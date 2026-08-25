@@ -1358,7 +1358,30 @@ CSS-like styling via the `style` prop:
 
 **Position:** `position` (`"relative"` | `"absolute"`), `top`, `right`, `bottom`, `left`
 
-**Visual:** `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
+**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
+
+`background` accepts a solid color, a CSS `linear-gradient()` with two through
+eight stops, or a structured native gradient:
+
+```tsx
+<div style={{
+  background: {
+    type: 'linearGradient',
+    angle: 90,
+    colorSpace: 'oklab',
+    stops: [
+      { color: 'red', position: 0 },
+      { color: 'rebeccapurple', position: 0.5 },
+      { color: 'blue', position: 1 },
+    ],
+  },
+}} />
+```
+
+Angles follow CSS (`0` points up and `90` points right); stop positions run
+from `0` through `1`. Native interpolation supports `srgb` and `oklab`.
+Radial gradients are explicitly rejected until GPUI has a radial background
+primitive.
 
 ### Colors
 
@@ -1374,8 +1397,23 @@ uses `csscolorparser` 0.8.3 and accepts:
   forms.
 
 Standard comma and modern space/slash alpha forms work. Values are converted
-to hard-clipped sRGB before GPUI paints them. Invalid strings are ignored for
-that property; they do not reject the full style object.
+to hard-clipped sRGB before GPUI paints them.
+
+### Strict style diagnostics
+
+Style objects are decoded field-by-field. An invalid value rejects only that
+field; valid siblings still commit and the error never escapes React's commit
+phase. In a Node runtime outside `NODE_ENV=production`, strict styles are
+enabled by default and each rejection warns with the element id, element type,
+`testId` when present, property, and offending value. Unknown properties,
+unsupported enum values, invalid colors, radial gradients, and supported
+properties with malformed values all use the same diagnostic path.
+
+Production and browser bundles without a Node environment default to
+deterministic compatibility mode: invalid fields are dropped without a warning,
+while the rest of the style and mutation batch are applied. Pass
+`strictStyles: true` to `render()` to keep diagnostics there, or
+`strictStyles: false` to opt out explicitly.
 
 `hsv()`, `hsva()`, and `hwba()` are parser extensions rather than CSS Color 4
 standard functions. `color()`, platform/dynamic colors, and numeric color
@@ -1425,7 +1463,11 @@ Limited relative-color forms can derive a new color from a base value:
 
 **Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` creates a native scrollable container with persistent scroll state
 
-**Text:** `fontSize`, `fontFamily`, `fontWeight`, `textAlign`, `lineHeight`, `whiteSpace`, `textOverflow`, `lineClamp`
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`
+
+`textWrap` accepts `"wrap"` and `"nowrap"`. `"balance"` and `"pretty"` are
+recognized but explicitly rejected with a strict-style diagnostic because GPUI
+does not yet implement those wrapping algorithms.
 
 **Selection:** `userSelect` (`"text"` | `"none"`), `selectionColor` — both inherit down the tree
 

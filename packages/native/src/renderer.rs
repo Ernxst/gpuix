@@ -26,6 +26,7 @@ use napi_derive::napi;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -37,9 +38,100 @@ use wasm_bindgen::JsCast as _;
 use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::retained_tree::RetainedTree;
-use crate::style::StyleDesc;
+use crate::style::{ParsedStyle, StyleDesc, StyleProblem};
 use crate::text::{selectable_text, selection_frame_reset, selection_key, SharedSelection};
 use crate::theme::Theme;
+
+#[derive(Debug, Clone)]
+pub(crate) struct PendingStyleDiagnostic {
+    element_id: u64,
+    problem: StyleProblem,
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct GpuixStyleDiagnostic {
+    pub message: String,
+    pub element_id: f64,
+    pub element_type: String,
+    pub test_id: Option<String>,
+    pub property: String,
+    pub value: String,
+}
+
+pub(crate) fn parse_style_json(style_json: &str) -> ParsedStyle {
+    match serde_json::from_str(style_json) {
+        Ok(value) => crate::style::parse_style_value(&value),
+        Err(error) => ParsedStyle {
+            style: StyleDesc::default(),
+            problems: vec![StyleProblem {
+                property: "<style>".into(),
+                value: serde_json::to_string(style_json)
+                    .unwrap_or_else(|_| format!("{style_json:?}")),
+                reason: format!("invalid style JSON: {error}"),
+            }],
+        },
+    }
+}
+
+pub(crate) fn pending_style_diagnostics(
+    element_id: u64,
+    problems: Vec<StyleProblem>,
+) -> impl Iterator<Item = PendingStyleDiagnostic> {
+    problems
+        .into_iter()
+        .map(move |problem| PendingStyleDiagnostic {
+            element_id,
+            problem,
+        })
+}
+
+fn style_diagnostic_context(
+    diagnostic: &PendingStyleDiagnostic,
+    tree: &RetainedTree,
+) -> (String, String, Option<String>) {
+    let element = tree.elements.get(&diagnostic.element_id);
+    let element_type = element
+        .map(|element| element.element_type.clone())
+        .unwrap_or_else(|| "unknown".into());
+    let test_id = element.and_then(|element| element.test_id.clone());
+    let test_id_label = test_id
+        .as_ref()
+        .map(|test_id| format!(" testId={test_id:?}"))
+        .unwrap_or_default();
+    let message = format!(
+        "[gpuix] Invalid style on <{element_type}{test_id_label}> (element {}): property {:?} rejected value {}: {}",
+        diagnostic.element_id,
+        diagnostic.problem.property,
+        diagnostic.problem.value,
+        diagnostic.problem.reason,
+    );
+    (message, element_type, test_id)
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn drain_style_diagnostics(
+    pending: &Mutex<Vec<PendingStyleDiagnostic>>,
+    tree: &Mutex<RetainedTree>,
+) -> Vec<GpuixStyleDiagnostic> {
+    let pending = std::mem::take(&mut *pending.lock().unwrap());
+    let tree = tree.lock().unwrap();
+    pending
+        .into_iter()
+        .map(|diagnostic| {
+            let (message, element_type, test_id) = style_diagnostic_context(&diagnostic, &tree);
+            GpuixStyleDiagnostic {
+                message,
+                element_id: diagnostic.element_id as f64,
+                element_type,
+                test_id,
+                property: diagnostic.problem.property,
+                value: diagnostic.problem.value,
+            }
+        })
+        .collect()
+}
 
 gpui::actions!(gpuix_focus, [FocusNext, FocusPrevious]);
 
@@ -528,6 +620,8 @@ pub struct GpuixRenderer {
     /// Shared with GpuixView so napi methods can read the live selection
     /// without an App context. Paint and napi calls can use different threads.
     selection: SharedSelection,
+    strict_styles: AtomicBool,
+    style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     ui_commands: Mutex<Option<mpsc::UnboundedSender<UiCommand>>>,
 }
@@ -640,6 +734,8 @@ impl GpuixRenderer {
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             initialized: Arc::new(Mutex::new(false)),
             selection: SharedSelection::default(),
+            strict_styles: AtomicBool::new(true),
+            style_diagnostics: Mutex::new(Vec::new()),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
         }
@@ -911,11 +1007,33 @@ impl GpuixRenderer {
     #[napi]
     pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
         let id = to_element_id(id)?;
-        let style: StyleDesc = serde_json::from_str(&style_json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse style: {}", e)))?;
+        let parsed = parse_style_json(&style_json);
         let mut tree = self.tree.lock().unwrap();
-        tree.set_style(id, style);
+        tree.set_style(id, parsed.style);
+        drop(tree);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            self.style_diagnostics
+                .lock()
+                .unwrap()
+                .extend(pending_style_diagnostics(id, parsed.problems));
+        }
         Ok(())
+    }
+
+    /// Enable actionable diagnostics for rejected style fields. React enables this
+    /// by default outside production builds.
+    #[napi]
+    pub fn set_strict_styles(&self, enabled: bool) {
+        self.strict_styles.store(enabled, Ordering::Relaxed);
+        if !enabled {
+            self.style_diagnostics.lock().unwrap().clear();
+        }
+    }
+
+    /// Drain rejected style fields after a commit, once element type and testId are known.
+    #[napi]
+    pub fn drain_style_diagnostics(&self) -> Vec<GpuixStyleDiagnostic> {
+        drain_style_diagnostics(&self.style_diagnostics, &self.tree)
     }
 
     #[napi]
@@ -996,10 +1114,16 @@ impl GpuixRenderer {
         let ops: Vec<serde_json::Value> = serde_json::from_str(&json)
             .map_err(|e| Error::from_reason(format!("Failed to parse batch: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
-        let destroyed = apply_batch_to_tree(&mut tree, &ops).map_err(Error::from_reason)?;
+        let outcome = apply_batch_to_tree(&mut tree, &ops).map_err(Error::from_reason)?;
         drop(tree);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            self.style_diagnostics
+                .lock()
+                .unwrap()
+                .extend(outcome.diagnostics);
+        }
         self.request_invalidate()?;
-        Ok(destroyed)
+        Ok(outcome.destroyed_ids)
     }
 
     // ── Frame loop ───────────────────────────────────────────────────
@@ -1812,6 +1936,7 @@ pub struct WebGpuixRenderer {
     tree: Arc<Mutex<RetainedTree>>,
     selection: SharedSelection,
     event_callback: EventCallback,
+    strict_styles: AtomicBool,
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -1823,6 +1948,7 @@ impl WebGpuixRenderer {
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             selection: SharedSelection::default(),
             event_callback: web_event_callback(event_callback),
+            strict_styles: AtomicBool::new(true),
         }
     }
 
@@ -1894,14 +2020,22 @@ impl WebGpuixRenderer {
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setStyle)]
     pub fn set_style(&self, id: f64, style_json: String) -> Result<(), wasm_bindgen::JsValue> {
-        let style = serde_json::from_str(&style_json).map_err(|error| {
-            wasm_bindgen::JsValue::from_str(&format!("Failed to parse style: {error}"))
-        })?;
-        self.tree
-            .lock()
-            .unwrap()
-            .set_style(web_element_id(id)?, style);
+        let id = web_element_id(id)?;
+        let parsed = parse_style_json(&style_json);
+        let mut tree = self.tree.lock().unwrap();
+        tree.set_style(id, parsed.style);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            for diagnostic in pending_style_diagnostics(id, parsed.problems) {
+                let (message, _, _) = style_diagnostic_context(&diagnostic, &tree);
+                web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
+            }
+        }
         Ok(())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setStrictStyles)]
+    pub fn set_strict_styles(&self, enabled: bool) {
+        self.strict_styles.store(enabled, Ordering::Relaxed);
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setText)]
@@ -1975,8 +2109,17 @@ impl WebGpuixRenderer {
         let ops: Vec<serde_json::Value> = serde_json::from_str(&json).map_err(|error| {
             wasm_bindgen::JsValue::from_str(&format!("Failed to parse batch: {error}"))
         })?;
-        let destroyed = apply_batch_to_tree(&mut self.tree.lock().unwrap(), &ops)
+        let mut tree = self.tree.lock().unwrap();
+        let outcome = apply_batch_to_tree(&mut tree, &ops)
             .map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
+        if self.strict_styles.load(Ordering::Relaxed) {
+            for diagnostic in outcome.diagnostics {
+                let (message, _, _) = style_diagnostic_context(&diagnostic, &tree);
+                web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
+            }
+        }
+        let destroyed = outcome.destroyed_ids;
+        drop(tree);
         notify_web();
         Ok(web_number_array(destroyed))
     }
@@ -2498,6 +2641,16 @@ pub(crate) struct Inherited {
     pub selectable: bool,
     /// Selection wash colour for this subtree.
     pub selection_wash: gpui::Hsla,
+    /// Text case transformation inherited by plain text descendants.
+    pub text_transform: TextTransform,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) enum TextTransform {
+    #[default]
+    None,
+    Uppercase,
+    Lowercase,
 }
 
 impl Inherited {
@@ -2507,6 +2660,7 @@ impl Inherited {
         Self {
             selectable: true,
             selection_wash: wash,
+            text_transform: TextTransform::None,
         }
     }
 
@@ -2524,6 +2678,12 @@ impl Inherited {
             .and_then(crate::color::parse_color_rgba)
         {
             self.selection_wash = color.into();
+        }
+        match style.text_transform.as_deref() {
+            Some("none") => self.text_transform = TextTransform::None,
+            Some("uppercase") => self.text_transform = TextTransform::Uppercase,
+            Some("lowercase") => self.text_transform = TextTransform::Lowercase,
+            _ => {}
         }
         self
     }
@@ -3543,13 +3703,18 @@ pub(crate) fn build_div(
 /// A selectable text run owned by `element_id`. Runs are left to gpui so the
 /// text keeps inheriting colour, weight and family from ancestor styles.
 fn text_content(element_id: u64, content: &str, ctx: &BuildCtx) -> gpui::AnyElement {
+    let content = match ctx.inherited.text_transform {
+        TextTransform::None => content.to_string(),
+        TextTransform::Uppercase => content.to_uppercase(),
+        TextTransform::Lowercase => content.to_lowercase(),
+    };
     if !ctx.inherited.selectable {
         // Still logged: `getPaintedText()` promises every painted string, and a
         // `userSelect: "none"` label is exactly the chrome tests want to assert.
-        return crate::text::chrome_text(gpui::SharedString::from(content.to_string()), None);
+        return crate::text::chrome_text(gpui::SharedString::from(content), None);
     }
     selectable_text(crate::text::SelectableText::new(
-        gpui::SharedString::from(content.to_string()),
+        gpui::SharedString::from(content),
         None,
         selection_key(element_id, 0),
         ctx.selection.clone(),
@@ -3636,6 +3801,11 @@ pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::Dimension
 }
 
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
+    match style.visibility.as_deref() {
+        Some("hidden") => el = el.invisible(),
+        Some("visible") => el = el.visible(),
+        _ => {}
+    }
     match style.display.as_deref() {
         Some("flex") => el = el.flex(),
         Some("grid") => el = el.grid(),
@@ -3682,6 +3852,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("center") => el = el.items_center(),
         Some("start") | Some("flex-start") => el = el.items_start(),
         Some("end") | Some("flex-end") => el = el.items_end(),
+        Some("stretch") => el = el.items_stretch(),
         _ => {}
     }
     match style.align_content.as_deref() {
@@ -3701,6 +3872,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("end") | Some("flex-end") => el = el.justify_end(),
         Some("between") | Some("space-between") => el = el.justify_between(),
         Some("around") | Some("space-around") => el = el.justify_around(),
+        Some("evenly") | Some("space-evenly") => el = el.justify_evenly(),
         _ => {}
     }
     match style.align_self.as_deref() {
@@ -3813,13 +3985,13 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(left) = style.left {
         el = el.left(gpui::px(left as f32));
     }
-    if let Some(ref bg) = style
-        .background_color
-        .as_ref()
-        .or(style.background.as_ref())
-    {
-        if let Some(color) = crate::color::parse_color_rgba(bg) {
+    if let Some(background_color) = style.background_color.as_deref() {
+        if let Some(color) = crate::color::parse_color_rgba(background_color) {
             el = el.bg(color);
+        }
+    } else if let Some(background) = style.background.as_ref() {
+        if let Ok(background) = crate::style::parse_background(background) {
+            el = el.bg(background);
         }
     }
     if let Some(ref color) = style.color {
@@ -3836,6 +4008,9 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(ref weight) = style.font_weight {
         el = el.font_weight(parse_font_weight(weight));
     }
+    if let Some(letter_spacing) = style.letter_spacing {
+        el = el.letter_spacing(gpui::px(letter_spacing as f32));
+    }
     // `textAlign` was in the style type but implemented nowhere.
     match style.text_align.as_deref() {
         Some("center") => el = el.text_center(),
@@ -3846,6 +4021,11 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.white_space.as_deref() {
         Some("nowrap") => el = el.whitespace_nowrap(),
         Some("normal") => el = el.whitespace_normal(),
+        _ => {}
+    }
+    match style.text_wrap.as_deref() {
+        Some("nowrap") => el = el.whitespace_nowrap(),
+        Some("wrap") => el = el.whitespace_normal(),
         _ => {}
     }
     match style.text_overflow.as_deref() {
@@ -4009,6 +4189,7 @@ enum BatchOp {
     SetStyle {
         id: u64,
         style: StyleDesc,
+        problems: Vec<StyleProblem>,
     },
     SetText {
         id: u64,
@@ -4067,11 +4248,13 @@ fn parse_batch_ops(ops: &[serde_json::Value]) -> BatchResult<Vec<BatchOp>> {
                 before_id: batch_id(arr, 3, i)?,
             },
             "setStyle" => {
-                let style: StyleDesc = batch_decode(arr, 2, i)
-                    .map_err(|error| format!("Batch op {i} setStyle parse error: {error}"))?;
+                let id = batch_id(arr, 1, i)?;
+                let value = batch_payload(arr, 2, i)?;
+                let parsed = crate::style::parse_style_value(&value);
                 BatchOp::SetStyle {
-                    id: batch_id(arr, 1, i)?,
-                    style,
+                    id,
+                    style: parsed.style,
+                    problems: parsed.problems,
                 }
             }
             "setText" => BatchOp::SetText {
@@ -4129,15 +4312,21 @@ fn parse_batch_ops(ops: &[serde_json::Value]) -> BatchResult<Vec<BatchOp>> {
 ///
 /// Batch format: JSON array of tuples [opcode, ...args].
 /// See GpuixRenderer::apply_batch for opcode documentation.
+pub(crate) struct BatchOutcome {
+    pub destroyed_ids: Vec<f64>,
+    pub diagnostics: Vec<PendingStyleDiagnostic>,
+}
+
 pub(crate) fn apply_batch_to_tree(
     tree: &mut RetainedTree,
     ops: &[serde_json::Value],
-) -> BatchResult<Vec<f64>> {
+) -> BatchResult<BatchOutcome> {
     // Phase 1: parse and validate all ops (no mutation).
     let parsed = parse_batch_ops(ops)?;
 
     // Phase 2: apply all validated ops to the tree.
     let mut destroyed_ids: Vec<f64> = Vec::new();
+    let mut diagnostics = Vec::new();
     for batch_op in parsed {
         match batch_op {
             BatchOp::CreateElement { id, element_type } => {
@@ -4166,8 +4355,13 @@ pub(crate) fn apply_batch_to_tree(
             } => {
                 tree.insert_before(parent_id, child_id, before_id);
             }
-            BatchOp::SetStyle { id, style } => {
+            BatchOp::SetStyle {
+                id,
+                style,
+                problems,
+            } => {
                 tree.set_style(id, style);
+                diagnostics.extend(pending_style_diagnostics(id, problems));
             }
             BatchOp::SetText { id, content } => {
                 tree.set_text(id, content);
@@ -4188,7 +4382,10 @@ pub(crate) fn apply_batch_to_tree(
         }
     }
 
-    Ok(destroyed_ids)
+    Ok(BatchOutcome {
+        destroyed_ids,
+        diagnostics,
+    })
 }
 
 /// Extract a u64 element ID from a batch tuple at the given index.
@@ -4218,15 +4415,6 @@ fn batch_payload(
     } else {
         Ok(value.clone())
     }
-}
-
-fn batch_decode<T: serde::de::DeserializeOwned>(
-    arr: &[serde_json::Value],
-    idx: usize,
-    op_idx: usize,
-) -> BatchResult<T> {
-    let value = batch_payload(arr, idx, op_idx)?;
-    serde_json::from_value(value).map_err(|error| error.to_string())
 }
 
 /// Extract a String from a batch tuple at the given index.

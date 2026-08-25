@@ -126,6 +126,7 @@ pub fn flatten_runs(runs: &[InlineRun], theme: &Theme, base_weight: FontWeight) 
         out.push(TextRun {
             len: run.text.len(),
             font: f,
+            letter_spacing: px(0.0),
             // Inline code reads violet; links stay the monochrome foreground
             // with an underline, because accent is reserved for actions.
             color: if run.style.code {
