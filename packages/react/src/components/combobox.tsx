@@ -9,7 +9,7 @@ import React, {
 } from "react"
 import type { ReactElement, ReactNode } from "react"
 import type { EventPayload } from "@gpuix/native"
-import type { InputProps, Props, PublicInstance } from "../types/host.js"
+import type { GpuixEvent, InputProps, Props, PublicInstance } from "../types/host.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
   FloatingLayer,
@@ -240,7 +240,7 @@ export const ComboboxInput = forwardRef<PublicInstance, ComboboxInputProps>(
         value={context.inputValue}
         readOnly={disabled || props.readOnly}
         autoFocus={context.open}
-        onClick={(event: EventPayload) => {
+        onClick={(event: GpuixEvent) => {
           onClick?.(event)
           if (!disabled) context.setOpen(true)
         }}
@@ -401,11 +401,11 @@ export const ComboboxItem = forwardRef<PublicInstance, ComboboxItemProps>(
         {...props}
         ref={itemRef}
         style={resolveStyle(style, state)}
-        onMouseEnter={(event: EventPayload) => {
+        onMouseEnter={(event: GpuixEvent) => {
           onMouseEnter?.(event)
           if (!disabled && index >= 0) context.setActiveIndex(index)
         }}
-        onClick={(event: EventPayload) => {
+        onClick={(event: GpuixEvent) => {
           onClick?.(event)
           if (!disabled) context.selectItem(value)
         }}

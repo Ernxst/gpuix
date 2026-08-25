@@ -93,10 +93,10 @@ function getElementRef(element: ReactElement<Props>): Ref<PublicInstance> | unde
   return descriptor?.value
 }
 
-function composeHandlers(
-  first?: (event: EventPayload) => void,
-  second?: (event: EventPayload) => void
-): ((event: EventPayload) => void) | undefined {
+function composeHandlers<Event extends EventPayload>(
+  first?: (event: Event) => void,
+  second?: (event: Event) => void
+): ((event: Event) => void) | undefined {
   if (!first) return second
   if (!second) return first
   return (event) => {

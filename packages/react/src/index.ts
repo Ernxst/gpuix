@@ -82,6 +82,7 @@ export type {
   MotionStyle,
   MotionTransition,
   NativeRenderer,
+  GpuixEvent,
   StyleDiagnostic,
   StyleDesc,
 } from "./types/host.js"

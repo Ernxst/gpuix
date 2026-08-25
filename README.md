@@ -135,6 +135,8 @@ interface NativeRenderer {
   setStyle(id: number, styleJson: string): void
   setText(id: number, content: string): void
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
+  setPointerCapture(id: number): void
+  releasePointerCapture(id: number): void
   setRoot(id: number): void
   commitMutations(): void
 }
@@ -1117,10 +1119,12 @@ Give every overlay an **opaque** fill (`#232323`, not `#23232399`).
 color, or a solid hover color. A `#00000000` child on a blurred window punches
 through Metal to the desktop.
 
-A filled in-flow `div` blocks clicks and hovers behind it. The parent
-scroller still gets the wheel. `position: "absolute"` / `"fixed"` or
-`pointerEvents: "auto"` also steals the wheel. Set `pointerEvents: "none"`
-to pass hits through.
+A host node with pointer, focus, or scroll behavior blocks clicks and hovers
+behind it. A passive fill or absolute decoration does not become a hit-test
+target just because it paints. `pointerEvents: "auto"` opts a passive layer
+back in; `pointerEvents: "none"` always passes ordinary hits through. In-flow
+interactive nodes leave the wheel available to their parent scroller, while an
+absolute/fixed interactive overlay owns it.
 
 ## Text selection
 
@@ -1386,6 +1390,21 @@ text imports no longer need a runtime flag.
 | Show more | `onShowMore` | `value` (hidden line count) — `<diff>` only |
 | Line click | `onLineClick` | `value`, `oldLine`, `newLine` — `<diff>` only |
 | Link click | `onLinkClick` | `value` (URL) — `<markdown>` only |
+
+Mouse event payloads expose pointer capture. Capture keeps move and up routed
+to the pressed element across redraws and outside its bounds until mouse up,
+explicit release, or unmount:
+
+```tsx
+<div
+  onMouseDown={(event) => event.setPointerCapture()}
+  onMouseMove={(event) => updateDrag(event.x, event.y)}
+  onMouseUp={finishDrag}
+/>
+```
+
+The host ref exposes the same `setPointerCapture()` and
+`releasePointerCapture()` methods when capture is decided outside the handler.
 
 Keyboard and focus listeners create a persistent GPUI `FocusHandle`
 automatically. A listener alone does not put a `div` in the Tab order; add
@@ -1825,6 +1844,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] RetainedTree (Rust-side element storage)
 - [x] Style mapping (CSS properties → GPUI style methods)
 - [x] Mouse events (click, mouseDown, mouseUp, mouseMove, mouseEnter, mouseLeave)
+- [x] Pointer capture across redraws and passive decoration hit testing
 - [x] Click outside (`onMouseDownOutside`)
 - [x] Scroll wheel events with delta and touch phase
 - [x] Scrollable containers (`overflow: "scroll"`) with persistent scroll state

@@ -1,0 +1,139 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use gpui::{
+    canvas, px, DispatchPhase, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, Styled,
+};
+
+#[derive(Default)]
+pub(crate) struct PointerRouter {
+    pressed_button: Option<MouseButton>,
+    capture_owner: Option<u64>,
+}
+
+impl PointerRouter {
+    fn begin(&mut self, button: MouseButton) {
+        self.pressed_button = Some(button);
+        self.capture_owner = None;
+    }
+
+    pub(crate) fn capture(&mut self, owner: u64) -> bool {
+        if self.pressed_button.is_none() {
+            return false;
+        }
+        self.capture_owner = Some(owner);
+        true
+    }
+
+    pub(crate) fn release(&mut self, owner: u64) -> bool {
+        if self.capture_owner != Some(owner) {
+            return false;
+        }
+        self.capture_owner = None;
+        true
+    }
+
+    fn finish(&mut self, button: MouseButton) -> bool {
+        if self.pressed_button != Some(button) {
+            return false;
+        }
+        self.pressed_button = None;
+        self.capture_owner = None;
+        true
+    }
+
+    pub(crate) fn cancel(&mut self) -> bool {
+        let had_capture = self.capture_owner.take().is_some();
+        self.pressed_button = None;
+        had_capture
+    }
+
+    pub(crate) fn retain_owner(&mut self, owner_exists: impl FnOnce(u64) -> bool) -> bool {
+        let Some(owner) = self.capture_owner else {
+            return true;
+        };
+        if owner_exists(owner) {
+            return true;
+        }
+        self.cancel();
+        false
+    }
+
+    #[cfg(test)]
+    fn owner(&self) -> Option<u64> {
+        self.capture_owner
+    }
+}
+
+pub(crate) type SharedPointerRouter = Rc<RefCell<PointerRouter>>;
+
+/// Installs one frame's pressed-sequence bookkeeping before element listeners.
+/// The actual captured hitbox remains GPUI's responsibility; this state keeps
+/// the retained element owner and sequence lifetime coherent across redraws.
+pub(crate) fn pointer_router_frame(router: SharedPointerRouter) -> impl IntoElement {
+    canvas(
+        |_, _, _| (),
+        move |_, _, window, _| {
+            let down_router = router.clone();
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, _cx| {
+                if phase != DispatchPhase::Capture {
+                    return;
+                }
+                window.release_pointer();
+                down_router.borrow_mut().begin(event.button);
+            });
+
+            let up_router = router.clone();
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, _cx| {
+                if phase == DispatchPhase::Capture {
+                    up_router.borrow_mut().finish(event.button);
+                }
+            });
+        },
+    )
+    .absolute()
+    .w(px(0.0))
+    .h(px(0.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_requires_a_pressed_sequence_and_ends_with_that_button() {
+        let mut router = PointerRouter::default();
+        assert!(!router.capture(7));
+
+        router.begin(MouseButton::Left);
+        assert!(router.capture(7));
+        assert_eq!(router.owner(), Some(7));
+        assert!(!router.finish(MouseButton::Right));
+        assert_eq!(router.owner(), Some(7));
+        assert!(router.finish(MouseButton::Left));
+        assert_eq!(router.owner(), None);
+    }
+
+    #[test]
+    fn explicit_release_only_releases_the_current_owner() {
+        let mut router = PointerRouter::default();
+        router.begin(MouseButton::Left);
+        router.capture(7);
+
+        assert!(!router.release(8));
+        assert_eq!(router.owner(), Some(7));
+        assert!(router.release(7));
+        assert_eq!(router.owner(), None);
+    }
+
+    #[test]
+    fn removing_the_owner_cancels_capture_and_the_pressed_sequence() {
+        let mut router = PointerRouter::default();
+        router.begin(MouseButton::Left);
+        router.capture(7);
+
+        assert!(!router.retain_owner(|id| id != 7));
+        assert_eq!(router.owner(), None);
+        assert!(!router.capture(8));
+    }
+}

@@ -36,6 +36,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   hasMainMenu(): boolean
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number): void
+  setPointerCapture(elementId: number): void
+  releasePointerCapture(elementId: number): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
   simulateClick(x: number, y: number): void
@@ -221,6 +223,14 @@ export class TestRenderer implements NativeRenderer {
 
   setApplicationEventHandler(handler: ((event: EventPayload) => void) | null): void {
     this.applicationEventHandler = handler
+  }
+
+  setPointerCapture(elementId: number): void {
+    this.native.setPointerCapture(elementId)
+  }
+
+  releasePointerCapture(elementId: number): void {
+    this.native.releasePointerCapture(elementId)
   }
 
   setStrictStyles(enabled: boolean): void {

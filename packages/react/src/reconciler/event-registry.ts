@@ -1,5 +1,10 @@
 import type { EventPayload } from "@gpuix/native"
-import type { Container, EventHandlerMap, NativeRenderer } from "../types/host.js"
+import type {
+  Container,
+  EventHandlerMap,
+  GpuixEvent,
+  NativeRenderer,
+} from "../types/host.js"
 
 const containersByRenderer = new WeakMap<NativeRenderer, Container>()
 
@@ -21,14 +26,21 @@ export function handleGpuixEvent(payload: EventPayload, renderer: NativeRenderer
   const elementHandlers = container.eventHandlers.get(payload.elementId)
   if (!elementHandlers) return
   const handler = elementHandlers.get(payload.eventType)
-  if (handler) handler(payload)
+  if (!handler) return
+
+  const event: GpuixEvent = {
+    ...payload,
+    setPointerCapture: () => renderer.setPointerCapture?.(payload.elementId),
+    releasePointerCapture: () => renderer.releasePointerCapture?.(payload.elementId),
+  }
+  handler(event)
 }
 
 export function registerEventHandler(
   eventHandlers: EventHandlerMap,
   elementId: number,
   eventType: string,
-  handler: (event: EventPayload) => void
+  handler: (event: GpuixEvent) => void
 ): void {
   let elementHandlers = eventHandlers.get(elementId)
   if (!elementHandlers) {

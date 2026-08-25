@@ -983,25 +983,13 @@ fn split_top_level(value: &str, separator: char) -> Vec<&str> {
 
 pub use crate::color::{parse_color, parse_color_hex};
 
-/// Whether this style should insert a mouse hitbox.
-pub fn should_occlude(style: &StyleDesc) -> bool {
-    match style.pointer_events.as_deref() {
-        Some("none") => return false,
-        Some("auto") => return true,
-        _ => {}
-    }
-    if style.position.as_deref() == Some("absolute") {
-        return true;
-    }
-    if let Some(color) = style.background_color.as_deref() {
-        return crate::color::parse_color_rgba(color).is_none_or(|color| color.a > 0.0);
-    }
-    let Some(background) = style.background.as_ref() else {
-        return false;
-    };
-    match parse_background(background) {
-        Ok(background) => !background.is_transparent(),
-        Err(_) => true,
+/// Whether an element should block ordinary pointer hits behind it.
+/// Explicit `pointerEvents` wins; otherwise only interactive behavior blocks.
+pub fn should_occlude(style: Option<&StyleDesc>, interactive: bool) -> bool {
+    match style.and_then(|style| style.pointer_events.as_deref()) {
+        Some("none") => false,
+        Some("auto") => true,
+        _ => interactive,
     }
 }
 
@@ -1010,22 +998,24 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn with_fill(fill: &str) -> StyleDesc {
-        StyleDesc {
-            background_color: Some(fill.to_owned()),
+    #[test]
+    fn pointer_hit_testing_follows_interaction_and_explicit_overrides() {
+        let passive = StyleDesc::default();
+        assert!(!should_occlude(Some(&passive), false));
+        assert!(should_occlude(Some(&passive), true));
+        assert!(should_occlude(None, true));
+
+        let auto = StyleDesc {
+            pointer_events: Some("auto".into()),
             ..Default::default()
-        }
-    }
+        };
+        assert!(should_occlude(Some(&auto), false));
 
-    #[test]
-    fn transparent_function_does_not_occlude() {
-        assert!(!should_occlude(&with_fill("transparent")));
-        assert!(!should_occlude(&with_fill("oklch(50% 0.2 30 / 0%)")));
-    }
-
-    #[test]
-    fn invalid_fill_keeps_conservative_occlusion() {
-        assert!(should_occlude(&with_fill("not-a-color")));
+        let none = StyleDesc {
+            pointer_events: Some("none".into()),
+            ..Default::default()
+        };
+        assert!(!should_occlude(Some(&none), true));
     }
 
     #[test]

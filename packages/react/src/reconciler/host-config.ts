@@ -356,7 +356,15 @@ export const hostConfig = {
     rootContainerInstance: Container,
     _hostContext: HostContext
   ): Instance {
-    const instance: Instance = { id: nextId(rootContainerInstance), type, props }
+    const id = nextId(rootContainerInstance)
+    const instance: Instance = {
+      id,
+      type,
+      props,
+      setPointerCapture: () => rootContainerInstance.renderer.setPointerCapture?.(id),
+      releasePointerCapture: () =>
+        rootContainerInstance.renderer.releasePointerCapture?.(id),
+    }
     hostNodeStates.set(instance, {
       container: rootContainerInstance,
       children: [],

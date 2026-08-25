@@ -83,6 +83,10 @@ export declare class GpuixRenderer {
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
+  /** Route the active pressed-pointer sequence to this retained element. */
+  setPointerCapture(elementId: number): void
+  /** Release capture only when this retained element currently owns it. */
+  releasePointerCapture(elementId: number): void
   blur(): void
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
@@ -216,6 +220,8 @@ export declare class TestGpuixRenderer {
    * Call flush() before this so the element tree and focus handles exist.
    */
   focusElement(id: number): void
+  setPointerCapture(id: number): void
+  releasePointerCapture(id: number): void
   /**
    * Simulate a mouse down event at the given window coordinates.
    * Button: 0=left, 1=middle, 2=right. Defaults to left (0).

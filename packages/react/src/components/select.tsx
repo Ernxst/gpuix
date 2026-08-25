@@ -12,7 +12,7 @@ import React, {
 } from "react"
 import type { ReactElement, ReactNode } from "react"
 import type { EventPayload } from "@gpuix/native"
-import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
+import type { GpuixEvent, Props, PublicInstance, StyleDesc } from "../types/host.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
   FloatingLayer,
@@ -332,11 +332,11 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
         {...props}
         ref={ref}
         style={resolveStyle(style, state)}
-        onMouseEnter={(event: EventPayload) => {
+        onMouseEnter={(event: GpuixEvent) => {
           onMouseEnter?.(event)
           if (!disabled) context.setActiveValue(value)
         }}
-        onClick={(event: EventPayload) => {
+        onClick={(event: GpuixEvent) => {
           onClick?.(event)
           if (!disabled) context.selectValue(value)
         }}

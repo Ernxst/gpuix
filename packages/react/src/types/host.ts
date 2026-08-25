@@ -1,5 +1,12 @@
 import type { EventPayload, MenuSpec } from "@gpuix/native"
 
+export interface GpuixEvent extends EventPayload {
+  /** Route this pressed-pointer sequence to the event target until release. */
+  setPointerCapture(): void
+  /** Stop routing this pressed-pointer sequence to the event target. */
+  releasePointerCapture(): void
+}
+
 export type DimensionValue = number | string
 
 export interface MotionStyle {
@@ -300,14 +307,14 @@ export interface Props {
   ref?: React.Ref<PublicInstance>
 
   // ── Mouse events ───────────────────────────────────────────────
-  onClick?: (event: EventPayload) => void
-  onMouseDown?: (event: EventPayload) => void
-  onMouseUp?: (event: EventPayload) => void
-  onMouseEnter?: (event: EventPayload) => void
-  onMouseLeave?: (event: EventPayload) => void
-  onMouseMove?: (event: EventPayload) => void
+  onClick?: (event: GpuixEvent) => void
+  onMouseDown?: (event: GpuixEvent) => void
+  onMouseUp?: (event: GpuixEvent) => void
+  onMouseEnter?: (event: GpuixEvent) => void
+  onMouseLeave?: (event: GpuixEvent) => void
+  onMouseMove?: (event: GpuixEvent) => void
   /** Fires when user clicks OUTSIDE this element. Use for "click outside to close". */
-  onMouseDownOutside?: (event: EventPayload) => void
+  onMouseDownOutside?: (event: GpuixEvent) => void
 
   // ── Keyboard events (need focus: autoFocus, or a click on the element) ──
   onKeyDown?: (event: EventPayload) => void
@@ -492,6 +499,10 @@ export interface NativeRenderer {
   focusElement?(elementId: number): void
   blur?(): void
 
+  // ── Pointer capture API ────────────────────────────────────────
+  setPointerCapture?(elementId: number): void
+  releasePointerCapture?(elementId: number): void
+
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
    *  x and y are negative pixel values (scroll down = more negative y). */
@@ -539,7 +550,7 @@ export interface DebugFrameOverlayStats {
 
 export type EventHandlerMap = Map<
   number,
-  Map<string, (event: EventPayload) => void>
+  Map<string, (event: GpuixEvent) => void>
 >
 
 export interface ElementIdAllocator {
@@ -561,6 +572,8 @@ export interface Instance {
   id: number
   type: ElementType
   props: Props
+  setPointerCapture(): void
+  releasePointerCapture(): void
 }
 
 // Text instance for raw text nodes

@@ -20,6 +20,7 @@ import {
   startFrameLoop,
 } from "../reconciler/renderer.js"
 import type { EventPayload } from "@gpuix/native"
+import type { GpuixEvent, PublicInstance } from "../types/host.js"
 import { expectScreenshotsDiffer } from "./test-utils"
 
 // All tests require the native GPUI test renderer (cargo build with test-support).
@@ -1051,6 +1052,122 @@ describeNative("events", () => {
       expect(dragEvent.pressedButton).toBe(0)
     })
 
+    it("continues a drag after mouse down mounts and flushes its continuation surface", () => {
+      const trace: string[] = []
+
+      function DragContinuation() {
+        const [dragging, setDragging] = useState(false)
+        return (
+          <div style={{ position: "relative", width: 600, height: 400 }}>
+            <div
+              style={{ width: 120, height: 80 }}
+              onMouseDown={(event: GpuixEvent) => {
+                trace.push(`down:${event.x},${event.y}`)
+                event.setPointerCapture()
+                setDragging(true)
+              }}
+              onMouseMove={(event: EventPayload) =>
+                trace.push(`move:${event.x},${event.y}`)
+              }
+              onMouseUp={(event: EventPayload) => {
+                trace.push(`up:${event.x},${event.y}`)
+                setDragging(false)
+              }}
+            />
+            {dragging ? (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  left: 0,
+                  backgroundColor: "#00000010",
+                }}
+              />
+            ) : null}
+          </div>
+        )
+      }
+
+      testRoot.render(<DragContinuation />)
+
+      testRoot.renderer.nativeSimulateMouseDown(20, 20, 0)
+      testRoot.renderer.nativeSimulateMouseMove(216, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(216, 20, 0)
+
+      expect(trace).toEqual([
+        "down:20,20",
+        "move:216,20",
+        "up:216,20",
+      ])
+    })
+
+    it("captures through the host ref and releases explicitly", () => {
+      const trace: string[] = []
+
+      function RefCapture() {
+        const handle = useRef<PublicInstance>(null)
+        return (
+          <div
+            style={{ width: 600, height: 400 }}
+            onMouseMove={() => trace.push("surface-move")}
+          >
+            <div
+              ref={handle}
+              style={{ width: 80, height: 80 }}
+              onMouseDown={() => handle.current?.setPointerCapture()}
+              onMouseMove={(event: GpuixEvent) => {
+                trace.push("handle-move")
+                event.releasePointerCapture()
+              }}
+            />
+          </div>
+        )
+      }
+
+      testRoot.render(<RefCapture />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20, 0)
+      testRoot.renderer.nativeSimulateMouseMove(180, 20, 0)
+      testRoot.renderer.nativeSimulateMouseMove(220, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(220, 20, 0)
+
+      expect(trace).toEqual(["handle-move", "surface-move"])
+    })
+
+    it("releases capture when its retained owner unmounts", () => {
+      const trace: string[] = []
+
+      function UnmountingCapture() {
+        const [mounted, setMounted] = useState(true)
+        return (
+          <div
+            style={{ width: 600, height: 400 }}
+            onMouseMove={() => trace.push("surface-move")}
+            onMouseUp={() => trace.push("surface-up")}
+          >
+            {mounted ? (
+              <div
+                style={{ width: 80, height: 80 }}
+                onMouseDown={(event: GpuixEvent) => {
+                  trace.push("down")
+                  event.setPointerCapture()
+                  setMounted(false)
+                }}
+              />
+            ) : null}
+          </div>
+        )
+      }
+
+      testRoot.render(<UnmountingCapture />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20, 0)
+      testRoot.renderer.nativeSimulateMouseMove(180, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(180, 20, 0)
+
+      expect(trace).toEqual(["down", "surface-move", "surface-up"])
+    })
+
     it("should update state on mouse move", () => {
       function PositionTracker() {
         const [pos, setPos] = useState("0,0")
@@ -1079,6 +1196,61 @@ describeNative("events", () => {
           "Position: 42,99",
         ]
       `)
+    })
+  })
+
+  describe("pointer hit testing", () => {
+    const fill = {
+      position: "absolute" as const,
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    }
+
+    it("passes through an absolute-fill decoration with no behavior", () => {
+      const clicks: string[] = []
+      testRoot.render(
+        <div style={{ position: "relative", width: 200, height: 100 }}>
+          <div style={fill} onClick={() => clicks.push("button")} />
+          <div style={{ ...fill, backgroundColor: "#ffffff20" }} />
+        </div>
+      )
+
+      testRoot.renderer.nativeSimulateClick(50, 50)
+      expect(clicks).toEqual(["button"])
+    })
+
+    it("lets an explicitly interactive overlay own the hit", () => {
+      const clicks: string[] = []
+      testRoot.render(
+        <div style={{ position: "relative", width: 200, height: 100 }}>
+          <div style={fill} onClick={() => clicks.push("button")} />
+          <div
+            style={{ ...fill, pointerEvents: "auto" }}
+            onClick={() => clicks.push("overlay")}
+          />
+        </div>
+      )
+
+      testRoot.renderer.nativeSimulateClick(50, 50)
+      expect(clicks).toEqual(["overlay"])
+    })
+
+    it("always excludes pointerEvents none from hit testing", () => {
+      const clicks: string[] = []
+      testRoot.render(
+        <div style={{ position: "relative", width: 200, height: 100 }}>
+          <div style={fill} onClick={() => clicks.push("button")} />
+          <div
+            style={{ ...fill, pointerEvents: "none" }}
+            onClick={() => clicks.push("ignored-overlay")}
+          />
+        </div>
+      )
+
+      testRoot.renderer.nativeSimulateClick(50, 50)
+      expect(clicks).toEqual(["button"])
     })
   })
 
