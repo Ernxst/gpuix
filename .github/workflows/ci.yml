@@ -203,7 +203,8 @@ jobs:
           NAPI_RS_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/packages/native/test-fault-binding/gpuix-native.darwin-arm64.node
         run: bun scripts/test-renderer-smoke.ts --fault-injection
 
-      - name: Run React tests
+      # Includes the GPU-backed default-main-menu and Cmd+Q action smoke.
+      - name: Run React and macOS menu integration tests
         run: bun run test
         working-directory: packages/react
 

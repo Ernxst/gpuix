@@ -8,7 +8,7 @@
 //! Ported from Comet (https://github.com/zeronsh/comet), MIT.
 //! Original: `runs_for_syntax_line_with_plain` in `crates/ui/src/markdown/render.rs`.
 
-use gpui::{Font, Hsla, TextRun};
+use gpui::{px, Font, Hsla, TextRun};
 
 /// A single run covering the whole string.
 #[allow(dead_code)]
@@ -19,6 +19,7 @@ pub fn plain_runs(text: &str, font: &Font, color: Hsla) -> Vec<TextRun> {
     vec![TextRun {
         len: text.len(),
         font: font.clone(),
+        letter_spacing: px(0.0),
         color,
         background_color: None,
         underline: None,
@@ -39,6 +40,7 @@ pub fn runs_for_spans(
     let plain = |len: usize, color: Hsla| TextRun {
         len,
         font: font.clone(),
+        letter_spacing: px(0.0),
         color,
         background_color: None,
         underline: None,

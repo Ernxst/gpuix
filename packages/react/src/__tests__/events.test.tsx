@@ -13,13 +13,98 @@
 import fs from "fs"
 import { describe, it, expect, beforeEach } from "vitest"
 import React, { useState, useRef } from "react"
-import { createTestRoot, isNativeTestRendererAvailable } from "../testing"
-import { startFrameLoop } from "../reconciler/renderer.js"
+import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing"
+import {
+  render as renderApp,
+  resetRender,
+  startFrameLoop,
+} from "../reconciler/renderer.js"
 import type { EventPayload } from "@gpuix/native"
 import { expectScreenshotsDiffer } from "./test-utils"
 
 // All tests require the native GPUI test renderer (cargo build with test-support).
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+
+describeNative("application menus", () => {
+  it("installs the default application menu when menus are omitted", () => {
+    resetRender()
+    const renderer = new TestRenderer()
+
+    try {
+      renderApp(<text>Default menu test</text>, { renderer })
+      expect(renderer.hasMainMenu()).toBe(true)
+    } finally {
+      resetRender()
+    }
+  })
+
+  it("installs a main menu and dispatches custom action ids exactly once through GPUI", () => {
+    resetRender()
+    const renderer = new TestRenderer()
+    const actions: string[] = []
+
+    try {
+      renderApp(<text>Menu test</text>, {
+        renderer,
+        menus: [
+          {
+            name: "Test",
+            items: [
+              {
+                kind: "action",
+                id: "mark",
+                label: "Mark",
+                keyEquivalent: "cmd-m",
+              },
+            ],
+          },
+        ],
+        onMenuAction: ({ id }) => actions.push(id),
+      })
+
+      expect(renderer.hasMainMenu()).toBe(true)
+      renderer.simulateMenuAction("mark")
+      expect(actions).toEqual(["mark"])
+
+      renderer.setMenus([])
+      expect(renderer.hasMainMenu()).toBe(false)
+    } finally {
+      resetRender()
+    }
+  })
+
+  it("routes a menu key equivalent through the same action handler", () => {
+    resetRender()
+    const renderer = new TestRenderer()
+    const actions: string[] = []
+
+    try {
+      renderApp(<text>Shortcut test</text>, {
+        renderer,
+        menus: [
+          {
+            name: "Test",
+            items: [
+              {
+                kind: "action",
+                id: "shortcut",
+                label: "Shortcut",
+                keyEquivalent: "cmd-q",
+              },
+            ],
+          },
+        ],
+        onMenuAction: ({ id }) => actions.push(id),
+      })
+
+      renderer.simulateKeystrokes("cmd-q")
+      expect(actions).toEqual(["shortcut"])
+    } finally {
+      resetRender()
+    }
+  })
+
+})
 
 describe("frame loop", () => {
   it("does not tick when the native platform owns its event loop", () => {
@@ -92,6 +177,61 @@ describe("frame loop", () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(ticks).toBe(1)
     expect(terminated).toBe(1)
+    loop.stop()
+  })
+
+  it("recovers after tick throws instead of abandoning the AppKit pump", async () => {
+    let ticks = 0
+    let terminated = 0
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          ticks += 1
+          if (ticks === 1) throw new Error("injected tick failure")
+          return false
+        },
+      },
+      {
+        frameMs: 1,
+        onTerminated: () => {
+          terminated += 1
+        },
+      },
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(ticks).toBe(2)
+    expect(terminated).toBe(1)
+    loop.stop()
+  })
+
+  it("quits after repeated tick failures instead of leaving an unpumped window", async () => {
+    let ticks = 0
+    let quits = 0
+    const failures: unknown[] = []
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          ticks += 1
+          throw new Error(`tick failure ${ticks}`)
+        },
+        quit: () => {
+          quits += 1
+        },
+      },
+      {
+        frameMs: 1,
+        maxConsecutiveTickErrors: 3,
+        onUnrecoverableError: (error) => failures.push(error),
+      },
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(ticks).toBe(3)
+    expect(quits).toBe(1)
+    expect(failures).toHaveLength(1)
     loop.stop()
   })
 })

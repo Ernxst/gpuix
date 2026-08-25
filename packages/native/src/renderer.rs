@@ -11,7 +11,7 @@
 //!   renderer.appendChild(0, 1)
 //!   renderer.commitMutations()           // signal batch complete
 //!   setTimeout(function loop() {         // drive AppKit on macOS
-//!     if (!renderer.tick()) process.exit(0)
+//!     if (!renderer.tick()) onTerminated()
 //!     setTimeout(loop, 8)
 //!   })
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -26,6 +26,9 @@ use napi_derive::napi;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -37,11 +40,391 @@ use wasm_bindgen::JsCast as _;
 use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::retained_tree::RetainedTree;
-use crate::style::StyleDesc;
+use crate::style::{ParsedStyle, StyleDesc, StyleProblem};
 use crate::text::{selectable_text, selection_frame_reset, selection_key, SharedSelection};
 use crate::theme::Theme;
 
+#[derive(Debug, Clone)]
+pub(crate) struct PendingStyleDiagnostic {
+    element_id: u64,
+    problem: StyleProblem,
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct GpuixStyleDiagnostic {
+    pub message: String,
+    pub element_id: f64,
+    pub element_type: String,
+    pub test_id: Option<String>,
+    pub property: String,
+    pub value: String,
+}
+
+pub(crate) fn parse_style_json(style_json: &str) -> ParsedStyle {
+    match serde_json::from_str(style_json) {
+        Ok(value) => crate::style::parse_style_value(&value),
+        Err(error) => ParsedStyle {
+            style: StyleDesc::default(),
+            problems: vec![StyleProblem {
+                property: "<style>".into(),
+                value: serde_json::to_string(style_json)
+                    .unwrap_or_else(|_| format!("{style_json:?}")),
+                reason: format!("invalid style JSON: {error}"),
+            }],
+        },
+    }
+}
+
+pub(crate) fn pending_style_diagnostics(
+    element_id: u64,
+    problems: Vec<StyleProblem>,
+) -> impl Iterator<Item = PendingStyleDiagnostic> {
+    problems
+        .into_iter()
+        .map(move |problem| PendingStyleDiagnostic {
+            element_id,
+            problem,
+        })
+}
+
+fn style_diagnostic_context(
+    diagnostic: &PendingStyleDiagnostic,
+    tree: &RetainedTree,
+) -> (String, String, Option<String>) {
+    let element = tree.elements.get(&diagnostic.element_id);
+    let element_type = element
+        .map(|element| element.element_type.clone())
+        .unwrap_or_else(|| "unknown".into());
+    let test_id = element.and_then(|element| element.test_id.clone());
+    let test_id_label = test_id
+        .as_ref()
+        .map(|test_id| format!(" testId={test_id:?}"))
+        .unwrap_or_default();
+    let message = format!(
+        "[gpuix] Invalid style on <{element_type}{test_id_label}> (element {}): property {:?} rejected value {}: {}",
+        diagnostic.element_id,
+        diagnostic.problem.property,
+        diagnostic.problem.value,
+        diagnostic.problem.reason,
+    );
+    (message, element_type, test_id)
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn drain_style_diagnostics(
+    pending: &Mutex<Vec<PendingStyleDiagnostic>>,
+    tree: &Mutex<RetainedTree>,
+) -> Vec<GpuixStyleDiagnostic> {
+    let pending = std::mem::take(&mut *pending.lock().unwrap());
+    let tree = tree.lock().unwrap();
+    pending
+        .into_iter()
+        .map(|diagnostic| {
+            let (message, element_type, test_id) = style_diagnostic_context(&diagnostic, &tree);
+            GpuixStyleDiagnostic {
+                message,
+                element_id: diagnostic.element_id as f64,
+                element_type,
+                test_id,
+                property: diagnostic.problem.property,
+                value: diagnostic.problem.value,
+            }
+        })
+        .collect()
+}
+
 gpui::actions!(gpuix_focus, [FocusNext, FocusPrevious]);
+
+#[derive(Clone, Debug, PartialEq, Eq, gpui::Action)]
+#[action(namespace = gpuix, no_json)]
+struct ApplicationMenuAction {
+    generation: u64,
+    instance: u64,
+    id: Option<String>,
+    quit: bool,
+}
+
+#[derive(Default)]
+struct ApplicationMenuState {
+    generation: u64,
+    actions_by_id: HashMap<String, ApplicationMenuAction>,
+    installed_menu_count: usize,
+}
+
+impl gpui::Global for ApplicationMenuState {}
+
+/// One top-level application menu.
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct MenuSpec {
+    pub name: String,
+    pub items: Vec<MenuItemSpec>,
+    pub disabled: Option<bool>,
+}
+
+/// A cross-platform application menu item.
+///
+/// `kind` is `"action"`, `"separator"`, `"submenu"`, or `"system"`.
+/// Action items require `label` and `id`; use `role: "quit"` for the
+/// platform quit action. System items currently support `systemMenu:
+/// "services"`.
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct MenuItemSpec {
+    pub kind: String,
+    pub label: Option<String>,
+    pub id: Option<String>,
+    pub items: Option<Vec<MenuItemSpec>>,
+    pub disabled: Option<bool>,
+    pub checked: Option<bool>,
+    pub key_equivalent: Option<String>,
+    pub role: Option<String>,
+    pub system_menu: Option<String>,
+    pub os_action: Option<String>,
+}
+
+struct ApplicationMenuBuilder {
+    generation: u64,
+    next_instance: u64,
+    actions_by_id: HashMap<String, ApplicationMenuAction>,
+    bindings: Vec<gpui::KeyBinding>,
+}
+
+impl ApplicationMenuBuilder {
+    fn new(generation: u64) -> Self {
+        Self {
+            generation,
+            next_instance: 0,
+            actions_by_id: HashMap::new(),
+            bindings: Vec::new(),
+        }
+    }
+
+    fn menu(&mut self, spec: MenuSpec) -> std::result::Result<gpui::Menu, String> {
+        let items = spec
+            .items
+            .into_iter()
+            .map(|item| self.item(item))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(gpui::Menu::new(spec.name)
+            .items(items)
+            .disabled(spec.disabled.unwrap_or(false)))
+    }
+
+    fn item(&mut self, spec: MenuItemSpec) -> std::result::Result<gpui::MenuItem, String> {
+        match spec.kind.as_str() {
+            "separator" => Ok(gpui::MenuItem::separator()),
+            "submenu" => {
+                let label = required_menu_field(spec.label, "submenu", "label")?;
+                let items = spec.items.unwrap_or_default();
+                let submenu = self.menu(MenuSpec {
+                    name: label,
+                    items,
+                    disabled: spec.disabled,
+                })?;
+                Ok(gpui::MenuItem::submenu(submenu))
+            }
+            "system" => {
+                let label = required_menu_field(spec.label, "system", "label")?;
+                match spec.system_menu.as_deref() {
+                    Some("services") => Ok(gpui::MenuItem::os_submenu(
+                        label,
+                        gpui::SystemMenuType::Services,
+                    )),
+                    Some(value) => Err(format!(
+                        "Unknown system menu {value:?}. The supported value is \"services\"."
+                    )),
+                    None => Err("A system menu item requires systemMenu".to_string()),
+                }
+            }
+            "action" => self.action(spec),
+            value => Err(format!(
+                "Unknown menu item kind {value:?}. Use action, separator, submenu, or system."
+            )),
+        }
+    }
+
+    fn action(&mut self, spec: MenuItemSpec) -> std::result::Result<gpui::MenuItem, String> {
+        let label = required_menu_field(spec.label, "action", "label")?;
+        let quit = match spec.role.as_deref() {
+            None => false,
+            Some("quit") => true,
+            Some(value) => {
+                return Err(format!(
+                    "Unknown menu action role {value:?}. The supported role is \"quit\"."
+                ));
+            }
+        };
+        if !quit && spec.id.is_none() {
+            return Err("A menu action requires id unless role is \"quit\"".to_string());
+        }
+
+        self.next_instance += 1;
+        let action = ApplicationMenuAction {
+            generation: self.generation,
+            instance: self.next_instance,
+            id: spec.id.clone(),
+            quit,
+        };
+
+        if let Some(id) = spec.id {
+            if id.is_empty() {
+                return Err("A menu action id cannot be empty".to_string());
+            }
+            if self
+                .actions_by_id
+                .insert(id.clone(), action.clone())
+                .is_some()
+            {
+                return Err(format!("Duplicate menu action id {id:?}"));
+            }
+        }
+
+        let key_equivalent = spec
+            .key_equivalent
+            .or_else(|| quit.then(|| "cmd-q".to_string()));
+        if let Some(key_equivalent) = key_equivalent {
+            validate_menu_key_equivalent(&key_equivalent)?;
+            self.bindings
+                .push(gpui::KeyBinding::new(&key_equivalent, action.clone(), None));
+        }
+
+        let item = match spec.os_action.as_deref() {
+            Some(value) => gpui::MenuItem::os_action(label, action, parse_menu_os_action(value)?),
+            None => gpui::MenuItem::action(label, action),
+        };
+        Ok(item
+            .checked(spec.checked.unwrap_or(false))
+            .disabled(spec.disabled.unwrap_or(false)))
+    }
+}
+
+fn required_menu_field(
+    value: Option<String>,
+    kind: &str,
+    field: &str,
+) -> std::result::Result<String, String> {
+    value
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("A {kind} menu item requires {field}"))
+}
+
+fn validate_menu_key_equivalent(value: &str) -> std::result::Result<(), String> {
+    if value.split_whitespace().count() != 1 {
+        return Err(format!(
+            "Menu key equivalent {value:?} must contain exactly one keystroke"
+        ));
+    }
+    gpui::Keystroke::parse(value)
+        .map(|_| ())
+        .map_err(|error| format!("Invalid menu key equivalent {value:?}: {error}"))
+}
+
+fn parse_menu_os_action(value: &str) -> std::result::Result<gpui::OsAction, String> {
+    match value {
+        "cut" => Ok(gpui::OsAction::Cut),
+        "copy" => Ok(gpui::OsAction::Copy),
+        "paste" => Ok(gpui::OsAction::Paste),
+        "selectAll" => Ok(gpui::OsAction::SelectAll),
+        "undo" => Ok(gpui::OsAction::Undo),
+        "redo" => Ok(gpui::OsAction::Redo),
+        _ => Err(format!(
+            "Unknown menu OS action {value:?}. Use cut, copy, paste, selectAll, undo, or redo."
+        )),
+    }
+}
+
+pub(crate) fn default_application_menus(title: &str) -> Vec<MenuSpec> {
+    vec![MenuSpec {
+        name: title.to_string(),
+        disabled: None,
+        items: vec![MenuItemSpec {
+            kind: "action".to_string(),
+            label: Some(format!("Quit {title}")),
+            id: None,
+            items: None,
+            disabled: None,
+            checked: None,
+            key_equivalent: Some("cmd-q".to_string()),
+            role: Some("quit".to_string()),
+            system_menu: None,
+            os_action: None,
+        }],
+    }]
+}
+
+fn emit_application_event(
+    callback: &Option<EventCallback>,
+    event_type: &str,
+    value: Option<String>,
+) {
+    if let Some(callback) = callback {
+        callback(EventPayload {
+            event_type: event_type.to_string(),
+            value,
+            ..EventPayload::default()
+        });
+    }
+}
+
+pub(crate) fn init_application_menu_support(cx: &mut gpui::App, callback: Option<EventCallback>) {
+    cx.set_global(ApplicationMenuState::default());
+    cx.on_action(move |action: &ApplicationMenuAction, cx| {
+        let active = cx.global::<ApplicationMenuState>().generation == action.generation;
+        if !active {
+            return;
+        }
+        if let Some(id) = action.id.clone() {
+            emit_application_event(&callback, "menuAction", Some(id));
+        }
+        if action.quit {
+            cx.quit();
+        }
+    });
+}
+
+pub(crate) fn set_application_menus(
+    cx: &mut gpui::App,
+    specs: Vec<MenuSpec>,
+) -> std::result::Result<(), String> {
+    let generation = cx
+        .global::<ApplicationMenuState>()
+        .generation
+        .wrapping_add(1);
+    let mut builder = ApplicationMenuBuilder::new(generation);
+    let menus = specs
+        .into_iter()
+        .map(|menu| builder.menu(menu))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    let state = cx.global_mut::<ApplicationMenuState>();
+    state.generation = generation;
+    state.actions_by_id = builder.actions_by_id;
+    state.installed_menu_count = menus.len();
+    cx.bind_keys(builder.bindings);
+    cx.set_menus(menus);
+    Ok(())
+}
+
+pub(crate) fn has_application_menus(cx: &gpui::App) -> bool {
+    cx.global::<ApplicationMenuState>().installed_menu_count > 0
+}
+
+pub(crate) fn dispatch_application_menu_action(
+    cx: &mut gpui::App,
+    id: &str,
+) -> std::result::Result<(), String> {
+    let action = cx
+        .global::<ApplicationMenuState>()
+        .actions_by_id
+        .get(id)
+        .cloned()
+        .ok_or_else(|| format!("Unknown menu action id {id:?}"))?;
+    cx.dispatch_action(&action);
+    Ok(())
+}
 
 pub(crate) fn init_key_bindings(cx: &mut gpui::App) {
     cx.bind_keys([
@@ -232,6 +615,17 @@ enum ClockControl {
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum UiCommand {
     Invalidate,
+    SetMenus {
+        menus: Vec<MenuSpec>,
+        response: SyncSender<std::result::Result<(), String>>,
+    },
+    DispatchMenuAction {
+        id: String,
+        response: SyncSender<std::result::Result<(), String>>,
+    },
+    Quit {
+        response: SyncSender<()>,
+    },
     SetWindowTitle(String),
     SetDebugFrameOverlay(gpui::DebugFrameOverlayMode),
     CycleDebugFrameOverlay {
@@ -296,6 +690,31 @@ async fn run_ui_commands(
     while let Some(command) = commands.next().await {
         let result = match command {
             UiCommand::Invalidate => refresh_ui_window(window, cx),
+            UiCommand::SetMenus { menus, response } => {
+                let result = cx.update(|cx| set_application_menus(cx, menus));
+                let response_value = result
+                    .as_ref()
+                    .map(|value| value.clone())
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| value);
+                response.send(response_value).ok();
+                result.and_then(|value| value.map_err(anyhow::Error::msg))
+            }
+            UiCommand::DispatchMenuAction { id, response } => {
+                let result = cx.update(|cx| dispatch_application_menu_action(cx, &id));
+                let response_value = result
+                    .as_ref()
+                    .map(|value| value.clone())
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| value);
+                response.send(response_value).ok();
+                result.and_then(|value| value.map_err(anyhow::Error::msg))
+            }
+            UiCommand::Quit { response } => {
+                let result = cx.update(|cx| cx.quit());
+                response.send(()).ok();
+                result
+            }
             UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
                 view.window_title = title;
                 cx.notify();
@@ -518,16 +937,29 @@ pub fn test_macos_native_window_allocation_count() -> u32 {
         .unwrap_or(u32::MAX)
 }
 
+/// Lifecycle states distinguish an invalid pre-init call from an idempotent
+/// post-termination call after the native window has already been destroyed.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RendererLifecycle {
+    Uninitialized,
+    Running,
+    Terminated,
+}
+
 /// The main GPUI renderer exposed to Node.js.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[napi]
 pub struct GpuixRenderer {
     event_callback: Mutex<Option<Arc<ThreadsafeFunction<EventPayload>>>>,
+    application_event_callback: Arc<Mutex<Option<EventCallback>>>,
     tree: Arc<Mutex<RetainedTree>>,
-    initialized: Arc<Mutex<bool>>,
+    lifecycle: Arc<Mutex<RendererLifecycle>>,
     /// Shared with GpuixView so napi methods can read the live selection
     /// without an App context. Paint and napi calls can use different threads.
     selection: SharedSelection,
+    strict_styles: AtomicBool,
+    style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     ui_commands: Mutex<Option<mpsc::UnboundedSender<UiCommand>>>,
 }
@@ -540,6 +972,16 @@ impl GpuixRenderer {
             Arc::new(move |payload: EventPayload| {
                 tsf.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
             }) as EventCallback
+        })
+    }
+
+    fn application_event_callback(&self) -> EventCallback {
+        let callback = self.application_event_callback.clone();
+        Arc::new(move |payload: EventPayload| {
+            let current = callback.lock().unwrap().clone();
+            if let Some(current) = current {
+                current(payload);
+            }
         })
     }
 
@@ -635,11 +1077,20 @@ impl GpuixRenderer {
     #[napi(constructor)]
     pub fn new(event_callback: Option<ThreadsafeFunction<EventPayload>>) -> Self {
         let _ = env_logger::try_init();
+        let event_callback = event_callback.map(Arc::new);
+        let initial_application_event_callback = event_callback.clone().map(|tsf| {
+            Arc::new(move |payload: EventPayload| {
+                tsf.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
+            }) as EventCallback
+        });
         Self {
-            event_callback: Mutex::new(event_callback.map(Arc::new)),
+            event_callback: Mutex::new(event_callback),
+            application_event_callback: Arc::new(Mutex::new(initial_application_event_callback)),
             tree: Arc::new(Mutex::new(RetainedTree::new())),
-            initialized: Arc::new(Mutex::new(false)),
+            lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
             selection: SharedSelection::default(),
+            strict_styles: AtomicBool::new(true),
+            style_diagnostics: Mutex::new(Vec::new()),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
         }
@@ -668,6 +1119,22 @@ impl GpuixRenderer {
         return self.init_threaded(options);
     }
 
+    /// Replace the callback used for application-level events such as menu actions.
+    #[napi]
+    pub fn set_application_event_handler(
+        &self,
+        event_callback: Option<
+            ThreadsafeFunction<EventPayload, Unknown<'static>, EventPayload, Status, false>,
+        >,
+    ) {
+        let callback = event_callback.map(Arc::new).map(|tsf| {
+            Arc::new(move |payload: EventPayload| {
+                tsf.call(payload, ThreadsafeFunctionCallMode::NonBlocking);
+            }) as EventCallback
+        });
+        *self.application_event_callback.lock().unwrap() = callback;
+    }
+
     #[cfg(target_os = "macos")]
     fn init_macos(&self, options: Option<WindowOptions>) -> Result<()> {
         catch_gpui_initialization("GPUI macOS renderer initialization", || {
@@ -680,8 +1147,8 @@ impl GpuixRenderer {
         let options = options.unwrap_or_default();
 
         {
-            let initialized = self.initialized.lock().unwrap();
-            if *initialized {
+            let lifecycle = self.lifecycle.lock().unwrap();
+            if *lifecycle != RendererLifecycle::Uninitialized {
                 return Err(Error::from_reason("Renderer is already initialized"));
             }
         }
@@ -694,12 +1161,17 @@ impl GpuixRenderer {
         let width = options.width.unwrap_or(800.0);
         let height = options.height.unwrap_or(600.0);
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
+        let menus = options
+            .menus
+            .clone()
+            .unwrap_or_else(|| default_application_menus(&title));
         let window_options = options.clone();
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
 
         let tree = self.tree.clone();
         let callback = self.event_callback_for_view();
+        let application_callback = self.application_event_callback();
 
         let selection = self.selection.clone();
         let opened_window = Rc::new(RefCell::new(None));
@@ -713,6 +1185,11 @@ impl GpuixRenderer {
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
+            init_application_menu_support(cx, Some(application_callback.clone()));
+            if let Err(error) = set_application_menus(cx, menus) {
+                *startup_error_for_app.borrow_mut() = Some(error);
+                return;
+            }
             let window_size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
             #[cfg(feature = "display-discovery-fault-injection")]
             // Let the fault smoke reach MacWindow::open instead of failing during centering.
@@ -774,7 +1251,7 @@ impl GpuixRenderer {
             *w.borrow_mut() = Some(window_handle);
         });
 
-        *self.initialized.lock().unwrap() = true;
+        *self.lifecycle.lock().unwrap() = RendererLifecycle::Running;
         self.event_callback.lock().unwrap().take();
         Ok(())
     }
@@ -782,17 +1259,27 @@ impl GpuixRenderer {
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     fn init_threaded(&self, options: Option<WindowOptions>) -> Result<()> {
         let options = options.unwrap_or_default();
-        if *self.initialized.lock().unwrap() {
+        if *self.lifecycle.lock().unwrap() != RendererLifecycle::Uninitialized {
             return Err(Error::from_reason("Renderer is already initialized"));
         }
 
         let width = options.width.unwrap_or(800.0);
         let height = options.height.unwrap_or(600.0);
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
+        let menus = options
+            .menus
+            .clone()
+            .unwrap_or_else(|| default_application_menus(&title));
         let window_options = options.clone();
         let tree = self.tree.clone();
         let selection = self.selection.clone();
         let callback = self.event_callback_for_view();
+        let application_callback = self.application_event_callback();
+        let termination_callback = Some(application_callback.clone());
+        let lifecycle = self.lifecycle.clone();
+        let lifecycle_for_app = lifecycle.clone();
+        let launched = Arc::new(AtomicBool::new(false));
+        let launched_for_thread = launched.clone();
         let (command_sender, command_receiver) = mpsc::unbounded();
         let (startup_sender, startup_receiver) = sync_channel(1);
         let exit_startup_sender = startup_sender.clone();
@@ -804,6 +1291,12 @@ impl GpuixRenderer {
                     gpui_platform::application().run(move |cx| {
                         init_key_bindings(cx);
                         crate::custom_elements::input::init(cx);
+                        init_application_menu_support(cx, Some(application_callback.clone()));
+                        if let Err(error) = set_application_menus(cx, menus) {
+                            startup_sender.send(Err(error)).ok();
+                            cx.quit();
+                            return;
+                        }
                         let bounds = gpui::Bounds::centered(
                             None,
                             gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
@@ -830,9 +1323,16 @@ impl GpuixRenderer {
                         })
                         .detach();
                         cx.activate(true);
+                        *lifecycle_for_app.lock().unwrap() = RendererLifecycle::Running;
+                        launched_for_thread.store(true, Ordering::Release);
                         startup_sender.send(Ok(())).ok();
                     });
                 }));
+
+                *lifecycle.lock().unwrap() = RendererLifecycle::Terminated;
+                if launched.load(Ordering::Acquire) {
+                    emit_application_event(&termination_callback, "terminated", None);
+                }
 
                 let error = match result {
                     Ok(()) => {
@@ -855,7 +1355,6 @@ impl GpuixRenderer {
             .map_err(Error::from_reason)?;
 
         *self.ui_commands.lock().unwrap() = Some(command_sender);
-        *self.initialized.lock().unwrap() = true;
         self.event_callback.lock().unwrap().take();
         Ok(())
     }
@@ -911,11 +1410,33 @@ impl GpuixRenderer {
     #[napi]
     pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
         let id = to_element_id(id)?;
-        let style: StyleDesc = serde_json::from_str(&style_json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse style: {}", e)))?;
+        let parsed = parse_style_json(&style_json);
         let mut tree = self.tree.lock().unwrap();
-        tree.set_style(id, style);
+        tree.set_style(id, parsed.style);
+        drop(tree);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            self.style_diagnostics
+                .lock()
+                .unwrap()
+                .extend(pending_style_diagnostics(id, parsed.problems));
+        }
         Ok(())
+    }
+
+    /// Enable actionable diagnostics for rejected style fields. React enables this
+    /// by default outside production builds.
+    #[napi]
+    pub fn set_strict_styles(&self, enabled: bool) {
+        self.strict_styles.store(enabled, Ordering::Relaxed);
+        if !enabled {
+            self.style_diagnostics.lock().unwrap().clear();
+        }
+    }
+
+    /// Drain rejected style fields after a commit, once element type and testId are known.
+    #[napi]
+    pub fn drain_style_diagnostics(&self) -> Vec<GpuixStyleDiagnostic> {
+        drain_style_diagnostics(&self.style_diagnostics, &self.tree)
     }
 
     #[napi]
@@ -968,6 +1489,9 @@ impl GpuixRenderer {
     /// Signal that a batch of mutations is complete. Triggers re-render.
     #[napi]
     pub fn commit_mutations(&self) -> Result<()> {
+        if *self.lifecycle.lock().unwrap() == RendererLifecycle::Terminated {
+            return Ok(());
+        }
         self.request_invalidate()
     }
 
@@ -993,25 +1517,162 @@ impl GpuixRenderer {
     /// Acquires the tree mutex ONCE for the entire batch.
     #[napi]
     pub fn apply_batch(&self, json: String) -> Result<Vec<f64>> {
+        if *self.lifecycle.lock().unwrap() == RendererLifecycle::Terminated {
+            return Ok(Vec::new());
+        }
         let ops: Vec<serde_json::Value> = serde_json::from_str(&json)
             .map_err(|e| Error::from_reason(format!("Failed to parse batch: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
-        let destroyed = apply_batch_to_tree(&mut tree, &ops).map_err(Error::from_reason)?;
+        let outcome = apply_batch_to_tree(&mut tree, &ops).map_err(Error::from_reason)?;
         drop(tree);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            self.style_diagnostics
+                .lock()
+                .unwrap()
+                .extend(outcome.diagnostics);
+        }
         self.request_invalidate()?;
-        Ok(destroyed)
+        Ok(outcome.destroyed_ids)
     }
 
     // ── Frame loop ───────────────────────────────────────────────────
 
-    /// Pump the native event loop. Returns false after the last window closes.
+    /// Replace the application menu bar. Pass an empty array to remove it.
     #[napi]
-    pub fn tick(&self) -> Result<bool> {
-        let initialized = *self.initialized.lock().unwrap();
-        if !initialized {
+    pub fn set_menus(&self, menus: Vec<MenuSpec>) -> Result<()> {
+        if *self.lifecycle.lock().unwrap() != RendererLifecycle::Running {
             return Err(Error::from_reason(
                 "Renderer not initialized. Call init() first.",
             ));
+        }
+
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| set_application_menus(cx, menus))
+                .map_err(Error::from_reason)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::SetMenus { menus, response })?;
+            return recv_ui_response(receiver, "the application menu update")?
+                .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Dispatch a configured menu action through the production GPUI application.
+    #[napi]
+    pub fn simulate_menu_action(&self, id: String) -> Result<()> {
+        if *self.lifecycle.lock().unwrap() != RendererLifecycle::Running {
+            return Err(Error::from_reason(
+                "Renderer not initialized. Call init() first.",
+            ));
+        }
+
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| dispatch_application_menu_action(cx, &id))
+                .map_err(Error::from_reason)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::DispatchMenuAction { id, response })?;
+            return recv_ui_response(receiver, "the application menu action")?
+                .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Gracefully terminate the native application through GPUI's platform abstraction.
+    #[napi]
+    pub fn quit(&self) -> Result<()> {
+        if *self.lifecycle.lock().unwrap() != RendererLifecycle::Running {
+            return Ok(());
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            GPUI_APP.with(|app| {
+                let app = app.borrow();
+                let app = app
+                    .as_ref()
+                    .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+                app.update(|cx| cx.quit());
+                Ok::<(), Error>(())
+            })?;
+
+            for _ in 0..64 {
+                let running = MAC_PLATFORM.with(|platform| {
+                    platform
+                        .borrow()
+                        .as_ref()
+                        .map(|platform| platform.pump_events())
+                        .unwrap_or(false)
+                });
+                if !running {
+                    *self.lifecycle.lock().unwrap() = RendererLifecycle::Terminated;
+                    return Ok(());
+                }
+            }
+            return Err(Error::from_reason(
+                "GPUI did not finish quitting after 64 AppKit pump iterations",
+            ));
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::Quit { response })?;
+            recv_ui_response(receiver, "the application quit request")?;
+            return Ok(());
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Pump the native event loop. Returns false after the last window closes.
+    #[napi]
+    pub fn tick(&self) -> Result<bool> {
+        match *self.lifecycle.lock().unwrap() {
+            RendererLifecycle::Uninitialized => {
+                return Err(Error::from_reason(
+                    "Renderer not initialized. Call init() first.",
+                ));
+            }
+            RendererLifecycle::Terminated => return Ok(false),
+            RendererLifecycle::Running => {}
         }
 
         #[cfg(target_os = "macos")]
@@ -1022,6 +1683,9 @@ impl GpuixRenderer {
                     .map(|platform| platform.pump_events())
                     .unwrap_or(false)
             });
+            if !running {
+                *self.lifecycle.lock().unwrap() = RendererLifecycle::Terminated;
+            }
             return Ok(running);
         }
 
@@ -1041,7 +1705,7 @@ impl GpuixRenderer {
 
     #[napi]
     pub fn is_initialized(&self) -> bool {
-        *self.initialized.lock().unwrap()
+        *self.lifecycle.lock().unwrap() == RendererLifecycle::Running
     }
 
     /// Whether JavaScript must drive the native event loop with tick().
@@ -1812,6 +2476,7 @@ pub struct WebGpuixRenderer {
     tree: Arc<Mutex<RetainedTree>>,
     selection: SharedSelection,
     event_callback: EventCallback,
+    strict_styles: AtomicBool,
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -1823,6 +2488,7 @@ impl WebGpuixRenderer {
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             selection: SharedSelection::default(),
             event_callback: web_event_callback(event_callback),
+            strict_styles: AtomicBool::new(true),
         }
     }
 
@@ -1894,14 +2560,22 @@ impl WebGpuixRenderer {
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setStyle)]
     pub fn set_style(&self, id: f64, style_json: String) -> Result<(), wasm_bindgen::JsValue> {
-        let style = serde_json::from_str(&style_json).map_err(|error| {
-            wasm_bindgen::JsValue::from_str(&format!("Failed to parse style: {error}"))
-        })?;
-        self.tree
-            .lock()
-            .unwrap()
-            .set_style(web_element_id(id)?, style);
+        let id = web_element_id(id)?;
+        let parsed = parse_style_json(&style_json);
+        let mut tree = self.tree.lock().unwrap();
+        tree.set_style(id, parsed.style);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            for diagnostic in pending_style_diagnostics(id, parsed.problems) {
+                let (message, _, _) = style_diagnostic_context(&diagnostic, &tree);
+                web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
+            }
+        }
         Ok(())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setStrictStyles)]
+    pub fn set_strict_styles(&self, enabled: bool) {
+        self.strict_styles.store(enabled, Ordering::Relaxed);
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setText)]
@@ -1975,8 +2649,17 @@ impl WebGpuixRenderer {
         let ops: Vec<serde_json::Value> = serde_json::from_str(&json).map_err(|error| {
             wasm_bindgen::JsValue::from_str(&format!("Failed to parse batch: {error}"))
         })?;
-        let destroyed = apply_batch_to_tree(&mut self.tree.lock().unwrap(), &ops)
+        let mut tree = self.tree.lock().unwrap();
+        let outcome = apply_batch_to_tree(&mut tree, &ops)
             .map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
+        if self.strict_styles.load(Ordering::Relaxed) {
+            for diagnostic in outcome.diagnostics {
+                let (message, _, _) = style_diagnostic_context(&diagnostic, &tree);
+                web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
+            }
+        }
+        let destroyed = outcome.destroyed_ids;
+        drop(tree);
         notify_web();
         Ok(web_number_array(destroyed))
     }
@@ -2388,18 +3071,18 @@ impl GpuixView {
         if motion_active {
             window.request_animation_frame();
         }
-        let Some(focus_handle) = row_focus_handle else {
-            return child;
-        };
-        gpui::div()
+        let row = gpui::div()
             .id(gpui::SharedString::from(format!(
                 "__gpuix_virtual_row_{}_{}",
                 list_id, expected_child_id
             )))
-            .w_full()
-            .track_focus(&focus_handle)
-            .child(child)
-            .into_any_element()
+            .w_full();
+        let row = if let Some(focus_handle) = row_focus_handle {
+            row.track_focus(&focus_handle)
+        } else {
+            row
+        };
+        row.child(child).into_any_element()
     }
 
     pub(crate) fn scroll_virtual_list_to_item(&self, id: u64, index: usize) -> bool {
@@ -2498,6 +3181,16 @@ pub(crate) struct Inherited {
     pub selectable: bool,
     /// Selection wash colour for this subtree.
     pub selection_wash: gpui::Hsla,
+    /// Text case transformation inherited by plain text descendants.
+    pub text_transform: TextTransform,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) enum TextTransform {
+    #[default]
+    None,
+    Uppercase,
+    Lowercase,
 }
 
 impl Inherited {
@@ -2507,6 +3200,7 @@ impl Inherited {
         Self {
             selectable: true,
             selection_wash: wash,
+            text_transform: TextTransform::None,
         }
     }
 
@@ -2524,6 +3218,12 @@ impl Inherited {
             .and_then(crate::color::parse_color_rgba)
         {
             self.selection_wash = color.into();
+        }
+        match style.text_transform.as_deref() {
+            Some("none") => self.text_transform = TextTransform::None,
+            Some("uppercase") => self.text_transform = TextTransform::Uppercase,
+            Some("lowercase") => self.text_transform = TextTransform::Lowercase,
+            _ => {}
         }
         self
     }
@@ -3543,13 +4243,18 @@ pub(crate) fn build_div(
 /// A selectable text run owned by `element_id`. Runs are left to gpui so the
 /// text keeps inheriting colour, weight and family from ancestor styles.
 fn text_content(element_id: u64, content: &str, ctx: &BuildCtx) -> gpui::AnyElement {
+    let content = match ctx.inherited.text_transform {
+        TextTransform::None => content.to_string(),
+        TextTransform::Uppercase => content.to_uppercase(),
+        TextTransform::Lowercase => content.to_lowercase(),
+    };
     if !ctx.inherited.selectable {
         // Still logged: `getPaintedText()` promises every painted string, and a
         // `userSelect: "none"` label is exactly the chrome tests want to assert.
-        return crate::text::chrome_text(gpui::SharedString::from(content.to_string()), None);
+        return crate::text::chrome_text(gpui::SharedString::from(content), None);
     }
     selectable_text(crate::text::SelectableText::new(
-        gpui::SharedString::from(content.to_string()),
+        gpui::SharedString::from(content),
         None,
         selection_key(element_id, 0),
         ctx.selection.clone(),
@@ -3636,6 +4341,11 @@ pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::Dimension
 }
 
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
+    match style.visibility.as_deref() {
+        Some("hidden") => el = el.invisible(),
+        Some("visible") => el = el.visible(),
+        _ => {}
+    }
     match style.display.as_deref() {
         Some("flex") => el = el.flex(),
         Some("grid") => el = el.grid(),
@@ -3682,6 +4392,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("center") => el = el.items_center(),
         Some("start") | Some("flex-start") => el = el.items_start(),
         Some("end") | Some("flex-end") => el = el.items_end(),
+        Some("stretch") => el = el.items_stretch(),
         _ => {}
     }
     match style.align_content.as_deref() {
@@ -3701,6 +4412,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("end") | Some("flex-end") => el = el.justify_end(),
         Some("between") | Some("space-between") => el = el.justify_between(),
         Some("around") | Some("space-around") => el = el.justify_around(),
+        Some("evenly") | Some("space-evenly") => el = el.justify_evenly(),
         _ => {}
     }
     match style.align_self.as_deref() {
@@ -3813,13 +4525,13 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(left) = style.left {
         el = el.left(gpui::px(left as f32));
     }
-    if let Some(ref bg) = style
-        .background_color
-        .as_ref()
-        .or(style.background.as_ref())
-    {
-        if let Some(color) = crate::color::parse_color_rgba(bg) {
+    if let Some(background_color) = style.background_color.as_deref() {
+        if let Some(color) = crate::color::parse_color_rgba(background_color) {
             el = el.bg(color);
+        }
+    } else if let Some(background) = style.background.as_ref() {
+        if let Ok(background) = crate::style::parse_background(background) {
+            el = el.bg(background);
         }
     }
     if let Some(ref color) = style.color {
@@ -3836,6 +4548,9 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(ref weight) = style.font_weight {
         el = el.font_weight(parse_font_weight(weight));
     }
+    if let Some(letter_spacing) = style.letter_spacing {
+        el = el.letter_spacing(gpui::px(letter_spacing as f32));
+    }
     // `textAlign` was in the style type but implemented nowhere.
     match style.text_align.as_deref() {
         Some("center") => el = el.text_center(),
@@ -3846,6 +4561,11 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.white_space.as_deref() {
         Some("nowrap") => el = el.whitespace_nowrap(),
         Some("normal") => el = el.whitespace_normal(),
+        _ => {}
+    }
+    match style.text_wrap.as_deref() {
+        Some("nowrap") => el = el.whitespace_nowrap(),
+        Some("wrap") => el = el.whitespace_normal(),
         _ => {}
     }
     match style.text_overflow.as_deref() {
@@ -4009,6 +4729,7 @@ enum BatchOp {
     SetStyle {
         id: u64,
         style: StyleDesc,
+        problems: Vec<StyleProblem>,
     },
     SetText {
         id: u64,
@@ -4067,11 +4788,13 @@ fn parse_batch_ops(ops: &[serde_json::Value]) -> BatchResult<Vec<BatchOp>> {
                 before_id: batch_id(arr, 3, i)?,
             },
             "setStyle" => {
-                let style: StyleDesc = batch_decode(arr, 2, i)
-                    .map_err(|error| format!("Batch op {i} setStyle parse error: {error}"))?;
+                let id = batch_id(arr, 1, i)?;
+                let value = batch_payload(arr, 2, i)?;
+                let parsed = crate::style::parse_style_value(&value);
                 BatchOp::SetStyle {
-                    id: batch_id(arr, 1, i)?,
-                    style,
+                    id,
+                    style: parsed.style,
+                    problems: parsed.problems,
                 }
             }
             "setText" => BatchOp::SetText {
@@ -4129,15 +4852,21 @@ fn parse_batch_ops(ops: &[serde_json::Value]) -> BatchResult<Vec<BatchOp>> {
 ///
 /// Batch format: JSON array of tuples [opcode, ...args].
 /// See GpuixRenderer::apply_batch for opcode documentation.
+pub(crate) struct BatchOutcome {
+    pub destroyed_ids: Vec<f64>,
+    pub diagnostics: Vec<PendingStyleDiagnostic>,
+}
+
 pub(crate) fn apply_batch_to_tree(
     tree: &mut RetainedTree,
     ops: &[serde_json::Value],
-) -> BatchResult<Vec<f64>> {
+) -> BatchResult<BatchOutcome> {
     // Phase 1: parse and validate all ops (no mutation).
     let parsed = parse_batch_ops(ops)?;
 
     // Phase 2: apply all validated ops to the tree.
     let mut destroyed_ids: Vec<f64> = Vec::new();
+    let mut diagnostics = Vec::new();
     for batch_op in parsed {
         match batch_op {
             BatchOp::CreateElement { id, element_type } => {
@@ -4166,8 +4895,13 @@ pub(crate) fn apply_batch_to_tree(
             } => {
                 tree.insert_before(parent_id, child_id, before_id);
             }
-            BatchOp::SetStyle { id, style } => {
+            BatchOp::SetStyle {
+                id,
+                style,
+                problems,
+            } => {
                 tree.set_style(id, style);
+                diagnostics.extend(pending_style_diagnostics(id, problems));
             }
             BatchOp::SetText { id, content } => {
                 tree.set_text(id, content);
@@ -4188,7 +4922,10 @@ pub(crate) fn apply_batch_to_tree(
         }
     }
 
-    Ok(destroyed_ids)
+    Ok(BatchOutcome {
+        destroyed_ids,
+        diagnostics,
+    })
 }
 
 /// Extract a u64 element ID from a batch tuple at the given index.
@@ -4218,15 +4955,6 @@ fn batch_payload(
     } else {
         Ok(value.clone())
     }
-}
-
-fn batch_decode<T: serde::de::DeserializeOwned>(
-    arr: &[serde_json::Value],
-    idx: usize,
-    op_idx: usize,
-) -> BatchResult<T> {
-    let value = batch_payload(arr, idx, op_idx)?;
-    serde_json::from_value(value).map_err(|error| error.to_string())
 }
 
 /// Extract a String from a batch tuple at the given index.
@@ -4263,6 +4991,8 @@ pub struct DebugFrameOverlayStats {
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
 pub struct WindowOptions {
     pub title: Option<String>,
+    /// Application menus. Omit for a minimal Quit menu; pass `[]` to opt out.
+    pub menus: Option<Vec<MenuSpec>>,
     pub width: Option<f64>,
     pub height: Option<f64>,
     pub min_width: Option<f64>,
@@ -4284,6 +5014,7 @@ impl Default for WindowOptions {
     fn default() -> Self {
         Self {
             title: Some("GPUIX".to_string()),
+            menus: None,
             width: Some(800.0),
             height: Some(600.0),
             min_width: None,

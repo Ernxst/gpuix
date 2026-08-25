@@ -1,8 +1,9 @@
 import fs from "fs"
 import path from "path"
 import React from "react"
-import { beforeAll, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
+import type { BackgroundValue } from "../types/host.js"
 import {
   expectScreenshotsDiffer,
   expectScreenshotsEqual,
@@ -15,6 +16,7 @@ const absoluteCases = [
   ["hex4", "#f00f", "#ff0000"],
   ["hex-no-hash", "ff0000ff", "#ff0000"],
   ["named", "rebeccapurple", "#663399"],
+  ["named-red", "red", "#ff0000"],
   ["rgb", "rgb(255 0 0)", "#ff0000"],
   ["rgba", "rgba(255, 0, 0, 1)", "#ff0000"],
   ["hsl", "hsl(0 100% 50%)", "#ff0000"],
@@ -59,6 +61,10 @@ beforeAll(() => {
   fs.mkdirSync(SHOTS_DIR, { recursive: true })
 })
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 function captureColor(name: string, color?: string) {
   const screenshotPath = path.join(SHOTS_DIR, `${name}.png`)
   const testRoot = createTestRoot()
@@ -81,6 +87,14 @@ function expectColorsEqual(name: string, input: string, expected: string) {
   expectScreenshotsEqual(actualPath, expectedPath)
 }
 
+function captureBackground(name: string, background: BackgroundValue) {
+  const screenshotPath = path.join(SHOTS_DIR, `${name}.png`)
+  const testRoot = createTestRoot()
+  testRoot.render(<div style={{ width: "100%", height: "100%", background }} />)
+  testRoot.renderer.captureScreenshot(screenshotPath)
+  return screenshotPath
+}
+
 describeNative("native color functions", () => {
   it.each(absoluteCases)(
     "paints absolute %s exactly like its canonical hex",
@@ -100,10 +114,13 @@ describeNative("native color functions", () => {
     }
   )
 
-  it("ignores an invalid paint and paints a valid OKLCH value", () => {
+  it("rejects an invalid paint loudly and paints a valid OKLCH value", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const invalidPath = captureColor("color-invalid", "not-a-color")
     const unsetPath = captureColor("color-unset")
     expectScreenshotsEqual(invalidPath, unsetPath)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("backgroundColor"))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"not-a-color"'))
 
     const validPath = captureColor("color-valid-oklch", "oklch(67.3% 0.182 276.935)")
     expectScreenshotsDiffer(validPath, unsetPath)
@@ -150,5 +167,37 @@ describeNative("native color functions", () => {
     expectScreenshotsDiffer(basePath, hoverPath)
     expectScreenshotsDiffer(hoverPath, activePath)
     expectScreenshotsDiffer(basePath, activePath)
+  })
+
+  it("renders a two-stop CSS linear gradient through the native background", () => {
+    const gradient = captureBackground(
+      "linear-gradient-two-stop",
+      "linear-gradient(90deg in oklab, #ff0000 0%, #0000ff 100%)"
+    )
+    const solid = captureColor("linear-gradient-two-stop-solid", "#ff0000")
+    expectScreenshotsDiffer(gradient, solid)
+  })
+
+  it("renders every stop in a structured multi-stop linear gradient", () => {
+    const twoStop = captureBackground("linear-gradient-endpoints", {
+      type: "linearGradient",
+      angle: 90,
+      stops: [
+        { color: "#ff0000", position: 0 },
+        { color: "#0000ff", position: 1 },
+      ],
+      colorSpace: "srgb",
+    })
+    const multiStop = captureBackground("linear-gradient-multi-stop", {
+      type: "linearGradient",
+      angle: 90,
+      stops: [
+        { color: "#ff0000", position: 0 },
+        { color: "#00ff00", position: 0.5 },
+        { color: "#0000ff", position: 1 },
+      ],
+      colorSpace: "srgb",
+    })
+    expectScreenshotsDiffer(twoStop, multiStop)
   })
 })

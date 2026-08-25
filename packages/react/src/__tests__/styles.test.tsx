@@ -7,7 +7,7 @@
 /// @ts-nocheck
 
 import fs from "fs"
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import React from "react"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing"
 import { motion } from "../index"
@@ -1250,7 +1250,8 @@ describeNative("style properties", () => {
       expect(bytes1.equals(bytes3)).toBe(false)
     })
 
-    it("edge case: lineClamp 0 is ignored (no clamping)", () => {
+    it("edge case: lineClamp 0 is rejected without clamping", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
       function Clamp0Test() {
         return (
           <Center>
@@ -1272,6 +1273,8 @@ describeNative("style properties", () => {
       }
 
       testRoot.render(<Clamp0Test />)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("lineClamp"))
+      warn.mockRestore()
 
       const path = `${SCREENSHOT_DIR}/gpuix-line-clamp-zero.png`
       if (fs.existsSync(path)) fs.unlinkSync(path)
