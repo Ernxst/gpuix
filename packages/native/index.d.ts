@@ -15,6 +15,13 @@ export declare class GpuixRenderer {
   removeChild(parentId: number, childId: number): void
   insertBefore(parentId: number, childId: number, beforeId: number): void
   setStyle(id: number, styleJson: string): void
+  /**
+   * Enable actionable diagnostics for rejected style fields. React enables this
+   * by default outside production builds.
+   */
+  setStrictStyles(enabled: boolean): void
+  /** Drain rejected style fields after a commit, once element type and testId are known. */
+  drainStyleDiagnostics(): Array<GpuixStyleDiagnostic>
   setText(id: number, content: string): void
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   /** Set the root element (called from appendChildToContainer). */
@@ -127,6 +134,8 @@ export declare class TestGpuixRenderer {
   removeChild(parentId: number, childId: number): void
   insertBefore(parentId: number, childId: number, beforeId: number): void
   setStyle(id: number, styleJson: string): void
+  setStrictStyles(enabled: boolean): void
+  drainStyleDiagnostics(): Array<GpuixStyleDiagnostic>
   setText(id: number, content: string): void
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   /** Set the root element (called from appendChildToContainer). */
@@ -402,6 +411,15 @@ export interface EventPayload {
   /** Exclusive end of the visible logical range. Populated for: visibleRange. */
   endIndex?: number
   modifiers?: EventModifiers
+}
+
+export interface GpuixStyleDiagnostic {
+  message: string
+  elementId: number
+  elementType: string
+  testId?: string
+  property: string
+  value: string
 }
 
 export interface WindowOptions {

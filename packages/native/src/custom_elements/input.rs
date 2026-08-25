@@ -1055,6 +1055,7 @@ impl TextEditorState {
         let run = |len: usize, underline: bool| TextRun {
             len,
             font: style.font(),
+            letter_spacing: style.letter_spacing,
             color,
             background_color: None,
             underline: underline.then_some(UnderlineStyle {

@@ -88,6 +88,33 @@ describe("style props reach the renderer", () => {
     )
   })
 
+  it("applies textTransform before shaping", () => {
+    const transformed = createTestRoot()
+    transformed.render(
+      <text style={{ color: "#ffffff", fontSize: 28, textTransform: "uppercase" }}>
+        PlayStation 5
+      </text>
+    )
+    transformed.renderer.flush()
+    expect(transformed.renderer.getPaintedText()).toContain("PLAYSTATION 5")
+
+    comparePixels(
+      "text-transform",
+      <text style={{ color: "#ffffff", fontSize: 28 }}>PlayStation 5</text>,
+      <text style={{ color: "#ffffff", fontSize: 28, textTransform: "uppercase" }}>
+        PlayStation 5
+      </text>
+    )
+  })
+
+  it("applies letterSpacing to shaped text", () => {
+    comparePixels(
+      "letter-spacing",
+      <text style={{ color: "#ffffff", fontSize: 28, letterSpacing: 0 }}>TRACKED LABEL</text>,
+      <text style={{ color: "#ffffff", fontSize: 28, letterSpacing: 8 }}>TRACKED LABEL</text>
+    )
+  })
+
   it("applies fontSize set on a div, not only on a text node", () => {
     // `fontSize` lived only in build_text, so a div that set it alongside
     // layout props had no effect on its children.

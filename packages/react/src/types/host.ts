@@ -43,6 +43,22 @@ export interface BoxShadow {
   color: string
 }
 
+export interface LinearGradientStop {
+  color: string
+  /** Position from 0 through 1. */
+  position: number
+}
+
+export interface LinearGradient {
+  type: "linearGradient"
+  /** CSS angle in degrees: 0 points up, 90 points right. */
+  angle: number
+  stops: LinearGradientStop[]
+  colorSpace?: "srgb" | "oklab"
+}
+
+export type BackgroundValue = string | LinearGradient
+
 export interface StyleDesc {
   display?: string
   visibility?: string
@@ -88,7 +104,7 @@ export interface StyleDesc {
   bottom?: number
   left?: number
 
-  background?: string
+  background?: BackgroundValue
   backgroundColor?: string
   color?: string
   opacity?: number
@@ -109,9 +125,12 @@ export interface StyleDesc {
   fontSize?: number
   fontFamily?: string
   fontWeight?: string | number
+  letterSpacing?: number
+  textTransform?: "none" | "uppercase" | "lowercase"
   textAlign?: string
   lineHeight?: number
   whiteSpace?: "normal" | "nowrap"
+  textWrap?: "wrap" | "nowrap" | "balance" | "pretty"
   textOverflow?: "ellipsis" | "ellipsis-start"
   lineClamp?: number
 
@@ -457,6 +476,8 @@ export interface NativeRenderer {
   setCustomProp(id: number, key: string, valueJson: string | object | number | boolean | null): void
   /** Apply a batch of mutations in a single FFI call. Returns destroyed IDs. */
   applyBatch?(json: string): Array<number>
+  setStrictStyles?(enabled: boolean): void
+  drainStyleDiagnostics?(): StyleDiagnostic[]
 
   // ── Focus API ──────────────────────────────────────────────────
   focusElement?(elementId: number): void
@@ -485,6 +506,15 @@ export interface NativeRenderer {
   cycleDebugFrameOverlay?(): string
   resetDebugFrameOverlayStats?(): void
   getDebugFrameOverlayStats?(): DebugFrameOverlayStats
+}
+
+export interface StyleDiagnostic {
+  message: string
+  elementId: number
+  elementType: string
+  testId?: string
+  property: string
+  value: string
 }
 
 export type DebugFrameOverlayMode = "hidden" | "minimal" | "full"

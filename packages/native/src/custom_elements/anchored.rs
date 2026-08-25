@@ -299,9 +299,13 @@ impl CustomElement for AnchoredElement {
             style
                 .background_color
                 .as_deref()
-                .or(style.background.as_deref())
                 .and_then(crate::color::parse_color_rgba)
                 .is_some_and(|color| color.a > 0.0)
+                || style
+                    .background
+                    .as_ref()
+                    .and_then(|background| crate::style::parse_background(background).ok())
+                    .is_some_and(|background| !background.is_transparent())
         });
         if !has_fill {
             content = content.bg(gpui::rgb(0x1A1A1A));

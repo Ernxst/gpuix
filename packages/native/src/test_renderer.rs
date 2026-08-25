@@ -13,6 +13,7 @@
 /// All napi calls happen on the JS main thread.
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use napi::bindgen_prelude::*;
@@ -23,11 +24,11 @@ use gpui::AppContext as _;
 use crate::element_tree::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree, catch_gpui_initialization, debug_frame_overlay_mode_name,
-    debug_frame_overlay_stats_js, parse_debug_frame_overlay_mode, to_element_id,
-    DebugFrameOverlayStats, EventCallback, GpuixView,
+    debug_frame_overlay_stats_js, drain_style_diagnostics, parse_debug_frame_overlay_mode,
+    parse_style_json, pending_style_diagnostics, to_element_id, DebugFrameOverlayStats,
+    EventCallback, GpuixStyleDiagnostic, GpuixView, PendingStyleDiagnostic,
 };
 use crate::retained_tree::RetainedTree;
-use crate::style::StyleDesc;
 
 // ── Thread-local storage for !Send GPUI types ────────────────────────
 
@@ -96,6 +97,8 @@ pub struct TestGpuixRenderer {
     /// Same handle GpuixView paints against, so tests can assert on the live
     /// selection after simulating a drag.
     selection: crate::text::SharedSelection,
+    strict_styles: AtomicBool,
+    style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
 }
 
 #[napi]
@@ -161,6 +164,8 @@ impl TestGpuixRenderer {
             tree,
             events,
             selection,
+            strict_styles: AtomicBool::new(true),
+            style_diagnostics: Mutex::new(Vec::new()),
         })
     }
 
@@ -213,10 +218,28 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
         let id = to_element_id(id)?;
-        let style: StyleDesc = serde_json::from_str(&style_json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse style: {}", e)))?;
-        self.tree.lock().unwrap().set_style(id, style);
+        let parsed = parse_style_json(&style_json);
+        self.tree.lock().unwrap().set_style(id, parsed.style);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            self.style_diagnostics
+                .lock()
+                .unwrap()
+                .extend(pending_style_diagnostics(id, parsed.problems));
+        }
         Ok(())
+    }
+
+    #[napi]
+    pub fn set_strict_styles(&self, enabled: bool) {
+        self.strict_styles.store(enabled, Ordering::Relaxed);
+        if !enabled {
+            self.style_diagnostics.lock().unwrap().clear();
+        }
+    }
+
+    #[napi]
+    pub fn drain_style_diagnostics(&self) -> Vec<GpuixStyleDiagnostic> {
+        drain_style_diagnostics(&self.style_diagnostics, &self.tree)
     }
 
     #[napi]
@@ -279,7 +302,15 @@ impl TestGpuixRenderer {
         let ops: Vec<serde_json::Value> = serde_json::from_str(&json)
             .map_err(|e| Error::from_reason(format!("Failed to parse batch: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
-        apply_batch_to_tree(&mut tree, &ops).map_err(Error::from_reason)
+        let outcome = apply_batch_to_tree(&mut tree, &ops).map_err(Error::from_reason)?;
+        drop(tree);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            self.style_diagnostics
+                .lock()
+                .unwrap()
+                .extend(outcome.diagnostics);
+        }
+        Ok(outcome.destroyed_ids)
     }
 
     // ── Test-specific methods ────────────────────────────────────────

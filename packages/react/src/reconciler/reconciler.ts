@@ -31,6 +31,15 @@ export interface Root {
   unmount: () => void
 }
 
+export interface RootOptions {
+  /** Reject invalid fields and emit actionable diagnostics. Defaults off only in production. */
+  strictStyles?: boolean
+}
+
+function strictStylesDefault(): boolean {
+  return typeof process === "undefined" || process.env.NODE_ENV !== "production"
+}
+
 const idAllocators = new WeakMap<NativeRenderer, ElementIdAllocator>()
 
 function idAllocatorFor(renderer: NativeRenderer): ElementIdAllocator {
@@ -42,7 +51,8 @@ function idAllocatorFor(renderer: NativeRenderer): ElementIdAllocator {
   return alloc
 }
 
-export function createRoot(renderer: NativeRenderer): Root {
+export function createRoot(renderer: NativeRenderer, options: RootOptions = {}): Root {
+  renderer.setStrictStyles?.(options.strictStyles ?? strictStylesDefault())
   let container: OpaqueRoot | null = null
   const batchedRenderer = wrapWithBatching(renderer)
   const gpuixContainer: Container = {

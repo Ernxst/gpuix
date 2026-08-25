@@ -35,6 +35,12 @@ import { containerForRenderer, unregisterEventHandlers } from "./event-registry.
 
 export type MutationTuple = (number | string | boolean | object | null)[]
 
+function reportStyleDiagnostics(renderer: NativeRenderer): void {
+  for (const diagnostic of renderer.drainStyleDiagnostics?.() ?? []) {
+    console.warn(diagnostic.message)
+  }
+}
+
 /// Methods that should be batched (queued instead of called immediately).
 /// Any method NOT in this set is passed through to the inner renderer directly.
 /// This prevents accidental queuing of getters, queries, or future non-mutation
@@ -78,6 +84,12 @@ export function wrapWithBatching(inner: NativeRenderer): NativeRenderer {
             target.setCustomProp(id, key, JSON.stringify(value ?? null))
           }
         }
+        if (prop === "commitMutations") {
+          return () => {
+            target.commitMutations()
+            reportStyleDiagnostics(target)
+          }
+        }
         const method = (target as NativeRenderer & Record<string, unknown>)[prop]
         if (typeof method === "function") {
           return method.bind(target)
@@ -98,14 +110,29 @@ export function wrapWithBatching(inner: NativeRenderer): NativeRenderer {
         return () => {
           if (queue.length === 0) {
             batchable.commitMutations()
+            reportStyleDiagnostics(batchable)
             return
           }
 
           const json = JSON.stringify(queue)
 
-          // applyBatch may throw on malformed ops — queue is preserved
-          // on failure so state doesn't desync between JS and Rust.
-          const destroyedIds = batchable.applyBatch(json)
+          let destroyedIds: number[]
+          try {
+            destroyedIds = batchable.applyBatch(json)
+          } catch (error) {
+            // Native field validation is lossy, so reaching here means the batch
+            // envelope itself is unusable. Contain it at the host boundary: an
+            // exception escaping resetAfterCommit stops Bun's frame-loop timers.
+            queue = []
+            console.error("[gpuix] Native mutation batch was rejected atomically", error)
+            try {
+              batchable.commitMutations()
+            } catch (invalidateError) {
+              console.error("[gpuix] Failed to invalidate after a rejected batch", invalidateError)
+            }
+            reportStyleDiagnostics(batchable)
+            return
+          }
 
           const container = containerForRenderer(inner)
           if (container) {
@@ -116,6 +143,7 @@ export function wrapWithBatching(inner: NativeRenderer): NativeRenderer {
 
           // applyBatch already invalidates, so only clear after batch + cleanup.
           queue = []
+          reportStyleDiagnostics(batchable)
         }
       }
 
