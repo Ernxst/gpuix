@@ -241,6 +241,24 @@ render(<App />, {
 The red traffic-light button terminates the renderer, unmounts React, runs
 `onTerminated` cleanup, and then exits the process.
 
+### Respond to window resizes
+
+`useWindowSize()` returns the current `{ width, height, scaleFactor }` and
+updates mounted consumers when the native window is resized:
+
+```tsx
+import { useWindowSize } from '@gpuix/react'
+
+function ResponsivePanel() {
+  const { width } = useWindowSize()
+  return <div>{width < 800 ? 'compact' : 'wide'}</div>
+}
+```
+
+`width` and `height` are logical GPUI pixels (points on macOS). `scaleFactor`
+is device pixels per logical pixel, so multiply by it only when you need a
+device-pixel measurement.
+
 | Option | Values | Purpose |
 |---|---|---|
 | `titlebarTransparent` | boolean | Hide the native titlebar so the app draws chrome under the traffic lights |

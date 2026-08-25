@@ -12,6 +12,7 @@ import {
   nativeTestRendererError,
   TestRenderer,
 } from "../testing.js"
+import { useWindowSize } from "../hooks/use-window-size.js"
 import {
   installBrowserAutomation,
   render,
@@ -360,6 +361,47 @@ describeNative("render()", () => {
   beforeEach(() => {
     resetRender()
     renderer = new TestRenderer()
+  })
+
+  it("updates every useWindowSize consumer from a native resize and releases the handler", () => {
+    const windowHandlers: Array<((event: import("@gpuix/native").EventPayload) => void) | null> = []
+    const renderedSizes = new Map<string, ReturnType<typeof useWindowSize>>()
+    const setWindowEventHandler = renderer.setWindowEventHandler.bind(renderer)
+    renderer.setWindowEventHandler = (handler) => {
+      windowHandlers.push(handler)
+      setWindowEventHandler(handler)
+    }
+
+    function Size({ id }: { id: string }) {
+      const size = useWindowSize()
+      renderedSizes.set(id, size)
+      return <text testId={id} />
+    }
+
+    render(
+      <div>
+        <Size id="first" />
+        <Size id="second" />
+      </div>,
+      { renderer }
+    )
+    renderer.flush()
+
+    const initial = renderer.getWindowSize()
+    expect(renderedSizes.get("first")).toEqual(initial)
+    expect(renderedSizes.get("second")).toEqual(initial)
+    expect(windowHandlers).toHaveLength(1)
+
+    renderer.simulateResize(960, 540)
+    renderer.dispatchNativeEvents()
+    renderer.flush()
+
+    expect(renderer.getWindowSize()).toMatchObject({ width: 960, height: 540 })
+    expect(renderedSizes.get("first")).toMatchObject({ width: 960, height: 540 })
+    expect(renderedSizes.get("second")).toMatchObject({ width: 960, height: 540 })
+
+    resetRender()
+    expect(windowHandlers.at(-1)).toBeNull()
   })
 
   it("runs graceful termination exactly once", () => {
