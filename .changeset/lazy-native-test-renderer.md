@@ -8,3 +8,6 @@ their test suite.
 
 **Breaking:** `hasNativeTestRenderer` was removed; use
 `isNativeTestRendererAvailable()`.
+
+**Breaking:** `react-reconciler` and `scheduler` are peer dependencies.
+Consumers must declare compatible versions.
