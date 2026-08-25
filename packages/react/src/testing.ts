@@ -11,6 +11,7 @@
 
 import type { ReactNode } from "react"
 import type { EventPayload } from "@gpuix/native"
+import { createRequire } from "node:module"
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
@@ -70,24 +71,28 @@ interface NativeTestRendererConstructor {
 // The native test renderer is currently exported only by macOS builds.
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
 let probedNativeTestRenderer: NativeTestRendererApi | null = null
-let loadError: Error | null = null
+/** The native binding error when the test renderer cannot be loaded. */
+export let nativeTestRendererLoadError: Error | null = null
+/** Backward-compatible alias for nativeTestRendererLoadError. */
+export { nativeTestRendererLoadError as nativeTestRendererError }
+const requireNative = createRequire(import.meta.url)
+
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const native = require("@gpuix/native") as {
+  const native = requireNative("@gpuix/native") as {
     TestGpuixRenderer?: NativeTestRendererConstructor
   }
   if (native.TestGpuixRenderer) {
     NativeTestRenderer = native.TestGpuixRenderer
     probedNativeTestRenderer = new native.TestGpuixRenderer()
   } else {
-    loadError = new Error(
-      "@gpuix/native loaded but does not export TestGpuixRenderer; build it with test-support"
+    nativeTestRendererLoadError = new Error(
+      "@gpuix/native does not export TestGpuixRenderer. Build with test-support to run tests."
     )
   }
 } catch (error) {
   NativeTestRenderer = null
   probedNativeTestRenderer = null
-  loadError =
+  nativeTestRendererLoadError =
     error instanceof Error
       ? error
       : new Error(`Failed to load @gpuix/native: ${String(error)}`)
@@ -95,9 +100,6 @@ try {
 
 /** Whether the native TestGpuixRenderer loaded and initialized successfully. */
 export const hasNativeTestRenderer = NativeTestRenderer != null
-
-/** The native binding load/capability error when hasNativeTestRenderer is false. */
-export const nativeTestRendererError = loadError
 
 // ── Test element tree ────────────────────────────────────────────────
 
@@ -125,7 +127,7 @@ export class TestRenderer implements NativeRenderer {
     if (!NativeTestRenderer) {
       throw new Error(
         `Native TestGpuixRenderer not available: ${
-          nativeTestRendererError?.message ?? "unknown native binding error"
+          nativeTestRendererLoadError?.message ?? "unknown native binding error"
         }`
       )
     }

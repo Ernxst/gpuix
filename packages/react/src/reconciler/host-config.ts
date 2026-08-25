@@ -133,8 +133,35 @@ function sendStyle(renderer: NativeRenderer, id: number, props: Props): void {
 // Props that are handled by the reconciler directly (not forwarded as custom props).
 const RESERVED_PROPS = new Set(["style", "className", "children", "key", "ref"])
 
+// HTML structural elements that GPUIX renders as native divs.
+const DIV_ALIASES = new Set([
+  "main",
+  "header",
+  "footer",
+  "nav",
+  "section",
+  "article",
+  "aside",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "p",
+  "span",
+  "strong",
+  "em",
+  "ul",
+  "ol",
+  "li",
+  "a",
+  "button",
+  "kbd",
+])
+
 // Built-in element types that don't use custom props.
-const BUILT_IN_TYPES = new Set(["div", "text"])
+const BUILT_IN_TYPES = new Set(["div", "text", ...DIV_ALIASES])
 
 // Props that reach Rust on EVERY element type, including div and text.
 // Custom props are otherwise skipped for built-ins.
@@ -209,7 +236,7 @@ function materialize(node: HostNode): HostNodeState {
 
   const renderer = state.container.renderer
   if ("type" in node) {
-    renderer.createElement(node.id, node.type)
+    renderer.createElement(node.id, DIV_ALIASES.has(node.type) ? "div" : node.type)
     sendStyle(renderer, node.id, node.props)
     syncEventListeners(state.container, node.id, node.props)
     syncCustomProps(renderer, node.id, node.type, node.props)

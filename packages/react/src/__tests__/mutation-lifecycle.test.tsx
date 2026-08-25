@@ -7,6 +7,23 @@ import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing.
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 describeNative("mutation lifecycle", () => {
+  it("renders structural JSX aliases as native divs", () => {
+    const { render, renderer, unmount } = createTestRoot()
+
+    try {
+      render(
+        <section testId="content">
+          <text>content</text>
+        </section>
+      )
+
+      expect(renderer.findByTestId("content")?.type).toBe("div")
+      expect(renderer.findByType("section")).toEqual([])
+    } finally {
+      unmount()
+    }
+  })
+
   it("does not paint host nodes from an abandoned Suspense render", () => {
     const { render, renderer, unmount } = createTestRoot()
     const pending = new Promise<never>(() => {})

@@ -14,6 +14,9 @@ env:
       - "**/*.gitignore"
       - docs/**
   pull_request: null
+  # Full 6-target matrix (macOS at 10x billing, Windows at 2x) only on
+  # manual dispatch; push/PR runs build only the Linux x64 target.
+  workflow_dispatch: null
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -54,6 +57,9 @@ jobs:
             bunTarget: bun-windows-arm64
             build: bun run build:release --target aarch64-pc-windows-msvc
     name: build - ${{ matrix.settings.target }}
+    # Cost control on this private repo: push/PR builds only Linux x64 (the
+    # one platform not buildable locally); macOS verification stays local.
+    if: github.event_name == 'workflow_dispatch' || matrix.settings.target == 'x86_64-unknown-linux-gnu'
     runs-on: ${{ matrix.settings.host }}
     defaults:
       run:
@@ -165,6 +171,8 @@ jobs:
   test:
     name: test
     needs: build
+    # Needs the macOS artifact, which only exists on dispatch runs.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -210,6 +218,8 @@ jobs:
   test-windows:
     name: test-windows-load
     needs: build
+    # Needs the Windows artifact, which only exists on dispatch runs.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
