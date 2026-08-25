@@ -11,7 +11,7 @@
 /// JSX types now resolve to GPUIX's Props via jsxImportSource in tsconfig.
 
 import fs from "fs"
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import React, { useState, useRef } from "react"
 import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing"
 import {
@@ -281,6 +281,76 @@ describeNative("events", () => {
           "Count: 2",
         ]
       `)
+    })
+
+    it("activates a plain link-like anchor through click, focused Enter, and Space", () => {
+      const navigate = vi.fn()
+      testRoot.render(
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            width: 400,
+            height: 240,
+            gap: 20,
+            padding: 40,
+          }}
+        >
+          <div
+            autoFocus
+            tabIndex={0}
+            testId="before-link"
+            style={{ width: 1, height: 1 }}
+          />
+          <a
+            href="/factory"
+            testId="plain-link"
+            onClick={() => navigate("/factory")}
+            style={{ width: 200, height: 60 }}
+          >
+            Factory
+          </a>
+        </div>
+      )
+
+      const link = testRoot.renderer.findByTestId("plain-link")!
+      const beforeLink = testRoot.renderer.findByTestId("before-link")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(link.id)!
+
+      testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
+      expect(navigate).toHaveBeenLastCalledWith("/factory")
+
+      testRoot.renderer.focusElement(beforeLink.id)
+      testRoot.renderer.simulateKeystrokes("tab")
+      testRoot.renderer.simulateKeyDown("enter")
+      testRoot.renderer.simulateKeyUp("enter")
+      expect(navigate).toHaveBeenCalledTimes(2)
+
+      testRoot.renderer.focusElement(beforeLink.id)
+      testRoot.renderer.simulateKeystrokes("tab")
+      testRoot.renderer.simulateKeyDown("space")
+      testRoot.renderer.simulateKeyUp("space")
+      expect(navigate).toHaveBeenCalledTimes(3)
+    })
+
+    it("keeps pointer click but does not turn Space in a text editor into activation", () => {
+      const onClick = vi.fn()
+      testRoot.render(
+        <input
+          autoFocus
+          value=""
+          onClick={onClick}
+          style={{ width: 200, height: 60 }}
+        />
+      )
+
+      testRoot.renderer.nativeSimulateClick(100, 30)
+      expect(onClick).toHaveBeenCalledTimes(1)
+
+      testRoot.renderer.simulateKeyDown("space")
+      testRoot.renderer.simulateKeyUp("space")
+
+      expect(onClick).toHaveBeenCalledTimes(1)
     })
   })
 

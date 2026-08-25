@@ -253,8 +253,20 @@ function serializeCustomProp(
 
 type CustomPropInput = object | string | number | boolean | null | undefined
 
+/** Preserve the browser's natural tab stop when an `<a href>` becomes a native div. */
+function nativeTabIndex(type: string, props: Props): number | undefined {
+  if (props.tabIndex !== undefined) return props.tabIndex
+  const href = type === "a" ? (props as Props & { href?: unknown }).href : undefined
+  return typeof href === "string" ? 0 : undefined
+}
+
 function customPropEntries(type: string, props: Props): Array<[string, CustomPropInput]> {
-  const entries = Object.entries(props) as Array<[string, CustomPropInput]>
+  const entries = (Object.entries(props) as Array<[string, CustomPropInput]>).filter(
+    ([key]) => key !== "tabIndex"
+  )
+  const tabIndex = nativeTabIndex(type, props)
+  if (tabIndex !== undefined) entries.push(["tabIndex", tabIndex])
+
   const virtualListProps = props as Props & VirtualListProps
   if (type !== "virtual-list" || virtualListProps.estimatedItemHeight !== undefined) {
     return entries
@@ -302,7 +314,7 @@ function diffCustomProps(
     }
   }
   // Removed props
-  for (const key of Object.keys(oldProps)) {
+  for (const [key] of oldEntries) {
     if (isReservedProp(key)) continue
     if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
     if (!newKeys.includes(key)) {

@@ -367,6 +367,9 @@ impl CustomElement for TextEditorElement {
             let callback = ctx.event_callback.clone();
             let id = ctx.id;
             editor = editor.on_click(move |event, _window, _cx| {
+                if event.is_keyboard() {
+                    return;
+                }
                 emit_event_full(&callback, id, "click", |payload| {
                     let (x, y) = crate::renderer::point_to_xy(event.position());
                     payload.x = Some(x);

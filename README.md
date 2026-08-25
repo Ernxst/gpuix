@@ -1566,6 +1566,14 @@ parent's `focus` or `focusVisible` style.
 Nesting is one level deep. A state style cannot contain `hover`, `active`,
 `focus`, or `focusVisible`.
 
+### Keyboard activation
+
+A focused, clickable non-text element dispatches its existing `onClick` handler
+for Enter or Space, using the same native click path as pointer activation.
+Anchors with an `href` join the native tab order automatically, so a plain link
+does not need an app-side `tabIndex` or `onKeyDown` adapter. Native text editors
+keep Space as text input instead of synthesizing a click.
+
 > **Note: `white-space: pre` is not supported.** GPUI's text system only has `normal` (wraps) and `nowrap` (single line). To preserve newlines like HTML `<pre>`, split your text on `\n` in React and render each line as a separate `<text>` element in a flex column:
 >
 > ```tsx
@@ -1852,7 +1860,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Cross-element text selection
 - [x] Headless Select, Combobox, and Tooltip
 - [x] Native `hover` and `active` styles
-- [x] Native `focus` and keyboard-only `focusVisible` styles with paint-only outlines
+- [x] Native focus styles, paint-only outlines, and keyboard activation
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Application menus, Cmd+Q, explicit quit, and graceful React termination
