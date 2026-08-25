@@ -119,6 +119,6 @@ render(<MenuDemo />, {
   menus,
   onMenuAction: ({ id }) => deliverMenuAction(id),
   onTerminated: () => {
-    console.log('[menu demo] React terminated cleanly')
+    console.log('[menu demo] termination cleanup finished')
   },
 })

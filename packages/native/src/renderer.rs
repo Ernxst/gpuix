@@ -831,13 +831,23 @@ pub fn test_macos_native_window_allocation_count() -> u32 {
         .unwrap_or(u32::MAX)
 }
 
+/// Lifecycle states distinguish an invalid pre-init call from an idempotent
+/// post-termination call after the native window has already been destroyed.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RendererLifecycle {
+    Uninitialized,
+    Running,
+    Terminated,
+}
+
 /// The main GPUI renderer exposed to Node.js.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[napi]
 pub struct GpuixRenderer {
     event_callback: Mutex<Option<Arc<ThreadsafeFunction<EventPayload>>>>,
     tree: Arc<Mutex<RetainedTree>>,
-    initialized: Arc<Mutex<bool>>,
+    lifecycle: Arc<Mutex<RendererLifecycle>>,
     /// Shared with GpuixView so napi methods can read the live selection
     /// without an App context. Paint and napi calls can use different threads.
     selection: SharedSelection,
@@ -951,7 +961,7 @@ impl GpuixRenderer {
         Self {
             event_callback: Mutex::new(event_callback.map(Arc::new)),
             tree: Arc::new(Mutex::new(RetainedTree::new())),
-            initialized: Arc::new(Mutex::new(false)),
+            lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
             selection: SharedSelection::default(),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
@@ -993,8 +1003,8 @@ impl GpuixRenderer {
         let options = options.unwrap_or_default();
 
         {
-            let initialized = self.initialized.lock().unwrap();
-            if *initialized {
+            let lifecycle = self.lifecycle.lock().unwrap();
+            if *lifecycle != RendererLifecycle::Uninitialized {
                 return Err(Error::from_reason("Renderer is already initialized"));
             }
         }
@@ -1096,7 +1106,7 @@ impl GpuixRenderer {
             *w.borrow_mut() = Some(window_handle);
         });
 
-        *self.initialized.lock().unwrap() = true;
+        *self.lifecycle.lock().unwrap() = RendererLifecycle::Running;
         self.event_callback.lock().unwrap().take();
         Ok(())
     }
@@ -1104,7 +1114,7 @@ impl GpuixRenderer {
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     fn init_threaded(&self, options: Option<WindowOptions>) -> Result<()> {
         let options = options.unwrap_or_default();
-        if *self.initialized.lock().unwrap() {
+        if *self.lifecycle.lock().unwrap() != RendererLifecycle::Uninitialized {
             return Err(Error::from_reason("Renderer is already initialized"));
         }
 
@@ -1120,8 +1130,8 @@ impl GpuixRenderer {
         let selection = self.selection.clone();
         let callback = self.event_callback_for_view();
         let termination_callback = callback.clone();
-        let initialized = self.initialized.clone();
-        let initialized_for_app = initialized.clone();
+        let lifecycle = self.lifecycle.clone();
+        let lifecycle_for_app = lifecycle.clone();
         let launched = Arc::new(AtomicBool::new(false));
         let launched_for_thread = launched.clone();
         let (command_sender, command_receiver) = mpsc::unbounded();
@@ -1167,13 +1177,13 @@ impl GpuixRenderer {
                         })
                         .detach();
                         cx.activate(true);
-                        *initialized_for_app.lock().unwrap() = true;
+                        *lifecycle_for_app.lock().unwrap() = RendererLifecycle::Running;
                         launched_for_thread.store(true, Ordering::Release);
                         startup_sender.send(Ok(())).ok();
                     });
                 }));
 
-                *initialized.lock().unwrap() = false;
+                *lifecycle.lock().unwrap() = RendererLifecycle::Terminated;
                 if launched.load(Ordering::Acquire) {
                     emit_application_event(&termination_callback, "terminated", None);
                 }
@@ -1311,6 +1321,9 @@ impl GpuixRenderer {
     /// Signal that a batch of mutations is complete. Triggers re-render.
     #[napi]
     pub fn commit_mutations(&self) -> Result<()> {
+        if *self.lifecycle.lock().unwrap() == RendererLifecycle::Terminated {
+            return Ok(());
+        }
         self.request_invalidate()
     }
 
@@ -1336,6 +1349,9 @@ impl GpuixRenderer {
     /// Acquires the tree mutex ONCE for the entire batch.
     #[napi]
     pub fn apply_batch(&self, json: String) -> Result<Vec<f64>> {
+        if *self.lifecycle.lock().unwrap() == RendererLifecycle::Terminated {
+            return Ok(Vec::new());
+        }
         let ops: Vec<serde_json::Value> = serde_json::from_str(&json)
             .map_err(|e| Error::from_reason(format!("Failed to parse batch: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
@@ -1350,7 +1366,7 @@ impl GpuixRenderer {
     /// Replace the application menu bar. Pass an empty array to remove it.
     #[napi]
     pub fn set_menus(&self, menus: Vec<MenuSpec>) -> Result<()> {
-        if !*self.initialized.lock().unwrap() {
+        if *self.lifecycle.lock().unwrap() != RendererLifecycle::Running {
             return Err(Error::from_reason(
                 "Renderer not initialized. Call init() first.",
             ));
@@ -1386,7 +1402,7 @@ impl GpuixRenderer {
     /// Gracefully terminate the native application through GPUI's platform abstraction.
     #[napi]
     pub fn quit(&self) -> Result<()> {
-        if !*self.initialized.lock().unwrap() {
+        if *self.lifecycle.lock().unwrap() != RendererLifecycle::Running {
             return Ok(());
         }
 
@@ -1410,7 +1426,7 @@ impl GpuixRenderer {
                         .unwrap_or(false)
                 });
                 if !running {
-                    *self.initialized.lock().unwrap() = false;
+                    *self.lifecycle.lock().unwrap() = RendererLifecycle::Terminated;
                     return Ok(());
                 }
             }
@@ -1439,11 +1455,14 @@ impl GpuixRenderer {
     /// Pump the native event loop. Returns false after the last window closes.
     #[napi]
     pub fn tick(&self) -> Result<bool> {
-        let initialized = *self.initialized.lock().unwrap();
-        if !initialized {
-            return Err(Error::from_reason(
-                "Renderer not initialized. Call init() first.",
-            ));
+        match *self.lifecycle.lock().unwrap() {
+            RendererLifecycle::Uninitialized => {
+                return Err(Error::from_reason(
+                    "Renderer not initialized. Call init() first.",
+                ));
+            }
+            RendererLifecycle::Terminated => return Ok(false),
+            RendererLifecycle::Running => {}
         }
 
         #[cfg(target_os = "macos")]
@@ -1455,7 +1474,7 @@ impl GpuixRenderer {
                     .unwrap_or(false)
             });
             if !running {
-                *self.initialized.lock().unwrap() = false;
+                *self.lifecycle.lock().unwrap() = RendererLifecycle::Terminated;
             }
             return Ok(running);
         }
@@ -1476,7 +1495,7 @@ impl GpuixRenderer {
 
     #[napi]
     pub fn is_initialized(&self) -> bool {
-        *self.initialized.lock().unwrap()
+        *self.lifecycle.lock().unwrap() == RendererLifecycle::Running
     }
 
     /// Whether JavaScript must drive the native event loop with tick().

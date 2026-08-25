@@ -238,8 +238,8 @@ render(<App />, {
 ```
 
 `render()` creates the native window, mounts React, and starts the frame loop.
-The red traffic-light button terminates the renderer, unmounts React, and lets
-Node exit naturally after `onTerminated` cleanup.
+The red traffic-light button terminates the renderer, unmounts React, runs
+`onTerminated` cleanup, and then exits the process.
 
 | Option | Values | Purpose |
 |---|---|---|
@@ -294,8 +294,9 @@ roles `cut`, `copy`, `paste`, `selectAll`, `undo`, and `redo` through
 Call `renderer.setMenus(menus)` to replace the tree after launch, and
 `renderer.quit()` to use GPUI's graceful platform quit path without a menu.
 Menu Quit, explicit quit, and last-window close all stop the frame loop and run
-`onTerminated` once. The default path no longer calls `process.exit(0)`; caller
-cleanup can finish before Node exits naturally.
+`onTerminated` once. The renderer waits for that cleanup before exiting; a
+cleanup or unmount failure exits with status 1 instead of leaving the process
+or native window alive.
 
 The frame loop contains individual native tick failures and reschedules. Three
 consecutive failures are treated as unrecoverable: GPUIX quits the native app
@@ -311,7 +312,8 @@ bun --hot menus.tsx
 ```
 
 Enter fullscreen, choose **Actions → Fire JavaScript Action**, confirm the
-window and terminal log update once, then press Cmd+Q.
+window and terminal log update once, then press Cmd+Q. The terminal should print
+`termination cleanup finished` and return to the shell.
 
 ## Debug frame overlay
 

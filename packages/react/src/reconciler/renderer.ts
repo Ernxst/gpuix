@@ -46,7 +46,7 @@ export function createRenderer(
  *  bottleneck, while still leaving the Node event loop almost entirely idle. */
 const DEFAULT_FRAME_MS = 8
 const DEFAULT_MAX_CONSECUTIVE_TICK_ERRORS = 3
-const FATAL_CLEANUP_TIMEOUT_MS = 5_000
+const TERMINATION_CLEANUP_TIMEOUT_MS = 5_000
 
 export interface FrameLoop {
   stop: () => void
@@ -189,12 +189,17 @@ type RenderSlot = {
   onEvent?: (event: EventPayload) => void
   onMenuAction?: (event: MenuActionEvent) => void
   onTerminated?: () => void | Promise<void>
-  termination?: Promise<void>
+  termination?: Promise<TerminationOutcome>
+  processExitScheduled?: boolean
   fatal: boolean
   processHandlers?: {
     uncaughtException: (error: Error, origin: NodeJS.UncaughtExceptionOrigin) => void
     unhandledRejection: (reason: unknown) => void
   }
+}
+
+interface TerminationOutcome {
+  clean: boolean
 }
 
 export interface MenuActionEvent {
@@ -237,7 +242,7 @@ function dispatchApplicationEvent(slot: RenderSlot, event: EventPayload): void {
   if (event.eventType === "menuAction" && event.value) {
     slot.onMenuAction?.({ id: event.value })
   } else if (event.eventType === "terminated") {
-    void terminateRenderSlot(slot)
+    finishNativeTermination(slot)
   }
   slot.onEvent?.(event)
 }
@@ -252,20 +257,21 @@ function removeProcessTerminationGuards(slot: RenderSlot | undefined): void {
 function terminateRenderSlot(
   slot: RenderSlot,
   options: { quit?: boolean } = {}
-): Promise<void> {
+): Promise<TerminationOutcome> {
   if (slot.termination) return slot.termination
 
-  let completeTermination!: () => void
-  const termination = new Promise<void>((resolve) => {
+  let completeTermination!: (outcome: TerminationOutcome) => void
+  const termination = new Promise<TerminationOutcome>((resolve) => {
     completeTermination = resolve
   })
-  // Native quit emits `terminated` synchronously on macOS. Publish the promise
-  // first so that re-entrant delivery shares this cleanup instead of running it twice.
+  // Publish the promise before cleanup so any re-entrant native termination
+  // delivery shares this work instead of running it twice.
   slot.termination = termination
 
   slot.loop?.stop()
   slot.loop = undefined
   removeProcessTerminationGuards(slot)
+  let clean = true
 
   const root = slot.root
   slot.root = undefined
@@ -273,6 +279,7 @@ function terminateRenderSlot(
     try {
       root.unmount()
     } catch (error) {
+      clean = false
       console.error("[gpuix] React unmount failed during termination", error)
     }
   }
@@ -281,6 +288,7 @@ function terminateRenderSlot(
     try {
       slot.renderer?.quit?.()
     } catch (error) {
+      clean = false
       console.error("[gpuix] native quit failed during termination", error)
     }
   }
@@ -289,33 +297,54 @@ function terminateRenderSlot(
   try {
     cleanup = slot.onTerminated?.()
   } catch (error) {
+    clean = false
     console.error("[gpuix] onTerminated failed", error)
   }
-  void Promise.resolve(cleanup)
-    .catch((error) => {
+  void Promise.resolve(cleanup).then(
+    () => completeTermination({ clean }),
+    (error) => {
+      clean = false
       console.error("[gpuix] onTerminated rejected", error)
-    })
-    .finally(completeTermination)
+      completeTermination({ clean })
+    }
+  )
   return termination
+}
+
+function exitAfterTermination(
+  slot: RenderSlot,
+  termination: Promise<TerminationOutcome>,
+  forcedExitCode?: number
+): void {
+  if (slot.processExitScheduled || typeof process === "undefined") return
+  slot.processExitScheduled = true
+  process.exitCode = forcedExitCode ?? 0
+
+  const timeout = setTimeout(() => {
+    console.error("[gpuix] termination cleanup timed out; forcing process exit")
+    process.exit(1)
+  }, TERMINATION_CLEANUP_TIMEOUT_MS)
+  timeout.unref?.()
+
+  void termination.then(({ clean }) => {
+    clearTimeout(timeout)
+    process.exit(forcedExitCode ?? (clean ? 0 : 1))
+  })
+}
+
+function finishNativeTermination(slot: RenderSlot): void {
+  const termination = terminateRenderSlot(slot)
+  if (slot.renderer instanceof GpuixRenderer) {
+    exitAfterTermination(slot, termination)
+  }
 }
 
 function handleFatalRenderError(slot: RenderSlot, error: unknown, origin: string): void {
   if (slot.fatal) return
   slot.fatal = true
   console.error(`[gpuix] fatal JavaScript error (${origin}); quitting native application`, error)
-  if (typeof process !== "undefined") {
-    process.exitCode = 1
-  }
-
-  const cleanup = terminateRenderSlot(slot, { quit: true })
-  if (typeof process === "undefined") return
-
-  const timeout = setTimeout(() => process.exit(1), FATAL_CLEANUP_TIMEOUT_MS)
-  timeout.unref?.()
-  void cleanup.finally(() => {
-    clearTimeout(timeout)
-    process.exit(1)
-  })
+  const termination = terminateRenderSlot(slot, { quit: true })
+  exitAfterTermination(slot, termination, 1)
 }
 
 function installProcessTerminationGuards(slot: RenderSlot): void {
@@ -405,7 +434,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     slot.loop?.stop()
     slot.loop = startFrameLoop(native, {
       onTerminated: () => {
-        void terminateRenderSlot(slot)
+        finishNativeTermination(slot)
       },
       onUnrecoverableError: (error) =>
         handleFatalRenderError(slot, error, "repeated native tick failure"),

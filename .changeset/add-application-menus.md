@@ -14,5 +14,7 @@ Quit, and last-window close share the same platform lifecycle and run
 The macOS frame pump now survives individual tick errors. Repeated native
 failures and uncaught JavaScript errors quit the native window before the
 process exits, so `bun --hot` cannot leave an unresponsive orphaned window.
+Termination-time React batches are drained after the native window closes, and
+the process exits only after `onTerminated` cleanup settles.
 
 Fixes #5
