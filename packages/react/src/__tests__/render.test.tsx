@@ -7,7 +7,11 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import React, { useState } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
-import { hasNativeTestRenderer, TestRenderer } from "../testing.js"
+import {
+  hasNativeTestRenderer,
+  nativeTestRendererError,
+  TestRenderer,
+} from "../testing.js"
 import {
   installBrowserAutomation,
   render,
@@ -62,15 +66,17 @@ function collectOutput(child: ReturnType<typeof spawn>) {
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
-describeNative("render()", () => {
-  let renderer: TestRenderer
+describe("native test renderer diagnostics", () => {
+  it("surfaces loader failures or constructs the GPU-backed renderer", () => {
+    if (!hasNativeTestRenderer) {
+      expect(nativeTestRendererError).toBeInstanceOf(Error)
+      expect(() => new TestRenderer()).toThrow(nativeTestRendererError!.message)
+      return
+    }
 
-  beforeEach(() => {
+    expect(nativeTestRendererError).toBeNull()
     resetRender()
-    renderer = new TestRenderer()
-  })
-
-  it("reuses the injected renderer on the second call", () => {
+    const renderer = new TestRenderer()
     const ignored = new TestRenderer()
     render(<text>one</text>, { renderer })
     render(<text>two</text>, { renderer: ignored })
@@ -78,6 +84,15 @@ describeNative("render()", () => {
     renderer.flush()
     expect(renderer.getAllText()).toEqual(["two"])
     expect(ignored.getAllText()).toEqual([])
+  })
+})
+
+describeNative("render()", () => {
+  let renderer: TestRenderer
+
+  beforeEach(() => {
+    resetRender()
+    renderer = new TestRenderer()
   })
 
   it("replaces painted text when the entry is evaluated again", () => {

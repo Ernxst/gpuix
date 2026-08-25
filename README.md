@@ -1574,8 +1574,10 @@ await app.close()
 
 The locators above sit on a **GPU-backed test renderer** (`TestGpuixRenderer`).
 It runs the same `GpuixView`, `build_element()`, `apply_styles()`, and event
-handlers as production. Windows are positioned offscreen but fully rendered by
-Metal. The methods below are the lower-level API when a locator is not enough.
+handlers as production. A fixed virtual display supplies layout geometry, so
+tests never discover the host display; windows are positioned offscreen and
+still rendered fully by Metal. The methods below are the lower-level API when a
+locator is not enough.
 
 ```ts
 import { createTestRoot } from '@gpuix/react/testing'

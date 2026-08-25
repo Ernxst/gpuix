@@ -169,6 +169,9 @@ jobs:
           name: bindings-aarch64-apple-darwin
           path: packages/native/
 
+      - name: Smoke test packaged test renderer without display discovery
+        run: bun scripts/test-renderer-smoke.ts
+
       - name: Run React tests
         run: bun run test
         working-directory: packages/react

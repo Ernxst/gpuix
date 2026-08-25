@@ -475,13 +475,31 @@ async fn run_ui_commands(
     cx.update(|cx| cx.quit());
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|message| (*message).to_string())
         .or_else(|| payload.downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "unknown panic".to_string())
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn catch_gpui_initialization<T>(
+    operation: &str,
+    initialize: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(initialize)) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(Error::new(
+            error.status,
+            format!("{operation} failed: {}", error.reason),
+        )),
+        Err(payload) => Err(Error::from_reason(format!(
+            "{operation} panicked: {}",
+            panic_message(payload)
+        ))),
+    }
 }
 
 /// The main GPUI renderer exposed to Node.js.
@@ -636,6 +654,13 @@ impl GpuixRenderer {
 
     #[cfg(target_os = "macos")]
     fn init_macos(&self, options: Option<WindowOptions>) -> Result<()> {
+        catch_gpui_initialization("GPUI macOS renderer initialization", || {
+            self.init_macos_inner(options)
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn init_macos_inner(&self, options: Option<WindowOptions>) -> Result<()> {
         let options = options.unwrap_or_default();
 
         {
@@ -1601,6 +1626,33 @@ impl GpuixRenderer {
             Err(Error::from_reason(
                 "captureScreenshot needs the test-support build on macOS",
             ))
+        }
+    }
+}
+
+#[cfg(all(test, not(all(target_arch = "wasm32", target_os = "unknown"))))]
+mod initialization_tests {
+    use super::*;
+
+    #[test]
+    fn initialization_panics_preserve_observed_messages() {
+        let observed = [
+            "window.rs:366:57: called Option::unwrap() on a None value",
+            "Can't spawn on main thread after on_app_quit",
+            "The GPUI UI thread panicked during initialization",
+        ];
+
+        for message in observed {
+            let error =
+                catch_gpui_initialization("GPUI test renderer initialization", || -> Result<()> {
+                    panic!("{message}")
+                })
+                .expect_err("the initialization panic should become an error");
+
+            assert!(error
+                .reason
+                .contains("GPUI test renderer initialization panicked"));
+            assert!(error.reason.contains(message));
         }
     }
 }

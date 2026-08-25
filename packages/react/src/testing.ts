@@ -69,6 +69,8 @@ interface NativeTestRendererConstructor {
 
 // The native test renderer is currently exported only by macOS builds.
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
+let probedNativeTestRenderer: NativeTestRendererApi | null = null
+let loadError: Error | null = null
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const native = require("@gpuix/native") as {
@@ -76,13 +78,26 @@ try {
   }
   if (native.TestGpuixRenderer) {
     NativeTestRenderer = native.TestGpuixRenderer
+    probedNativeTestRenderer = new native.TestGpuixRenderer()
+  } else {
+    loadError = new Error(
+      "@gpuix/native loaded but does not export TestGpuixRenderer; build it with test-support"
+    )
   }
-} catch {
-  // Native module not available — native simulation methods will throw.
+} catch (error) {
+  NativeTestRenderer = null
+  probedNativeTestRenderer = null
+  loadError =
+    error instanceof Error
+      ? error
+      : new Error(`Failed to load @gpuix/native: ${String(error)}`)
 }
 
-/** Whether the native TestGpuixRenderer is available (for conditional test registration). */
+/** Whether the native TestGpuixRenderer loaded and initialized successfully. */
 export const hasNativeTestRenderer = NativeTestRenderer != null
+
+/** The native binding load/capability error when hasNativeTestRenderer is false. */
+export const nativeTestRendererError = loadError
 
 // ── Test element tree ────────────────────────────────────────────────
 
@@ -109,10 +124,13 @@ export class TestRenderer implements NativeRenderer {
   constructor() {
     if (!NativeTestRenderer) {
       throw new Error(
-        "Native TestGpuixRenderer not available. Build with test-support to run tests."
+        `Native TestGpuixRenderer not available: ${
+          nativeTestRendererError?.message ?? "unknown native binding error"
+        }`
       )
     }
-    this.native = new NativeTestRenderer()
+    this.native = probedNativeTestRenderer ?? new NativeTestRenderer()
+    probedNativeTestRenderer = null
   }
 
   // ── NativeRenderer interface (all mutations delegate to native) ──
