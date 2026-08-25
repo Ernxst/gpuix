@@ -189,6 +189,36 @@ renderer.applyBatch = (json) => {
 setTimeout(() => renderer.quit(), 50)
 `
 
+const INJECTED_NATIVE_MENU_PROGRAM = `
+import React from "react"
+import { GpuixRenderer } from "@gpuix/native"
+import { render, resetRender } from ${JSON.stringify(join(srcDir, "reconciler/renderer.ts"))}
+
+const renderer = new GpuixRenderer(() => {})
+renderer.init({ title: "GPUIX injected menu smoke", menus: [] })
+
+const timeout = setTimeout(() => {
+  renderer.quit()
+  throw new Error("INJECTED_NATIVE_MENU_TIMEOUT")
+}, 1_000)
+
+render(React.createElement("text", null, "injected native menu smoke"), {
+  renderer,
+  menus: [{
+    name: "Smoke",
+    items: [{ kind: "action", label: "Mark", id: "mark" }],
+  }],
+  onMenuAction: ({ id }) => {
+    clearTimeout(timeout)
+    console.log("INJECTED_NATIVE_MENU_ACTION", id)
+    renderer.quit()
+    resetRender()
+  },
+})
+
+setTimeout(() => renderer.simulateMenuAction("mark"), 50)
+`
+
 const ESM_TESTING_PROGRAM = `
 import {
   TestRenderer,
@@ -415,6 +445,25 @@ describeNative("render()", () => {
       expect(result.output).toContain("React unmount failed during termination")
       expect(result.output).not.toContain("repeated native tick failure")
       expect(result.output.match(/^QUIT_FAILURE_CLEANUP_FINISHED$/gm), result.output).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 10_000)
+
+  it("delivers menu actions from an injected production renderer", async () => {
+    const file = join(srcDir, "__tests__", "injected-native-menu.tmp.tsx")
+    writeFileSync(file, INJECTED_NATIVE_MENU_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file], 3_000)
+      expect(result.code, result.output).toBe(0)
+      expect(result.signal).toBeNull()
+      expect(result.output).not.toContain("INJECTED_NATIVE_MENU_TIMEOUT")
+      expect(result.output.match(/^INJECTED_NATIVE_MENU_ACTION mark$/gm), result.output).toHaveLength(
+        1
+      )
     } finally {
       try {
         unlinkSync(file)

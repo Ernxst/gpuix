@@ -527,6 +527,10 @@ enum UiCommand {
         menus: Vec<MenuSpec>,
         response: SyncSender<std::result::Result<(), String>>,
     },
+    DispatchMenuAction {
+        id: String,
+        response: SyncSender<std::result::Result<(), String>>,
+    },
     Quit {
         response: SyncSender<()>,
     },
@@ -596,6 +600,16 @@ async fn run_ui_commands(
             UiCommand::Invalidate => refresh_ui_window(window, cx),
             UiCommand::SetMenus { menus, response } => {
                 let result = cx.update(|cx| set_application_menus(cx, menus));
+                let response_value = result
+                    .as_ref()
+                    .map(|value| value.clone())
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| value);
+                response.send(response_value).ok();
+                result.and_then(|value| value.map_err(anyhow::Error::msg))
+            }
+            UiCommand::DispatchMenuAction { id, response } => {
+                let result = cx.update(|cx| dispatch_application_menu_action(cx, &id));
                 let response_value = result
                     .as_ref()
                     .map(|value| value.clone())
@@ -846,6 +860,7 @@ enum RendererLifecycle {
 #[napi]
 pub struct GpuixRenderer {
     event_callback: Mutex<Option<Arc<ThreadsafeFunction<EventPayload>>>>,
+    application_event_callback: Arc<Mutex<Option<EventCallback>>>,
     tree: Arc<Mutex<RetainedTree>>,
     lifecycle: Arc<Mutex<RendererLifecycle>>,
     /// Shared with GpuixView so napi methods can read the live selection
@@ -863,6 +878,16 @@ impl GpuixRenderer {
             Arc::new(move |payload: EventPayload| {
                 tsf.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
             }) as EventCallback
+        })
+    }
+
+    fn application_event_callback(&self) -> EventCallback {
+        let callback = self.application_event_callback.clone();
+        Arc::new(move |payload: EventPayload| {
+            let current = callback.lock().unwrap().clone();
+            if let Some(current) = current {
+                current(payload);
+            }
         })
     }
 
@@ -958,8 +983,15 @@ impl GpuixRenderer {
     #[napi(constructor)]
     pub fn new(event_callback: Option<ThreadsafeFunction<EventPayload>>) -> Self {
         let _ = env_logger::try_init();
+        let event_callback = event_callback.map(Arc::new);
+        let initial_application_event_callback = event_callback.clone().map(|tsf| {
+            Arc::new(move |payload: EventPayload| {
+                tsf.call(Ok(payload), ThreadsafeFunctionCallMode::NonBlocking);
+            }) as EventCallback
+        });
         Self {
-            event_callback: Mutex::new(event_callback.map(Arc::new)),
+            event_callback: Mutex::new(event_callback),
+            application_event_callback: Arc::new(Mutex::new(initial_application_event_callback)),
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
             selection: SharedSelection::default(),
@@ -989,6 +1021,22 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.init_threaded(options);
+    }
+
+    /// Replace the callback used for application-level events such as menu actions.
+    #[napi]
+    pub fn set_application_event_handler(
+        &self,
+        event_callback: Option<
+            ThreadsafeFunction<EventPayload, Unknown<'static>, EventPayload, Status, false>,
+        >,
+    ) {
+        let callback = event_callback.map(Arc::new).map(|tsf| {
+            Arc::new(move |payload: EventPayload| {
+                tsf.call(payload, ThreadsafeFunctionCallMode::NonBlocking);
+            }) as EventCallback
+        });
+        *self.application_event_callback.lock().unwrap() = callback;
     }
 
     #[cfg(target_os = "macos")]
@@ -1027,6 +1075,7 @@ impl GpuixRenderer {
 
         let tree = self.tree.clone();
         let callback = self.event_callback_for_view();
+        let application_callback = self.application_event_callback();
 
         let selection = self.selection.clone();
         let opened_window = Rc::new(RefCell::new(None));
@@ -1040,7 +1089,7 @@ impl GpuixRenderer {
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
-            init_application_menu_support(cx, callback.clone());
+            init_application_menu_support(cx, Some(application_callback.clone()));
             if let Err(error) = set_application_menus(cx, menus) {
                 *startup_error_for_app.borrow_mut() = Some(error);
                 return;
@@ -1129,7 +1178,8 @@ impl GpuixRenderer {
         let tree = self.tree.clone();
         let selection = self.selection.clone();
         let callback = self.event_callback_for_view();
-        let termination_callback = callback.clone();
+        let application_callback = self.application_event_callback();
+        let termination_callback = Some(application_callback.clone());
         let lifecycle = self.lifecycle.clone();
         let lifecycle_for_app = lifecycle.clone();
         let launched = Arc::new(AtomicBool::new(false));
@@ -1145,7 +1195,7 @@ impl GpuixRenderer {
                     gpui_platform::application().run(move |cx| {
                         init_key_bindings(cx);
                         crate::custom_elements::input::init(cx);
-                        init_application_menu_support(cx, callback.clone());
+                        init_application_menu_support(cx, Some(application_callback.clone()));
                         if let Err(error) = set_application_menus(cx, menus) {
                             startup_sender.send(Err(error)).ok();
                             cx.quit();
@@ -1387,6 +1437,42 @@ impl GpuixRenderer {
             let (response, receiver) = sync_channel(1);
             self.send_ui_command(UiCommand::SetMenus { menus, response })?;
             return recv_ui_response(receiver, "the application menu update")?
+                .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Dispatch a configured menu action through the production GPUI application.
+    #[napi]
+    pub fn simulate_menu_action(&self, id: String) -> Result<()> {
+        if *self.lifecycle.lock().unwrap() != RendererLifecycle::Running {
+            return Err(Error::from_reason(
+                "Renderer not initialized. Call init() first.",
+            ));
+        }
+
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| dispatch_application_menu_action(cx, &id))
+                .map_err(Error::from_reason)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::DispatchMenuAction { id, response })?;
+            return recv_ui_response(receiver, "the application menu action")?
                 .map_err(Error::from_reason);
         }
 

@@ -5,6 +5,8 @@ export declare class GpuixRenderer {
   constructor(eventCallback?: (((err: Error | null, arg: EventPayload) => any)) | undefined | null)
   /** Initialize GPUI using the native event-loop architecture for this OS. */
   init(options?: WindowOptions | undefined | null): void
+  /** Replace the callback used for application-level events such as menu actions. */
+  setApplicationEventHandler(eventCallback?: (((arg: EventPayload) => unknown)) | undefined | null): void
   createElement(id: number, elementType: string): void
   /**
    * Destroy an element and all descendants. Returns array of destroyed IDs
@@ -53,6 +55,8 @@ export declare class GpuixRenderer {
   applyBatch(json: string): Array<number>
   /** Replace the application menu bar. Pass an empty array to remove it. */
   setMenus(menus: Array<MenuSpec>): void
+  /** Dispatch a configured menu action through the production GPUI application. */
+  simulateMenuAction(id: string): void
   /** Gracefully terminate the native application through GPUI's platform abstraction. */
   quit(): void
   /** Pump the native event loop. Returns false after the last window closes. */
