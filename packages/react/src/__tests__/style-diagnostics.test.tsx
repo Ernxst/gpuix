@@ -81,6 +81,37 @@ describeNative("style diagnostics", () => {
     expect(diagnostics[0].message).toContain("1")
   })
 
+  it("reports malformed nested grid tracks with their track index", () => {
+    const renderer = new TestRenderer()
+    renderer.createElement(82, "div")
+    renderer.setCustomProp(82, "testId", JSON.stringify("ledger-grid"))
+    renderer.setStyle(
+      82,
+      JSON.stringify({
+        display: "grid",
+        gridTemplateColumns: [
+          { type: "max-content" },
+          {
+            type: "minmax",
+            min: { type: "fr", value: 1 },
+            max: { type: "fr", value: 1 },
+          },
+        ],
+      }),
+    )
+
+    const diagnostics = renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementId: 82,
+      elementType: "div",
+      testId: "ledger-grid",
+      property: "gridTemplateColumns[1].min.type",
+      value: '"fr"',
+    })
+    expect(diagnostics[0].message).toContain('<div testId="ledger-grid">')
+  })
+
   it("keeps deterministic field dropping when strict diagnostics are disabled", () => {
     const renderer = new TestRenderer()
     renderer.setStrictStyles(false)
