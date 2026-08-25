@@ -502,6 +502,22 @@ pub(crate) fn catch_gpui_initialization<T>(
     }
 }
 
+#[cfg(all(target_os = "macos", feature = "display-discovery-fault-injection"))]
+#[napi]
+pub fn test_macos_autorelease_pool_drain_count() -> u32 {
+    gpui_macos::test_autorelease_pool_drain_count()
+        .try_into()
+        .unwrap_or(u32::MAX)
+}
+
+#[cfg(all(target_os = "macos", feature = "display-discovery-fault-injection"))]
+#[napi]
+pub fn test_macos_native_window_allocation_count() -> u32 {
+    gpui_macos::test_native_window_allocation_count()
+        .try_into()
+        .unwrap_or(u32::MAX)
+}
+
 /// The main GPUI renderer exposed to Node.js.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[napi]
@@ -697,11 +713,16 @@ impl GpuixRenderer {
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
-            let bounds = gpui::Bounds::centered(
-                None,
-                gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
-                cx,
-            );
+            let window_size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
+            #[cfg(feature = "display-discovery-fault-injection")]
+            // Let the fault smoke reach MacWindow::open instead of failing during centering.
+            let bounds = if std::env::var_os("GPUI_TEST_DISABLE_DISPLAY_DISCOVERY").is_some() {
+                gpui::Bounds::new(gpui::Point::default(), window_size)
+            } else {
+                gpui::Bounds::centered(None, window_size, cx)
+            };
+            #[cfg(not(feature = "display-discovery-fault-injection"))]
+            let bounds = gpui::Bounds::centered(None, window_size, cx);
 
             match cx.open_window(
                 to_gpui_window_options(&window_options, bounds),

@@ -128,6 +128,18 @@ jobs:
           path: packages/native/${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
+      - name: Build display-discovery fault-injection binding
+        if: matrix.settings.target == 'aarch64-apple-darwin'
+        run: bun run build:test-fault-injection --target aarch64-apple-darwin --output-dir test-fault-binding --no-js
+
+      - name: Upload display-discovery fault-injection binding
+        if: matrix.settings.target == 'aarch64-apple-darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-test-fault-aarch64-apple-darwin
+          path: packages/native/test-fault-binding/${{ env.APP_NAME }}.*.node
+          if-no-files-found: error
+
       - name: Build React package
         working-directory: packages/react
         shell: bash
@@ -169,8 +181,19 @@ jobs:
           name: bindings-aarch64-apple-darwin
           path: packages/native/
 
-      - name: Smoke test packaged test renderer without display discovery
+      - name: Smoke test published test renderer without display discovery
         run: bun scripts/test-renderer-smoke.ts
+
+      - name: Download display-discovery fault-injection artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-test-fault-aarch64-apple-darwin
+          path: packages/native/test-fault-binding/
+
+      - name: Smoke test catchable display-discovery failure
+        env:
+          NAPI_RS_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/packages/native/test-fault-binding/gpuix-native.darwin-arm64.node
+        run: bun scripts/test-renderer-smoke.ts --fault-injection
 
       - name: Run React tests
         run: bun run test
