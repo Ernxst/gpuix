@@ -154,7 +154,7 @@ export interface RenderOptions extends WindowOptions {
   renderer?: NativeRenderer
   /** GPUI scene overlay. Does not go through React or layout. */
   debugFrameOverlay?: DebugFrameOverlayMode
-  /** Reject invalid fields and emit actionable diagnostics. Defaults off only in production. */
+  /** Reject invalid fields and emit actionable diagnostics. Defaults on in non-production Node runtimes. */
   strictStyles?: boolean
 }
 

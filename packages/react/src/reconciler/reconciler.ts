@@ -32,12 +32,13 @@ export interface Root {
 }
 
 export interface RootOptions {
-  /** Reject invalid fields and emit actionable diagnostics. Defaults off only in production. */
+  /** Reject invalid fields and emit actionable diagnostics. Defaults on in non-production Node runtimes. */
   strictStyles?: boolean
 }
 
-function strictStylesDefault(): boolean {
-  return typeof process === "undefined" || process.env.NODE_ENV !== "production"
+export function strictStylesDefault(): boolean {
+  if (typeof process === "undefined") return false
+  return process.env?.NODE_ENV !== "production"
 }
 
 const idAllocators = new WeakMap<NativeRenderer, ElementIdAllocator>()

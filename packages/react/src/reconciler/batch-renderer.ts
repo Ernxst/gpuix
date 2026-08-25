@@ -116,23 +116,11 @@ export function wrapWithBatching(inner: NativeRenderer): NativeRenderer {
 
           const json = JSON.stringify(queue)
 
-          let destroyedIds: number[]
-          try {
-            destroyedIds = batchable.applyBatch(json)
-          } catch (error) {
-            // Native field validation is lossy, so reaching here means the batch
-            // envelope itself is unusable. Contain it at the host boundary: an
-            // exception escaping resetAfterCommit stops Bun's frame-loop timers.
-            queue = []
-            console.error("[gpuix] Native mutation batch was rejected atomically", error)
-            try {
-              batchable.commitMutations()
-            } catch (invalidateError) {
-              console.error("[gpuix] Failed to invalidate after a rejected batch", invalidateError)
-            }
-            reportStyleDiagnostics(batchable)
-            return
-          }
+          // Field-level style problems never reject the batch. If applyBatch
+          // throws, the atomic envelope or renderer lifecycle is unusable.
+          // Preserve the queue and let that fatal error escape the React host
+          // boundary; swallowing it would commit a JS tree Rust never received.
+          const destroyedIds = batchable.applyBatch(json)
 
           const container = containerForRenderer(inner)
           if (container) {

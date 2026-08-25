@@ -1389,16 +1389,17 @@ to hard-clipped sRGB before GPUI paints them.
 
 Style objects are decoded field-by-field. An invalid value rejects only that
 field; valid siblings still commit and the error never escapes React's commit
-phase. Outside `NODE_ENV=production`, strict styles are enabled by default and
-each rejection warns with the element id, element type, `testId` when present,
-property, and offending value. Unknown properties, unsupported enum values,
-invalid colors, radial gradients, and supported properties with malformed
-values all use the same diagnostic path.
+phase. In a Node runtime outside `NODE_ENV=production`, strict styles are
+enabled by default and each rejection warns with the element id, element type,
+`testId` when present, property, and offending value. Unknown properties,
+unsupported enum values, invalid colors, radial gradients, and supported
+properties with malformed values all use the same diagnostic path.
 
-Production defaults to deterministic compatibility mode: invalid fields are
-dropped without a warning, while the rest of the style and mutation batch are
-applied. Pass `strictStyles: true` to `render()` to keep diagnostics in
-production, or `strictStyles: false` to opt out explicitly.
+Production and browser bundles without a Node environment default to
+deterministic compatibility mode: invalid fields are dropped without a warning,
+while the rest of the style and mutation batch are applied. Pass
+`strictStyles: true` to `render()` to keep diagnostics there, or
+`strictStyles: false` to opt out explicitly.
 
 `hsv()`, `hsva()`, and `hwba()` are parser extensions rather than CSS Color 4
 standard functions. `color()`, platform/dynamic colors, and numeric color

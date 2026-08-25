@@ -30,7 +30,12 @@ pub struct LinearGradientStopValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum BackgroundImageValue {
     LinearGradient {
         angle: f64,
@@ -1091,6 +1096,23 @@ mod tests {
             },
         ));
         assert!(structured.is_ok());
+
+        let structured_json = parse_style_value(&json!({
+            "background": {
+                "type": "linearGradient",
+                "angle": 45,
+                "stops": [
+                    { "color": "red", "position": 0 },
+                    { "color": "blue", "position": 1 }
+                ],
+                "colorSpace": "oklab"
+            }
+        }));
+        assert!(
+            structured_json.problems.is_empty(),
+            "{:?}",
+            structured_json.problems
+        );
 
         let malformed = parse_style_value(&json!({
             "background": {
