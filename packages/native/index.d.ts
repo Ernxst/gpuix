@@ -5,6 +5,8 @@ export declare class GpuixRenderer {
   constructor(eventCallback?: (((err: Error | null, arg: EventPayload) => any)) | undefined | null)
   /** Initialize GPUI using the native event-loop architecture for this OS. */
   init(options?: WindowOptions | undefined | null): void
+  /** Replace the callback used for application-level events such as menu actions. */
+  setApplicationEventHandler(eventCallback?: (((arg: EventPayload) => unknown)) | undefined | null): void
   createElement(id: number, elementType: string): void
   /**
    * Destroy an element and all descendants. Returns array of destroyed IDs
@@ -58,6 +60,12 @@ export declare class GpuixRenderer {
    * Acquires the tree mutex ONCE for the entire batch.
    */
   applyBatch(json: string): Array<number>
+  /** Replace the application menu bar. Pass an empty array to remove it. */
+  setMenus(menus: Array<MenuSpec>): void
+  /** Dispatch a configured menu action through the production GPUI application. */
+  simulateMenuAction(id: string): void
+  /** Gracefully terminate the native application through GPUI's platform abstraction. */
+  quit(): void
   /** Pump the native event loop. Returns false after the last window closes. */
   tick(): boolean
   isInitialized(): boolean
@@ -155,6 +163,12 @@ export declare class TestGpuixRenderer {
    * Returns accumulated destroyed IDs from all destroyElement ops.
    */
   applyBatch(json: string): Array<number>
+  /** Replace the application menu using the production conversion and GPUI APIs. */
+  setMenus(menus: Array<MenuSpec>): void
+  /** Dispatch a configured application action through GPUI's global action pipeline. */
+  simulateMenuAction(id: string): void
+  /** Whether GPUI reports a currently installed application menu bar. */
+  hasMainMenu(): boolean
   /**
    * Notify the view entity and run GPUI until parked.
    * This triggers GpuixView::render() → build_element() → GPUI layout.
@@ -422,8 +436,38 @@ export interface GpuixStyleDiagnostic {
   value: string
 }
 
+/**
+ * A cross-platform application menu item.
+ *
+ * `kind` is `"action"`, `"separator"`, `"submenu"`, or `"system"`.
+ * Action items require `label` and `id`; use `role: "quit"` for the
+ * platform quit action. System items currently support `systemMenu:
+ * "services"`.
+ */
+export interface MenuItemSpec {
+  kind: string
+  label?: string
+  id?: string
+  items?: Array<MenuItemSpec>
+  disabled?: boolean
+  checked?: boolean
+  keyEquivalent?: string
+  role?: string
+  systemMenu?: string
+  osAction?: string
+}
+
+/** One top-level application menu. */
+export interface MenuSpec {
+  name: string
+  items: Array<MenuItemSpec>
+  disabled?: boolean
+}
+
 export interface WindowOptions {
   title?: string
+  /** Application menus. Omit for a minimal Quit menu; pass `[]` to opt out. */
+  menus?: Array<MenuSpec>
   width?: number
   height?: number
   minWidth?: number

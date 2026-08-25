@@ -1,4 +1,4 @@
-import type { EventPayload } from "@gpuix/native"
+import type { EventPayload, MenuSpec } from "@gpuix/native"
 
 export type DimensionValue = number | string
 
@@ -481,6 +481,12 @@ export interface NativeRenderer {
   applyBatch?(json: string): Array<number>
   setStrictStyles?(enabled: boolean): void
   drainStyleDiagnostics?(): StyleDiagnostic[]
+
+  // ── Application lifecycle ──────────────────────────────────────
+  setMenus?(menus: MenuSpec[]): void
+  quit?(): void
+  /** Internal hook used by injected renderers to deliver non-element events. */
+  setApplicationEventHandler?(handler: ((event: EventPayload) => void) | null): void
 
   // ── Focus API ──────────────────────────────────────────────────
   focusElement?(elementId: number): void

@@ -10,7 +10,7 @@
 /// the React event registry via handleGpuixEvent.
 
 import type { ReactNode } from "react"
-import type { EventPayload } from "@gpuix/native"
+import type { EventPayload, MenuSpec } from "@gpuix/native"
 import { createRequire } from "node:module"
 import type {
   DebugFrameOverlayMode,
@@ -31,6 +31,9 @@ interface NativeTestRendererApi extends NativeRenderer {
   applyBatch(json: string): number[]
   flush(): void
   drainEvents(): EventPayload[]
+  setMenus(menus: MenuSpec[]): void
+  simulateMenuAction(id: string): void
+  hasMainMenu(): boolean
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
@@ -122,6 +125,7 @@ export interface TestElement {
 
 export class TestRenderer implements NativeRenderer {
   commitCount = 0
+  private applicationEventHandler: ((event: EventPayload) => void) | null = null
 
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
@@ -189,6 +193,14 @@ export class TestRenderer implements NativeRenderer {
     return this.native.applyBatch(json)
   }
 
+  setMenus(menus: MenuSpec[]): void {
+    this.native.setMenus(menus)
+  }
+
+  setApplicationEventHandler(handler: ((event: EventPayload) => void) | null): void {
+    this.applicationEventHandler = handler
+  }
+
   setStrictStyles(enabled: boolean): void {
     this.native.setStrictStyles(enabled)
   }
@@ -224,6 +236,10 @@ export class TestRenderer implements NativeRenderer {
       const events = this.native.drainEvents()
       if (events.length === 0) break
       for (const event of events) {
+        if (event.eventType === "menuAction" || event.eventType === "terminated") {
+          this.applicationEventHandler?.(event)
+          continue
+        }
         flushSync(() => {
           handleGpuixEvent(event, this)
         })
@@ -289,6 +305,22 @@ export class TestRenderer implements NativeRenderer {
     // Flush again after React state updates so the Rust RetainedTree
     // is fully rebuilt and GPUI has re-laid-out before any screenshot.
     this.native.flush()
+  }
+
+  /** Dispatch an installed application-menu action through GPUI. */
+  simulateMenuAction(id: string): void {
+    this.native.simulateMenuAction(id)
+    this.dispatchNativeEvents()
+  }
+
+  /** Simulate application termination without shutting down the test process. */
+  simulateTermination(): void {
+    this.applicationEventHandler?.({ elementId: 0, eventType: "terminated" })
+  }
+
+  /** Whether GPUI currently reports an installed main menu. */
+  hasMainMenu(): boolean {
+    return this.native.hasMainMenu()
   }
 
   /** End-to-end: simulate scroll wheel through GPUI →

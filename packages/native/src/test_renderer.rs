@@ -24,9 +24,11 @@ use gpui::AppContext as _;
 use crate::element_tree::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree, catch_gpui_initialization, debug_frame_overlay_mode_name,
-    debug_frame_overlay_stats_js, drain_style_diagnostics, parse_debug_frame_overlay_mode,
-    parse_style_json, pending_style_diagnostics, to_element_id, DebugFrameOverlayStats,
-    EventCallback, GpuixStyleDiagnostic, GpuixView, PendingStyleDiagnostic,
+    debug_frame_overlay_stats_js, default_application_menus, dispatch_application_menu_action,
+    drain_style_diagnostics, has_application_menus, init_application_menu_support,
+    parse_debug_frame_overlay_mode, parse_style_json, pending_style_diagnostics,
+    set_application_menus, to_element_id, DebugFrameOverlayStats, EventCallback,
+    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic,
 };
 use crate::retained_tree::RetainedTree;
 
@@ -130,6 +132,9 @@ impl TestGpuixRenderer {
         cx.update(|cx| {
             crate::renderer::init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
+            init_application_menu_support(cx, event_callback.clone());
+            set_application_menus(cx, default_application_menus("GPUIX Test"))
+                .expect("default test menu is valid");
         });
 
         // Open an offscreen window at (-10000, -10000) — invisible but fully
@@ -314,6 +319,33 @@ impl TestGpuixRenderer {
     }
 
     // ── Test-specific methods ────────────────────────────────────────
+
+    /// Replace the application menu using the production conversion and GPUI APIs.
+    #[napi]
+    pub fn set_menus(&self, menus: Vec<MenuSpec>) -> Result<()> {
+        with_test_state(|cx, _window, _view| {
+            cx.update(|cx| set_application_menus(cx, menus))
+                .map_err(Error::from_reason)?;
+            Ok(())
+        })
+    }
+
+    /// Dispatch a configured application action through GPUI's global action pipeline.
+    #[napi]
+    pub fn simulate_menu_action(&self, id: String) -> Result<()> {
+        with_test_state(|cx, _window, _view| {
+            cx.update(|cx| dispatch_application_menu_action(cx, &id))
+                .map_err(Error::from_reason)?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// Whether GPUI reports a currently installed application menu bar.
+    #[napi]
+    pub fn has_main_menu(&self) -> Result<bool> {
+        with_test_state(|cx, _window, _view| Ok(cx.update(|cx| has_application_menus(cx))))
+    }
 
     /// Notify the view entity and run GPUI until parked.
     /// This triggers GpuixView::render() → build_element() → GPUI layout.

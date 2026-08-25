@@ -60,7 +60,13 @@ export type {
   TooltipTriggerProps,
 } from "./components/tooltip.js"
 export { motion, VirtualList } from "./components/index.js"
-export type { Root, FrameLoop, RenderOptions } from "./reconciler/renderer.js"
+export type {
+  Root,
+  FrameLoop,
+  FrameLoopOptions,
+  MenuActionEvent,
+  RenderOptions,
+} from "./reconciler/renderer.js"
 export type { WindowSize } from "./hooks/use-window-size.js"
 
 // Re-export types
@@ -89,6 +95,8 @@ export type { MacCpuThrottle } from "./cpu-throttle.js"
 export type {
   EventPayload,
   EventModifiers,
+  MenuItemSpec,
+  MenuSpec,
   WindowOptions,
   WindowSize as NativeWindowSize,
 } from "@gpuix/native"
