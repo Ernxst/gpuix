@@ -119,6 +119,12 @@ export function wrapWithBatching(inner: NativeRenderer): NativeRenderer {
         }
       }
 
+      if (prop === "discardMutations") {
+        return () => {
+          queue = []
+        }
+      }
+
       // destroyElement: queue the op, return [] (destroyed IDs come from applyBatch).
       if (prop === "destroyElement") {
         return (id: number): Array<number> => {

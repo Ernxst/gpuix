@@ -455,6 +455,8 @@ export interface NativeRenderer {
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   setRoot(id: number): void
   commitMutations(): void
+  /** Drop a buffered commit after JS-side contract validation fails. */
+  discardMutations?(): void
   setCustomProp(id: number, key: string, valueJson: string | object | number | boolean | null): void
   /** Apply a batch of mutations in a single FFI call. Returns destroyed IDs. */
   applyBatch?(json: string): Array<number>

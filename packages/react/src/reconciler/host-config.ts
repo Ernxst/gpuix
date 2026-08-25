@@ -36,11 +36,12 @@ type HostNode = Instance | TextInstance
 
 interface HostNodeState {
   container: Container
-  initialChildren: HostNode[]
+  children: HostNode[]
   mounted: boolean
 }
 
 const hostNodeStates = new WeakMap<HostNode, HostNodeState>()
+const virtualListsPendingValidation = new WeakMap<Container, Set<Instance>>()
 
 function stateFor(node: HostNode): HostNodeState {
   const state = hostNodeStates.get(node)
@@ -60,6 +61,71 @@ function rendererFor(node: HostNode): NativeRenderer {
 
 function nextId(container: Container): number {
   return ++container.ids.nextElementId
+}
+
+function shouldValidateVirtualListRows(): boolean {
+  return typeof process === "undefined" || process.env?.NODE_ENV !== "production"
+}
+
+function validateVirtualListRowContract(instance: Instance, state: HostNodeState): void {
+  if (
+    instance.type !== "virtual-list" ||
+    !shouldValidateVirtualListRows() ||
+    state.children.length !== 1 ||
+    (instance.props as Props & VirtualListProps).itemCount === 1
+  ) {
+    return
+  }
+
+  throw new VirtualListRowContractError(
+    "GPUIX <virtual-list> received exactly one immediate child. Its immediate children are rows, so wrapping a collection in one container creates one virtual row and defeats virtualization. Render the rows as direct children, or use <VirtualList itemCount={...} renderItem={...} /> for windowed data. Pass itemCount={1} only when the list intentionally contains one row."
+  )
+}
+
+function scheduleVirtualListValidation(instance: Instance, state: HostNodeState): void {
+  if (instance.type !== "virtual-list" || !shouldValidateVirtualListRows()) return
+
+  let pending = virtualListsPendingValidation.get(state.container)
+  if (!pending) {
+    pending = new Set()
+    virtualListsPendingValidation.set(state.container, pending)
+  }
+  pending.add(instance)
+}
+
+function validatePendingVirtualLists(container: Container): void {
+  const pending = virtualListsPendingValidation.get(container)
+  if (!pending) return
+
+  virtualListsPendingValidation.delete(container)
+  for (const instance of pending) {
+    const state = stateFor(instance)
+    if (state.mounted) validateVirtualListRowContract(instance, state)
+  }
+}
+
+function removeTrackedChild(state: HostNodeState, child: HostNode): void {
+  const index = state.children.indexOf(child)
+  if (index !== -1) state.children.splice(index, 1)
+}
+
+function appendTrackedChild(state: HostNodeState, child: HostNode): void {
+  removeTrackedChild(state, child)
+  state.children.push(child)
+}
+
+function insertTrackedChild(
+  state: HostNodeState,
+  child: HostNode,
+  beforeChild: HostNode
+): void {
+  removeTrackedChild(state, child)
+  const beforeIndex = state.children.indexOf(beforeChild)
+  if (beforeIndex === -1) {
+    state.children.push(child)
+  } else {
+    state.children.splice(beforeIndex, 0, child)
+  }
 }
 
 // ── Event wiring helpers ─────────────────────────────────────────────
@@ -256,16 +322,7 @@ function materialize(node: HostNode): HostNodeState {
 
   const renderer = state.container.renderer
   if ("type" in node) {
-    if (
-      process.env.NODE_ENV !== "production" &&
-      node.type === "virtual-list" &&
-      state.initialChildren.length === 1 &&
-      (node.props as Props & VirtualListProps).itemCount !== 1
-    ) {
-      throw new VirtualListRowContractError(
-        "GPUIX <virtual-list> received exactly one immediate child. Its immediate children are rows, so wrapping a collection in one container creates one virtual row and defeats virtualization. Render the rows as direct children, or use <VirtualList itemCount={...} renderItem={...} /> for windowed data. Pass itemCount={1} only when the list intentionally contains one row."
-      )
-    }
+    validateVirtualListRowContract(node, state)
     renderer.createElement(node.id, DIV_ALIASES.has(node.type) ? "div" : node.type)
     sendStyle(renderer, node.id, node.props)
     syncEventListeners(state.container, node.id, node.props)
@@ -276,11 +333,10 @@ function materialize(node: HostNode): HostNodeState {
   }
   state.mounted = true
 
-  for (const child of state.initialChildren) {
+  for (const child of state.children) {
     materialize(child)
     renderer.appendChild(node.id, child.id)
   }
-  state.initialChildren.length = 0
   return state
 }
 
@@ -303,7 +359,7 @@ export const hostConfig = {
     const instance: Instance = { id: nextId(rootContainerInstance), type, props }
     hostNodeStates.set(instance, {
       container: rootContainerInstance,
-      initialChildren: [],
+      children: [],
       mounted: false,
     })
     return instance
@@ -312,11 +368,16 @@ export const hostConfig = {
   appendChild(parent: Instance, child: Instance | TextInstance): void {
     const parentState = materialize(parent)
     materialize(child)
+    appendTrackedChild(parentState, child)
+    scheduleVirtualListValidation(parent, parentState)
     parentState.container.renderer.appendChild(parent.id, child.id)
   },
 
   removeChild(parent: Instance, child: Instance | TextInstance): void {
-    rendererFor(parent).removeChild(parent.id, child.id)
+    const parentState = stateFor(parent)
+    removeTrackedChild(parentState, child)
+    scheduleVirtualListValidation(parent, parentState)
+    parentState.container.renderer.removeChild(parent.id, child.id)
   },
 
   insertBefore(
@@ -326,6 +387,8 @@ export const hostConfig = {
   ): void {
     const parentState = materialize(parent)
     materialize(child)
+    insertTrackedChild(parentState, child, beforeChild)
+    scheduleVirtualListValidation(parent, parentState)
     parentState.container.renderer.insertBefore(parent.id, child.id, beforeChild.id)
   },
 
@@ -350,6 +413,13 @@ export const hostConfig = {
   // in a single applyBatch() FFI call. This is the end of React's synchronous
   // commit phase — all mutations from this render are flushed together.
   resetAfterCommit(containerInfo: Container): void {
+    try {
+      validatePendingVirtualLists(containerInfo)
+    } catch (error) {
+      containerInfo.renderer.discardMutations?.()
+      console.error(error)
+      return
+    }
     containerInfo.renderer.commitMutations()
   },
 
@@ -382,7 +452,7 @@ export const hostConfig = {
     }
     hostNodeStates.set(instance, {
       container: rootContainerInstance,
-      initialChildren: [],
+      children: [],
       mounted: false,
     })
     return instance
@@ -428,6 +498,7 @@ export const hostConfig = {
     // Custom prop diff (for non-div/text elements)
     diffCustomProps(container.renderer, instance.id, instance.type, oldProps, newProps)
     instance.props = newProps
+    scheduleVirtualListValidation(instance, stateFor(instance))
   },
 
   commitTextUpdate(
@@ -445,7 +516,7 @@ export const hostConfig = {
   },
 
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {
-    stateFor(parent).initialChildren.push(child)
+    stateFor(parent).children.push(child)
   },
 
   hideInstance(instance: Instance): void {

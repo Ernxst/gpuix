@@ -2,6 +2,7 @@
 
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
+import { flushSync } from "../reconciler/reconciler.js"
 import { createTestRoot } from "../testing.js"
 
 function Rows({ count }: { count: number }) {
@@ -72,6 +73,30 @@ function DynamicFocusableRows({ enabled }: { enabled: boolean }) {
 }
 
 describe("<virtual-list>", () => {
+  it("materializes host elements when the browser has no process global", () => {
+    const { render, renderer } = createTestRoot()
+    const reportError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    vi.stubGlobal("process", undefined)
+    try {
+      render(
+        <div testId="browser-host">
+          <text>browser-safe</text>
+        </div>
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    try {
+      expect(reportError).not.toHaveBeenCalled()
+      expect(renderer.findByTestId("browser-host")).toBeDefined()
+      expect(renderer.getPaintedText()).toContain("browser-safe")
+    } finally {
+      reportError.mockRestore()
+    }
+  })
+
   it("accepts an explicit one-row list and estimate opt-out", () => {
     const intentional = createTestRoot()
     intentional.render(
@@ -111,6 +136,45 @@ describe("<virtual-list>", () => {
         /immediate children are rows.*VirtualList.*itemCount.*renderItem/is
       )
       expect(invalid.renderer.findByType("virtual-list")).toHaveLength(0)
+    } finally {
+      reportError.mockRestore()
+    }
+  })
+
+  it("rejects an update from an empty list to one wrapper row", () => {
+    let loadRows = (): void => {
+      throw new Error("Async rows did not mount")
+    }
+    function AsyncRows() {
+      const [loaded, setLoaded] = React.useState(false)
+      loadRows = () => setLoaded(true)
+      return loaded ? (
+        <div>
+          <Rows count={100} />
+        </div>
+      ) : null
+    }
+
+    const invalid = createTestRoot()
+    invalid.render(
+      <virtual-list style={{ width: 400, height: 160 }}>
+        <AsyncRows />
+      </virtual-list>
+    )
+
+    const reportError = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      flushSync(loadRows)
+
+      expect(reportError).toHaveBeenCalledOnce()
+      const error = reportError.mock.calls[0]?.[0]
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toMatch(
+        /immediate children are rows.*VirtualList.*itemCount.*renderItem/is
+      )
+
+      const list = invalid.renderer.findByType("virtual-list")[0]
+      expect(list.children).toHaveLength(0)
     } finally {
       reportError.mockRestore()
     }
