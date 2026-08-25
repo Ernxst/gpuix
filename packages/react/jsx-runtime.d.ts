@@ -28,6 +28,29 @@ export namespace JSX {
   interface IntrinsicElements {
     div: Props
     text: Props
+    main: Props
+    header: Props
+    footer: Props
+    nav: Props
+    section: Props
+    article: Props
+    aside: Props
+    h1: Props
+    h2: Props
+    h3: Props
+    h4: Props
+    h5: Props
+    h6: Props
+    p: Props
+    span: Props
+    strong: Props
+    em: Props
+    ul: Props
+    ol: Props
+    li: Props
+    a: Props & { href?: string; target?: string }
+    button: Props & { type?: "button" | "submit" | "reset" }
+    kbd: Props
     img: ImgProps
     svg: SvgProps
     canvas: Props
