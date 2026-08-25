@@ -2531,18 +2531,18 @@ impl GpuixView {
         if motion_active {
             window.request_animation_frame();
         }
-        let Some(focus_handle) = row_focus_handle else {
-            return child;
-        };
-        gpui::div()
+        let row = gpui::div()
             .id(gpui::SharedString::from(format!(
                 "__gpuix_virtual_row_{}_{}",
                 list_id, expected_child_id
             )))
-            .w_full()
-            .track_focus(&focus_handle)
-            .child(child)
-            .into_any_element()
+            .w_full();
+        let row = if let Some(focus_handle) = row_focus_handle {
+            row.track_focus(&focus_handle)
+        } else {
+            row
+        };
+        row.child(child).into_any_element()
     }
 
     pub(crate) fn scroll_virtual_list_to_item(&self, id: u64, index: usize) -> bool {
