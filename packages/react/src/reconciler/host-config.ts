@@ -18,12 +18,17 @@ import type {
   Props,
   PublicInstance,
   TextInstance,
+  VirtualListProps,
 } from "../types/host.js"
 import {
   registerEventHandler,
   unregisterEventHandler,
   unregisterEventHandlers,
 } from "./event-registry.js"
+import {
+  DEFAULT_VIRTUAL_LIST_ESTIMATED_ITEM_HEIGHT,
+  VirtualListRowContractError,
+} from "../components/virtual-list-contract.js"
 
 let currentUpdatePriority = NoEventPriority
 
@@ -180,6 +185,20 @@ function serializeCustomProp(
   return value
 }
 
+type CustomPropInput = object | string | number | boolean | null | undefined
+
+function customPropEntries(type: string, props: Props): Array<[string, CustomPropInput]> {
+  const entries = Object.entries(props) as Array<[string, CustomPropInput]>
+  const virtualListProps = props as Props & VirtualListProps
+  if (type !== "virtual-list" || virtualListProps.estimatedItemHeight !== undefined) {
+    return entries
+  }
+  return [
+    ...entries.filter(([key]) => key !== "estimatedItemHeight"),
+    ["estimatedItemHeight", DEFAULT_VIRTUAL_LIST_ESTIMATED_ITEM_HEIGHT],
+  ]
+}
+
 /** Send all custom props to Rust for non-built-in element types. */
 function syncCustomProps(
   renderer: NativeRenderer,
@@ -188,7 +207,7 @@ function syncCustomProps(
   props: Props
 ): void {
   const builtIn = BUILT_IN_TYPES.has(type)
-  for (const [key, value] of Object.entries(props)) {
+  for (const [key, value] of customPropEntries(type, props)) {
     if (isReservedProp(key)) continue
     if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
     renderer.setCustomProp(id, key, serializeCustomProp(type, key, value))
@@ -204,10 +223,11 @@ function diffCustomProps(
   newProps: Props
 ): void {
   const builtIn = BUILT_IN_TYPES.has(type)
-  const oldEntries = Object.entries(oldProps)
-  const newKeys = Object.keys(newProps)
+  const oldEntries = customPropEntries(type, oldProps)
+  const newEntries = customPropEntries(type, newProps)
+  const newKeys = newEntries.map(([key]) => key)
   // Updated or added props
-  for (const [key, value] of Object.entries(newProps)) {
+  for (const [key, value] of newEntries) {
     if (isReservedProp(key)) continue
     if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
     const oldValue = oldEntries.find(([oldKey]) => oldKey === key)?.[1]
@@ -236,6 +256,16 @@ function materialize(node: HostNode): HostNodeState {
 
   const renderer = state.container.renderer
   if ("type" in node) {
+    if (
+      process.env.NODE_ENV !== "production" &&
+      node.type === "virtual-list" &&
+      state.initialChildren.length === 1 &&
+      (node.props as Props & VirtualListProps).itemCount !== 1
+    ) {
+      throw new VirtualListRowContractError(
+        "GPUIX <virtual-list> received exactly one immediate child. Its immediate children are rows, so wrapping a collection in one container creates one virtual row and defeats virtualization. Render the rows as direct children, or use <VirtualList itemCount={...} renderItem={...} /> for windowed data. Pass itemCount={1} only when the list intentionally contains one row."
+      )
+    }
     renderer.createElement(node.id, DIV_ALIASES.has(node.type) ? "div" : node.type)
     sendStyle(renderer, node.id, node.props)
     syncEventListeners(state.container, node.id, node.props)

@@ -346,7 +346,8 @@ export interface VirtualListProps {
   alignment?: "top" | "bottom"
   followTail?: boolean
   overdraw?: number
-  estimatedItemHeight?: number
+  /** Defaults to 48 px. Pass `null` to opt out of estimating unvisited rows. */
+  estimatedItemHeight?: number | null
   /** Logical row count. When set, `children` is only the mounted window. */
   itemCount?: number
   /** Logical index of `children[0]`. Ignored when `itemCount` is unset. */

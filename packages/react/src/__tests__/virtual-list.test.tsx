@@ -1,7 +1,7 @@
 /// The native <virtual-list>: lazy rows, programmatic scrolling, and chat tail following.
 
 import React from "react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createTestRoot } from "../testing.js"
 
 function Rows({ count }: { count: number }) {
@@ -72,6 +72,115 @@ function DynamicFocusableRows({ enabled }: { enabled: boolean }) {
 }
 
 describe("<virtual-list>", () => {
+  it("accepts an explicit one-row list and estimate opt-out", () => {
+    const intentional = createTestRoot()
+    intentional.render(
+      <virtual-list
+        itemCount={1}
+        estimatedItemHeight={null}
+        style={{ width: 400, height: 160 }}
+      >
+        <div style={{ height: 40 }}>
+          <text>one intentional row</text>
+        </div>
+      </virtual-list>
+    )
+
+    expect(intentional.renderer.getPaintedText()).toContain("one intentional row")
+    expect(
+      intentional.renderer.findByType("virtual-list")[0]?.customProps?.estimatedItemHeight
+    ).toBeUndefined()
+  })
+
+  it("rejects one wrapper row unless a one-row list is explicit", () => {
+    const reportError = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const invalid = createTestRoot()
+      invalid.render(
+        <virtual-list style={{ width: 400, height: 160 }}>
+          <div>
+            <Rows count={100} />
+          </div>
+        </virtual-list>
+      )
+
+      expect(reportError).toHaveBeenCalledOnce()
+      const error = reportError.mock.calls[0]?.[0]
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toMatch(
+        /immediate children are rows.*VirtualList.*itemCount.*renderItem/is
+      )
+      expect(invalid.renderer.findByType("virtual-list")).toHaveLength(0)
+    } finally {
+      reportError.mockRestore()
+    }
+  })
+
+  it("gives unvisited rows a useful default scroll extent", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <virtual-list overdraw={0} style={{ width: 400, height: 160 }}>
+        {Array.from({ length: 100 }, (_, index) => (
+          <div key={index} style={{ height: 48, flexShrink: 0 }}>
+            <text>{`estimated-row-${index}`}</text>
+          </div>
+        ))}
+      </virtual-list>
+    )
+
+    const list = renderer.findByType("virtual-list")[0]
+    renderer.scrollTo(list.id, 0, -100_000)
+    const offset = renderer.getScrollOffset(list.id)
+    expect(offset?.[1]).toBeLessThan(-4_500)
+    expect(offset?.[1]).toBeGreaterThan(-4_700)
+    expect(list.customProps?.estimatedItemHeight).toBe(48)
+  })
+
+  it("stretches every row by default without overriding an explicit width", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <virtual-list
+        overdraw={0}
+        estimatedItemHeight={40}
+        style={{ width: 400, height: 160 }}
+      >
+        <div testId="plain-row" style={{ height: 40, flexShrink: 0 }}>
+          <text>plain</text>
+        </div>
+        <div testId="focusable-row" tabIndex={0} style={{ height: 40, flexShrink: 0 }}>
+          <text>focusable</text>
+        </div>
+        <div
+          testId="explicit-row"
+          style={{ width: 120, height: 40, flexShrink: 0 }}
+        >
+          <text>explicit</text>
+        </div>
+        <div style={{ height: 40, flexShrink: 0 }}>
+          <text>filler</text>
+        </div>
+      </virtual-list>
+    )
+
+    const bounds = (testId: string) => {
+      const row = renderer.findByTestId(testId)
+      expect(row).toBeDefined()
+      const rowBounds = renderer.getElementBounds(row!.id)
+      expect(rowBounds).not.toBeNull()
+      return rowBounds!
+    }
+    const plain = bounds("plain-row")
+    const focusable = bounds("focusable-row")
+    const explicit = bounds("explicit-row")
+
+    expect(plain[2]).toBeCloseTo(400)
+    expect(focusable[2]).toBeCloseTo(plain[2])
+    expect(explicit[2]).toBeCloseTo(120)
+    expect(plain[3]).toBeCloseTo(40)
+    expect(focusable[3]).toBeCloseTo(40)
+    expect(explicit[3]).toBeCloseTo(40)
+  })
+
   it("builds and paints only rows near the viewport", () => {
     const { render, renderer } = createTestRoot()
     render(
