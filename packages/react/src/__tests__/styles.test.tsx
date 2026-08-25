@@ -9,11 +9,11 @@
 import fs from "fs"
 import { describe, it, expect, beforeEach } from "vitest"
 import React from "react"
-import { createTestRoot, hasNativeTestRenderer } from "../testing"
+import { createTestRoot, isNativeTestRendererAvailable } from "../testing"
 import { motion } from "../index"
 import { bufferSimilarity, isCI } from "./test-utils"
 
-const describeNative = hasNativeTestRenderer() ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 const SCREENSHOT_DIR = "/tmp"
 

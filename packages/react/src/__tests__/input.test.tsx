@@ -4,9 +4,9 @@
 import React, { useState } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
 import type { EventPayload } from "@gpuix/native"
-import { createTestRoot, hasNativeTestRenderer } from "../testing"
+import { createTestRoot, isNativeTestRendererAvailable } from "../testing"
 
-const describeNative = hasNativeTestRenderer() ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 describeNative("native text editors", () => {
   let testRoot: ReturnType<typeof createTestRoot>

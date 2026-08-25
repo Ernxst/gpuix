@@ -6,9 +6,9 @@ import path from "path"
 import React, { useState } from "react"
 import { describe, expect, it } from "vitest"
 import { connectTest } from "../automation/index.js"
-import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
+import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 
-const describeNative = hasNativeTestRenderer() ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 function Counter() {
   const [count, setCount] = useState(0)

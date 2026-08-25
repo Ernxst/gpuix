@@ -3,10 +3,10 @@
 import path from "path"
 import React from "react"
 import { describe, expect, it } from "vitest"
-import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
+import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
 
-const describeNative = hasNativeTestRenderer() ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 const PROSE =
   "The longest word in any of the major English language dictionaries is pneumonoultramicroscopicsilicovolcanoconiosis"

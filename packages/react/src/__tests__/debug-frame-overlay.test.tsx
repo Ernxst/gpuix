@@ -5,10 +5,10 @@ import path from "path"
 import React from "react"
 import { beforeAll, describe, expect, it } from "vitest"
 import { render, resetRender } from "../reconciler/renderer.js"
-import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing.js"
+import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
 
-const describeNative = hasNativeTestRenderer() ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 beforeAll(() => {
   fs.mkdirSync(SHOTS_DIR, { recursive: true })

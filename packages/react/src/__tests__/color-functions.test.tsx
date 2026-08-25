@@ -2,14 +2,14 @@ import fs from "fs"
 import path from "path"
 import React from "react"
 import { beforeAll, describe, expect, it } from "vitest"
-import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
+import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import {
   expectScreenshotsDiffer,
   expectScreenshotsEqual,
   SHOTS_DIR,
 } from "./test-utils.js"
 
-const describeNative = hasNativeTestRenderer() ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 const absoluteCases = [
   ["hex4", "#f00f", "#ff0000"],

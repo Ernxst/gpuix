@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url"
 import React, { useState } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
 import {
-  hasNativeTestRenderer,
+  isNativeTestRendererAvailable,
   nativeTestRendererError,
   TestRenderer,
 } from "../testing.js"
@@ -96,11 +96,11 @@ function runChild(command: string, args: string[]): Promise<string> {
 const ESM_TESTING_PROGRAM = `
 import {
   TestRenderer,
-  hasNativeTestRenderer,
+  isNativeTestRendererAvailable,
   nativeTestRendererLoadError,
 } from "@gpuix/react/testing"
 
-if (!hasNativeTestRenderer()) {
+if (!isNativeTestRendererAvailable()) {
   throw nativeTestRendererLoadError ?? new Error("TestGpuixRenderer is unavailable")
 }
 
@@ -153,9 +153,9 @@ console.log("BARE_TESTING_IMPORT_OK")
 `
 
 const LAZY_NATIVE_TEST_RENDERER_PROGRAM = `
-import { hasNativeTestRenderer } from "@gpuix/react/testing"
+import { isNativeTestRendererAvailable } from "@gpuix/react/testing"
 
-if (!hasNativeTestRenderer()) {
+if (!isNativeTestRendererAvailable()) {
   throw new Error("expected the native test renderer to initialize")
 }
 if (globalThis.__gpuixNativeModuleLoads !== 1) {
@@ -164,7 +164,7 @@ if (globalThis.__gpuixNativeModuleLoads !== 1) {
 if (globalThis.__gpuixNativeTestRendererConstructions !== 1) {
   throw new Error("first availability check did not construct TestGpuixRenderer exactly once")
 }
-if (!hasNativeTestRenderer()) {
+if (!isNativeTestRendererAvailable()) {
   throw new Error("expected the memoised native test renderer to remain available")
 }
 if (globalThis.__gpuixNativeModuleLoads !== 1) {
@@ -177,7 +177,7 @@ if (globalThis.__gpuixNativeTestRendererConstructions !== 1) {
 console.log("LAZY_NATIVE_TEST_RENDERER_OK")
 `
 
-const describeNative = hasNativeTestRenderer() ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 describe("native test renderer diagnostics", () => {
   it("loads and constructs the native renderer only on first use", async () => {
@@ -209,7 +209,7 @@ describe("native test renderer diagnostics", () => {
   })
 
   it("surfaces loader failures or constructs the GPU-backed renderer", () => {
-    if (!hasNativeTestRenderer()) {
+    if (!isNativeTestRendererAvailable()) {
       expect(nativeTestRendererError).toBeInstanceOf(Error)
       expect(() => new TestRenderer()).toThrow(nativeTestRendererError!.message)
       return

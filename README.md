@@ -1583,6 +1583,10 @@ When consuming GPUIX through `file:` or `link:`, configure your test bundler to
 dedupe `react`, `react-dom`, `react-reconciler`, and `scheduler`. This ensures
 your components and `@gpuix/react/testing` use the same React runtime.
 
+`hasNativeTestRenderer` was removed. Use
+`isNativeTestRendererAvailable()` when a test must check whether the native
+renderer can initialize.
+
 ```ts
 import { createTestRoot } from '@gpuix/react/testing'
 

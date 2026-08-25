@@ -13,14 +13,14 @@ import React from 'react'
 import { describe, expect, it } from 'vitest'
 import {
   createTestRoot,
-  hasNativeTestRenderer,
+  isNativeTestRendererAvailable,
   readMacCpuThrottle,
   type TestRoot,
 } from '@gpuix/react/testing'
 import { connectTest } from '@gpuix/react/automation'
 import { ChatApp } from './chat'
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 const throttle = readMacCpuThrottle()
 const TURNS = 1_000
 const WARMUP = 10

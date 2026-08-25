@@ -118,7 +118,7 @@ function initializeNativeTestRenderer(): NativeTestRendererConstructor | null {
  * native binding. Importing `@gpuix/react/testing` alone stays side-effect
  * free so file:/link: consumers can resolve their React runtime first.
  */
-export function hasNativeTestRenderer(): boolean {
+export function isNativeTestRendererAvailable(): boolean {
   return initializeNativeTestRenderer() != null
 }
 
