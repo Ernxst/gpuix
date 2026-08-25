@@ -70,8 +70,11 @@ interface NativeTestRendererConstructor {
 
 // The native test renderer is currently exported only by macOS builds.
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
+let probedNativeTestRenderer: NativeTestRendererApi | null = null
 /** The native binding error when the test renderer cannot be loaded. */
-export let nativeTestRendererLoadError: unknown
+export let nativeTestRendererLoadError: Error | null = null
+/** Backward-compatible alias for nativeTestRendererLoadError. */
+export { nativeTestRendererLoadError as nativeTestRendererError }
 const requireNative = createRequire(import.meta.url)
 
 try {
@@ -80,16 +83,22 @@ try {
   }
   if (native.TestGpuixRenderer) {
     NativeTestRenderer = native.TestGpuixRenderer
+    probedNativeTestRenderer = new native.TestGpuixRenderer()
   } else {
     nativeTestRendererLoadError = new Error(
       "@gpuix/native does not export TestGpuixRenderer. Build with test-support to run tests."
     )
   }
 } catch (error) {
-  nativeTestRendererLoadError = error
+  NativeTestRenderer = null
+  probedNativeTestRenderer = null
+  nativeTestRendererLoadError =
+    error instanceof Error
+      ? error
+      : new Error(`Failed to load @gpuix/native: ${String(error)}`)
 }
 
-/** Whether the native TestGpuixRenderer is available (for conditional test registration). */
+/** Whether the native TestGpuixRenderer loaded and initialized successfully. */
 export const hasNativeTestRenderer = NativeTestRenderer != null
 
 // ── Test element tree ────────────────────────────────────────────────
@@ -117,10 +126,13 @@ export class TestRenderer implements NativeRenderer {
   constructor() {
     if (!NativeTestRenderer) {
       throw new Error(
-        "Native TestGpuixRenderer not available. Build with test-support to run tests."
+        `Native TestGpuixRenderer not available: ${
+          nativeTestRendererLoadError?.message ?? "unknown native binding error"
+        }`
       )
     }
-    this.native = new NativeTestRenderer()
+    this.native = probedNativeTestRenderer ?? new NativeTestRenderer()
+    probedNativeTestRenderer = null
   }
 
   // ── NativeRenderer interface (all mutations delegate to native) ──

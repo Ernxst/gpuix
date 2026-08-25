@@ -475,13 +475,47 @@ async fn run_ui_commands(
     cx.update(|cx| cx.quit());
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|message| (*message).to_string())
         .or_else(|| payload.downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "unknown panic".to_string())
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn catch_gpui_initialization<T>(
+    operation: &str,
+    initialize: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(initialize)) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(Error::new(
+            error.status,
+            format!("{operation} failed: {}", error.reason),
+        )),
+        Err(payload) => Err(Error::from_reason(format!(
+            "{operation} panicked: {}",
+            panic_message(payload)
+        ))),
+    }
+}
+
+#[cfg(all(target_os = "macos", feature = "display-discovery-fault-injection"))]
+#[napi]
+pub fn test_macos_autorelease_pool_drain_count() -> u32 {
+    gpui_macos::test_autorelease_pool_drain_count()
+        .try_into()
+        .unwrap_or(u32::MAX)
+}
+
+#[cfg(all(target_os = "macos", feature = "display-discovery-fault-injection"))]
+#[napi]
+pub fn test_macos_native_window_allocation_count() -> u32 {
+    gpui_macos::test_native_window_allocation_count()
+        .try_into()
+        .unwrap_or(u32::MAX)
 }
 
 /// The main GPUI renderer exposed to Node.js.
@@ -636,6 +670,13 @@ impl GpuixRenderer {
 
     #[cfg(target_os = "macos")]
     fn init_macos(&self, options: Option<WindowOptions>) -> Result<()> {
+        catch_gpui_initialization("GPUI macOS renderer initialization", || {
+            self.init_macos_inner(options)
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn init_macos_inner(&self, options: Option<WindowOptions>) -> Result<()> {
         let options = options.unwrap_or_default();
 
         {
@@ -672,11 +713,16 @@ impl GpuixRenderer {
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
-            let bounds = gpui::Bounds::centered(
-                None,
-                gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
-                cx,
-            );
+            let window_size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
+            #[cfg(feature = "display-discovery-fault-injection")]
+            // Let the fault smoke reach MacWindow::open instead of failing during centering.
+            let bounds = if std::env::var_os("GPUI_TEST_DISABLE_DISPLAY_DISCOVERY").is_some() {
+                gpui::Bounds::new(gpui::Point::default(), window_size)
+            } else {
+                gpui::Bounds::centered(None, window_size, cx)
+            };
+            #[cfg(not(feature = "display-discovery-fault-injection"))]
+            let bounds = gpui::Bounds::centered(None, window_size, cx);
 
             match cx.open_window(
                 to_gpui_window_options(&window_options, bounds),
@@ -1601,6 +1647,33 @@ impl GpuixRenderer {
             Err(Error::from_reason(
                 "captureScreenshot needs the test-support build on macOS",
             ))
+        }
+    }
+}
+
+#[cfg(all(test, not(all(target_arch = "wasm32", target_os = "unknown"))))]
+mod initialization_tests {
+    use super::*;
+
+    #[test]
+    fn initialization_panics_preserve_observed_messages() {
+        let observed = [
+            "window.rs:366:57: called Option::unwrap() on a None value",
+            "Can't spawn on main thread after on_app_quit",
+            "The GPUI UI thread panicked during initialization",
+        ];
+
+        for message in observed {
+            let error =
+                catch_gpui_initialization("GPUI test renderer initialization", || -> Result<()> {
+                    panic!("{message}")
+                })
+                .expect_err("the initialization panic should become an error");
+
+            assert!(error
+                .reason
+                .contains("GPUI test renderer initialization panicked"));
+            assert!(error.reason.contains(message));
         }
     }
 }

@@ -1,8 +1,9 @@
 /// TestGpuixRenderer — GPU-backed GPUI test renderer exposed to Node.js via napi.
 ///
-/// Uses gpui::VisualTestAppContext (real Metal rendering on macOS) with
-/// TestDispatcher for deterministic scheduling. Runs the SAME GpuixView,
-/// build_element(), apply_styles(), and event handlers as production.
+/// Uses gpui::VisualTestAppContext with a deterministic virtual display,
+/// real Metal rendering on macOS, and TestDispatcher scheduling. Runs the
+/// SAME GpuixView, build_element(), apply_styles(), and event handlers as
+/// production without consulting the host display list.
 ///
 /// Windows are positioned offscreen at (-10000, -10000) — invisible but
 /// fully rendered by Metal. This enables capture_screenshot() for visual
@@ -21,9 +22,9 @@ use gpui::AppContext as _;
 
 use crate::element_tree::EventPayload;
 use crate::renderer::{
-    apply_batch_to_tree, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
-    parse_debug_frame_overlay_mode, to_element_id, DebugFrameOverlayStats, EventCallback,
-    GpuixView,
+    apply_batch_to_tree, catch_gpui_initialization, debug_frame_overlay_mode_name,
+    debug_frame_overlay_stats_js, parse_debug_frame_overlay_mode, to_element_id,
+    DebugFrameOverlayStats, EventCallback, GpuixView,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -101,6 +102,10 @@ pub struct TestGpuixRenderer {
 impl TestGpuixRenderer {
     #[napi(constructor)]
     pub fn new() -> Result<Self> {
+        catch_gpui_initialization("GPUI test renderer initialization", Self::try_new)
+    }
+
+    fn try_new() -> Result<Self> {
         let tree = Arc::new(Mutex::new(RetainedTree::new()));
         let events: Arc<Mutex<Vec<EventPayload>>> = Arc::new(Mutex::new(Vec::new()));
 
