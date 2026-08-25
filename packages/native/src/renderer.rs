@@ -3941,6 +3941,7 @@ pub(crate) fn build_div(
         if let Some(ref active_style) = style.active {
             el = el.active(|refinement| apply_styles(refinement, active_style));
         }
+        el = apply_focus_styles(el, style);
 
         if crate::style::should_occlude(style) {
             // BlockMouse (occlude) stops the hit test. The parent scroller
@@ -4340,6 +4341,19 @@ pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::Dimension
     }
 }
 
+pub(crate) fn apply_focus_styles<E: gpui::StatefulInteractiveElement>(
+    mut el: E,
+    style: &StyleDesc,
+) -> E {
+    if let Some(ref focus_style) = style.focus {
+        el = el.focus(|refinement| apply_styles(refinement, focus_style));
+    }
+    if let Some(ref focus_visible_style) = style.focus_visible {
+        el = el.focus_visible(|refinement| apply_styles(refinement, focus_visible_style));
+    }
+    el
+}
+
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.visibility.as_deref() {
         Some("hidden") => el = el.invisible(),
@@ -4634,6 +4648,17 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
             .spread_radius(gpui::px(shadow.spread_radius as f32));
             el = el.shadow(vec![shadow]);
         }
+    }
+    if let Some(ref color) = style.outline_color {
+        if let Some(color) = crate::color::parse_color_rgba(color) {
+            el = el.outline_color(color);
+        }
+    }
+    if let Some(width) = style.outline_width {
+        el = el.outline_width(gpui::px(width.max(0.0) as f32));
+    }
+    if let Some(offset) = style.outline_offset {
+        el = el.outline_offset(gpui::px(offset as f32));
     }
     if let Some(opacity) = style.opacity {
         el = el.opacity(opacity as f32);

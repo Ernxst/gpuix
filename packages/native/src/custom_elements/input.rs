@@ -353,6 +353,7 @@ impl CustomElement for TextEditorElement {
             .child(state);
         if let Some(style) = ctx.style {
             editor = crate::renderer::apply_styles(editor, style);
+            editor = crate::renderer::apply_focus_styles(editor, style);
         }
         if ctx
             .style

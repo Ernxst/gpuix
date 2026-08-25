@@ -224,6 +224,41 @@ describe("style props reach the renderer", () => {
     )
   })
 
+  it("paints an outside outline without changing measured bounds", () => {
+    const withoutPath = path.join(SHOTS_DIR, "outline-paint-without.png")
+    const withPath = path.join(SHOTS_DIR, "outline-paint-with.png")
+    const testRoot = createTestRoot()
+    const card = (outlined: boolean) => (
+      <div style={{ display: "flex", padding: 80, backgroundColor: "#101010" }}>
+        <div
+          testId="outlined-card"
+          style={{
+            width: 240,
+            height: 120,
+            backgroundColor: "#ffffff",
+            borderRadius: 16,
+            outlineColor: outlined ? "#7c86ff" : undefined,
+            outlineWidth: outlined ? 4 : undefined,
+            outlineOffset: outlined ? 6 : undefined,
+          }}
+        />
+      </div>
+    )
+
+    testRoot.render(card(false))
+    const element = testRoot.renderer.findByTestId("outlined-card")
+    expect(element).toBeDefined()
+    const boundsWithout = testRoot.renderer.getElementBounds(element!.id)
+    testRoot.renderer.captureScreenshot(withoutPath)
+
+    testRoot.render(card(true))
+    const boundsWith = testRoot.renderer.getElementBounds(element!.id)
+    testRoot.renderer.captureScreenshot(withPath)
+
+    expect(boundsWith).toEqual(boundsWithout)
+    expectScreenshotsDiffer(withoutPath, withPath)
+  })
+
   it("applies rowGap and columnGap", () => {
     // Both were in StyleDesc and implemented nowhere; only `gap` worked.
     const boxes = [0, 1, 2, 3].map((i) => (

@@ -20,7 +20,7 @@ import {
   startFrameLoop,
 } from "../reconciler/renderer.js"
 import type { EventPayload } from "@gpuix/native"
-import { expectScreenshotsDiffer } from "./test-utils"
+import { expectScreenshotsDiffer, expectScreenshotsEqual } from "./test-utils"
 
 // All tests require the native GPUI test renderer (cargo build with test-support).
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
@@ -281,6 +281,157 @@ describeNative("events", () => {
           "Count: 2",
         ]
       `)
+    })
+  })
+
+  describe("focus state styles", () => {
+    const focusProbe = (
+      staticFocused = false,
+      keyboardSentinel = false,
+      staticFocusVisible = false
+    ) => (
+      <div
+        style={{
+          display: "flex",
+          width: "100%",
+          height: "100%",
+          padding: 80,
+          backgroundColor: "#101010",
+        }}
+      >
+        {keyboardSentinel && (
+          <div
+            autoFocus={!staticFocused}
+            tabIndex={staticFocused ? undefined : 0}
+            style={{ width: 1, height: 1 }}
+          />
+        )}
+        <div
+          tabIndex={staticFocused ? undefined : 0}
+          style={{
+            width: 240,
+            height: 100,
+            backgroundColor: staticFocused ? "#c2415d" : "#334155",
+            borderRadius: 12,
+            outlineColor: staticFocusVisible ? "#67e8f9" : undefined,
+            outlineWidth: staticFocusVisible ? 4 : undefined,
+            outlineOffset: staticFocusVisible ? 5 : undefined,
+            focus: { backgroundColor: "#c2415d" },
+            focusVisible: {
+              outlineColor: "#67e8f9",
+              outlineWidth: 4,
+              outlineOffset: 5,
+            },
+          }}
+        />
+      </div>
+    )
+
+    it("applies focus on pointer focus but reserves focusVisible for keyboard focus", () => {
+      const pointerPath = "/tmp/gpuix-focus-pointer.png"
+      const pointerExpectedPath = "/tmp/gpuix-focus-pointer-expected.png"
+      const keyboardPath = "/tmp/gpuix-focus-keyboard.png"
+      const keyboardExpectedPath = "/tmp/gpuix-focus-keyboard-expected.png"
+
+      const pointer = createTestRoot()
+      pointer.render(focusProbe())
+      pointer.renderer.nativeSimulateClick(120, 120)
+      pointer.renderer.captureScreenshot(pointerPath)
+
+      const pointerExpected = createTestRoot()
+      pointerExpected.render(focusProbe(true))
+      pointerExpected.renderer.captureScreenshot(pointerExpectedPath)
+
+      const keyboard = createTestRoot()
+      keyboard.render(focusProbe(false, true))
+      keyboard.renderer.simulateKeystrokes("tab")
+      keyboard.renderer.captureScreenshot(keyboardPath)
+
+      const keyboardExpected = createTestRoot()
+      keyboardExpected.render(focusProbe(true, true, true))
+      keyboardExpected.renderer.captureScreenshot(keyboardExpectedPath)
+
+      expectScreenshotsEqual(pointerPath, pointerExpectedPath)
+      expectScreenshotsEqual(keyboardPath, keyboardExpectedPath)
+      expectScreenshotsDiffer(pointerPath, keyboardPath)
+    })
+
+    it("keeps focus-visible styling on the directly focused control", () => {
+      const actualPath = "/tmp/gpuix-focus-scoped.png"
+      const expectedPath = "/tmp/gpuix-focus-scoped-expected.png"
+
+      const tree = (staticChildOutline: boolean) => (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            width: "100%",
+            height: "100%",
+            gap: 36,
+            padding: 80,
+            backgroundColor: "#101010",
+          }}
+        >
+          <div
+            autoFocus={!staticChildOutline}
+            tabIndex={staticChildOutline ? undefined : 0}
+            style={{ width: 1, height: 1 }}
+          />
+          <div
+            style={{
+              width: 180,
+              height: 60,
+              backgroundColor: "#334155",
+              focusVisible: {
+                outlineColor: "#c084fc",
+                outlineWidth: 4,
+              },
+            }}
+          />
+          <div
+            tabIndex={-1}
+            style={{
+              width: 320,
+              height: 150,
+              padding: 28,
+              backgroundColor: "#1e293b",
+              focusVisible: {
+                outlineColor: "#fb7185",
+                outlineWidth: 4,
+              },
+            }}
+          >
+            <div
+              testId="focus-scoped-child"
+              tabIndex={staticChildOutline ? undefined : 0}
+              style={{
+                width: 180,
+                height: 70,
+                backgroundColor: "#334155",
+                outlineColor: staticChildOutline ? "#4ade80" : undefined,
+                outlineWidth: staticChildOutline ? 4 : undefined,
+                outlineOffset: staticChildOutline ? 4 : undefined,
+                focusVisible: {
+                  outlineColor: "#4ade80",
+                  outlineWidth: 4,
+                  outlineOffset: 4,
+                },
+              }}
+            />
+          </div>
+        </div>
+      )
+
+      const actual = createTestRoot()
+      actual.render(tree(false))
+      actual.renderer.simulateKeystrokes("tab")
+      actual.renderer.captureScreenshot(actualPath)
+
+      const expected = createTestRoot()
+      expected.render(tree(true))
+      expected.renderer.captureScreenshot(expectedPath)
+
+      expectScreenshotsEqual(actualPath, expectedPath)
     })
   })
 

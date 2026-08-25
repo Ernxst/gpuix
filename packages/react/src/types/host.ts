@@ -121,6 +121,9 @@ export interface StyleDesc {
   borderBottomLeftRadius?: number
   borderBottomRightRadius?: number
   boxShadow?: BoxShadow
+  outlineColor?: string
+  outlineWidth?: number
+  outlineOffset?: number
 
   fontSize?: number
   fontFamily?: string
@@ -148,10 +151,12 @@ export interface StyleDesc {
   /** Selection wash colour for this subtree. Defaults to the theme accent at 35%. */
   selectionColor?: string
 
-  // Pseudo-selector styles — applied by GPUI natively (no JS round-trip).
-  // Nesting is one level deep: hover/active cannot contain hover/active.
-  hover?: Omit<StyleDesc, "hover" | "active">
-  active?: Omit<StyleDesc, "hover" | "active">
+  // Native state styles — applied by GPUI without a JS round trip.
+  // Nesting is one level deep: a state style cannot contain another state style.
+  hover?: Omit<StyleDesc, "hover" | "active" | "focus" | "focusVisible">
+  active?: Omit<StyleDesc, "hover" | "active" | "focus" | "focusVisible">
+  focus?: Omit<StyleDesc, "hover" | "active" | "focus" | "focusVisible">
+  focusVisible?: Omit<StyleDesc, "hover" | "active" | "focus" | "focusVisible">
 }
 
 // Element types supported by GPUIX
