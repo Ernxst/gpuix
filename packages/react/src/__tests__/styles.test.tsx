@@ -13,7 +13,7 @@ import { createTestRoot, hasNativeTestRenderer } from "../testing"
 import { motion } from "../index"
 import { bufferSimilarity, isCI } from "./test-utils"
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = hasNativeTestRenderer() ? describe : describe.skip
 
 const SCREENSHOT_DIR = "/tmp"
 

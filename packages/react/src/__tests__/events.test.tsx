@@ -19,7 +19,7 @@ import type { EventPayload } from "@gpuix/native"
 import { expectScreenshotsDiffer } from "./test-utils"
 
 // All tests require the native GPUI test renderer (cargo build with test-support).
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = hasNativeTestRenderer() ? describe : describe.skip
 
 describe("frame loop", () => {
   it("does not tick when the native platform owns its event loop", () => {

@@ -1579,6 +1579,10 @@ tests never discover the host display; windows are positioned offscreen and
 still rendered fully by Metal. The methods below are the lower-level API when a
 locator is not enough.
 
+When consuming GPUIX through `file:` or `link:`, configure your test bundler to
+dedupe `react`, `react-dom`, `react-reconciler`, and `scheduler`. This ensures
+your components and `@gpuix/react/testing` use the same React runtime.
+
 ```ts
 import { createTestRoot } from '@gpuix/react/testing'
 

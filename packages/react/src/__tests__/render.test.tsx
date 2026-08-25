@@ -100,7 +100,7 @@ import {
   nativeTestRendererLoadError,
 } from "@gpuix/react/testing"
 
-if (!hasNativeTestRenderer) {
+if (!hasNativeTestRenderer()) {
   throw nativeTestRendererLoadError ?? new Error("TestGpuixRenderer is unavailable")
 }
 
@@ -117,11 +117,99 @@ if (!renderer.getPaintedText().includes("esm test binding")) {
 console.log("ESM_TEST_BINDING_OK")
 `
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const NATIVE_TEST_RENDERER_SPY_PRELOAD = `
+const Module = require("node:module")
+const originalLoad = Module._load
+
+globalThis.__gpuixNativeModuleLoads = 0
+globalThis.__gpuixNativeTestRendererConstructions = 0
+
+Module._load = function (request, parent, isMain) {
+  if (request === "@gpuix/native") {
+    globalThis.__gpuixNativeModuleLoads += 1
+    return {
+      TestGpuixRenderer: class TestGpuixRenderer {
+        constructor() {
+          globalThis.__gpuixNativeTestRendererConstructions += 1
+        }
+      },
+    }
+  }
+  return originalLoad.call(this, request, parent, isMain)
+}
+`
+
+const BARE_TESTING_IMPORT_PROGRAM = `
+import "@gpuix/react/testing"
+
+if (globalThis.__gpuixNativeModuleLoads !== 0) {
+  throw new Error("bare testing import loaded @gpuix/native")
+}
+if (globalThis.__gpuixNativeTestRendererConstructions !== 0) {
+  throw new Error("bare testing import constructed TestGpuixRenderer")
+}
+
+console.log("BARE_TESTING_IMPORT_OK")
+`
+
+const LAZY_NATIVE_TEST_RENDERER_PROGRAM = `
+import { hasNativeTestRenderer } from "@gpuix/react/testing"
+
+if (!hasNativeTestRenderer()) {
+  throw new Error("expected the native test renderer to initialize")
+}
+if (globalThis.__gpuixNativeModuleLoads !== 1) {
+  throw new Error("first availability check did not load @gpuix/native exactly once")
+}
+if (globalThis.__gpuixNativeTestRendererConstructions !== 1) {
+  throw new Error("first availability check did not construct TestGpuixRenderer exactly once")
+}
+if (!hasNativeTestRenderer()) {
+  throw new Error("expected the memoised native test renderer to remain available")
+}
+if (globalThis.__gpuixNativeModuleLoads !== 1) {
+  throw new Error("memoised availability check loaded @gpuix/native again")
+}
+if (globalThis.__gpuixNativeTestRendererConstructions !== 1) {
+  throw new Error("memoised availability check constructed TestGpuixRenderer again")
+}
+
+console.log("LAZY_NATIVE_TEST_RENDERER_OK")
+`
+
+const describeNative = hasNativeTestRenderer() ? describe : describe.skip
 
 describe("native test renderer diagnostics", () => {
+  it("loads and constructs the native renderer only on first use", async () => {
+    const preload = join(srcDir, "__tests__", "native-test-renderer-spy.tmp.cjs")
+    writeFileSync(preload, NATIVE_TEST_RENDERER_SPY_PRELOAD)
+
+    try {
+      await expect(
+        runChild("node", [
+          "--require",
+          preload,
+          "--input-type=module",
+          "--eval",
+          BARE_TESTING_IMPORT_PROGRAM,
+        ])
+      ).resolves.toContain("BARE_TESTING_IMPORT_OK")
+      await expect(
+        runChild("node", [
+          "--require",
+          preload,
+          "--input-type=module",
+          "--eval",
+          LAZY_NATIVE_TEST_RENDERER_PROGRAM,
+        ])
+      ).resolves.toContain("LAZY_NATIVE_TEST_RENDERER_OK")
+    } finally {
+      unlinkSync(preload)
+    }
+  })
+
   it("surfaces loader failures or constructs the GPU-backed renderer", () => {
-    if (!hasNativeTestRenderer) {
+    if (!hasNativeTestRenderer()) {
       expect(nativeTestRendererError).toBeInstanceOf(Error)
       expect(() => new TestRenderer()).toThrow(nativeTestRendererError!.message)
       return

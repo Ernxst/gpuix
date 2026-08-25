@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest"
 import { connectTest } from "../automation/index.js"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = hasNativeTestRenderer() ? describe : describe.skip
 
 function Counter() {
   const [count, setCount] = useState(0)

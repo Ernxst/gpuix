@@ -9,7 +9,7 @@ import {
   SHOTS_DIR,
 } from "./test-utils.js"
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = hasNativeTestRenderer() ? describe : describe.skip
 
 const absoluteCases = [
   ["hex4", "#f00f", "#ff0000"],

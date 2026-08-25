@@ -7,7 +7,7 @@ import React, { useState } from "react"
 import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing"
 import { bufferSimilarity, isCI } from "./test-utils"
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = hasNativeTestRenderer() ? describe : describe.skip
 
 const IMAGE_FIXTURE_PATH = "/tmp/gpuix-img-fixture.svg"
 const SVG_FIXTURE = [

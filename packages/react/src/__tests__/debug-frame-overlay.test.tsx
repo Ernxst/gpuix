@@ -8,7 +8,7 @@ import { render, resetRender } from "../reconciler/renderer.js"
 import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = hasNativeTestRenderer() ? describe : describe.skip
 
 beforeAll(() => {
   fs.mkdirSync(SHOTS_DIR, { recursive: true })
