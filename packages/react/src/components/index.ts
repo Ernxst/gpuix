@@ -10,6 +10,7 @@ import type {
   StyleDesc,
   VirtualListProps,
 } from "../types/host.js"
+import { DEFAULT_VIRTUAL_LIST_ESTIMATED_ITEM_HEIGHT } from "./virtual-list-contract.js"
 
 export const gpuixComponents = {
   div: "div",
@@ -64,9 +65,11 @@ export const motion = {
   div: MotionDiv,
 } as const
 
-export interface WindowedVirtualListProps extends VirtualListProps {
+export interface WindowedVirtualListProps
+  extends Omit<VirtualListProps, "estimatedItemHeight"> {
   itemCount: number
   renderItem: (index: number) => ReactNode
+  estimatedItemHeight?: number
 }
 
 function initialWindow(options: {
@@ -87,7 +90,7 @@ export const VirtualList = forwardRef<PublicInstance, WindowedVirtualListProps>(
     {
       itemCount,
       renderItem,
-      estimatedItemHeight = 48,
+      estimatedItemHeight = DEFAULT_VIRTUAL_LIST_ESTIMATED_ITEM_HEIGHT,
       overdraw = 240,
       alignment,
       followTail,
