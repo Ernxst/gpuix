@@ -224,6 +224,8 @@ export interface RenderOptions extends WindowOptions {
   renderer?: NativeRenderer
   /** GPUI scene overlay. Does not go through React or layout. */
   debugFrameOverlay?: DebugFrameOverlayMode
+  /** Reject invalid fields and emit actionable diagnostics. Defaults on in non-production Node runtimes. */
+  strictStyles?: boolean
 }
 
 export function resetRender(): void {
@@ -370,6 +372,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     renderer: injected,
     debugFrameOverlay,
     menus,
+    strictStyles,
     ...windowOptions
   } = options
   const slot = renderSlot()
@@ -419,7 +422,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     console.log("[gpuix] remount: unmount previous tree")
     slot.root.unmount()
   }
-  const root = createRoot(host)
+  const root = createRoot(host, { strictStyles })
   slot.root = root
   try {
     flushSync(() => {

@@ -35,6 +35,12 @@ import { containerForRenderer, unregisterEventHandlers } from "./event-registry.
 
 export type MutationTuple = (number | string | boolean | object | null)[]
 
+function reportStyleDiagnostics(renderer: NativeRenderer): void {
+  for (const diagnostic of renderer.drainStyleDiagnostics?.() ?? []) {
+    console.warn(diagnostic.message)
+  }
+}
+
 /// Methods that should be batched (queued instead of called immediately).
 /// Any method NOT in this set is passed through to the inner renderer directly.
 /// This prevents accidental queuing of getters, queries, or future non-mutation
@@ -78,6 +84,12 @@ export function wrapWithBatching(inner: NativeRenderer): NativeRenderer {
             target.setCustomProp(id, key, JSON.stringify(value ?? null))
           }
         }
+        if (prop === "commitMutations") {
+          return () => {
+            target.commitMutations()
+            reportStyleDiagnostics(target)
+          }
+        }
         const method = (target as NativeRenderer & Record<string, unknown>)[prop]
         if (typeof method === "function") {
           return method.bind(target)
@@ -98,13 +110,16 @@ export function wrapWithBatching(inner: NativeRenderer): NativeRenderer {
         return () => {
           if (queue.length === 0) {
             batchable.commitMutations()
+            reportStyleDiagnostics(batchable)
             return
           }
 
           const json = JSON.stringify(queue)
 
-          // applyBatch may throw on malformed ops — queue is preserved
-          // on failure so state doesn't desync between JS and Rust.
+          // Field-level style problems never reject the batch. If applyBatch
+          // throws, the atomic envelope or renderer lifecycle is unusable.
+          // Preserve the queue and let that fatal error escape the React host
+          // boundary; swallowing it would commit a JS tree Rust never received.
           const destroyedIds = batchable.applyBatch(json)
 
           const container = containerForRenderer(inner)
@@ -115,6 +130,13 @@ export function wrapWithBatching(inner: NativeRenderer): NativeRenderer {
           }
 
           // applyBatch already invalidates, so only clear after batch + cleanup.
+          queue = []
+          reportStyleDiagnostics(batchable)
+        }
+      }
+
+      if (prop === "discardMutations") {
+        return () => {
           queue = []
         }
       }

@@ -637,43 +637,45 @@ renderer.getScrollOffset(elementId)       // returns [x, y] or null
 
 ## Virtual lists
 
-Use `<virtual-list>` for **long, variable-height collections** such as message lists. React and Rust retain every row, but GPUI only builds, lays out, and paints rows near the viewport.
+Use `VirtualList` for **long, variable-height collections** such as message lists. It mounts only the active React window while native GPUI builds, lays out, and paints rows near the viewport.
 
 ```tsx
+import { VirtualList } from '@gpuix/react'
+
 function MessageList({ messages }: { messages: Message[] }) {
   return (
-    <virtual-list
+    <VirtualList
+      itemCount={messages.length}
       alignment="bottom"
       followTail
       estimatedItemHeight={180}
       style={{ flexGrow: 1, minHeight: 0 }}
-    >
-      {messages.map((message) => (
-        <Message key={message.id} message={message} />
-      ))}
-    </virtual-list>
+      renderItem={(index) => (
+        <Message key={messages[index].id} message={messages[index]} />
+      )}
+    />
   )
 }
 ```
 
-The list needs a **bounded height** or bounded flex space. Its direct children are rows and can contain any GPUIX host or custom element.
+The list needs a **bounded height** or bounded flex space. `renderItem` must return one host root for each row; that root can contain any GPUIX host or custom element.
 
 | Prop | Default | Purpose |
 |---|---:|---|
 | `alignment` | `"top"` | Use `"bottom"` for chat-style initial positioning |
 | `followTail` | `false` | Follow appended rows until the user scrolls away |
-| `overdraw` | `512` | Extra pixels built outside the viewport |
-| `estimatedItemHeight` | none | Gives unmeasured rows an initial height estimate |
+| `overdraw` | `240` | Extra pixels mounted and built outside the viewport |
+| `estimatedItemHeight` | `48` | Gives unmeasured rows an initial height estimate |
 
 ### How virtualization works
 
-**React reconciliation stays normal.** The complete keyed child list crosses the mutation protocol and remains in Rust's retained tree. GPUIX defers only the expensive GPUI element construction, layout, and paint work.
+`VirtualList` keeps the logical count in native state while React and Rust retain only the mounted window. The lower-level `<virtual-list>` host still accepts a complete keyed child list and defers only GPUI element construction, layout, and paint.
 
 ```text
-React Fiber + Rust RetainedTree    all row IDs, props, text, and events
+React Fiber + Rust RetainedTree    mounted row window
                  │
                  ▼
-          GPUI ListState          row count and measured height cache
+          GPUI ListState          full row count and measured height cache
                  │
                  ▼ visible indexes plus overdraw
           cx.processor            re-enters GpuixView after root render
@@ -691,7 +693,7 @@ When a retained descendant changes, GPUIX marks its direct row for remeasurement
 
 ### Row boundaries
 
-Each **direct host child** is one virtual row. Give every row a stable React key and one host root:
+`VirtualList.renderItem` must return one host root with a stable key. At the lower level, each **immediate child** of `<virtual-list>` is one virtual row:
 
 ```tsx
 <virtual-list style={{ height: 500 }}>
@@ -703,6 +705,15 @@ Each **direct host child** is one virtual row. Give every row a stable React key
 </virtual-list>
 ```
 
+In development, a direct host list with one immediate child fails unless
+`itemCount={1}` makes that one-row intent explicit. A wrapper around an entire
+collection is one row and defeats virtualization. Prefer `VirtualList` with
+`itemCount` and `renderItem` for windowed data.
+
+Direct host usage also defaults `estimatedItemHeight` to `48`. Pass
+`estimatedItemHeight={null}` only when content-discovery sizing is intentional;
+unvisited rows then contribute no estimate to the initial scroll extent.
+
 A row can contain nested `<div>`, `<text>`, `<markdown>`, `<code>`, `<diff>`, `<input>`, and `<textarea>` elements. Focusable rows stay active when they move offscreen, so keyboard input and native editor state are preserved. Those children must not scroll. Nested scrolling is not supported; see [Scrolling](#scrolling).
 
 ### Chat tail behavior
@@ -710,16 +721,16 @@ A row can contain nested `<div>`, `<text>`, `<markdown>`, `<code>`, `<diff>`, `<
 Combine `alignment="bottom"` and `followTail` for a chat thread:
 
 ```tsx
-<virtual-list
+<VirtualList
+  itemCount={turns.length}
   alignment="bottom"
   followTail
   estimatedItemHeight={220}
   style={{ flexGrow: 1, minHeight: 0 }}
->
-  {turns.map((turn) => (
-    <ChatTurn key={turn.id} turn={turn} />
-  ))}
-</virtual-list>
+  renderItem={(index) => (
+    <ChatTurn key={turns[index].id} turn={turns[index]} />
+  )}
+/>
 ```
 
 The list follows new rows while the user is at the bottom. Scrolling upward pauses tail following. Returning to the bottom enables it again. A streaming final row is remeasured as its content grows.
@@ -741,11 +752,14 @@ function Results({ rows }: { rows: Result[] }) {
 
   return (
     <>
-      <virtual-list ref={listRef} style={{ height: 400 }}>
-        {rows.map((row) => (
-          <ResultRow key={row.id} row={row} />
-        ))}
-      </virtual-list>
+      <VirtualList
+        ref={listRef}
+        itemCount={rows.length}
+        style={{ height: 400 }}
+        renderItem={(index) => (
+          <ResultRow key={rows[index].id} row={rows[index]} />
+        )}
+      />
       <div onClick={() => reveal(rows.length - 1)}>Reveal latest</div>
     </>
   )
@@ -1404,7 +1418,30 @@ CSS-like styling via the `style` prop:
 
 **Position:** `position` (`"relative"` | `"absolute"`), `top`, `right`, `bottom`, `left`
 
-**Visual:** `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
+**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
+
+`background` accepts a solid color, a CSS `linear-gradient()` with two through
+eight stops, or a structured native gradient:
+
+```tsx
+<div style={{
+  background: {
+    type: 'linearGradient',
+    angle: 90,
+    colorSpace: 'oklab',
+    stops: [
+      { color: 'red', position: 0 },
+      { color: 'rebeccapurple', position: 0.5 },
+      { color: 'blue', position: 1 },
+    ],
+  },
+}} />
+```
+
+Angles follow CSS (`0` points up and `90` points right); stop positions run
+from `0` through `1`. Native interpolation supports `srgb` and `oklab`.
+Radial gradients are explicitly rejected until GPUI has a radial background
+primitive.
 
 ### Colors
 
@@ -1420,8 +1457,23 @@ uses `csscolorparser` 0.8.3 and accepts:
   forms.
 
 Standard comma and modern space/slash alpha forms work. Values are converted
-to hard-clipped sRGB before GPUI paints them. Invalid strings are ignored for
-that property; they do not reject the full style object.
+to hard-clipped sRGB before GPUI paints them.
+
+### Strict style diagnostics
+
+Style objects are decoded field-by-field. An invalid value rejects only that
+field; valid siblings still commit and the error never escapes React's commit
+phase. In a Node runtime outside `NODE_ENV=production`, strict styles are
+enabled by default and each rejection warns with the element id, element type,
+`testId` when present, property, and offending value. Unknown properties,
+unsupported enum values, invalid colors, radial gradients, and supported
+properties with malformed values all use the same diagnostic path.
+
+Production and browser bundles without a Node environment default to
+deterministic compatibility mode: invalid fields are dropped without a warning,
+while the rest of the style and mutation batch are applied. Pass
+`strictStyles: true` to `render()` to keep diagnostics there, or
+`strictStyles: false` to opt out explicitly.
 
 `hsv()`, `hsva()`, and `hwba()` are parser extensions rather than CSS Color 4
 standard functions. `color()`, platform/dynamic colors, and numeric color
@@ -1471,7 +1523,11 @@ Limited relative-color forms can derive a new color from a base value:
 
 **Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` creates a native scrollable container with persistent scroll state
 
-**Text:** `fontSize`, `fontFamily`, `fontWeight`, `textAlign`, `lineHeight`, `whiteSpace`, `textOverflow`, `lineClamp`
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`
+
+`textWrap` accepts `"wrap"` and `"nowrap"`. `"balance"` and `"pretty"` are
+recognized but explicitly rejected with a strict-style diagnostic because GPUI
+does not yet implement those wrapping algorithms.
 
 **Selection:** `userSelect` (`"text"` | `"none"`), `selectionColor` — both inherit down the tree
 

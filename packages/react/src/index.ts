@@ -74,11 +74,15 @@ export type { MotionDivProps, WindowedVirtualListProps } from "./components/inde
 export type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
+  BackgroundValue,
+  LinearGradient,
+  LinearGradientStop,
   MotionEase,
   MotionProps,
   MotionStyle,
   MotionTransition,
   NativeRenderer,
+  StyleDiagnostic,
   StyleDesc,
 } from "./types/host.js"
 export { handleGpuixEvent } from "./reconciler/event-registry.js"

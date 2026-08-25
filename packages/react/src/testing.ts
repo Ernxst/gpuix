@@ -16,6 +16,7 @@ import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
   NativeRenderer,
+  StyleDiagnostic,
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
@@ -64,6 +65,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   getPaintedText(): string[]
   getSyntaxCacheStats(): number[]
   clearSelection(): void
+  setStrictStyles(enabled: boolean): void
+  drainStyleDiagnostics(): StyleDiagnostic[]
   captureScreenshot(path: string): void
 }
 
@@ -196,6 +199,14 @@ export class TestRenderer implements NativeRenderer {
 
   setApplicationEventHandler(handler: ((event: EventPayload) => void) | null): void {
     this.applicationEventHandler = handler
+  }
+
+  setStrictStyles(enabled: boolean): void {
+    this.native.setStrictStyles(enabled)
+  }
+
+  drainStyleDiagnostics(): StyleDiagnostic[] {
+    return this.native.drainStyleDiagnostics()
   }
 
   // ── GPUI pipeline methods ───────────────────────────────────────
