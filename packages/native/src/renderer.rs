@@ -11,7 +11,7 @@
 //!   renderer.appendChild(0, 1)
 //!   renderer.commitMutations()           // signal batch complete
 //!   setTimeout(function loop() {         // drive AppKit on macOS
-//!     if (!renderer.tick()) process.exit(0)
+//!     if (!renderer.tick()) onTerminated()
 //!     setTimeout(loop, 8)
 //!   })
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -26,6 +26,8 @@ use napi_derive::napi;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -42,6 +44,295 @@ use crate::text::{selectable_text, selection_frame_reset, selection_key, SharedS
 use crate::theme::Theme;
 
 gpui::actions!(gpuix_focus, [FocusNext, FocusPrevious]);
+
+#[derive(Clone, Debug, PartialEq, Eq, gpui::Action)]
+#[action(namespace = gpuix, no_json)]
+struct ApplicationMenuAction {
+    generation: u64,
+    instance: u64,
+    id: Option<String>,
+    quit: bool,
+}
+
+#[derive(Default)]
+struct ApplicationMenuState {
+    generation: u64,
+    actions_by_id: HashMap<String, ApplicationMenuAction>,
+    installed_menu_count: usize,
+}
+
+impl gpui::Global for ApplicationMenuState {}
+
+/// One top-level application menu.
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct MenuSpec {
+    pub name: String,
+    pub items: Vec<MenuItemSpec>,
+    pub disabled: Option<bool>,
+}
+
+/// A cross-platform application menu item.
+///
+/// `kind` is `"action"`, `"separator"`, `"submenu"`, or `"system"`.
+/// Action items require `label` and `id`; use `role: "quit"` for the
+/// platform quit action. System items currently support `systemMenu:
+/// "services"`.
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct MenuItemSpec {
+    pub kind: String,
+    pub label: Option<String>,
+    pub id: Option<String>,
+    pub items: Option<Vec<MenuItemSpec>>,
+    pub disabled: Option<bool>,
+    pub checked: Option<bool>,
+    pub key_equivalent: Option<String>,
+    pub role: Option<String>,
+    pub system_menu: Option<String>,
+    pub os_action: Option<String>,
+}
+
+struct ApplicationMenuBuilder {
+    generation: u64,
+    next_instance: u64,
+    actions_by_id: HashMap<String, ApplicationMenuAction>,
+    bindings: Vec<gpui::KeyBinding>,
+}
+
+impl ApplicationMenuBuilder {
+    fn new(generation: u64) -> Self {
+        Self {
+            generation,
+            next_instance: 0,
+            actions_by_id: HashMap::new(),
+            bindings: Vec::new(),
+        }
+    }
+
+    fn menu(&mut self, spec: MenuSpec) -> std::result::Result<gpui::Menu, String> {
+        let items = spec
+            .items
+            .into_iter()
+            .map(|item| self.item(item))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(gpui::Menu::new(spec.name)
+            .items(items)
+            .disabled(spec.disabled.unwrap_or(false)))
+    }
+
+    fn item(&mut self, spec: MenuItemSpec) -> std::result::Result<gpui::MenuItem, String> {
+        match spec.kind.as_str() {
+            "separator" => Ok(gpui::MenuItem::separator()),
+            "submenu" => {
+                let label = required_menu_field(spec.label, "submenu", "label")?;
+                let items = spec.items.unwrap_or_default();
+                let submenu = self.menu(MenuSpec {
+                    name: label,
+                    items,
+                    disabled: spec.disabled,
+                })?;
+                Ok(gpui::MenuItem::submenu(submenu))
+            }
+            "system" => {
+                let label = required_menu_field(spec.label, "system", "label")?;
+                match spec.system_menu.as_deref() {
+                    Some("services") => Ok(gpui::MenuItem::os_submenu(
+                        label,
+                        gpui::SystemMenuType::Services,
+                    )),
+                    Some(value) => Err(format!(
+                        "Unknown system menu {value:?}. The supported value is \"services\"."
+                    )),
+                    None => Err("A system menu item requires systemMenu".to_string()),
+                }
+            }
+            "action" => self.action(spec),
+            value => Err(format!(
+                "Unknown menu item kind {value:?}. Use action, separator, submenu, or system."
+            )),
+        }
+    }
+
+    fn action(&mut self, spec: MenuItemSpec) -> std::result::Result<gpui::MenuItem, String> {
+        let label = required_menu_field(spec.label, "action", "label")?;
+        let quit = match spec.role.as_deref() {
+            None => false,
+            Some("quit") => true,
+            Some(value) => {
+                return Err(format!(
+                    "Unknown menu action role {value:?}. The supported role is \"quit\"."
+                ));
+            }
+        };
+        if !quit && spec.id.is_none() {
+            return Err("A menu action requires id unless role is \"quit\"".to_string());
+        }
+
+        self.next_instance += 1;
+        let action = ApplicationMenuAction {
+            generation: self.generation,
+            instance: self.next_instance,
+            id: spec.id.clone(),
+            quit,
+        };
+
+        if let Some(id) = spec.id {
+            if id.is_empty() {
+                return Err("A menu action id cannot be empty".to_string());
+            }
+            if self
+                .actions_by_id
+                .insert(id.clone(), action.clone())
+                .is_some()
+            {
+                return Err(format!("Duplicate menu action id {id:?}"));
+            }
+        }
+
+        let key_equivalent = spec
+            .key_equivalent
+            .or_else(|| quit.then(|| "cmd-q".to_string()));
+        if let Some(key_equivalent) = key_equivalent {
+            validate_menu_key_equivalent(&key_equivalent)?;
+            self.bindings
+                .push(gpui::KeyBinding::new(&key_equivalent, action.clone(), None));
+        }
+
+        let item = match spec.os_action.as_deref() {
+            Some(value) => gpui::MenuItem::os_action(label, action, parse_menu_os_action(value)?),
+            None => gpui::MenuItem::action(label, action),
+        };
+        Ok(item
+            .checked(spec.checked.unwrap_or(false))
+            .disabled(spec.disabled.unwrap_or(false)))
+    }
+}
+
+fn required_menu_field(
+    value: Option<String>,
+    kind: &str,
+    field: &str,
+) -> std::result::Result<String, String> {
+    value
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("A {kind} menu item requires {field}"))
+}
+
+fn validate_menu_key_equivalent(value: &str) -> std::result::Result<(), String> {
+    if value.split_whitespace().count() != 1 {
+        return Err(format!(
+            "Menu key equivalent {value:?} must contain exactly one keystroke"
+        ));
+    }
+    gpui::Keystroke::parse(value)
+        .map(|_| ())
+        .map_err(|error| format!("Invalid menu key equivalent {value:?}: {error}"))
+}
+
+fn parse_menu_os_action(value: &str) -> std::result::Result<gpui::OsAction, String> {
+    match value {
+        "cut" => Ok(gpui::OsAction::Cut),
+        "copy" => Ok(gpui::OsAction::Copy),
+        "paste" => Ok(gpui::OsAction::Paste),
+        "selectAll" => Ok(gpui::OsAction::SelectAll),
+        "undo" => Ok(gpui::OsAction::Undo),
+        "redo" => Ok(gpui::OsAction::Redo),
+        _ => Err(format!(
+            "Unknown menu OS action {value:?}. Use cut, copy, paste, selectAll, undo, or redo."
+        )),
+    }
+}
+
+pub(crate) fn default_application_menus(title: &str) -> Vec<MenuSpec> {
+    vec![MenuSpec {
+        name: title.to_string(),
+        disabled: None,
+        items: vec![MenuItemSpec {
+            kind: "action".to_string(),
+            label: Some(format!("Quit {title}")),
+            id: None,
+            items: None,
+            disabled: None,
+            checked: None,
+            key_equivalent: Some("cmd-q".to_string()),
+            role: Some("quit".to_string()),
+            system_menu: None,
+            os_action: None,
+        }],
+    }]
+}
+
+fn emit_application_event(
+    callback: &Option<EventCallback>,
+    event_type: &str,
+    value: Option<String>,
+) {
+    if let Some(callback) = callback {
+        callback(EventPayload {
+            event_type: event_type.to_string(),
+            value,
+            ..EventPayload::default()
+        });
+    }
+}
+
+pub(crate) fn init_application_menu_support(cx: &mut gpui::App, callback: Option<EventCallback>) {
+    cx.set_global(ApplicationMenuState::default());
+    cx.on_action(move |action: &ApplicationMenuAction, cx| {
+        let active = cx.global::<ApplicationMenuState>().generation == action.generation;
+        if !active {
+            return;
+        }
+        if let Some(id) = action.id.clone() {
+            emit_application_event(&callback, "menuAction", Some(id));
+        }
+        if action.quit {
+            cx.quit();
+        }
+    });
+}
+
+pub(crate) fn set_application_menus(
+    cx: &mut gpui::App,
+    specs: Vec<MenuSpec>,
+) -> std::result::Result<(), String> {
+    let generation = cx
+        .global::<ApplicationMenuState>()
+        .generation
+        .wrapping_add(1);
+    let mut builder = ApplicationMenuBuilder::new(generation);
+    let menus = specs
+        .into_iter()
+        .map(|menu| builder.menu(menu))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    let state = cx.global_mut::<ApplicationMenuState>();
+    state.generation = generation;
+    state.actions_by_id = builder.actions_by_id;
+    state.installed_menu_count = menus.len();
+    cx.bind_keys(builder.bindings);
+    cx.set_menus(menus);
+    Ok(())
+}
+
+pub(crate) fn has_application_menus(cx: &gpui::App) -> bool {
+    cx.global::<ApplicationMenuState>().installed_menu_count > 0
+}
+
+pub(crate) fn dispatch_application_menu_action(
+    cx: &mut gpui::App,
+    id: &str,
+) -> std::result::Result<(), String> {
+    let action = cx
+        .global::<ApplicationMenuState>()
+        .actions_by_id
+        .get(id)
+        .cloned()
+        .ok_or_else(|| format!("Unknown menu action id {id:?}"))?;
+    cx.dispatch_action(&action);
+    Ok(())
+}
 
 pub(crate) fn init_key_bindings(cx: &mut gpui::App) {
     cx.bind_keys([
@@ -232,6 +523,13 @@ enum ClockControl {
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum UiCommand {
     Invalidate,
+    SetMenus {
+        menus: Vec<MenuSpec>,
+        response: SyncSender<std::result::Result<(), String>>,
+    },
+    Quit {
+        response: SyncSender<()>,
+    },
     SetWindowTitle(String),
     SetDebugFrameOverlay(gpui::DebugFrameOverlayMode),
     CycleDebugFrameOverlay {
@@ -296,6 +594,21 @@ async fn run_ui_commands(
     while let Some(command) = commands.next().await {
         let result = match command {
             UiCommand::Invalidate => refresh_ui_window(window, cx),
+            UiCommand::SetMenus { menus, response } => {
+                let result = cx.update(|cx| set_application_menus(cx, menus));
+                let response_value = result
+                    .as_ref()
+                    .map(|value| value.clone())
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| value);
+                response.send(response_value).ok();
+                result.and_then(|value| value.map_err(anyhow::Error::msg))
+            }
+            UiCommand::Quit { response } => {
+                let result = cx.update(|cx| cx.quit());
+                response.send(()).ok();
+                result
+            }
             UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
                 view.window_title = title;
                 cx.notify();
@@ -694,6 +1007,10 @@ impl GpuixRenderer {
         let width = options.width.unwrap_or(800.0);
         let height = options.height.unwrap_or(600.0);
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
+        let menus = options
+            .menus
+            .clone()
+            .unwrap_or_else(|| default_application_menus(&title));
         let window_options = options.clone();
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
@@ -713,6 +1030,11 @@ impl GpuixRenderer {
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
+            init_application_menu_support(cx, callback.clone());
+            if let Err(error) = set_application_menus(cx, menus) {
+                *startup_error_for_app.borrow_mut() = Some(error);
+                return;
+            }
             let window_size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
             #[cfg(feature = "display-discovery-fault-injection")]
             // Let the fault smoke reach MacWindow::open instead of failing during centering.
@@ -789,10 +1111,19 @@ impl GpuixRenderer {
         let width = options.width.unwrap_or(800.0);
         let height = options.height.unwrap_or(600.0);
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
+        let menus = options
+            .menus
+            .clone()
+            .unwrap_or_else(|| default_application_menus(&title));
         let window_options = options.clone();
         let tree = self.tree.clone();
         let selection = self.selection.clone();
         let callback = self.event_callback_for_view();
+        let termination_callback = callback.clone();
+        let initialized = self.initialized.clone();
+        let initialized_for_app = initialized.clone();
+        let launched = Arc::new(AtomicBool::new(false));
+        let launched_for_thread = launched.clone();
         let (command_sender, command_receiver) = mpsc::unbounded();
         let (startup_sender, startup_receiver) = sync_channel(1);
         let exit_startup_sender = startup_sender.clone();
@@ -804,6 +1135,12 @@ impl GpuixRenderer {
                     gpui_platform::application().run(move |cx| {
                         init_key_bindings(cx);
                         crate::custom_elements::input::init(cx);
+                        init_application_menu_support(cx, callback.clone());
+                        if let Err(error) = set_application_menus(cx, menus) {
+                            startup_sender.send(Err(error)).ok();
+                            cx.quit();
+                            return;
+                        }
                         let bounds = gpui::Bounds::centered(
                             None,
                             gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
@@ -830,9 +1167,16 @@ impl GpuixRenderer {
                         })
                         .detach();
                         cx.activate(true);
+                        *initialized_for_app.lock().unwrap() = true;
+                        launched_for_thread.store(true, Ordering::Release);
                         startup_sender.send(Ok(())).ok();
                     });
                 }));
+
+                *initialized.lock().unwrap() = false;
+                if launched.load(Ordering::Acquire) {
+                    emit_application_event(&termination_callback, "terminated", None);
+                }
 
                 let error = match result {
                     Ok(()) => {
@@ -855,7 +1199,6 @@ impl GpuixRenderer {
             .map_err(Error::from_reason)?;
 
         *self.ui_commands.lock().unwrap() = Some(command_sender);
-        *self.initialized.lock().unwrap() = true;
         self.event_callback.lock().unwrap().take();
         Ok(())
     }
@@ -1004,6 +1347,95 @@ impl GpuixRenderer {
 
     // ── Frame loop ───────────────────────────────────────────────────
 
+    /// Replace the application menu bar. Pass an empty array to remove it.
+    #[napi]
+    pub fn set_menus(&self, menus: Vec<MenuSpec>) -> Result<()> {
+        if !*self.initialized.lock().unwrap() {
+            return Err(Error::from_reason(
+                "Renderer not initialized. Call init() first.",
+            ));
+        }
+
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| set_application_menus(cx, menus))
+                .map_err(Error::from_reason)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::SetMenus { menus, response })?;
+            return recv_ui_response(receiver, "the application menu update")?
+                .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Gracefully terminate the native application through GPUI's platform abstraction.
+    #[napi]
+    pub fn quit(&self) -> Result<()> {
+        if !*self.initialized.lock().unwrap() {
+            return Ok(());
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            GPUI_APP.with(|app| {
+                let app = app.borrow();
+                let app = app
+                    .as_ref()
+                    .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+                app.update(|cx| cx.quit());
+                Ok::<(), Error>(())
+            })?;
+
+            for _ in 0..64 {
+                let running = MAC_PLATFORM.with(|platform| {
+                    platform
+                        .borrow()
+                        .as_ref()
+                        .map(|platform| platform.pump_events())
+                        .unwrap_or(false)
+                });
+                if !running {
+                    *self.initialized.lock().unwrap() = false;
+                    return Ok(());
+                }
+            }
+            return Err(Error::from_reason(
+                "GPUI did not finish quitting after 64 AppKit pump iterations",
+            ));
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::Quit { response })?;
+            recv_ui_response(receiver, "the application quit request")?;
+            return Ok(());
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// Pump the native event loop. Returns false after the last window closes.
     #[napi]
     pub fn tick(&self) -> Result<bool> {
@@ -1022,6 +1454,9 @@ impl GpuixRenderer {
                     .map(|platform| platform.pump_events())
                     .unwrap_or(false)
             });
+            if !running {
+                *self.initialized.lock().unwrap() = false;
+            }
             return Ok(running);
         }
 
@@ -4263,6 +4698,8 @@ pub struct DebugFrameOverlayStats {
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
 pub struct WindowOptions {
     pub title: Option<String>,
+    /// Application menus. Omit for a minimal Quit menu; pass `[]` to opt out.
+    pub menus: Option<Vec<MenuSpec>>,
     pub width: Option<f64>,
     pub height: Option<f64>,
     pub min_width: Option<f64>,
@@ -4284,6 +4721,7 @@ impl Default for WindowOptions {
     fn default() -> Self {
         Self {
             title: Some("GPUIX".to_string()),
+            menus: None,
             width: Some(800.0),
             height: Some(600.0),
             min_width: None,

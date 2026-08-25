@@ -1,4 +1,4 @@
-import type { EventPayload } from "@gpuix/native"
+import type { EventPayload, MenuSpec } from "@gpuix/native"
 
 export type DimensionValue = number | string
 
@@ -457,6 +457,12 @@ export interface NativeRenderer {
   setCustomProp(id: number, key: string, valueJson: string | object | number | boolean | null): void
   /** Apply a batch of mutations in a single FFI call. Returns destroyed IDs. */
   applyBatch?(json: string): Array<number>
+
+  // ── Application lifecycle ──────────────────────────────────────
+  setMenus?(menus: MenuSpec[]): void
+  quit?(): void
+  /** Internal hook used by injected renderers to deliver non-element events. */
+  setApplicationEventHandler?(handler: ((event: EventPayload) => void) | null): void
 
   // ── Focus API ──────────────────────────────────────────────────
   focusElement?(elementId: number): void

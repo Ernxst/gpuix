@@ -21,6 +21,7 @@ cd examples && bun --hot chat.tsx
 | **chat** | `bun --hot chat.tsx` | A Waku-style app: transparent titlebar, animated sidebar, message list, composer, `<markdown>` |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
+| **menus** | `bun --hot menus.tsx` | Application menus, JS menu actions, explicit quit, and graceful termination |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **web** | `bun run web` from the repository root | The ChatGPT example rendered in a browser canvas with WebGPU |
 
@@ -237,8 +238,8 @@ render(<App />, {
 ```
 
 `render()` creates the native window, mounts React, and starts the frame loop.
-The red traffic-light button quits the process. Start the app again from the
-terminal.
+The red traffic-light button terminates the renderer, unmounts React, and lets
+Node exit naturally after `onTerminated` cleanup.
 
 | Option | Values | Purpose |
 |---|---|---|
@@ -256,6 +257,61 @@ later calls only remount React.
 `createRenderer()`, `createRoot()`, and `startFrameLoop()` stay public for
 tests and custom hosts. Pass `{ renderer }` into `render()` when you already
 have one.
+
+## Application menus and termination
+
+Every desktop app gets a minimal application menu with **Quit** and Cmd+Q. Pass
+`menus: []` to opt out, or replace it with a cross-platform menu tree. A menu
+action's stable `id` reaches `onMenuAction` exactly once:
+
+```tsx
+render(<App />, {
+  title: 'My App',
+  menus: [
+    {
+      name: 'My App',
+      items: [
+        { kind: 'action', id: 'preferences', label: 'Preferences…', keyEquivalent: 'cmd-,' },
+        { kind: 'separator' },
+        { kind: 'system', label: 'Services', systemMenu: 'services' },
+        { kind: 'separator' },
+        { kind: 'action', label: 'Quit My App', role: 'quit', keyEquivalent: 'cmd-q' },
+      ],
+    },
+  ],
+  onMenuAction: ({ id }) => console.log('menu action', id),
+  onTerminated: async () => {
+    await closeServer()
+  },
+})
+```
+
+`kind` is `"action"`, `"separator"`, `"submenu"`, or `"system"`. Action
+items support `checked`, `disabled`, `keyEquivalent`, and the native editing
+roles `cut`, `copy`, `paste`, `selectAll`, `undo`, and `redo` through
+`osAction`. Submenus carry their own `label` and `items`.
+
+Call `renderer.setMenus(menus)` to replace the tree after launch, and
+`renderer.quit()` to use GPUI's graceful platform quit path without a menu.
+Menu Quit, explicit quit, and last-window close all stop the frame loop and run
+`onTerminated` once. The default path no longer calls `process.exit(0)`; caller
+cleanup can finish before Node exits naturally.
+
+The frame loop contains individual native tick failures and reschedules. Three
+consecutive failures are treated as unrecoverable: GPUIX quits the native app
+instead of leaving a mapped window without an AppKit pump. `render()` also
+guards uncaught exceptions and unhandled rejections, unmounts React, quits the
+window synchronously, runs `onTerminated`, and then exits with status 1.
+
+Run the human menu check on macOS:
+
+```bash
+cd examples
+bun --hot menus.tsx
+```
+
+Enter fullscreen, choose **Actions → Fire JavaScript Action**, confirm the
+window and terminal log update once, then press Cmd+Q.
 
 ## Debug frame overlay
 
@@ -353,6 +409,8 @@ Native `.node` edits still need a rebuild. See [Developing the Rust side](#devel
 On **macOS**, `startFrameLoop` calls `renderer.tick()` at a fixed rate (~125fps by
 default). This pumps AppKit on the process main thread without blocking Node. Pass
 `{ frameMs }` to change the rate, and call `.stop()` on the returned handle to end it.
+One thrown tick is reported and retried; repeated failures quit instead of
+abandoning the native window.
 
 On **Windows and Linux**, GPUI runs its normal blocking native event loop on one
 dedicated Rust UI thread. Node sends in-process commands to that thread, so
@@ -1691,7 +1749,8 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Native `hover` and `active` styles
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
-- [x] Last window close quits the process
+- [x] Application menus, Cmd+Q, explicit quit, and graceful React termination
+- [x] Last window close terminates through the shared graceful lifecycle
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [ ] Canvas element
 - [ ] Multiple windows

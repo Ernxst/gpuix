@@ -93,6 +93,55 @@ function runChild(command: string, args: string[]): Promise<string> {
   })
 }
 
+function runChildWithStatus(
+  command: string,
+  args: string[],
+  timeoutMs = 15_000
+): Promise<{ code: number | null; signal: NodeJS.Signals | null; output: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: packageRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    let output = ""
+    child.stdout?.on("data", (chunk) => {
+      output += String(chunk)
+    })
+    child.stderr?.on("data", (chunk) => {
+      output += String(chunk)
+    })
+    child.once("error", reject)
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL")
+      reject(new Error(`timed out waiting for child process\n${output}`))
+    }, timeoutMs)
+    child.once("close", (code, signal) => {
+      clearTimeout(timeout)
+      resolve({ code, signal, output })
+    })
+  })
+}
+
+const FATAL_HOT_PROGRAM = `
+import React, { useEffect } from "react"
+import { render } from ${JSON.stringify(join(srcDir, "reconciler/renderer.ts"))}
+
+function App() {
+  useEffect(() => () => console.log("FATAL_REACT_UNMOUNTED"), [])
+  return React.createElement("text", null, "fatal lifecycle smoke")
+}
+
+render(React.createElement(App), {
+  title: "GPUIX fatal lifecycle smoke",
+  menus: [],
+  onTerminated: () => console.log("FATAL_TERMINATED"),
+})
+
+setTimeout(() => {
+  throw new Error("INJECTED_FATAL_HOT_ERROR")
+}, 50)
+`
+
 const ESM_TESTING_PROGRAM = `
 import {
   TestRenderer,
@@ -146,6 +195,20 @@ describeNative("render()", () => {
   beforeEach(() => {
     resetRender()
     renderer = new TestRenderer()
+  })
+
+  it("runs graceful termination exactly once", () => {
+    let terminated = 0
+    render(<text>Termination test</text>, {
+      renderer,
+      onTerminated: () => {
+        terminated += 1
+      },
+    })
+
+    renderer.simulateTermination()
+    renderer.simulateTermination()
+    expect(terminated).toBe(1)
   })
 
   it("replaces painted text when the entry is evaluated again", () => {
@@ -255,4 +318,22 @@ describeNative("render()", () => {
       } catch {}
     }
   }, 40_000)
+
+  it("quits and unmounts React when bun --hot receives an uncaught exception", async () => {
+    const file = join(srcDir, "__tests__", "fatal-hot.tmp.tsx")
+    writeFileSync(file, FATAL_HOT_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", ["--hot", file])
+      expect(result.code, result.output).toBe(1)
+      expect(result.signal).toBeNull()
+      expect(result.output).toContain("INJECTED_FATAL_HOT_ERROR")
+      expect(result.output.match(/^FATAL_REACT_UNMOUNTED$/gm), result.output).toHaveLength(1)
+      expect(result.output.match(/^FATAL_TERMINATED$/gm), result.output).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 20_000)
 })

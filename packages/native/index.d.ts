@@ -51,6 +51,10 @@ export declare class GpuixRenderer {
    * Acquires the tree mutex ONCE for the entire batch.
    */
   applyBatch(json: string): Array<number>
+  /** Replace the application menu bar. Pass an empty array to remove it. */
+  setMenus(menus: Array<MenuSpec>): void
+  /** Gracefully terminate the native application through GPUI's platform abstraction. */
+  quit(): void
   /** Pump the native event loop. Returns false after the last window closes. */
   tick(): boolean
   isInitialized(): boolean
@@ -146,6 +150,12 @@ export declare class TestGpuixRenderer {
    * Returns accumulated destroyed IDs from all destroyElement ops.
    */
   applyBatch(json: string): Array<number>
+  /** Replace the application menu using the production conversion and GPUI APIs. */
+  setMenus(menus: Array<MenuSpec>): void
+  /** Dispatch a configured application action through GPUI's global action pipeline. */
+  simulateMenuAction(id: string): void
+  /** Whether GPUI reports a currently installed application menu bar. */
+  hasMainMenu(): boolean
   /**
    * Notify the view entity and run GPUI until parked.
    * This triggers GpuixView::render() → build_element() → GPUI layout.
@@ -404,8 +414,38 @@ export interface EventPayload {
   modifiers?: EventModifiers
 }
 
+/**
+ * A cross-platform application menu item.
+ *
+ * `kind` is `"action"`, `"separator"`, `"submenu"`, or `"system"`.
+ * Action items require `label` and `id`; use `role: "quit"` for the
+ * platform quit action. System items currently support `systemMenu:
+ * "services"`.
+ */
+export interface MenuItemSpec {
+  kind: string
+  label?: string
+  id?: string
+  items?: Array<MenuItemSpec>
+  disabled?: boolean
+  checked?: boolean
+  keyEquivalent?: string
+  role?: string
+  systemMenu?: string
+  osAction?: string
+}
+
+/** One top-level application menu. */
+export interface MenuSpec {
+  name: string
+  items: Array<MenuItemSpec>
+  disabled?: boolean
+}
+
 export interface WindowOptions {
   title?: string
+  /** Application menus. Omit for a minimal Quit menu; pass `[]` to opt out. */
+  menus?: Array<MenuSpec>
   width?: number
   height?: number
   minWidth?: number
