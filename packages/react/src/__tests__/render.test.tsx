@@ -15,6 +15,7 @@ import {
 } from "../reconciler/renderer.js"
 
 const srcDir = fileURLToPath(new URL("..", import.meta.url))
+const packageRoot = fileURLToPath(new URL("../..", import.meta.url))
 
 function hotAppSource(label: string): string {
   return `
@@ -59,6 +60,58 @@ function collectOutput(child: ReturnType<typeof spawn>) {
     },
   }
 }
+
+function runChild(command: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: packageRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    let output = ""
+    child.stdout?.on("data", (chunk) => {
+      output += String(chunk)
+    })
+    child.stderr?.on("data", (chunk) => {
+      output += String(chunk)
+    })
+    child.once("error", reject)
+    child.once("close", (code, signal) => {
+      if (code === 0) {
+        resolve(output)
+      } else {
+        reject(
+          new Error(
+            `${command} exited with ${code ?? signal ?? "an unknown status"}\n${output}`
+          )
+        )
+      }
+    })
+  })
+}
+
+const ESM_TESTING_PROGRAM = `
+import {
+  TestRenderer,
+  hasNativeTestRenderer,
+  nativeTestRendererLoadError,
+} from "@gpuix/react/testing"
+
+if (!hasNativeTestRenderer) {
+  throw nativeTestRendererLoadError ?? new Error("TestGpuixRenderer is unavailable")
+}
+
+const renderer = new TestRenderer()
+renderer.createElement(1, "text")
+renderer.setText(1, "esm test binding")
+renderer.setRoot(1)
+renderer.flush()
+
+if (!renderer.getPaintedText().includes("esm test binding")) {
+  throw new Error("TestGpuixRenderer did not paint the ESM test binding probe")
+}
+
+console.log("ESM_TEST_BINDING_OK")
+`
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -152,7 +205,14 @@ describeNative("render()", () => {
     expect(Reflect.get(globalThis, "gpuix")).toBeUndefined()
   })
 
-  it("remounts under bun --hot without creating a new root", async () => {
+  it("loads the built testing entry point through ESM and remounts under bun --hot", async () => {
+    await expect(
+      runChild("node", ["--input-type=module", "--eval", ESM_TESTING_PROGRAM])
+    ).resolves.toContain("ESM_TEST_BINDING_OK")
+    await expect(runChild("bun", ["--eval", ESM_TESTING_PROGRAM])).resolves.toContain(
+      "ESM_TEST_BINDING_OK"
+    )
+
     const file = join(srcDir, "__tests__", "hot-app.tmp.tsx")
     writeFileSync(file, hotAppSource("hello"))
 
