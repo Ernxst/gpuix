@@ -11,6 +11,7 @@
 
 import type { ReactNode } from "react"
 import type { EventPayload } from "@gpuix/native"
+import { createRequire } from "node:module"
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
@@ -69,16 +70,23 @@ interface NativeTestRendererConstructor {
 
 // The native test renderer is currently exported only by macOS builds.
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
+/** The native binding error when the test renderer cannot be loaded. */
+export let nativeTestRendererLoadError: unknown
+const requireNative = createRequire(import.meta.url)
+
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const native = require("@gpuix/native") as {
+  const native = requireNative("@gpuix/native") as {
     TestGpuixRenderer?: NativeTestRendererConstructor
   }
   if (native.TestGpuixRenderer) {
     NativeTestRenderer = native.TestGpuixRenderer
+  } else {
+    nativeTestRendererLoadError = new Error(
+      "@gpuix/native does not export TestGpuixRenderer. Build with test-support to run tests."
+    )
   }
-} catch {
-  // Native module not available — native simulation methods will throw.
+} catch (error) {
+  nativeTestRendererLoadError = error
 }
 
 /** Whether the native TestGpuixRenderer is available (for conditional test registration). */

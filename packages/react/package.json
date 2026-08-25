@@ -67,7 +67,7 @@
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/react locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
     "build": "rm -rf dist && tsc",
     "dev": "tsc --watch",
-    "test": "vitest run",
+    "test": "bun run build && vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
