@@ -1,9 +1,13 @@
 import React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing.js"
+import {
+  createTestRoot,
+  isNativeTestRendererAvailable,
+  TestRenderer,
+} from "../testing.js"
 import type { StyleDesc } from "../types/host.js"
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 afterEach(() => {
   vi.restoreAllMocks()

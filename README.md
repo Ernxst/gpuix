@@ -1695,6 +1695,41 @@ tests never discover the host display; windows are positioned offscreen and
 still rendered fully by Metal. The methods below are the lower-level API when a
 locator is not enough.
 
+### Consuming an unpublished checkout
+
+Use packed tarballs, not a directory `file:` or `link:` dependency. Bun installs
+directory dependencies as symlinks and resolves their real paths, which can load
+the checkout's dev React packages alongside your app's React at runtime. That
+is structurally unsafe under Bun even with correct peer dependencies;
+`--preserve-symlinks` does not change it.
+
+Build tarballs from the checkout, then pin those generated `.tgz` files in the
+consuming app:
+
+```bash
+cd packages/native && bun pm pack
+cd ../react && bun pm pack
+```
+
+```json
+{
+  "dependencies": {
+    "@gpuix/native": "file:../gpuix/packages/native/gpuix-native-0.4.0.tgz",
+    "@gpuix/react": "file:../gpuix/packages/react/gpuix-react-0.4.0.tgz"
+  }
+}
+```
+
+`react`, `react-reconciler`, and `scheduler` are peer dependencies. Install
+versions compatible with your React runtime in the consuming app. If you still
+use a directory link, configure Vitest to dedupe `react`, `react-dom`,
+`react-reconciler`, and `scheduler`; that is only a fallback, not a supported
+way to consume the unpublished fork under Bun.
+
+`hasNativeTestRenderer` was removed. Use
+`isNativeTestRendererAvailable()` when a test must check whether the native
+renderer can initialize.
+
 ```ts
 import { createTestRoot } from '@gpuix/react/testing'
 

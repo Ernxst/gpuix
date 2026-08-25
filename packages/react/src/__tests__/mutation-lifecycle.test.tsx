@@ -2,9 +2,9 @@ import { Suspense } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { handleGpuixEvent } from "../reconciler/event-registry.js"
 import { createRoot, flushSync } from "../reconciler/reconciler.js"
-import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing.js"
+import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing.js"
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 describeNative("mutation lifecycle", () => {
   it("renders structural JSX aliases as native divs", () => {

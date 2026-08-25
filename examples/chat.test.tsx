@@ -12,10 +12,10 @@ import React from 'react'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { render, resetRender } from '@gpuix/react'
 import { connectTest } from '@gpuix/react/automation'
-import { createTestRoot, hasNativeTestRenderer, TestRenderer } from '@gpuix/react/testing'
+import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from '@gpuix/react/testing'
 import { ChatApp, SafeMdxContent, SafeMdxTranscript } from './chat'
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 const SHOTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'screenshots')
 
 beforeAll(() => {

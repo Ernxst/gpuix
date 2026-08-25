@@ -13,7 +13,7 @@
 import fs from "fs"
 import { describe, it, expect, beforeEach } from "vitest"
 import React, { useState, useRef } from "react"
-import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing"
+import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing"
 import {
   render as renderApp,
   resetRender,
@@ -23,7 +23,7 @@ import type { EventPayload } from "@gpuix/native"
 import { expectScreenshotsDiffer } from "./test-utils"
 
 // All tests require the native GPUI test renderer (cargo build with test-support).
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 describeNative("application menus", () => {
   it("installs the default application menu when menus are omitted", () => {

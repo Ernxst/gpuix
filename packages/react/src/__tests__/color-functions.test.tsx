@@ -2,7 +2,7 @@ import fs from "fs"
 import path from "path"
 import React from "react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
-import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
+import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import type { BackgroundValue } from "../types/host.js"
 import {
   expectScreenshotsDiffer,
@@ -10,7 +10,7 @@ import {
   SHOTS_DIR,
 } from "./test-utils.js"
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 const absoluteCases = [
   ["hex4", "#f00f", "#ff0000"],

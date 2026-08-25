@@ -77,35 +77,56 @@ interface NativeTestRendererConstructor {
 // The native test renderer is currently exported only by macOS builds.
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
 let probedNativeTestRenderer: NativeTestRendererApi | null = null
+let nativeTestRendererInitialized = false
 /** The native binding error when the test renderer cannot be loaded. */
 export let nativeTestRendererLoadError: Error | null = null
 /** Backward-compatible alias for nativeTestRendererLoadError. */
 export { nativeTestRendererLoadError as nativeTestRendererError }
 const requireNative = createRequire(import.meta.url)
 
-try {
-  const native = requireNative("@gpuix/native") as {
-    TestGpuixRenderer?: NativeTestRendererConstructor
+function initializeNativeTestRenderer(): NativeTestRendererConstructor | null {
+  if (nativeTestRendererInitialized) {
+    return NativeTestRenderer
   }
-  if (native.TestGpuixRenderer) {
-    NativeTestRenderer = native.TestGpuixRenderer
-    probedNativeTestRenderer = new native.TestGpuixRenderer()
-  } else {
-    nativeTestRendererLoadError = new Error(
-      "@gpuix/native does not export TestGpuixRenderer. Build with test-support to run tests."
-    )
+
+  nativeTestRendererInitialized = true
+  try {
+    const native = requireNative("@gpuix/native") as {
+      TestGpuixRenderer?: NativeTestRendererConstructor
+    }
+    if (native.TestGpuixRenderer) {
+      NativeTestRenderer = native.TestGpuixRenderer
+      // Construct once here so availability includes native initialization, not
+      // merely whether the binding exports its constructor. The first
+      // TestRenderer reuses this instance.
+      probedNativeTestRenderer = new native.TestGpuixRenderer()
+    } else {
+      nativeTestRendererLoadError = new Error(
+        "@gpuix/native does not export TestGpuixRenderer. Build with test-support to run tests."
+      )
+    }
+  } catch (error) {
+    NativeTestRenderer = null
+    probedNativeTestRenderer = null
+    nativeTestRendererLoadError =
+      error instanceof Error
+        ? error
+        : new Error(`Failed to load @gpuix/native: ${String(error)}`)
   }
-} catch (error) {
-  NativeTestRenderer = null
-  probedNativeTestRenderer = null
-  nativeTestRendererLoadError =
-    error instanceof Error
-      ? error
-      : new Error(`Failed to load @gpuix/native: ${String(error)}`)
+
+  return NativeTestRenderer
 }
 
-/** Whether the native TestGpuixRenderer loaded and initialized successfully. */
-export const hasNativeTestRenderer = NativeTestRenderer != null
+/**
+ * Whether the native TestGpuixRenderer loaded and initialized successfully.
+ *
+ * Calling this accessor is intentionally the first point that loads the
+ * native binding. Importing `@gpuix/react/testing` alone stays side-effect
+ * free so file:/link: consumers can resolve their React runtime first.
+ */
+export function isNativeTestRendererAvailable(): boolean {
+  return initializeNativeTestRenderer() != null
+}
 
 // ── Test element tree ────────────────────────────────────────────────
 
@@ -131,14 +152,15 @@ export class TestRenderer implements NativeRenderer {
   private native: NativeTestRendererApi
 
   constructor() {
-    if (!NativeTestRenderer) {
+    const NativeTestRendererConstructor = initializeNativeTestRenderer()
+    if (!NativeTestRendererConstructor) {
       throw new Error(
         `Native TestGpuixRenderer not available: ${
           nativeTestRendererLoadError?.message ?? "unknown native binding error"
         }`
       )
     }
-    this.native = probedNativeTestRenderer ?? new NativeTestRenderer()
+    this.native = probedNativeTestRenderer ?? new NativeTestRendererConstructor()
     probedNativeTestRenderer = null
   }
 
