@@ -1,7 +1,237 @@
 import type { EventPayload, MenuSpec } from "@gpuix/native"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 
-export type DimensionValue = number | string
+/**
+ * Native dimensions are pixels, percentages, `auto`, or numeric strings.
+ * Keep this aligned with `DimensionValue::deserialize` in `packages/native/src/style.rs`.
+ */
+export type DimensionValue = number | "auto" | `${number}` | `${number}%`
+
+type CssColorFunctionName =
+  | "rgb"
+  | "rgba"
+  | "hsl"
+  | "hsla"
+  | "hwb"
+  | "hwba"
+  | "hsv"
+  | "hsva"
+  | "lab"
+  | "lch"
+  | "oklab"
+  | "oklch"
+
+type CssColorFunction =
+  | CssColorFunctionName
+  | Uppercase<CssColorFunctionName>
+  | Capitalize<CssColorFunctionName>
+
+/** CSS Color 4 named colours accepted by csscolorparser 0.8.3. */
+export type CssNamedColor =
+  | "aliceblue"
+  | "antiquewhite"
+  | "aqua"
+  | "aquamarine"
+  | "azure"
+  | "beige"
+  | "bisque"
+  | "black"
+  | "blanchedalmond"
+  | "blue"
+  | "blueviolet"
+  | "brown"
+  | "burlywood"
+  | "cadetblue"
+  | "chartreuse"
+  | "chocolate"
+  | "coral"
+  | "cornflowerblue"
+  | "cornsilk"
+  | "crimson"
+  | "cyan"
+  | "darkblue"
+  | "darkcyan"
+  | "darkgoldenrod"
+  | "darkgray"
+  | "darkgreen"
+  | "darkgrey"
+  | "darkkhaki"
+  | "darkmagenta"
+  | "darkolivegreen"
+  | "darkorange"
+  | "darkorchid"
+  | "darkred"
+  | "darksalmon"
+  | "darkseagreen"
+  | "darkslateblue"
+  | "darkslategray"
+  | "darkslategrey"
+  | "darkturquoise"
+  | "darkviolet"
+  | "deeppink"
+  | "deepskyblue"
+  | "dimgray"
+  | "dimgrey"
+  | "dodgerblue"
+  | "firebrick"
+  | "floralwhite"
+  | "forestgreen"
+  | "fuchsia"
+  | "gainsboro"
+  | "ghostwhite"
+  | "gold"
+  | "goldenrod"
+  | "gray"
+  | "green"
+  | "greenyellow"
+  | "grey"
+  | "honeydew"
+  | "hotpink"
+  | "indianred"
+  | "indigo"
+  | "ivory"
+  | "khaki"
+  | "lavender"
+  | "lavenderblush"
+  | "lawngreen"
+  | "lemonchiffon"
+  | "lightblue"
+  | "lightcoral"
+  | "lightcyan"
+  | "lightgoldenrodyellow"
+  | "lightgray"
+  | "lightgreen"
+  | "lightgrey"
+  | "lightpink"
+  | "lightsalmon"
+  | "lightseagreen"
+  | "lightskyblue"
+  | "lightslategray"
+  | "lightslategrey"
+  | "lightsteelblue"
+  | "lightyellow"
+  | "lime"
+  | "limegreen"
+  | "linen"
+  | "magenta"
+  | "maroon"
+  | "mediumaquamarine"
+  | "mediumblue"
+  | "mediumorchid"
+  | "mediumpurple"
+  | "mediumseagreen"
+  | "mediumslateblue"
+  | "mediumspringgreen"
+  | "mediumturquoise"
+  | "mediumvioletred"
+  | "midnightblue"
+  | "mintcream"
+  | "mistyrose"
+  | "moccasin"
+  | "navajowhite"
+  | "navy"
+  | "oldlace"
+  | "olive"
+  | "olivedrab"
+  | "orange"
+  | "orangered"
+  | "orchid"
+  | "palegoldenrod"
+  | "palegreen"
+  | "paleturquoise"
+  | "palevioletred"
+  | "papayawhip"
+  | "peachpuff"
+  | "peru"
+  | "pink"
+  | "plum"
+  | "powderblue"
+  | "purple"
+  | "rebeccapurple"
+  | "red"
+  | "rosybrown"
+  | "royalblue"
+  | "saddlebrown"
+  | "salmon"
+  | "sandybrown"
+  | "seagreen"
+  | "seashell"
+  | "sienna"
+  | "silver"
+  | "skyblue"
+  | "slateblue"
+  | "slategray"
+  | "slategrey"
+  | "snow"
+  | "springgreen"
+  | "steelblue"
+  | "tan"
+  | "teal"
+  | "thistle"
+  | "tomato"
+  | "turquoise"
+  | "violet"
+  | "wheat"
+  | "white"
+  | "whitesmoke"
+  | "yellow"
+  | "yellowgreen"
+
+/**
+ * A colour authoring envelope for StyleDesc. The native csscolorparser 0.8.3
+ * parser remains authoritative for hex digit counts, function arguments,
+ * relative colours, and case-insensitive named colours.
+ */
+export type GpuixColor =
+  | `#${string}`
+  | `${CssColorFunction}(${string})`
+  | CssNamedColor
+  | "transparent"
+  // Preserve dynamically-computed colours for the loud runtime diagnostics.
+  | (string & {})
+
+/** The native renderer supports CSS linear gradients as background strings. */
+export type CssLinearGradient = `linear-gradient(${string})`
+
+export type FontWeight =
+  | number
+  | `${number}`
+  | "thin"
+  | "extralight"
+  | "extra-light"
+  | "light"
+  | "normal"
+  | "medium"
+  | "semibold"
+  | "semi-bold"
+  | "bold"
+  | "extrabold"
+  | "extra-bold"
+  | "black"
+
+export type Display = "flex" | "grid"
+export type Visibility = "visible" | "hidden"
+export type FlexDirection = "row" | "column"
+export type FlexWrap = "nowrap" | "wrap" | "wrap-reverse"
+export type AlignItems = "start" | "flex-start" | "center" | "end" | "flex-end" | "baseline" | "stretch"
+export type AlignContent =
+  | "normal"
+  | "start"
+  | "flex-start"
+  | "center"
+  | "end"
+  | "flex-end"
+  | "between"
+  | "space-between"
+  | "around"
+  | "space-around"
+  | "evenly"
+  | "space-evenly"
+  | "stretch"
+export type JustifyContent = Exclude<AlignContent, "normal" | "stretch">
+export type Position = "relative" | "absolute"
+export type Overflow = "visible" | "hidden" | "scroll"
+export type Cursor = "default" | "pointer"
 
 export interface MotionStyle {
   width?: number
@@ -41,11 +271,11 @@ export interface BoxShadow {
   offsetY: number
   blurRadius: number
   spreadRadius: number
-  color: string
+  color: GpuixColor
 }
 
 export interface LinearGradientStop {
-  color: string
+  color: GpuixColor
   /** Position from 0 through 1. */
   position: number
 }
@@ -58,7 +288,7 @@ export interface LinearGradient {
   colorSpace?: "srgb" | "oklab"
 }
 
-export type BackgroundValue = string | LinearGradient
+export type BackgroundValue = GpuixColor | CssLinearGradient | LinearGradient
 
 export type GridTrackSizing =
   | { type: "px"; value: number }
@@ -89,17 +319,17 @@ type NativeStateStyleKey = "hover" | "hoverWithin" | "active" | "focus" | "focus
 type NativeStateStyle = Omit<StyleDesc, NativeStateStyleKey>
 
 export interface StyleDesc {
-  display?: string
-  visibility?: string
-  flexDirection?: string
-  flexWrap?: string
+  display?: Display
+  visibility?: Visibility
+  flexDirection?: FlexDirection
+  flexWrap?: FlexWrap
   flexGrow?: number
   flexShrink?: number
   flexBasis?: number
-  alignItems?: string
-  alignSelf?: string
-  alignContent?: string
-  justifyContent?: string
+  alignItems?: AlignItems
+  alignSelf?: AlignItems
+  alignContent?: AlignContent
+  justifyContent?: JustifyContent
   gap?: number
   rowGap?: number
   columnGap?: number
@@ -127,15 +357,15 @@ export interface StyleDesc {
   marginBottom?: number
   marginLeft?: number
 
-  position?: string
+  position?: Position
   top?: number
   right?: number
   bottom?: number
   left?: number
 
   background?: BackgroundValue
-  backgroundColor?: string
-  color?: string
+  backgroundColor?: GpuixColor
+  color?: GpuixColor
   opacity?: number
 
   borderWidth?: number
@@ -143,35 +373,35 @@ export interface StyleDesc {
   borderRightWidth?: number
   borderBottomWidth?: number
   borderLeftWidth?: number
-  borderColor?: string
+  borderColor?: GpuixColor
   borderRadius?: number
   borderTopLeftRadius?: number
   borderTopRightRadius?: number
   borderBottomLeftRadius?: number
   borderBottomRightRadius?: number
   boxShadow?: BoxShadow
-  outlineColor?: string
+  outlineColor?: GpuixColor
   outlineWidth?: number
   outlineOffset?: number
 
   fontSize?: number
   fontFamily?: string
-  fontWeight?: string | number
+  fontWeight?: FontWeight
   letterSpacing?: number
   textDecoration?: "underline" | "line-through"
   textTransform?: "none" | "uppercase" | "lowercase"
-  textAlign?: string
+  textAlign?: "left" | "start" | "center" | "right"
   lineHeight?: number
   whiteSpace?: "normal" | "nowrap"
-  textWrap?: "wrap" | "nowrap" | "balance" | "pretty"
+  textWrap?: "wrap" | "nowrap"
   textOverflow?: "ellipsis" | "ellipsis-start"
   lineClamp?: number
 
-  overflow?: string
-  overflowX?: string
-  overflowY?: string
+  overflow?: Overflow
+  overflowX?: Overflow
+  overflowY?: Overflow
 
-  cursor?: string
+  cursor?: Cursor
   /** `"auto"` blocks hits behind this element. `"none"` never does. Unset blocks when the element paints a fill or is absolutely positioned. */
   pointerEvents?: "auto" | "none"
 
@@ -179,7 +409,7 @@ export interface StyleDesc {
    *  Inherited like the CSS property, so a toolbar can disable it once. */
   userSelect?: "text" | "none" | "auto"
   /** Selection wash colour for this subtree. Defaults to the theme accent at 35%. */
-  selectionColor?: string
+  selectionColor?: GpuixColor
 
   // Native state styles — applied by GPUI without a JS round trip.
   // Nesting is one level deep: a state style cannot contain another state style.
