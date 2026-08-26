@@ -791,6 +791,7 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                 "center",
                 "end",
                 "flex-end",
+                "baseline",
                 "stretch"
             ]
         );
@@ -1640,7 +1641,7 @@ mod tests {
             "flexGrow": 1,
             "flexShrink": 1,
             "flexBasis": 20,
-            "alignItems": "stretch",
+            "alignItems": "baseline",
             "alignSelf": "baseline",
             "alignContent": "space-evenly",
             "justifyContent": "space-evenly",
