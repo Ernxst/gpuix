@@ -1631,7 +1631,9 @@ tracked element has keyboard-modality focus, matching CSS `:focus-visible`.
 Put `hoverGroup` on a container when its hover should style an opted-in
 descendant. The descendant's `hoverWithin` style follows the nearest hover
 group, including while the pointer is over a sibling such as the destination
-label. No React hover state or mouse handlers are involved.
+label. During pointer capture it remains active only while the pointer is within
+the group's hit-test bounds, so capture by the group or a descendant neither
+clears nor pins the style. No React hover state or mouse handlers are involved.
 
 ```tsx
 <div hoverGroup="destination-row" style={{ display: 'flex', flexDirection: 'column' }}>
