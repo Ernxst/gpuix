@@ -390,6 +390,58 @@ describe("style props reach the renderer", () => {
     )
   })
 
+  it("aligns grid rows with mixed column and row track lists", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", width: 600, height: 120, backgroundColor: "#101010" }}>
+        <div
+          testId="ledger"
+          style={{
+            display: "grid",
+            width: 600,
+            gridTemplateColumns: [
+              { type: "max-content" },
+              {
+                type: "minmax",
+                min: { type: "px", value: 0 },
+                max: { type: "fr", value: 1 },
+              },
+              { type: "auto" },
+            ],
+            gridTemplateRows: [
+              { type: "px", value: 40 },
+              { type: "px", value: 40 },
+            ],
+          }}
+        >
+          <div testId="header-name" style={{ width: 140, height: 24 }} />
+          <div testId="header-rate" style={{ width: 80, height: 24 }} />
+          <div testId="header-status" style={{ width: 48, height: 24 }} />
+          <div testId="row-name" style={{ width: 72, height: 24 }} />
+          <div testId="row-rate" style={{ width: 80, height: 24 }} />
+          <div testId="row-status" style={{ width: 48, height: 24 }} />
+        </div>
+      </div>,
+    )
+
+    const bounds = (testId: string) => {
+      const element = renderer.findByTestId(testId)
+      expect(element, `missing ${testId}`).toBeDefined()
+      const result = renderer.getElementBounds(element!.id)
+      expect(result, `no bounds for ${testId}`).toEqual(expect.any(Array))
+      return result!
+    }
+
+    const headerRate = bounds("header-rate")
+    const rowRate = bounds("row-rate")
+    const headerStatus = bounds("header-status")
+    const rowStatus = bounds("row-status")
+
+    expect(rowRate[0]).toBeCloseTo(headerRate[0], 4)
+    expect(rowStatus[0]).toBeCloseTo(headerStatus[0], 4)
+    expect(rowRate[1]).toBeGreaterThan(headerRate[1])
+  })
+
   it("focuses an element with autoFocus so it receives keys", () => {
     // `autoFocus` was declared in Props and dropped by the reconciler, so an
     // <input> was dead until clicked.

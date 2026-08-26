@@ -11,8 +11,15 @@
 /// JSX types now resolve to GPUIX's Props via jsxImportSource in tsconfig.
 
 import fs from "fs"
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import React, { useState, useRef } from "react"
+import {
+  createLink,
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterContextProvider,
+} from "@tanstack/react-router"
 import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing"
 import {
   render as renderApp,
@@ -20,6 +27,9 @@ import {
   startFrameLoop,
 } from "../reconciler/renderer.js"
 import type { EventPayload } from "@gpuix/native"
+import { handleGpuixEvent } from "../reconciler/event-registry.js"
+import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
+import type { Props, PublicInstance } from "../types/host.js"
 import { expectScreenshotsDiffer, expectScreenshotsEqual } from "./test-utils"
 
 // All tests require the native GPUI test renderer (cargo build with test-support).
@@ -243,6 +253,10 @@ describeNative("events", () => {
     testRoot = createTestRoot()
   })
 
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   describe("click events", () => {
     it("should handle onClick and trigger re-render", () => {
       function Counter() {
@@ -283,55 +297,251 @@ describeNative("events", () => {
       `)
     })
 
-    it("activates a plain link-like anchor through click, focused Enter, and Space", () => {
-      const navigate = vi.fn()
+    it("dispatches one event through capture, target, and bubble with DOM-shaped targets", () => {
+      const calls: Array<{
+        name: string
+        phase: number
+        target: PublicInstance
+        currentTarget: PublicInstance
+        defaultPrevented: boolean
+      }> = []
+      let parent: PublicInstance | null = null
+      let target: PublicInstance | null = null
+
+      const record = (name: string, event: GpuixSyntheticEvent): void => {
+        calls.push({
+          name,
+          phase: event.eventPhase,
+          target: event.target,
+          currentTarget: event.currentTarget,
+          defaultPrevented: event.defaultPrevented,
+        })
+      }
+
       testRoot.render(
         <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            width: 400,
-            height: 240,
-            gap: 20,
-            padding: 40,
+          ref={(instance) => {
+            parent = instance
           }}
+          onClickCapture={(event) => record("parent capture", event)}
+          onClick={(event) => record("parent bubble", event)}
+          style={{ width: 240, height: 100 }}
         >
-          <div
-            autoFocus
-            tabIndex={0}
-            testId="before-link"
-            style={{ width: 1, height: 1 }}
-          />
           <a
-            href="/factory"
-            testId="plain-link"
-            onClick={() => navigate("/factory")}
-            style={{ width: 200, height: 60 }}
+            ref={(instance) => {
+              target = instance
+            }}
+            target="_self"
+            onClickCapture={(event) => record("target capture", event)}
+            onClick={(event) => {
+              event.preventDefault()
+              record("target bubble", event)
+            }}
+            style={{ width: 120, height: 50 }}
           >
             Factory
           </a>
         </div>
       )
 
-      const link = testRoot.renderer.findByTestId("plain-link")!
-      const beforeLink = testRoot.renderer.findByTestId("before-link")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(link.id)!
+      const nativeEvent: EventPayload = {
+        elementId: target!.id,
+        eventType: "click",
+        modifiers: { alt: true, ctrl: false, cmd: true, shift: false },
+      }
+      const result = handleGpuixEvent(nativeEvent, testRoot.renderer)
 
-      testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
-      expect(navigate).toHaveBeenLastCalledWith("/factory")
+      expect(calls.map(({ name }) => name)).toEqual([
+        "parent capture",
+        "target capture",
+        "target bubble",
+        "parent bubble",
+      ])
+      expect(calls.map(({ phase }) => phase)).toEqual([1, 2, 2, 3])
+      expect(calls.every((call) => call.target === target)).toBe(true)
+      expect(calls[0]!.currentTarget).toBe(parent)
+      expect(calls[1]!.currentTarget).toBe(target)
+      expect(calls[3]!.currentTarget).toBe(parent)
+      expect(calls[3]!.defaultPrevented).toBe(true)
+      expect(target!.getAttribute("target")).toBe("_self")
+      expect(target!.getAttribute("missing")).toBeNull()
+      expect(result).toEqual({ defaultPrevented: true, propagationStopped: false })
+    })
 
-      testRoot.renderer.focusElement(beforeLink.id)
-      testRoot.renderer.simulateKeystrokes("tab")
+    it("stops React propagation before an ancestor bubble handler", () => {
+      const parentClick = vi.fn()
+      const targetClick = vi.fn((event: GpuixSyntheticEvent) => event.stopPropagation())
+      let target: PublicInstance | null = null
+
+      testRoot.render(
+        <div onClick={parentClick} style={{ width: 240, height: 100 }}>
+          <div
+            ref={(instance) => {
+              target = instance
+            }}
+            onClick={targetClick}
+            style={{ width: 120, height: 50 }}
+          />
+        </div>
+      )
+
+      testRoot.renderer.nativeSimulateClick(10, 10)
+
+      expect(targetClick).toHaveBeenCalledOnce()
+      expect(parentClick).not.toHaveBeenCalled()
+      expect(targetClick.mock.calls[0]![0].isPropagationStopped()).toBe(true)
+    })
+
+    it("runs an unadapted TanStack createLink handler through the synthetic surface", () => {
+      vi.stubGlobal("window", { origin: "http://localhost" })
+      type NativeAnchorProps = Props & {
+        href?: string
+        target?: string
+      }
+      const NativeAnchor = React.forwardRef<PublicInstance, NativeAnchorProps>(
+        (props, ref) => <a {...props} ref={ref} />
+      )
+      const TanStackLink = createLink(NativeAnchor)
+      const rootRoute = createRootRoute()
+      const router = createRouter({
+        routeTree: rootRoute,
+        history: createMemoryHistory({ initialEntries: ["/"] }),
+        isServer: false,
+      })
+      const navigate = vi.spyOn(router, "navigate").mockResolvedValue(undefined)
+
+      testRoot.render(
+        <RouterContextProvider router={router}>
+          <TanStackLink
+            to="/factory"
+            preload={false}
+            testId="tanstack-link"
+            style={{ width: 180, height: 50 }}
+          >
+            Factory
+          </TanStackLink>
+        </RouterContextProvider>
+      )
+
+      const link = testRoot.renderer.findByTestId("tanstack-link")!
+      expect(link.events.has("click")).toBe(true)
+      const modified = handleGpuixEvent(
+        {
+          elementId: link.id,
+          eventType: "click",
+          modifiers: { alt: false, ctrl: false, cmd: true, shift: false },
+        },
+        testRoot.renderer
+      )
+      expect(modified.defaultPrevented).toBe(false)
+      expect(navigate).not.toHaveBeenCalled()
+
+      const primary = handleGpuixEvent(
+        { elementId: link.id, eventType: "click" },
+        testRoot.renderer
+      )
+      expect(primary.defaultPrevented).toBe(true)
+      expect(navigate).toHaveBeenCalledOnce()
+      expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ to: "/factory" }))
+    })
+
+    it("navigates an unadapted TanStack createLink link on focused Enter", () => {
+      vi.stubGlobal("window", { origin: "http://localhost" })
+      type NativeAnchorProps = Props & {
+        href?: string
+        target?: string
+      }
+      const NativeAnchor = React.forwardRef<PublicInstance, NativeAnchorProps>(
+        (props, ref) => <a {...props} ref={ref} />
+      )
+      const TanStackLink = createLink(NativeAnchor)
+      const rootRoute = createRootRoute()
+      const router = createRouter({
+        routeTree: rootRoute,
+        history: createMemoryHistory({ initialEntries: ["/"] }),
+        isServer: false,
+      })
+      const navigate = vi.spyOn(router, "navigate").mockResolvedValue(undefined)
+
+      testRoot.render(
+        <RouterContextProvider router={router}>
+          <TanStackLink
+            to="/factory"
+            preload={false}
+            testId="tanstack-keyboard-link"
+            style={{ width: 180, height: 50 }}
+          >
+            Factory
+          </TanStackLink>
+        </RouterContextProvider>
+      )
+
+      const link = testRoot.renderer.findByTestId("tanstack-keyboard-link")!
+      expect(link.customProps?.tabIndex).toBe(0)
+
+      testRoot.renderer.focusElement(link.id)
       testRoot.renderer.simulateKeyDown("enter")
       testRoot.renderer.simulateKeyUp("enter")
-      expect(navigate).toHaveBeenCalledTimes(2)
 
-      testRoot.renderer.focusElement(beforeLink.id)
-      testRoot.renderer.simulateKeystrokes("tab")
-      testRoot.renderer.simulateKeyDown("space")
-      testRoot.renderer.simulateKeyUp("space")
-      expect(navigate).toHaveBeenCalledTimes(3)
+      expect(navigate).toHaveBeenCalledOnce()
+      expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ to: "/factory" }))
     })
+
+    it("routes pointer click and focused Space through the same click handler", () => {
+      const click = vi.fn()
+      testRoot.render(
+        <div
+          autoFocus
+          tabIndex={0}
+          testId="space-activation"
+          onClick={click}
+          style={{ width: 180, height: 50 }}
+        />
+      )
+
+      const target = testRoot.renderer.findByTestId("space-activation")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(target.id)!
+      testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
+      expect(click).toHaveBeenCalledOnce()
+
+      testRoot.renderer.focusElement(target.id)
+      testRoot.renderer.simulateKeyDown("space")
+      expect(click).toHaveBeenCalledOnce()
+
+      testRoot.renderer.simulateKeyUp("space")
+      expect(click).toHaveBeenCalledTimes(2)
+    })
+
+    it.each(["enter", "space"] as const)(
+      "suppresses a keyboard-synthesized click after prevented %s",
+      (key) => {
+        const click = vi.fn()
+        const keyUp = vi.fn()
+        let target: PublicInstance | null = null
+
+        testRoot.render(
+          <a
+            ref={(instance) => {
+              target = instance
+            }}
+            autoFocus
+            tabIndex={0}
+            onKeyDown={(event) => event.preventDefault()}
+            onKeyUp={keyUp}
+            onClick={click}
+            style={{ width: 180, height: 50 }}
+          >
+            Factory
+          </a>
+        )
+
+        testRoot.renderer.nativeSimulateKeyDown(target!.id, key)
+        testRoot.renderer.nativeSimulateKeyUp(target!.id, key)
+
+        expect(click).not.toHaveBeenCalled()
+        expect(keyUp).toHaveBeenCalledOnce()
+      }
+    )
 
     it("keeps pointer click but does not turn Space in a text editor into activation", () => {
       const onClick = vi.fn()
