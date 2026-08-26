@@ -20,6 +20,14 @@ pub struct EventPayload {
     /// e.g. "click", "mouseDown", "mouseEnter", "keyDown", "scroll", etc.
     pub event_type: String,
 
+    // ── Window ───────────────────────────────────────────────────────
+    /// Logical GPUI window width. Populated for `windowResize`.
+    pub width: Option<f64>,
+    /// Logical GPUI window height. Populated for `windowResize`.
+    pub height: Option<f64>,
+    /// Device pixels per logical GPUI pixel. Populated for `windowResize`.
+    pub scale_factor: Option<f64>,
+
     // ── Mouse position ───────────────────────────────────────────────
     /// Mouse X position in window coordinates (pixels).
     pub x: Option<f64>,
@@ -112,6 +120,9 @@ impl Default for EventPayload {
         Self {
             element_id: 0.0,
             event_type: String::new(),
+            width: None,
+            height: None,
+            scale_factor: None,
             x: None,
             y: None,
             button: None,

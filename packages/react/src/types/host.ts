@@ -550,7 +550,10 @@ export interface NativeRenderer {
   clearSelection?(): void
 
   // ── Window API ─────────────────────────────────────────────────
-  getWindowSize?(): { width: number; height: number }
+  /** Reads the live logical window dimensions and device-pixel scale factor. */
+  getWindowSize?(): { width: number; height: number; scaleFactor: number }
+  /** Internal transport for renderer-global native window events. */
+  setWindowEventHandler?(handler: ((event: EventPayload) => void) | null): void
   setWindowTitle?(title: string): void
   setDebugFrameOverlay?(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay?(): string
