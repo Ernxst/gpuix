@@ -11,6 +11,31 @@ pub enum FontWeightValue {
     Str(String),
 }
 
+/// Parse a validated CSS font-weight value into GPUI's numeric representation.
+pub(crate) fn parse_font_weight(value: &FontWeightValue) -> gpui::FontWeight {
+    match value {
+        FontWeightValue::Num(number) => gpui::FontWeight((*number as f32).clamp(1.0, 1000.0)),
+        FontWeightValue::Str(value) => {
+            let value = value.trim().to_ascii_lowercase();
+            match value.as_str() {
+                "100" | "thin" => gpui::FontWeight(100.0),
+                "200" | "extralight" | "extra-light" => gpui::FontWeight(200.0),
+                "300" | "light" => gpui::FontWeight(300.0),
+                "400" | "normal" => gpui::FontWeight(400.0),
+                "500" | "medium" => gpui::FontWeight(500.0),
+                "600" | "semibold" | "semi-bold" => gpui::FontWeight(600.0),
+                "700" | "bold" => gpui::FontWeight(700.0),
+                "800" | "extrabold" | "extra-bold" => gpui::FontWeight(800.0),
+                "900" | "black" => gpui::FontWeight(900.0),
+                _ => value
+                    .parse::<f32>()
+                    .map(|number| gpui::FontWeight(number.clamp(1.0, 1000.0)))
+                    .unwrap_or(gpui::FontWeight(400.0)),
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BoxShadowValue {
@@ -256,6 +281,7 @@ pub struct StyleDesc {
     pub font_family: Option<String>,
     pub font_weight: Option<FontWeightValue>,
     pub letter_spacing: Option<f64>,
+    pub text_decoration: Option<String>,
     pub text_transform: Option<String>,
     pub text_align: Option<String>,
     pub line_height: Option<f64>,
@@ -1025,6 +1051,13 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         enum_field!(
             key,
             value,
+            "textDecoration",
+            text_decoration,
+            ["underline", "line-through"]
+        );
+        enum_field!(
+            key,
+            value,
             "textTransform",
             text_transform,
             ["none", "uppercase", "lowercase"]
@@ -1701,6 +1734,7 @@ mod tests {
             "fontFamily": "Helvetica",
             "fontWeight": "bold",
             "letterSpacing": 1,
+            "textDecoration": "underline",
             "textTransform": "uppercase",
             "textAlign": "center",
             "lineHeight": 20,

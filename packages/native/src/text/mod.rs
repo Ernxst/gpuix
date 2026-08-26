@@ -8,10 +8,12 @@
 //! order. Adding a new text-painting element means calling that helper, never
 //! `div().child(string)`.
 
+pub(crate) mod inline;
 pub mod paint;
 pub mod runs;
 pub mod selection;
 
+pub(crate) use inline::TextTransform;
 pub use paint::{
     chrome_text, log_painted_text, painted_text, range_rects, record_start_region, selectable_text,
     selection_frame_reset, selection_key, selection_start_region, SelectableText, SharedSelection,

@@ -41,10 +41,12 @@ use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::retained_tree::RetainedTree;
 use crate::style::{
-    GridTemplateValue, GridTrackMaxValue, GridTrackMinValue, GridTrackValue, ParsedStyle,
-    StyleDesc, StyleProblem,
+    parse_font_weight, GridTemplateValue, GridTrackMaxValue, GridTrackMinValue, GridTrackValue,
+    ParsedStyle, StyleDesc, StyleProblem,
 };
-use crate::text::{selectable_text, selection_frame_reset, selection_key, SharedSelection};
+use crate::text::{
+    selectable_text, selection_frame_reset, selection_key, SharedSelection, TextTransform,
+};
 use crate::theme::Theme;
 
 #[cfg(not(target_family = "wasm"))]
@@ -75,6 +77,8 @@ pub struct GpuixStyleDiagnostic {
     pub message: String,
     pub element_id: f64,
     pub element_type: String,
+    pub author_id: Option<String>,
+    pub data_test_id: Option<String>,
     pub test_id: Option<String>,
     pub property: String,
     pub value: String,
@@ -126,12 +130,30 @@ pub(crate) fn pending_custom_prop_diagnostic(
 fn style_diagnostic_context(
     diagnostic: &PendingStyleDiagnostic,
     tree: &RetainedTree,
-) -> (String, String, Option<String>) {
+) -> (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     let element = tree.elements.get(&diagnostic.element_id);
     let element_type = element
         .map(|element| element.element_type.clone())
         .unwrap_or_else(|| "unknown".into());
     let test_id = element.and_then(|element| element.test_id.clone());
+    let author_id = element.and_then(|element| element.author_id.clone());
+    let data_test_id = element.and_then(|element| {
+        element
+            .custom_props
+            .get("data-testid")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    });
+    let author_id_label = author_id
+        .as_ref()
+        .map(|author_id| format!(" id={author_id:?}"))
+        .unwrap_or_default();
     let test_id_label = test_id
         .as_ref()
         .map(|test_id| format!(" testId={test_id:?}"))
@@ -140,14 +162,18 @@ fn style_diagnostic_context(
         DiagnosticKind::Style => "style",
         DiagnosticKind::Property => "property",
     };
+    let data_test_id_label = data_test_id
+        .as_ref()
+        .map(|data_test_id| format!(" data-testid={data_test_id:?}"))
+        .unwrap_or_default();
     let message = format!(
-        "[gpuix] Invalid {subject} on <{element_type}{test_id_label}> (element {}): property {:?} rejected value {}: {}",
+        "[gpuix] Invalid {subject} on <{element_type}{author_id_label}{data_test_id_label}{test_id_label}> (element {}): property {:?} rejected value {}: {}",
         diagnostic.element_id,
         diagnostic.problem.property,
         diagnostic.problem.value,
         diagnostic.problem.reason,
     );
-    (message, element_type, test_id)
+    (message, element_type, author_id, data_test_id, test_id)
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -160,11 +186,14 @@ pub(crate) fn drain_style_diagnostics(
     pending
         .into_iter()
         .map(|diagnostic| {
-            let (message, element_type, test_id) = style_diagnostic_context(&diagnostic, &tree);
+            let (message, element_type, author_id, data_test_id, test_id) =
+                style_diagnostic_context(&diagnostic, &tree);
             GpuixStyleDiagnostic {
                 message,
                 element_id: diagnostic.element_id as f64,
                 element_type,
+                author_id,
+                data_test_id,
                 test_id,
                 property: diagnostic.problem.property,
                 value: diagnostic.problem.value,
@@ -469,33 +498,6 @@ pub(crate) fn init_key_bindings(cx: &mut gpui::App) {
         gpui::KeyBinding::new("tab", FocusNext, None),
         gpui::KeyBinding::new("shift-tab", FocusPrevious, None),
     ]);
-}
-
-/// Parse a CSS font-weight value (string or number) into a GPUI FontWeight.
-/// Accepts named keywords ("bold", "semibold"), numeric strings ("700"),
-/// and raw numbers (700). Falls back to 400 (normal) for unrecognized values.
-fn parse_font_weight(value: &crate::style::FontWeightValue) -> gpui::FontWeight {
-    match value {
-        crate::style::FontWeightValue::Num(n) => gpui::FontWeight((*n as f32).clamp(1.0, 1000.0)),
-        crate::style::FontWeightValue::Str(s) => {
-            let lower = s.trim().to_ascii_lowercase();
-            match lower.as_str() {
-                "100" | "thin" => gpui::FontWeight(100.0),
-                "200" | "extralight" | "extra-light" => gpui::FontWeight(200.0),
-                "300" | "light" => gpui::FontWeight(300.0),
-                "400" | "normal" => gpui::FontWeight(400.0),
-                "500" | "medium" => gpui::FontWeight(500.0),
-                "600" | "semibold" | "semi-bold" => gpui::FontWeight(600.0),
-                "700" | "bold" => gpui::FontWeight(700.0),
-                "800" | "extrabold" | "extra-bold" => gpui::FontWeight(800.0),
-                "900" | "black" => gpui::FontWeight(900.0),
-                _ => lower
-                    .parse::<f32>()
-                    .map(|n| gpui::FontWeight(n.clamp(1.0, 1000.0)))
-                    .unwrap_or(gpui::FontWeight(400.0)),
-            }
-        }
-    }
 }
 
 /// Abstracted event callback shared by desktop, browser, and test renderers.
@@ -2892,7 +2894,7 @@ impl WebGpuixRenderer {
         tree.set_style(id, parsed.style);
         if self.strict_styles.load(Ordering::Relaxed) {
             for diagnostic in pending_style_diagnostics(id, parsed.problems) {
-                let (message, _, _) = style_diagnostic_context(&diagnostic, &tree);
+                let (message, _, _, _, _) = style_diagnostic_context(&diagnostic, &tree);
                 web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
             }
         }
@@ -2949,7 +2951,7 @@ impl WebGpuixRenderer {
         tree.set_custom_prop(id, key, value);
         if self.strict_styles.load(Ordering::Relaxed) {
             if let Some(diagnostic) = diagnostic {
-                let (message, _, _) = style_diagnostic_context(&diagnostic, &tree);
+                let (message, _, _, _, _) = style_diagnostic_context(&diagnostic, &tree);
                 web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
             }
         }
@@ -2986,7 +2988,7 @@ impl WebGpuixRenderer {
             .map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
         if self.strict_styles.load(Ordering::Relaxed) {
             for diagnostic in outcome.diagnostics {
-                let (message, _, _) = style_diagnostic_context(&diagnostic, &tree);
+                let (message, _, _, _, _) = style_diagnostic_context(&diagnostic, &tree);
                 web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
             }
         }
@@ -3592,14 +3594,6 @@ pub(crate) struct Inherited {
     pub current_color: gpui::Rgba,
     /// Nearest native hover group for descendant `hoverWithin` styles.
     pub hover_group: Option<gpui::SharedString>,
-}
-
-#[derive(Clone, Copy, Default)]
-pub(crate) enum TextTransform {
-    #[default]
-    None,
-    Uppercase,
-    Lowercase,
 }
 
 impl Inherited {
@@ -4782,15 +4776,15 @@ pub(crate) fn build_text(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
     ctx: &mut BuildCtx,
-    window: &mut gpui::Window,
-    cx: &mut gpui::Context<GpuixView>,
+    _window: &mut gpui::Window,
+    _cx: &mut gpui::Context<GpuixView>,
 ) -> gpui::AnyElement {
     use gpui::prelude::*;
 
     // Fast path: plain text leaf without style. It still goes through
     // `text_content` so the glyphs land in the selection registry — the old
     // raw-string return was the reason text was not selectable.
-    if style.is_none() && element.children.is_empty() {
+    if style.is_none() && element.children.is_empty() && element.events.is_empty() {
         let content = element.content.clone().unwrap_or_default();
         return gpui::div()
             .relative()
@@ -4814,14 +4808,46 @@ pub(crate) fn build_text(
         selection_start_flag(style),
     ));
 
-    if let Some(ref content) = element.content {
-        el = el.child(text_content(element.id, content, ctx));
+    let inline = match crate::text::inline::flatten_inline_text(
+        ctx.tree,
+        element.id,
+        ctx.inherited.text_transform,
+    ) {
+        Ok(inline) => inline,
+        Err(error) => {
+            log::error!("Invalid inline text tree: {error}");
+            crate::text::inline::InlineText::default()
+        }
+    };
+    let mut content = crate::text::SelectableText::new(
+        gpui::SharedString::from(inline.text),
+        None,
+        selection_key(element.id, 0),
+        ctx.selection.clone(),
+        ctx.inherited.selection_wash,
+    );
+    content.run_styles = Some(inline.runs);
+    content.tracked_ranges = inline.tracked_ranges;
+    content.clickable_ranges = inline.clickable_ranges;
+    content.selectable = ctx.inherited.selectable;
+
+    if !content.clickable_ranges.is_empty() {
+        let callback = ctx.event_callback.clone();
+        content.on_inline_click = Some(Arc::new(move |id, event| {
+            emit_event_full(&callback, id, "click", |payload| {
+                let (x, y) = point_to_xy(event.position);
+                payload.x = Some(x);
+                payload.y = Some(y);
+                payload.modifiers = Some(event.modifiers.into());
+                payload.click_count = Some(event.click_count as u32);
+                payload.is_right_click = Some(false);
+                payload.button = Some(mouse_button_to_u32(event.button));
+                payload.input_source = Some("mouse".to_string());
+            });
+        }));
     }
 
-    let child_ids: Vec<u64> = element.children.clone();
-    for child_id in child_ids {
-        el = el.child(build_element(child_id, ctx, window, cx));
-    }
+    el = el.child(selectable_text(content));
 
     el.into_any_element()
 }
@@ -5140,6 +5166,11 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     }
     if let Some(letter_spacing) = style.letter_spacing {
         el = el.letter_spacing(gpui::px(letter_spacing as f32));
+    }
+    match style.text_decoration.as_deref() {
+        Some("underline") => el = el.underline(),
+        Some("line-through") => el = el.line_through(),
+        _ => {}
     }
     // `textAlign` was in the style type but implemented nowhere.
     match style.text_align.as_deref() {
@@ -5501,6 +5532,8 @@ pub(crate) fn apply_batch_to_tree(
     // Phase 2: apply all validated ops to the tree.
     let mut destroyed_ids: Vec<f64> = Vec::new();
     let mut diagnostics = Vec::new();
+    let mut inline_style_candidates = HashSet::new();
+    let mut inline_subtree_roots = Vec::new();
     for batch_op in parsed {
         match batch_op {
             BatchOp::CreateElement { id, element_type } => {
@@ -5515,6 +5548,7 @@ pub(crate) fn apply_batch_to_tree(
                 child_id,
             } => {
                 tree.append_child(parent_id, child_id);
+                inline_subtree_roots.push(child_id);
             }
             BatchOp::RemoveChild {
                 parent_id,
@@ -5528,6 +5562,7 @@ pub(crate) fn apply_batch_to_tree(
                 before_id,
             } => {
                 tree.insert_before(parent_id, child_id, before_id);
+                inline_subtree_roots.push(child_id);
             }
             BatchOp::SetStyle {
                 id,
@@ -5536,6 +5571,7 @@ pub(crate) fn apply_batch_to_tree(
             } => {
                 tree.set_style(id, style);
                 diagnostics.extend(pending_style_diagnostics(id, problems));
+                inline_style_candidates.insert(id);
             }
             BatchOp::SetText { id, content } => {
                 tree.set_text(id, content);
@@ -5557,6 +5593,28 @@ pub(crate) fn apply_batch_to_tree(
                 tree.set_custom_prop(id, key, value);
             }
         }
+    }
+
+    for root_id in inline_subtree_roots {
+        crate::text::inline::subtree_ids(tree, root_id, &mut inline_style_candidates);
+    }
+    let mut inline_style_candidates = inline_style_candidates.into_iter().collect::<Vec<_>>();
+    inline_style_candidates.sort_unstable();
+    for id in inline_style_candidates {
+        if !crate::text::inline::is_inline_text_descendant(tree, id) {
+            continue;
+        }
+        let Some(style) = tree
+            .elements
+            .get(&id)
+            .and_then(|element| element.style.as_ref())
+        else {
+            continue;
+        };
+        diagnostics.extend(pending_style_diagnostics(
+            id,
+            crate::text::inline::unsupported_inline_style_problems(style),
+        ));
     }
 
     Ok(BatchOutcome {
