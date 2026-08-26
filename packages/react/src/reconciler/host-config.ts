@@ -278,6 +278,10 @@ const BUILT_IN_TYPES = new Set(["div", "text", ...DIV_ALIASES])
 // Custom props are otherwise skipped for built-ins.
 const UNIVERSAL_PROPS = new Set(["autoFocus", "tabIndex", "motion", "testId", "hoverGroup"])
 
+function isIdentityProp(name: string): boolean {
+  return name === "id" || name.startsWith("data-")
+}
+
 function isReservedProp(name: string): boolean {
   return RESERVED_PROPS.has(name) || EVENT_PROP_NAMES.has(name)
 }
@@ -327,7 +331,7 @@ function syncCustomProps(
   const builtIn = BUILT_IN_TYPES.has(type)
   for (const [key, value] of customPropEntries(type, props)) {
     if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
+    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isIdentityProp(key)) continue
     renderer.setCustomProp(id, key, serializeCustomProp(type, key, value))
   }
 }
@@ -347,7 +351,7 @@ function diffCustomProps(
   // Updated or added props
   for (const [key, value] of newEntries) {
     if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
+    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isIdentityProp(key)) continue
     const oldValue = oldEntries.find(([oldKey]) => oldKey === key)?.[1]
     if (oldValue !== value) {
       renderer.setCustomProp(id, key, serializeCustomProp(type, key, value))
@@ -356,9 +360,9 @@ function diffCustomProps(
   // Removed props
   for (const [key] of oldEntries) {
     if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
+    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isIdentityProp(key)) continue
     if (!newKeys.includes(key)) {
-      renderer.setCustomProp(id, key, JSON.stringify(null))
+      renderer.setCustomProp(id, key, null)
     }
   }
 }
@@ -420,7 +424,9 @@ export const hostConfig = {
       parentId: null,
       getAttribute(name): string | null {
         const value = (instance.props as Props & Record<string, unknown>)[name]
-        if (value == null || value === false || typeof value === "function") return null
+        if (value == null || typeof value === "function") return null
+        if (name === "id" || name.startsWith("data-")) return String(value)
+        if (value === false) return null
         if (value === true) return ""
         return typeof value === "string" || typeof value === "number" ? String(value) : null
       },

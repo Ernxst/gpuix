@@ -541,6 +541,7 @@ describe("style props reach the renderer", () => {
             Copper Basin
           </text>
           <span
+            data-testid="destination-hover-underline"
             style={{
               width: 180,
               height: 8,
@@ -553,6 +554,7 @@ describe("style props reach the renderer", () => {
     )
 
     const label = renderer.findByTestId("destination-label")!
+    expect(renderer.findByTestId("destination-hover-underline")?.type).toBe("div")
     const [x, y, width, height] = renderer.getElementBounds(label.id)!
     const before = path.join(SHOTS_DIR, "hover-within-before.png")
     const after = path.join(SHOTS_DIR, "hover-within-after.png")

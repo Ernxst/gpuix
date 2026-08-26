@@ -18,6 +18,11 @@ type EventRegistrySlot = {
 }
 
 function eventRegistrySlot(): EventRegistrySlot {
+  // Bun --hot re-evaluates this module, producing duplicate module instances per reload pass.
+  // This slot deliberately makes that duplication HARMLESS (all instances share one registry
+  // and ID allocator) rather than preventing it. Do not 'fix' the duplication by
+  // de-duplicating module evaluation — the cross-reload event routing depends on this
+  // slot surviving re-evaluation.
   const existing = Reflect.get(globalThis, EVENT_REGISTRY_KEY) as EventRegistrySlot | undefined
   if (existing) return existing
 
