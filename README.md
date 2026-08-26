@@ -1434,9 +1434,11 @@ only for a desktop app that intentionally ships loose asset files.
 Bun `import … with { type: 'file' }` bindings emit the data URL. GPUIX decodes
 both.
 
-`style.color` is required. Without it the icon does not paint. Prefer
-`fill="#000"` or `stroke="#000"` in the file. `currentColor` in the SVG is not
-the same as `style.color`.
+`color` follows normal inherited semantics across built-in text and custom
+elements. `<svg>` is always a monochrome icon surface, so its resolved color
+comes from itself or an ancestor regardless of whether the SVG source uses
+`fill="#000"` or `currentColor`. Use `<img>` for a full-colour SVG document;
+its authored colours stay intact unless `tint="currentColor"` is explicit.
 
 #### Bun
 

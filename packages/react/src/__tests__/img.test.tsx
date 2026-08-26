@@ -11,7 +11,7 @@ import {
   TestRenderer,
 } from "../testing"
 import type { ImageMimeType, ImageSource } from "../types/host"
-import { bufferSimilarity, isCI } from "./test-utils"
+import { bufferSimilarity, expectScreenshotsDiffer, isCI } from "./test-utils"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -503,6 +503,44 @@ describeNative("custom element: svg", () => {
     const screenshot = "/tmp/gpuix-svg-icon.png"
     testRoot.renderer.captureScreenshot(screenshot)
     expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
+  })
+
+  it("tints #000 and currentColor SVG icons from an ancestor color", () => {
+    const testRoot = createImageTestRoot()
+    const sources = {
+      blackFill:
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="4" y="4" width="24" height="24" rx="4" fill="#000"/></svg>',
+      currentColor:
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="4" y="4" width="24" height="24" rx="4" fill="currentColor"/></svg>',
+    }
+
+    function SvgProbe({ ancestorColor, source }: { ancestorColor: string; source: string }) {
+      return (
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: "#10131d",
+            color: ancestorColor,
+          }}
+        >
+          <svg source={source} style={{ width: 160, height: 100 }} />
+        </div>
+      )
+    }
+
+    for (const [name, source] of Object.entries(sources)) {
+      const redPath = `/tmp/gpuix-svg-${name}-inherited-red.png`
+      const bluePath = `/tmp/gpuix-svg-${name}-inherited-blue.png`
+      testRoot.render(<SvgProbe ancestorColor="#ff4d6d" source={source} />)
+      testRoot.renderer.captureScreenshot(redPath)
+      testRoot.render(<SvgProbe ancestorColor="#4da3ff" source={source} />)
+      testRoot.renderer.captureScreenshot(bluePath)
+      expectScreenshotsDiffer(redPath, bluePath)
+    }
   })
 
   it("uses the light default icon colour on a dark surface", () => {
