@@ -30,6 +30,19 @@ export interface AutomationBackend {
   close(): Promise<void>
 }
 
+/** Fields that GPUI receives from a platform scroll-wheel event. */
+export interface ScrollWheelOptions {
+  phase?: "started" | "moved" | "ended" | "cancelled"
+  deltaUnit?: "pixels" | "lines"
+  modifiers?: {
+    shift?: boolean
+    ctrl?: boolean
+    alt?: boolean
+    cmd?: boolean
+    function?: boolean
+  }
+}
+
 abstract class ValidatedAutomationBackend implements AutomationBackend {
   private closed = false
 
@@ -68,7 +81,8 @@ export interface TestAutomationRenderer {
     x: number,
     y: number,
     deltaX: number,
-    deltaY: number
+    deltaY: number,
+    options?: ScrollWheelOptions
   ): void
   simulateKeystrokes(keystrokes: string): void
   nativeSimulateKeystrokes(elementId: number, keystrokes: string): void
@@ -151,11 +165,20 @@ export class InProcessBackend extends ValidatedAutomationBackend {
       return { ok: true as const }
     },
     scrollWheel: (params) => {
+      const options =
+        params.phase || params.deltaUnit || params.modifiers
+          ? {
+              phase: params.phase,
+              deltaUnit: params.deltaUnit,
+              modifiers: params.modifiers,
+            }
+          : undefined
       this.renderer.nativeSimulateScrollWheel(
         params.x,
         params.y,
         params.deltaX,
-        params.deltaY
+        params.deltaY,
+        options
       )
       return { ok: true as const }
     },
@@ -546,7 +569,8 @@ export interface LiveAutomationRenderer {
     x: number,
     y: number,
     deltaX: number,
-    deltaY: number
+    deltaY: number,
+    options?: ScrollWheelOptions
   ): void
   simulateKeystrokes?(keystrokes: string): void
   simulateKeyDown?(keystroke: string, isHeld?: boolean): void
@@ -592,12 +616,11 @@ export function liveRendererAsTest(
       renderer.simulateMouseMove(x, y, pressedButton)
       afterInput()
     },
-    nativeSimulateScrollWheel(x, y, deltaX, deltaY) {
+    nativeSimulateScrollWheel(x, y, deltaX, deltaY, options) {
       if (!renderer.simulateScrollWheel) {
-        throw new AutomationError("Unsupported", "scrollWheel is not live yet")
+        throw new AutomationError("Unsupported", "scrollWheel is not supported by this live renderer")
       }
-      renderer.simulateScrollWheel(x, y, deltaX, deltaY)
-      afterInput()
+      renderer.simulateScrollWheel(x, y, deltaX, deltaY, options)
     },
     simulateKeystrokes(keys) {
       if (!renderer.simulateKeystrokes) {

@@ -743,22 +743,20 @@ impl TestGpuixRenderer {
     }
 
     /// Simulate a scroll wheel event at the given position.
-    /// delta_x and delta_y are in pixels (negative = scroll up/left).
+    /// delta_x and delta_y default to pixels (negative = scroll up/left).
     #[napi]
-    pub fn simulate_scroll_wheel(&self, x: f64, y: f64, delta_x: f64, delta_y: f64) -> Result<()> {
+    pub fn simulate_scroll_wheel(
+        &self,
+        x: f64,
+        y: f64,
+        delta_x: f64,
+        delta_y: f64,
+        options: Option<crate::automation::ScrollWheelOptions>,
+    ) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.simulate_event(
-                window,
-                gpui::ScrollWheelEvent {
-                    position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-                    delta: gpui::ScrollDelta::Pixels(gpui::point(
-                        gpui::px(delta_x as f32),
-                        gpui::px(delta_y as f32),
-                    )),
-                    modifiers: gpui::Modifiers::default(),
-                    touch_phase: gpui::TouchPhase::Moved,
-                },
-            );
+            let event = crate::automation::scroll_wheel_event(x, y, delta_x, delta_y, options)
+                .map_err(Error::from_reason)?;
+            cx.simulate_event(window, event);
             Ok(())
         })
     }

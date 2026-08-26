@@ -11,6 +11,7 @@
 
 import type { ReactNode } from "react"
 import type { EventPayload, MenuSpec } from "@gpuix/native"
+import type { ScrollWheelOptions } from "./automation/client.js"
 import { createRequire } from "node:module"
 import type {
   DebugFrameOverlayMode,
@@ -46,7 +47,13 @@ interface NativeTestRendererApi extends NativeRenderer {
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
   simulateClick(x: number, y: number): void
-  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
+  simulateScrollWheel(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    options?: ScrollWheelOptions
+  ): void
   simulateMouseMove(x: number, y: number, pressedButton?: number): void
   simulateMouseDown(x: number, y: number, button: number): void
   simulateMouseUp(x: number, y: number, button: number): void
@@ -433,10 +440,11 @@ export class TestRenderer implements NativeRenderer {
     x: number,
     y: number,
     deltaX: number,
-    deltaY: number
+    deltaY: number,
+    options?: ScrollWheelOptions
   ): void {
     this.native.flush()
-    this.native.simulateScrollWheel(x, y, deltaX, deltaY)
+    this.native.simulateScrollWheel(x, y, deltaX, deltaY, options)
     this.dispatchNativeEvents()
   }
 
@@ -444,9 +452,10 @@ export class TestRenderer implements NativeRenderer {
     x: number,
     y: number,
     deltaX: number,
-    deltaY: number
+    deltaY: number,
+    options?: ScrollWheelOptions
   ): void {
-    this.native.simulateScrollWheel(x, y, deltaX, deltaY)
+    this.native.simulateScrollWheel(x, y, deltaX, deltaY, options)
     this.dispatchNativeEvents()
   }
 

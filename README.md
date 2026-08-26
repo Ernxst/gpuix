@@ -1899,6 +1899,27 @@ await app.screenshot({ path: 'live.png' })
 await app.close()
 ```
 
+`scrollWheel` uses the same live native input pipeline as a physical wheel. It
+accepts optional `phase` (`started`, `moved`, `ended`, or `cancelled`),
+`deltaUnit` (`pixels` or `lines`), and `modifiers` (`shift`, `ctrl`, `alt`,
+`cmd`, and `function`) so a paced test can inject the same fields GPUI receives
+from AppKit. Each call dispatches immediately; it does not advance the live
+renderer. The caller owns gesture cadence and must pace its own sequence
+realistically when measuring #58. This is functional automation and paced
+testing, not passive physical-input capture. GPUI has no separate momentum
+phase, so paced momentum samples are injected as `moved` events.
+
+The repository includes a real-window smoke target that sends a phased pixel
+and line-delta sequence, then checks both the scroll event and scroll offset:
+
+```bash
+cd examples
+bun run live-scroll-wheel:smoke
+```
+
+The window may briefly appear while the controller sends the gesture. The command
+prints `live scroll-wheel automation passed` on success.
+
 ## Testing
 
 The locators above sit on a **GPU-backed test renderer** (`TestGpuixRenderer`).

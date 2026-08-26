@@ -655,6 +655,13 @@ enum MouseInput {
         y: f64,
         pressed_button: Option<u32>,
     },
+    ScrollWheel {
+        x: f64,
+        y: f64,
+        delta_x: f64,
+        delta_y: f64,
+        options: Option<crate::automation::ScrollWheelOptions>,
+    },
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -952,24 +959,46 @@ async fn run_ui_commands(
                 })
             }
             UiCommand::DispatchMouse { input, response } => {
-                let result = window.update(cx, move |_view, window, cx| match input {
-                    MouseInput::Click { x, y, button } => {
-                        crate::automation::dispatch_click(window, cx, x, y, button);
-                    }
-                    MouseInput::Down { x, y, button } => {
-                        crate::automation::dispatch_mouse_down(window, cx, x, y, button);
-                    }
-                    MouseInput::Up { x, y, button } => {
-                        crate::automation::dispatch_mouse_up(window, cx, x, y, button);
-                    }
-                    MouseInput::Move {
-                        x,
-                        y,
-                        pressed_button,
-                    } => {
-                        crate::automation::dispatch_mouse_move(window, cx, x, y, pressed_button);
-                    }
-                });
+                let result = window
+                    .update(cx, move |_view, window, cx| match input {
+                        MouseInput::Click { x, y, button } => {
+                            crate::automation::dispatch_click(window, cx, x, y, button);
+                            Ok(())
+                        }
+                        MouseInput::Down { x, y, button } => {
+                            crate::automation::dispatch_mouse_down(window, cx, x, y, button);
+                            Ok(())
+                        }
+                        MouseInput::Up { x, y, button } => {
+                            crate::automation::dispatch_mouse_up(window, cx, x, y, button);
+                            Ok(())
+                        }
+                        MouseInput::Move {
+                            x,
+                            y,
+                            pressed_button,
+                        } => {
+                            crate::automation::dispatch_mouse_move(
+                                window,
+                                cx,
+                                x,
+                                y,
+                                pressed_button,
+                            );
+                            Ok(())
+                        }
+                        MouseInput::ScrollWheel {
+                            x,
+                            y,
+                            delta_x,
+                            delta_y,
+                            options,
+                        } => crate::automation::dispatch_scroll_wheel(
+                            window, cx, x, y, delta_x, delta_y, options,
+                        )
+                        .map_err(Error::from_reason),
+                    })
+                    .and_then(|result| result.map_err(|error| anyhow::anyhow!(error.reason)));
                 response
                     .send(
                         result
@@ -2450,6 +2479,44 @@ impl GpuixRenderer {
     }
 
     #[napi]
+    pub fn simulate_scroll_wheel(
+        &self,
+        x: f64,
+        y: f64,
+        delta_x: f64,
+        delta_y: f64,
+        options: Option<crate::automation::ScrollWheelOptions>,
+    ) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(move |_view, window, cx| {
+            crate::automation::dispatch_scroll_wheel(window, cx, x, y, delta_x, delta_y, options)
+                .map_err(Error::from_reason)
+        })?;
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.dispatch_mouse_input(MouseInput::ScrollWheel {
+            x,
+            y,
+            delta_x,
+            delta_y,
+            options,
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (x, y, delta_x, delta_y, options);
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    #[napi]
     pub fn clock_pause(&self) -> Result<f64> {
         #[cfg(target_os = "macos")]
         return update_window(move |view, _window, cx| {
@@ -3320,10 +3387,12 @@ impl WebGpuixRenderer {
         delta_x: f64,
         delta_y: f64,
     ) -> Result<(), wasm_bindgen::JsValue> {
-        update_web_window(move |_view, window, cx| {
-            crate::automation::dispatch_scroll_wheel(window, cx, x, y, delta_x, delta_y);
+        return update_web_window(move |_view, window, cx| {
+            crate::automation::dispatch_scroll_wheel(window, cx, x, y, delta_x, delta_y, None)
+                .map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
             cx.notify();
-        })
+            Ok(())
+        })?;
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = clockPause)]
