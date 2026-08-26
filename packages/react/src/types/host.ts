@@ -534,6 +534,10 @@ export interface NativeRenderer {
   focusElement?(elementId: number): void
   blur?(): void
 
+  // ── Pointer capture API ────────────────────────────────────────
+  setPointerCapture?(elementId: number): void
+  releasePointerCapture?(elementId: number): void
+
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
    *  x and y are negative pixel values (scroll down = more negative y). */
@@ -608,6 +612,8 @@ export interface Instance {
   id: number
   type: ElementType
   props: Props
+  setPointerCapture(): void
+  releasePointerCapture(): void
   parentId: number | null
   getAttribute(name: string): string | null
 }

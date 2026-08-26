@@ -513,6 +513,48 @@ impl TestGpuixRenderer {
         })
     }
 
+    #[napi]
+    pub fn set_pointer_capture(&self, id: f64) -> Result<()> {
+        let id = to_element_id(id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            let result = cx
+                .update_window(window, |_, window, app| {
+                    view.update(app, |view, _cx| view.set_pointer_capture(id, window))
+                })
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            result.map_err(Error::from_reason)
+        })
+    }
+
+    #[napi]
+    pub fn release_pointer_capture(&self, id: f64) -> Result<()> {
+        let id = to_element_id(id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, _cx| {
+                    view.release_pointer_capture(id, window);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            Ok(())
+        })
+    }
+
+    /// Simulate the platform deactivating the test window.
+    #[napi]
+    pub fn simulate_window_deactivation(&self) -> Result<()> {
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_, window, app| {
+                window.simulate_active_status_change(false, app);
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
     /// Simulate a mouse down event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]

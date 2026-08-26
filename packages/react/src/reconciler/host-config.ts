@@ -409,10 +409,14 @@ export const hostConfig = {
     rootContainerInstance: Container,
     _hostContext: HostContext
   ): Instance {
+    const id = nextId(rootContainerInstance)
     const instance: Instance = {
-      id: nextId(rootContainerInstance),
+      id,
       type,
       props,
+      setPointerCapture: () => rootContainerInstance.renderer.setPointerCapture?.(id),
+      releasePointerCapture: () =>
+        rootContainerInstance.renderer.releasePointerCapture?.(id),
       parentId: null,
       getAttribute(name): string | null {
         const value = (instance.props as Props & Record<string, unknown>)[name]

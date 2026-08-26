@@ -7,6 +7,7 @@ mod diff;
 mod element_tree;
 mod markdown;
 mod motion;
+mod pointer;
 mod renderer;
 mod retained_tree;
 mod style;

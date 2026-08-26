@@ -120,7 +120,7 @@ export function handleGpuixEvent(
   const path = NON_BUBBLING_EVENTS.has(payload.eventType)
     ? [target]
     : eventPath(container, target)
-  const controller = createGpuixSyntheticEvent(payload, target)
+  const controller = createGpuixSyntheticEvent(payload, target, renderer)
   const { event } = controller
 
   const invoke = (instance: Instance, handlerKey: string, phase: 1 | 2 | 3): void => {

@@ -1,5 +1,5 @@
 import type { EventPayload } from "@gpuix/native"
-import type { PublicInstance } from "../types/host.js"
+import type { NativeRenderer, PublicInstance } from "../types/host.js"
 
 export type GpuixEventPhase = 1 | 2 | 3
 
@@ -29,6 +29,10 @@ export type GpuixSyntheticEvent = EventPayload & {
   stopPropagation(): void
   isDefaultPrevented(): boolean
   isPropagationStopped(): boolean
+  /** Route this pressed-pointer sequence to the original event target. */
+  setPointerCapture(): void
+  /** Stop routing this pressed-pointer sequence to the original event target. */
+  releasePointerCapture(): void
   /** GPUIX events are never pooled, so persist is intentionally a no-op. */
   persist(): void
 }
@@ -45,7 +49,8 @@ interface SyntheticEventController {
 
 export function createGpuixSyntheticEvent(
   nativeEvent: EventPayload,
-  target: PublicInstance
+  target: PublicInstance,
+  renderer: NativeRenderer
 ): SyntheticEventController {
   let currentTarget = target
   let eventPhase: GpuixEventPhase = 2
@@ -76,6 +81,12 @@ export function createGpuixSyntheticEvent(
     },
     isPropagationStopped(): boolean {
       return propagationStopped
+    },
+    setPointerCapture(): void {
+      renderer.setPointerCapture?.(nativeEvent.elementId)
+    },
+    releasePointerCapture(): void {
+      renderer.releasePointerCapture?.(nativeEvent.elementId)
     },
     persist(): void {},
   } as GpuixSyntheticEvent

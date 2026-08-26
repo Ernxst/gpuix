@@ -670,6 +670,14 @@ enum UiCommand {
         response: SyncSender<Option<crate::automation::ElementBounds>>,
     },
     FocusElement(u64),
+    SetPointerCapture {
+        id: u64,
+        response: SyncSender<std::result::Result<(), String>>,
+    },
+    ReleasePointerCapture {
+        id: u64,
+        response: SyncSender<()>,
+    },
     ControlClock {
         control: ClockControl,
         response: SyncSender<f64>,
@@ -860,6 +868,24 @@ async fn run_ui_commands(
                 cx.notify();
                 window.refresh();
             }),
+            UiCommand::SetPointerCapture { id, response } => {
+                let result = window.update(cx, move |view, window, _cx| {
+                    view.set_pointer_capture(id, window)
+                });
+                let response_value = result
+                    .as_ref()
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| value.clone());
+                response.send(response_value).ok();
+                result.and_then(|value| value.map_err(anyhow::Error::msg))
+            }
+            UiCommand::ReleasePointerCapture { id, response } => {
+                let result = window.update(cx, move |view, window, _cx| {
+                    view.release_pointer_capture(id, window);
+                });
+                response.send(()).ok();
+                result
+            }
             UiCommand::ControlClock { control, response } => {
                 window.update(cx, move |view, _window, cx| {
                     let now_ms = match control {
@@ -1959,6 +1985,57 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusElement(id));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Route the active pressed-pointer sequence to this retained element.
+    #[napi]
+    pub fn set_pointer_capture(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+
+        #[cfg(target_os = "macos")]
+        return update_window(|view, window, _cx| view.set_pointer_capture(id, window))?
+            .map_err(Error::from_reason);
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::SetPointerCapture { id, response })?;
+            return recv_ui_response(receiver, "pointer capture")?.map_err(Error::from_reason);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Release capture only when this retained element currently owns it.
+    #[napi]
+    pub fn release_pointer_capture(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+
+        #[cfg(target_os = "macos")]
+        return update_window(|view, window, _cx| {
+            view.release_pointer_capture(id, window);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::ReleasePointerCapture { id, response })?;
+            return recv_ui_response(receiver, "pointer capture release");
+        }
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3186,6 +3263,10 @@ pub(crate) struct GpuixView {
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
     /// Live text selection, shared with the paint closures and the napi methods.
     pub(crate) selection: SharedSelection,
+    /// Retained owner and pressed-button lifetime for mouse pointer capture.
+    pointer_router: crate::pointer::SharedPointerRouter,
+    /// Cancels the pressed-pointer sequence when the platform deactivates this window.
+    window_activation_subscription: Option<gpui::Subscription>,
     /// Persistent measurement and scroll state for React-backed virtual lists.
     virtual_lists: HashMap<u64, VirtualListEntry>,
     /// Motion / review clock. Live wall time unless automation freezes it.
@@ -3212,8 +3293,44 @@ impl GpuixView {
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
             selection,
+            pointer_router: Default::default(),
+            window_activation_subscription: None,
             virtual_lists: HashMap::new(),
             clock: crate::automation::AutomationClock::new(),
+        }
+    }
+
+    pub(crate) fn set_pointer_capture(
+        &mut self,
+        id: u64,
+        window: &mut gpui::Window,
+    ) -> std::result::Result<(), String> {
+        if !self.tree.lock().unwrap().elements.contains_key(&id) {
+            return Err(format!("Cannot capture pointer for missing element {id}"));
+        }
+        if !self.pointer_router.borrow_mut().capture(id) {
+            return Err("Cannot capture pointer without an active mouse-down sequence".into());
+        }
+
+        let element_id = gpui::ElementId::from(format!("__gpuix_{id}"));
+        if !window.capture_pointer_for_element(&element_id) {
+            self.pointer_router.borrow_mut().release(id);
+            return Err(format!(
+                "Cannot capture pointer for element {id} before it has painted a hitbox"
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn release_pointer_capture(&mut self, id: u64, window: &mut gpui::Window) {
+        if self.pointer_router.borrow_mut().release(id) {
+            window.release_pointer();
+        }
+    }
+
+    fn cancel_pointer_sequence(&mut self, window: &mut gpui::Window) {
+        if self.pointer_router.borrow_mut().cancel() {
+            window.release_pointer();
         }
     }
 
@@ -3815,10 +3932,27 @@ impl gpui::Render for GpuixView {
         window.set_window_title(&self.window_title);
         self.observe_window_resize(window, cx);
 
+        if self.window_activation_subscription.is_none() {
+            self.window_activation_subscription =
+                Some(cx.observe_window_activation(window, |view, window, _cx| {
+                    if !window.is_window_active() {
+                        view.cancel_pointer_sequence(window);
+                    }
+                }));
+        }
+
         // Clone Arc so we don't borrow self.tree — frees self for focus_handles access.
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
         let callback = self.event_callback.clone();
+
+        if !self
+            .pointer_router
+            .borrow_mut()
+            .retain_owner(|id| tree.elements.contains_key(&id))
+        {
+            window.release_pointer();
+        }
 
         // Sync focus handles before building elements.
         self.sync_focus_handles(&tree, &callback, window, cx);
@@ -3874,6 +4008,9 @@ impl gpui::Render for GpuixView {
                 .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
                 .child(selection_frame_reset(self.selection.clone()))
                 .child(crate::automation::bounds_frame_reset())
+                .child(crate::pointer::pointer_router_frame(
+                    self.pointer_router.clone(),
+                ))
                 .child(result)
                 .into_any_element()
         };
@@ -4131,6 +4268,30 @@ fn virtual_row_ancestor(tree: &RetainedTree, list_id: u64, element_id: u64) -> O
     }
 }
 
+fn has_interactive_behavior(
+    element: &crate::retained_tree::RetainedElement,
+    style: Option<&StyleDesc>,
+) -> bool {
+    let scrolls = style.is_some_and(|style| {
+        [
+            style.overflow.as_deref(),
+            style.overflow_x.as_deref(),
+            style.overflow_y.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| value == "scroll")
+    });
+
+    !element.events.is_empty()
+        || element.custom_props.contains_key("tabIndex")
+        || element.custom_props.get("autoFocus") == Some(&serde_json::Value::Bool(true))
+        || style.is_some_and(|style| {
+            style.cursor.is_some() || style.hover.is_some() || style.active.is_some()
+        })
+        || scrolls
+}
+
 pub(crate) fn build_div(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
@@ -4157,21 +4318,24 @@ pub(crate) fn build_div(
             el = el.active(|refinement| apply_styles(refinement, active_style));
         }
         el = apply_focus_styles(el, style);
+    }
 
-        if crate::style::should_occlude(style) {
-            // BlockMouse (occlude) stops the hit test. The parent scroller
-            // then never sees the wheel. In-flow fills must use
-            // BlockMouseExceptScroll. Keep occlude for overlays that steal
-            // the pointer: absolute, fixed, or pointerEvents: "auto".
-            let steal_scroll =
-                matches!(style.position.as_deref(), Some("absolute") | Some("fixed"))
-                    || style.pointer_events.as_deref() == Some("auto");
-            el = if steal_scroll {
-                el.occlude()
-            } else {
-                el.block_mouse_except_scroll()
-            };
-        }
+    if style.and_then(|style| style.pointer_events.as_deref()) == Some("none") {
+        el = el.ignore_mouse();
+    } else if crate::style::should_occlude(style, has_interactive_behavior(element, style)) {
+        // BlockMouse (occlude) stops the hit test. The parent scroller
+        // then never sees the wheel. In-flow interactive nodes use
+        // BlockMouseExceptScroll. Keep occlude for overlays that steal
+        // the pointer: absolute, fixed, or pointerEvents: "auto".
+        let steal_scroll = style.is_some_and(|style| {
+            matches!(style.position.as_deref(), Some("absolute") | Some("fixed"))
+                || style.pointer_events.as_deref() == Some("auto")
+        });
+        el = if steal_scroll {
+            el.occlude()
+        } else {
+            el.block_mouse_except_scroll()
+        };
     }
 
     // ── Overflow: scroll ─────────────────────────────────────────────
