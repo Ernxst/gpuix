@@ -1929,6 +1929,14 @@ impl GpuixRenderer {
     }
 
     fn pump_native_event_loop(&self, dispatch_frame_request: bool) -> Result<bool> {
+        self.pump_native_event_loop_after_precheck(dispatch_frame_request, || {})
+    }
+
+    fn pump_native_event_loop_after_precheck(
+        &self,
+        dispatch_frame_request: bool,
+        after_precheck: impl FnOnce(),
+    ) -> Result<bool> {
         match *self.lifecycle.lock().unwrap() {
             RendererLifecycle::Uninitialized => {
                 return Err(Error::from_reason(
@@ -1941,17 +1949,16 @@ impl GpuixRenderer {
 
         #[cfg(target_os = "macos")]
         {
-            // The CoreVideo observer marks the callback outstanding before
-            // enqueueing its TSFN. Under sustained JS work, an overdue idle
-            // timer can run first; entering AppKit here would starve the JS
-            // callback that dispatches the pending frame token. Return to the
-            // JS event loop instead. The frame callback performs the one pump.
+            // Avoid an extra idle pump when a native callback is already queued.
+            // This is only a latency optimization: a request can race this load,
+            // so MacPlatform::pump_events itself must always return before waiting.
             if should_defer_idle_pump(
                 dispatch_frame_request,
                 self.frame_request_outstanding.load(Ordering::Acquire),
             ) {
                 return Ok(true);
             }
+            after_precheck();
             if dispatch_frame_request {
                 if let Some(frame_request) = self
                     .pending_frame_request
@@ -1975,7 +1982,10 @@ impl GpuixRenderer {
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return Ok(true);
+        {
+            let _ = after_precheck;
+            return Ok(true);
+        }
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1983,9 +1993,12 @@ impl GpuixRenderer {
             target_os = "linux",
             target_os = "freebsd"
         )))]
-        Err(Error::from_reason(
-            "The production GPUIX renderer does not support this operating system",
-        ))
+        {
+            let _ = after_precheck;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
     }
 
     /// Pump the native event loop. Returns false after the last window closes.
@@ -2000,6 +2013,24 @@ impl GpuixRenderer {
     #[napi]
     pub fn tick_idle(&self) -> Result<bool> {
         self.pump_native_event_loop(false)
+    }
+
+    /// Test seam for a native frame callback that arrives after tickIdle's
+    /// outstanding-work precheck. The callback is queued from a background
+    /// thread while the embedded AppKit pump owns the JavaScript thread.
+    #[cfg(all(target_os = "macos", feature = "test-support"))]
+    #[napi]
+    pub fn test_idle_pump_frame_request_race(&self, callback: FrameRequestCallback) -> Result<bool> {
+        self.pump_native_event_loop_after_precheck(false, move || {
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                let _ = callback.call_with_return_value(
+                    (),
+                    ThreadsafeFunctionCallMode::NonBlocking,
+                    |_result, _env| Ok(()),
+                );
+            });
+        })
     }
 
     #[napi]
@@ -2882,7 +2913,7 @@ mod frame_loop_tests {
     use super::*;
 
     #[test]
-    fn idle_pump_defers_to_an_outstanding_frame_callback() {
+    fn idle_pump_skips_when_a_frame_callback_is_already_outstanding() {
         assert!(should_defer_idle_pump(false, true));
         assert!(!should_defer_idle_pump(false, false));
         assert!(!should_defer_idle_pump(true, true));

@@ -83,6 +83,12 @@ export declare class GpuixRenderer {
    * This keeps input and application lifecycle events responsive between frames.
    */
   tickIdle(): boolean
+  /**
+   * Test seam for a native frame callback that arrives after tickIdle's
+   * outstanding-work precheck. The callback is queued from a background
+   * thread while the embedded AppKit pump owns the JavaScript thread.
+   */
+  testIdlePumpFrameRequestRace(callback: FrameRequestCallback): boolean
   isInitialized(): boolean
   /** Whether JavaScript must drive the native event loop with tick(). */
   requiresTick(): boolean

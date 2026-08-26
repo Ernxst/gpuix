@@ -60,9 +60,10 @@ function FramePacing() {
           sortedPresentIntervals[Math.floor(sortedPresentIntervals.length / 2)] ?? 0
         const measuredTicks = tickDurations.slice(startedTicks).sort((a, b) => a - b)
         const tickP50Ms = measuredTicks[Math.floor(measuredTicks.length / 2)] ?? 0
+        const tickP95Ms = measuredTicks[Math.ceil(measuredTicks.length * 0.95) - 1] ?? 0
         const observedFrameCallbacks = frameCallbacks - startedFrameCallbacks
         setResult(
-          `PACING_RESULT ${JSON.stringify({ presents: presentTimestamps.length, durationMs, hz, workMs, presentP50Ms, tickP50Ms, ticks: measuredTicks.length, frameCallbacks: observedFrameCallbacks, frameSource: observedFrameCallbacks > 0 ? "display-link" : "timer" })}`
+          `PACING_RESULT ${JSON.stringify({ presents: presentTimestamps.length, durationMs, hz, workMs, presentP50Ms, tickP50Ms, tickP95Ms, ticks: measuredTicks.length, frameCallbacks: observedFrameCallbacks, frameSource: observedFrameCallbacks > 0 ? "display-link" : "timer" })}`
         )
       }, 150)
     }
@@ -111,6 +112,14 @@ const measuredTick = (): boolean => {
     tickDurations.push(performance.now() - started)
   }
 }
+const measuredIdleTick = (): boolean => {
+  const started = performance.now()
+  try {
+    return renderer.tickIdle()
+  } finally {
+    tickDurations.push(performance.now() - started)
+  }
+}
 const setFrameRequestHandler = (callback: (() => void) | null): boolean => {
   return renderer.setFrameRequestHandler(
     callback
@@ -153,7 +162,7 @@ let loop = startFrameLoop({
   tick: measuredTick,
   quit: renderer.quit.bind(renderer),
   setFrameRequestHandler,
-  tickIdle: renderer.tickIdle.bind(renderer),
+  tickIdle: measuredIdleTick,
 })
 
 for (const delayMs of [0, 100, 250, 500, 750, 1_000]) {

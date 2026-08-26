@@ -1,18 +1,17 @@
 import { launch } from "@gpuix/react/automation"
 import {
   calibrateFramePacingWork,
-  isDisplayLinkProgressing,
-  isTimerPacingDegraded,
+  isPacingProgressing,
+  isPumpCadenceBounded,
+  meetsRefreshRatio,
 } from "./frame-pacing-calibration"
 
 const sampleCount = 60
 const sampleIntervalMs = 1_000 / 60
 const refreshHz = 1_000 / sampleIntervalMs
-const calibrationMarginMs = Number(process.env.PACE_CALIBRATION_MARGIN_MS ?? 5)
-const minimumWorkMs = Number(process.env.PACE_WORK_FLOOR_MS ?? 12)
-const minimumDisplayRefreshRatio = Number(process.env.PACE_ASSERT_DISPLAY_RATIO ?? 0.5)
-const maximumTimerRefreshRatio = Number(process.env.PACE_ASSERT_TIMER_RATIO ?? 0.75)
-const minimumImprovementHz = Number(process.env.PACE_ASSERT_DELTA_HZ ?? 15)
+const calibrationMarginMs = Number(process.env.PACE_DEADLINE_MARGIN_MS ?? 1.5)
+const targetWorkMs = Number(process.env.PACE_WORK_TARGET_MS ?? 12)
+const minimumDisplayRefreshRatio = Number(process.env.PACE_ASSERT_DISPLAY_RATIO ?? 0.9)
 
 interface PacingResult {
   presents: number
@@ -21,6 +20,7 @@ interface PacingResult {
   workMs: number
   presentP50Ms: number
   tickP50Ms: number
+  tickP95Ms: number
   ticks: number
   frameCallbacks: number
   frameSource: string
@@ -174,7 +174,7 @@ async function measure(forceTimer: boolean, workMs: number): Promise<PacingResul
 
 function report(result: PacingResult): void {
   console.log(
-    `frame pacing (${result.frameSource}): ${result.presents} presents / ${result.durationMs.toFixed(1)}ms = ${result.hz.toFixed(1)} Hz; present p50 ${result.presentP50Ms.toFixed(2)}ms; tick p50 ${result.tickP50Ms.toFixed(2)}ms (${result.ticks} ticks, ${result.frameCallbacks} native callbacks, ${result.workMs}ms JS work)`
+    `frame pacing (${result.frameSource}): ${result.presents} presents / ${result.durationMs.toFixed(1)}ms = ${result.hz.toFixed(1)} Hz; present p50 ${result.presentP50Ms.toFixed(2)}ms; tick p50/p95 ${result.tickP50Ms.toFixed(2)}/${result.tickP95Ms.toFixed(2)}ms (${result.ticks} ticks, ${result.frameCallbacks} native callbacks, ${result.workMs}ms JS work)`
   )
 }
 
@@ -187,10 +187,10 @@ const calibration = calibrateFramePacingWork(
   sampleIntervalMs,
   timerCalibration.tickP50Ms,
   calibrationMarginMs,
-  minimumWorkMs
+  targetWorkMs
 )
 console.log(
-  `frame pacing calibration: tick p50 ${calibration.tickP50Ms.toFixed(2)}ms (${timerCalibration.ticks} timer ticks), refresh ${refreshHz.toFixed(1)}Hz / ${calibration.refreshPeriodMs.toFixed(2)}ms, calibrated JS work ${calibration.workMs.toFixed(2)}ms (${calibration.marginMs.toFixed(1)}ms margin, ${calibration.floorMs.toFixed(1)}ms floor)`
+  `frame pacing calibration: tick p50 ${calibration.tickP50Ms.toFixed(2)}ms (${timerCalibration.ticks} timer ticks), refresh ${refreshHz.toFixed(1)}Hz / ${calibration.refreshPeriodMs.toFixed(2)}ms, calibrated JS work ${calibration.workMs.toFixed(2)}ms (${calibration.targetWorkMs.toFixed(1)}ms target, ${calibration.deadlineMarginMs.toFixed(1)}ms deadline margin)`
 )
 
 await new Promise((resolve) => setTimeout(resolve, 1_000))
@@ -214,28 +214,21 @@ if (displayLink.frameSource !== "display-link") {
 if (timer.frameSource !== "timer") {
   throw new Error(`Expected the forced timer source, received ${timer.frameSource}`)
 }
-const timerIsDegraded = isTimerPacingDegraded(
-  timer.hz,
-  displayLink.hz,
-  refreshHz,
-  minimumImprovementHz,
-  maximumTimerRefreshRatio
-)
-if (!timerIsDegraded) {
-  throw new Error(
-    `Expected the forced timer control to trail display-link by at least ${minimumImprovementHz.toFixed(1)} Hz or stay at or below ${(maximumTimerRefreshRatio * 100).toFixed(0)}% of refresh; received ${timer.hz.toFixed(1)} Hz vs ${displayLink.hz.toFixed(1)} Hz at ${refreshHz.toFixed(1)} Hz refresh`
-  )
+for (const result of [timer, displayLink]) {
+  if (!isPacingProgressing(result.presents, result.ticks, result.hz)) {
+    throw new Error(
+      `Expected ${result.frameSource} pacing to keep progressing, received ${result.presents} presents, ${result.ticks} ticks, and ${result.hz.toFixed(1)} Hz`
+    )
+  }
+  if (!isPumpCadenceBounded(result.tickP95Ms, sampleIntervalMs)) {
+    throw new Error(
+      `Expected ${result.frameSource} tick p95 below one refresh period (${sampleIntervalMs.toFixed(2)}ms), received ${result.tickP95Ms.toFixed(2)}ms`
+    )
+  }
 }
 const minimumDisplayHz = refreshHz * minimumDisplayRefreshRatio
-if (
-  !isDisplayLinkProgressing(
-    displayLink.hz,
-    timer.hz,
-    refreshHz,
-    minimumDisplayRefreshRatio
-  )
-) {
+if (!meetsRefreshRatio(displayLink.hz, refreshHz, minimumDisplayRefreshRatio)) {
   throw new Error(
-    `Expected display-link pacing at or above ${(minimumDisplayRefreshRatio * 100).toFixed(0)}% of refresh (${minimumDisplayHz.toFixed(1)} Hz) and above the forced timer control, received ${displayLink.hz.toFixed(1)} Hz vs ${timer.hz.toFixed(1)} Hz`
+    `Expected display-link pacing at or above ${(minimumDisplayRefreshRatio * 100).toFixed(0)}% of refresh (${minimumDisplayHz.toFixed(1)} Hz), received ${displayLink.hz.toFixed(1)} Hz`
   )
 }

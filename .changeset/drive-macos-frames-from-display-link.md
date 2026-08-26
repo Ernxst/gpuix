@@ -11,13 +11,20 @@ idle pump releasing a pending frame token.
 GPUI now owns the per-window coalescing lease: consuming or dropping a single-use token admits the
 next request, while stop, occlusion, and display migration invalidate escaped tokens. Display-link
 observers are snapshotted under the registry lock and invoked outside it. The live pacing smoke uses
-GPUI presentation timestamps and observed callbacks. A short forced-timer warmup self-calibrates one
-shared JavaScript workload beyond the local refresh deadline, so the control reproduces missed frames
-without depending on machine-specific tick cost while display-link pacing stays at refresh. The smoke
-first proves the window is receiving CoreVideo callbacks, briefly reactivates an occluded window, and
-skips with an explicit diagnostic when the platform cannot provide a measurable window. An overdue
-idle AppKit wake now defers while a frame callback is outstanding, preventing the timer pump from
-starving the callback that dispatches the frame token under above-refresh JavaScript work.
+GPUI presentation timestamps and observed callbacks. A short forced-timer warmup calibrates one shared
+JavaScript workload to roughly 12ms while retaining margin below the local refresh deadline. The smoke
+requires the display-link path to hold at least 90% of refresh, both paths to keep presenting, and each
+path's pump p95 to stay below one refresh period. It first proves the window is receiving CoreVideo
+callbacks, briefly reactivates an occluded window, and skips with an explicit diagnostic when the
+platform cannot provide a measurable window.
+
+The embedded AppKit pump now stops at `kCFRunLoopBeforeWaiting`, which bounds the pump even when its
+pre-posted wake event is processed without a sleep/wake transition. A real native-to-JavaScript race
+regression queues a frame callback after the idle precheck and verifies both bounded pump return and
+eventual TSFN service. The outstanding-callback check remains a latency optimization, not the pump's
+correctness boundary. This pump-phase correction benefits the timer path too; the display-link clock's
+remaining advantage is refresh alignment without polling to choose presentation times. A separate
+idle-wake pump remains responsible for input and application lifecycle progress between frames.
 
 The upstream search found GPUI's existing private `PlatformWindow::on_request_frame` path and the
 related [ProMotion pacing work](https://github.com/zed-industries/zed/pull/7305), but no public

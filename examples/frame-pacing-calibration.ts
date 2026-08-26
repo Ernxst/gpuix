@@ -1,44 +1,48 @@
 export interface FramePacingCalibration {
   refreshPeriodMs: number
   tickP50Ms: number
-  marginMs: number
-  floorMs: number
+  deadlineMarginMs: number
+  targetWorkMs: number
   workMs: number
 }
 
 export function calibrateFramePacingWork(
   refreshPeriodMs: number,
   tickP50Ms: number,
-  marginMs: number,
-  floorMs: number
+  deadlineMarginMs: number,
+  targetWorkMs: number
 ): FramePacingCalibration {
   return {
     refreshPeriodMs,
     tickP50Ms,
-    marginMs,
-    floorMs,
-    workMs: Math.max(refreshPeriodMs - tickP50Ms + marginMs, floorMs),
+    deadlineMarginMs,
+    targetWorkMs,
+    workMs: Math.min(
+      targetWorkMs,
+      Math.max(0, refreshPeriodMs - tickP50Ms - deadlineMarginMs)
+    ),
   }
 }
 
-export function isTimerPacingDegraded(
-  timerHz: number,
-  displayLinkHz: number,
-  refreshHz: number,
-  minimumImprovementHz: number,
-  maximumRefreshRatio: number
-): boolean {
-  return (
-    displayLinkHz - timerHz >= minimumImprovementHz ||
-    timerHz <= refreshHz * maximumRefreshRatio
-  )
-}
-
-export function isDisplayLinkProgressing(
-  displayLinkHz: number,
-  timerHz: number,
+export function meetsRefreshRatio(
+  observedHz: number,
   refreshHz: number,
   minimumRefreshRatio: number
 ): boolean {
-  return displayLinkHz >= refreshHz * minimumRefreshRatio && displayLinkHz > timerHz
+  return observedHz >= refreshHz * minimumRefreshRatio
+}
+
+export function isPacingProgressing(
+  presents: number,
+  ticks: number,
+  observedHz: number
+): boolean {
+  return presents >= 2 && ticks > 0 && observedHz > 0
+}
+
+export function isPumpCadenceBounded(
+  tickP95Ms: number,
+  refreshPeriodMs: number
+): boolean {
+  return tickP95Ms > 0 && tickP95Ms < refreshPeriodMs
 }
