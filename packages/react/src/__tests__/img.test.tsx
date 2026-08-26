@@ -83,7 +83,7 @@ afterEach(() => {
   liveRenderers.clear()
 })
 
-function sourceFrame(source?: ImageSource, tint?: "currentColor") {
+function sourceFrame(source?: ImageSource | string, tint?: "currentColor") {
   return (
     <div
       style={{
@@ -110,7 +110,11 @@ function sourceFrame(source?: ImageSource, tint?: "currentColor") {
   )
 }
 
-async function captureLoadedSource(source: ImageSource, name: string, tint?: "currentColor") {
+async function captureLoadedSource(
+  source: ImageSource | string,
+  name: string,
+  tint?: "currentColor"
+) {
   const baseline = createImageTestRoot({ allowPrivateNetworkImages: true })
   baseline.render(sourceFrame())
   const baselinePath = `/tmp/gpuix-image-${name}-baseline.png`
@@ -255,13 +259,13 @@ describeNative("custom element: img", () => {
     const direct = createImageRenderer()
     direct.createElement(41, "img")
     direct.setCustomProp(41, "testId", JSON.stringify("direct-image"))
-    direct.setCustomProp(41, "src", JSON.stringify("/tmp/ambiguous.png"))
+    direct.setCustomProp(41, "src", JSON.stringify({ kind: "path", url: "/tmp/a.png" }))
     expect(direct.drainStyleDiagnostics()[0]).toMatchObject({
       elementId: 41,
       elementType: "img",
       testId: "direct-image",
       property: "src",
-      value: '"/tmp/ambiguous.png"',
+      value: '{"kind":"path","url":"/tmp/a.png"}',
     })
 
     const batched = createImageRenderer()
@@ -304,6 +308,16 @@ describeNative("custom element: img", () => {
     }
   }, 20_000)
 
+  it("GPU-renders bare-string path and URL source sugar", async () => {
+    const pathScreenshot = await captureLoadedSource(FIXTURE_PATHS.get("png")!, "string-path")
+    const urlScreenshot = await captureLoadedSource(
+      `http://127.0.0.1:${serverPort}/png`,
+      "string-url"
+    )
+    expect(fs.statSync(pathScreenshot).size).toBeGreaterThan(0)
+    expect(fs.statSync(urlScreenshot).size).toBeGreaterThan(0)
+  }, 15_000)
+
   it("GPU-renders PNG, JPEG, WebP, and SVG in-memory sources", async () => {
     for (const fixture of FIXTURES) {
       const screenshot = await captureLoadedSource(
@@ -340,24 +354,42 @@ describeNative("custom element: img", () => {
     expect(conditionalRequestCount).toBeGreaterThan(0)
   }, 15_000)
 
-  it("denies loopback URL images by default before opening a connection", async () => {
+  it("denies sugared loopback URL images by default before opening a connection", async () => {
     const testRoot = createImageTestRoot()
     testRoot.render(
-      sourceFrame({
-        kind: "url",
-        url: `http://127.0.0.1:${serverPort}/blocked?token=secret`,
-      })
+      sourceFrame(`http://127.0.0.1:${serverPort}/blocked?token=secret`)
     )
     for (let frame = 0; frame < 20; frame++) {
       testRoot.renderer.flush()
-      if (testRoot.renderer.getPaintedText().join(" ").includes("private network")) break
+      const image = testRoot.renderer.findByType("img")[0]!
+      if (testRoot.renderer.getImageLoadState(image.id)?.status === "error") break
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
-    const painted = testRoot.renderer.getPaintedText().join(" ")
-    expect(painted).toContain("allowPrivateNetworkImages")
-    expect(painted).not.toContain("token")
-    expect(painted).not.toContain("secret")
+    const image = testRoot.renderer.findByType("img")[0]!
+    expect(testRoot.renderer.getImageLoadState(image.id)).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("allowPrivateNetworkImages"),
+    })
     expect(blockedRequestCount).toBe(0)
+  })
+
+  it("exposes URL load failures through the test image state", async () => {
+    const testRoot = createImageTestRoot({ allowPrivateNetworkImages: true })
+    try {
+      testRoot.render(sourceFrame(`http://127.0.0.1:${serverPort}/missing`))
+      const image = testRoot.renderer.findByType("img")[0]!
+      for (let frame = 0; frame < 20; frame++) {
+        testRoot.renderer.flush()
+        if (testRoot.renderer.getImageLoadState(image.id)?.status === "error") break
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(testRoot.renderer.getImageLoadState(image.id)).toMatchObject({
+        status: "error",
+        error: expect.stringContaining("404"),
+      })
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
   })
 
   it("retries a transient failure after the bounded failure TTL", async () => {

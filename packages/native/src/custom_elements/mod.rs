@@ -115,6 +115,14 @@ pub trait CustomElement: 'static {
     /// Immutable event capability declaration for this adapter.
     fn supported_events(&self) -> &'static [&'static str];
 
+    /// Optional state exposed only through the native test renderer.
+    ///
+    /// Custom elements own runtime state outside the retained tree. This keeps
+    /// narrowly-scoped test assertions from needing screenshots or paint logs.
+    fn test_state(&self) -> Option<serde_json::Value> {
+        None
+    }
+
     /// Clean up resources (GPUI entities, subscriptions, etc.)
     fn destroy(&mut self);
 }
@@ -264,6 +272,13 @@ impl CustomElementRegistry {
         if let Some(mut entry) = self.instances.remove(&id) {
             entry.element.destroy();
         }
+    }
+
+    /// Testing-only inspection of state owned by a live custom-element adapter.
+    pub fn test_state(&self, id: u64) -> Option<serde_json::Value> {
+        self.instances
+            .get(&id)
+            .and_then(|entry| entry.element.test_state())
     }
 
     /// Remove and destroy instances whose IDs no longer exist in the tree.

@@ -1355,11 +1355,16 @@ block and custom children are rejected during React render.
 
 ### `<img>`
 
-`<img>` paints **PNG, JPEG, WebP, GIF, and full-colour SVG** from one explicit
-source union. Strings are not inferred: choose a filesystem path, an HTTP(S)
-URL, or in-memory bytes.
+`<img>` paints **PNG, JPEG, WebP, GIF, and full-colour SVG** from an explicit
+source union. For DOM-compatible shorthand, a bare `http://` or `https://`
+string is a URL source; every other string is a filesystem path. Use the
+tagged union when the source kind should stay explicit, especially for bytes.
 
 ```tsx
+<img src="/usr/share/my-app/hero.webp" style={{ width: 240, height: 140 }} />
+
+<img src="https://example.com/photo.webp" style={{ width: 240, height: 140 }} />
+
 <img
   src={{
     kind: 'path',
@@ -1393,7 +1398,8 @@ redirects.
 URL images are public-network-only by default. GPUIX rejects URL credentials,
 resolves and validates every redirect target before connecting, and never
 includes URL credentials, query strings, or response bodies in painted/logged
-load errors. Loopback and private-network development servers require an
+load errors. The same validation applies to bare-string URL shorthand.
+Loopback and private-network development servers require an
 explicit renderer-level opt-in:
 
 ```tsx
@@ -1968,6 +1974,17 @@ and `focusVisible` refinements applied:
 const target = renderer.findByTestId('row-underline')!
 renderer.nativeSimulateMouseMove(100, 20)
 expect(renderer.getResolvedStyle(target.id)?.backgroundColor).toBe('#7d8b8c')
+```
+
+For native `<img>` elements, `getImageLoadState(elementId)` makes asynchronous
+load failures assertable without a screenshot or fallback-text assertion:
+
+```ts
+const image = renderer.findByTestId('avatar')!
+expect(renderer.getImageLoadState(image.id)).toMatchObject({
+  status: 'error',
+  error: expect.stringContaining('404'),
+})
 ```
 
 ### Testing native elements

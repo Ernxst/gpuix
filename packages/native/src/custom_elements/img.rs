@@ -1,9 +1,10 @@
 /// Image custom elements for raster images, full-colour SVG documents, and
 /// tintable SVG icons.
 ///
-/// `<img>` deliberately accepts a discriminated source instead of guessing
-/// whether a string is a path or URL. Every source becomes bounded bytes before
-/// GPUI decodes it. `<svg>` remains the lightweight monochrome icon element.
+/// `<img>` accepts a discriminated source, plus DOM-compatible string sugar:
+/// HTTP(S) strings are URLs and every other string is a path. Every source
+/// becomes bounded bytes before GPUI decodes it. `<svg>` remains the lightweight
+/// monochrome icon element.
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -257,9 +258,20 @@ enum WireImageSource {
 
 impl ImageSource {
     fn parse(value: &serde_json::Value) -> Result<Self, String> {
+        if let Some(source) = value.as_str() {
+            return if source.starts_with("http://") || source.starts_with("https://") {
+                parse_image_url(source)?;
+                Ok(Self::Url(source.to_string()))
+            } else if source.trim().is_empty() {
+                Err("path must not be empty".into())
+            } else {
+                Ok(Self::Path(source.to_string()))
+            };
+        }
+
         let source: WireImageSource = serde_json::from_value(value.clone()).map_err(|error| {
             format!(
-                "expected {{ kind: \"path\", path }}, {{ kind: \"url\", url }}, or {{ kind: \"data\", mimeType, bytes }}: {error}"
+                "expected a path or HTTP(S) URL string, {{ kind: \"path\", path }}, {{ kind: \"url\", url }}, or {{ kind: \"data\", mimeType, bytes }}: {error}"
             )
         })?;
 
@@ -1277,6 +1289,23 @@ impl CustomElement for ImgElement {
         &[]
     }
 
+    fn test_state(&self) -> Option<serde_json::Value> {
+        if let Some(error) = self.source_error.as_deref() {
+            return Some(serde_json::json!({ "status": "error", "error": error }));
+        }
+
+        let status = match self.load_result.lock().unwrap().as_ref() {
+            Some(Ok(_)) => serde_json::json!({ "status": "loaded" }),
+            Some(Err(error)) => serde_json::json!({
+                "status": "error",
+                "error": format!("img: failed to load {}: {error}", self.last_request.as_ref()?.source.label()),
+            }),
+            None if self.source.is_some() => serde_json::json!({ "status": "loading" }),
+            None => serde_json::json!({ "status": "idle" }),
+        };
+        Some(status)
+    }
+
     fn destroy(&mut self) {
         self.reset_load();
     }
@@ -1411,7 +1440,15 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     #[test]
-    fn parses_each_source_kind_and_rejects_ambiguous_or_oversized_data() {
+    fn parses_each_source_kind_and_rejects_invalid_or_oversized_data() {
+        assert!(matches!(
+            ImageSource::parse(&serde_json::json!("/tmp/a.png")),
+            Ok(ImageSource::Path(path)) if path == "/tmp/a.png"
+        ));
+        assert!(matches!(
+            ImageSource::parse(&serde_json::json!("https://example.com/a.webp")),
+            Ok(ImageSource::Url(url)) if url == "https://example.com/a.webp"
+        ));
         assert!(matches!(
             ImageSource::parse(&serde_json::json!({ "kind": "path", "path": "/tmp/a.png" })),
             Ok(ImageSource::Path(_))
@@ -1429,9 +1466,9 @@ mod tests {
             Ok(ImageSource::Data { .. })
         ));
 
-        assert!(ImageSource::parse(&serde_json::json!("/tmp/a.png"))
+        assert!(ImageSource::parse(&serde_json::json!("   "))
             .unwrap_err()
-            .contains("expected"));
+            .contains("must not be empty"));
         assert!(ImageSource::parse(&serde_json::json!({
             "kind": "data",
             "mimeType": "image/png",
