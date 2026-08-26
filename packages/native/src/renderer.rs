@@ -690,6 +690,9 @@ enum UiCommand {
     GetWindowSize {
         response: SyncSender<WindowSize>,
     },
+    IsWindowActive {
+        response: SyncSender<bool>,
+    },
     SetDebugFrameOverlay(gpui::DebugFrameOverlayMode),
     CycleDebugFrameOverlay {
         response: SyncSender<String>,
@@ -794,6 +797,11 @@ async fn run_ui_commands(
             UiCommand::GetWindowSize { response } => {
                 window.update(cx, move |_view, window, _cx| {
                     response.send(window_size(window)).ok();
+                })
+            }
+            UiCommand::IsWindowActive { response } => {
+                window.update(cx, move |_view, window, _cx| {
+                    response.send(window.is_window_active()).ok();
                 })
             }
             UiCommand::SetDebugFrameOverlay(mode) => {
@@ -1890,6 +1898,28 @@ impl GpuixRenderer {
         cfg!(target_os = "macos")
     }
 
+    /// Whether this native window is active and receiving key events.
+    #[napi]
+    pub fn is_active(&self) -> Result<bool> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.is_window_active());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::IsWindowActive { response })?;
+            return recv_ui_response(receiver, "the window activation query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     #[napi]
     pub fn get_window_size(&self) -> Result<WindowSize> {
         #[cfg(target_os = "macos")]
@@ -2671,6 +2701,23 @@ mod initialization_tests {
         assert_eq!(payload.width, Some(1280.0));
         assert_eq!(payload.height, Some(720.0));
         assert_eq!(payload.scale_factor, Some(2.0));
+    }
+
+    #[test]
+    fn window_activation_emits_active_state() {
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let emitted_for_callback = emitted.clone();
+        let callback: WindowEventCallback = Arc::new(Mutex::new(Some(Arc::new(move |payload| {
+            emitted_for_callback.lock().unwrap().push(payload);
+        }))));
+
+        emit_window_activation_payload(&callback, false);
+
+        let emitted = emitted.lock().unwrap();
+        assert_eq!(emitted.len(), 1);
+        let payload = &emitted[0];
+        assert_eq!(payload.event_type, "windowActivation");
+        assert_eq!(payload.is_active, Some(false));
     }
 }
 
@@ -4176,7 +4223,9 @@ impl gpui::Render for GpuixView {
         if self.window_activation_subscription.is_none() {
             self.window_activation_subscription =
                 Some(cx.observe_window_activation(window, |view, window, _cx| {
-                    if !window.is_window_active() {
+                    let is_active = window.is_window_active();
+                    emit_window_activation(&view.window_event_callback, is_active);
+                    if !is_active {
                         view.cancel_pointer_sequence(window);
                     }
                 }));
@@ -5521,6 +5570,10 @@ fn emit_window_resize(callback: &WindowEventCallback, window: &gpui::Window) {
     emit_window_resize_payload(callback, window_size(window));
 }
 
+fn emit_window_activation(callback: &WindowEventCallback, is_active: bool) {
+    emit_window_activation_payload(callback, is_active);
+}
+
 fn emit_window_resize_payload(callback: &WindowEventCallback, size: WindowSize) {
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     let callback = callback.lock().unwrap().clone();
@@ -5538,6 +5591,20 @@ fn window_resize_payload(size: WindowSize) -> EventPayload {
         height: Some(size.height),
         scale_factor: Some(size.scale_factor),
         ..EventPayload::default()
+    }
+}
+
+fn emit_window_activation_payload(callback: &WindowEventCallback, is_active: bool) {
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    let callback = callback.lock().unwrap().clone();
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    let callback = callback.borrow().clone();
+    if let Some(callback) = callback {
+        callback(EventPayload {
+            event_type: "windowActivation".to_string(),
+            is_active: Some(is_active),
+            ..EventPayload::default()
+        });
     }
 }
 

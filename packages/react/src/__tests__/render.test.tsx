@@ -289,7 +289,21 @@ Module._load = function (request, parent, isMain) {
 `
 
 const BARE_TESTING_IMPORT_PROGRAM = `
-import "@gpuix/react/testing"
+import {
+  getAllByText,
+  getByText,
+  getChildren,
+  getParent,
+  queryByText,
+  textContent,
+  within,
+} from "@gpuix/react/testing"
+
+if ([getAllByText, getByText, getChildren, getParent, queryByText, textContent, within].some(
+  (query) => typeof query !== "function"
+)) {
+  throw new Error("testing queries were not exported")
+}
 
 if (globalThis.__gpuixNativeModuleLoads !== 0) {
   throw new Error("bare testing import loaded @gpuix/native")
@@ -424,6 +438,29 @@ describeNative("render()", () => {
 
     resetRender()
     expect(windowHandlers.at(-1)).toBeNull()
+  })
+
+  it("forwards native activation changes through the window event handler", () => {
+    const activations: Array<{ eventType: string; isActive?: boolean }> = []
+    renderer.setWindowEventHandler((event) => activations.push(event))
+
+    // Install the production observer before changing the offscreen window state.
+    render(<div />, { renderer })
+    renderer.flush()
+
+    renderer.nativeSimulateWindowActivation(false)
+    expect(renderer.isActive()).toBe(false)
+    renderer.nativeSimulateWindowActivation(true)
+    expect(renderer.isActive()).toBe(true)
+
+    expect(
+      activations
+        .filter((event) => event.eventType === "windowActivation")
+        .map(({ eventType, isActive }) => ({ eventType, isActive }))
+    ).toEqual([
+      { eventType: "windowActivation", isActive: false },
+      { eventType: "windowActivation", isActive: true },
+    ])
   })
 
   it("normalizes an incomplete browser window-size response", () => {

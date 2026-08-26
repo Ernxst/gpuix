@@ -42,6 +42,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   focusElement(elementId: number): void
   setPointerCapture(elementId: number): void
   releasePointerCapture(elementId: number): void
+  simulateWindowActivation(active: boolean): void
   simulateWindowDeactivation(): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
@@ -163,6 +164,15 @@ export interface TestElement {
   /** The author-defined `id` attribute, distinct from the numeric renderer ID. */
   authorId?: string
   customProps?: Record<string, unknown>
+}
+
+export type TextMatcher = RegExp | string
+
+/** Text queries over the GPU-IX desktop test renderer. */
+export interface TextQueries {
+  getByText: (text: TextMatcher) => TestElement
+  queryByText: (text: TextMatcher) => TestElement | undefined
+  getAllByText: (text: TextMatcher) => TestElement[]
 }
 
 /** Current async load state for a live native `<img>` test element. */
@@ -317,7 +327,7 @@ export class TestRenderer implements NativeRenderer {
       const events = this.native.drainEvents()
       if (events.length === 0) break
       for (const event of events) {
-        if (event.eventType === "windowResize") {
+        if (event.eventType === "windowResize" || event.eventType === "windowActivation") {
           flushSync(() => {
             this.windowEventHandler?.(event)
           })
@@ -471,12 +481,17 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
-  /** End-to-end: simulate the platform deactivating the native window. */
-  nativeSimulateWindowDeactivation(): void {
+  /** End-to-end: simulate a native window activation change. */
+  nativeSimulateWindowActivation(active: boolean): void {
     this.native.flush()
-    this.native.simulateWindowDeactivation()
+    this.native.simulateWindowActivation(active)
     this.dispatchNativeEvents()
     this.native.flush()
+  }
+
+  /** End-to-end: simulate the platform deactivating the native window. */
+  nativeSimulateWindowDeactivation(): void {
+    this.nativeSimulateWindowActivation(false)
   }
 
   /** End-to-end: simulate mouse up through GPUI hit testing →
@@ -703,6 +718,10 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getWindowSize!()
   }
 
+  isActive(): boolean {
+    return this.native.isActive!()
+  }
+
   simulateResize(width: number, height: number): void {
     this.native.simulateResize(width, height)
   }
@@ -714,6 +733,177 @@ export class TestRenderer implements NativeRenderer {
 }
 
 // ── Test root helper ─────────────────────────────────────────────────
+
+/** Returns every direct child, resolving the renderer's numeric element table. */
+export function getChildren(renderer: TestRenderer, element: TestElement): TestElement[] {
+  return element.children.map((childId) =>
+    getElement(renderer, childId, `child of <${element.type}>`)
+  )
+}
+
+/** Returns an element's parent from the renderer's numeric element table. */
+export function getParent(renderer: TestRenderer, element: TestElement): TestElement {
+  if (element.parentId === null) {
+    throw new Error(`${describeElement(renderer, element)} has no parent`)
+  }
+
+  return getElement(renderer, element.parentId, `parent of ${describeElement(renderer, element)}`)
+}
+
+/** Returns an element's text, including the text rendered by every descendant. */
+export function textContent(renderer: TestRenderer, element: TestElement): string {
+  return `${element.text ?? ""}${getChildren(renderer, element)
+    .map((child) => textContent(renderer, child))
+    .join("")}`
+}
+
+export function getByText(renderer: TestRenderer, text: TextMatcher): TestElement {
+  return getQueries(renderer, getRoot(renderer)).getByText(text)
+}
+
+export function queryByText(renderer: TestRenderer, text: TextMatcher): TestElement | undefined {
+  return getQueries(renderer, getRoot(renderer)).queryByText(text)
+}
+
+export function getAllByText(renderer: TestRenderer, text: TextMatcher): TestElement[] {
+  return getQueries(renderer, getRoot(renderer)).getAllByText(text)
+}
+
+/** Limits text queries to an element and its descendants. */
+export function within(renderer: TestRenderer, element: TestElement): TextQueries {
+  return getQueries(renderer, element)
+}
+
+function getQueries(renderer: TestRenderer, scope: TestElement): TextQueries {
+  return {
+    getByText: (text) => {
+      const matches = findAllByText(renderer, scope, text)
+
+      if (matches.length === 0) throw noMatchError(renderer, scope, text)
+      if (matches.length > 1) throw multipleMatchesError(renderer, text, matches)
+
+      const [match] = matches
+      if (match === undefined) throw noMatchError(renderer, scope, text)
+
+      return match
+    },
+    queryByText: (text) => {
+      const matches = findAllByText(renderer, scope, text)
+
+      if (matches.length > 1) throw multipleMatchesError(renderer, text, matches)
+
+      return matches[0]
+    },
+    getAllByText: (text) => {
+      const matches = findAllByText(renderer, scope, text)
+
+      if (matches.length === 0) throw noMatchError(renderer, scope, text)
+
+      return matches
+    },
+  }
+}
+
+function findAllByText(
+  renderer: TestRenderer,
+  scope: TestElement,
+  text: TextMatcher
+): TestElement[] {
+  return getElements(renderer, scope).filter(
+    (element) =>
+      matchesText(textContent(renderer, element), text) &&
+      !hasMatchingChild(renderer, element, text)
+  )
+}
+
+function hasMatchingChild(
+  renderer: TestRenderer,
+  element: TestElement,
+  text: TextMatcher
+): boolean {
+  return getChildren(renderer, element).some((child) =>
+    matchesText(textContent(renderer, child), text)
+  )
+}
+
+function getElements(renderer: TestRenderer, scope: TestElement): TestElement[] {
+  return [scope, ...getChildren(renderer, scope).flatMap((child) => getElements(renderer, child))]
+}
+
+function getRoot(renderer: TestRenderer): TestElement {
+  const root = renderer.getRoot()
+  if (root === undefined) throw missingRootError()
+
+  return root
+}
+
+function getElement(renderer: TestRenderer, id: number, relationship: string): TestElement {
+  const element = renderer.getElement(id)
+  if (element === undefined) throw missingElementError(id, relationship)
+
+  return element
+}
+
+function matchesText(content: string, text: TextMatcher): boolean {
+  if (!(text instanceof RegExp)) return content === text
+
+  text.lastIndex = 0
+  const matches = text.test(content)
+  text.lastIndex = 0
+  return matches
+}
+
+function noMatchError(renderer: TestRenderer, scope: TestElement, text: TextMatcher): Error {
+  const nearMisses = getElements(renderer, scope)
+    .map((element) => ({ element, content: textContent(renderer, element) }))
+    .filter(({ element, content }) => element.text !== null && content.length > 0)
+    .slice(0, 5)
+    .map(({ element }) => `  ${describeElement(renderer, element)}`)
+  const nearby =
+    nearMisses.length === 0 ? "No text was rendered in this scope." : nearMisses.join("\n")
+
+  return new Error(
+    `Unable to find an element with text ${describeMatcher(text)} within ${describeElement(renderer, scope)}. Near misses:\n${nearby}`
+  )
+}
+
+function multipleMatchesError(
+  renderer: TestRenderer,
+  text: TextMatcher,
+  matches: TestElement[]
+): Error {
+  return new Error(
+    `Found multiple elements with text ${describeMatcher(text)}:\n${matches
+      .map((element) => `  ${describeElement(renderer, element)}`)
+      .join("\n")}`
+  )
+}
+
+function describeElement(renderer: TestRenderer, element: TestElement): string {
+  const identity = [
+    element.dataTestId === undefined ? undefined : `data-testid=${JSON.stringify(element.dataTestId)}`,
+    element.authorId === undefined ? undefined : `id=${JSON.stringify(element.authorId)}`,
+  ]
+    .filter((attribute): attribute is string => attribute !== undefined)
+    .join(" ")
+  const attributes = [identity, `text=${JSON.stringify(textContent(renderer, element))}`]
+    .filter((attribute) => attribute.length > 0)
+    .join(" ")
+
+  return `<${element.type} ${attributes}>`
+}
+
+function describeMatcher(text: TextMatcher): string {
+  return text instanceof RegExp ? text.toString() : JSON.stringify(text)
+}
+
+function missingRootError(): Error {
+  return new Error("Unable to search rendered text because the renderer has no root element")
+}
+
+function missingElementError(id: number, relationship: string): Error {
+  return new Error(`Unable to find ${relationship}: element #${id} is absent`)
+}
 
 export interface TestRoot {
   root: Root

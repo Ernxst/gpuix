@@ -27,6 +27,8 @@ pub struct EventPayload {
     pub height: Option<f64>,
     /// Device pixels per logical GPUI pixel. Populated for `windowResize`.
     pub scale_factor: Option<f64>,
+    /// Whether the native window is active. Populated for `windowActivation`.
+    pub is_active: Option<bool>,
 
     // ── Mouse position ───────────────────────────────────────────────
     /// Mouse X position in window coordinates (pixels).
@@ -123,6 +125,7 @@ impl Default for EventPayload {
             width: None,
             height: None,
             scale_factor: None,
+            is_active: None,
             x: None,
             y: None,
             button: None,
