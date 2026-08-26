@@ -48,6 +48,7 @@ type IdAllocatorSlot = {
 }
 
 function idAllocatorSlot(): IdAllocatorSlot {
+  // Bun --hot re-evaluates this module, producing duplicate module instances per reload pass.
   const existing = Reflect.get(globalThis, ID_ALLOCATOR_KEY) as IdAllocatorSlot | undefined
   if (existing) return existing
 
