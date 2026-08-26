@@ -38,6 +38,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   focusElement(elementId: number): void
   setPointerCapture(elementId: number): void
   releasePointerCapture(elementId: number): void
+  simulateWindowDeactivation(): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
   simulateClick(x: number, y: number): void
@@ -396,6 +397,14 @@ export class TestRenderer implements NativeRenderer {
   nativeSimulateMouseDown(x: number, y: number, button?: number): void {
     this.native.flush()
     this.native.simulateMouseDown(x, y, button ?? 0)
+    this.dispatchNativeEvents()
+    this.native.flush()
+  }
+
+  /** End-to-end: simulate the platform deactivating the native window. */
+  nativeSimulateWindowDeactivation(): void {
+    this.native.flush()
+    this.native.simulateWindowDeactivation()
     this.dispatchNativeEvents()
     this.native.flush()
   }

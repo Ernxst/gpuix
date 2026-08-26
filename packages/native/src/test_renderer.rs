@@ -510,6 +510,19 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Simulate the platform deactivating the test window.
+    #[napi]
+    pub fn simulate_window_deactivation(&self) -> Result<()> {
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_, window, app| {
+                window.simulate_active_status_change(false, app);
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
     /// Simulate a mouse down event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]

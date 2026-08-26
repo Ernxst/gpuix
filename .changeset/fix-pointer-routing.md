@@ -6,7 +6,8 @@
 Keep captured pointer drags routed to their retained element across redraws,
 outside its bounds, and through mouse-down-driven React commits. Mouse event
 payloads and host refs now expose `setPointerCapture()` and
-`releasePointerCapture()`.
+`releasePointerCapture()`. Window deactivation silently resets an active
+pressed-pointer sequence and releases capture.
 
 Passive fills and absolute decorations no longer block controls behind them.
 Pointer, focus, and scroll behavior still opts a node into hit testing;

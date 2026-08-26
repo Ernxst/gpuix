@@ -1405,6 +1405,8 @@ explicit release, or unmount:
 
 The host ref exposes the same `setPointerCapture()` and
 `releasePointerCapture()` methods when capture is decided outside the handler.
+Window deactivation silently resets the pressed-pointer sequence and capture;
+GPUIX does not currently synthesize `pointercancel` or `lostpointercapture`.
 
 Keyboard and focus listeners create a persistent GPUI `FocusHandle`
 automatically. A listener alone does not put a `div` in the Tab order; add

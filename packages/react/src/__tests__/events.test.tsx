@@ -1168,6 +1168,34 @@ describeNative("events", () => {
       expect(trace).toEqual(["down", "surface-move", "surface-up"])
     })
 
+    it("cancels capture when the window deactivates", () => {
+      const trace: string[] = []
+      testRoot.render(
+        <div
+          style={{ width: 600, height: 400 }}
+          onMouseMove={() => trace.push("surface-move")}
+          onMouseUp={() => trace.push("surface-up")}
+        >
+          <div
+            style={{ width: 80, height: 80 }}
+            onMouseDown={(event: GpuixEvent) => {
+              trace.push("down")
+              event.setPointerCapture()
+            }}
+            onMouseMove={() => trace.push("handle-move")}
+            onMouseUp={() => trace.push("handle-up")}
+          />
+        </div>
+      )
+
+      testRoot.renderer.nativeSimulateMouseDown(20, 20, 0)
+      testRoot.renderer.nativeSimulateWindowDeactivation()
+      testRoot.renderer.nativeSimulateMouseMove(180, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(180, 20, 0)
+
+      expect(trace).toEqual(["down", "surface-move", "surface-up"])
+    })
+
     it("should update state on mouse move", () => {
       function PositionTracker() {
         const [pos, setPos] = useState("0,0")

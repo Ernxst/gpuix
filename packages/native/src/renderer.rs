@@ -3063,6 +3063,8 @@ pub(crate) struct GpuixView {
     pub(crate) selection: SharedSelection,
     /// Retained owner and pressed-button lifetime for mouse pointer capture.
     pointer_router: crate::pointer::SharedPointerRouter,
+    /// Cancels the pressed-pointer sequence when the platform deactivates this window.
+    window_activation_subscription: Option<gpui::Subscription>,
     /// Persistent measurement and scroll state for React-backed virtual lists.
     virtual_lists: HashMap<u64, VirtualListEntry>,
     /// Motion / review clock. Live wall time unless automation freezes it.
@@ -3087,6 +3089,7 @@ impl GpuixView {
             motion_states: HashMap::new(),
             selection,
             pointer_router: Default::default(),
+            window_activation_subscription: None,
             virtual_lists: HashMap::new(),
             clock: crate::automation::AutomationClock::new(),
         }
@@ -3116,6 +3119,12 @@ impl GpuixView {
 
     pub(crate) fn release_pointer_capture(&mut self, id: u64, window: &mut gpui::Window) {
         if self.pointer_router.borrow_mut().release(id) {
+            window.release_pointer();
+        }
+    }
+
+    fn cancel_pointer_sequence(&mut self, window: &mut gpui::Window) {
+        if self.pointer_router.borrow_mut().cancel() {
             window.release_pointer();
         }
     }
@@ -3707,6 +3716,15 @@ impl gpui::Render for GpuixView {
         use gpui::IntoElement;
 
         window.set_window_title(&self.window_title);
+
+        if self.window_activation_subscription.is_none() {
+            self.window_activation_subscription =
+                Some(cx.observe_window_activation(window, |view, window, _cx| {
+                    if !window.is_window_active() {
+                        view.cancel_pointer_sequence(window);
+                    }
+                }));
+        }
 
         // Clone Arc so we don't borrow self.tree — frees self for focus_handles access.
         let tree_arc = self.tree.clone();

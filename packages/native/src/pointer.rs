@@ -43,9 +43,9 @@ impl PointerRouter {
     }
 
     pub(crate) fn cancel(&mut self) -> bool {
+        let had_sequence = self.pressed_button.take().is_some();
         let had_capture = self.capture_owner.take().is_some();
-        self.pressed_button = None;
-        had_capture
+        had_sequence || had_capture
     }
 
     pub(crate) fn retain_owner(&mut self, owner_exists: impl FnOnce(u64) -> bool) -> bool {
@@ -135,5 +135,17 @@ mod tests {
         assert!(!router.retain_owner(|id| id != 7));
         assert_eq!(router.owner(), None);
         assert!(!router.capture(8));
+    }
+
+    #[test]
+    fn cancellation_without_mouse_up_ends_the_pressed_sequence() {
+        let mut router = PointerRouter::default();
+        router.begin(MouseButton::Left);
+        router.capture(7);
+
+        assert!(router.cancel());
+        assert_eq!(router.owner(), None);
+        assert!(!router.capture(8));
+        assert!(!router.cancel());
     }
 }

@@ -222,6 +222,8 @@ export declare class TestGpuixRenderer {
   focusElement(id: number): void
   setPointerCapture(id: number): void
   releasePointerCapture(id: number): void
+  /** Simulate the platform deactivating the test window. */
+  simulateWindowDeactivation(): void
   /**
    * Simulate a mouse down event at the given window coordinates.
    * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
