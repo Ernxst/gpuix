@@ -158,6 +158,7 @@ export interface StyleDesc {
   fontFamily?: string
   fontWeight?: string | number
   letterSpacing?: number
+  textDecoration?: "underline" | "line-through"
   textTransform?: "none" | "uppercase" | "lowercase"
   textAlign?: string
   lineHeight?: number

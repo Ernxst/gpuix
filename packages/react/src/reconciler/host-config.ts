@@ -43,6 +43,10 @@ interface HostNodeState {
 const hostNodeStates = new WeakMap<HostNode, HostNodeState>()
 const virtualListsPendingValidation = new WeakMap<Container, Set<Instance>>()
 
+class InlineTextChildError extends Error {
+  override name = "InlineTextChildError"
+}
+
 function stateFor(node: HostNode): HostNodeState {
   const state = hostNodeStates.get(node)
   if (!state) {
@@ -411,8 +415,14 @@ export const hostConfig = {
     type: ElementType,
     props: Props,
     rootContainerInstance: Container,
-    _hostContext: HostContext
+    hostContext: HostContext
   ): Instance {
+    if (hostContext.isInsideText && type !== "text") {
+      throw new InlineTextChildError(
+        `GPUIX <text> can contain only strings and nested <text> elements; received <${type}>. ` +
+          "Move block or custom content outside the flowing text node."
+      )
+    }
     const id = nextId(rootContainerInstance)
     const instance: Instance = {
       id,
