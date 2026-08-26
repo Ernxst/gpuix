@@ -2,6 +2,7 @@ import fs from "fs"
 import path from "path"
 import React from "react"
 import { beforeAll, describe, expect, it, vi } from "vitest"
+import { connectTest } from "../automation/index.js"
 import type { GpuixSyntheticEvent, PublicInstance, StyleDesc } from "../index.js"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import { SHOTS_DIR } from "./test-utils.js"
@@ -170,6 +171,58 @@ describeNative("inline text runs", () => {
     const event = targetClick.mock.calls[0]![0] as GpuixSyntheticEvent
     expect(event.target).toBe(target)
     expect(targetCurrentTarget).toBe(target)
+  })
+
+  it("resolves an inner data-testid and preserves its event identity", async () => {
+    const observedTargets: Array<[PublicInstance, PublicInstance]> = []
+    const targetClick = vi.fn((event: GpuixSyntheticEvent) => {
+      observedTargets.push([event.target, event.currentTarget])
+    })
+    let target: PublicInstance | null = null
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ display: "flex", padding: 30 }}>
+        <text style={{ color: "#ffffff", fontSize: 24 }}>
+          {"Open "}
+          <text
+            ref={(instance) => {
+              target = instance
+            }}
+            data-testid="inline-data-action"
+            onClick={targetClick}
+            style={{ color: "#60a5fa", textDecoration: "underline" }}
+          >
+            details
+          </text>
+          {" now"}
+        </text>
+      </div>
+    )
+
+    const lowLevel = renderer.findByTestId("inline-data-action")
+    expect(lowLevel).toMatchObject({
+      id: target?.id,
+      type: "text",
+      dataTestId: "inline-data-action",
+    })
+
+    const app = await connectTest(renderer)
+    try {
+      await expect(app.getByTestId("inline-data-action").element()).resolves.toMatchObject({
+        id: lowLevel?.id,
+        type: "text",
+        dataTestId: "inline-data-action",
+      })
+      await app.getByTestId("inline-data-action").click()
+    } finally {
+      await app.close()
+    }
+
+    expect(targetClick).toHaveBeenCalledOnce()
+    expect(observedTargets).toHaveLength(1)
+    expect(observedTargets[0]![0]).toBe(target)
+    expect(observedTargets[0]![1]).toBe(target)
   })
 
   it("rejects block and custom descendants with a precise error", () => {
