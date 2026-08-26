@@ -31,6 +31,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   dispose(): void
   applyBatch(json: string): number[]
   flush(): void
+  advanceAsyncClock(deltaMs: number): void
   drainEvents(): EventPayload[]
   setMenus(menus: MenuSpec[]): void
   simulateMenuAction(id: string): void
@@ -72,6 +73,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   setStrictStyles(enabled: boolean): void
+  setAllowPrivateNetworkImages(enabled: boolean): void
   drainStyleDiagnostics(): StyleDiagnostic[]
   captureScreenshot(path: string): void
   simulateResize(width: number, height: number): void
@@ -259,6 +261,10 @@ export class TestRenderer implements NativeRenderer {
     this.native.setStrictStyles(enabled)
   }
 
+  setAllowPrivateNetworkImages(enabled: boolean): void {
+    this.native.setAllowPrivateNetworkImages(enabled)
+  }
+
   drainStyleDiagnostics(): StyleDiagnostic[] {
     return this.native.drainStyleDiagnostics()
   }
@@ -269,6 +275,11 @@ export class TestRenderer implements NativeRenderer {
    *  build_element() → apply_styles() → layout). */
   flush(): void {
     this.native.flush()
+  }
+
+  /** Advance timers owned by GPUI's async executor without sleeping. */
+  advanceAsyncClock(deltaMs: number): void {
+    this.native.advanceAsyncClock(deltaMs)
   }
 
   /** Drain events collected by the native GPUI event handlers. */
@@ -681,14 +692,20 @@ export interface TestRoot {
   unmount: () => void
 }
 
+export interface TestRootOptions {
+  /** Opt in to loopback/private URL images for local fixture servers. */
+  allowPrivateNetworkImages?: boolean
+}
+
 /**
  * Create a test root for rendering React components.
  * All mutations go to the real GPUI pipeline via native TestGpuixRenderer.
  * Returns the Root (for rendering), the TestRenderer (for inspection/events),
  * and convenience methods.
  */
-export function createTestRoot(): TestRoot {
+export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   const renderer = new TestRenderer()
+  renderer.setAllowPrivateNetworkImages(options.allowPrivateNetworkImages ?? false)
   const root = createRoot(renderer)
   let unmounted = false
 

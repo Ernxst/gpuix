@@ -291,11 +291,31 @@ function isReservedProp(name: string): boolean {
 }
 
 function serializeCustomProp(
-  _type: string,
-  _key: string,
+  type: string,
+  key: string,
   value: object | string | number | boolean | null | undefined
 ): string | object | number | boolean | null {
   if (value === undefined || typeof value === "function") return null
+  if (
+    type === "img" &&
+    key === "src" &&
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === "data" &&
+    "bytes" in value
+  ) {
+    const bytes = value.bytes
+    if (bytes instanceof ArrayBuffer) {
+      return { ...value, bytes: Array.from(new Uint8Array(bytes)) }
+    }
+    if (ArrayBuffer.isView(bytes)) {
+      return {
+        ...value,
+        bytes: Array.from(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)),
+      }
+    }
+  }
   return value
 }
 

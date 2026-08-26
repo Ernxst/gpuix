@@ -25,11 +25,12 @@ use gpui::AppContext as _;
 use crate::element_tree::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree, catch_gpui_initialization, debug_frame_overlay_mode_name,
-    debug_frame_overlay_stats_js, default_application_menus, dispatch_application_menu_action,
-    drain_style_diagnostics, has_application_menus, init_application_menu_support,
-    parse_debug_frame_overlay_mode, parse_style_json, pending_style_diagnostics,
-    set_application_menus, to_element_id, DebugFrameOverlayStats, EventCallback,
-    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
+    debug_frame_overlay_stats_js, default_application_menus, default_http_client,
+    dispatch_application_menu_action, drain_style_diagnostics, has_application_menus,
+    init_application_menu_support, parse_debug_frame_overlay_mode, parse_style_json,
+    pending_custom_prop_diagnostic, pending_style_diagnostics, set_application_menus,
+    to_element_id, DebugFrameOverlayStats, EventCallback, GpuixStyleDiagnostic, GpuixView,
+    MenuSpec, PendingStyleDiagnostic, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 
@@ -108,6 +109,7 @@ pub struct TestGpuixRenderer {
     /// Same handle GpuixView paints against, so tests can assert on the live
     /// selection after simulating a drag.
     selection: crate::text::SharedSelection,
+    image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
 }
@@ -134,12 +136,15 @@ impl TestGpuixRenderer {
         let callback_clone = event_callback.clone();
         let selection = crate::text::SharedSelection::default();
         let selection_clone = selection.clone();
+        let image_network_policy = crate::custom_elements::img::ImageNetworkPolicy::default();
+        let image_network_policy_for_view = image_network_policy.clone();
 
         // Create VisualTestAppContext with real macOS Metal rendering +
         // TestDispatcher for deterministic scheduling.
         let mac_platform = gpui_macos::MacPlatform::new(false);
         let mut cx = gpui::VisualTestAppContext::new(Rc::new(mac_platform));
         cx.update(|cx| {
+            cx.set_http_client(default_http_client());
             crate::renderer::init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
             init_application_menu_support(cx, event_callback.clone());
@@ -158,6 +163,7 @@ impl TestGpuixRenderer {
                         Arc::new(Mutex::new(event_callback.clone())),
                         "GPUIX Test".to_string(),
                         selection_clone,
+                        image_network_policy_for_view,
                     )
                 })
             })
@@ -182,6 +188,7 @@ impl TestGpuixRenderer {
             tree,
             events,
             selection,
+            image_network_policy,
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(Vec::new()),
         })
@@ -262,6 +269,13 @@ impl TestGpuixRenderer {
         }
     }
 
+    /// Opt in to loopback and private-network URL image sources for local tests.
+    /// Link-local and cloud-metadata addresses remain blocked.
+    #[napi]
+    pub fn set_allow_private_network_images(&self, enabled: bool) {
+        self.image_network_policy.set_allow_private(enabled);
+    }
+
     #[napi]
     pub fn drain_style_diagnostics(&self) -> Vec<GpuixStyleDiagnostic> {
         drain_style_diagnostics(&self.style_diagnostics, &self.tree)
@@ -298,7 +312,15 @@ impl TestGpuixRenderer {
         let id = to_element_id(id)?;
         let value: serde_json::Value = serde_json::from_str(&value_json)
             .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
-        self.tree.lock().unwrap().set_custom_prop(id, key, value);
+        let mut tree = self.tree.lock().unwrap();
+        let diagnostic = pending_custom_prop_diagnostic(&tree, id, &key, &value);
+        tree.set_custom_prop(id, key, value);
+        drop(tree);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            if let Some(diagnostic) = diagnostic {
+                self.style_diagnostics.lock().unwrap().push(diagnostic);
+            }
+        }
         Ok(())
     }
 
@@ -384,6 +406,22 @@ impl TestGpuixRenderer {
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// Advance GPUI's async executor clock so tests can deterministically fire
+    /// timers such as bounded image retry/revalidation deadlines.
+    #[napi]
+    pub fn advance_async_clock(&self, delta_ms: f64) -> Result<()> {
+        if !delta_ms.is_finite() || delta_ms < 0.0 {
+            return Err(Error::from_reason(
+                "advanceAsyncClock delta must be a finite non-negative number",
+            ));
+        }
+        with_test_state(|cx, _window, _view| {
+            cx.advance_clock(std::time::Duration::from_secs_f64(delta_ms / 1000.0));
             cx.run_until_parked();
             Ok(())
         })
