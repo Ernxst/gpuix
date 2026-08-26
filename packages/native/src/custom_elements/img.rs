@@ -1261,7 +1261,15 @@ impl CustomElement for ImgElement {
             el = crate::renderer::apply_styles(el, style);
         }
 
-        el.into_any_element()
+        // `<img>` is not a parent element, so record its last paint box from
+        // a relative wrapper just as the other native custom elements do.
+        // The image keeps its own styles, preserving intrinsic sizing and
+        // object-fit behaviour while the wrapper tracks the same layout box.
+        gpui::div()
+            .relative()
+            .child(crate::automation::bounds_tracker(ctx.id, None))
+            .child(el)
+            .into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {

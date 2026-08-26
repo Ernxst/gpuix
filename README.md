@@ -1987,6 +1987,10 @@ expect(renderer.getImageLoadState(image.id)).toMatchObject({
 })
 ```
 
+Once an image paints, `getElementBounds(image.id)` returns its non-null
+last-paint bounds. Together, the load state and bounds assert both a successful
+source resolution and native paint without a screenshot.
+
 ### Testing native elements
 
 `getAllText()` only sees `<text>` nodes in the retained tree. `<code>`, `<diff>`

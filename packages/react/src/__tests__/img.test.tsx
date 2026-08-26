@@ -318,6 +318,35 @@ describeNative("custom element: img", () => {
     expect(fs.statSync(urlScreenshot).size).toBeGreaterThan(0)
   }, 15_000)
 
+  it("records plausible bounds for a painting image", async () => {
+    const testRoot = createImageTestRoot()
+    try {
+      testRoot.render(
+        sourceFrame({ kind: "data", mimeType: "image/png", bytes: PNG_BYTES })
+      )
+      const image = testRoot.renderer.findByType("img")[0]!
+      let bounds: number[] | null = null
+      for (let frame = 0; frame < 100; frame++) {
+        testRoot.renderer.flush()
+        bounds = testRoot.renderer.getElementBounds(image.id)
+        if (
+          testRoot.renderer.getImageLoadState(image.id)?.status === "loaded" &&
+          bounds != null
+        ) {
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+
+      expect(testRoot.renderer.getImageLoadState(image.id)).toMatchObject({ status: "loaded" })
+      expect(bounds).toEqual(expect.any(Array))
+      expect(bounds![2]).toBeGreaterThan(300)
+      expect(bounds![3]).toBeGreaterThan(180)
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
   it("GPU-renders PNG, JPEG, WebP, and SVG in-memory sources", async () => {
     for (const fixture of FIXTURES) {
       const screenshot = await captureLoadedSource(
