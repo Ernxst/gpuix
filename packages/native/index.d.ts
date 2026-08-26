@@ -122,6 +122,10 @@ export declare class GpuixRenderer {
   scrollTo(elementId: number, x: number, y: number): void
   /** Scroll a child into view by its index in the children list. */
   scrollToItem(elementId: number, index: number): void
+  /** Starts a macOS profiler capture at GPUI's post-platform-submit present boundary. */
+  startPresentTimingCapture(): void
+  /** Ends the capture and returns ordered millisecond offsets for submitted frames. */
+  takePresentTimestamps(): Array<number>
   /**
    * Get the current scroll offset of a scrollable element.
    * Returns [x, y] or null if the element has no scroll handle.

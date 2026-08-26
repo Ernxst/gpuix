@@ -1073,6 +1073,13 @@ enum RendererLifecycle {
 #[cfg(target_os = "macos")]
 type FrameRequestCallback = ThreadsafeFunction<(), Unknown<'static>, (), Status, false, false, 1>;
 
+#[cfg(target_os = "macos")]
+struct PresentTimingCapture {
+    collector: gpui::FrameTimingCollector,
+    window_id: gpui::WindowId,
+    disable_trace_when_done: bool,
+}
+
 /// The main GPUI renderer exposed to Node.js.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[napi]
@@ -1088,6 +1095,8 @@ pub struct GpuixRenderer {
     frame_request_outstanding: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     pending_frame_request: Arc<Mutex<Option<gpui_macos::FrameRequest>>>,
+    #[cfg(target_os = "macos")]
+    present_timing_capture: Mutex<Option<PresentTimingCapture>>,
     /// Shared with GpuixView so napi methods can read the live selection
     /// without an App context. Paint and napi calls can use different threads.
     selection: SharedSelection,
@@ -1233,6 +1242,8 @@ impl GpuixRenderer {
             frame_request_outstanding: Arc::new(AtomicBool::new(false)),
             #[cfg(target_os = "macos")]
             pending_frame_request: Arc::new(Mutex::new(None)),
+            #[cfg(target_os = "macos")]
+            present_timing_capture: Mutex::new(None),
             selection: SharedSelection::default(),
             image_network_policy: crate::custom_elements::img::ImageNetworkPolicy::default(),
             strict_styles: AtomicBool::new(true),
@@ -2412,6 +2423,80 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Starts a macOS profiler capture at GPUI's post-platform-submit present boundary.
+    #[napi]
+    pub fn start_present_timing_capture(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let window_id = GPUI_WINDOW.with(|window| {
+                window
+                    .borrow()
+                    .as_ref()
+                    .map(|window| window.window_id())
+                    .ok_or_else(|| Error::from_reason("Window not initialized"))
+            })?;
+            let mut capture = self
+                .present_timing_capture
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let disable_trace_when_done = capture
+                .as_ref()
+                .is_some_and(|capture| capture.disable_trace_when_done)
+                || gpui::set_trace_enabled(true);
+            *capture = Some(PresentTimingCapture {
+                collector: gpui::FrameTimingCollector::new(),
+                window_id,
+                disable_trace_when_done,
+            });
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason(
+            "Present timing capture is only available on macOS",
+        ))
+    }
+
+    /// Ends the capture and returns ordered millisecond offsets for submitted frames.
+    #[napi]
+    pub fn take_present_timestamps(&self) -> Result<Vec<f64>> {
+        #[cfg(target_os = "macos")]
+        {
+            let mut capture = self
+                .present_timing_capture
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take()
+                .ok_or_else(|| Error::from_reason("Present timing capture has not started"))?;
+            let present_ends = capture
+                .collector
+                .collect_unseen()
+                .into_iter()
+                .filter_map(|event| match event {
+                    gpui::FrameEvent::Present(timing) if timing.window_id == capture.window_id => {
+                        Some(timing.present_end)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if capture.disable_trace_when_done {
+                gpui::set_trace_enabled(false);
+            }
+            let Some(first) = present_ends.first().copied() else {
+                return Ok(Vec::new());
+            };
+            return Ok(present_ends
+                .into_iter()
+                .map(|presented_at| presented_at.duration_since(first).as_secs_f64() * 1_000.0)
+                .collect());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason(
+            "Present timing capture is only available on macOS",
+        ))
     }
 
     /// Get the current scroll offset of a scrollable element.

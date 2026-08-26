@@ -2,15 +2,19 @@ import { launch } from "@gpuix/react/automation"
 
 const sampleCount = 60
 const sampleIntervalMs = 1_000 / 60
-const minimumHz = Number(process.env.PACE_ASSERT_MIN_HZ ?? 50)
+const minimumDisplayHz = Number(process.env.PACE_ASSERT_MIN_HZ ?? 50)
+const maximumTimerHz = Number(process.env.PACE_ASSERT_TIMER_MAX_HZ ?? 45)
+const minimumImprovementHz = Number(process.env.PACE_ASSERT_DELTA_HZ ?? 15)
 
 interface PacingResult {
-  frames: number
+  presents: number
   durationMs: number
   hz: number
   workMs: number
+  presentP50Ms: number
   tickP50Ms: number
   ticks: number
+  frameCallbacks: number
   frameSource: string
 }
 
@@ -38,8 +42,11 @@ async function measure(forceTimer: boolean): Promise<PacingResult> {
   })
 
   try {
+    await new Promise((resolve) => setTimeout(resolve, 250))
     const startedAt = performance.now()
 
+    const samples: Promise<unknown>[] = []
+    const inFlight = new Set<Promise<unknown>>()
     for (let index = 0; index < sampleCount; index += 1) {
       const target = startedAt + index * sampleIntervalMs
       const wait = target - performance.now()
@@ -47,7 +54,7 @@ async function measure(forceTimer: boolean): Promise<PacingResult> {
         await new Promise((resolve) => setTimeout(resolve, wait))
       }
 
-      await withTimeout(
+      const sample = withTimeout(
         app.call("scrollWheel", {
           x: 240,
           y: 180,
@@ -58,7 +65,15 @@ async function measure(forceTimer: boolean): Promise<PacingResult> {
         }),
         `scroll sample ${index + 1}`
       )
+      samples.push(sample)
+      inFlight.add(sample)
+      void sample.then(
+        () => inFlight.delete(sample),
+        () => inFlight.delete(sample)
+      )
+      if (inFlight.size >= 2) await Promise.race(inFlight)
     }
+    await Promise.all(samples)
 
     const timeoutAt = performance.now() + 10_000
     let resultText: string | undefined
@@ -81,20 +96,34 @@ async function measure(forceTimer: boolean): Promise<PacingResult> {
 
 function report(result: PacingResult): void {
   console.log(
-    `frame pacing (${result.frameSource}): ${result.frames} frames / ${result.durationMs.toFixed(1)}ms = ${result.hz.toFixed(1)} Hz; tick p50 ${result.tickP50Ms.toFixed(2)}ms (${result.ticks} ticks, ${result.workMs}ms JS work)`
+    `frame pacing (${result.frameSource}): ${result.presents} presents / ${result.durationMs.toFixed(1)}ms = ${result.hz.toFixed(1)} Hz; present p50 ${result.presentP50Ms.toFixed(2)}ms; tick p50 ${result.tickP50Ms.toFixed(2)}ms (${result.ticks} ticks, ${result.frameCallbacks} native callbacks, ${result.workMs}ms JS work)`
   )
 }
 
-const displayLink = await measure(false)
-report(displayLink)
 const timer = await measure(true)
 report(timer)
+await new Promise((resolve) => setTimeout(resolve, 1_000))
+const displayLink = await measure(false)
+report(displayLink)
 
 if (displayLink.frameSource !== "display-link") {
   throw new Error(`Expected the native display-link source, received ${displayLink.frameSource}`)
 }
-if (displayLink.hz < minimumHz) {
+if (timer.frameSource !== "timer") {
+  throw new Error(`Expected the forced timer source, received ${timer.frameSource}`)
+}
+if (timer.hz > maximumTimerHz) {
   throw new Error(
-    `Expected at least ${minimumHz.toFixed(1)} Hz under paced scroll work, received ${displayLink.hz.toFixed(1)} Hz`
+    `Expected the forced timer control at or below ${maximumTimerHz.toFixed(1)} Hz, received ${timer.hz.toFixed(1)} Hz`
+  )
+}
+if (displayLink.hz < minimumDisplayHz) {
+  throw new Error(
+    `Expected at least ${minimumDisplayHz.toFixed(1)} Hz under paced scroll work, received ${displayLink.hz.toFixed(1)} Hz`
+  )
+}
+if (displayLink.hz - timer.hz < minimumImprovementHz) {
+  throw new Error(
+    `Expected display-link pacing to improve by at least ${minimumImprovementHz.toFixed(1)} Hz, received ${(displayLink.hz - timer.hz).toFixed(1)} Hz`
   )
 }

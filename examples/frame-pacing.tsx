@@ -2,7 +2,7 @@
  * Live-window frame-pacing regression target.
  *
  * The controller injects a 60 Hz phased scroll gesture. Each scroll callback
- * performs a small, configurable amount of JavaScript work before yielding.
+ * queues a small, configurable amount of JavaScript work before the next turn.
  */
 
 import React, { useState } from "react"
@@ -12,13 +12,12 @@ import { createRenderer, render, startFrameLoop } from "@gpuix/react"
 const renderer = createRenderer()
 const workMs = Number(process.env.PACE_WORK_MS ?? 12)
 const forceTimer = process.env.PACE_FORCE_TIMER === "1"
-let frameSource = "timer"
 
 renderer.init({ title: "GPUIX frame pacing", width: 528, height: 408 })
 
-let startedAt = 0
-let startedFrames = 0
 let startedTicks = 0
+let startedFrameCallbacks = 0
+let frameCallbacks = 0
 const tickDurations: number[] = []
 
 function doScrollWork(): void {
@@ -33,25 +32,31 @@ function FramePacing() {
 
   const handleScroll = (event: EventPayload): void => {
     if (event.touchPhase === "started") {
-      startedAt = performance.now()
-      startedFrames = renderer.getDebugFrameOverlayStats().frames
+      renderer.startPresentTimingCapture()
       startedTicks = tickDurations.length
+      startedFrameCallbacks = frameCallbacks
     }
 
-    doScrollWork()
+    queueMicrotask(doScrollWork)
 
     if (event.touchPhase === "ended") {
-      const endedAt = performance.now()
       setTimeout(() => {
-        const frames = renderer.getDebugFrameOverlayStats().frames - startedFrames
-        const durationMs = endedAt - startedAt
-        const hz = (frames * 1_000) / durationMs
+        const presentTimestamps = renderer.takePresentTimestamps()
+        const presentIntervals = presentTimestamps
+          .slice(1)
+          .map((timestamp, index) => timestamp - presentTimestamps[index])
+        const durationMs = presentTimestamps.at(-1) ?? 0
+        const hz = durationMs > 0 ? ((presentTimestamps.length - 1) * 1_000) / durationMs : 0
+        const sortedPresentIntervals = presentIntervals.toSorted((a, b) => a - b)
+        const presentP50Ms =
+          sortedPresentIntervals[Math.floor(sortedPresentIntervals.length / 2)] ?? 0
         const measuredTicks = tickDurations.slice(startedTicks).sort((a, b) => a - b)
         const tickP50Ms = measuredTicks[Math.floor(measuredTicks.length / 2)] ?? 0
+        const observedFrameCallbacks = frameCallbacks - startedFrameCallbacks
         setResult(
-          `PACING_RESULT ${JSON.stringify({ frames, durationMs, hz, workMs, tickP50Ms, ticks: measuredTicks.length, frameSource })}`
+          `PACING_RESULT ${JSON.stringify({ presents: presentTimestamps.length, durationMs, hz, workMs, presentP50Ms, tickP50Ms, ticks: measuredTicks.length, frameCallbacks: observedFrameCallbacks, frameSource: observedFrameCallbacks > 0 ? "display-link" : "timer" })}`
         )
-      }, 100)
+      }, 150)
     }
   }
 
@@ -73,7 +78,7 @@ function FramePacing() {
       </text>
       <div
         testId="scroll-target"
-        style={{ flex: 1, overflow: "scroll", backgroundColor: "#262626", padding: 12 }}
+        style={{ flexGrow: 1, overflow: "scroll", backgroundColor: "#262626", padding: 12 }}
         onScroll={handleScroll}
       >
         <div style={{ height: 2400 }}>
@@ -96,9 +101,14 @@ const measuredTick = (): boolean => {
   }
 }
 const setFrameRequestHandler = (callback: (() => void) | null): boolean => {
-  const installed = renderer.setFrameRequestHandler(callback)
-  if (callback && installed) frameSource = "display-link"
-  return installed
+  return renderer.setFrameRequestHandler(
+    callback
+      ? () => {
+          frameCallbacks += 1
+          callback()
+        }
+      : null
+  )
 }
 startFrameLoop(
   {
