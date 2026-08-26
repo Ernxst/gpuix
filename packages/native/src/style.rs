@@ -274,6 +274,7 @@ pub struct StyleDesc {
     pub selection_color: Option<String>,
 
     pub hover: Option<Box<StyleDesc>>,
+    pub hover_within: Option<Box<StyleDesc>>,
     pub active: Option<Box<StyleDesc>>,
     pub focus: Option<Box<StyleDesc>>,
     pub focus_visible: Option<Box<StyleDesc>>,
@@ -1104,9 +1105,13 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             ["auto", "text", "none"]
         );
 
-        if matches!(key.as_str(), "hover" | "active" | "focus" | "focusVisible") {
+        if matches!(
+            key.as_str(),
+            "hover" | "hoverWithin" | "active" | "focus" | "focusVisible"
+        ) {
             let property = match key.as_str() {
                 "hover" => property!("hover"),
+                "hoverWithin" => property!("hoverWithin"),
                 "active" => property!("active"),
                 "focus" => property!("focus"),
                 "focusVisible" => property!("focusVisible"),
@@ -1124,6 +1129,10 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                     "hover" => {
                         parsed.style.hover =
                             parse_nested_style("hover", value, &mut parsed.problems)
+                    }
+                    "hoverWithin" => {
+                        parsed.style.hover_within =
+                            parse_nested_style("hoverWithin", value, &mut parsed.problems)
                     }
                     "active" => {
                         parsed.style.active =
@@ -1707,6 +1716,7 @@ mod tests {
             "userSelect": "text",
             "selectionColor": "red",
             "hover": { "color": "blue" },
+            "hoverWithin": { "backgroundColor": "magenta" },
             "active": { "color": "green" },
             "focus": { "borderColor": "yellow" },
             "focusVisible": { "outlineColor": "cyan" }

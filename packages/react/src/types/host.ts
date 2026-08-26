@@ -85,6 +85,9 @@ export type GridTrack =
 
 export type GridTemplate = number | GridTrack[]
 
+type NativeStateStyleKey = "hover" | "hoverWithin" | "active" | "focus" | "focusVisible"
+type NativeStateStyle = Omit<StyleDesc, NativeStateStyleKey>
+
 export interface StyleDesc {
   display?: string
   visibility?: string
@@ -179,10 +182,12 @@ export interface StyleDesc {
 
   // Native state styles — applied by GPUI without a JS round trip.
   // Nesting is one level deep: a state style cannot contain another state style.
-  hover?: Omit<StyleDesc, "hover" | "active" | "focus" | "focusVisible">
-  active?: Omit<StyleDesc, "hover" | "active" | "focus" | "focusVisible">
-  focus?: Omit<StyleDesc, "hover" | "active" | "focus" | "focusVisible">
-  focusVisible?: Omit<StyleDesc, "hover" | "active" | "focus" | "focusVisible">
+  hover?: NativeStateStyle
+  /** Applies while the nearest ancestor with `hoverGroup` is hovered. */
+  hoverWithin?: NativeStateStyle
+  active?: NativeStateStyle
+  focus?: NativeStateStyle
+  focusVisible?: NativeStateStyle
 }
 
 // Element types supported by GPUIX
@@ -329,6 +334,9 @@ export interface Props {
   style?: StyleDesc
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
+
+  /** Establishes a native hover group for descendant `style.hoverWithin` states. */
+  hoverGroup?: string
 
   // ── Mouse events ───────────────────────────────────────────────
   onClick?: (event: GpuixSyntheticEvent) => void

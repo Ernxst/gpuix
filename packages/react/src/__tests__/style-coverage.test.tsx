@@ -442,6 +442,60 @@ describe("style props reach the renderer", () => {
     expect(rowRate[1]).toBeGreaterThan(headerRate[1])
   })
 
+  it("applies hoverWithin to a descendant of the nearest hoverGroup", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "100%",
+          height: "100%",
+          backgroundColor: "#101010",
+        }}
+      >
+        <div
+          hoverGroup="destination-row"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 360,
+            height: 120,
+            gap: 8,
+            backgroundColor: "#20283a",
+          }}
+        >
+          <text testId="destination-label" style={{ color: "#ffffff", fontSize: 22 }}>
+            Copper Basin
+          </text>
+          <span
+            style={{
+              width: 180,
+              height: 8,
+              backgroundColor: "#334155",
+              hoverWithin: { backgroundColor: "#f59e0b" },
+            }}
+          />
+        </div>
+      </div>
+    )
+
+    const label = renderer.findByTestId("destination-label")!
+    const [x, y, width, height] = renderer.getElementBounds(label.id)!
+    const before = path.join(SHOTS_DIR, "hover-within-before.png")
+    const after = path.join(SHOTS_DIR, "hover-within-after.png")
+
+    renderer.nativeSimulateMouseMove(10, 10)
+    renderer.captureScreenshot(before)
+    renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+    renderer.captureScreenshot(after)
+
+    expectScreenshotsDiffer(before, after)
+  })
+
   it("focuses an element with autoFocus so it receives keys", () => {
     // `autoFocus` was declared in Props and dropped by the reconciler, so an
     // <input> was dead until clicked.

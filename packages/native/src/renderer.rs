@@ -3506,7 +3506,7 @@ pub(crate) struct BuildCtx<'a> {
 }
 
 /// Style properties that cascade into descendants.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct Inherited {
     /// False once an ancestor sets `userSelect: "none"`.
     pub selectable: bool,
@@ -3514,6 +3514,8 @@ pub(crate) struct Inherited {
     pub selection_wash: gpui::Hsla,
     /// Text case transformation inherited by plain text descendants.
     pub text_transform: TextTransform,
+    /// Nearest native hover group for descendant `hoverWithin` styles.
+    pub hover_group: Option<gpui::SharedString>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -3532,29 +3534,34 @@ impl Inherited {
             selectable: true,
             selection_wash: wash,
             text_transform: TextTransform::None,
+            hover_group: None,
         }
     }
 
     /// Apply the inheritable parts of `style` for the subtree below it.
-    fn descend(mut self, style: Option<&StyleDesc>) -> Self {
-        let Some(style) = style else { return self };
-        match style.user_select.as_deref() {
-            Some("none") => self.selectable = false,
-            Some("text") | Some("auto") => self.selectable = true,
-            _ => {}
+    fn descend(mut self, style: Option<&StyleDesc>, hover_group: Option<&str>) -> Self {
+        if let Some(style) = style {
+            match style.user_select.as_deref() {
+                Some("none") => self.selectable = false,
+                Some("text") | Some("auto") => self.selectable = true,
+                _ => {}
+            }
+            if let Some(color) = style
+                .selection_color
+                .as_deref()
+                .and_then(crate::color::parse_color_rgba)
+            {
+                self.selection_wash = color.into();
+            }
+            match style.text_transform.as_deref() {
+                Some("none") => self.text_transform = TextTransform::None,
+                Some("uppercase") => self.text_transform = TextTransform::Uppercase,
+                Some("lowercase") => self.text_transform = TextTransform::Lowercase,
+                _ => {}
+            }
         }
-        if let Some(color) = style
-            .selection_color
-            .as_deref()
-            .and_then(crate::color::parse_color_rgba)
-        {
-            self.selection_wash = color.into();
-        }
-        match style.text_transform.as_deref() {
-            Some("none") => self.text_transform = TextTransform::None,
-            Some("uppercase") => self.text_transform = TextTransform::Uppercase,
-            Some("lowercase") => self.text_transform = TextTransform::Lowercase,
-            _ => {}
+        if let Some(hover_group) = hover_group {
+            self.hover_group = Some(gpui::SharedString::from(hover_group.to_owned()));
         }
         self
     }
@@ -4085,8 +4092,12 @@ pub(crate) fn build_element(
 
     // Inheritable style resolves once here so both built-ins and custom
     // elements see the same cascade.
-    let parent_inherited = ctx.inherited;
-    ctx.inherited = parent_inherited.descend(style);
+    let hover_group = element
+        .custom_props
+        .get("hoverGroup")
+        .and_then(serde_json::Value::as_str);
+    let parent_inherited = ctx.inherited.clone();
+    ctx.inherited = parent_inherited.clone().descend(style, hover_group);
 
     let built = match element.element_type.as_str() {
         "div" => {
@@ -4111,7 +4122,7 @@ pub(crate) fn build_element(
                 .filter(|child_id| ctx.tree.elements.contains_key(child_id))
                 .map(|child_id| build_element(child_id, ctx, window, cx))
                 .collect();
-            let inherited = ctx.inherited;
+            let inherited = ctx.inherited.clone();
             let render_ctx = CustomRenderContext {
                 id,
                 events: &element.events,
@@ -4238,7 +4249,7 @@ fn build_virtual_list(
     }
 
     let list_id = element.id;
-    let inherited = ctx.inherited;
+    let inherited = ctx.inherited.clone();
     let render_item = cx.processor(move |view, index: usize, window, cx| {
         let Some(child_id) = view
             .virtual_lists
@@ -4247,7 +4258,7 @@ fn build_virtual_list(
         else {
             return gpui::Empty.into_any_element();
         };
-        view.build_virtual_child(list_id, index, child_id, inherited, window, cx)
+        view.build_virtual_child(list_id, index, child_id, inherited.clone(), window, cx)
     });
     let mut list =
         gpui::list(list_state, render_item).with_sizing_behavior(gpui::ListSizingBehavior::Auto);
@@ -4304,6 +4315,14 @@ pub(crate) fn build_div(
     let element_id_str = format!("__gpuix_{}", element.id);
     let mut el = gpui::div().id(gpui::SharedString::from(element_id_str));
 
+    if let Some(group) = element
+        .custom_props
+        .get("hoverGroup")
+        .and_then(serde_json::Value::as_str)
+    {
+        el = el.group(gpui::SharedString::from(group.to_owned()));
+    }
+
     if let Some(style) = style {
         el = apply_styles(el, style);
 
@@ -4313,6 +4332,14 @@ pub(crate) fn build_div(
         // StyleRefinement implements Styled, we can reuse apply_styles().
         if let Some(ref hover_style) = style.hover {
             el = el.hover(|refinement| apply_styles(refinement, hover_style));
+        }
+        if let (Some(group), Some(hover_within_style)) = (
+            ctx.inherited.hover_group.clone(),
+            style.hover_within.as_ref(),
+        ) {
+            el = el.group_hover(group, |refinement| {
+                apply_styles(refinement, hover_within_style)
+            });
         }
         if let Some(ref active_style) = style.active {
             el = el.active(|refinement| apply_styles(refinement, active_style));

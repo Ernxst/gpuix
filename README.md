@@ -1603,7 +1603,7 @@ does not yet implement those wrapping algorithms.
 
 ### Hover, active, and focus
 
-`hover`, `active`, `focus`, and `focusVisible` are **nested style objects**.
+`hover`, `hoverWithin`, `active`, `focus`, and `focusVisible` are **nested style objects**.
 GPUI applies them natively without a JavaScript round trip. `focus` applies for
 pointer and keyboard focus. `focusVisible` applies only while the directly
 tracked element has keyboard-modality focus, matching CSS `:focus-visible`.
@@ -1625,6 +1625,25 @@ tracked element has keyboard-modality focus, matching CSS `:focus-visible`.
   tabIndex={0}
 >
   Press
+</div>
+```
+
+Put `hoverGroup` on a container when its hover should style an opted-in
+descendant. The descendant's `hoverWithin` style follows the nearest hover
+group, including while the pointer is over a sibling such as the destination
+label. No React hover state or mouse handlers are involved.
+
+```tsx
+<div hoverGroup="destination-row" style={{ display: 'flex', flexDirection: 'column' }}>
+  <span>Destination</span>
+  <span
+    style={{
+      width: 96,
+      height: 1,
+      backgroundColor: 'transparent',
+      hoverWithin: { backgroundColor: '#7c86ff' },
+    }}
+  />
 </div>
 ```
 

@@ -824,6 +824,57 @@ describeNative("events", () => {
         ]
       `)
     })
+
+    it("keeps container hover styles and listeners active over descendant text", () => {
+      const events: string[] = []
+      testRoot.render(
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "100%",
+            height: "100%",
+            backgroundColor: "#101010",
+          }}
+        >
+          <div
+            testId="hover-row"
+            onMouseEnter={() => events.push("enter")}
+            onMouseLeave={() => events.push("leave")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 360,
+              height: 96,
+              backgroundColor: "#253047",
+              hover: { backgroundColor: "#d97706" },
+            }}
+          >
+            <text testId="hover-row-label" style={{ color: "#ffffff", fontSize: 22 }}>
+              Destination
+            </text>
+          </div>
+        </div>
+      )
+
+      const label = testRoot.renderer.findByTestId("hover-row-label")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(label.id)!
+      const before = "/tmp/gpuix-descendant-container-hover-before.png"
+      const after = "/tmp/gpuix-descendant-container-hover-after.png"
+
+      testRoot.renderer.nativeSimulateMouseMove(10, 10)
+      testRoot.renderer.captureScreenshot(before)
+      testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      testRoot.renderer.captureScreenshot(after)
+
+      expect(events).toEqual(["enter"])
+      expectScreenshotsDiffer(before, after)
+
+      testRoot.renderer.nativeSimulateMouseMove(10, 10)
+      expect(events).toEqual(["enter", "leave"])
+    })
   })
 
   describe("mouseDownOutside", () => {
