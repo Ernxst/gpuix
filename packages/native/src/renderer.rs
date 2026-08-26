@@ -40,7 +40,10 @@ use wasm_bindgen::JsCast as _;
 use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::retained_tree::RetainedTree;
-use crate::style::{ParsedStyle, StyleDesc, StyleProblem};
+use crate::style::{
+    GridTemplateValue, GridTrackMaxValue, GridTrackMinValue, GridTrackValue, ParsedStyle,
+    StyleDesc, StyleProblem,
+};
 use crate::text::{selectable_text, selection_frame_reset, selection_key, SharedSelection};
 use crate::theme::Theme;
 
@@ -4340,6 +4343,74 @@ pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::Dimension
     }
 }
 
+fn to_gpui_grid_track(track: &GridTrackValue) -> gpui::GridTrack {
+    match track {
+        GridTrackValue::Px { value } => gpui::GridTrack::Px(gpui::px(*value as f32)),
+        GridTrackValue::Fr { value } => gpui::GridTrack::Fr(*value as f32),
+        GridTrackValue::Auto => gpui::GridTrack::Auto,
+        GridTrackValue::MinContent => gpui::GridTrack::MinContent,
+        GridTrackValue::MaxContent => gpui::GridTrack::MaxContent,
+        GridTrackValue::Minmax { min, max } => gpui::GridTrack::MinMax {
+            min: match min {
+                GridTrackMinValue::Px { value } => gpui::GridTrackMin::Px(gpui::px(*value as f32)),
+                GridTrackMinValue::Auto => gpui::GridTrackMin::Auto,
+                GridTrackMinValue::MinContent => gpui::GridTrackMin::MinContent,
+                GridTrackMinValue::MaxContent => gpui::GridTrackMin::MaxContent,
+            },
+            max: match max {
+                GridTrackMaxValue::Px { value } => gpui::GridTrackMax::Px(gpui::px(*value as f32)),
+                GridTrackMaxValue::Fr { value } => gpui::GridTrackMax::Fr(*value as f32),
+                GridTrackMaxValue::Auto => gpui::GridTrackMax::Auto,
+                GridTrackMaxValue::MinContent => gpui::GridTrackMax::MinContent,
+                GridTrackMaxValue::MaxContent => gpui::GridTrackMax::MaxContent,
+            },
+        },
+        GridTrackValue::Repeat { .. } => {
+            unreachable!("repeat is only valid as a grid template component")
+        }
+    }
+}
+
+fn legacy_grid_track(minimum: Option<&str>) -> gpui::GridTrack {
+    match minimum {
+        Some("min-content") => gpui::GridTrack::MinMax {
+            min: gpui::GridTrackMin::MinContent,
+            max: gpui::GridTrackMax::Fr(1.),
+        },
+        Some("max-content") => gpui::GridTrack::MinMax {
+            min: gpui::GridTrackMin::Px(gpui::px(0.)),
+            max: gpui::GridTrackMax::MaxContent,
+        },
+        _ => gpui::GridTrack::MinMax {
+            min: gpui::GridTrackMin::Px(gpui::px(0.)),
+            max: gpui::GridTrackMax::Fr(1.),
+        },
+    }
+}
+
+fn to_gpui_grid_template(
+    template: &GridTemplateValue,
+    legacy_minimum: Option<&str>,
+) -> gpui::GridTemplate {
+    let tracks = match template {
+        GridTemplateValue::LegacyCount(count) => vec![gpui::GridTemplateComponent::Repeat {
+            count: *count as u16,
+            tracks: vec![legacy_grid_track(legacy_minimum)],
+        }],
+        GridTemplateValue::Tracks(tracks) => tracks
+            .iter()
+            .map(|track| match track {
+                GridTrackValue::Repeat { count, tracks } => gpui::GridTemplateComponent::Repeat {
+                    count: *count,
+                    tracks: tracks.iter().map(to_gpui_grid_track).collect(),
+                },
+                track => gpui::GridTemplateComponent::Track(to_gpui_grid_track(track)),
+            })
+            .collect(),
+    };
+    gpui::GridTemplate { tracks }
+}
+
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.visibility.as_deref() {
         Some("hidden") => el = el.invisible(),
@@ -4351,21 +4422,14 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("grid") => el = el.grid(),
         _ => {}
     }
-    if let Some(cols) = style.grid_template_columns {
-        let count = cols.round().clamp(1.0, 64.0) as u16;
-        el = match style.grid_column_min.as_deref() {
-            Some("min-content") => el.grid_cols_min_content(count),
-            Some("max-content") => el.grid_cols_max_content(count),
-            _ => el.grid_cols(count),
-        };
+    if let Some(cols) = &style.grid_template_columns {
+        el = el.grid_template_columns(to_gpui_grid_template(
+            cols,
+            style.grid_column_min.as_deref(),
+        ));
     }
-    if let Some(rows) = style.grid_template_rows {
-        let count = rows.round().clamp(1.0, 64.0) as u16;
-        el = match style.grid_row_min.as_deref() {
-            Some("min-content") => el.grid_rows_min_content(count),
-            Some("max-content") => el.grid_rows_max_content(count),
-            _ => el.grid_rows(count),
-        };
+    if let Some(rows) = &style.grid_template_rows {
+        el = el.grid_template_rows(to_gpui_grid_template(rows, style.grid_row_min.as_deref()));
     }
     if style.flex_direction.as_deref() == Some("column") {
         el = el.flex_col();
