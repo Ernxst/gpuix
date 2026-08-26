@@ -75,6 +75,13 @@ export type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
   BackgroundValue,
+  GridTemplate,
+  GridTrack,
+  GridTrackMax,
+  GridTrackMin,
+  GridTrackMinmax,
+  GridTrackNonRepeat,
+  GridTrackSizing,
   LinearGradient,
   LinearGradientStop,
   MotionEase,
@@ -82,11 +89,15 @@ export type {
   MotionStyle,
   MotionTransition,
   NativeRenderer,
-  GpuixEvent,
   StyleDiagnostic,
   StyleDesc,
 } from "./types/host.js"
 export { handleGpuixEvent } from "./reconciler/event-registry.js"
+export type {
+  GpuixEventDispatchResult,
+  GpuixEventPhase,
+  GpuixSyntheticEvent,
+} from "./reconciler/synthetic-event.js"
 export {
   applyMacCpuThrottleFromEnv,
   MAC_CPU_THROTTLES,

@@ -71,6 +71,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   setStrictStyles(enabled: boolean): void
   drainStyleDiagnostics(): StyleDiagnostic[]
   captureScreenshot(path: string): void
+  simulateResize(width: number, height: number): void
 }
 
 interface NativeTestRendererConstructor {
@@ -150,6 +151,7 @@ export interface TestElement {
 export class TestRenderer implements NativeRenderer {
   commitCount = 0
   private applicationEventHandler: ((event: EventPayload) => void) | null = null
+  private windowEventHandler: ((event: EventPayload) => void) | null = null
 
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
@@ -234,6 +236,10 @@ export class TestRenderer implements NativeRenderer {
     this.native.releasePointerCapture(elementId)
   }
 
+  setWindowEventHandler(handler: ((event: EventPayload) => void) | null): void {
+    this.windowEventHandler = handler
+  }
+
   setStrictStyles(enabled: boolean): void {
     this.native.setStrictStyles(enabled)
   }
@@ -269,6 +275,12 @@ export class TestRenderer implements NativeRenderer {
       const events = this.native.drainEvents()
       if (events.length === 0) break
       for (const event of events) {
+        if (event.eventType === "windowResize") {
+          flushSync(() => {
+            this.windowEventHandler?.(event)
+          })
+          continue
+        }
         if (event.eventType === "menuAction" || event.eventType === "terminated") {
           this.applicationEventHandler?.(event)
           continue
@@ -294,6 +306,20 @@ export class TestRenderer implements NativeRenderer {
     this.native.simulateKeystrokes(keystrokes)
     this.dispatchNativeEvents()
     this.native.flush()
+  }
+
+  /** Dispatch one key-down event to the element that already holds focus. */
+  simulateKeyDown(keystroke: string, isHeld?: boolean): void {
+    this.native.flush()
+    this.native.simulateKeyDown(keystroke, isHeld)
+    this.dispatchNativeEvents()
+  }
+
+  /** Dispatch one key-up event to the element that already holds focus. */
+  simulateKeyUp(keystroke: string): void {
+    this.native.flush()
+    this.native.simulateKeyUp(keystroke)
+    this.dispatchNativeEvents()
   }
 
   nativeSimulateKeystrokes(elementId: number, keystrokes: string): void {
@@ -605,6 +631,14 @@ export class TestRenderer implements NativeRenderer {
   captureScreenshot(path: string): void {
     this.native.flush()
     this.native.captureScreenshot(path)
+  }
+
+  getWindowSize(): { width: number; height: number; scaleFactor: number } {
+    return this.native.getWindowSize!()
+  }
+
+  simulateResize(width: number, height: number): void {
+    this.native.simulateResize(width, height)
   }
 
   /** Whether the native GPUI test renderer is available. Always true. */

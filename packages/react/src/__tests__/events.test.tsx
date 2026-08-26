@@ -11,8 +11,15 @@
 /// JSX types now resolve to GPUIX's Props via jsxImportSource in tsconfig.
 
 import fs from "fs"
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import React, { useState, useRef } from "react"
+import {
+  createLink,
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterContextProvider,
+} from "@tanstack/react-router"
 import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing"
 import {
   render as renderApp,
@@ -20,8 +27,10 @@ import {
   startFrameLoop,
 } from "../reconciler/renderer.js"
 import type { EventPayload } from "@gpuix/native"
-import type { GpuixEvent, PublicInstance } from "../types/host.js"
-import { expectScreenshotsDiffer } from "./test-utils"
+import { handleGpuixEvent } from "../reconciler/event-registry.js"
+import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
+import type { Props, PublicInstance } from "../types/host.js"
+import { expectScreenshotsDiffer, expectScreenshotsEqual } from "./test-utils"
 
 // All tests require the native GPUI test renderer (cargo build with test-support).
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
@@ -244,6 +253,10 @@ describeNative("events", () => {
     testRoot = createTestRoot()
   })
 
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   describe("click events", () => {
     it("should handle onClick and trigger re-render", () => {
       function Counter() {
@@ -282,6 +295,423 @@ describeNative("events", () => {
           "Count: 2",
         ]
       `)
+    })
+
+    it("dispatches one event through capture, target, and bubble with DOM-shaped targets", () => {
+      const calls: Array<{
+        name: string
+        phase: number
+        target: PublicInstance
+        currentTarget: PublicInstance
+        defaultPrevented: boolean
+      }> = []
+      let parent: PublicInstance | null = null
+      let target: PublicInstance | null = null
+
+      const record = (name: string, event: GpuixSyntheticEvent): void => {
+        calls.push({
+          name,
+          phase: event.eventPhase,
+          target: event.target,
+          currentTarget: event.currentTarget,
+          defaultPrevented: event.defaultPrevented,
+        })
+      }
+
+      testRoot.render(
+        <div
+          ref={(instance) => {
+            parent = instance
+          }}
+          onClickCapture={(event) => record("parent capture", event)}
+          onClick={(event) => record("parent bubble", event)}
+          style={{ width: 240, height: 100 }}
+        >
+          <a
+            ref={(instance) => {
+              target = instance
+            }}
+            target="_self"
+            onClickCapture={(event) => record("target capture", event)}
+            onClick={(event) => {
+              event.preventDefault()
+              record("target bubble", event)
+            }}
+            style={{ width: 120, height: 50 }}
+          >
+            Factory
+          </a>
+        </div>
+      )
+
+      const nativeEvent: EventPayload = {
+        elementId: target!.id,
+        eventType: "click",
+        modifiers: { alt: true, ctrl: false, cmd: true, shift: false },
+      }
+      const result = handleGpuixEvent(nativeEvent, testRoot.renderer)
+
+      expect(calls.map(({ name }) => name)).toEqual([
+        "parent capture",
+        "target capture",
+        "target bubble",
+        "parent bubble",
+      ])
+      expect(calls.map(({ phase }) => phase)).toEqual([1, 2, 2, 3])
+      expect(calls.every((call) => call.target === target)).toBe(true)
+      expect(calls[0]!.currentTarget).toBe(parent)
+      expect(calls[1]!.currentTarget).toBe(target)
+      expect(calls[3]!.currentTarget).toBe(parent)
+      expect(calls[3]!.defaultPrevented).toBe(true)
+      expect(target!.getAttribute("target")).toBe("_self")
+      expect(target!.getAttribute("missing")).toBeNull()
+      expect(result).toEqual({ defaultPrevented: true, propagationStopped: false })
+    })
+
+    it("stops React propagation before an ancestor bubble handler", () => {
+      const parentClick = vi.fn()
+      const targetClick = vi.fn((event: GpuixSyntheticEvent) => event.stopPropagation())
+      let target: PublicInstance | null = null
+
+      testRoot.render(
+        <div onClick={parentClick} style={{ width: 240, height: 100 }}>
+          <div
+            ref={(instance) => {
+              target = instance
+            }}
+            onClick={targetClick}
+            style={{ width: 120, height: 50 }}
+          />
+        </div>
+      )
+
+      testRoot.renderer.nativeSimulateClick(10, 10)
+
+      expect(targetClick).toHaveBeenCalledOnce()
+      expect(parentClick).not.toHaveBeenCalled()
+      expect(targetClick.mock.calls[0]![0].isPropagationStopped()).toBe(true)
+    })
+
+    it("runs an unadapted TanStack createLink handler through the synthetic surface", () => {
+      vi.stubGlobal("window", { origin: "http://localhost" })
+      type NativeAnchorProps = Props & {
+        href?: string
+        target?: string
+      }
+      const NativeAnchor = React.forwardRef<PublicInstance, NativeAnchorProps>(
+        (props, ref) => <a {...props} ref={ref} />
+      )
+      const TanStackLink = createLink(NativeAnchor)
+      const rootRoute = createRootRoute()
+      const router = createRouter({
+        routeTree: rootRoute,
+        history: createMemoryHistory({ initialEntries: ["/"] }),
+        isServer: false,
+      })
+      const navigate = vi.spyOn(router, "navigate").mockResolvedValue(undefined)
+
+      testRoot.render(
+        <RouterContextProvider router={router}>
+          <TanStackLink
+            to="/factory"
+            preload={false}
+            testId="tanstack-link"
+            style={{ width: 180, height: 50 }}
+          >
+            Factory
+          </TanStackLink>
+        </RouterContextProvider>
+      )
+
+      const link = testRoot.renderer.findByTestId("tanstack-link")!
+      expect(link.events.has("click")).toBe(true)
+      const modified = handleGpuixEvent(
+        {
+          elementId: link.id,
+          eventType: "click",
+          modifiers: { alt: false, ctrl: false, cmd: true, shift: false },
+        },
+        testRoot.renderer
+      )
+      expect(modified.defaultPrevented).toBe(false)
+      expect(navigate).not.toHaveBeenCalled()
+
+      const primary = handleGpuixEvent(
+        { elementId: link.id, eventType: "click" },
+        testRoot.renderer
+      )
+      expect(primary.defaultPrevented).toBe(true)
+      expect(navigate).toHaveBeenCalledOnce()
+      expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ to: "/factory" }))
+    })
+
+    it("navigates an unadapted TanStack createLink link on focused Enter", () => {
+      vi.stubGlobal("window", { origin: "http://localhost" })
+      type NativeAnchorProps = Props & {
+        href?: string
+        target?: string
+      }
+      const NativeAnchor = React.forwardRef<PublicInstance, NativeAnchorProps>(
+        (props, ref) => <a {...props} ref={ref} />
+      )
+      const TanStackLink = createLink(NativeAnchor)
+      const rootRoute = createRootRoute()
+      const router = createRouter({
+        routeTree: rootRoute,
+        history: createMemoryHistory({ initialEntries: ["/"] }),
+        isServer: false,
+      })
+      const navigate = vi.spyOn(router, "navigate").mockResolvedValue(undefined)
+
+      testRoot.render(
+        <RouterContextProvider router={router}>
+          <TanStackLink
+            to="/factory"
+            preload={false}
+            testId="tanstack-keyboard-link"
+            style={{ width: 180, height: 50 }}
+          >
+            Factory
+          </TanStackLink>
+        </RouterContextProvider>
+      )
+
+      const link = testRoot.renderer.findByTestId("tanstack-keyboard-link")!
+      expect(link.customProps?.tabIndex).toBe(0)
+
+      testRoot.renderer.focusElement(link.id)
+      testRoot.renderer.simulateKeyDown("enter")
+      testRoot.renderer.simulateKeyUp("enter")
+
+      expect(navigate).toHaveBeenCalledOnce()
+      expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ to: "/factory" }))
+    })
+
+    it("routes pointer click and focused Space through the same click handler", () => {
+      const click = vi.fn()
+      testRoot.render(
+        <div
+          autoFocus
+          tabIndex={0}
+          testId="space-activation"
+          onClick={click}
+          style={{ width: 180, height: 50 }}
+        />
+      )
+
+      const target = testRoot.renderer.findByTestId("space-activation")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(target.id)!
+      testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
+      expect(click).toHaveBeenCalledOnce()
+
+      testRoot.renderer.focusElement(target.id)
+      testRoot.renderer.simulateKeyDown("space")
+      expect(click).toHaveBeenCalledOnce()
+
+      testRoot.renderer.simulateKeyUp("space")
+      expect(click).toHaveBeenCalledTimes(2)
+    })
+
+    it.each(["enter", "space"] as const)(
+      "suppresses a keyboard-synthesized click after prevented %s",
+      (key) => {
+        const click = vi.fn()
+        const keyUp = vi.fn()
+        let target: PublicInstance | null = null
+
+        testRoot.render(
+          <a
+            ref={(instance) => {
+              target = instance
+            }}
+            autoFocus
+            tabIndex={0}
+            onKeyDown={(event) => event.preventDefault()}
+            onKeyUp={keyUp}
+            onClick={click}
+            style={{ width: 180, height: 50 }}
+          >
+            Factory
+          </a>
+        )
+
+        testRoot.renderer.nativeSimulateKeyDown(target!.id, key)
+        testRoot.renderer.nativeSimulateKeyUp(target!.id, key)
+
+        expect(click).not.toHaveBeenCalled()
+        expect(keyUp).toHaveBeenCalledOnce()
+      }
+    )
+
+    it("keeps pointer click but does not turn Space in a text editor into activation", () => {
+      const onClick = vi.fn()
+      testRoot.render(
+        <input
+          autoFocus
+          value=""
+          onClick={onClick}
+          style={{ width: 200, height: 60 }}
+        />
+      )
+
+      testRoot.renderer.nativeSimulateClick(100, 30)
+      expect(onClick).toHaveBeenCalledTimes(1)
+
+      testRoot.renderer.simulateKeyDown("space")
+      testRoot.renderer.simulateKeyUp("space")
+
+      expect(onClick).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe("focus state styles", () => {
+    const focusProbe = (
+      staticFocused = false,
+      keyboardSentinel = false,
+      staticFocusVisible = false
+    ) => (
+      <div
+        style={{
+          display: "flex",
+          width: "100%",
+          height: "100%",
+          padding: 80,
+          backgroundColor: "#101010",
+        }}
+      >
+        {keyboardSentinel && (
+          <div
+            autoFocus={!staticFocused}
+            tabIndex={staticFocused ? undefined : 0}
+            style={{ width: 1, height: 1 }}
+          />
+        )}
+        <div
+          tabIndex={staticFocused ? undefined : 0}
+          style={{
+            width: 240,
+            height: 100,
+            backgroundColor: staticFocused ? "#c2415d" : "#334155",
+            borderRadius: 12,
+            outlineColor: staticFocusVisible ? "#67e8f9" : undefined,
+            outlineWidth: staticFocusVisible ? 4 : undefined,
+            outlineOffset: staticFocusVisible ? 5 : undefined,
+            focus: { backgroundColor: "#c2415d" },
+            focusVisible: {
+              outlineColor: "#67e8f9",
+              outlineWidth: 4,
+              outlineOffset: 5,
+            },
+          }}
+        />
+      </div>
+    )
+
+    it("applies focus on pointer focus but reserves focusVisible for keyboard focus", () => {
+      const pointerPath = "/tmp/gpuix-focus-pointer.png"
+      const pointerExpectedPath = "/tmp/gpuix-focus-pointer-expected.png"
+      const keyboardPath = "/tmp/gpuix-focus-keyboard.png"
+      const keyboardExpectedPath = "/tmp/gpuix-focus-keyboard-expected.png"
+
+      const pointer = createTestRoot()
+      pointer.render(focusProbe())
+      pointer.renderer.nativeSimulateClick(120, 120)
+      pointer.renderer.captureScreenshot(pointerPath)
+
+      const pointerExpected = createTestRoot()
+      pointerExpected.render(focusProbe(true))
+      pointerExpected.renderer.captureScreenshot(pointerExpectedPath)
+
+      const keyboard = createTestRoot()
+      keyboard.render(focusProbe(false, true))
+      keyboard.renderer.simulateKeystrokes("tab")
+      keyboard.renderer.captureScreenshot(keyboardPath)
+
+      const keyboardExpected = createTestRoot()
+      keyboardExpected.render(focusProbe(true, true, true))
+      keyboardExpected.renderer.captureScreenshot(keyboardExpectedPath)
+
+      expectScreenshotsEqual(pointerPath, pointerExpectedPath)
+      expectScreenshotsEqual(keyboardPath, keyboardExpectedPath)
+      expectScreenshotsDiffer(pointerPath, keyboardPath)
+    })
+
+    it("keeps focus-visible styling on the directly focused control", () => {
+      const actualPath = "/tmp/gpuix-focus-scoped.png"
+      const expectedPath = "/tmp/gpuix-focus-scoped-expected.png"
+
+      const tree = (staticChildOutline: boolean) => (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            width: "100%",
+            height: "100%",
+            gap: 36,
+            padding: 80,
+            backgroundColor: "#101010",
+          }}
+        >
+          <div
+            autoFocus={!staticChildOutline}
+            tabIndex={staticChildOutline ? undefined : 0}
+            style={{ width: 1, height: 1 }}
+          />
+          <div
+            style={{
+              width: 180,
+              height: 60,
+              backgroundColor: "#334155",
+              focusVisible: {
+                outlineColor: "#c084fc",
+                outlineWidth: 4,
+              },
+            }}
+          />
+          <div
+            tabIndex={-1}
+            style={{
+              width: 320,
+              height: 150,
+              padding: 28,
+              backgroundColor: "#1e293b",
+              focusVisible: {
+                outlineColor: "#fb7185",
+                outlineWidth: 4,
+              },
+            }}
+          >
+            <div
+              testId="focus-scoped-child"
+              tabIndex={staticChildOutline ? undefined : 0}
+              style={{
+                width: 180,
+                height: 70,
+                backgroundColor: "#334155",
+                outlineColor: staticChildOutline ? "#4ade80" : undefined,
+                outlineWidth: staticChildOutline ? 4 : undefined,
+                outlineOffset: staticChildOutline ? 4 : undefined,
+                focusVisible: {
+                  outlineColor: "#4ade80",
+                  outlineWidth: 4,
+                  outlineOffset: 4,
+                },
+              }}
+            />
+          </div>
+        </div>
+      )
+
+      const actual = createTestRoot()
+      actual.render(tree(false))
+      actual.renderer.simulateKeystrokes("tab")
+      actual.renderer.captureScreenshot(actualPath)
+
+      const expected = createTestRoot()
+      expected.render(tree(true))
+      expected.renderer.captureScreenshot(expectedPath)
+
+      expectScreenshotsEqual(actualPath, expectedPath)
     })
   })
 
@@ -1061,7 +1491,7 @@ describeNative("events", () => {
           <div style={{ position: "relative", width: 600, height: 400 }}>
             <div
               style={{ width: 120, height: 80 }}
-              onMouseDown={(event: GpuixEvent) => {
+              onMouseDown={(event: GpuixSyntheticEvent) => {
                 trace.push(`down:${event.x},${event.y}`)
                 event.setPointerCapture()
                 setDragging(true)
@@ -1111,13 +1541,13 @@ describeNative("events", () => {
         return (
           <div
             style={{ width: 600, height: 400 }}
-            onMouseMove={() => trace.push("surface-move")}
+            onMouseMove={(event) => trace.push(`surface-move:${event.eventPhase}`)}
           >
             <div
               ref={handle}
               style={{ width: 80, height: 80 }}
               onMouseDown={() => handle.current?.setPointerCapture()}
-              onMouseMove={(event: GpuixEvent) => {
+              onMouseMove={(event: GpuixSyntheticEvent) => {
                 trace.push("handle-move")
                 event.releasePointerCapture()
               }}
@@ -1132,7 +1562,7 @@ describeNative("events", () => {
       testRoot.renderer.nativeSimulateMouseMove(220, 20, 0)
       testRoot.renderer.nativeSimulateMouseUp(220, 20, 0)
 
-      expect(trace).toEqual(["handle-move", "surface-move"])
+      expect(trace).toEqual(["handle-move", "surface-move:3", "surface-move:2"])
     })
 
     it("releases capture when its retained owner unmounts", () => {
@@ -1149,7 +1579,7 @@ describeNative("events", () => {
             {mounted ? (
               <div
                 style={{ width: 80, height: 80 }}
-                onMouseDown={(event: GpuixEvent) => {
+                onMouseDown={(event: GpuixSyntheticEvent) => {
                   trace.push("down")
                   event.setPointerCapture()
                   setMounted(false)
@@ -1178,7 +1608,7 @@ describeNative("events", () => {
         >
           <div
             style={{ width: 80, height: 80 }}
-            onMouseDown={(event: GpuixEvent) => {
+            onMouseDown={(event: GpuixSyntheticEvent) => {
               trace.push("down")
               event.setPointerCapture()
             }}

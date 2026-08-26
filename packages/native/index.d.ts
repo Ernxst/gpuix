@@ -7,6 +7,13 @@ export declare class GpuixRenderer {
   init(options?: WindowOptions | undefined | null): void
   /** Replace the callback used for application-level events such as menu actions. */
   setApplicationEventHandler(eventCallback?: (((arg: EventPayload) => unknown)) | undefined | null): void
+  /**
+   * Install the renderer-level callback for native window events.
+   *
+   * Resize dimensions use logical GPUI pixels (points on macOS). Multiply
+   * them by `scaleFactor` to obtain device-pixel dimensions.
+   */
+  setWindowEventHandler(eventCallback?: (((arg: EventPayload) => unknown)) | undefined | null): void
   createElement(id: number, elementType: string): void
   /**
    * Destroy an element and all descendants. Returns array of destroyed IDs
@@ -180,6 +187,9 @@ export declare class TestGpuixRenderer {
    * hit testing requires elements to be laid out).
    */
   flush(): void
+  getWindowSize(): WindowSize
+  /** Simulate a native window resize through GPUI's bounds observer. */
+  simulateResize(width: number, height: number): void
   /**
    * Simulate a click at the given window coordinates.
    * Dispatches MouseDown + MouseUp through GPUI's input pipeline,
@@ -351,6 +361,12 @@ export interface EventPayload {
    * e.g. "click", "mouseDown", "mouseEnter", "keyDown", "scroll", etc.
    */
   eventType: string
+  /** Logical GPUI window width. Populated for `windowResize`. */
+  width?: number
+  /** Logical GPUI window height. Populated for `windowResize`. */
+  height?: number
+  /** Device pixels per logical GPUI pixel. Populated for `windowResize`. */
+  scaleFactor?: number
   /** Mouse X position in window coordinates (pixels). */
   x?: number
   /** Mouse Y position in window coordinates (pixels). */
@@ -370,6 +386,11 @@ export interface EventPayload {
    * true when button==2 or ClickEvent::is_right_click().
    */
   isRightClick?: boolean
+  /**
+   * Physical input that produced a click: "mouse", "keyboard", or "touch".
+   * Populated for: click.
+   */
+  inputSource?: string
   /**
    * Which mouse button is currently held during a mouseMove.
    * Same encoding as `button`: 0=left, 1=middle, 2=right.
@@ -498,4 +519,5 @@ export interface WindowOptions {
 export interface WindowSize {
   width: number
   height: number
+  scaleFactor: number
 }

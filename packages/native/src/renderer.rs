@@ -40,7 +40,10 @@ use wasm_bindgen::JsCast as _;
 use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::retained_tree::RetainedTree;
-use crate::style::{ParsedStyle, StyleDesc, StyleProblem};
+use crate::style::{
+    GridTemplateValue, GridTrackMaxValue, GridTrackMinValue, GridTrackValue, ParsedStyle,
+    StyleDesc, StyleProblem,
+};
 use crate::text::{selectable_text, selection_frame_reset, selection_key, SharedSelection};
 use crate::theme::Theme;
 
@@ -466,6 +469,11 @@ pub(crate) type EventCallback = Arc<dyn Fn(EventPayload) + Send + Sync>;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 pub(crate) type EventCallback = Rc<dyn Fn(EventPayload)>;
 
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+type WindowEventCallback = Arc<Mutex<Option<EventCallback>>>;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+type WindowEventCallback = Rc<RefCell<Option<EventCallback>>>;
+
 /// Validate and convert a JS number (f64) to a u64 element ID.
 /// JS numbers are f64 — lossless for integers up to 2^53.
 fn raw_element_id(id: f64) -> std::result::Result<u64, String> {
@@ -627,6 +635,9 @@ enum UiCommand {
         response: SyncSender<()>,
     },
     SetWindowTitle(String),
+    GetWindowSize {
+        response: SyncSender<WindowSize>,
+    },
     SetDebugFrameOverlay(gpui::DebugFrameOverlayMode),
     CycleDebugFrameOverlay {
         response: SyncSender<String>,
@@ -728,6 +739,11 @@ async fn run_ui_commands(
                 cx.notify();
                 window.refresh();
             }),
+            UiCommand::GetWindowSize { response } => {
+                window.update(cx, move |_view, window, _cx| {
+                    response.send(window_size(window)).ok();
+                })
+            }
             UiCommand::SetDebugFrameOverlay(mode) => {
                 window.update(cx, move |_view, window, _cx| {
                     window.set_debug_frame_overlay_mode(mode);
@@ -979,6 +995,7 @@ enum RendererLifecycle {
 pub struct GpuixRenderer {
     event_callback: Mutex<Option<Arc<ThreadsafeFunction<EventPayload>>>>,
     application_event_callback: Arc<Mutex<Option<EventCallback>>>,
+    window_event_callback: WindowEventCallback,
     tree: Arc<Mutex<RetainedTree>>,
     lifecycle: Arc<Mutex<RendererLifecycle>>,
     /// Shared with GpuixView so napi methods can read the live selection
@@ -1009,6 +1026,10 @@ impl GpuixRenderer {
                 current(payload);
             }
         })
+    }
+
+    fn window_event_callback(&self) -> WindowEventCallback {
+        self.window_event_callback.clone()
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -1112,6 +1133,7 @@ impl GpuixRenderer {
         Self {
             event_callback: Mutex::new(event_callback),
             application_event_callback: Arc::new(Mutex::new(initial_application_event_callback)),
+            window_event_callback: Arc::new(Mutex::new(None)),
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
             selection: SharedSelection::default(),
@@ -1161,6 +1183,25 @@ impl GpuixRenderer {
         *self.application_event_callback.lock().unwrap() = callback;
     }
 
+    /// Install the renderer-level callback for native window events.
+    ///
+    /// Resize dimensions use logical GPUI pixels (points on macOS). Multiply
+    /// them by `scaleFactor` to obtain device-pixel dimensions.
+    #[napi]
+    pub fn set_window_event_handler(
+        &self,
+        event_callback: Option<
+            ThreadsafeFunction<EventPayload, Unknown<'static>, EventPayload, Status, false>,
+        >,
+    ) {
+        let callback = event_callback.map(Arc::new).map(|tsf| {
+            Arc::new(move |payload: EventPayload| {
+                tsf.call(payload, ThreadsafeFunctionCallMode::NonBlocking);
+            }) as EventCallback
+        });
+        *self.window_event_callback.lock().unwrap() = callback;
+    }
+
     #[cfg(target_os = "macos")]
     fn init_macos(&self, options: Option<WindowOptions>) -> Result<()> {
         catch_gpui_initialization("GPUI macOS renderer initialization", || {
@@ -1197,6 +1238,7 @@ impl GpuixRenderer {
 
         let tree = self.tree.clone();
         let callback = self.event_callback_for_view();
+        let window_event_callback = self.window_event_callback();
         let application_callback = self.application_event_callback();
 
         let selection = self.selection.clone();
@@ -1230,8 +1272,14 @@ impl GpuixRenderer {
             match cx.open_window(
                 to_gpui_window_options(&window_options, bounds),
                 |_window, cx| {
-                    cx.new(|_| {
-                        GpuixView::new(tree.clone(), callback.clone(), title, selection.clone())
+                    cx.new(|_view_cx| {
+                        GpuixView::new(
+                            tree.clone(),
+                            callback.clone(),
+                            window_event_callback.clone(),
+                            title,
+                            selection.clone(),
+                        )
                     })
                 },
             ) {
@@ -1300,6 +1348,7 @@ impl GpuixRenderer {
         let tree = self.tree.clone();
         let selection = self.selection.clone();
         let callback = self.event_callback_for_view();
+        let window_event_callback = self.window_event_callback();
         let application_callback = self.application_event_callback();
         let termination_callback = Some(application_callback.clone());
         let lifecycle = self.lifecycle.clone();
@@ -1331,7 +1380,15 @@ impl GpuixRenderer {
                         let window = match cx.open_window(
                             to_gpui_window_options(&window_options, bounds),
                             |_window, cx| {
-                                cx.new(|_| GpuixView::new(tree, callback, title, selection))
+                                cx.new(|_view_cx| {
+                                    GpuixView::new(
+                                        tree,
+                                        callback,
+                                        window_event_callback,
+                                        title,
+                                        selection,
+                                    )
+                                })
                             },
                         ) {
                             Ok(window) => window,
@@ -1742,10 +1799,23 @@ impl GpuixRenderer {
 
     #[napi]
     pub fn get_window_size(&self) -> Result<WindowSize> {
-        Ok(WindowSize {
-            width: 800.0,
-            height: 600.0,
-        })
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window_size(window));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetWindowSize { response })?;
+            return recv_ui_response(receiver, "the window size query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
     }
 
     /// `"hidden"` | `"minimal"` | `"full"`. Paints into the scene after layout.
@@ -2417,6 +2487,43 @@ mod initialization_tests {
             assert!(error.reason.contains(message));
         }
     }
+
+    #[test]
+    fn window_resize_emits_logical_dimensions_and_scale_factor() {
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let emitted_for_callback = emitted.clone();
+        let callback: WindowEventCallback = Arc::new(Mutex::new(Some(Arc::new(move |payload| {
+            emitted_for_callback.lock().unwrap().push(payload);
+        }))));
+
+        emit_window_resize_payload(
+            &callback,
+            WindowSize {
+                width: 960.0,
+                height: 540.0,
+                scale_factor: 2.0,
+            },
+        );
+
+        let emitted = emitted.lock().unwrap();
+        assert_eq!(emitted.len(), 1);
+        let payload = &emitted[0];
+        assert_eq!(payload.event_type, "windowResize");
+        assert_eq!(payload.width, Some(960.0));
+        assert_eq!(payload.height, Some(540.0));
+        assert_eq!(payload.scale_factor, Some(2.0));
+    }
+
+    #[test]
+    fn browser_window_resize_contract_includes_dpr_and_event_fields() {
+        let size = window_size_from_metrics(1280.0, 720.0, 2.0);
+        let payload = window_resize_payload(size);
+
+        assert_eq!(payload.event_type, "windowResize");
+        assert_eq!(payload.width, Some(1280.0));
+        assert_eq!(payload.height, Some(720.0));
+        assert_eq!(payload.scale_factor, Some(2.0));
+    }
 }
 
 fn collect_text(id: u64, tree: &RetainedTree, texts: &mut Vec<String>) {
@@ -2435,6 +2542,7 @@ fn start_web_app(
     tree: Arc<Mutex<RetainedTree>>,
     selection: SharedSelection,
     event_callback: EventCallback,
+    window_event_callback: WindowEventCallback,
 ) -> Result<(), wasm_bindgen::JsValue> {
     if WEB_APP.with(|stored| stored.borrow().is_some()) {
         return Err(wasm_bindgen::JsValue::from_str(
@@ -2446,10 +2554,11 @@ fn start_web_app(
         init_key_bindings(cx);
         crate::custom_elements::input::init(cx);
         let window = cx.open_window(Default::default(), |_window, cx| {
-            cx.new(|_| {
+            cx.new(|_view_cx| {
                 GpuixView::new(
                     tree,
                     Some(event_callback),
+                    window_event_callback,
                     "GPUIX Web".to_string(),
                     selection,
                 )
@@ -2521,6 +2630,16 @@ fn notify_web() {
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 fn web_event_callback(callback: js_sys::Function) -> EventCallback {
+    web_callback(callback, true)
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn web_window_event_callback(callback: js_sys::Function) -> EventCallback {
+    web_callback(callback, false)
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn web_callback(callback: js_sys::Function, includes_error_argument: bool) -> EventCallback {
     Rc::new(move |payload| {
         let Ok(json) = serde_json::to_string(&payload) else {
             log::error!("Failed to serialize GPUIX browser event");
@@ -2532,11 +2651,16 @@ fn web_event_callback(callback: js_sys::Function) -> EventCallback {
         };
         let callback = callback.clone();
         let task = wasm_bindgen::closure::Closure::once_into_js(move || {
-            if let Err(error) = callback.call2(
-                &wasm_bindgen::JsValue::UNDEFINED,
-                &wasm_bindgen::JsValue::NULL,
-                &payload,
-            ) {
+            let result = if includes_error_argument {
+                callback.call2(
+                    &wasm_bindgen::JsValue::UNDEFINED,
+                    &wasm_bindgen::JsValue::NULL,
+                    &payload,
+                )
+            } else {
+                callback.call1(&wasm_bindgen::JsValue::UNDEFINED, &payload)
+            };
+            if let Err(error) = result {
                 log::error!("GPUIX browser event callback failed: {error:?}");
             }
         });
@@ -2547,12 +2671,50 @@ fn web_event_callback(callback: js_sys::Function) -> EventCallback {
     })
 }
 
+#[cfg(any(test, all(target_arch = "wasm32", target_os = "unknown")))]
+fn window_size_from_metrics(width: f64, height: f64, scale_factor: f64) -> WindowSize {
+    WindowSize {
+        width,
+        height,
+        scale_factor,
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn web_window_size(window: &web_sys::Window) -> Result<WindowSize, wasm_bindgen::JsValue> {
+    let width = window
+        .inner_width()?
+        .as_f64()
+        .ok_or_else(|| wasm_bindgen::JsValue::from_str("Browser innerWidth is not a number"))?;
+    let height = window
+        .inner_height()?
+        .as_f64()
+        .ok_or_else(|| wasm_bindgen::JsValue::from_str("Browser innerHeight is not a number"))?;
+
+    Ok(window_size_from_metrics(
+        width,
+        height,
+        window.device_pixel_ratio(),
+    ))
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn web_window_size_value(size: WindowSize) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    let value = js_sys::Object::new();
+    js_sys::Reflect::set(&value, &"width".into(), &size.width.into())?;
+    js_sys::Reflect::set(&value, &"height".into(), &size.height.into())?;
+    js_sys::Reflect::set(&value, &"scaleFactor".into(), &size.scale_factor.into())?;
+    Ok(value.into())
+}
+
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = GpuixRenderer)]
 pub struct WebGpuixRenderer {
     tree: Arc<Mutex<RetainedTree>>,
     selection: SharedSelection,
     event_callback: EventCallback,
+    window_event_callback: WindowEventCallback,
+    window_resize_listener: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::Event)>,
     strict_styles: AtomicBool,
 }
 
@@ -2561,10 +2723,33 @@ pub struct WebGpuixRenderer {
 impl WebGpuixRenderer {
     #[wasm_bindgen::prelude::wasm_bindgen(constructor)]
     pub fn new(event_callback: js_sys::Function) -> Self {
+        let window_event_callback = Rc::new(RefCell::new(None));
+        let callback = window_event_callback.clone();
+        let window_resize_listener = wasm_bindgen::closure::Closure::new(move |_event| {
+            let Some(window) = web_sys::window() else {
+                return;
+            };
+
+            match web_window_size(&window) {
+                Ok(size) => emit_window_resize_payload(&callback, size),
+                Err(error) => log::error!("Failed to read GPUIX browser window size: {error:?}"),
+            }
+        });
+        if let Some(window) = web_sys::window() {
+            if let Err(error) = window.add_event_listener_with_callback(
+                "resize",
+                window_resize_listener.as_ref().unchecked_ref(),
+            ) {
+                log::error!("Failed to observe GPUIX browser window resizes: {error:?}");
+            }
+        }
+
         Self {
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             selection: SharedSelection::default(),
             event_callback: web_event_callback(event_callback),
+            window_event_callback,
+            window_resize_listener,
             strict_styles: AtomicBool::new(true),
         }
     }
@@ -2574,6 +2759,7 @@ impl WebGpuixRenderer {
             self.tree.clone(),
             self.selection.clone(),
             self.event_callback.clone(),
+            self.window_event_callback.clone(),
         )
     }
 
@@ -2762,10 +2948,12 @@ impl WebGpuixRenderer {
     pub fn get_window_size(&self) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
         let window = web_sys::window()
             .ok_or_else(|| wasm_bindgen::JsValue::from_str("Browser window is unavailable"))?;
-        let size = js_sys::Object::new();
-        js_sys::Reflect::set(&size, &"width".into(), &window.inner_width()?)?;
-        js_sys::Reflect::set(&size, &"height".into(), &window.inner_height()?)?;
-        Ok(size.into())
+        web_window_size_value(web_window_size(&window)?)
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowEventHandler)]
+    pub fn set_window_event_handler(&self, event_callback: Option<js_sys::Function>) {
+        *self.window_event_callback.borrow_mut() = event_callback.map(web_window_event_callback);
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowTitle)]
@@ -3031,6 +3219,18 @@ impl WebGpuixRenderer {
     }
 }
 
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+impl Drop for WebGpuixRenderer {
+    fn drop(&mut self) {
+        if let Some(window) = web_sys::window() {
+            let _ = window.remove_event_listener_with_callback(
+                "resize",
+                self.window_resize_listener.as_ref().unchecked_ref(),
+            );
+        }
+    }
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 impl Drop for GpuixRenderer {
     fn drop(&mut self) {
@@ -3043,6 +3243,8 @@ impl Drop for GpuixRenderer {
 pub(crate) struct GpuixView {
     pub(crate) tree: Arc<Mutex<RetainedTree>>,
     pub(crate) event_callback: Option<EventCallback>,
+    window_event_callback: WindowEventCallback,
+    window_bounds_subscription: Option<gpui::Subscription>,
     pub(crate) window_title: String,
     /// Persistent FocusHandles keyed by element ID.
     /// Created lazily for elements with keyboard or focus/blur listeners.
@@ -3075,12 +3277,15 @@ impl GpuixView {
     pub(crate) fn new(
         tree: Arc<Mutex<RetainedTree>>,
         event_callback: Option<EventCallback>,
+        window_event_callback: WindowEventCallback,
         window_title: String,
         selection: SharedSelection,
     ) -> Self {
         Self {
             tree,
             event_callback,
+            window_event_callback,
+            window_bounds_subscription: None,
             window_title,
             focus_handles: HashMap::new(),
             focus_subscriptions: HashMap::new(),
@@ -3126,6 +3331,15 @@ impl GpuixView {
     fn cancel_pointer_sequence(&mut self, window: &mut gpui::Window) {
         if self.pointer_router.borrow_mut().cancel() {
             window.release_pointer();
+        }
+    }
+
+    fn observe_window_resize(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) {
+        if self.window_bounds_subscription.is_none() {
+            self.window_bounds_subscription =
+                Some(cx.observe_window_bounds(window, |view, window, _cx| {
+                    emit_window_resize(&view.window_event_callback, window)
+                }));
         }
     }
 
@@ -3716,6 +3930,7 @@ impl gpui::Render for GpuixView {
         use gpui::IntoElement;
 
         window.set_window_title(&self.window_title);
+        self.observe_window_resize(window, cx);
 
         if self.window_activation_subscription.is_none() {
             self.window_activation_subscription =
@@ -4102,6 +4317,7 @@ pub(crate) fn build_div(
         if let Some(ref active_style) = style.active {
             el = el.active(|refinement| apply_styles(refinement, active_style));
         }
+        el = apply_focus_styles(el, style);
     }
 
     if style.and_then(|style| style.pointer_events.as_deref()) == Some("none") {
@@ -4206,7 +4422,9 @@ pub(crate) fn build_div(
         match event_type.as_str() {
             // ── Click ────────────────────────────────────────────
             "click" => {
-                el = el.on_click(move |click_event, _window, _cx| {
+                el = el.on_click(move |click_event, _window, cx| {
+                    let stop_native_propagation =
+                        !matches!(click_event, gpui::ClickEvent::Keyboard(_));
                     emit_event_full(&callback, id, "click", |p| {
                         let (x, y) = point_to_xy(click_event.position());
                         p.x = Some(x);
@@ -4214,7 +4432,27 @@ pub(crate) fn build_div(
                         p.modifiers = Some(click_event.modifiers().into());
                         p.click_count = Some(click_event.click_count() as u32);
                         p.is_right_click = Some(click_event.is_right_click());
+                        p.button = Some(match click_event {
+                            gpui::ClickEvent::Mouse(event) => {
+                                mouse_button_to_u32(event.down.button)
+                            }
+                            gpui::ClickEvent::Keyboard(_) | gpui::ClickEvent::Touch(_) => 0,
+                        });
+                        p.input_source = Some(
+                            match click_event {
+                                gpui::ClickEvent::Mouse(_) => "mouse",
+                                gpui::ClickEvent::Keyboard(_) => "keyboard",
+                                gpui::ClickEvent::Touch(_) => "touch",
+                            }
+                            .to_string(),
+                        );
                     });
+                    if stop_native_propagation {
+                        // React owns propagation from this native target onward. A keyboard
+                        // click fires within key-up dispatch, so it must leave propagation
+                        // active for this element's key-up listener to run afterward.
+                        cx.stop_propagation();
+                    }
                 });
             }
 
@@ -4504,6 +4742,87 @@ pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::Dimension
     }
 }
 
+pub(crate) fn apply_focus_styles<E: gpui::StatefulInteractiveElement>(
+    mut el: E,
+    style: &StyleDesc,
+) -> E {
+    if let Some(ref focus_style) = style.focus {
+        el = el.focus(|refinement| apply_styles(refinement, focus_style));
+    }
+    if let Some(ref focus_visible_style) = style.focus_visible {
+        el = el.focus_visible(|refinement| apply_styles(refinement, focus_visible_style));
+    }
+    el
+}
+
+fn to_gpui_grid_track(track: &GridTrackValue) -> gpui::GridTrack {
+    match track {
+        GridTrackValue::Px { value } => gpui::GridTrack::Px(gpui::px(*value as f32)),
+        GridTrackValue::Fr { value } => gpui::GridTrack::Fr(*value as f32),
+        GridTrackValue::Auto => gpui::GridTrack::Auto,
+        GridTrackValue::MinContent => gpui::GridTrack::MinContent,
+        GridTrackValue::MaxContent => gpui::GridTrack::MaxContent,
+        GridTrackValue::Minmax { min, max } => gpui::GridTrack::MinMax {
+            min: match min {
+                GridTrackMinValue::Px { value } => gpui::GridTrackMin::Px(gpui::px(*value as f32)),
+                GridTrackMinValue::Auto => gpui::GridTrackMin::Auto,
+                GridTrackMinValue::MinContent => gpui::GridTrackMin::MinContent,
+                GridTrackMinValue::MaxContent => gpui::GridTrackMin::MaxContent,
+            },
+            max: match max {
+                GridTrackMaxValue::Px { value } => gpui::GridTrackMax::Px(gpui::px(*value as f32)),
+                GridTrackMaxValue::Fr { value } => gpui::GridTrackMax::Fr(*value as f32),
+                GridTrackMaxValue::Auto => gpui::GridTrackMax::Auto,
+                GridTrackMaxValue::MinContent => gpui::GridTrackMax::MinContent,
+                GridTrackMaxValue::MaxContent => gpui::GridTrackMax::MaxContent,
+            },
+        },
+        GridTrackValue::Repeat { .. } => {
+            unreachable!("repeat is only valid as a grid template component")
+        }
+    }
+}
+
+fn legacy_grid_track(minimum: Option<&str>) -> gpui::GridTrack {
+    match minimum {
+        Some("min-content") => gpui::GridTrack::MinMax {
+            min: gpui::GridTrackMin::MinContent,
+            max: gpui::GridTrackMax::Fr(1.),
+        },
+        Some("max-content") => gpui::GridTrack::MinMax {
+            min: gpui::GridTrackMin::Px(gpui::px(0.)),
+            max: gpui::GridTrackMax::MaxContent,
+        },
+        _ => gpui::GridTrack::MinMax {
+            min: gpui::GridTrackMin::Px(gpui::px(0.)),
+            max: gpui::GridTrackMax::Fr(1.),
+        },
+    }
+}
+
+fn to_gpui_grid_template(
+    template: &GridTemplateValue,
+    legacy_minimum: Option<&str>,
+) -> gpui::GridTemplate {
+    let tracks = match template {
+        GridTemplateValue::LegacyCount(count) => vec![gpui::GridTemplateComponent::Repeat {
+            count: *count as u16,
+            tracks: vec![legacy_grid_track(legacy_minimum)],
+        }],
+        GridTemplateValue::Tracks(tracks) => tracks
+            .iter()
+            .map(|track| match track {
+                GridTrackValue::Repeat { count, tracks } => gpui::GridTemplateComponent::Repeat {
+                    count: *count,
+                    tracks: tracks.iter().map(to_gpui_grid_track).collect(),
+                },
+                track => gpui::GridTemplateComponent::Track(to_gpui_grid_track(track)),
+            })
+            .collect(),
+    };
+    gpui::GridTemplate { tracks }
+}
+
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.visibility.as_deref() {
         Some("hidden") => el = el.invisible(),
@@ -4515,21 +4834,14 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("grid") => el = el.grid(),
         _ => {}
     }
-    if let Some(cols) = style.grid_template_columns {
-        let count = cols.round().clamp(1.0, 64.0) as u16;
-        el = match style.grid_column_min.as_deref() {
-            Some("min-content") => el.grid_cols_min_content(count),
-            Some("max-content") => el.grid_cols_max_content(count),
-            _ => el.grid_cols(count),
-        };
+    if let Some(cols) = &style.grid_template_columns {
+        el = el.grid_template_columns(to_gpui_grid_template(
+            cols,
+            style.grid_column_min.as_deref(),
+        ));
     }
-    if let Some(rows) = style.grid_template_rows {
-        let count = rows.round().clamp(1.0, 64.0) as u16;
-        el = match style.grid_row_min.as_deref() {
-            Some("min-content") => el.grid_rows_min_content(count),
-            Some("max-content") => el.grid_rows_max_content(count),
-            _ => el.grid_rows(count),
-        };
+    if let Some(rows) = &style.grid_template_rows {
+        el = el.grid_template_rows(to_gpui_grid_template(rows, style.grid_row_min.as_deref()));
     }
     if style.flex_direction.as_deref() == Some("column") {
         el = el.flex_col();
@@ -4799,6 +5111,17 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
             el = el.shadow(vec![shadow]);
         }
     }
+    if let Some(ref color) = style.outline_color {
+        if let Some(color) = crate::color::parse_color_rgba(color) {
+            el = el.outline_color(color);
+        }
+    }
+    if let Some(width) = style.outline_width {
+        el = el.outline_width(gpui::px(width.max(0.0) as f32));
+    }
+    if let Some(offset) = style.outline_offset {
+        el = el.outline_offset(gpui::px(offset as f32));
+    }
     if let Some(opacity) = style.opacity {
         el = el.opacity(opacity as f32);
     }
@@ -4861,6 +5184,39 @@ pub(crate) fn emit_event_full(
         };
         build(&mut payload);
         cb(payload);
+    }
+}
+
+fn window_size(window: &gpui::Window) -> WindowSize {
+    let viewport_size = window.viewport_size();
+    WindowSize {
+        width: f64::from(f32::from(viewport_size.width)),
+        height: f64::from(f32::from(viewport_size.height)),
+        scale_factor: f64::from(window.scale_factor()),
+    }
+}
+
+fn emit_window_resize(callback: &WindowEventCallback, window: &gpui::Window) {
+    emit_window_resize_payload(callback, window_size(window));
+}
+
+fn emit_window_resize_payload(callback: &WindowEventCallback, size: WindowSize) {
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    let callback = callback.lock().unwrap().clone();
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    let callback = callback.borrow().clone();
+    if let Some(callback) = callback {
+        callback(window_resize_payload(size));
+    }
+}
+
+fn window_resize_payload(size: WindowSize) -> EventPayload {
+    EventPayload {
+        event_type: "windowResize".to_string(),
+        width: Some(size.width),
+        height: Some(size.height),
+        scale_factor: Some(size.scale_factor),
+        ..EventPayload::default()
     }
 }
 
@@ -5136,6 +5492,7 @@ fn batch_str(arr: &[serde_json::Value], idx: usize, op_idx: usize) -> BatchResul
 pub struct WindowSize {
     pub width: f64,
     pub height: f64,
+    pub scale_factor: f64,
 }
 
 /// Recorded draw times from the debug frame overlay.

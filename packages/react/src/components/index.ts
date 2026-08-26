@@ -2,7 +2,7 @@
 
 import { createElement, forwardRef, useCallback, useState } from "react"
 import type { ReactElement, ReactNode } from "react"
-import type { EventPayload } from "@gpuix/native"
+import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type {
   MotionProps,
   Props,
@@ -105,7 +105,7 @@ export const VirtualList = forwardRef<PublicInstance, WindowedVirtualListProps>(
       initialWindow({ itemCount, pad, alignment, followTail }),
     )
     const handleRange = useCallback(
-      (event: EventPayload & { startIndex?: number | null; endIndex?: number | null }) => {
+      (event: GpuixSyntheticEvent) => {
         const next = {
           start: Math.max(0, Math.floor(event.startIndex ?? 0) - pad),
           end: Math.min(itemCount, Math.ceil(event.endIndex ?? 0) + pad),

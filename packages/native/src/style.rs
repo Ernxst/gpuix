@@ -62,6 +62,59 @@ pub enum DimensionValue {
     Auto,
 }
 
+/// One serializable CSS Grid track. Track lists deliberately use tagged objects
+/// rather than CSS strings so the renderer can validate every nested function.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum GridTrackValue {
+    Px {
+        value: f64,
+    },
+    Fr {
+        value: f64,
+    },
+    Auto,
+    MinContent,
+    MaxContent,
+    Minmax {
+        min: GridTrackMinValue,
+        max: GridTrackMaxValue,
+    },
+    Repeat {
+        count: u16,
+        tracks: Vec<GridTrackValue>,
+    },
+}
+
+/// Valid lower-bound functions for a `minmax()` grid track.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum GridTrackMinValue {
+    Px { value: f64 },
+    Auto,
+    MinContent,
+    MaxContent,
+}
+
+/// Valid upper-bound functions for a `minmax()` grid track.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum GridTrackMaxValue {
+    Px { value: f64 },
+    Fr { value: f64 },
+    Auto,
+    MinContent,
+    MaxContent,
+}
+
+/// Integer grid counts remain a compatibility shorthand for `repeat(count, 1fr)`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum GridTemplateValue {
+    LegacyCount(f64),
+    Tracks(Vec<GridTrackValue>),
+}
+
 impl Default for DimensionValue {
     fn default() -> Self {
         DimensionValue::Auto
@@ -130,7 +183,7 @@ impl<'de> Deserialize<'de> for DimensionValue {
 }
 
 /// Style description retained by the native renderer.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StyleDesc {
     pub display: Option<String>,
@@ -148,8 +201,8 @@ pub struct StyleDesc {
     pub gap: Option<f64>,
     pub row_gap: Option<f64>,
     pub column_gap: Option<f64>,
-    pub grid_template_columns: Option<f64>,
-    pub grid_template_rows: Option<f64>,
+    pub grid_template_columns: Option<GridTemplateValue>,
+    pub grid_template_rows: Option<GridTemplateValue>,
     pub grid_column_min: Option<String>,
     pub grid_row_min: Option<String>,
 
@@ -195,6 +248,9 @@ pub struct StyleDesc {
     pub border_bottom_left_radius: Option<f64>,
     pub border_bottom_right_radius: Option<f64>,
     pub box_shadow: Option<BoxShadowValue>,
+    pub outline_color: Option<String>,
+    pub outline_width: Option<f64>,
+    pub outline_offset: Option<f64>,
 
     pub font_size: Option<f64>,
     pub font_family: Option<String>,
@@ -219,6 +275,8 @@ pub struct StyleDesc {
 
     pub hover: Option<Box<StyleDesc>>,
     pub active: Option<Box<StyleDesc>>,
+    pub focus: Option<Box<StyleDesc>>,
+    pub focus_visible: Option<Box<StyleDesc>>,
 }
 
 /// One rejected field. The renderer adds element context when diagnostics are drained,
@@ -293,6 +351,329 @@ fn decode_number(
     problems: &mut Vec<StyleProblem>,
 ) -> Option<f64> {
     decode(property, value, problems)
+}
+
+fn reject_unexpected_grid_fields(
+    path: &str,
+    object: &serde_json::Map<String, serde_json::Value>,
+    allowed: &[&str],
+    problems: &mut Vec<StyleProblem>,
+) -> bool {
+    let mut valid = true;
+    for (key, value) in object {
+        if !allowed.contains(&key.as_str()) {
+            reject(
+                problems,
+                format!("{path}.{key}"),
+                value,
+                "unsupported grid track property",
+            );
+            valid = false;
+        }
+    }
+    valid
+}
+
+fn grid_track_object<'a>(
+    path: &str,
+    value: &'a serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<(&'a str, &'a serde_json::Map<String, serde_json::Value>)> {
+    let Some(object) = value.as_object() else {
+        reject(problems, path, value, "expected a grid track object");
+        return None;
+    };
+    let Some(track_type) = object.get("type").and_then(serde_json::Value::as_str) else {
+        reject(
+            problems,
+            format!("{path}.type"),
+            object.get("type").unwrap_or(&serde_json::Value::Null),
+            "expected a grid track type",
+        );
+        return None;
+    };
+    Some((track_type, object))
+}
+
+fn grid_track_number(
+    path: &str,
+    object: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    problems: &mut Vec<StyleProblem>,
+    positive: bool,
+) -> Option<f64> {
+    let property = format!("{path}.{field}");
+    let Some(value) = object.get(field) else {
+        reject(
+            problems,
+            property,
+            &serde_json::Value::Null,
+            "expected a number",
+        );
+        return None;
+    };
+    let Some(number) = decode_number(&property, value, problems) else {
+        return None;
+    };
+    if !number.is_finite()
+        || if positive {
+            number <= 0.0
+        } else {
+            number < 0.0
+        }
+    {
+        reject(
+            problems,
+            property,
+            value,
+            if positive {
+                "expected a positive number"
+            } else {
+                "expected a non-negative number"
+            },
+        );
+        return None;
+    }
+    Some(number)
+}
+
+fn parse_grid_track_sizing(
+    path: &str,
+    value: &serde_json::Value,
+    allow_fr: bool,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<GridTrackValue> {
+    let (track_type, object) = grid_track_object(path, value, problems)?;
+    match track_type {
+        "px" => {
+            let fields_ok =
+                reject_unexpected_grid_fields(path, object, &["type", "value"], problems);
+            let value = grid_track_number(path, object, "value", problems, false)?;
+            fields_ok.then_some(GridTrackValue::Px { value })
+        }
+        "fr" if allow_fr => {
+            let fields_ok =
+                reject_unexpected_grid_fields(path, object, &["type", "value"], problems);
+            let value = grid_track_number(path, object, "value", problems, true)?;
+            fields_ok.then_some(GridTrackValue::Fr { value })
+        }
+        "auto" => reject_unexpected_grid_fields(path, object, &["type"], problems)
+            .then_some(GridTrackValue::Auto),
+        "min-content" => reject_unexpected_grid_fields(path, object, &["type"], problems)
+            .then_some(GridTrackValue::MinContent),
+        "max-content" => reject_unexpected_grid_fields(path, object, &["type"], problems)
+            .then_some(GridTrackValue::MaxContent),
+        "fr" => {
+            reject(
+                problems,
+                format!("{path}.type"),
+                object.get("type").expect("track type is present"),
+                "fr is not valid as a minmax minimum",
+            );
+            None
+        }
+        "minmax" | "repeat" => {
+            reject(
+                problems,
+                format!("{path}.type"),
+                object.get("type").expect("track type is present"),
+                "expected a grid track sizing function",
+            );
+            None
+        }
+        _ => {
+            reject(
+                problems,
+                format!("{path}.type"),
+                object.get("type").expect("track type is present"),
+                "expected px, fr, auto, min-content, or max-content",
+            );
+            None
+        }
+    }
+}
+
+fn parse_grid_track_min(
+    path: &str,
+    value: &serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<GridTrackMinValue> {
+    match parse_grid_track_sizing(path, value, false, problems)? {
+        GridTrackValue::Px { value } => Some(GridTrackMinValue::Px { value }),
+        GridTrackValue::Auto => Some(GridTrackMinValue::Auto),
+        GridTrackValue::MinContent => Some(GridTrackMinValue::MinContent),
+        GridTrackValue::MaxContent => Some(GridTrackMinValue::MaxContent),
+        GridTrackValue::Fr { .. }
+        | GridTrackValue::Minmax { .. }
+        | GridTrackValue::Repeat { .. } => {
+            unreachable!("grid track sizing grammar excludes these values")
+        }
+    }
+}
+
+fn parse_grid_track_max(
+    path: &str,
+    value: &serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<GridTrackMaxValue> {
+    match parse_grid_track_sizing(path, value, true, problems)? {
+        GridTrackValue::Px { value } => Some(GridTrackMaxValue::Px { value }),
+        GridTrackValue::Fr { value } => Some(GridTrackMaxValue::Fr { value }),
+        GridTrackValue::Auto => Some(GridTrackMaxValue::Auto),
+        GridTrackValue::MinContent => Some(GridTrackMaxValue::MinContent),
+        GridTrackValue::MaxContent => Some(GridTrackMaxValue::MaxContent),
+        GridTrackValue::Minmax { .. } | GridTrackValue::Repeat { .. } => {
+            unreachable!("grid track sizing grammar excludes these values")
+        }
+    }
+}
+
+fn parse_grid_track(
+    path: &str,
+    value: &serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
+    allow_repeat: bool,
+) -> Option<GridTrackValue> {
+    let (track_type, object) = grid_track_object(path, value, problems)?;
+    match track_type {
+        "minmax" => {
+            let fields_ok =
+                reject_unexpected_grid_fields(path, object, &["type", "min", "max"], problems);
+            let min = parse_grid_track_min(
+                &format!("{path}.min"),
+                object.get("min").unwrap_or(&serde_json::Value::Null),
+                problems,
+            )?;
+            let max = parse_grid_track_max(
+                &format!("{path}.max"),
+                object.get("max").unwrap_or(&serde_json::Value::Null),
+                problems,
+            )?;
+            fields_ok.then_some(GridTrackValue::Minmax { min, max })
+        }
+        "repeat" if allow_repeat => {
+            let fields_ok =
+                reject_unexpected_grid_fields(path, object, &["type", "count", "tracks"], problems);
+            let count = grid_track_number(path, object, "count", problems, true)?;
+            if count.fract() != 0.0 || count > 64.0 {
+                reject(
+                    problems,
+                    format!("{path}.count"),
+                    object.get("count").expect("repeat count is present"),
+                    "expected an integer from 1 through 64",
+                );
+                return None;
+            }
+            let Some(tracks) = object.get("tracks").and_then(serde_json::Value::as_array) else {
+                reject(
+                    problems,
+                    format!("{path}.tracks"),
+                    object.get("tracks").unwrap_or(&serde_json::Value::Null),
+                    "expected a non-empty grid track list",
+                );
+                return None;
+            };
+            if tracks.is_empty() {
+                reject(
+                    problems,
+                    format!("{path}.tracks"),
+                    object.get("tracks").expect("repeat tracks is present"),
+                    "expected a non-empty grid track list",
+                );
+                return None;
+            }
+            let mut parsed_tracks = Vec::with_capacity(tracks.len());
+            let mut valid = fields_ok;
+            for (index, track) in tracks.iter().enumerate() {
+                match parse_grid_track(&format!("{path}.tracks[{index}]"), track, problems, false) {
+                    Some(track) => parsed_tracks.push(track),
+                    None => valid = false,
+                }
+            }
+            valid.then_some(GridTrackValue::Repeat {
+                count: count as u16,
+                tracks: parsed_tracks,
+            })
+        }
+        "repeat" => {
+            reject(
+                problems,
+                format!("{path}.type"),
+                object.get("type").expect("track type is present"),
+                "repeat cannot be nested inside repeat",
+            );
+            None
+        }
+        _ => parse_grid_track_sizing(path, value, true, problems),
+    }
+}
+
+fn grid_track_count(track: &GridTrackValue) -> usize {
+    match track {
+        GridTrackValue::Repeat { count, tracks } => usize::from(*count) * tracks.len(),
+        _ => 1,
+    }
+}
+
+fn parse_grid_template(
+    property: &str,
+    value: &serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<GridTemplateValue> {
+    if value.is_number() {
+        let count = decode_number(property, value, problems)?;
+        if count < 1.0 || count > 64.0 || count.fract() != 0.0 {
+            reject(
+                problems,
+                property,
+                value,
+                "expected an integer from 1 through 64 or a grid track list",
+            );
+            return None;
+        }
+        return Some(GridTemplateValue::LegacyCount(count));
+    }
+
+    let Some(tracks) = value.as_array() else {
+        reject(
+            problems,
+            property,
+            value,
+            "expected an integer shorthand or a non-empty grid track list",
+        );
+        return None;
+    };
+    if tracks.is_empty() {
+        reject(
+            problems,
+            property,
+            value,
+            "expected a non-empty grid track list",
+        );
+        return None;
+    }
+
+    let mut parsed_tracks = Vec::with_capacity(tracks.len());
+    let mut valid = true;
+    for (index, track) in tracks.iter().enumerate() {
+        match parse_grid_track(&format!("{property}[{index}]"), track, problems, true) {
+            Some(track) => parsed_tracks.push(track),
+            None => valid = false,
+        }
+    }
+    if !valid {
+        return None;
+    }
+    if parsed_tracks.iter().map(grid_track_count).sum::<usize>() > 64 {
+        reject(
+            problems,
+            property,
+            value,
+            "expected no more than 64 expanded grid tracks",
+        );
+        return None;
+    }
+    Some(GridTemplateValue::Tracks(parsed_tracks))
 }
 
 fn parse_nested_style(
@@ -470,8 +851,19 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         number_field!(key, value, "gap", gap);
         number_field!(key, value, "rowGap", row_gap);
         number_field!(key, value, "columnGap", column_gap);
-        number_field!(key, value, "gridTemplateColumns", grid_template_columns);
-        number_field!(key, value, "gridTemplateRows", grid_template_rows);
+        if key == "gridTemplateColumns" {
+            parsed.style.grid_template_columns = parse_grid_template(
+                &property!("gridTemplateColumns"),
+                value,
+                &mut parsed.problems,
+            );
+            continue;
+        }
+        if key == "gridTemplateRows" {
+            parsed.style.grid_template_rows =
+                parse_grid_template(&property!("gridTemplateRows"), value, &mut parsed.problems);
+            continue;
+        }
         enum_field!(
             key,
             value,
@@ -527,6 +919,7 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             ("backgroundColor", &mut parsed.style.background_color),
             ("color", &mut parsed.style.color),
             ("borderColor", &mut parsed.style.border_color),
+            ("outlineColor", &mut parsed.style.outline_color),
             ("selectionColor", &mut parsed.style.selection_color),
         ] {
             if key == name {
@@ -583,6 +976,8 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             }
             continue;
         }
+        number_field!(key, value, "outlineWidth", outline_width);
+        number_field!(key, value, "outlineOffset", outline_offset);
 
         number_field!(key, value, "fontSize", font_size);
         string_field!(key, value, "fontFamily", font_family);
@@ -709,23 +1104,41 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             ["auto", "text", "none"]
         );
 
-        if key == "hover" || key == "active" {
-            let property = if key == "hover" {
-                property!("hover")
-            } else {
-                property!("active")
+        if matches!(key.as_str(), "hover" | "active" | "focus" | "focusVisible") {
+            let property = match key.as_str() {
+                "hover" => property!("hover"),
+                "active" => property!("active"),
+                "focus" => property!("focus"),
+                "focusVisible" => property!("focusVisible"),
+                _ => unreachable!(),
             };
             if !prefix.is_empty() {
                 reject(
                     &mut parsed.problems,
                     property,
                     value,
-                    "nested hover/active styles are not supported",
+                    "nested state styles are not supported",
                 );
-            } else if key == "hover" {
-                parsed.style.hover = parse_nested_style("hover", value, &mut parsed.problems);
             } else {
-                parsed.style.active = parse_nested_style("active", value, &mut parsed.problems);
+                match key.as_str() {
+                    "hover" => {
+                        parsed.style.hover =
+                            parse_nested_style("hover", value, &mut parsed.problems)
+                    }
+                    "active" => {
+                        parsed.style.active =
+                            parse_nested_style("active", value, &mut parsed.problems)
+                    }
+                    "focus" => {
+                        parsed.style.focus =
+                            parse_nested_style("focus", value, &mut parsed.problems)
+                    }
+                    "focusVisible" => {
+                        parsed.style.focus_visible =
+                            parse_nested_style("focusVisible", value, &mut parsed.problems)
+                    }
+                    _ => unreachable!(),
+                }
             }
             continue;
         }
@@ -797,19 +1210,6 @@ fn validate_ranges(parsed: &mut ParsedStyle, prefix: &str) {
         |value| value < 0.0,
         "expected a non-negative number"
     );
-    reject_if!(
-        grid_template_columns,
-        "gridTemplateColumns",
-        |value| value < 1.0 || value > 64.0 || value.fract() != 0.0,
-        "expected an integer from 1 through 64"
-    );
-    reject_if!(
-        grid_template_rows,
-        "gridTemplateRows",
-        |value| value < 1.0 || value > 64.0 || value.fract() != 0.0,
-        "expected an integer from 1 through 64"
-    );
-
     macro_rules! non_negative {
         ($($field:ident => $name:literal),+ $(,)?) => {
             $(reject_if!($field, $name, |value| value < 0.0, "expected a non-negative number");)+
@@ -834,6 +1234,7 @@ fn validate_ranges(parsed: &mut ParsedStyle, prefix: &str) {
         border_top_right_radius => "borderTopRightRadius",
         border_bottom_left_radius => "borderBottomLeftRadius",
         border_bottom_right_radius => "borderBottomRightRadius",
+        outline_width => "outlineWidth",
     );
 }
 
@@ -1037,6 +1438,68 @@ mod tests {
     }
 
     #[test]
+    fn parses_mixed_grid_track_lists_and_preserves_integer_shorthand() {
+        let parsed = parse_style_value(&json!({
+            "gridTemplateColumns": [
+                { "type": "max-content" },
+                {
+                    "type": "minmax",
+                    "min": { "type": "px", "value": 0 },
+                    "max": { "type": "fr", "value": 1 }
+                },
+                { "type": "auto" },
+                {
+                    "type": "repeat",
+                    "count": 2,
+                    "tracks": [{ "type": "px", "value": 24 }]
+                }
+            ],
+            "gridTemplateRows": [
+                { "type": "px", "value": 40 },
+                { "type": "auto" }
+            ]
+        }));
+
+        assert!(parsed.problems.is_empty());
+        assert!(matches!(
+            parsed.style.grid_template_columns,
+            Some(GridTemplateValue::Tracks(ref tracks)) if tracks.len() == 4
+        ));
+        assert!(matches!(
+            parsed.style.grid_template_rows,
+            Some(GridTemplateValue::Tracks(ref tracks)) if tracks.len() == 2
+        ));
+
+        let shorthand = parse_style_value(&json!({ "gridTemplateRows": 2 }));
+        assert_eq!(
+            shorthand.style.grid_template_rows,
+            Some(GridTemplateValue::LegacyCount(2.0))
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_grid_tracks_at_the_nested_index() {
+        let parsed = parse_style_value(&json!({
+            "gridTemplateColumns": [
+                { "type": "max-content" },
+                {
+                    "type": "minmax",
+                    "min": { "type": "fr", "value": 1 },
+                    "max": { "type": "fr", "value": 1 }
+                }
+            ]
+        }));
+
+        assert_eq!(parsed.style.grid_template_columns, None);
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(
+            parsed.problems[0].property,
+            "gridTemplateColumns[1].min.type"
+        );
+        assert_eq!(parsed.problems[0].value, "\"fr\"");
+    }
+
+    #[test]
     fn named_colors_are_valid_paints() {
         let parsed = parse_style_value(&json!({ "backgroundColor": "red" }));
         assert!(parsed.problems.is_empty());
@@ -1052,6 +1515,43 @@ mod tests {
         assert_eq!(parsed.problems.len(), 2);
         assert!(parsed.problems[0].reason.contains("radial"));
         assert!(parsed.problems[1].reason.contains("not supported"));
+    }
+
+    #[test]
+    fn outline_and_focus_fields_use_the_shared_validation_path() {
+        let parsed = parse_style_value(&json!({
+            "outlineColor": "not-a-color",
+            "outlineWidth": -1,
+            "outlineOffset": "wide",
+            "focusVisible": {
+                "backgroundColor": "blue",
+                "outlineWidth": -2
+            }
+        }));
+
+        let mut properties = parsed
+            .problems
+            .iter()
+            .map(|problem| problem.property.as_str())
+            .collect::<Vec<_>>();
+        properties.sort_unstable();
+        assert_eq!(
+            properties,
+            [
+                "focusVisible.outlineWidth",
+                "outlineColor",
+                "outlineOffset",
+                "outlineWidth"
+            ]
+        );
+        assert_eq!(
+            parsed
+                .style
+                .focus_visible
+                .as_deref()
+                .and_then(|style| style.background_color.as_deref()),
+            Some("blue")
+        );
     }
 
     #[test]
@@ -1185,6 +1685,9 @@ mod tests {
                 "spreadRadius": 1,
                 "color": "red"
             },
+            "outlineColor": "blue",
+            "outlineWidth": 2,
+            "outlineOffset": 3,
             "fontSize": 16,
             "fontFamily": "Helvetica",
             "fontWeight": "bold",
@@ -1204,7 +1707,9 @@ mod tests {
             "userSelect": "text",
             "selectionColor": "red",
             "hover": { "color": "blue" },
-            "active": { "color": "green" }
+            "active": { "color": "green" },
+            "focus": { "borderColor": "yellow" },
+            "focusVisible": { "outlineColor": "cyan" }
         }"#,
         )
         .unwrap();

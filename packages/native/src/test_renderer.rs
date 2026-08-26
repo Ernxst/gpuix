@@ -28,7 +28,7 @@ use crate::renderer::{
     drain_style_diagnostics, has_application_menus, init_application_menu_support,
     parse_debug_frame_overlay_mode, parse_style_json, pending_style_diagnostics,
     set_application_menus, to_element_id, DebugFrameOverlayStats, EventCallback,
-    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic,
+    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 
@@ -145,6 +145,7 @@ impl TestGpuixRenderer {
                     GpuixView::new(
                         tree_clone,
                         callback_clone,
+                        Arc::new(Mutex::new(event_callback.clone())),
                         "GPUIX Test".to_string(),
                         selection_clone,
                     )
@@ -362,6 +363,37 @@ impl TestGpuixRenderer {
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn get_window_size(&self) -> Result<WindowSize> {
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_view, window, _app| {
+                let viewport_size = window.viewport_size();
+                WindowSize {
+                    width: f64::from(f32::from(viewport_size.width)),
+                    height: f64::from(f32::from(viewport_size.height)),
+                    scale_factor: f64::from(window.scale_factor()),
+                }
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
+    /// Simulate a native window resize through GPUI's bounds observer.
+    #[napi]
+    pub fn simulate_resize(&self, width: f64, height: f64) -> Result<()> {
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_view, window, app| {
+                window.simulate_resize(
+                    gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
+                    app,
+                );
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
             cx.run_until_parked();
             Ok(())
         })

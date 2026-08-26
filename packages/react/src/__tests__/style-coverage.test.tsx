@@ -224,6 +224,41 @@ describe("style props reach the renderer", () => {
     )
   })
 
+  it("paints an outside outline without changing measured bounds", () => {
+    const withoutPath = path.join(SHOTS_DIR, "outline-paint-without.png")
+    const withPath = path.join(SHOTS_DIR, "outline-paint-with.png")
+    const testRoot = createTestRoot()
+    const card = (outlined: boolean) => (
+      <div style={{ display: "flex", padding: 80, backgroundColor: "#101010" }}>
+        <div
+          testId="outlined-card"
+          style={{
+            width: 240,
+            height: 120,
+            backgroundColor: "#ffffff",
+            borderRadius: 16,
+            outlineColor: outlined ? "#7c86ff" : undefined,
+            outlineWidth: outlined ? 4 : undefined,
+            outlineOffset: outlined ? 6 : undefined,
+          }}
+        />
+      </div>
+    )
+
+    testRoot.render(card(false))
+    const element = testRoot.renderer.findByTestId("outlined-card")
+    expect(element).toBeDefined()
+    const boundsWithout = testRoot.renderer.getElementBounds(element!.id)
+    testRoot.renderer.captureScreenshot(withoutPath)
+
+    testRoot.render(card(true))
+    const boundsWith = testRoot.renderer.getElementBounds(element!.id)
+    testRoot.renderer.captureScreenshot(withPath)
+
+    expect(boundsWith).toEqual(boundsWithout)
+    expectScreenshotsDiffer(withoutPath, withPath)
+  })
+
   it("applies rowGap and columnGap", () => {
     // Both were in StyleDesc and implemented nowhere; only `gap` worked.
     const boxes = [0, 1, 2, 3].map((i) => (
@@ -353,6 +388,58 @@ describe("style props reach the renderer", () => {
         </div>
       </div>
     )
+  })
+
+  it("aligns grid rows with mixed column and row track lists", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", width: 600, height: 120, backgroundColor: "#101010" }}>
+        <div
+          testId="ledger"
+          style={{
+            display: "grid",
+            width: 600,
+            gridTemplateColumns: [
+              { type: "max-content" },
+              {
+                type: "minmax",
+                min: { type: "px", value: 0 },
+                max: { type: "fr", value: 1 },
+              },
+              { type: "auto" },
+            ],
+            gridTemplateRows: [
+              { type: "px", value: 40 },
+              { type: "px", value: 40 },
+            ],
+          }}
+        >
+          <div testId="header-name" style={{ width: 140, height: 24 }} />
+          <div testId="header-rate" style={{ width: 80, height: 24 }} />
+          <div testId="header-status" style={{ width: 48, height: 24 }} />
+          <div testId="row-name" style={{ width: 72, height: 24 }} />
+          <div testId="row-rate" style={{ width: 80, height: 24 }} />
+          <div testId="row-status" style={{ width: 48, height: 24 }} />
+        </div>
+      </div>,
+    )
+
+    const bounds = (testId: string) => {
+      const element = renderer.findByTestId(testId)
+      expect(element, `missing ${testId}`).toBeDefined()
+      const result = renderer.getElementBounds(element!.id)
+      expect(result, `no bounds for ${testId}`).toEqual(expect.any(Array))
+      return result!
+    }
+
+    const headerRate = bounds("header-rate")
+    const rowRate = bounds("row-rate")
+    const headerStatus = bounds("header-status")
+    const rowStatus = bounds("row-status")
+
+    expect(rowRate[0]).toBeCloseTo(headerRate[0], 4)
+    expect(rowStatus[0]).toBeCloseTo(headerStatus[0], 4)
+    expect(rowRate[1]).toBeGreaterThan(headerRate[1])
   })
 
   it("focuses an element with autoFocus so it receives keys", () => {
