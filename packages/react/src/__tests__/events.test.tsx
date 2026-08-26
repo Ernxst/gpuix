@@ -537,7 +537,7 @@ describeNative("events", () => {
     it("routes pointer click and focused Space through the same click handler", () => {
       const click = vi.fn()
       testRoot.render(
-        <div
+        <button
           autoFocus
           tabIndex={0}
           testId="space-activation"
@@ -557,6 +557,34 @@ describeNative("events", () => {
 
       testRoot.renderer.simulateKeyUp("space")
       expect(click).toHaveBeenCalledTimes(2)
+    })
+
+    it("activates a focused anchor only on unmodified Enter", () => {
+      const navigate = vi.fn()
+      testRoot.render(
+        <a
+          autoFocus
+          href="/factory"
+          testId="anchor-activation"
+          onClick={() => navigate("/factory")}
+          style={{ width: 180, height: 50 }}
+        >
+          Factory
+        </a>
+      )
+
+      const anchor = testRoot.renderer.findByTestId("anchor-activation")!
+      testRoot.renderer.focusElement(anchor.id)
+
+      testRoot.renderer.simulateKeystrokes("space")
+      expect(navigate).not.toHaveBeenCalled()
+
+      testRoot.renderer.simulateKeystrokes("cmd-enter")
+      expect(navigate).not.toHaveBeenCalled()
+
+      testRoot.renderer.simulateKeystrokes("enter")
+      expect(navigate).toHaveBeenCalledOnce()
+      expect(navigate).toHaveBeenLastCalledWith("/factory")
     })
 
     it.each(["enter", "space"] as const)(
