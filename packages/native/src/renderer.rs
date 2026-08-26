@@ -1036,6 +1036,7 @@ pub struct GpuixRenderer {
     /// Shared with GpuixView so napi methods can read the live selection
     /// without an App context. Paint and napi calls can use different threads.
     selection: SharedSelection,
+    image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -1172,6 +1173,7 @@ impl GpuixRenderer {
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
             selection: SharedSelection::default(),
+            image_network_policy: crate::custom_elements::img::ImageNetworkPolicy::default(),
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(Vec::new()),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -1259,6 +1261,8 @@ impl GpuixRenderer {
                 "A GPUI application already exists on this thread",
             ));
         }
+        self.image_network_policy
+            .set_allow_private(options.allow_private_network_images.unwrap_or(false));
 
         let width = options.width.unwrap_or(800.0);
         let height = options.height.unwrap_or(600.0);
@@ -1277,6 +1281,7 @@ impl GpuixRenderer {
         let application_callback = self.application_event_callback();
 
         let selection = self.selection.clone();
+        let image_network_policy = self.image_network_policy.clone();
         let opened_window = Rc::new(RefCell::new(None));
         let startup_error = Rc::new(RefCell::new(None));
         let opened_window_for_app = opened_window.clone();
@@ -1315,6 +1320,7 @@ impl GpuixRenderer {
                             window_event_callback.clone(),
                             title,
                             selection.clone(),
+                            image_network_policy.clone(),
                         )
                     })
                 },
@@ -1372,6 +1378,8 @@ impl GpuixRenderer {
         if *self.lifecycle.lock().unwrap() != RendererLifecycle::Uninitialized {
             return Err(Error::from_reason("Renderer is already initialized"));
         }
+        self.image_network_policy
+            .set_allow_private(options.allow_private_network_images.unwrap_or(false));
 
         let width = options.width.unwrap_or(800.0);
         let height = options.height.unwrap_or(600.0);
@@ -1383,6 +1391,7 @@ impl GpuixRenderer {
         let window_options = options.clone();
         let tree = self.tree.clone();
         let selection = self.selection.clone();
+        let image_network_policy = self.image_network_policy.clone();
         let callback = self.event_callback_for_view();
         let window_event_callback = self.window_event_callback();
         let application_callback = self.application_event_callback();
@@ -1424,6 +1433,7 @@ impl GpuixRenderer {
                                         window_event_callback,
                                         title,
                                         selection,
+                                        image_network_policy,
                                     )
                                 })
                             },
@@ -2511,6 +2521,14 @@ mod initialization_tests {
     use super::*;
 
     #[test]
+    fn inherited_image_colour_keeps_the_light_on_dark_fallback() {
+        assert_eq!(
+            u32::from(Inherited::root(&Theme::dark()).current_color),
+            0xe2e2e2ff
+        );
+    }
+
+    #[test]
     fn initialization_panics_preserve_observed_messages() {
         let observed = [
             "window.rs:366:57: called Option::unwrap() on a None value",
@@ -2605,6 +2623,7 @@ fn start_web_app(
                     window_event_callback,
                     "GPUIX Web".to_string(),
                     selection,
+                    crate::custom_elements::img::ImageNetworkPolicy::default(),
                 )
             })
         });
@@ -3313,6 +3332,7 @@ pub(crate) struct GpuixView {
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
     /// Live text selection, shared with the paint closures and the napi methods.
     pub(crate) selection: SharedSelection,
+    pub(crate) image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     /// Retained owner and pressed-button lifetime for mouse pointer capture.
     pointer_router: crate::pointer::SharedPointerRouter,
     /// Cancels the pressed-pointer sequence when the platform deactivates this window.
@@ -3330,6 +3350,7 @@ impl GpuixView {
         window_event_callback: WindowEventCallback,
         window_title: String,
         selection: SharedSelection,
+        image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     ) -> Self {
         Self {
             tree,
@@ -3343,6 +3364,7 @@ impl GpuixView {
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
             selection,
+            image_network_policy,
             pointer_router: Default::default(),
             window_activation_subscription: None,
             virtual_lists: HashMap::new(),
@@ -3446,6 +3468,7 @@ impl GpuixView {
             now,
             motion_active: &mut motion_active,
             selection: self.selection.clone(),
+            image_network_policy: &self.image_network_policy,
             inherited,
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
@@ -3549,6 +3572,7 @@ pub(crate) struct BuildCtx<'a> {
     pub now: web_time::Instant,
     pub motion_active: &'a mut bool,
     pub selection: SharedSelection,
+    pub image_network_policy: &'a crate::custom_elements::img::ImageNetworkPolicy,
     /// Inherited text state, resolved the way CSS inherits it. The renderer's
     /// own theme only seeds the root selection wash; custom elements resolve
     /// their own theme from their `theme` prop.
@@ -3586,7 +3610,7 @@ impl Inherited {
             selectable: true,
             selection_wash: wash,
             text_transform: TextTransform::None,
-            current_color: gpui::rgba(0x000000ff),
+            current_color: gpui::rgba(0xe2e2e2ff),
             hover_group: None,
         }
     }
@@ -4056,6 +4080,7 @@ impl gpui::Render for GpuixView {
                     now,
                     motion_active: &mut motion_active,
                     selection: self.selection.clone(),
+                    image_network_policy: &self.image_network_policy,
                     inherited: Inherited::root(&theme),
                 };
                 build_element(root_id, &mut ctx, window, cx)
@@ -4194,6 +4219,7 @@ pub(crate) fn build_element(
                 selectable: inherited.selectable,
                 selection_wash: inherited.selection_wash,
                 current_color: inherited.current_color,
+                image_network_policy: ctx.image_network_policy,
             };
             ctx.custom_registry
                 .render(custom_type, &element.custom_props, render_ctx, window, cx)
@@ -5620,6 +5646,9 @@ pub struct WindowOptions {
     pub window_background: Option<String>,
     pub traffic_light_x: Option<f64>,
     pub traffic_light_y: Option<f64>,
+    /// Allow URL-backed images to connect to loopback and private networks.
+    /// Link-local and cloud-metadata ranges remain blocked.
+    pub allow_private_network_images: Option<bool>,
 }
 
 impl Default for WindowOptions {
@@ -5638,6 +5667,7 @@ impl Default for WindowOptions {
             window_background: None,
             traffic_light_x: None,
             traffic_light_y: None,
+            allow_private_network_images: Some(false),
         }
     }
 }

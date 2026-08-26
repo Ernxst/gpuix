@@ -1355,11 +1355,28 @@ URL, or in-memory bytes.
 `"scaleDown"`, or `"none"`. `bytes` accepts an `ArrayBuffer`, `Uint8Array`
 (including Node.js `Buffer`), or a number array. Every source is capped at
 **10 MiB** before decode. URL responses are cached by URL and revalidated with
-`ETag` or `Last-Modified` when another render variant needs the same asset.
+`ETag` or `Last-Modified` when another image instance needs the same asset.
+Failed requests retry with bounded backoff, successful path and URL loads have
+a five-minute revalidation deadline, and unmounting an image cancels its active
+load. HTTP requests have a 15-second total deadline and follow at most five
+redirects.
+
+URL images are public-network-only by default. GPUIX rejects URL credentials,
+resolves and validates every redirect target before connecting, and never
+includes URL credentials, query strings, or response bodies in painted/logged
+load errors. Loopback and private-network development servers require an
+explicit renderer-level opt-in:
+
+```tsx
+render(<App />, { allowPrivateNetworkImages: true })
+```
+
+Link-local and cloud-metadata address ranges remain blocked with the opt-in.
 
 SVG preserves its authored colours by default. Set `tint="currentColor"` to
 replace only authored `currentColor` references with the resolved inherited
-`style.color`; other authored fills and strokes remain unchanged.
+`style.color`; other authored fills and strokes, IDs, text, and URL references
+remain unchanged.
 
 ```tsx
 <div style={{ color: '#5ca9ff' }}>

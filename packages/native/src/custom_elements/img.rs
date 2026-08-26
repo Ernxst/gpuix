@@ -6,7 +6,10 @@
 /// GPUI decodes it. `<svg>` remains the lightweight monochrome icon element.
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use futures::AsyncReadExt as _;
 use gpui::http_client::HttpRequestExt as _;
@@ -16,6 +19,115 @@ use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 
 pub(crate) const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 const URL_CACHE_CAPACITY: usize = 32;
+const MAX_REDIRECTS: usize = 5;
+const IMAGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const URL_SUCCESS_TTL: Duration = Duration::from_secs(5 * 60);
+const URL_FAILURE_RETRY_MIN: Duration = Duration::from_secs(1);
+const URL_FAILURE_RETRY_MAX: Duration = Duration::from_secs(30);
+
+/// Network boundary shared by one renderer and every `<img>` it owns.
+/// Private development servers are opt-in; link-local and metadata networks
+/// remain blocked even when that opt-in is enabled.
+#[derive(Clone)]
+pub(crate) struct ImageNetworkPolicy {
+    allow_private: Arc<AtomicBool>,
+    #[cfg(not(target_family = "wasm"))]
+    client: Arc<dyn gpui::http_client::HttpClient>,
+    request_timeout: Duration,
+}
+
+impl Default for ImageNetworkPolicy {
+    fn default() -> Self {
+        let allow_private = Arc::new(AtomicBool::new(false));
+        Self {
+            #[cfg(not(target_family = "wasm"))]
+            client: restricted_image_http_client(allow_private.clone()),
+            allow_private,
+            request_timeout: IMAGE_REQUEST_TIMEOUT,
+        }
+    }
+}
+
+impl ImageNetworkPolicy {
+    pub(crate) fn set_allow_private(&self, enabled: bool) {
+        self.allow_private.store(enabled, Ordering::Relaxed);
+    }
+
+    fn allows_private(&self) -> bool {
+        self.allow_private.load(Ordering::Relaxed)
+    }
+
+    fn client(
+        &self,
+        fallback: Arc<dyn gpui::http_client::HttpClient>,
+    ) -> Arc<dyn gpui::http_client::HttpClient> {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let _ = fallback;
+            self.client.clone()
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            fallback
+        }
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+struct RestrictedImageDnsResolver {
+    allow_private: Arc<AtomicBool>,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl reqwest::dns::Resolve for RestrictedImageDnsResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        let allow_private = self.allow_private.load(Ordering::Relaxed);
+        Box::pin(async move {
+            let resolved = tokio::net::lookup_host((host.as_str(), 0))
+                .await
+                .map_err(|error| Box::new(error) as Box<dyn std::error::Error + Send + Sync>)?
+                .collect::<Vec<_>>();
+            if resolved.is_empty() {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("image URL host {host:?} resolved to no addresses"),
+                ))
+                    as Box<dyn std::error::Error + Send + Sync>);
+            }
+            for address in &resolved {
+                validate_destination_ip(address.ip(), allow_private).map_err(|reason| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        format!("image URL host {host:?} is blocked: {reason}"),
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                })?;
+            }
+            Ok(Box::new(resolved.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn restricted_image_http_client(
+    allow_private: Arc<AtomicBool>,
+) -> Arc<dyn gpui::http_client::HttpClient> {
+    let client = reqwest::Client::builder()
+        .use_rustls_tls()
+        .connect_timeout(Duration::from_secs(10))
+        .tcp_keepalive(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(30))
+        .http2_keep_alive_interval(Duration::from_secs(15))
+        .http2_keep_alive_timeout(Duration::from_secs(10))
+        .http2_keep_alive_while_idle(true)
+        // A proxy can resolve the destination outside this policy boundary.
+        .no_proxy()
+        .user_agent(concat!("GPUIX/", env!("CARGO_PKG_VERSION")))
+        .dns_resolver(Arc::new(RestrictedImageDnsResolver { allow_private }))
+        .build()
+        .expect("failed to initialize the restricted image HTTP client");
+    Arc::new(reqwest_client::ReqwestClient::from(client))
+}
 
 pub struct ImgFactory;
 
@@ -158,14 +270,7 @@ impl ImageSource {
                 Ok(Self::Path(path))
             }
             WireImageSource::Url { url } => {
-                let parsed = gpui::http_client::Url::parse(&url)
-                    .map_err(|error| format!("invalid URL: {error}"))?;
-                if !matches!(parsed.scheme(), "http" | "https") {
-                    return Err(format!(
-                        "unsupported URL scheme {:?}; expected http or https",
-                        parsed.scheme()
-                    ));
-                }
+                parse_image_url(&url)?;
                 Ok(Self::Url(url))
             }
             WireImageSource::Data { mime_type, bytes } => {
@@ -183,12 +288,112 @@ impl ImageSource {
     fn label(&self) -> String {
         match self {
             Self::Path(path) => format!("path {path:?}"),
-            Self::Url(url) => format!("URL {url:?}"),
+            Self::Url(url) => format!("URL {:?}", redacted_url(url)),
             Self::Data { mime_type, bytes } => {
                 format!("{mime_type} data ({} bytes)", bytes.len())
             }
         }
     }
+}
+
+fn parse_image_url(url: &str) -> Result<gpui::http_client::Url, String> {
+    let parsed =
+        gpui::http_client::Url::parse(url).map_err(|error| format!("invalid URL: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!(
+            "unsupported URL scheme {:?}; expected http or https",
+            parsed.scheme()
+        ));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("credentials in image URLs are not allowed".into());
+    }
+    if parsed.host().is_none() {
+        return Err("image URL must include a host".into());
+    }
+    Ok(parsed)
+}
+
+fn redacted_url(url: &str) -> String {
+    let Ok(mut parsed) = gpui::http_client::Url::parse(url) else {
+        return "<invalid image URL>".into();
+    };
+    let _ = parsed.set_password(None);
+    let _ = parsed.set_username("");
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    parsed.to_string()
+}
+
+fn validate_url_destination(
+    url: &gpui::http_client::Url,
+    allow_private: bool,
+) -> Result<(), String> {
+    match url.host() {
+        Some(gpui::http_client::Host::Ipv4(address)) => {
+            validate_destination_ip(IpAddr::V4(address), allow_private)
+        }
+        Some(gpui::http_client::Host::Ipv6(address)) => {
+            validate_destination_ip(IpAddr::V6(address), allow_private)
+        }
+        Some(gpui::http_client::Host::Domain(_)) => Ok(()),
+        None => Err("image URL must include a host".into()),
+    }
+}
+
+fn validate_destination_ip(address: IpAddr, allow_private: bool) -> Result<(), String> {
+    match address {
+        IpAddr::V4(address) => validate_ipv4_destination(address, allow_private),
+        IpAddr::V6(address) => {
+            if let Some(mapped) = address.to_ipv4_mapped() {
+                return validate_ipv4_destination(mapped, allow_private);
+            }
+            validate_ipv6_destination(address, allow_private)
+        }
+    }
+}
+
+fn validate_ipv4_destination(address: Ipv4Addr, allow_private: bool) -> Result<(), String> {
+    let octets = address.octets();
+    let carrier_grade_nat = octets[0] == 100 && (octets[1] & 0xc0) == 0x40;
+    let reserved = octets[0] == 0
+        || address.is_multicast()
+        || address == Ipv4Addr::BROADCAST
+        || octets[0] >= 240;
+    if address.is_link_local() || carrier_grade_nat {
+        return Err(format!(
+            "link-local and cloud-metadata address {address} is never allowed"
+        ));
+    }
+    if reserved {
+        return Err(format!("reserved address {address} is not allowed"));
+    }
+    if (address.is_loopback() || address.is_private()) && !allow_private {
+        return Err(format!(
+            "private network address {address} is disabled; set allowPrivateNetworkImages on the renderer to opt in"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_ipv6_destination(address: Ipv6Addr, allow_private: bool) -> Result<(), String> {
+    let first_segment = address.segments()[0];
+    let link_local = (first_segment & 0xffc0) == 0xfe80;
+    let unique_local = (first_segment & 0xfe00) == 0xfc00;
+    if link_local {
+        return Err(format!(
+            "link-local and cloud-metadata address {address} is never allowed"
+        ));
+    }
+    if address.is_unspecified() || address.is_multicast() {
+        return Err(format!("reserved address {address} is not allowed"));
+    }
+    if (address.is_loopback() || unique_local) && !allow_private {
+        return Err(format!(
+            "private network address {address} is disabled; set allowPrivateNetworkImages on the renderer to opt in"
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -206,6 +411,7 @@ struct LoadedBytes {
 #[derive(Clone)]
 struct CachedUrl {
     loaded: LoadedBytes,
+    effective_url: String,
     etag: Option<String>,
     last_modified: Option<String>,
     last_used: u64,
@@ -308,25 +514,305 @@ fn sniff_image_format(bytes: &[u8]) -> Result<gpui::ImageFormat, String> {
 fn replace_current_color(bytes: &[u8], color: u32) -> Result<Vec<u8>, String> {
     let source =
         std::str::from_utf8(bytes).map_err(|error| format!("SVG is not valid UTF-8: {error}"))?;
-    let needle = b"currentcolor";
-    let source_bytes = source.as_bytes();
     let replacement = format!("#{color:08x}");
-    let mut output = Vec::with_capacity(source_bytes.len());
+    let source_bytes = source.as_bytes();
+    let mut output = String::with_capacity(source.len());
     let mut index = 0;
+    let mut style_depth = 0usize;
 
     while index < source_bytes.len() {
-        if source_bytes[index..].len() >= needle.len()
-            && source_bytes[index..index + needle.len()].eq_ignore_ascii_case(needle)
-        {
-            output.extend_from_slice(replacement.as_bytes());
-            index += needle.len();
-        } else {
-            output.push(source_bytes[index]);
-            index += 1;
+        if source_bytes[index] != b'<' {
+            let end = source_bytes[index..]
+                .iter()
+                .position(|byte| *byte == b'<')
+                .map_or(source_bytes.len(), |offset| index + offset);
+            let text = &source[index..end];
+            if style_depth > 0 {
+                output.push_str(&replace_css_current_color(
+                    text,
+                    &replacement,
+                    CssContext::Stylesheet,
+                ));
+            } else {
+                output.push_str(text);
+            }
+            index = end;
+            continue;
         }
+
+        let end = find_xml_tag_end(source_bytes, index)
+            .ok_or_else(|| "SVG contains an unterminated XML tag".to_string())?;
+        let tag = &source[index..=end];
+        let tag_info = xml_tag_info(tag);
+        output.push_str(&rewrite_xml_tag(tag, &replacement));
+        if let Some((closing, is_style, self_closing)) = tag_info {
+            if is_style {
+                if closing {
+                    style_depth = style_depth.saturating_sub(1);
+                } else if !self_closing {
+                    style_depth += 1;
+                }
+            }
+        }
+        index = end + 1;
     }
 
-    Ok(output)
+    Ok(output.into_bytes())
+}
+
+fn find_xml_tag_end(bytes: &[u8], start: usize) -> Option<usize> {
+    if bytes[start..].starts_with(b"<!--") {
+        return bytes[start + 4..]
+            .windows(3)
+            .position(|window| window == b"-->")
+            .map(|offset| start + 4 + offset + 2);
+    }
+    if bytes[start..].starts_with(b"<![CDATA[") {
+        return bytes[start + 9..]
+            .windows(3)
+            .position(|window| window == b"]]>")
+            .map(|offset| start + 9 + offset + 2);
+    }
+
+    let mut quote = None;
+    for (offset, byte) in bytes[start + 1..].iter().copied().enumerate() {
+        match (quote, byte) {
+            (Some(expected), current) if expected == current => quote = None,
+            (None, b'\'' | b'"') => quote = Some(byte),
+            (None, b'>') => return Some(start + 1 + offset),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn xml_tag_info(tag: &str) -> Option<(bool, bool, bool)> {
+    let bytes = tag.as_bytes();
+    if bytes.starts_with(b"<!--") || bytes.starts_with(b"<!") || bytes.starts_with(b"<?") {
+        return None;
+    }
+    let mut index = 1;
+    while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
+        index += 1;
+    }
+    let closing = bytes.get(index) == Some(&b'/');
+    if closing {
+        index += 1;
+    }
+    while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
+        index += 1;
+    }
+    let start = index;
+    while bytes
+        .get(index)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-'))
+    {
+        index += 1;
+    }
+    (start < index).then(|| {
+        let name = &tag[start..index];
+        (
+            closing,
+            name.eq_ignore_ascii_case("style"),
+            tag[..tag.len().saturating_sub(1)].trim_end().ends_with('/'),
+        )
+    })
+}
+
+fn rewrite_xml_tag(tag: &str, replacement: &str) -> String {
+    if xml_tag_info(tag).is_none() {
+        return tag.to_string();
+    }
+
+    let bytes = tag.as_bytes();
+    let mut output = String::with_capacity(tag.len());
+    let mut copied_through = 0;
+    let mut index = 1;
+    while index < bytes.len() && bytes[index] != b'>' {
+        while index < bytes.len() && (bytes[index].is_ascii_whitespace() || bytes[index] == b'/') {
+            index += 1;
+        }
+        let name_start = index;
+        while index < bytes.len()
+            && (bytes[index].is_ascii_alphanumeric() || matches!(bytes[index], b':' | b'_' | b'-'))
+        {
+            index += 1;
+        }
+        if name_start == index {
+            index += 1;
+            continue;
+        }
+        let name = &tag[name_start..index];
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if bytes.get(index) != Some(&b'=') {
+            continue;
+        }
+        index += 1;
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        let Some(quote @ (b'\'' | b'"')) = bytes.get(index).copied() else {
+            continue;
+        };
+        let value_start = index + 1;
+        let Some(relative_end) = bytes[value_start..].iter().position(|byte| *byte == quote) else {
+            return tag.to_string();
+        };
+        let value_end = value_start + relative_end;
+        let value = &tag[value_start..value_end];
+        let rewritten = if name.eq_ignore_ascii_case("style") {
+            Some(replace_css_current_color(
+                value,
+                replacement,
+                CssContext::InlineDeclarations,
+            ))
+        } else if is_svg_color_attribute(name) {
+            Some(replace_css_current_color(
+                value,
+                replacement,
+                CssContext::ColorValue,
+            ))
+        } else {
+            None
+        };
+        if let Some(rewritten) = rewritten {
+            output.push_str(&tag[copied_through..value_start]);
+            output.push_str(&rewritten);
+            copied_through = value_end;
+        }
+        index = value_end + 1;
+    }
+    output.push_str(&tag[copied_through..]);
+    output
+}
+
+fn is_svg_color_attribute(name: &str) -> bool {
+    [
+        "color",
+        "fill",
+        "stroke",
+        "stop-color",
+        "flood-color",
+        "lighting-color",
+        "solid-color",
+    ]
+    .iter()
+    .any(|candidate| name.eq_ignore_ascii_case(candidate))
+}
+
+#[derive(Clone, Copy)]
+enum CssContext {
+    Stylesheet,
+    InlineDeclarations,
+    ColorValue,
+}
+
+fn replace_css_current_color(source: &str, replacement: &str, context: CssContext) -> String {
+    let bytes = source.as_bytes();
+    let mut output = String::with_capacity(source.len());
+    let mut index = 0;
+    let mut copied_through = 0;
+    let mut brace_depth = 0usize;
+    let mut in_value = matches!(context, CssContext::ColorValue);
+    let mut function_stack = Vec::new();
+
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"/*") {
+            index = bytes[index + 2..]
+                .windows(2)
+                .position(|window| window == b"*/")
+                .map_or(bytes.len(), |offset| index + 2 + offset + 2);
+            continue;
+        }
+        if matches!(bytes[index], b'\'' | b'"') {
+            let quote = bytes[index];
+            index += 1;
+            while index < bytes.len() {
+                if bytes[index] == b'\\' {
+                    index = (index + 2).min(bytes.len());
+                } else if bytes[index] == quote {
+                    index += 1;
+                    break;
+                } else {
+                    index += 1;
+                }
+            }
+            continue;
+        }
+
+        match bytes[index] {
+            b'{' => {
+                brace_depth += 1;
+                in_value = false;
+                index += 1;
+                continue;
+            }
+            b'}' => {
+                brace_depth = brace_depth.saturating_sub(1);
+                in_value = false;
+                index += 1;
+                continue;
+            }
+            b':' if matches!(context, CssContext::InlineDeclarations)
+                || (matches!(context, CssContext::Stylesheet) && brace_depth > 0) =>
+            {
+                in_value = true;
+                index += 1;
+                continue;
+            }
+            b';' if !matches!(context, CssContext::ColorValue) => {
+                in_value = false;
+                index += 1;
+                continue;
+            }
+            b'(' => {
+                let mut end = index;
+                while end > 0 && bytes[end - 1].is_ascii_whitespace() {
+                    end -= 1;
+                }
+                let mut start = end;
+                while start > 0
+                    && (bytes[start - 1].is_ascii_alphanumeric()
+                        || matches!(bytes[start - 1], b'_' | b'-'))
+                {
+                    start -= 1;
+                }
+                function_stack.push(source[start..end].eq_ignore_ascii_case("url"));
+                index += 1;
+                continue;
+            }
+            b')' => {
+                function_stack.pop();
+                index += 1;
+                continue;
+            }
+            _ => {}
+        }
+
+        if bytes[index].is_ascii_alphabetic() || matches!(bytes[index], b'_' | b'-') {
+            let token_start = index;
+            index += 1;
+            while index < bytes.len()
+                && (bytes[index].is_ascii_alphanumeric() || matches!(bytes[index], b'_' | b'-'))
+            {
+                index += 1;
+            }
+            if in_value
+                && !function_stack.iter().any(|inside_url| *inside_url)
+                && source[token_start..index].eq_ignore_ascii_case("currentcolor")
+            {
+                output.push_str(&source[copied_through..token_start]);
+                output.push_str(replacement);
+                copied_through = index;
+            }
+            continue;
+        }
+        index += 1;
+    }
+    output.push_str(&source[copied_through..]);
+    output
 }
 
 fn add_validator_headers(
@@ -353,7 +839,7 @@ async fn read_limited(
     body.take((MAX_IMAGE_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
         .await
-        .map_err(|error| format!("failed to read {source}: {error}"))?;
+        .map_err(|_| format!("failed to read {source}"))?;
     ensure_size(bytes.len(), source)?;
     Ok(bytes.into())
 }
@@ -361,96 +847,124 @@ async fn read_limited(
 async fn load_url(
     url: &str,
     client: Arc<dyn gpui::http_client::HttpClient>,
+    policy: &ImageNetworkPolicy,
 ) -> Result<LoadedBytes, String> {
     let cached = url_cache().lock().unwrap().get(url);
-    let request = add_validator_headers(
-        gpui::http_client::Builder::new()
-            .uri(url)
-            .follow_redirects(gpui::http_client::RedirectPolicy::FollowAll),
-        cached.as_ref(),
-    )
-    .body(().into())
-    .map_err(|error| format!("failed to build image request for {url:?}: {error}"))?;
+    let mut current = parse_image_url(url)?;
+    current.set_fragment(None);
+    let started_at = Instant::now();
 
-    let mut response = client
-        .send(request)
-        .await
-        .map_err(|error| format!("failed to load image from {url:?}: {error}"))?;
+    for redirect_count in 0..=MAX_REDIRECTS {
+        validate_url_destination(&current, policy.allows_private())?;
+        let safe_url = redacted_url(current.as_str());
+        let remaining = policy
+            .request_timeout
+            .checked_sub(started_at.elapsed())
+            .ok_or_else(|| format!("image request for {safe_url:?} timed out"))?;
+        let validators = cached
+            .as_ref()
+            .filter(|entry| entry.effective_url == current.as_str());
+        let request = add_validator_headers(
+            gpui::http_client::Builder::new()
+                .uri(current.as_str())
+                .follow_redirects(gpui::http_client::RedirectPolicy::NoFollow)
+                .timeout(remaining),
+            validators,
+        )
+        .body(().into())
+        .map_err(|_| format!("failed to build image request for {safe_url:?}"))?;
 
-    if response.status() == gpui::http_client::StatusCode::NOT_MODIFIED {
-        return cached
-            .map(|entry| entry.loaded)
-            .ok_or_else(|| format!("{url:?} returned 304 without a cached image"));
-    }
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = read_limited(response.body_mut(), &format!("error response from {url:?}"))
+        let mut response = client
+            .send(request)
             .await
-            .unwrap_or_default();
-        let first_line = String::from_utf8_lossy(&body)
-            .lines()
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .chars()
-            .take(256)
-            .collect::<String>();
-        return Err(format!(
-            "image request for {url:?} returned {status}{}",
-            if first_line.is_empty() {
-                String::new()
-            } else {
-                format!(": {first_line}")
+            .map_err(|_| format!("failed to load image from {safe_url:?}"))?;
+
+        if response.status() == gpui::http_client::StatusCode::NOT_MODIFIED {
+            return validators
+                .map(|entry| entry.loaded.clone())
+                .ok_or_else(|| format!("{safe_url:?} returned an unsolicited 304 response"));
+        }
+
+        if response.status().is_redirection() {
+            if redirect_count == MAX_REDIRECTS {
+                return Err(format!(
+                    "image request for {safe_url:?} exceeded {MAX_REDIRECTS} redirects"
+                ));
             }
-        ));
+            let location = response
+                .headers()
+                .get(gpui::http_client::http::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| {
+                    format!("image redirect from {safe_url:?} has no valid Location header")
+                })?;
+            current = current
+                .join(location)
+                .map_err(|_| format!("image redirect from {safe_url:?} has an invalid target"))?;
+            // Reject credentials and schemes before the redirected request is built.
+            current = parse_image_url(current.as_str())?;
+            current.set_fragment(None);
+            continue;
+        }
+
+        if !response.status().is_success() {
+            return Err(format!(
+                "image request for {safe_url:?} returned {}",
+                response.status()
+            ));
+        }
+
+        if let Some(content_length) = response
+            .headers()
+            .get(gpui::http_client::http::header::CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<usize>().ok())
+        {
+            ensure_size(content_length, &format!("response from {safe_url:?}"))?;
+        }
+
+        let mime_type = response
+            .headers()
+            .get(gpui::http_client::http::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(normalize_mime_type);
+        if let Some(mime_type) = mime_type.as_deref() {
+            supported_image_format(mime_type)?;
+        }
+
+        let etag = response
+            .headers()
+            .get(gpui::http_client::http::header::ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let last_modified = response
+            .headers()
+            .get(gpui::http_client::http::header::LAST_MODIFIED)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let bytes =
+            read_limited(response.body_mut(), &format!("response from {safe_url:?}")).await?;
+        let loaded = LoadedBytes { bytes, mime_type };
+        url_cache().lock().unwrap().insert(
+            url.to_string(),
+            CachedUrl {
+                loaded: loaded.clone(),
+                effective_url: current.to_string(),
+                etag,
+                last_modified,
+                last_used: 0,
+            },
+        );
+        return Ok(loaded);
     }
 
-    if let Some(content_length) = response
-        .headers()
-        .get(gpui::http_client::http::header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<usize>().ok())
-    {
-        ensure_size(content_length, &format!("response from {url:?}"))?;
-    }
-
-    let mime_type = response
-        .headers()
-        .get(gpui::http_client::http::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(normalize_mime_type);
-    if let Some(mime_type) = mime_type.as_deref() {
-        supported_image_format(mime_type)?;
-    }
-
-    let etag = response
-        .headers()
-        .get(gpui::http_client::http::header::ETAG)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    let last_modified = response
-        .headers()
-        .get(gpui::http_client::http::header::LAST_MODIFIED)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    let bytes = read_limited(response.body_mut(), &format!("response from {url:?}")).await?;
-    let loaded = LoadedBytes { bytes, mime_type };
-    url_cache().lock().unwrap().insert(
-        url.to_string(),
-        CachedUrl {
-            loaded: loaded.clone(),
-            etag,
-            last_modified,
-            last_used: 0,
-        },
-    );
-    Ok(loaded)
+    unreachable!("redirect loop returns or continues within its fixed bound")
 }
 
 async fn load_source(
     source: &ImageSource,
     client: Arc<dyn gpui::http_client::HttpClient>,
+    policy: &ImageNetworkPolicy,
 ) -> Result<LoadedBytes, String> {
     match source {
         ImageSource::Path(path) => {
@@ -473,7 +987,7 @@ async fn load_source(
                 })
             }
         }
-        ImageSource::Url(url) => load_url(url, client).await,
+        ImageSource::Url(url) => load_url(url, client, policy).await,
         ImageSource::Data { mime_type, bytes } => Ok(LoadedBytes {
             bytes: bytes.clone(),
             mime_type: Some(mime_type.clone()),
@@ -481,49 +995,39 @@ async fn load_source(
     }
 }
 
-enum ImageAsset {}
+type ImageLoadResult = Result<Arc<gpui::RenderImage>, gpui::ImageCacheError>;
 
-impl gpui::Asset for ImageAsset {
-    type Source = ImageRequest;
-    type Output = Result<Arc<gpui::RenderImage>, gpui::ImageCacheError>;
-
-    fn load(
-        request: Self::Source,
-        cx: &mut gpui::App,
-    ) -> impl std::future::Future<Output = Self::Output> + Send + 'static {
-        let client = cx.http_client();
-        let svg_renderer = cx.svg_renderer();
-        async move {
-            let mut loaded = load_source(&request.source, client)
-                .await
-                .map_err(|error| gpui::ImageCacheError::Other(Arc::new(anyhow::anyhow!(error))))?;
-            let format = match loaded.mime_type.as_deref() {
-                Some(mime_type) => supported_image_format(mime_type),
-                None => sniff_image_format(&loaded.bytes),
-            }
-            .map_err(|error| gpui::ImageCacheError::Other(Arc::new(anyhow::anyhow!(error))))?;
-
-            if let Some(color) = request.current_color {
-                if format != gpui::ImageFormat::Svg {
-                    return Err(gpui::ImageCacheError::Other(Arc::new(anyhow::anyhow!(
-                        "tint=\"currentColor\" is only supported for SVG images"
-                    ))));
-                }
-                loaded.bytes = replace_current_color(&loaded.bytes, color)
-                    .map(Arc::from)
-                    .map_err(|error| {
-                        gpui::ImageCacheError::Other(Arc::new(anyhow::anyhow!(error)))
-                    })?;
-            }
-
-            gpui::Image::from_bytes(format, loaded.bytes.to_vec())
-                .to_image_data(svg_renderer)
-                .map_err(|error| gpui::ImageCacheError::Other(Arc::new(error)))
-        }
+async fn load_image(
+    request: ImageRequest,
+    client: Arc<dyn gpui::http_client::HttpClient>,
+    svg_renderer: gpui::SvgRenderer,
+    policy: ImageNetworkPolicy,
+) -> ImageLoadResult {
+    let mut loaded = load_source(&request.source, client, &policy)
+        .await
+        .map_err(|error| gpui::ImageCacheError::Other(Arc::new(anyhow::anyhow!(error))))?;
+    let format = match loaded.mime_type.as_deref() {
+        Some(mime_type) => supported_image_format(mime_type),
+        None => sniff_image_format(&loaded.bytes),
     }
+    .map_err(|error| gpui::ImageCacheError::Other(Arc::new(anyhow::anyhow!(error))))?;
+
+    if let Some(color) = request.current_color {
+        if format != gpui::ImageFormat::Svg {
+            return Err(gpui::ImageCacheError::Other(Arc::new(anyhow::anyhow!(
+                "tint=\"currentColor\" is only supported for SVG images"
+            ))));
+        }
+        loaded.bytes = replace_current_color(&loaded.bytes, color)
+            .map(Arc::from)
+            .map_err(|error| gpui::ImageCacheError::Other(Arc::new(anyhow::anyhow!(error))))?;
+    }
+
+    gpui::Image::from_bytes(format, loaded.bytes.to_vec())
+        .to_image_data(svg_renderer)
+        .map_err(|error| gpui::ImageCacheError::Other(Arc::new(error)))
 }
 
-#[derive(Debug, Clone, Default)]
 pub struct ImgElement {
     source: Option<ImageSource>,
     source_error: Option<String>,
@@ -531,6 +1035,29 @@ pub struct ImgElement {
     tint_current_color: bool,
     last_request: Option<ImageRequest>,
     load_error: Arc<Mutex<Option<String>>>,
+    load_result: Arc<Mutex<Option<ImageLoadResult>>>,
+    load_task: Option<gpui::Task<()>>,
+    reload_wake_task: Option<gpui::Task<()>>,
+    completed_at: Option<Instant>,
+    retry_attempt: u32,
+}
+
+impl Default for ImgElement {
+    fn default() -> Self {
+        Self {
+            source: None,
+            source_error: None,
+            object_fit: ImgObjectFit::default(),
+            tint_current_color: false,
+            last_request: None,
+            load_error: Arc::new(Mutex::new(None)),
+            load_result: Arc::new(Mutex::new(None)),
+            load_task: None,
+            reload_wake_task: None,
+            completed_at: None,
+            retry_attempt: 0,
+        }
+    }
 }
 
 impl ImgElement {
@@ -548,11 +1075,64 @@ impl ImgElement {
             .child(crate::text::chrome_text(message.into(), None))
     }
 
+    fn reset_load(&mut self) {
+        self.last_request = None;
+        self.load_task = None;
+        self.reload_wake_task = None;
+        self.completed_at = None;
+        self.retry_attempt = 0;
+        self.load_result = Arc::new(Mutex::new(None));
+        *self.load_error.lock().unwrap() = None;
+    }
+
+    fn start_load(
+        &mut self,
+        request: ImageRequest,
+        policy: ImageNetworkPolicy,
+        client: Arc<dyn gpui::http_client::HttpClient>,
+        svg_renderer: gpui::SvgRenderer,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
+    ) {
+        self.load_task = None;
+        self.reload_wake_task = None;
+        self.completed_at = None;
+        self.load_result = Arc::new(Mutex::new(None));
+        *self.load_error.lock().unwrap() = None;
+
+        let result = self.load_result.clone();
+        let background =
+            cx.background_executor()
+                .spawn(load_image(request, client, svg_renderer, policy));
+        self.load_task = Some(cx.spawn(async move |view, cx| {
+            *result.lock().unwrap() = Some(background.await);
+            let _ = view.update(cx, |_view, cx| cx.notify());
+        }));
+    }
+
+    fn reload_delay(&self, request: &ImageRequest, result: &ImageLoadResult) -> Option<Duration> {
+        if result.is_err() {
+            let multiplier = 1u32 << self.retry_attempt.min(5);
+            return Some((URL_FAILURE_RETRY_MIN * multiplier).min(URL_FAILURE_RETRY_MAX));
+        }
+        matches!(request.source, ImageSource::Path(_) | ImageSource::Url(_))
+            .then_some(URL_SUCCESS_TTL)
+    }
+
+    fn schedule_reload(
+        &mut self,
+        delay: Duration,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
+    ) {
+        self.reload_wake_task = Some(cx.spawn(async move |view, cx| {
+            cx.background_executor().timer(delay).await;
+            let _ = view.update(cx, |_view, cx| cx.notify());
+        }));
+    }
+
     fn set_source(&mut self, value: serde_json::Value) {
         self.source = None;
         self.source_error = None;
-        self.last_request = None;
-        *self.load_error.lock().unwrap() = None;
+        self.reset_load();
 
         if value.is_null() {
             return;
@@ -569,7 +1149,7 @@ impl CustomElement for ImgElement {
         &mut self,
         ctx: CustomRenderContext,
         _window: &mut gpui::Window,
-        _cx: &mut gpui::Context<crate::renderer::GpuixView>,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
@@ -596,16 +1176,54 @@ impl CustomElement for ImgElement {
                 .then(|| u32::from(ctx.current_color)),
         };
         if self.last_request.as_ref() != Some(&request) {
+            self.reset_load();
             self.last_request = Some(request.clone());
-            *self.load_error.lock().unwrap() = None;
+        }
+
+        let now = cx.background_executor().now();
+        let completed = self.load_result.lock().unwrap().clone();
+        if let Some(result) = completed.as_ref() {
+            let completed_at = *self.completed_at.get_or_insert(now);
+            if self.reload_wake_task.is_none() {
+                if let Some(delay) = self.reload_delay(&request, result) {
+                    self.schedule_reload(delay, cx);
+                }
+            }
+            if self
+                .reload_delay(&request, result)
+                .is_some_and(|delay| now.duration_since(completed_at) >= delay)
+            {
+                if result.is_err() {
+                    self.retry_attempt = self.retry_attempt.saturating_add(1);
+                } else {
+                    self.retry_attempt = 0;
+                }
+                self.start_load(
+                    request.clone(),
+                    ctx.image_network_policy.clone(),
+                    ctx.image_network_policy.client(cx.http_client()),
+                    cx.svg_renderer(),
+                    cx,
+                );
+            }
+        }
+        if self.load_task.is_none() {
+            self.start_load(
+                request.clone(),
+                ctx.image_network_policy.clone(),
+                ctx.image_network_policy.client(cx.http_client()),
+                cx.svg_renderer(),
+                cx,
+            );
         }
 
         let load_error = self.load_error.clone();
         let loader_error = load_error.clone();
+        let load_result = self.load_result.clone();
         let source_label = request.source.label();
         let fallback_label = source_label.clone();
-        let mut el = gpui::img(move |window: &mut gpui::Window, cx: &mut gpui::App| {
-            let result = window.use_asset::<ImageAsset>(&request, cx);
+        let mut el = gpui::img(move |_window: &mut gpui::Window, _cx: &mut gpui::App| {
+            let result = load_result.lock().unwrap().clone();
             if let Some(Err(error)) = result.as_ref() {
                 let message = format!("img: failed to load {source_label}: {error}");
                 let mut previous = loader_error.lock().unwrap();
@@ -644,8 +1262,7 @@ impl CustomElement for ImgElement {
             }
             "tint" => {
                 self.tint_current_color = value.as_str() == Some("currentColor");
-                self.last_request = None;
-                *self.load_error.lock().unwrap() = None;
+                self.reset_load();
             }
             _ => {}
         }
@@ -659,7 +1276,9 @@ impl CustomElement for ImgElement {
         &[]
     }
 
-    fn destroy(&mut self) {}
+    fn destroy(&mut self) {
+        self.reset_load();
+    }
 }
 
 pub(crate) fn image_prop_problem(
@@ -788,6 +1407,7 @@ impl CustomElement for SvgElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
 
     #[test]
     fn parses_each_source_kind_and_rejects_ambiguous_or_oversized_data() {
@@ -818,6 +1438,12 @@ mod tests {
         }))
         .unwrap_err()
         .contains("10 MiB"));
+        assert!(ImageSource::parse(&serde_json::json!({
+            "kind": "url",
+            "url": "https://user:secret@example.com/icon.svg?token=secret",
+        }))
+        .unwrap_err()
+        .contains("credentials"));
     }
 
     #[test]
@@ -839,6 +1465,7 @@ mod tests {
             "https://example.com/icon.svg".into(),
             CachedUrl {
                 loaded: loaded.clone(),
+                effective_url: "https://example.com/icon.svg".into(),
                 etag: Some("\"v1\"".into()),
                 last_modified: Some("Wed, 26 Aug 2026 10:00:00 GMT".into()),
                 last_used: 0,
@@ -867,6 +1494,7 @@ mod tests {
                 format!("https://example.com/{index}.svg"),
                 CachedUrl {
                     loaded: loaded.clone(),
+                    effective_url: format!("https://example.com/{index}.svg"),
                     etag: None,
                     last_modified: None,
                     last_used: 0,
@@ -880,25 +1508,170 @@ mod tests {
 
     #[test]
     fn current_color_substitution_preserves_authored_colours() {
-        let svg = br##"<svg><rect fill="#ff0000"/><path fill="currentColor"/></svg>"##;
+        let svg = br##"<svg><style>.tinted { fill: currentColor } .preserved { fill: url(#currentColor) }</style><text>currentColor</text><defs><linearGradient id="currentColor"/></defs><rect fill="#ff0000"/><path class="tinted" fill="currentColor" style="stroke: CURRENTCOLOR"/><path class="preserved" fill="url(#currentColor)"/></svg>"##;
         let tinted = String::from_utf8(replace_current_color(svg, 0x336699ff).unwrap()).unwrap();
         assert!(tinted.contains("#ff0000"));
-        assert!(tinted.contains("#336699ff"));
-        assert!(!tinted.to_ascii_lowercase().contains("currentcolor"));
+        assert_eq!(tinted.matches("#336699ff").count(), 3);
+        assert!(tinted.contains("id=\"currentColor\""));
+        assert!(tinted.contains(">currentColor</text>"));
+        assert_eq!(tinted.matches("url(#currentColor)").count(), 2);
+    }
+
+    #[test]
+    fn url_labels_redact_credentials_query_and_fragment() {
+        let source = ImageSource::Url(
+            "https://user:secret@example.com/icon.svg?token=secret#private".into(),
+        );
+        let label = source.label();
+        assert_eq!(label, "URL \"https://example.com/icon.svg\"");
+        assert!(!label.contains("user"));
+        assert!(!label.contains("secret"));
+    }
+
+    #[test]
+    fn destination_policy_blocks_private_and_metadata_ranges_at_each_boundary() {
+        for address in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "172.16.0.1",
+            "192.168.0.1",
+            "::1",
+            "fd00::1",
+        ] {
+            let error = validate_destination_ip(address.parse().unwrap(), false).unwrap_err();
+            assert!(
+                error.contains("allowPrivateNetworkImages"),
+                "{address}: {error}"
+            );
+            assert!(validate_destination_ip(address.parse().unwrap(), true).is_ok());
+        }
+
+        for address in ["169.254.169.254", "100.100.100.200", "fe80::1"] {
+            assert!(validate_destination_ip(address.parse().unwrap(), false).is_err());
+            assert!(validate_destination_ip(address.parse().unwrap(), true).is_err());
+        }
+        assert!(validate_destination_ip("93.184.216.34".parse().unwrap(), false).is_ok());
+        assert!(validate_destination_ip(
+            "2606:2800:220:1:248:1893:25c8:1946".parse().unwrap(),
+            false
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn redirects_are_bounded_and_each_literal_target_is_revalidated() {
+        let policy = ImageNetworkPolicy::default();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let requests_for_client = requests.clone();
+        let metadata_client = gpui::http_client::FakeHttpClient::create(move |_| {
+            requests_for_client.fetch_add(1, Ordering::Relaxed);
+            async move {
+                Ok(gpui::http_client::Response::builder()
+                    .status(302)
+                    .header(
+                        gpui::http_client::http::header::LOCATION,
+                        "http://169.254.169.254/latest/meta-data",
+                    )
+                    .body(gpui::http_client::AsyncBody::default())?)
+            }
+        });
+        let error = gpui::block_on(load_url(
+            "https://redirect.example/icon.png",
+            metadata_client,
+            &policy,
+        ))
+        .unwrap_err();
+        assert!(error.contains("never allowed"));
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
+
+        let requests = Arc::new(AtomicUsize::new(0));
+        let requests_for_client = requests.clone();
+        let looping_client = gpui::http_client::FakeHttpClient::create(move |_| {
+            requests_for_client.fetch_add(1, Ordering::Relaxed);
+            async move {
+                Ok(gpui::http_client::Response::builder()
+                    .status(302)
+                    .header(gpui::http_client::http::header::LOCATION, "/again")
+                    .body(gpui::http_client::AsyncBody::default())?)
+            }
+        });
+        let error = gpui::block_on(load_url(
+            "https://loop.example/start",
+            looping_client,
+            &policy,
+        ))
+        .unwrap_err();
+        assert!(error.contains("exceeded 5 redirects"));
+        assert_eq!(requests.load(Ordering::Relaxed), MAX_REDIRECTS + 1);
+    }
+
+    #[test]
+    fn private_literal_requests_need_opt_in_and_every_request_has_a_total_timeout() {
+        let policy = ImageNetworkPolicy::default();
+        let denied_client = gpui::http_client::FakeHttpClient::create(|_| async move {
+            panic!("a denied literal target must not reach the HTTP client")
+        });
+        let error = gpui::block_on(load_url(
+            "http://127.0.0.1/image.png",
+            denied_client,
+            &policy,
+        ))
+        .unwrap_err();
+        assert!(error.contains("allowPrivateNetworkImages"));
+
+        policy.set_allow_private(true);
+        let allowed_client = gpui::http_client::FakeHttpClient::create(|request| async move {
+            let timeout = request
+                .extensions()
+                .get::<gpui::http_client::RequestTimeout>()
+                .expect("image request has a total timeout");
+            assert!(timeout.0 <= IMAGE_REQUEST_TIMEOUT);
+            assert!(timeout.0 > IMAGE_REQUEST_TIMEOUT - Duration::from_secs(1));
+            Ok(gpui::http_client::Response::builder()
+                .status(200)
+                .header(gpui::http_client::http::header::CONTENT_TYPE, "image/png")
+                .body(gpui::http_client::AsyncBody::default())?)
+        });
+        assert!(gpui::block_on(load_url(
+            "http://127.0.0.1/image.png",
+            allowed_client,
+            &policy,
+        ))
+        .is_ok());
     }
 
     #[test]
     fn url_status_mime_and_size_errors_are_actionable() {
+        let policy = ImageNetworkPolicy::default();
         let status_client = gpui::http_client::FakeHttpClient::create(|_| async move {
             Ok(gpui::http_client::Response::builder()
                 .status(404)
                 .body(gpui::http_client::AsyncBody::from("not here"))?)
         });
-        let status_error =
-            gpui::block_on(load_url("https://status.example/image.png", status_client))
-                .unwrap_err();
+        let status_error = gpui::block_on(load_url(
+            "https://status.example/image.png?token=secret",
+            status_client,
+            &policy,
+        ))
+        .unwrap_err();
         assert!(status_error.contains("404"));
-        assert!(status_error.contains("not here"));
+        assert!(!status_error.contains("not here"));
+        assert!(!status_error.contains("token"));
+        assert!(!status_error.contains("secret"));
+
+        let network_client = gpui::http_client::FakeHttpClient::create(|_| async move {
+            Err(anyhow::anyhow!(
+                "request failed for https://network.example/image.png?token=secret"
+            ))
+        });
+        let network_error = gpui::block_on(load_url(
+            "https://network.example/image.png?token=secret",
+            network_client,
+            &policy,
+        ))
+        .unwrap_err();
+        assert!(!network_error.contains("token"));
+        assert!(!network_error.contains("secret"));
 
         let mime_client = gpui::http_client::FakeHttpClient::create(|_| async move {
             Ok(gpui::http_client::Response::builder()
@@ -906,8 +1679,12 @@ mod tests {
                 .header(gpui::http_client::http::header::CONTENT_TYPE, "text/plain")
                 .body(gpui::http_client::AsyncBody::from("not an image"))?)
         });
-        let mime_error =
-            gpui::block_on(load_url("https://mime.example/image.png", mime_client)).unwrap_err();
+        let mime_error = gpui::block_on(load_url(
+            "https://mime.example/image.png",
+            mime_client,
+            &policy,
+        ))
+        .unwrap_err();
         assert!(mime_error.contains("unsupported MIME type"));
         assert!(mime_error.contains("text/plain"));
 
@@ -921,8 +1698,12 @@ mod tests {
                 )
                 .body(gpui::http_client::AsyncBody::default())?)
         });
-        let size_error =
-            gpui::block_on(load_url("https://size.example/image.png", size_client)).unwrap_err();
+        let size_error = gpui::block_on(load_url(
+            "https://size.example/image.png",
+            size_client,
+            &policy,
+        ))
+        .unwrap_err();
         assert!(size_error.contains("10 MiB"));
         assert!(size_error.contains("maximum image size"));
     }

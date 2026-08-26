@@ -51,6 +51,11 @@ const ETAG = '"gpuix-image-v1"'
 let server: Server
 let serverPort = 0
 let conditionalRequestCount = 0
+let blockedRequestCount = 0
+let retryRequestCount = 0
+let slowRequestCount = 0
+let slowResponseCloseCount = 0
+const slowResponseTimers = new Set<ReturnType<typeof setTimeout>>()
 
 function sourceFrame(source?: ImageSource, tint?: "currentColor") {
   return (
@@ -80,13 +85,13 @@ function sourceFrame(source?: ImageSource, tint?: "currentColor") {
 }
 
 async function captureLoadedSource(source: ImageSource, name: string, tint?: "currentColor") {
-  const baseline = createTestRoot()
+  const baseline = createTestRoot({ allowPrivateNetworkImages: true })
   baseline.render(sourceFrame())
   const baselinePath = `/tmp/gpuix-image-${name}-baseline.png`
   baseline.renderer.captureScreenshot(baselinePath)
   const baselineBytes = fs.readFileSync(baselinePath)
 
-  const testRoot = createTestRoot()
+  const testRoot = createTestRoot({ allowPrivateNetworkImages: true })
   testRoot.render(sourceFrame(source, tint))
   const screenshotPath = `/tmp/gpuix-image-${name}.png`
 
@@ -128,6 +133,38 @@ describeNative("custom element: img", () => {
         }).end(PNG_BYTES)
         return
       }
+      if (pathname.startsWith("/blocked")) {
+        blockedRequestCount++
+        response.writeHead(200, { "content-type": "image/png" }).end(PNG_BYTES)
+        return
+      }
+      if (pathname.startsWith("/redact")) {
+        response.writeHead(403).end("top-secret-response-body")
+        return
+      }
+      if (pathname.startsWith("/retry")) {
+        retryRequestCount++
+        if (retryRequestCount === 1) {
+          response.writeHead(503).end("transient-secret-body")
+        } else {
+          response.writeHead(200, { "content-type": "image/png", etag: ETAG }).end(PNG_BYTES)
+        }
+        return
+      }
+      if (pathname.startsWith("/slow")) {
+        slowRequestCount++
+        response.writeHead(200, { "content-type": "image/png" })
+        response.flushHeaders()
+        response.write(PNG_BYTES.subarray(0, 8))
+        const timer = setTimeout(() => response.end(PNG_BYTES.subarray(8)), 30_000)
+        slowResponseTimers.add(timer)
+        response.on("close", () => {
+          clearTimeout(timer)
+          slowResponseTimers.delete(timer)
+          slowResponseCloseCount++
+        })
+        return
+      }
 
       const name = pathname.slice(1)
       const fixture = FIXTURES.find((candidate) => candidate.name === name)
@@ -151,6 +188,9 @@ describeNative("custom element: img", () => {
   })
 
   afterAll(async () => {
+    for (const timer of slowResponseTimers) clearTimeout(timer)
+    slowResponseTimers.clear()
+    server.closeAllConnections()
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()))
     })
@@ -158,6 +198,10 @@ describeNative("custom element: img", () => {
 
   beforeEach(() => {
     conditionalRequestCount = 0
+    blockedRequestCount = 0
+    retryRequestCount = 0
+    slowRequestCount = 0
+    slowResponseCloseCount = 0
   })
 
   it("serialises Buffer-backed data sources through the custom-prop pipeline", () => {
@@ -217,7 +261,7 @@ describeNative("custom element: img", () => {
       )
       expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
     }
-  })
+  }, 20_000)
 
   it("GPU-renders PNG, JPEG, WebP, and SVG URL sources through the local server", async () => {
     for (const fixture of FIXTURES) {
@@ -227,7 +271,7 @@ describeNative("custom element: img", () => {
       )
       expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
     }
-  })
+  }, 20_000)
 
   it("GPU-renders PNG, JPEG, WebP, and SVG in-memory sources", async () => {
     for (const fixture of FIXTURES) {
@@ -237,7 +281,7 @@ describeNative("custom element: img", () => {
       )
       expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
     }
-  })
+  }, 20_000)
 
   it("preserves authored SVG colours by default and explicitly resolves inherited currentColor", async () => {
     const source: ImageSource = {
@@ -253,16 +297,119 @@ describeNative("custom element: img", () => {
     if (!isCI) {
       expect(bufferSimilarity(fs.readFileSync(authored), fs.readFileSync(tinted))).toBeLessThan(0.99)
     }
-  })
+  }, 15_000)
 
   it("revalidates URL cache entries and uses a 304 response", async () => {
     const source: ImageSource = {
       kind: "url",
       url: `http://127.0.0.1:${serverPort}/svg`,
     }
-    await captureLoadedSource(source, "url-cache-authored")
-    await captureLoadedSource(source, "url-cache-tinted", "currentColor")
+    await captureLoadedSource(source, "url-cache-first")
+    await captureLoadedSource(source, "url-cache-same-key")
     expect(conditionalRequestCount).toBeGreaterThan(0)
+  }, 15_000)
+
+  it("denies loopback URL images by default before opening a connection", async () => {
+    const testRoot = createTestRoot()
+    testRoot.render(
+      sourceFrame({
+        kind: "url",
+        url: `http://127.0.0.1:${serverPort}/blocked?token=secret`,
+      })
+    )
+    for (let frame = 0; frame < 20; frame++) {
+      testRoot.renderer.flush()
+      if (testRoot.renderer.getPaintedText().join(" ").includes("private network")) break
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    const painted = testRoot.renderer.getPaintedText().join(" ")
+    expect(painted).toContain("allowPrivateNetworkImages")
+    expect(painted).not.toContain("token")
+    expect(painted).not.toContain("secret")
+    expect(blockedRequestCount).toBe(0)
+  })
+
+  it("retries a transient failure after the bounded failure TTL", async () => {
+    const testRoot = createTestRoot({ allowPrivateNetworkImages: true })
+    testRoot.render(
+      sourceFrame({
+        kind: "url",
+        url: `http://127.0.0.1:${serverPort}/retry`,
+      })
+    )
+    for (let frame = 0; frame < 100; frame++) {
+      testRoot.renderer.flush()
+      if (testRoot.renderer.getPaintedText().join(" ").includes("503")) break
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(retryRequestCount).toBe(1)
+    expect(testRoot.renderer.getPaintedText().join(" ")).toContain("503")
+    const failureScreenshot = "/tmp/gpuix-image-retry-failure.png"
+    testRoot.renderer.captureScreenshot(failureScreenshot)
+
+    testRoot.renderer.advanceAsyncClock(1_100)
+    const successScreenshot = "/tmp/gpuix-image-retry-success.png"
+    for (let frame = 0; frame < 100; frame++) {
+      testRoot.renderer.flush()
+      testRoot.renderer.captureScreenshot(successScreenshot)
+      if (
+        retryRequestCount >= 2 &&
+        !testRoot.renderer.getPaintedText().join(" ").includes("img:")
+      ) {
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(retryRequestCount).toBeGreaterThanOrEqual(2)
+    expect(testRoot.renderer.getPaintedText().join(" ")).not.toContain("img:")
+    expect(
+      bufferSimilarity(
+        fs.readFileSync(failureScreenshot),
+        fs.readFileSync(successScreenshot)
+      )
+    ).toBeLessThan(0.99)
+  })
+
+  it("redacts URL secrets and never paints response bodies", async () => {
+    const testRoot = createTestRoot({ allowPrivateNetworkImages: true })
+    testRoot.render(
+      sourceFrame({
+        kind: "url",
+        url: `http://127.0.0.1:${serverPort}/redact?token=query-secret`,
+      })
+    )
+    for (let frame = 0; frame < 30; frame++) {
+      testRoot.renderer.flush()
+      if (testRoot.renderer.getPaintedText().join(" ").includes("403")) break
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    const painted = testRoot.renderer.getPaintedText().join(" ")
+    expect(painted).toContain("403")
+    expect(painted).not.toContain("token")
+    expect(painted).not.toContain("query-secret")
+    expect(painted).not.toContain("top-secret-response-body")
+  })
+
+  it("cancels an in-flight URL body when its image unmounts", async () => {
+    const testRoot = createTestRoot({ allowPrivateNetworkImages: true })
+    testRoot.render(
+      sourceFrame({
+        kind: "url",
+        url: `http://127.0.0.1:${serverPort}/slow`,
+      })
+    )
+    for (let frame = 0; frame < 50 && slowRequestCount < 1; frame++) {
+      testRoot.renderer.flush()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(slowRequestCount).toBe(1)
+
+    testRoot.unmount()
+    testRoot.renderer.flush()
+    for (let attempt = 0; attempt < 50 && slowResponseCloseCount < 1; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(slowResponseCloseCount).toBe(1)
   })
 
   it("keeps URL status, MIME, size, and decode failures recoverable in the GPU renderer", async () => {
@@ -274,7 +421,7 @@ describeNative("custom element: img", () => {
     ]
 
     for (const failure of cases) {
-      const testRoot = createTestRoot()
+      const testRoot = createTestRoot({ allowPrivateNetworkImages: true })
       testRoot.render(
         sourceFrame({
           kind: "url",
@@ -321,5 +468,36 @@ describeNative("custom element: svg", () => {
     const screenshot = "/tmp/gpuix-svg-icon.png"
     testRoot.renderer.captureScreenshot(screenshot)
     expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
+  })
+
+  it("uses the light default icon colour on a dark surface", () => {
+    const baseline = createTestRoot()
+    baseline.render(<div style={{ width: "100%", height: "100%", backgroundColor: "#101522" }} />)
+    const baselinePath = "/tmp/gpuix-svg-default-baseline.png"
+    baseline.renderer.captureScreenshot(baselinePath)
+
+    const icon = createTestRoot()
+    icon.render(
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "#101522",
+        }}
+      >
+        <svg
+          source={'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="4" y="4" width="24" height="24" rx="4" fill="#000"/></svg>'}
+          style={{ width: 96, height: 96 }}
+        />
+      </div>
+    )
+    const iconPath = "/tmp/gpuix-svg-default-light.png"
+    icon.renderer.captureScreenshot(iconPath)
+    expect(bufferSimilarity(fs.readFileSync(baselinePath), fs.readFileSync(iconPath))).toBeLessThan(
+      0.99
+    )
   })
 })

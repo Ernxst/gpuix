@@ -549,6 +549,8 @@ export interface NativeRenderer {
   /** Apply a batch of mutations in a single FFI call. Returns destroyed IDs. */
   applyBatch?(json: string): Array<number>
   setStrictStyles?(enabled: boolean): void
+  /** Opt in to loopback/private URL images. Link-local and metadata ranges stay blocked. */
+  setAllowPrivateNetworkImages?(enabled: boolean): void
   drainStyleDiagnostics?(): StyleDiagnostic[]
 
   // ── Application lifecycle ──────────────────────────────────────

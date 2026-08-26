@@ -100,6 +100,7 @@ pub struct TestGpuixRenderer {
     /// Same handle GpuixView paints against, so tests can assert on the live
     /// selection after simulating a drag.
     selection: crate::text::SharedSelection,
+    image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
 }
@@ -125,6 +126,8 @@ impl TestGpuixRenderer {
         let callback_clone = event_callback.clone();
         let selection = crate::text::SharedSelection::default();
         let selection_clone = selection.clone();
+        let image_network_policy = crate::custom_elements::img::ImageNetworkPolicy::default();
+        let image_network_policy_for_view = image_network_policy.clone();
 
         // Create VisualTestAppContext with real macOS Metal rendering +
         // TestDispatcher for deterministic scheduling.
@@ -150,6 +153,7 @@ impl TestGpuixRenderer {
                         Arc::new(Mutex::new(event_callback.clone())),
                         "GPUIX Test".to_string(),
                         selection_clone,
+                        image_network_policy_for_view,
                     )
                 })
             })
@@ -172,6 +176,7 @@ impl TestGpuixRenderer {
             tree,
             events,
             selection,
+            image_network_policy,
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(Vec::new()),
         })
@@ -243,6 +248,13 @@ impl TestGpuixRenderer {
         if !enabled {
             self.style_diagnostics.lock().unwrap().clear();
         }
+    }
+
+    /// Opt in to loopback and private-network URL image sources for local tests.
+    /// Link-local and cloud-metadata addresses remain blocked.
+    #[napi]
+    pub fn set_allow_private_network_images(&self, enabled: bool) {
+        self.image_network_policy.set_allow_private(enabled);
     }
 
     #[napi]
@@ -373,6 +385,22 @@ impl TestGpuixRenderer {
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// Advance GPUI's async executor clock so tests can deterministically fire
+    /// timers such as bounded image retry/revalidation deadlines.
+    #[napi]
+    pub fn advance_async_clock(&self, delta_ms: f64) -> Result<()> {
+        if !delta_ms.is_finite() || delta_ms < 0.0 {
+            return Err(Error::from_reason(
+                "advanceAsyncClock delta must be a finite non-negative number",
+            ));
+        }
+        with_test_state(|cx, _window, _view| {
+            cx.advance_clock(std::time::Duration::from_secs_f64(delta_ms / 1000.0));
             cx.run_until_parked();
             Ok(())
         })
