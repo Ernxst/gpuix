@@ -49,10 +49,25 @@ use crate::text::{
 };
 use crate::theme::Theme;
 
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn default_http_client() -> Arc<dyn gpui::http_client::HttpClient> {
+    Arc::new(
+        reqwest_client::ReqwestClient::user_agent(concat!("GPUIX/", env!("CARGO_PKG_VERSION")))
+            .unwrap_or_else(|_| reqwest_client::ReqwestClient::new()),
+    )
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct PendingStyleDiagnostic {
     element_id: u64,
     problem: StyleProblem,
+    kind: DiagnosticKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DiagnosticKind {
+    Style,
+    Property,
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -93,7 +108,23 @@ pub(crate) fn pending_style_diagnostics(
         .map(move |problem| PendingStyleDiagnostic {
             element_id,
             problem,
+            kind: DiagnosticKind::Style,
         })
+}
+
+pub(crate) fn pending_custom_prop_diagnostic(
+    tree: &RetainedTree,
+    element_id: u64,
+    key: &str,
+    value: &serde_json::Value,
+) -> Option<PendingStyleDiagnostic> {
+    let element_type = tree.elements.get(&element_id)?.element_type.as_str();
+    let problem = crate::custom_elements::img::image_prop_problem(element_type, key, value)?;
+    Some(PendingStyleDiagnostic {
+        element_id,
+        problem,
+        kind: DiagnosticKind::Property,
+    })
 }
 
 fn style_diagnostic_context(
@@ -127,12 +158,16 @@ fn style_diagnostic_context(
         .as_ref()
         .map(|test_id| format!(" testId={test_id:?}"))
         .unwrap_or_default();
+    let subject = match diagnostic.kind {
+        DiagnosticKind::Style => "style",
+        DiagnosticKind::Property => "property",
+    };
     let data_test_id_label = data_test_id
         .as_ref()
         .map(|data_test_id| format!(" data-testid={data_test_id:?}"))
         .unwrap_or_default();
     let message = format!(
-        "[gpuix] Invalid style on <{element_type}{author_id_label}{data_test_id_label}{test_id_label}> (element {}): property {:?} rejected value {}: {}",
+        "[gpuix] Invalid {subject} on <{element_type}{author_id_label}{data_test_id_label}{test_id_label}> (element {}): property {:?} rejected value {}: {}",
         diagnostic.element_id,
         diagnostic.problem.property,
         diagnostic.problem.value,
@@ -1003,6 +1038,7 @@ pub struct GpuixRenderer {
     /// Shared with GpuixView so napi methods can read the live selection
     /// without an App context. Paint and napi calls can use different threads.
     selection: SharedSelection,
+    image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -1139,6 +1175,7 @@ impl GpuixRenderer {
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
             selection: SharedSelection::default(),
+            image_network_policy: crate::custom_elements::img::ImageNetworkPolicy::default(),
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(Vec::new()),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -1226,6 +1263,8 @@ impl GpuixRenderer {
                 "A GPUI application already exists on this thread",
             ));
         }
+        self.image_network_policy
+            .set_allow_private(options.allow_private_network_images.unwrap_or(false));
 
         let width = options.width.unwrap_or(800.0);
         let height = options.height.unwrap_or(600.0);
@@ -1244,6 +1283,7 @@ impl GpuixRenderer {
         let application_callback = self.application_event_callback();
 
         let selection = self.selection.clone();
+        let image_network_policy = self.image_network_policy.clone();
         let opened_window = Rc::new(RefCell::new(None));
         let startup_error = Rc::new(RefCell::new(None));
         let opened_window_for_app = opened_window.clone();
@@ -1251,6 +1291,7 @@ impl GpuixRenderer {
         // bun/node is not a .app. A Dock icon with no window cannot relaunch.
         // Last window close quits AppKit; tick() returns false and JS exits.
         let app = gpui::Application::with_platform(platform.clone())
+            .with_http_client(default_http_client())
             .with_quit_mode(gpui::QuitMode::LastWindowClosed);
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             init_key_bindings(cx);
@@ -1281,6 +1322,7 @@ impl GpuixRenderer {
                             window_event_callback.clone(),
                             title,
                             selection.clone(),
+                            image_network_policy.clone(),
                         )
                     })
                 },
@@ -1338,6 +1380,8 @@ impl GpuixRenderer {
         if *self.lifecycle.lock().unwrap() != RendererLifecycle::Uninitialized {
             return Err(Error::from_reason("Renderer is already initialized"));
         }
+        self.image_network_policy
+            .set_allow_private(options.allow_private_network_images.unwrap_or(false));
 
         let width = options.width.unwrap_or(800.0);
         let height = options.height.unwrap_or(600.0);
@@ -1349,6 +1393,7 @@ impl GpuixRenderer {
         let window_options = options.clone();
         let tree = self.tree.clone();
         let selection = self.selection.clone();
+        let image_network_policy = self.image_network_policy.clone();
         let callback = self.event_callback_for_view();
         let window_event_callback = self.window_event_callback();
         let application_callback = self.application_event_callback();
@@ -1365,7 +1410,8 @@ impl GpuixRenderer {
             .name("gpuix-ui".to_string())
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    gpui_platform::application().run(move |cx| {
+                    let app = gpui_platform::application().with_http_client(default_http_client());
+                    app.run(move |cx| {
                         init_key_bindings(cx);
                         crate::custom_elements::input::init(cx);
                         init_application_menu_support(cx, Some(application_callback.clone()));
@@ -1389,6 +1435,7 @@ impl GpuixRenderer {
                                         window_event_callback,
                                         title,
                                         selection,
+                                        image_network_policy,
                                     )
                                 })
                             },
@@ -1557,7 +1604,14 @@ impl GpuixRenderer {
         let value: serde_json::Value = serde_json::from_str(&value_json)
             .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
+        let diagnostic = pending_custom_prop_diagnostic(&tree, id, &key, &value);
         tree.set_custom_prop(id, key, value);
+        drop(tree);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            if let Some(diagnostic) = diagnostic {
+                self.style_diagnostics.lock().unwrap().push(diagnostic);
+            }
+        }
         Ok(())
     }
 
@@ -2469,6 +2523,14 @@ mod initialization_tests {
     use super::*;
 
     #[test]
+    fn inherited_image_colour_keeps_the_light_on_dark_fallback() {
+        assert_eq!(
+            u32::from(Inherited::root(&Theme::dark()).current_color),
+            0xe2e2e2ff
+        );
+    }
+
+    #[test]
     fn initialization_panics_preserve_observed_messages() {
         let observed = [
             "window.rs:366:57: called Option::unwrap() on a None value",
@@ -2563,6 +2625,7 @@ fn start_web_app(
                     window_event_callback,
                     "GPUIX Web".to_string(),
                     selection,
+                    crate::custom_elements::img::ImageNetworkPolicy::default(),
                 )
             })
         });
@@ -2879,13 +2942,19 @@ impl WebGpuixRenderer {
         key: String,
         value_json: String,
     ) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(id)?;
         let value = serde_json::from_str(&value_json).map_err(|error| {
             wasm_bindgen::JsValue::from_str(&format!("Failed to parse custom prop: {error}"))
         })?;
-        self.tree
-            .lock()
-            .unwrap()
-            .set_custom_prop(web_element_id(id)?, key, value);
+        let mut tree = self.tree.lock().unwrap();
+        let diagnostic = pending_custom_prop_diagnostic(&tree, id, &key, &value);
+        tree.set_custom_prop(id, key, value);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            if let Some(diagnostic) = diagnostic {
+                let (message, _, _, _, _) = style_diagnostic_context(&diagnostic, &tree);
+                web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
+            }
+        }
         Ok(())
     }
 
@@ -3265,6 +3334,7 @@ pub(crate) struct GpuixView {
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
     /// Live text selection, shared with the paint closures and the napi methods.
     pub(crate) selection: SharedSelection,
+    pub(crate) image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     /// Retained owner and pressed-button lifetime for mouse pointer capture.
     pointer_router: crate::pointer::SharedPointerRouter,
     /// Cancels the pressed-pointer sequence when the platform deactivates this window.
@@ -3282,6 +3352,7 @@ impl GpuixView {
         window_event_callback: WindowEventCallback,
         window_title: String,
         selection: SharedSelection,
+        image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     ) -> Self {
         Self {
             tree,
@@ -3295,6 +3366,7 @@ impl GpuixView {
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
             selection,
+            image_network_policy,
             pointer_router: Default::default(),
             window_activation_subscription: None,
             virtual_lists: HashMap::new(),
@@ -3398,6 +3470,7 @@ impl GpuixView {
             now,
             motion_active: &mut motion_active,
             selection: self.selection.clone(),
+            image_network_policy: &self.image_network_policy,
             inherited,
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
@@ -3501,6 +3574,7 @@ pub(crate) struct BuildCtx<'a> {
     pub now: web_time::Instant,
     pub motion_active: &'a mut bool,
     pub selection: SharedSelection,
+    pub image_network_policy: &'a crate::custom_elements::img::ImageNetworkPolicy,
     /// Inherited text state, resolved the way CSS inherits it. The renderer's
     /// own theme only seeds the root selection wash; custom elements resolve
     /// their own theme from their `theme` prop.
@@ -3516,6 +3590,8 @@ pub(crate) struct Inherited {
     pub selection_wash: gpui::Hsla,
     /// Text case transformation inherited by plain text descendants.
     pub text_transform: TextTransform,
+    /// Resolved CSS currentColor value for custom image elements.
+    pub current_color: gpui::Rgba,
     /// Nearest native hover group for descendant `hoverWithin` styles.
     pub hover_group: Option<gpui::SharedString>,
 }
@@ -3528,6 +3604,7 @@ impl Inherited {
             selectable: true,
             selection_wash: wash,
             text_transform: TextTransform::None,
+            current_color: gpui::rgba(0xe2e2e2ff),
             hover_group: None,
         }
     }
@@ -3552,6 +3629,13 @@ impl Inherited {
                 Some("uppercase") => self.text_transform = TextTransform::Uppercase,
                 Some("lowercase") => self.text_transform = TextTransform::Lowercase,
                 _ => {}
+            }
+            if let Some(color) = style
+                .color
+                .as_deref()
+                .and_then(crate::color::parse_color_rgba)
+            {
+                self.current_color = color;
             }
         }
         if let Some(hover_group) = hover_group {
@@ -3990,6 +4074,7 @@ impl gpui::Render for GpuixView {
                     now,
                     motion_active: &mut motion_active,
                     selection: self.selection.clone(),
+                    image_network_policy: &self.image_network_policy,
                     inherited: Inherited::root(&theme),
                 };
                 build_element(root_id, &mut ctx, window, cx)
@@ -4127,6 +4212,8 @@ pub(crate) fn build_element(
                 selection: ctx.selection.clone(),
                 selectable: inherited.selectable,
                 selection_wash: inherited.selection_wash,
+                current_color: inherited.current_color,
+                image_network_policy: ctx.image_network_policy,
             };
             ctx.custom_registry
                 .render(custom_type, &element.custom_props, render_ctx, window, cx)
@@ -5500,6 +5587,9 @@ pub(crate) fn apply_batch_to_tree(
                 tree.root_id = Some(id);
             }
             BatchOp::SetCustomProp { id, key, value } => {
+                if let Some(diagnostic) = pending_custom_prop_diagnostic(tree, id, &key, &value) {
+                    diagnostics.push(diagnostic);
+                }
                 tree.set_custom_prop(id, key, value);
             }
         }
@@ -5614,6 +5704,9 @@ pub struct WindowOptions {
     pub window_background: Option<String>,
     pub traffic_light_x: Option<f64>,
     pub traffic_light_y: Option<f64>,
+    /// Allow URL-backed images to connect to loopback and private networks.
+    /// Link-local and cloud-metadata ranges remain blocked.
+    pub allow_private_network_images: Option<bool>,
 }
 
 impl Default for WindowOptions {
@@ -5632,6 +5725,7 @@ impl Default for WindowOptions {
             window_background: None,
             traffic_light_x: None,
             traffic_light_y: None,
+            allow_private_network_images: Some(false),
         }
     }
 }

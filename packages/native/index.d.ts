@@ -154,6 +154,11 @@ export declare class TestGpuixRenderer {
   insertBefore(parentId: number, childId: number, beforeId: number): void
   setStyle(id: number, styleJson: string): void
   setStrictStyles(enabled: boolean): void
+  /**
+   * Opt in to loopback and private-network URL image sources for local tests.
+   * Link-local and cloud-metadata addresses remain blocked.
+   */
+  setAllowPrivateNetworkImages(enabled: boolean): void
   drainStyleDiagnostics(): Array<GpuixStyleDiagnostic>
   setText(id: number, content: string): void
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
@@ -187,6 +192,11 @@ export declare class TestGpuixRenderer {
    * hit testing requires elements to be laid out).
    */
   flush(): void
+  /**
+   * Advance GPUI's async executor clock so tests can deterministically fire
+   * timers such as bounded image retry/revalidation deadlines.
+   */
+  advanceAsyncClock(deltaMs: number): void
   getWindowSize(): WindowSize
   /** Simulate a native window resize through GPUI's bounds observer. */
   simulateResize(width: number, height: number): void
@@ -520,6 +530,11 @@ export interface WindowOptions {
   windowBackground?: string
   trafficLightX?: number
   trafficLightY?: number
+  /**
+   * Allow URL-backed images to connect to loopback and private networks.
+   * Link-local and cloud-metadata ranges remain blocked.
+   */
+  allowPrivateNetworkImages?: boolean
 }
 
 export interface WindowSize {

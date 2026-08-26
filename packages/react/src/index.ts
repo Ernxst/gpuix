@@ -82,6 +82,8 @@ export type {
   GridTrackMinmax,
   GridTrackNonRepeat,
   GridTrackSizing,
+  ImageMimeType,
+  ImageSource,
   LinearGradient,
   LinearGradientStop,
   MotionEase,

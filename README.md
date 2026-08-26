@@ -1317,7 +1317,7 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `input`         | Native single-line text editor                   |
 | `textarea`      | Native multiline, auto-growing text editor       |
 | `virtual-list`  | Long collections; only visible rows are built    |
-| `img`           | Local raster or SVG images                       |
+| `img`           | Raster or full-colour SVG images from paths, URLs, or bytes |
 | `svg`           | Tintable monochrome SVG icons from source or disk |
 | `anchored`      | Positioned overlay                               |
 | `canvas`        | Custom drawing (planned)                         |
@@ -1351,25 +1351,74 @@ block and custom children are rejected during React render.
 
 ## Images and icons
 
-`<img>` takes a **filesystem path**, not a URL. Resolve the file with
-`fileURLToPath` or `path.join` and pass that string as `src`.
-
 ### `<img>`
 
-`<img>` paints through GPUI's image element. It loads **PNG, JPEG, WebP, GIF,
-and SVG** from disk. SVG here is a full-colour image, not a tintable icon.
+`<img>` paints **PNG, JPEG, WebP, GIF, and full-colour SVG** from one explicit
+source union. Strings are not inferred: choose a filesystem path, an HTTP(S)
+URL, or in-memory bytes.
 
 ```tsx
 <img
-  src={fileURLToPath(new URL('./photo.png', import.meta.url))}
+  src={{
+    kind: 'path',
+    path: fileURLToPath(new URL('./photo.png', import.meta.url)),
+  }}
   objectFit="cover"
   style={{ width: 240, height: 140, borderRadius: 12 }}
+/>
+
+<img
+  src={{ kind: 'url', url: 'https://example.com/photo.webp' }}
+  style={{ width: 240, height: 140 }}
+/>
+
+<img
+  src={{ kind: 'data', mimeType: 'image/png', bytes: pngBuffer }}
+  style={{ width: 240, height: 140 }}
 />
 ```
 
 `objectFit` matches CSS: `"contain"` (default), `"cover"`, `"fill"`,
-`"scaleDown"`, or `"none"`. An empty `src` or a failed load shows a fallback
-placeholder instead of crashing.
+`"scaleDown"`, or `"none"`. `bytes` accepts an `ArrayBuffer`, `Uint8Array`
+(including Node.js `Buffer`), or a number array. Every source is capped at
+**10 MiB** before decode. URL responses are cached by URL and revalidated with
+`ETag` or `Last-Modified` when another image instance needs the same asset.
+Failed requests retry with bounded backoff, successful path and URL loads have
+a five-minute revalidation deadline, and unmounting an image cancels its active
+load. HTTP requests have a 15-second total deadline and follow at most five
+redirects.
+
+URL images are public-network-only by default. GPUIX rejects URL credentials,
+resolves and validates every redirect target before connecting, and never
+includes URL credentials, query strings, or response bodies in painted/logged
+load errors. Loopback and private-network development servers require an
+explicit renderer-level opt-in:
+
+```tsx
+render(<App />, { allowPrivateNetworkImages: true })
+```
+
+Link-local and cloud-metadata address ranges remain blocked with the opt-in.
+
+SVG preserves its authored colours by default. Set `tint="currentColor"` to
+replace only authored `currentColor` references with the resolved inherited
+`style.color`; other authored fills and strokes, IDs, text, and URL references
+remain unchanged.
+
+```tsx
+<div style={{ color: '#5ca9ff' }}>
+  <img
+    src={{ kind: 'data', mimeType: 'image/svg+xml', bytes: iconBytes }}
+    tint="currentColor"
+    style={{ width: 20, height: 20 }}
+  />
+</div>
+```
+
+An omitted source shows the placeholder. Invalid source objects, unsupported
+MIME types, HTTP status failures, decode failures, and over-limit responses
+produce an element-specific diagnostic or fallback instead of crashing the
+renderer.
 
 ### `<svg>`
 
