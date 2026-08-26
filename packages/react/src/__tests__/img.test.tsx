@@ -11,7 +11,12 @@ import {
   TestRenderer,
 } from "../testing"
 import type { ImageMimeType, ImageSource } from "../types/host"
-import { bufferSimilarity, expectScreenshotsDiffer, isCI } from "./test-utils"
+import {
+  bufferSimilarity,
+  expectScreenshotsDiffer,
+  expectScreenshotsEqual,
+  isCI,
+} from "./test-utils"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -602,6 +607,108 @@ describeNative("custom element: svg", () => {
       testRoot.renderer.captureScreenshot(bluePath)
       expectScreenshotsDiffer(redPath, bluePath)
     }
+  })
+
+  it("keeps SVG currentColor aligned with an ancestor hover colour", () => {
+    const source =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="4" y="4" width="24" height="24" rx="4" fill="currentColor"/></svg>'
+    const baseColor = "#fb7185"
+    const hoverColor = "#60a5fa"
+    const activeColor = "#4ade80"
+    const focusColor = "#c084fc"
+
+    function SvgCurrentColor({
+      color,
+      hoverColor,
+      activeColor,
+      focusColor,
+    }: {
+      color: string
+      hoverColor?: string
+      activeColor?: string
+      focusColor?: string
+    }) {
+      return (
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: "#10131d",
+          }}
+        >
+          <div
+            testId="svg-current-color-state"
+            tabIndex={0}
+            style={{
+              width: 160,
+              height: 100,
+              color,
+              ...(hoverColor ? { hover: { color: hoverColor } } : {}),
+              ...(activeColor ? { active: { color: activeColor } } : {}),
+              ...(focusColor ? { focus: { color: focusColor } } : {}),
+            }}
+          >
+            <svg source={source} style={{ width: 160, height: 100 }} />
+          </div>
+        </div>
+      )
+    }
+
+    const interactive = createImageTestRoot()
+    interactive.render(
+      <SvgCurrentColor
+        color={baseColor}
+        hoverColor={hoverColor}
+        activeColor={activeColor}
+        focusColor={focusColor}
+      />
+    )
+    const target = interactive.renderer.findByTestId("svg-current-color-state")!
+    const [x, y, width, height] = interactive.renderer.getElementBounds(target.id)!
+    const before = "/tmp/gpuix-svg-current-color-hover-before.png"
+    const hovered = "/tmp/gpuix-svg-current-color-hover-after.png"
+    const expected = "/tmp/gpuix-svg-current-color-hover-expected.png"
+    const active = "/tmp/gpuix-svg-current-color-active.png"
+    const activeExpected = "/tmp/gpuix-svg-current-color-active-expected.png"
+    const focused = "/tmp/gpuix-svg-current-color-focus.png"
+    const focusExpected = "/tmp/gpuix-svg-current-color-focus-expected.png"
+
+    interactive.renderer.nativeSimulateMouseMove(10, 10)
+    interactive.renderer.captureScreenshot(before)
+    interactive.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+    expect(interactive.renderer.getResolvedStyle(target.id)).toMatchObject({ color: hoverColor })
+    interactive.renderer.captureScreenshot(hovered)
+
+    const reference = createImageTestRoot()
+    reference.render(<SvgCurrentColor color={hoverColor} />)
+    reference.renderer.captureScreenshot(expected)
+
+    expectScreenshotsDiffer(before, hovered)
+    // Issue #52's diagnostic read and the GPU SVG paint must represent the
+    // same resolved colour, not merely two different frames. macOS CI VMs
+    // sometimes retain the previous interactive frame between captures.
+    if (!isCI) expectScreenshotsEqual(hovered, expected)
+
+    interactive.renderer.nativeSimulateMouseDown(x + width / 2, y + height / 2)
+    expect(interactive.renderer.getResolvedStyle(target.id)).toMatchObject({ color: activeColor })
+    interactive.renderer.captureScreenshot(active)
+    const activeReference = createImageTestRoot()
+    activeReference.render(<SvgCurrentColor color={activeColor} />)
+    activeReference.renderer.captureScreenshot(activeExpected)
+    if (!isCI) expectScreenshotsEqual(active, activeExpected)
+
+    interactive.renderer.nativeSimulateMouseUp(x + width / 2, y + height / 2)
+    interactive.renderer.nativeSimulateMouseMove(10, 10)
+    interactive.renderer.focusElement(target.id)
+    expect(interactive.renderer.getResolvedStyle(target.id)).toMatchObject({ color: focusColor })
+    interactive.renderer.captureScreenshot(focused)
+    const focusReference = createImageTestRoot()
+    focusReference.render(<SvgCurrentColor color={focusColor} />)
+    focusReference.renderer.captureScreenshot(focusExpected)
+    if (!isCI) expectScreenshotsEqual(focused, focusExpected)
   })
 
   it("uses the light default icon colour on a dark surface", () => {

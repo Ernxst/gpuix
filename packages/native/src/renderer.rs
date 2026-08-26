@@ -4446,6 +4446,7 @@ impl GpuixView {
             motion_active: &mut motion_active,
             selection: self.selection.clone(),
             image_network_policy: &self.image_network_policy,
+            pointer_router: &self.pointer_router,
             inherited,
             highlights: &mut self.highlights,
             highlight_events: &mut highlight_events,
@@ -4553,6 +4554,7 @@ pub(crate) struct BuildCtx<'a> {
     pub motion_active: &'a mut bool,
     pub selection: SharedSelection,
     pub image_network_policy: &'a crate::custom_elements::img::ImageNetworkPolicy,
+    pub pointer_router: &'a crate::pointer::SharedPointerRouter,
     /// Inherited text state, resolved the way CSS inherits it. The renderer's
     /// own theme only seeds the root selection wash; custom elements resolve
     /// their own theme from their `theme` prop.
@@ -4607,7 +4609,12 @@ impl Inherited {
     }
 
     /// Apply the inheritable parts of `style` for the subtree below it.
-    fn descend(mut self, style: Option<&StyleDesc>, hover_group: Option<&str>) -> Self {
+    fn descend(
+        mut self,
+        style: Option<&StyleDesc>,
+        hover_group: Option<&str>,
+        state: AppliedStyleState,
+    ) -> Self {
         if let Some(style) = style {
             match style.user_select.as_deref() {
                 Some("none") => self.selectable = false,
@@ -4627,12 +4634,21 @@ impl Inherited {
                 Some("lowercase") => self.text_transform = TextTransform::Lowercase,
                 _ => {}
             }
-            if let Some(color) = style
-                .color
-                .as_deref()
-                .and_then(crate::color::parse_color_rgba)
-            {
-                self.current_color = color;
+            apply_current_color(&mut self.current_color, style);
+            if state.focused {
+                apply_current_color_refinement(&mut self.current_color, style.focus.as_deref());
+            }
+            if state.focus_visible {
+                apply_current_color_refinement(
+                    &mut self.current_color,
+                    style.focus_visible.as_deref(),
+                );
+            }
+            if state.hovered {
+                apply_current_color_refinement(&mut self.current_color, style.hover.as_deref());
+            }
+            if state.active {
+                apply_current_color_refinement(&mut self.current_color, style.active.as_deref());
             }
         }
         if let Some(hover_group) = hover_group {
@@ -4640,6 +4656,43 @@ impl Inherited {
         }
         self
     }
+}
+
+/// The state refinements GPUI has applied to this element's own style.
+///
+/// `currentColor` is resolved while GPUIX builds custom children, before GPUI
+/// paints their SVGs. Read the preceding frame's hitboxes here: a state change
+/// notifies the view, so they are the same hitboxes GPUI used to select the
+/// refinement that caused this build.
+#[derive(Default)]
+struct AppliedStyleState {
+    focused: bool,
+    focus_visible: bool,
+    hovered: bool,
+    active: bool,
+}
+
+fn apply_current_color(color: &mut gpui::Rgba, style: &StyleDesc) {
+    if let Some(parsed) = style
+        .color
+        .as_deref()
+        .and_then(crate::color::parse_color_rgba)
+    {
+        *color = parsed;
+    }
+}
+
+fn apply_current_color_refinement(color: &mut gpui::Rgba, refinement: Option<&StyleDesc>) {
+    if let Some(refinement) = refinement {
+        apply_current_color(color, refinement);
+    }
+}
+
+fn contains_pointer(bounds: crate::automation::ElementBounds, pointer: (f64, f64)) -> bool {
+    pointer.0 >= bounds.x
+        && pointer.0 <= bounds.x + bounds.width
+        && pointer.1 >= bounds.y
+        && pointer.1 <= bounds.y + bounds.height
 }
 
 fn json_usize(value: &serde_json::Value) -> Option<usize> {
@@ -5125,6 +5178,7 @@ impl gpui::Render for GpuixView {
                     motion_active: &mut motion_active,
                     selection: self.selection.clone(),
                     image_network_policy: &self.image_network_policy,
+                    pointer_router: &self.pointer_router,
                     inherited: Inherited::root(&theme),
                     highlights: &mut self.highlights,
                     highlight_events: &mut highlight_events,
@@ -5235,7 +5289,30 @@ pub(crate) fn build_element(
         .get("hoverGroup")
         .and_then(serde_json::Value::as_str);
     let parent_inherited = ctx.inherited.clone();
-    ctx.inherited = parent_inherited.clone().descend(style, hover_group);
+    let pointer = point_to_xy(window.mouse_position());
+    let bounds = crate::automation::get_bounds(id);
+    let accepts_pointer = style.and_then(|style| style.pointer_events.as_deref()) != Some("none");
+    let hovered = accepts_pointer
+        && !window.last_input_was_keyboard()
+        && bounds.is_some_and(|bounds| contains_pointer(bounds, pointer));
+    let active = accepts_pointer
+        && ctx
+            .pointer_router
+            .borrow()
+            .pressed_origin()
+            .map(point_to_xy)
+            .is_some_and(|origin| bounds.is_some_and(|bounds| contains_pointer(bounds, origin)));
+    let focused = ctx
+        .focus_handles
+        .get(&id)
+        .is_some_and(|handle| handle.is_focused(window));
+    let state = AppliedStyleState {
+        focused,
+        focus_visible: focused && window.last_input_was_keyboard(),
+        hovered,
+        active,
+    };
+    ctx.inherited = parent_inherited.clone().descend(style, hover_group, state);
 
     // A `highlight` here replaces any ancestor's: the nearest declaration wins,
     // and `GroupList::collect` skips nested declarations so an ancestor never

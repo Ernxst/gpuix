@@ -46,7 +46,7 @@ pub struct CustomRenderContext<'a> {
     pub selectable: bool,
     /// Inherited selection wash colour.
     pub selection_wash: gpui::Hsla,
-    /// Resolved inherited text colour, used by SVG currentColor rendering.
+    /// Resolved inherited text colour, including applied interactive refinements.
     pub current_color: gpui::Rgba,
     /// Renderer-owned HTTP policy and client for URL-backed images.
     pub image_network_policy: &'a img::ImageNetworkPolicy,
