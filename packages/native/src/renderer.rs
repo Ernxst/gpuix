@@ -5226,7 +5226,12 @@ pub(crate) fn build_element(
         ctx.motion_states.remove(&id);
         None
     };
-    let style = animated_style.as_ref().or(element.style.as_deref());
+    let declared_style = animated_style.as_ref().or(element.style.as_deref());
+    // GPUI resolves percentages during Taffy layout. `ch`, calc(), and clamp()
+    // need the current text metrics, so resolve their absolute component once
+    // while rebuilding this immediate-mode element.
+    let resolved_style = declared_style.map(|style| resolve_length_expressions(style, window));
+    let style = resolved_style.as_ref();
 
     // Inheritable style resolves once here so both built-ins and custom
     // elements see the same cascade.
@@ -5267,7 +5272,7 @@ pub(crate) fn build_element(
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
-            build_virtual_list(element, ctx, window, cx)
+            build_virtual_list(element, style, ctx, window, cx)
         }
 
         // Polymorphic dispatch for all custom elements.
@@ -5305,6 +5310,7 @@ pub(crate) fn build_element(
 
 fn build_virtual_list(
     element: &crate::retained_tree::RetainedElement,
+    style: Option<&StyleDesc>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -5428,7 +5434,7 @@ fn build_virtual_list(
     });
     let mut list =
         gpui::list(list_state, render_item).with_sizing_behavior(gpui::ListSizingBehavior::Auto);
-    if let Some(style) = element.style.as_deref() {
+    if let Some(style) = style {
         list = apply_styles(list, style);
     }
     list.into_any_element()
@@ -6019,6 +6025,9 @@ pub(crate) fn apply_width<E: gpui::Styled>(el: E, dim: &crate::style::DimensionV
         crate::style::DimensionValue::Pixels(v) => el.w(gpui::px(*v as f32)),
         crate::style::DimensionValue::Percentage(v) if *v >= 0.999 => el.w_full(),
         crate::style::DimensionValue::Percentage(v) => el.w(gpui::relative(*v as f32)),
+        crate::style::DimensionValue::Ch(_)
+        | crate::style::DimensionValue::Calc { .. }
+        | crate::style::DimensionValue::Clamp { .. } => el,
         crate::style::DimensionValue::Auto => el,
     }
 }
@@ -6028,7 +6037,119 @@ pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::Dimension
         crate::style::DimensionValue::Pixels(v) => el.h(gpui::px(*v as f32)),
         crate::style::DimensionValue::Percentage(v) if *v >= 0.999 => el.h_full(),
         crate::style::DimensionValue::Percentage(v) => el.h(gpui::relative(*v as f32)),
+        crate::style::DimensionValue::Ch(_)
+        | crate::style::DimensionValue::Calc { .. }
+        | crate::style::DimensionValue::Clamp { .. } => el,
         crate::style::DimensionValue::Auto => el,
+    }
+}
+
+/// Resolve the font-relative part of a length before handing the remaining
+/// percentage to GPUI/Taffy. Mixed percentages use the current viewport as the
+/// deterministic containing-size fallback; pure percentages keep GPUI's native
+/// relative layout semantics.
+fn resolve_length_expressions(style: &StyleDesc, window: &gpui::Window) -> StyleDesc {
+    let mut resolved = style.clone();
+    let text_style = window.text_style();
+    let font_size = style
+        .font_size
+        .map(|size| gpui::px(size as f32))
+        .unwrap_or_else(|| text_style.font_size.to_pixels(window.rem_size()));
+    let mut font = text_style.font();
+    if let Some(family) = &style.font_family {
+        font.family = gpui::SharedString::from(family.clone());
+    }
+    if let Some(weight) = &style.font_weight {
+        font.weight = parse_font_weight(weight);
+    }
+    let font_id = window.text_system().resolve_font(&font);
+    let ch = f64::from(f32::from(
+        window
+            .text_system()
+            .ch_advance(font_id, font_size)
+            .unwrap_or(font_size * 0.5),
+    ));
+    let bounds = window.bounds().size;
+
+    resolved.width =
+        resolve_dimension(style.width.as_ref(), ch, f64::from(f32::from(bounds.width)));
+    resolved.min_width = resolve_dimension(
+        style.min_width.as_ref(),
+        ch,
+        f64::from(f32::from(bounds.width)),
+    );
+    resolved.max_width = resolve_dimension(
+        style.max_width.as_ref(),
+        ch,
+        f64::from(f32::from(bounds.width)),
+    );
+    resolved.height = resolve_dimension(
+        style.height.as_ref(),
+        ch,
+        f64::from(f32::from(bounds.height)),
+    );
+    resolved.min_height = resolve_dimension(
+        style.min_height.as_ref(),
+        ch,
+        f64::from(f32::from(bounds.height)),
+    );
+    resolved.max_height = resolve_dimension(
+        style.max_height.as_ref(),
+        ch,
+        f64::from(f32::from(bounds.height)),
+    );
+    resolved
+}
+
+fn resolve_dimension(
+    value: Option<&crate::style::DimensionValue>,
+    ch: f64,
+    base: f64,
+) -> Option<crate::style::DimensionValue> {
+    let value = value?;
+    match value {
+        crate::style::DimensionValue::Percentage(_)
+        | crate::style::DimensionValue::Pixels(_)
+        | crate::style::DimensionValue::Auto => Some(value.clone()),
+        crate::style::DimensionValue::Ch(_)
+        | crate::style::DimensionValue::Calc { .. }
+        | crate::style::DimensionValue::Clamp { .. } => {
+            evaluate_dimension(value, ch, base).map(crate::style::DimensionValue::Pixels)
+        }
+    }
+}
+
+fn evaluate_dimension(value: &crate::style::DimensionValue, ch: f64, base: f64) -> Option<f64> {
+    use crate::style::{CalcOperator, DimensionValue};
+    match value {
+        DimensionValue::Pixels(value) => Some(*value),
+        DimensionValue::Percentage(value) => Some(value * base),
+        DimensionValue::Ch(value) => Some(value * ch),
+        DimensionValue::Calc {
+            left,
+            operator,
+            right,
+            ..
+        } => {
+            let left = evaluate_dimension(left, ch, base)?;
+            let right = evaluate_dimension(right, ch, base)?;
+            Some(match operator {
+                CalcOperator::Add => left + right,
+                CalcOperator::Subtract => left - right,
+            })
+        }
+        DimensionValue::Clamp {
+            min,
+            preferred,
+            max,
+            ..
+        } => {
+            let min = evaluate_dimension(min, ch, base)?;
+            let preferred = evaluate_dimension(preferred, ch, base)?;
+            let max = evaluate_dimension(max, ch, base)?;
+            Some(preferred.clamp(min, max))
+        }
+        DimensionValue::Auto => None,
     }
 }
 
@@ -6221,6 +6342,9 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         match min_w {
             crate::style::DimensionValue::Pixels(v) => el = el.min_w(gpui::px(*v as f32)),
             crate::style::DimensionValue::Percentage(v) => el = el.min_w(gpui::relative(*v as f32)),
+            crate::style::DimensionValue::Ch(_)
+            | crate::style::DimensionValue::Calc { .. }
+            | crate::style::DimensionValue::Clamp { .. } => {}
             crate::style::DimensionValue::Auto => {}
         }
     }
@@ -6228,6 +6352,9 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         match min_h {
             crate::style::DimensionValue::Pixels(v) => el = el.min_h(gpui::px(*v as f32)),
             crate::style::DimensionValue::Percentage(v) => el = el.min_h(gpui::relative(*v as f32)),
+            crate::style::DimensionValue::Ch(_)
+            | crate::style::DimensionValue::Calc { .. }
+            | crate::style::DimensionValue::Clamp { .. } => {}
             crate::style::DimensionValue::Auto => {}
         }
     }
@@ -6235,6 +6362,9 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         match max_w {
             crate::style::DimensionValue::Pixels(v) => el = el.max_w(gpui::px(*v as f32)),
             crate::style::DimensionValue::Percentage(v) => el = el.max_w(gpui::relative(*v as f32)),
+            crate::style::DimensionValue::Ch(_)
+            | crate::style::DimensionValue::Calc { .. }
+            | crate::style::DimensionValue::Clamp { .. } => {}
             crate::style::DimensionValue::Auto => {}
         }
     }
@@ -6242,6 +6372,9 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         match max_h {
             crate::style::DimensionValue::Pixels(v) => el = el.max_h(gpui::px(*v as f32)),
             crate::style::DimensionValue::Percentage(v) => el = el.max_h(gpui::relative(*v as f32)),
+            crate::style::DimensionValue::Ch(_)
+            | crate::style::DimensionValue::Calc { .. }
+            | crate::style::DimensionValue::Clamp { .. } => {}
             crate::style::DimensionValue::Auto => {}
         }
     }
@@ -6356,9 +6489,17 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     }
     // `line_height` was accepted by the style type but never applied, so
     // multi-line text always used gpui's default leading.
-    if let Some(line_height) = style.line_height {
-        if line_height > 0.0 {
-            el = el.line_height(gpui::px(line_height as f32));
+    if let Some(line_height) = style.line_height.as_ref() {
+        match line_height {
+            crate::style::LineHeightValue::Pixels(value) if *value > 0.0 => {
+                el = el.line_height(gpui::px(*value as f32))
+            }
+            crate::style::LineHeightValue::Unitless(value) => {
+                if let Ok(value) = value.parse::<f32>() {
+                    el = el.line_height(gpui::relative(value));
+                }
+            }
+            _ => {}
         }
     }
     if let Some(radius) = style.border_radius {

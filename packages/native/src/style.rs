@@ -78,13 +78,41 @@ pub enum BackgroundValue {
     Image(BackgroundImageValue),
 }
 
-/// A dimension value that can be a number (pixels) or a string (percentage, auto, etc.)
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(untagged)]
+/// A validated native length. Expressions stay parsed in the retained style so
+/// rendering never has to re-accept an arbitrary CSS string.
+#[derive(Debug, Clone, PartialEq)]
 pub enum DimensionValue {
     Pixels(f64),
     Percentage(f64), // 0.0 to 1.0
+    Ch(f64),
+    Calc {
+        source: String,
+        left: Box<DimensionValue>,
+        operator: CalcOperator,
+        right: Box<DimensionValue>,
+    },
+    Clamp {
+        source: String,
+        min: Box<DimensionValue>,
+        preferred: Box<DimensionValue>,
+        max: Box<DimensionValue>,
+    },
     Auto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CalcOperator {
+    Add,
+    Subtract,
+}
+
+/// CSS treats an unadorned line-height as a multiplier, while a pixel length
+/// is absolute. A JSON number remains the backwards-compatible pixel shorthand.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum LineHeightValue {
+    Pixels(f64),
+    Unitless(String),
 }
 
 /// One serializable CSS Grid track. Track lists deliberately use tagged objects
@@ -159,7 +187,7 @@ impl<'de> Deserialize<'de> for DimensionValue {
             type Value = DimensionValue;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a number, a percentage string, or 'auto'")
+                formatter.write_str("a number, px, %, ch, calc(), clamp(), or 'auto'")
             }
 
             fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
@@ -187,24 +215,188 @@ impl<'de> Deserialize<'de> for DimensionValue {
             where
                 E: de::Error,
             {
-                if value == "auto" {
-                    return Ok(DimensionValue::Auto);
-                }
-                if let Some(percentage) = value.strip_suffix('%') {
-                    return percentage
-                        .parse::<f64>()
-                        .map(|number| DimensionValue::Percentage(number / 100.0))
-                        .map_err(|_| de::Error::custom(format!("invalid percentage: {value}")));
-                }
-                value
-                    .parse::<f64>()
-                    .map(DimensionValue::Pixels)
-                    .map_err(|_| de::Error::custom(format!("invalid dimension: {value}")))
+                parse_dimension(value).map_err(de::Error::custom)
             }
         }
 
         deserializer.deserialize_any(DimensionVisitor)
     }
+}
+
+impl Serialize for DimensionValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Pixels(value) => serializer.serialize_f64(*value),
+            // Retained-tree inspection has historically exposed percentages as
+            // their normalized fraction (for example, "100%" as a fraction).
+            // Preserve that public diagnostic/test representation.
+            Self::Percentage(value) => serializer.serialize_f64(*value),
+            Self::Ch(value) => serializer.serialize_str(&format!("{value}ch")),
+            Self::Calc { source, .. } | Self::Clamp { source, .. } => {
+                serializer.serialize_str(source)
+            }
+            Self::Auto => serializer.serialize_str("auto"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LineHeightValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+
+        struct LineHeightVisitor;
+        impl<'de> Visitor<'de> for LineHeightVisitor {
+            type Value = LineHeightValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a positive pixel number, px length, or unitless multiplier")
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LineHeightValue::Pixels(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LineHeightValue::Pixels(value as f64))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LineHeightValue::Pixels(value as f64))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if let Some(pixels) = value.strip_suffix("px") {
+                    return pixels
+                        .parse::<f64>()
+                        .map(LineHeightValue::Pixels)
+                        .map_err(|_| de::Error::custom("invalid px lineHeight at byte 0"));
+                }
+                match value.parse::<f64>() {
+                    Ok(number) if number.is_finite() => {
+                        Ok(LineHeightValue::Unitless(value.to_owned()))
+                    }
+                    _ => Err(de::Error::custom("invalid unitless lineHeight at byte 0")),
+                }
+            }
+        }
+        deserializer.deserialize_any(LineHeightVisitor)
+    }
+}
+
+fn parse_dimension(value: &str) -> Result<DimensionValue, String> {
+    let value = value.trim();
+    if value == "auto" {
+        return Ok(DimensionValue::Auto);
+    }
+    if let Some(inner) = value
+        .strip_prefix("calc(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        let (index, operator) = find_calc_operator(inner).ok_or_else(|| {
+            "invalid calc() at byte 5: expected `length + length` or `length - length`".to_string()
+        })?;
+        let left = parse_dimension(&inner[..index])
+            .map_err(|error| format!("invalid calc() at byte 5: {error}"))?;
+        let right = parse_dimension(&inner[index + 1..])
+            .map_err(|error| format!("invalid calc() at byte {}: {error}", index + 6))?;
+        if matches!(left, DimensionValue::Auto) || matches!(right, DimensionValue::Auto) {
+            return Err(
+                "invalid calc() at byte 5: `auto` cannot participate in an expression".into(),
+            );
+        }
+        return Ok(DimensionValue::Calc {
+            source: value.to_owned(),
+            left: Box::new(left),
+            operator,
+            right: Box::new(right),
+        });
+    }
+    if let Some(inner) = value
+        .strip_prefix("clamp(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        let parts = split_top_level(inner, ',');
+        if parts.len() != 3 {
+            return Err("invalid clamp() at byte 6: expected three comma-separated lengths".into());
+        }
+        let parse = |part: &str| parse_dimension(part).map(Box::new);
+        let min = parse(parts[0]).map_err(|error| format!("invalid clamp() at byte 6: {error}"))?;
+        let preferred = parse(parts[1])
+            .map_err(|error| format!("invalid clamp() at byte {}: {error}", parts[0].len() + 7))?;
+        let max = parse(parts[2]).map_err(|error| {
+            format!(
+                "invalid clamp() at byte {}: {error}",
+                parts[0].len() + parts[1].len() + 8
+            )
+        })?;
+        if [&min, &preferred, &max]
+            .into_iter()
+            .any(|part| matches!(part.as_ref(), DimensionValue::Auto))
+        {
+            return Err(
+                "invalid clamp() at byte 6: `auto` cannot participate in an expression".into(),
+            );
+        }
+        return Ok(DimensionValue::Clamp {
+            source: value.to_owned(),
+            min,
+            preferred,
+            max,
+        });
+    }
+    parse_length_atom(value)
+}
+
+fn parse_length_atom(value: &str) -> Result<DimensionValue, String> {
+    let parse = |number: &str, unit: &str| match number.parse::<f64>() {
+        Ok(value) if value.is_finite() => Ok(value),
+        _ => Err(format!("invalid {unit} length at byte 0")),
+    };
+    if let Some(number) = value.strip_suffix("px") {
+        return parse(number, "px").map(DimensionValue::Pixels);
+    }
+    if let Some(number) = value.strip_suffix('%') {
+        return parse(number, "%").map(|value| DimensionValue::Percentage(value / 100.0));
+    }
+    if let Some(number) = value.strip_suffix("ch") {
+        return parse(number, "ch").map(DimensionValue::Ch);
+    }
+    match value.parse::<f64>() {
+        Ok(value) if value.is_finite() => Ok(DimensionValue::Pixels(value)),
+        _ => Err("invalid length at byte 0: expected a number with px, %, or ch".into()),
+    }
+}
+
+fn find_calc_operator(value: &str) -> Option<(usize, CalcOperator)> {
+    let mut depth = 0usize;
+    for (index, character) in value.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            '+' if depth == 0 => return Some((index, CalcOperator::Add)),
+            '-' if depth == 0 && index > 0 => return Some((index, CalcOperator::Subtract)),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Style description retained by the native renderer.
@@ -284,7 +476,7 @@ pub struct StyleDesc {
     pub text_decoration: Option<String>,
     pub text_transform: Option<String>,
     pub text_align: Option<String>,
-    pub line_height: Option<f64>,
+    pub line_height: Option<LineHeightValue>,
     pub white_space: Option<String>,
     pub text_wrap: Option<String>,
     pub text_overflow: Option<String>,
@@ -1076,8 +1268,18 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             text_align,
             ["left", "start", "center", "right"]
         );
-        number_field!(key, value, "lineHeight", line_height);
-        enum_field!(key, value, "whiteSpace", white_space, ["normal", "nowrap", "pre"]);
+        if key == "lineHeight" {
+            parsed.style.line_height =
+                decode(&property!("lineHeight"), value, &mut parsed.problems);
+            continue;
+        }
+        enum_field!(
+            key,
+            value,
+            "whiteSpace",
+            white_space,
+            ["normal", "nowrap", "pre"]
+        );
         if key == "textWrap" {
             let property = property!("textWrap");
             let wrap = decode::<String>(&property, value, &mut parsed.problems);
@@ -1245,12 +1447,27 @@ fn validate_ranges(parsed: &mut ParsedStyle, prefix: &str) {
         |value| value <= 0.0,
         "expected a positive number"
     );
-    reject_if!(
-        line_height,
-        "lineHeight",
-        |value| value <= 0.0,
-        "expected a positive number"
-    );
+    if let Some(line_height) = parsed.style.line_height.as_ref() {
+        let value = match line_height {
+            LineHeightValue::Pixels(value) => *value,
+            LineHeightValue::Unitless(value) => value.parse::<f64>().unwrap_or(f64::NAN),
+        };
+        if !(value > 0.0 && value.is_finite()) {
+            let value = serde_json::to_value(line_height).unwrap();
+            parsed.style.line_height = None;
+            let property = if prefix.is_empty() {
+                "lineHeight".to_string()
+            } else {
+                format!("{prefix}.lineHeight")
+            };
+            reject(
+                &mut parsed.problems,
+                property,
+                &value,
+                "expected a positive pixel length or unitless multiplier",
+            );
+        }
+    }
     reject_if!(
         line_clamp,
         "lineClamp",
@@ -1516,6 +1733,52 @@ pub fn parse_cursor(name: &str) -> Option<gpui::CursorStyle> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn parses_expressive_dimensions_once_with_their_css_source() {
+        let parsed = parse_style_value(&json!({
+            "width": "calc(100% - 4ch)",
+            "minWidth": "24ch",
+            "maxWidth": "clamp(240px, 70%, 960px)",
+            "lineHeight": "1.4",
+        }));
+
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert!(matches!(
+            parsed.style.width,
+            Some(DimensionValue::Calc { .. })
+        ));
+        assert!(matches!(
+            parsed.style.min_width,
+            Some(DimensionValue::Ch(24.0))
+        ));
+        assert!(matches!(
+            parsed.style.max_width,
+            Some(DimensionValue::Clamp { .. })
+        ));
+        assert_eq!(
+            parsed.style.line_height,
+            Some(LineHeightValue::Unitless("1.4".into()))
+        );
+        assert_eq!(
+            serde_json::to_value(parsed.style).unwrap()["width"],
+            "calc(100% - 4ch)"
+        );
+    }
+
+    #[test]
+    fn reports_expression_parse_positions_without_dropping_valid_siblings() {
+        let parsed = parse_style_value(&json!({
+            "width": "calc(100% - 2rem)",
+            "height": 40,
+        }));
+
+        assert_eq!(parsed.style.height, Some(DimensionValue::Pixels(40.0)));
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "width");
+        assert_eq!(parsed.problems[0].value, "\"calc(100% - 2rem)\"");
+        assert!(parsed.problems[0].reason.contains("byte"));
+    }
 
     #[test]
     fn pointer_hit_testing_follows_interaction_and_explicit_overrides() {

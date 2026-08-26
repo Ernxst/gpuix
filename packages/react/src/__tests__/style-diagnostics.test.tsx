@@ -62,6 +62,26 @@ describeNative("style diagnostics", () => {
     expect(diagnostics[0].message).toContain('"uppercase"')
   })
 
+  it("reports an invalid length expression with element, property, value, and parse position", () => {
+    const renderer = new TestRenderer()
+    renderer.createElement(44, "div")
+    renderer.setCustomProp(44, "testId", JSON.stringify("fluid-panel"))
+    renderer.setStyle(44, JSON.stringify({ width: "calc(100% - 2rem)", height: 40 }))
+    renderer.setRoot(44)
+
+    expect(renderer.getElement(44)?.style).toMatchObject({ height: 40 })
+    const [diagnostic] = renderer.drainStyleDiagnostics()
+    expect(diagnostic).toMatchObject({
+      elementId: 44,
+      elementType: "div",
+      testId: "fluid-panel",
+      property: "width",
+      value: '"calc(100% - 2rem)"',
+    })
+    expect(diagnostic!.message).toContain('<div testId="fluid-panel">')
+    expect(diagnostic!.message).toContain("byte")
+  })
+
   it("reports an unknown batched style after later identity metadata is applied", () => {
     const renderer = new TestRenderer()
     renderer.applyBatch(

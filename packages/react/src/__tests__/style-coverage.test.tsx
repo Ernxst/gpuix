@@ -154,6 +154,29 @@ function HoverWithinSiblingProbe({
 }
 
 describe("style props reach the renderer", () => {
+  it("resolves ch, calc, and clamp dimensions on the GPU", () => {
+    const shot = path.join(SHOTS_DIR, "expressive-lengths.png")
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ display: "flex", flexDirection: "column", width: "100%", padding: 20, gap: 16 }}>
+        <div testId="ch-length" style={{ width: "24ch", height: 30, fontSize: 20, backgroundColor: "#7c86ff" }} />
+        <div testId="calc-length" style={{ width: "calc(100% - 4ch)", height: 30, fontSize: 20, backgroundColor: "#38bdf8" }} />
+        <div testId="clamp-length" style={{ width: "clamp(240px, 70%, 960px)", height: 30, backgroundColor: "#f59e0b" }} />
+      </div>,
+    )
+
+    const ch = boundsFor(renderer, "ch-length")
+    const calc = boundsFor(renderer, "calc-length")
+    const clamp = boundsFor(renderer, "clamp-length")
+    expect(ch[2]).toBeGreaterThan(100)
+    expect(calc[2]).toBeGreaterThan(ch[2])
+    expect(clamp[2]).toBeGreaterThan(ch[2])
+
+    renderer.captureScreenshot(shot)
+    expect(fs.statSync(shot).size).toBeGreaterThan(0)
+  })
+
   it("applies padding to a <text> node", () => {
     // `<text>` used to apply a text-only subset of the style set, so every
     // layout prop on it was dropped.

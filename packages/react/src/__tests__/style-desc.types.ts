@@ -5,6 +5,10 @@ const validStyle = {
   alignItems: "baseline",
   width: "50%",
   minWidth: "auto",
+  maxWidth: "clamp(240px, 70%, 960px)",
+  height: "calc(100% - 4ch)",
+  lineHeight: "1.4",
+  whiteSpace: "pre",
   background: "oklch(67.3% 0.182 276.935)",
   outlineColor: "rebeccapurple",
   letterSpacing: 0.25,
@@ -39,8 +43,13 @@ const invalidDisplay: StyleDesc = {
 }
 
 const invalidDimension: StyleDesc = {
-  // @ts-expect-error Native dimensions do not accept CSS inheritance keywords.
-  width: "inherit",
+  // @ts-expect-error Native dimensions do not accept CSS inheritance keywords or unsupported units.
+  width: "12em",
+}
+
+const invalidCalc: StyleDesc = {
+  // @ts-expect-error calc values are made from the native length atoms.
+  width: "calc(100% - 2rem)",
 }
 
 const invalidColor: StyleDesc = {
@@ -85,6 +94,7 @@ const invalidImage: ImgProps = {
 
 void invalidDisplay
 void invalidDimension
+void invalidCalc
 void invalidColor
 void invalidTextWrap
 void invalidHoverStyle

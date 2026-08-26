@@ -88,7 +88,7 @@ describeNative("inline text runs", () => {
       <div style={{ display: "flex", padding: 24, width: 420, backgroundColor: "#10131a" }}>
         <text
           testId="preformatted-inline"
-          style={{ whiteSpace: "pre", color: "#e6edf7", fontSize: 20, lineHeight: 28 }}
+          style={{ whiteSpace: "pre", color: "#e6edf7", fontSize: 20, lineHeight: "1.4" }}
         >
           {"line  1\nline  "}
           <text style={{ color: "#7dd3fc", fontWeight: 700 }}>2: ready</text>
