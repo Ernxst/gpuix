@@ -593,6 +593,8 @@ export interface NativeRenderer {
   clearSelection?(): void
 
   // ── Window API ─────────────────────────────────────────────────
+  /** Whether the native window is active and receiving key events. */
+  isActive?(): boolean
   /** Reads the live logical window dimensions and device-pixel scale factor. */
   getWindowSize?(): { width: number; height: number; scaleFactor: number }
   /** Internal transport for renderer-global native window events. */

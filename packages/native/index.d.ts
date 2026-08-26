@@ -78,6 +78,8 @@ export declare class GpuixRenderer {
   isInitialized(): boolean
   /** Whether JavaScript must drive the native event loop with tick(). */
   requiresTick(): boolean
+  /** Whether this native window is active and receiving key events. */
+  isActive(): boolean
   getWindowSize(): WindowSize
   getWindowInsets(): WindowInsets
   /** `"hidden"` | `"minimal"` | `"full"`. Paints into the scene after layout. */
@@ -248,8 +250,12 @@ export declare class TestGpuixRenderer {
   focusElement(id: number): void
   setPointerCapture(id: number): void
   releasePointerCapture(id: number): void
+  /** Simulate a platform window activation change through the production observer path. */
+  simulateWindowActivation(active: boolean): void
   /** Simulate the platform deactivating the test window. */
   simulateWindowDeactivation(): void
+  /** Whether the offscreen native window is active and receiving key events. */
+  isActive(): boolean
   /**
    * Simulate a mouse down event at the given window coordinates.
    * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
@@ -404,6 +410,8 @@ export interface EventPayload {
   height?: number
   /** Device pixels per logical GPUI pixel. Populated for `windowResize`. */
   scaleFactor?: number
+  /** Whether the native window is active. Populated for `windowActivation`. */
+  isActive?: boolean
   /** Mouse X position in window coordinates (pixels). */
   x?: number
   /** Mouse Y position in window coordinates (pixels). */
