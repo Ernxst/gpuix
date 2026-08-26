@@ -12,6 +12,8 @@ import { createRenderer, render, startFrameLoop } from "@gpuix/react"
 const renderer = createRenderer()
 const workMs = Number(process.env.PACE_WORK_MS ?? 12)
 const forceTimer = process.env.PACE_FORCE_TIMER === "1"
+const calibrateTimer = process.env.PACE_CALIBRATE_TIMER === "1"
+const calibrationWarmupMs = 250
 
 renderer.init({ title: "GPUIX frame pacing", width: 528, height: 408 })
 
@@ -20,6 +22,7 @@ let startedFrameCallbacks = 0
 let frameCallbacks = 0
 const tickDurations: number[] = []
 let markPreflightReady: (() => void) | undefined
+let publishCalibration: ((result: string) => void) | undefined
 const requiredPreflightCallbacks = 4
 
 function doScrollWork(): void {
@@ -33,6 +36,7 @@ function FramePacing() {
   const [preflight, setPreflight] = useState("PACING_PREFLIGHT pending")
   const [result, setResult] = useState("PACING_PENDING")
   markPreflightReady = () => setPreflight("PACING_PREFLIGHT ready")
+  publishCalibration = setResult
 
   const handleScroll = (event: EventPayload): void => {
     if (event.touchPhase === "started") {
@@ -122,6 +126,18 @@ const setFrameRequestHandler = (callback: (() => void) | null): boolean => {
                   tick: measuredTick,
                   quit: renderer.quit.bind(renderer),
                 })
+                if (calibrateTimer) {
+                  const calibrationStartedTicks = tickDurations.length
+                  setTimeout(() => {
+                    const ticks = tickDurations
+                      .slice(calibrationStartedTicks)
+                      .sort((a, b) => a - b)
+                    const tickP50Ms = ticks[Math.floor(ticks.length / 2)] ?? 0
+                    publishCalibration?.(
+                      `PACING_CALIBRATION ${JSON.stringify({ tickP50Ms, ticks: ticks.length })}`
+                    )
+                  }, calibrationWarmupMs)
+                }
               }
               markPreflightReady?.()
             })

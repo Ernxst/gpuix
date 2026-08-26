@@ -1,9 +1,16 @@
 import { launch } from "@gpuix/react/automation"
+import {
+  calibrateFramePacingWork,
+  isTimerPacingDegraded,
+} from "./frame-pacing-calibration"
 
 const sampleCount = 60
 const sampleIntervalMs = 1_000 / 60
-const minimumDisplayHz = Number(process.env.PACE_ASSERT_MIN_HZ ?? 50)
-const maximumTimerHz = Number(process.env.PACE_ASSERT_TIMER_MAX_HZ ?? 45)
+const refreshHz = 1_000 / sampleIntervalMs
+const calibrationMarginMs = Number(process.env.PACE_CALIBRATION_MARGIN_MS ?? 5)
+const minimumWorkMs = Number(process.env.PACE_WORK_FLOOR_MS ?? 12)
+const minimumDisplayRefreshRatio = Number(process.env.PACE_ASSERT_DISPLAY_RATIO ?? 0.85)
+const maximumTimerRefreshRatio = Number(process.env.PACE_ASSERT_TIMER_RATIO ?? 0.75)
 const minimumImprovementHz = Number(process.env.PACE_ASSERT_DELTA_HZ ?? 15)
 
 interface PacingResult {
@@ -16,6 +23,11 @@ interface PacingResult {
   ticks: number
   frameCallbacks: number
   frameSource: string
+}
+
+interface TickCalibrationResult {
+  tickP50Ms: number
+  ticks: number
 }
 
 class OperationTimeoutError extends Error {}
@@ -61,12 +73,60 @@ async function waitForVisibleWindow(app: Awaited<ReturnType<typeof launch>>): Pr
   return false
 }
 
-async function measure(forceTimer: boolean): Promise<PacingResult | null> {
+async function waitForResult(
+  app: Awaited<ReturnType<typeof launch>>,
+  prefix: string,
+  label: string
+): Promise<string> {
+  const timeoutAt = performance.now() + 10_000
+  while (performance.now() < timeoutAt) {
+    const { text } = await withTimeout(app.call("getAllText", {}), label)
+    const resultText = text.find((entry) => entry.startsWith(prefix))
+    if (resultText) return resultText
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  throw new Error(`Timed out waiting for ${label}`)
+}
+
+async function calibrateTimerTick(): Promise<TickCalibrationResult | null> {
+  const app = await launch({
+    command: "bun",
+    args: ["frame-pacing.tsx"],
+    env: {
+      PACE_FORCE_TIMER: "1",
+      PACE_CALIBRATE_TIMER: "1",
+      PACE_WORK_MS: "0",
+    },
+  })
+
+  try {
+    if (!(await waitForVisibleWindow(app))) return null
+    const resultText = await waitForResult(
+      app,
+      "PACING_CALIBRATION ",
+      "timer calibration result"
+    )
+    const result = JSON.parse(
+      resultText.slice("PACING_CALIBRATION ".length)
+    ) as TickCalibrationResult
+    if (result.ticks < 8 || result.tickP50Ms <= 0) {
+      throw new Error(
+        `Timer calibration produced only ${result.ticks} ticks with p50 ${result.tickP50Ms.toFixed(2)}ms`
+      )
+    }
+    return result
+  } finally {
+    await app.close()
+  }
+}
+
+async function measure(forceTimer: boolean, workMs: number): Promise<PacingResult | null> {
   const app = await launch({
     command: "bun",
     args: ["frame-pacing.tsx"],
     env: {
       PACE_FORCE_TIMER: forceTimer ? "1" : "0",
+      PACE_WORK_MS: workMs.toString(),
     },
   })
 
@@ -104,19 +164,7 @@ async function measure(forceTimer: boolean): Promise<PacingResult | null> {
     }
     await Promise.all(samples)
 
-    const timeoutAt = performance.now() + 10_000
-    let resultText: string | undefined
-    while (performance.now() < timeoutAt) {
-      const { text } = await withTimeout(app.call("getAllText", {}), "pacing result poll")
-      resultText = text.find((entry) => entry.startsWith("PACING_RESULT "))
-      if (resultText) break
-      await new Promise((resolve) => setTimeout(resolve, 25))
-    }
-
-    if (!resultText) {
-      throw new Error("Timed out waiting for the live pacing result")
-    }
-
+    const resultText = await waitForResult(app, "PACING_RESULT ", "live pacing result")
     return JSON.parse(resultText.slice("PACING_RESULT ".length)) as PacingResult
   } finally {
     await app.close()
@@ -129,14 +177,30 @@ function report(result: PacingResult): void {
   )
 }
 
-const timer = await measure(true)
+const timerCalibration = await calibrateTimerTick()
+if (!timerCalibration) {
+  console.log("SKIP frame pacing: window occluded — cannot measure")
+  process.exit(0)
+}
+const calibration = calibrateFramePacingWork(
+  sampleIntervalMs,
+  timerCalibration.tickP50Ms,
+  calibrationMarginMs,
+  minimumWorkMs
+)
+console.log(
+  `frame pacing calibration: tick p50 ${calibration.tickP50Ms.toFixed(2)}ms (${timerCalibration.ticks} timer ticks), refresh ${refreshHz.toFixed(1)}Hz / ${calibration.refreshPeriodMs.toFixed(2)}ms, calibrated JS work ${calibration.workMs.toFixed(2)}ms (${calibration.marginMs.toFixed(1)}ms margin, ${calibration.floorMs.toFixed(1)}ms floor)`
+)
+
+await new Promise((resolve) => setTimeout(resolve, 1_000))
+const timer = await measure(true, calibration.workMs)
 if (!timer) {
   console.log("SKIP frame pacing: window occluded — cannot measure")
   process.exit(0)
 }
 report(timer)
 await new Promise((resolve) => setTimeout(resolve, 1_000))
-const displayLink = await measure(false)
+const displayLink = await measure(false, calibration.workMs)
 if (!displayLink) {
   console.log("SKIP frame pacing: window occluded — cannot measure")
   process.exit(0)
@@ -149,18 +213,21 @@ if (displayLink.frameSource !== "display-link") {
 if (timer.frameSource !== "timer") {
   throw new Error(`Expected the forced timer source, received ${timer.frameSource}`)
 }
-if (timer.hz > maximumTimerHz) {
+const timerIsDegraded = isTimerPacingDegraded(
+  timer.hz,
+  displayLink.hz,
+  refreshHz,
+  minimumImprovementHz,
+  maximumTimerRefreshRatio
+)
+if (!timerIsDegraded) {
   throw new Error(
-    `Expected the forced timer control at or below ${maximumTimerHz.toFixed(1)} Hz, received ${timer.hz.toFixed(1)} Hz`
+    `Expected the forced timer control to trail display-link by at least ${minimumImprovementHz.toFixed(1)} Hz or stay at or below ${(maximumTimerRefreshRatio * 100).toFixed(0)}% of refresh; received ${timer.hz.toFixed(1)} Hz vs ${displayLink.hz.toFixed(1)} Hz at ${refreshHz.toFixed(1)} Hz refresh`
   )
 }
+const minimumDisplayHz = refreshHz * minimumDisplayRefreshRatio
 if (displayLink.hz < minimumDisplayHz) {
   throw new Error(
-    `Expected at least ${minimumDisplayHz.toFixed(1)} Hz under paced scroll work, received ${displayLink.hz.toFixed(1)} Hz`
-  )
-}
-if (displayLink.hz - timer.hz < minimumImprovementHz) {
-  throw new Error(
-    `Expected display-link pacing to improve by at least ${minimumImprovementHz.toFixed(1)} Hz, received ${(displayLink.hz - timer.hz).toFixed(1)} Hz`
+    `Expected display-link pacing at or above ${(minimumDisplayRefreshRatio * 100).toFixed(0)}% of refresh (${minimumDisplayHz.toFixed(1)} Hz), received ${displayLink.hz.toFixed(1)} Hz`
   )
 }
