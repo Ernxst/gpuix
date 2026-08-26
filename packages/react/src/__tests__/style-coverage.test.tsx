@@ -9,7 +9,11 @@ import path from "path"
 import React from "react"
 import { beforeAll, describe, expect, it } from "vitest"
 import { createTestRoot } from "../testing.js"
-import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
+import {
+  expectScreenshotsDiffer,
+  expectScreenshotsEqual,
+  SHOTS_DIR,
+} from "./test-utils.js"
 
 beforeAll(() => {
   fs.mkdirSync(SHOTS_DIR, { recursive: true })
@@ -29,6 +33,71 @@ function comparePixels(name: string, a: React.ReactElement, b: React.ReactElemen
   second.renderer.captureScreenshot(right)
 
   expectScreenshotsDiffer(left, right)
+}
+
+type TestRenderer = ReturnType<typeof createTestRoot>["renderer"]
+
+function boundsFor(renderer: TestRenderer, testId: string) {
+  const element = renderer.findByTestId(testId)
+  expect(element, `missing ${testId}`).toBeDefined()
+  const bounds = renderer.getElementBounds(element!.id)
+  expect(bounds, `no bounds for ${testId}`).toEqual(expect.any(Array))
+  return bounds!
+}
+
+function centerX(bounds: number[]) {
+  return bounds[0] + bounds[2] / 2
+}
+
+function centerY(bounds: number[]) {
+  return bounds[1] + bounds[3] / 2
+}
+
+function HoverWithinCaptureProbe({ capture }: { capture: "child" | "group" }) {
+  const capturePointer = (event: React.MouseEvent) => event.setPointerCapture()
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "100%",
+        height: "100%",
+        backgroundColor: "#101010",
+      }}
+    >
+      <div
+        testId="capture-row"
+        hoverGroup="capture-row"
+        onMouseDown={capture === "group" ? capturePointer : undefined}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 360,
+          height: 160,
+          gap: 12,
+          backgroundColor: "#20283a",
+        }}
+      >
+        <div
+          testId="capture-child"
+          onMouseDown={capture === "child" ? capturePointer : undefined}
+          style={{ width: 120, height: 60, backgroundColor: "#64748b" }}
+        />
+        <span
+          style={{
+            width: 180,
+            height: 8,
+            backgroundColor: "#334155",
+            hoverWithin: { backgroundColor: "#f59e0b" },
+          }}
+        />
+      </div>
+    </div>
+  )
 }
 
 describe("style props reach the renderer", () => {
@@ -440,6 +509,164 @@ describe("style props reach the renderer", () => {
     expect(rowRate[0]).toBeCloseTo(headerRate[0], 4)
     expect(rowStatus[0]).toBeCloseTo(headerStatus[0], 4)
     expect(rowRate[1]).toBeGreaterThan(headerRate[1])
+  })
+
+  it("applies hoverWithin to a descendant of the nearest hoverGroup", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "100%",
+          height: "100%",
+          backgroundColor: "#101010",
+        }}
+      >
+        <div
+          hoverGroup="destination-row"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 360,
+            height: 120,
+            gap: 8,
+            backgroundColor: "#20283a",
+          }}
+        >
+          <text testId="destination-label" style={{ color: "#ffffff", fontSize: 22 }}>
+            Copper Basin
+          </text>
+          <span
+            style={{
+              width: 180,
+              height: 8,
+              backgroundColor: "#334155",
+              hoverWithin: { backgroundColor: "#f59e0b" },
+            }}
+          />
+        </div>
+      </div>
+    )
+
+    const label = renderer.findByTestId("destination-label")!
+    const [x, y, width, height] = renderer.getElementBounds(label.id)!
+    const before = path.join(SHOTS_DIR, "hover-within-before.png")
+    const after = path.join(SHOTS_DIR, "hover-within-after.png")
+
+    renderer.nativeSimulateMouseMove(10, 10)
+    renderer.captureScreenshot(before)
+    renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+    renderer.captureScreenshot(after)
+
+    expectScreenshotsDiffer(before, after)
+  })
+
+  it("keeps hoverWithin painted when a captured child stays inside the group", () => {
+    const { render, renderer } = createTestRoot()
+    render(<HoverWithinCaptureProbe capture="child" />)
+
+    const rowBounds = boundsFor(renderer, "capture-row")
+    const childBounds = boundsFor(renderer, "capture-child")
+    const idle = path.join(SHOTS_DIR, "hover-within-child-capture-idle.png")
+    const hovered = path.join(
+      SHOTS_DIR,
+      "hover-within-child-capture-hovered.png"
+    )
+    const capturedInside = path.join(
+      SHOTS_DIR,
+      "hover-within-child-capture-inside.png"
+    )
+
+    renderer.nativeSimulateMouseMove(10, 10)
+    renderer.captureScreenshot(idle)
+    renderer.nativeSimulateMouseMove(centerX(childBounds), centerY(childBounds))
+    renderer.captureScreenshot(hovered)
+    expectScreenshotsDiffer(idle, hovered)
+
+    renderer.nativeSimulateMouseDown(centerX(childBounds), centerY(childBounds), 0)
+    renderer.nativeSimulateMouseMove(
+      rowBounds[0] + rowBounds[2] - 20,
+      centerY(rowBounds),
+      0
+    )
+    renderer.captureScreenshot(capturedInside)
+
+    expectScreenshotsEqual(hovered, capturedInside)
+    renderer.nativeSimulateMouseUp(
+      rowBounds[0] + rowBounds[2] - 20,
+      centerY(rowBounds),
+      0
+    )
+  })
+
+  it("clears hoverWithin when a captured child leaves the group", () => {
+    const { render, renderer } = createTestRoot()
+    render(<HoverWithinCaptureProbe capture="child" />)
+
+    const rowBounds = boundsFor(renderer, "capture-row")
+    const childBounds = boundsFor(renderer, "capture-child")
+    const idle = path.join(
+      SHOTS_DIR,
+      "hover-within-child-capture-leave-idle.png"
+    )
+    const capturedOutside = path.join(
+      SHOTS_DIR,
+      "hover-within-child-capture-outside.png"
+    )
+
+    renderer.nativeSimulateMouseMove(10, 10)
+    renderer.captureScreenshot(idle)
+    renderer.nativeSimulateMouseMove(centerX(childBounds), centerY(childBounds))
+    renderer.nativeSimulateMouseDown(centerX(childBounds), centerY(childBounds), 0)
+    renderer.nativeSimulateMouseMove(
+      rowBounds[0] + rowBounds[2] + 40,
+      centerY(rowBounds),
+      0
+    )
+    renderer.captureScreenshot(capturedOutside)
+
+    expectScreenshotsEqual(idle, capturedOutside)
+    renderer.nativeSimulateMouseUp(
+      rowBounds[0] + rowBounds[2] + 40,
+      centerY(rowBounds),
+      0
+    )
+  })
+
+  it("clears hoverWithin when the capturing group owner leaves its bounds", () => {
+    const { render, renderer } = createTestRoot()
+    render(<HoverWithinCaptureProbe capture="group" />)
+
+    const rowBounds = boundsFor(renderer, "capture-row")
+    const idle = path.join(SHOTS_DIR, "hover-within-group-capture-idle.png")
+    const capturedOutside = path.join(
+      SHOTS_DIR,
+      "hover-within-group-capture-outside.png"
+    )
+    const captureX = rowBounds[0] + 20
+    const captureY = rowBounds[1] + 20
+
+    renderer.nativeSimulateMouseMove(10, 10)
+    renderer.captureScreenshot(idle)
+    renderer.nativeSimulateMouseMove(captureX, captureY)
+    renderer.nativeSimulateMouseDown(captureX, captureY, 0)
+    renderer.nativeSimulateMouseMove(
+      rowBounds[0] + rowBounds[2] + 40,
+      centerY(rowBounds),
+      0
+    )
+    renderer.captureScreenshot(capturedOutside)
+
+    expectScreenshotsEqual(idle, capturedOutside)
+    renderer.nativeSimulateMouseUp(
+      rowBounds[0] + rowBounds[2] + 40,
+      centerY(rowBounds),
+      0
+    )
   })
 
   it("focuses an element with autoFocus so it receives keys", () => {
