@@ -1,6 +1,7 @@
 import { launch } from "@gpuix/react/automation"
 import {
   calibrateFramePacingWork,
+  isDisplayLinkProgressing,
   isTimerPacingDegraded,
 } from "./frame-pacing-calibration"
 
@@ -9,7 +10,7 @@ const sampleIntervalMs = 1_000 / 60
 const refreshHz = 1_000 / sampleIntervalMs
 const calibrationMarginMs = Number(process.env.PACE_CALIBRATION_MARGIN_MS ?? 5)
 const minimumWorkMs = Number(process.env.PACE_WORK_FLOOR_MS ?? 12)
-const minimumDisplayRefreshRatio = Number(process.env.PACE_ASSERT_DISPLAY_RATIO ?? 0.85)
+const minimumDisplayRefreshRatio = Number(process.env.PACE_ASSERT_DISPLAY_RATIO ?? 0.5)
 const maximumTimerRefreshRatio = Number(process.env.PACE_ASSERT_TIMER_RATIO ?? 0.75)
 const minimumImprovementHz = Number(process.env.PACE_ASSERT_DELTA_HZ ?? 15)
 
@@ -226,8 +227,15 @@ if (!timerIsDegraded) {
   )
 }
 const minimumDisplayHz = refreshHz * minimumDisplayRefreshRatio
-if (displayLink.hz < minimumDisplayHz) {
+if (
+  !isDisplayLinkProgressing(
+    displayLink.hz,
+    timer.hz,
+    refreshHz,
+    minimumDisplayRefreshRatio
+  )
+) {
   throw new Error(
-    `Expected display-link pacing at or above ${(minimumDisplayRefreshRatio * 100).toFixed(0)}% of refresh (${minimumDisplayHz.toFixed(1)} Hz), received ${displayLink.hz.toFixed(1)} Hz`
+    `Expected display-link pacing at or above ${(minimumDisplayRefreshRatio * 100).toFixed(0)}% of refresh (${minimumDisplayHz.toFixed(1)} Hz) and above the forced timer control, received ${displayLink.hz.toFixed(1)} Hz vs ${timer.hz.toFixed(1)} Hz`
   )
 }

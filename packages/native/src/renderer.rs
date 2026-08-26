@@ -632,6 +632,11 @@ fn invalidate_window() -> Result<()> {
     })
 }
 
+#[cfg(target_os = "macos")]
+fn should_defer_idle_pump(dispatch_frame_request: bool, frame_request_outstanding: bool) -> bool {
+    !dispatch_frame_request && frame_request_outstanding
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum MouseInput {
     Click {
@@ -1936,6 +1941,17 @@ impl GpuixRenderer {
 
         #[cfg(target_os = "macos")]
         {
+            // The CoreVideo observer marks the callback outstanding before
+            // enqueueing its TSFN. Under sustained JS work, an overdue idle
+            // timer can run first; entering AppKit here would starve the JS
+            // callback that dispatches the pending frame token. Return to the
+            // JS event loop instead. The frame callback performs the one pump.
+            if should_defer_idle_pump(
+                dispatch_frame_request,
+                self.frame_request_outstanding.load(Ordering::Acquire),
+            ) {
+                return Ok(true);
+            }
             if dispatch_frame_request {
                 if let Some(frame_request) = self
                     .pending_frame_request
@@ -2858,6 +2874,18 @@ impl GpuixRenderer {
                 "captureScreenshot needs the test-support build on macOS",
             ))
         }
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod frame_loop_tests {
+    use super::*;
+
+    #[test]
+    fn idle_pump_defers_to_an_outstanding_frame_callback() {
+        assert!(should_defer_idle_pump(false, true));
+        assert!(!should_defer_idle_pump(false, false));
+        assert!(!should_defer_idle_pump(true, true));
     }
 }
 

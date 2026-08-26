@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   calibrateFramePacingWork,
+  isDisplayLinkProgressing,
   isTimerPacingDegraded,
 } from "./frame-pacing-calibration"
 
@@ -33,5 +34,11 @@ describe("frame pacing workload calibration", () => {
     expect(isTimerPacingDegraded(60.1, 60, 60, 15, 0.75)).toBe(false)
     expect(isTimerPacingDegraded(40, 56, 60, 15, 0.75)).toBe(true)
     expect(isTimerPacingDegraded(45, 55, 60, 15, 0.75)).toBe(true)
+  })
+
+  it("accepts degraded display-link pacing while rejecting stalls and timer regressions", () => {
+    expect(isDisplayLinkProgressing(30, 26.1, 60, 0.5)).toBe(true)
+    expect(isDisplayLinkProgressing(0, 26.1, 60, 0.5)).toBe(false)
+    expect(isDisplayLinkProgressing(30, 31, 60, 0.5)).toBe(false)
   })
 })

@@ -33,3 +33,12 @@ export function isTimerPacingDegraded(
     timerHz <= refreshHz * maximumRefreshRatio
   )
 }
+
+export function isDisplayLinkProgressing(
+  displayLinkHz: number,
+  timerHz: number,
+  refreshHz: number,
+  minimumRefreshRatio: number
+): boolean {
+  return displayLinkHz >= refreshHz * minimumRefreshRatio && displayLinkHz > timerHz
+}
