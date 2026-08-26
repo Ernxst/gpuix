@@ -1322,6 +1322,33 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `anchored`      | Positioned overlay                               |
 | `canvas`        | Custom drawing (planned)                         |
 
+### Inline text runs
+
+Nest `<text>` elements to style part of a sentence without creating another
+layout box. GPUIX flattens the descendants into one shaped string, so wrapping,
+ellipsis, selection, and copying operate across run boundaries.
+
+```tsx
+<text style={{ width: 240, color: '#e6edf7' }}>
+  Output is{' '}
+  <text
+    testId="output-rate"
+    onClick={showRateDetails}
+    style={{ color: '#7dd3fc', fontWeight: 700, letterSpacing: 1 }}
+  >
+    240 parts
+  </text>{' '}
+  per minute.
+</text>
+```
+
+Inline runs can vary `color`, `fontFamily`, `fontWeight`, `letterSpacing`,
+`backgroundColor`, `textDecoration`, and `textTransform`. Nested `onClick`,
+refs, and `testId` retain the nested text host as their target. Layout styles
+belong on the outer `<text>`; strict style diagnostics report them on inline
+descendants. A `<text>` accepts only strings and nested `<text>` elements, so
+block and custom children are rejected during React render.
+
 ## Images and icons
 
 `<img>` takes a **filesystem path**, not a URL. Resolve the file with
@@ -1596,7 +1623,7 @@ Limited relative-color forms can derive a new color from a base value:
 
 **Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` creates a native scrollable container with persistent scroll state
 
-**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textDecoration` (`"underline"` | `"line-through"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`
 
 `textWrap` accepts `"wrap"` and `"nowrap"`. `"balance"` and `"pretty"` are
 recognized but explicitly rejected with a strict-style diagnostic because GPUI

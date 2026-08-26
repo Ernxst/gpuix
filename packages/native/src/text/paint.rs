@@ -16,10 +16,12 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 
 use gpui::{
-    canvas, div, point, prelude::*, px, quad, size, BorderStyle, Bounds, Hsla, SharedString,
-    StyledText, TextLayout, TextRun, Window,
+    canvas, div, point, prelude::*, px, quad, size, App, BorderStyle, Bounds, Element, ElementId,
+    GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, SharedString, StyledText,
+    TextLayout, TextRun, Window,
 };
 
+use super::inline::{validate_runs, StyledTextRun};
 use super::selection::{self, SelectionState};
 
 /// Shared selection state. `GpuixView` and `GpuixRenderer` both hold clones, and
@@ -156,6 +158,10 @@ pub struct SelectableText {
     /// inheriting from ancestor `style` props. Pass `Some(..)` only when the
     /// element owns its own colours, as `<code>` and `<diff>` do.
     pub runs: Option<Vec<TextRun>>,
+    /// Deferred run styles resolved against the inherited GPUI text style during
+    /// layout. Unlike prebuilt `TextRun`s, these can inherit the outer text's
+    /// font while overriding letter spacing inside selected byte ranges.
+    pub run_styles: Option<Vec<StyledTextRun>>,
     pub key: Arc<str>,
     pub selection: SharedSelection,
     pub wash_color: Hsla,
@@ -167,6 +173,12 @@ pub struct SelectableText {
     pub links: Vec<(Range<usize>, String)>,
     /// Called with the payload of the range under a click.
     pub on_link: Option<Arc<dyn Fn(&str)>>,
+    /// Nested React text hosts whose glyph ranges should have automation bounds.
+    pub tracked_ranges: Vec<(Range<usize>, u64)>,
+    /// Nested React text hosts with an `onClick` handler.
+    pub clickable_ranges: Vec<(Range<usize>, u64)>,
+    /// Called with the most specific clickable host under a mouse-up.
+    pub on_inline_click: Option<Arc<dyn Fn(u64, &gpui::MouseUpEvent)>>,
     /// False under `userSelect: "none"`: the text is still painted, logged and
     /// clickable, but it does not join the selection registry.
     pub selectable: bool,
@@ -183,14 +195,140 @@ impl SelectableText {
         Self {
             text,
             runs,
+            run_styles: None,
             key,
             selection,
             wash_color,
             extra_wash: None,
             links: Vec::new(),
             on_link: None,
+            tracked_ranges: Vec::new(),
+            clickable_ranges: Vec::new(),
+            on_inline_click: None,
             selectable: true,
         }
+    }
+}
+
+/// A `StyledText` whose exact-cover run refinements resolve after the parent
+/// div has pushed its inherited `TextStyle` onto the GPUI window stack.
+struct RunStyledText {
+    text: SharedString,
+    runs: Vec<StyledTextRun>,
+    styled: StyledText,
+}
+
+impl RunStyledText {
+    fn new(text: SharedString, runs: Vec<StyledTextRun>) -> Self {
+        Self {
+            styled: StyledText::new(text.clone()),
+            text,
+            runs,
+        }
+    }
+
+    fn layout(&self) -> &TextLayout {
+        self.styled.layout()
+    }
+
+    fn resolve_runs(&self, window: &Window) -> Vec<TextRun> {
+        let inherited = window.text_style();
+        self.runs
+            .iter()
+            .map(|run| {
+                let mut style = inherited.clone();
+                if let Some(color) = run.style.color {
+                    style.color = color;
+                }
+                if let Some(family) = &run.style.font_family {
+                    style.font_family = family.clone();
+                }
+                if let Some(weight) = run.style.font_weight {
+                    style.font_weight = weight;
+                }
+                if let Some(spacing) = run.style.letter_spacing {
+                    style.letter_spacing = spacing;
+                }
+                if let Some(background) = run.style.background_color {
+                    style.background_color = Some(background);
+                }
+                if let Some(underline) = run.style.underline {
+                    style.underline = Some(underline);
+                }
+                if let Some(strikethrough) = run.style.strikethrough {
+                    style.strikethrough = Some(strikethrough);
+                }
+                style.to_run(run.range.len())
+            })
+            .collect()
+    }
+}
+
+impl Element for RunStyledText {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let runs = self.resolve_runs(window);
+        let styled = std::mem::replace(&mut self.styled, StyledText::new(self.text.clone()));
+        self.styled = styled.with_runs(runs);
+        self.styled.request_layout(id, inspector_id, window, cx)
+    }
+
+    fn prepaint(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<gpui::Pixels>,
+        request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        self.styled
+            .prepaint(id, inspector_id, bounds, request_layout, window, cx)
+    }
+
+    fn paint(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<gpui::Pixels>,
+        request_layout: &mut Self::RequestLayoutState,
+        prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.styled.paint(
+            id,
+            inspector_id,
+            bounds,
+            request_layout,
+            prepaint,
+            window,
+            cx,
+        );
+    }
+}
+
+impl IntoElement for RunStyledText {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
     }
 }
 
@@ -201,20 +339,40 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     let SelectableText {
         text,
         runs,
+        run_styles,
         key,
         selection,
         wash_color,
         extra_wash,
         links,
         on_link,
+        tracked_ranges,
+        clickable_ranges,
+        on_inline_click,
         selectable,
     } = opts;
 
-    let styled = match runs {
-        Some(runs) => StyledText::new(text.clone()).with_runs(runs),
-        None => StyledText::new(text.clone()),
+    debug_assert!(runs.is_none() || run_styles.is_none());
+    let (layout, styled) = match run_styles {
+        Some(run_styles) => match validate_runs(&text, &run_styles) {
+            Ok(()) => {
+                let styled = RunStyledText::new(text.clone(), run_styles);
+                (styled.layout().clone(), styled.into_any_element())
+            }
+            Err(error) => {
+                log::error!("Invalid inline text runs: {error}");
+                let styled = StyledText::new(text.clone());
+                (styled.layout().clone(), styled.into_any_element())
+            }
+        },
+        None => {
+            let styled = match runs {
+                Some(runs) => StyledText::new(text.clone()).with_runs(runs),
+                None => StyledText::new(text.clone()),
+            };
+            (styled.layout().clone(), styled.into_any_element())
+        }
     };
-    let layout = styled.layout().clone();
 
     let underlay = canvas(
         |_, _, _| (),
@@ -248,8 +406,25 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                 register_listeners(window, &key, &selection);
             }
             PAINTED.with(|p| p.borrow_mut().push(text.clone()));
+            for (range, element_id) in &tracked_ranges {
+                if let Some(bounds) = range_rects(&layout, range, 0.0, 0.0)
+                    .into_iter()
+                    .reduce(|bounds, next| bounds.union(&next))
+                {
+                    crate::automation::record_bounds(*element_id, bounds);
+                }
+            }
             if let Some(on_link) = &on_link {
                 register_link_listener(window, &layout, &links, on_link, &selection);
+            }
+            if let Some(on_inline_click) = &on_inline_click {
+                register_inline_click_listener(
+                    window,
+                    &layout,
+                    &clickable_ranges,
+                    on_inline_click,
+                    &selection,
+                );
             }
         },
     )
@@ -261,6 +436,48 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         .child(underlay)
         .child(styled)
         .into_any_element()
+}
+
+fn register_inline_click_listener(
+    window: &mut Window,
+    layout: &TextLayout,
+    targets: &[(Range<usize>, u64)],
+    on_click: &Arc<dyn Fn(u64, &gpui::MouseUpEvent)>,
+    selection: &SharedSelection,
+) {
+    use gpui::{DispatchPhase, MouseButton, MouseUpEvent};
+
+    if targets.is_empty() {
+        return;
+    }
+    let (layout, targets, on_click, selection) = (
+        layout.clone(),
+        targets.to_vec(),
+        on_click.clone(),
+        selection.clone(),
+    );
+    window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, cx| {
+        if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+            return;
+        }
+        if !layout.bounds().contains(&event.position) || selection.lock().selected_text().is_some()
+        {
+            return;
+        }
+        let Ok(index) = layout.index_for_position(event.position) else {
+            return;
+        };
+        if let Some((_, element_id)) = targets
+            .iter()
+            .filter(|(range, _)| range.contains(&index))
+            .min_by_key(|(range, _)| range.len())
+        {
+            on_click(*element_id, event);
+            // React owns propagation from the most specific inline target.
+            // Without this, a native ancestor hitbox also emits its own click.
+            cx.stop_propagation();
+        }
+    });
 }
 
 /// Fire `on_link` for the range under a click.
