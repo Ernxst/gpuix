@@ -1140,6 +1140,27 @@ impl TestGpuixRenderer {
             .map_err(|error| Error::from_reason(format!("Style serialization failed: {error}")))
     }
 
+    /// Return the current async image load state for a live `<img>` element.
+    /// This is test-only state; production images keep their loading fallback.
+    #[napi]
+    pub fn get_image_load_state(&self, id: f64) -> Result<Option<String>> {
+        let id = to_element_id(id)?;
+        self.flush()?;
+        let state = with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.read(app).custom_registry.test_state(id)
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })?;
+        state
+            .map(|state| serde_json::to_string(&state))
+            .transpose()
+            .map_err(|error| {
+                Error::from_reason(format!("Image state serialization failed: {error}"))
+            })
+    }
+
     /// Tree JSON with last-paint bounds. Used by the automation locators.
     #[napi]
     pub fn get_automation_tree(&self) -> Result<String> {

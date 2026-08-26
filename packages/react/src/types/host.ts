@@ -449,7 +449,11 @@ export type ImageSource =
 
 // Props for native <img> rendering.
 export interface ImgProps extends Props {
-  src?: ImageSource
+  /**
+   * An explicit source, or DOM-compatible sugar: `http(s)://` strings are URL
+   * sources and every other string is a filesystem path.
+   */
+  src?: ImageSource | string
   objectFit?: "fill" | "contain" | "cover" | "scaleDown" | "none"
   /** For SVG only: resolve authored `currentColor` references from inherited style.color. */
   tint?: "currentColor"

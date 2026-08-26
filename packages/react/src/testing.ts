@@ -51,6 +51,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   simulateMouseUp(x: number, y: number, button: number): void
   getTreeJson(): string
   getResolvedStyle(elementId: number): string | null
+  getImageLoadState(elementId: number): string | null
   getAutomationTree(): string
   getElementBounds(elementId: number): number[] | null
   clockPause(): number
@@ -155,6 +156,12 @@ export interface TestElement {
   /** The author-defined `id` attribute, distinct from the numeric renderer ID. */
   authorId?: string
   customProps?: Record<string, unknown>
+}
+
+/** Current async load state for a live native `<img>` test element. */
+export interface ImageLoadState {
+  status: "idle" | "loading" | "loaded" | "error"
+  error?: string
 }
 
 // ── TestRenderer ─────────────────────────────────────────────────────
@@ -518,6 +525,12 @@ export class TestRenderer implements NativeRenderer {
   /** Read the style currently applied after hover, active, and focus resolution. */
   getResolvedStyle(id: number): StyleDesc | undefined {
     const json = this.native.getResolvedStyle(id)
+    return json == null ? undefined : JSON.parse(json)
+  }
+
+  /** Read the current async image state without relying on a screenshot or fallback text. */
+  getImageLoadState(id: number): ImageLoadState | undefined {
+    const json = this.native.getImageLoadState(id)
     return json == null ? undefined : JSON.parse(json)
   }
 

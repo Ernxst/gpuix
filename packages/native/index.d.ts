@@ -348,6 +348,11 @@ export declare class TestGpuixRenderer {
    * overlaid in the same order GPUI resolves them for painting.
    */
   getResolvedStyle(id: number): string | null
+  /**
+   * Return the current async image load state for a live `<img>` element.
+   * This is test-only state; production images keep their loading fallback.
+   */
+  getImageLoadState(id: number): string | null
   /** Tree JSON with last-paint bounds. Used by the automation locators. */
   getAutomationTree(): string
   /** Last painted bounds for an element, or null if it was not painted. */
