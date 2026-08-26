@@ -2,7 +2,7 @@
 
 import React, { cloneElement, forwardRef, isValidElement, useCallback, useState } from "react"
 import type { ReactElement, ReactNode, Ref } from "react"
-import type { EventPayload } from "@gpuix/native"
+import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
 
 export type FloatingSide = "top" | "right" | "bottom" | "left"
@@ -94,9 +94,9 @@ function getElementRef(element: ReactElement<Props>): Ref<PublicInstance> | unde
 }
 
 function composeHandlers(
-  first?: (event: EventPayload) => void,
-  second?: (event: EventPayload) => void
-): ((event: EventPayload) => void) | undefined {
+  first?: (event: GpuixSyntheticEvent) => void,
+  second?: (event: GpuixSyntheticEvent) => void
+): ((event: GpuixSyntheticEvent) => void) | undefined {
   if (!first) return second
   if (!second) return first
   return (event) => {

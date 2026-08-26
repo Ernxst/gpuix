@@ -81,6 +81,37 @@ describeNative("style diagnostics", () => {
     expect(diagnostics[0].message).toContain("1")
   })
 
+  it("reports malformed nested grid tracks with their track index", () => {
+    const renderer = new TestRenderer()
+    renderer.createElement(82, "div")
+    renderer.setCustomProp(82, "testId", JSON.stringify("ledger-grid"))
+    renderer.setStyle(
+      82,
+      JSON.stringify({
+        display: "grid",
+        gridTemplateColumns: [
+          { type: "max-content" },
+          {
+            type: "minmax",
+            min: { type: "fr", value: 1 },
+            max: { type: "fr", value: 1 },
+          },
+        ],
+      }),
+    )
+
+    const diagnostics = renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementId: 82,
+      elementType: "div",
+      testId: "ledger-grid",
+      property: "gridTemplateColumns[1].min.type",
+      value: '"fr"',
+    })
+    expect(diagnostics[0].message).toContain('<div testId="ledger-grid">')
+  })
+
   it("keeps deterministic field dropping when strict diagnostics are disabled", () => {
     const renderer = new TestRenderer()
     renderer.setStrictStyles(false)
@@ -93,5 +124,44 @@ describeNative("style diagnostics", () => {
 
     expect(renderer.getElement(91)?.style).toMatchObject({ backgroundColor: "red" })
     expect(renderer.drainStyleDiagnostics()).toEqual([])
+  })
+
+  it("validates outline and focus-visible fields with their full property paths", () => {
+    const renderer = new TestRenderer()
+    renderer.createElement(101, "div")
+    renderer.setCustomProp(101, "testId", JSON.stringify("focus-card"))
+    renderer.setStyle(
+      101,
+      JSON.stringify({
+        outlineColor: "not-a-color",
+        outlineWidth: -1,
+        focusVisible: {
+          backgroundColor: "blue",
+          outlineOffset: "wide",
+        },
+      })
+    )
+    renderer.setRoot(101)
+
+    expect(renderer.getElement(101)?.style).toMatchObject({
+      focusVisible: { backgroundColor: "blue" },
+    })
+    const diagnostics = renderer.drainStyleDiagnostics().map((diagnostic) => ({
+      property: diagnostic.property,
+      elementType: diagnostic.elementType,
+      testId: diagnostic.testId,
+    }))
+    expect(diagnostics).toHaveLength(3)
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        { property: "outlineColor", elementType: "div", testId: "focus-card" },
+        { property: "outlineWidth", elementType: "div", testId: "focus-card" },
+        {
+          property: "focusVisible.outlineOffset",
+          elementType: "div",
+          testId: "focus-card",
+        },
+      ])
+    )
   })
 })

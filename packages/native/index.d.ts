@@ -379,6 +379,11 @@ export interface EventPayload {
    */
   isRightClick?: boolean
   /**
+   * Physical input that produced a click: "mouse", "keyboard", or "touch".
+   * Populated for: click.
+   */
+  inputSource?: string
+  /**
    * Which mouse button is currently held during a mouseMove.
    * Same encoding as `button`: 0=left, 1=middle, 2=right.
    * Populated for: mouseMove.

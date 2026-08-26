@@ -107,14 +107,17 @@ function validatePendingVirtualLists(container: Container): void {
 function removeTrackedChild(state: HostNodeState, child: HostNode): void {
   const index = state.children.indexOf(child)
   if (index !== -1) state.children.splice(index, 1)
+  child.parentId = null
 }
 
-function appendTrackedChild(state: HostNodeState, child: HostNode): void {
+function appendTrackedChild(parent: Instance, state: HostNodeState, child: HostNode): void {
   removeTrackedChild(state, child)
   state.children.push(child)
+  child.parentId = parent.id
 }
 
 function insertTrackedChild(
+  parent: Instance,
   state: HostNodeState,
   child: HostNode,
   beforeChild: HostNode
@@ -126,44 +129,76 @@ function insertTrackedChild(
   } else {
     state.children.splice(beforeIndex, 0, child)
   }
+  child.parentId = parent.id
 }
 
 // ── Event wiring helpers ─────────────────────────────────────────────
 
 const EVENT_PROPS = [
   // Custom element events
-  ["onToggleFile", "toggleFile"],
-  ["onShowMore", "showMore"],
-  ["onLineClick", "lineClick"],
-  ["onLinkClick", "linkClick"],
-  ["onVisibleRange", "visibleRange"],
-  ["onChange", "change"],
-  ["onSubmit", "submit"],
+  ["onToggleFile", "toggleFile", "bubble"],
+  ["onShowMore", "showMore", "bubble"],
+  ["onLineClick", "lineClick", "bubble"],
+  ["onLinkClick", "linkClick", "bubble"],
+  ["onVisibleRange", "visibleRange", "bubble"],
+  ["onChangeCapture", "change", "capture"],
+  ["onChange", "change", "bubble"],
+  ["onSubmitCapture", "submit", "capture"],
+  ["onSubmit", "submit", "bubble"],
   // Mouse events
-  ["onClick", "click"],
-  ["onMouseDown", "mouseDown"],
-  ["onMouseUp", "mouseUp"],
-  ["onMouseEnter", "mouseEnter"],
-  ["onMouseLeave", "mouseLeave"],
-  ["onMouseMove", "mouseMove"],
-  ["onMouseDownOutside", "mouseDownOutside"],
+  ["onClickCapture", "click", "capture"],
+  ["onClick", "click", "bubble"],
+  ["onMouseDownCapture", "mouseDown", "capture"],
+  ["onMouseDown", "mouseDown", "bubble"],
+  ["onMouseUpCapture", "mouseUp", "capture"],
+  ["onMouseUp", "mouseUp", "bubble"],
+  ["onMouseEnter", "mouseEnter", "bubble"],
+  ["onMouseLeave", "mouseLeave", "bubble"],
+  ["onMouseMoveCapture", "mouseMove", "capture"],
+  ["onMouseMove", "mouseMove", "bubble"],
+  ["onMouseDownOutside", "mouseDownOutside", "bubble"],
   // Keyboard events (require focus — tabIndex or autoFocus)
-  ["onKeyDown", "keyDown"],
-  ["onKeyUp", "keyUp"],
+  ["onKeyDownCapture", "keyDown", "capture"],
+  ["onKeyDown", "keyDown", "bubble"],
+  ["onKeyUpCapture", "keyUp", "capture"],
+  ["onKeyUp", "keyUp", "bubble"],
   // Focus events
-  ["onFocus", "focus"],
-  ["onBlur", "blur"],
+  ["onFocusCapture", "focus", "capture"],
+  ["onFocus", "focus", "bubble"],
+  ["onBlurCapture", "blur", "capture"],
+  ["onBlur", "blur", "bubble"],
   // Scroll events
-  ["onScroll", "scroll"],
+  ["onScrollCapture", "scroll", "capture"],
+  ["onScroll", "scroll", "bubble"],
 ] as const
 
 const EVENT_PROP_NAMES = new Set<string>(EVENT_PROPS.map(([name]) => name))
+const NATIVE_EVENT_TYPES = new Set(EVENT_PROPS.map(([, eventType]) => eventType))
+
+function eventHandlerKey(eventType: string, phase: "capture" | "bubble"): string {
+  return phase === "capture" ? `${eventType}Capture` : eventType
+}
+
+function hasEventListener(props: Props, eventType: string): boolean {
+  return EVENT_PROPS.some(
+    ([propName, candidateType]) => candidateType === eventType && props[propName] != null
+  )
+}
 
 function syncEventListeners(container: Container, id: number, props: Props): void {
-  for (const [propName, eventType] of EVENT_PROPS) {
+  for (const [propName, eventType, phase] of EVENT_PROPS) {
     const handler = props[propName]
     if (handler) {
-      registerEventHandler(container.eventHandlers, id, eventType, handler)
+      registerEventHandler(
+        container.eventHandlers,
+        id,
+        eventHandlerKey(eventType, phase),
+        handler
+      )
+    }
+  }
+  for (const eventType of NATIVE_EVENT_TYPES) {
+    if (hasEventListener(props, eventType)) {
       container.renderer.setEventListener(id, eventType, true)
     }
   }
@@ -175,18 +210,23 @@ function diffEventListeners(
   oldProps: Props,
   newProps: Props
 ): void {
-  for (const [propName, eventType] of EVENT_PROPS) {
+  for (const [propName, eventType, phase] of EVENT_PROPS) {
     const oldHandler = oldProps[propName]
     const newHandler = newProps[propName]
+    const handlerKey = eventHandlerKey(eventType, phase)
 
     if (oldHandler && !newHandler) {
-      unregisterEventHandler(container.eventHandlers, id, eventType)
-      container.renderer.setEventListener(id, eventType, false)
+      unregisterEventHandler(container.eventHandlers, id, handlerKey)
     } else if (newHandler && newHandler !== oldHandler) {
-      registerEventHandler(container.eventHandlers, id, eventType, newHandler)
-      if (!oldHandler) {
-        container.renderer.setEventListener(id, eventType, true)
-      }
+      registerEventHandler(container.eventHandlers, id, handlerKey, newHandler)
+    }
+  }
+
+  for (const eventType of NATIVE_EVENT_TYPES) {
+    const hadListener = hasEventListener(oldProps, eventType)
+    const hasListener = hasEventListener(newProps, eventType)
+    if (hadListener !== hasListener) {
+      container.renderer.setEventListener(id, eventType, hasListener)
     }
   }
 }
@@ -253,8 +293,20 @@ function serializeCustomProp(
 
 type CustomPropInput = object | string | number | boolean | null | undefined
 
+/** Preserve the browser's natural tab stop when an `<a href>` becomes a native div. */
+function nativeTabIndex(type: string, props: Props): number | undefined {
+  if (props.tabIndex !== undefined) return props.tabIndex
+  const href = type === "a" ? (props as Props & { href?: unknown }).href : undefined
+  return typeof href === "string" ? 0 : undefined
+}
+
 function customPropEntries(type: string, props: Props): Array<[string, CustomPropInput]> {
-  const entries = Object.entries(props) as Array<[string, CustomPropInput]>
+  const entries = (Object.entries(props) as Array<[string, CustomPropInput]>).filter(
+    ([key]) => key !== "tabIndex"
+  )
+  const tabIndex = nativeTabIndex(type, props)
+  if (tabIndex !== undefined) entries.push(["tabIndex", tabIndex])
+
   const virtualListProps = props as Props & VirtualListProps
   if (type !== "virtual-list" || virtualListProps.estimatedItemHeight !== undefined) {
     return entries
@@ -302,7 +354,7 @@ function diffCustomProps(
     }
   }
   // Removed props
-  for (const key of Object.keys(oldProps)) {
+  for (const [key] of oldEntries) {
     if (isReservedProp(key)) continue
     if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
     if (!newKeys.includes(key)) {
@@ -322,6 +374,7 @@ function materialize(node: HostNode): HostNodeState {
 
   const renderer = state.container.renderer
   if ("type" in node) {
+    state.container.eventTargets.set(node.id, node)
     validateVirtualListRowContract(node, state)
     renderer.createElement(node.id, DIV_ALIASES.has(node.type) ? "div" : node.type)
     sendStyle(renderer, node.id, node.props)
@@ -356,7 +409,18 @@ export const hostConfig = {
     rootContainerInstance: Container,
     _hostContext: HostContext
   ): Instance {
-    const instance: Instance = { id: nextId(rootContainerInstance), type, props }
+    const instance: Instance = {
+      id: nextId(rootContainerInstance),
+      type,
+      props,
+      parentId: null,
+      getAttribute(name): string | null {
+        const value = (instance.props as Props & Record<string, unknown>)[name]
+        if (value == null || value === false || typeof value === "function") return null
+        if (value === true) return ""
+        return typeof value === "string" || typeof value === "number" ? String(value) : null
+      },
+    }
     hostNodeStates.set(instance, {
       container: rootContainerInstance,
       children: [],
@@ -368,7 +432,7 @@ export const hostConfig = {
   appendChild(parent: Instance, child: Instance | TextInstance): void {
     const parentState = materialize(parent)
     materialize(child)
-    appendTrackedChild(parentState, child)
+    appendTrackedChild(parent, parentState, child)
     scheduleVirtualListValidation(parent, parentState)
     parentState.container.renderer.appendChild(parent.id, child.id)
   },
@@ -387,7 +451,7 @@ export const hostConfig = {
   ): void {
     const parentState = materialize(parent)
     materialize(child)
-    insertTrackedChild(parentState, child, beforeChild)
+    insertTrackedChild(parent, parentState, child, beforeChild)
     scheduleVirtualListValidation(parent, parentState)
     parentState.container.renderer.insertBefore(parent.id, child.id, beforeChild.id)
   },
@@ -402,6 +466,8 @@ export const hostConfig = {
     const destroyed = parent.renderer.destroyElement(child.id)
     for (const id of destroyed) {
       unregisterEventHandlers(parent.eventHandlers, id)
+      parent.eventTargets.delete(id)
+      parent.preventedKeyboardActivations.delete(id)
     }
   },
 
@@ -511,12 +577,14 @@ export const hostConfig = {
   },
 
   appendChildToContainer(container: Container, child: Instance): void {
+    child.parentId = null
     materialize(child)
     container.renderer.setRoot(child.id)
   },
 
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {
     stateFor(parent).children.push(child)
+    child.parentId = parent.id
   },
 
   hideInstance(instance: Instance): void {
@@ -579,6 +647,8 @@ export const hostConfig = {
     const destroyed = container.renderer.destroyElement(instance.id)
     for (const id of destroyed) {
       unregisterEventHandlers(container.eventHandlers, id)
+      container.eventTargets.delete(id)
+      container.preventedKeyboardActivations.delete(id)
     }
   },
 

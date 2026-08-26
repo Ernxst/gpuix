@@ -297,6 +297,20 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
+  /** Dispatch one key-down event to the element that already holds focus. */
+  simulateKeyDown(keystroke: string, isHeld?: boolean): void {
+    this.native.flush()
+    this.native.simulateKeyDown(keystroke, isHeld)
+    this.dispatchNativeEvents()
+  }
+
+  /** Dispatch one key-up event to the element that already holds focus. */
+  simulateKeyUp(keystroke: string): void {
+    this.native.flush()
+    this.native.simulateKeyUp(keystroke)
+    this.dispatchNativeEvents()
+  }
+
   nativeSimulateKeystrokes(elementId: number, keystrokes: string): void {
     this.native.flush()
     this.native.focusElement(elementId)

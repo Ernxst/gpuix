@@ -353,6 +353,7 @@ impl CustomElement for TextEditorElement {
             .child(state);
         if let Some(style) = ctx.style {
             editor = crate::renderer::apply_styles(editor, style);
+            editor = crate::renderer::apply_focus_styles(editor, style);
         }
         if ctx
             .style
@@ -366,6 +367,9 @@ impl CustomElement for TextEditorElement {
             let callback = ctx.event_callback.clone();
             let id = ctx.id;
             editor = editor.on_click(move |event, _window, _cx| {
+                if event.is_keyboard() {
+                    return;
+                }
                 emit_event_full(&callback, id, "click", |payload| {
                     let (x, y) = crate::renderer::point_to_xy(event.position());
                     payload.x = Some(x);

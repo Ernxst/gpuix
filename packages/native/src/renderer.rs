@@ -40,7 +40,10 @@ use wasm_bindgen::JsCast as _;
 use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::retained_tree::RetainedTree;
-use crate::style::{ParsedStyle, StyleDesc, StyleProblem};
+use crate::style::{
+    GridTemplateValue, GridTrackMaxValue, GridTrackMinValue, GridTrackValue, ParsedStyle,
+    StyleDesc, StyleProblem,
+};
 use crate::text::{selectable_text, selection_frame_reset, selection_key, SharedSelection};
 use crate::theme::Theme;
 
@@ -4138,6 +4141,7 @@ pub(crate) fn build_div(
         if let Some(ref active_style) = style.active {
             el = el.active(|refinement| apply_styles(refinement, active_style));
         }
+        el = apply_focus_styles(el, style);
 
         if crate::style::should_occlude(style) {
             // BlockMouse (occlude) stops the hit test. The parent scroller
@@ -4239,7 +4243,9 @@ pub(crate) fn build_div(
         match event_type.as_str() {
             // ── Click ────────────────────────────────────────────
             "click" => {
-                el = el.on_click(move |click_event, _window, _cx| {
+                el = el.on_click(move |click_event, _window, cx| {
+                    let stop_native_propagation =
+                        !matches!(click_event, gpui::ClickEvent::Keyboard(_));
                     emit_event_full(&callback, id, "click", |p| {
                         let (x, y) = point_to_xy(click_event.position());
                         p.x = Some(x);
@@ -4247,7 +4253,27 @@ pub(crate) fn build_div(
                         p.modifiers = Some(click_event.modifiers().into());
                         p.click_count = Some(click_event.click_count() as u32);
                         p.is_right_click = Some(click_event.is_right_click());
+                        p.button = Some(match click_event {
+                            gpui::ClickEvent::Mouse(event) => {
+                                mouse_button_to_u32(event.down.button)
+                            }
+                            gpui::ClickEvent::Keyboard(_) | gpui::ClickEvent::Touch(_) => 0,
+                        });
+                        p.input_source = Some(
+                            match click_event {
+                                gpui::ClickEvent::Mouse(_) => "mouse",
+                                gpui::ClickEvent::Keyboard(_) => "keyboard",
+                                gpui::ClickEvent::Touch(_) => "touch",
+                            }
+                            .to_string(),
+                        );
                     });
+                    if stop_native_propagation {
+                        // React owns propagation from this native target onward. A keyboard
+                        // click fires within key-up dispatch, so it must leave propagation
+                        // active for this element's key-up listener to run afterward.
+                        cx.stop_propagation();
+                    }
                 });
             }
 
@@ -4537,6 +4563,87 @@ pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::Dimension
     }
 }
 
+pub(crate) fn apply_focus_styles<E: gpui::StatefulInteractiveElement>(
+    mut el: E,
+    style: &StyleDesc,
+) -> E {
+    if let Some(ref focus_style) = style.focus {
+        el = el.focus(|refinement| apply_styles(refinement, focus_style));
+    }
+    if let Some(ref focus_visible_style) = style.focus_visible {
+        el = el.focus_visible(|refinement| apply_styles(refinement, focus_visible_style));
+    }
+    el
+}
+
+fn to_gpui_grid_track(track: &GridTrackValue) -> gpui::GridTrack {
+    match track {
+        GridTrackValue::Px { value } => gpui::GridTrack::Px(gpui::px(*value as f32)),
+        GridTrackValue::Fr { value } => gpui::GridTrack::Fr(*value as f32),
+        GridTrackValue::Auto => gpui::GridTrack::Auto,
+        GridTrackValue::MinContent => gpui::GridTrack::MinContent,
+        GridTrackValue::MaxContent => gpui::GridTrack::MaxContent,
+        GridTrackValue::Minmax { min, max } => gpui::GridTrack::MinMax {
+            min: match min {
+                GridTrackMinValue::Px { value } => gpui::GridTrackMin::Px(gpui::px(*value as f32)),
+                GridTrackMinValue::Auto => gpui::GridTrackMin::Auto,
+                GridTrackMinValue::MinContent => gpui::GridTrackMin::MinContent,
+                GridTrackMinValue::MaxContent => gpui::GridTrackMin::MaxContent,
+            },
+            max: match max {
+                GridTrackMaxValue::Px { value } => gpui::GridTrackMax::Px(gpui::px(*value as f32)),
+                GridTrackMaxValue::Fr { value } => gpui::GridTrackMax::Fr(*value as f32),
+                GridTrackMaxValue::Auto => gpui::GridTrackMax::Auto,
+                GridTrackMaxValue::MinContent => gpui::GridTrackMax::MinContent,
+                GridTrackMaxValue::MaxContent => gpui::GridTrackMax::MaxContent,
+            },
+        },
+        GridTrackValue::Repeat { .. } => {
+            unreachable!("repeat is only valid as a grid template component")
+        }
+    }
+}
+
+fn legacy_grid_track(minimum: Option<&str>) -> gpui::GridTrack {
+    match minimum {
+        Some("min-content") => gpui::GridTrack::MinMax {
+            min: gpui::GridTrackMin::MinContent,
+            max: gpui::GridTrackMax::Fr(1.),
+        },
+        Some("max-content") => gpui::GridTrack::MinMax {
+            min: gpui::GridTrackMin::Px(gpui::px(0.)),
+            max: gpui::GridTrackMax::MaxContent,
+        },
+        _ => gpui::GridTrack::MinMax {
+            min: gpui::GridTrackMin::Px(gpui::px(0.)),
+            max: gpui::GridTrackMax::Fr(1.),
+        },
+    }
+}
+
+fn to_gpui_grid_template(
+    template: &GridTemplateValue,
+    legacy_minimum: Option<&str>,
+) -> gpui::GridTemplate {
+    let tracks = match template {
+        GridTemplateValue::LegacyCount(count) => vec![gpui::GridTemplateComponent::Repeat {
+            count: *count as u16,
+            tracks: vec![legacy_grid_track(legacy_minimum)],
+        }],
+        GridTemplateValue::Tracks(tracks) => tracks
+            .iter()
+            .map(|track| match track {
+                GridTrackValue::Repeat { count, tracks } => gpui::GridTemplateComponent::Repeat {
+                    count: *count,
+                    tracks: tracks.iter().map(to_gpui_grid_track).collect(),
+                },
+                track => gpui::GridTemplateComponent::Track(to_gpui_grid_track(track)),
+            })
+            .collect(),
+    };
+    gpui::GridTemplate { tracks }
+}
+
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.visibility.as_deref() {
         Some("hidden") => el = el.invisible(),
@@ -4548,21 +4655,14 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("grid") => el = el.grid(),
         _ => {}
     }
-    if let Some(cols) = style.grid_template_columns {
-        let count = cols.round().clamp(1.0, 64.0) as u16;
-        el = match style.grid_column_min.as_deref() {
-            Some("min-content") => el.grid_cols_min_content(count),
-            Some("max-content") => el.grid_cols_max_content(count),
-            _ => el.grid_cols(count),
-        };
+    if let Some(cols) = &style.grid_template_columns {
+        el = el.grid_template_columns(to_gpui_grid_template(
+            cols,
+            style.grid_column_min.as_deref(),
+        ));
     }
-    if let Some(rows) = style.grid_template_rows {
-        let count = rows.round().clamp(1.0, 64.0) as u16;
-        el = match style.grid_row_min.as_deref() {
-            Some("min-content") => el.grid_rows_min_content(count),
-            Some("max-content") => el.grid_rows_max_content(count),
-            _ => el.grid_rows(count),
-        };
+    if let Some(rows) = &style.grid_template_rows {
+        el = el.grid_template_rows(to_gpui_grid_template(rows, style.grid_row_min.as_deref()));
     }
     if style.flex_direction.as_deref() == Some("column") {
         el = el.flex_col();
@@ -4831,6 +4931,17 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
             .spread_radius(gpui::px(shadow.spread_radius as f32));
             el = el.shadow(vec![shadow]);
         }
+    }
+    if let Some(ref color) = style.outline_color {
+        if let Some(color) = crate::color::parse_color_rgba(color) {
+            el = el.outline_color(color);
+        }
+    }
+    if let Some(width) = style.outline_width {
+        el = el.outline_width(gpui::px(width.max(0.0) as f32));
+    }
+    if let Some(offset) = style.outline_offset {
+        el = el.outline_offset(gpui::px(offset as f32));
     }
     if let Some(opacity) = style.opacity {
         el = el.opacity(opacity as f32);
