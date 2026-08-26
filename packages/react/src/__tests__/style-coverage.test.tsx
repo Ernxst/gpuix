@@ -7,7 +7,7 @@
 import fs from "fs"
 import path from "path"
 import React from "react"
-import { beforeAll, describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it, vi } from "vitest"
 import { createTestRoot } from "../testing.js"
 import {
   expectScreenshotsDiffer,
@@ -93,6 +93,58 @@ function HoverWithinCaptureProbe({ capture }: { capture: "child" | "group" }) {
             height: 8,
             backgroundColor: "#334155",
             hoverWithin: { backgroundColor: "#f59e0b" },
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function HoverWithinSiblingProbe({
+  forceHovered = false,
+  onClick,
+}: {
+  forceHovered?: boolean
+  onClick?: () => void
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "100%",
+        height: "100%",
+        backgroundColor: "#101010",
+      }}
+    >
+      <div
+        hoverGroup="destination-row"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 360,
+          height: 120,
+          gap: 8,
+          backgroundColor: "#20283a",
+        }}
+      >
+        <text
+          testId="destination-label"
+          onClick={onClick}
+          style={{ color: "#ffffff", fontSize: 22 }}
+        >
+          Copper Basin
+        </text>
+        <span
+          data-testid="destination-hover-underline"
+          style={{
+            width: 180,
+            height: 8,
+            backgroundColor: forceHovered ? "#f59e0b" : "#334155",
+            hoverWithin: forceHovered ? undefined : { backgroundColor: "#f59e0b" },
           }}
         />
       </div>
@@ -513,45 +565,7 @@ describe("style props reach the renderer", () => {
 
   it("applies hoverWithin to a descendant of the nearest hoverGroup", () => {
     const { render, renderer } = createTestRoot()
-    render(
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: "100%",
-          height: "100%",
-          backgroundColor: "#101010",
-        }}
-      >
-        <div
-          hoverGroup="destination-row"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 360,
-            height: 120,
-            gap: 8,
-            backgroundColor: "#20283a",
-          }}
-        >
-          <text testId="destination-label" style={{ color: "#ffffff", fontSize: 22 }}>
-            Copper Basin
-          </text>
-          <span
-            data-testid="destination-hover-underline"
-            style={{
-              width: 180,
-              height: 8,
-              backgroundColor: "#334155",
-              hoverWithin: { backgroundColor: "#f59e0b" },
-            }}
-          />
-        </div>
-      </div>
-    )
+    render(<HoverWithinSiblingProbe />)
 
     const label = renderer.findByTestId("destination-label")!
     expect(renderer.findByTestId("destination-hover-underline")?.type).toBe("div")
@@ -565,6 +579,46 @@ describe("style props reach the renderer", () => {
     renderer.captureScreenshot(after)
 
     expectScreenshotsDiffer(before, after)
+  })
+
+  it("keeps hover and click interaction isolated between two live offscreen roots", () => {
+    const clicked = vi.fn()
+    const first = createTestRoot()
+    let second: ReturnType<typeof createTestRoot> | undefined
+    let reference: ReturnType<typeof createTestRoot> | undefined
+    try {
+      first.render(<HoverWithinSiblingProbe onClick={clicked} />)
+
+      const label = first.renderer.findByTestId("destination-label")!
+      const [x, y, width, height] = first.renderer.getElementBounds(label.id)!
+      const after = path.join(SHOTS_DIR, "multi-root-hover-after.png")
+      const expected = path.join(SHOTS_DIR, "multi-root-hover-expected.png")
+
+      second = createTestRoot()
+      second.render(
+        <div style={{ width: "100%", height: "100%", backgroundColor: "#440000" }} />
+      )
+
+      expect(() => first.renderer.toJSON()).not.toThrow()
+      expect(() => second.renderer.toJSON()).not.toThrow()
+
+      const targetX = x + width / 2
+      const targetY = y + height / 2
+      first.renderer.nativeSimulateMouseMove(targetX, targetY)
+      first.renderer.captureScreenshot(after)
+      first.renderer.nativeSimulateClick(targetX, targetY)
+
+      reference = createTestRoot()
+      reference.render(<HoverWithinSiblingProbe forceHovered />)
+      reference.renderer.captureScreenshot(expected)
+
+      expectScreenshotsEqual(after, expected)
+      expect(clicked).toHaveBeenCalledTimes(1)
+    } finally {
+      reference?.unmount()
+      second?.unmount()
+      first.unmount()
+    }
   })
 
   it("keeps hoverWithin painted when a captured child stays inside the group", () => {
