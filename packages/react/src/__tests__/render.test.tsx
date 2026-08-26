@@ -34,8 +34,30 @@ if (!slot.__hotRenderer) {
   slot.__hotRenderer = new TestRenderer()
 }
 const renderer = slot.__hotRenderer
-render(React.createElement("text", null, ${JSON.stringify(label)}), { renderer })
+render(
+  React.createElement(
+    "div",
+    {
+      style: { width: 100, height: 100 },
+      onClick: () => {
+        slot.__hotClicks = (slot.__hotClicks ?? 0) + 1
+        console.log("HOT_CLICK", ${JSON.stringify(label)}, slot.__hotClicks)
+      },
+    },
+    ${JSON.stringify(label)}
+  ),
+  { renderer }
+)
 renderer.flush()
+if (slot.__hotEvals === 1) {
+  renderer.nativeSimulateClick(10, 10)
+  renderer.native.simulateClick(10, 10)
+  console.log("HOT_STALE_EVENT_QUEUED")
+} else {
+  renderer.dispatchNativeEvents()
+  console.log("HOT_STALE_EVENT_DROPPED", slot.__hotClicks)
+  renderer.nativeSimulateClick(10, 10)
+}
 console.log("HOT_EVAL", slot.__hotEvals)
 console.log("HOT_LABEL", ${JSON.stringify(label)})
 console.log("HOT_TEXT", JSON.stringify(renderer.getAllText()))
@@ -528,6 +550,8 @@ describeNative("render()", () => {
       await output.wait("HOT_LABEL hello", 15_000)
       await output.wait('HOT_TEXT ["hello"]', 1000)
       await output.wait("HOT_SAME_RENDERER true", 1000)
+      await output.wait("HOT_CLICK hello 1", 1000)
+      await output.wait("HOT_STALE_EVENT_QUEUED", 1000)
       await new Promise((resolve) => setTimeout(resolve, 300))
 
       writeFileSync(file, hotAppSource("world"))
@@ -535,6 +559,8 @@ describeNative("render()", () => {
       await output.wait("HOT_LABEL world", 15_000)
       await output.wait('HOT_TEXT ["world"]', 1000)
       await output.wait("HOT_SAME_RENDERER true", 1000)
+      await output.wait("HOT_STALE_EVENT_DROPPED 1", 1000)
+      await output.wait("HOT_CLICK world 2", 1000)
     } finally {
       child.kill("SIGTERM")
       try {

@@ -41,13 +41,27 @@ export function strictStylesDefault(): boolean {
   return process.env?.NODE_ENV !== "production"
 }
 
-const idAllocators = new WeakMap<NativeRenderer, ElementIdAllocator>()
+const ID_ALLOCATOR_KEY = "__gpuixIdAllocators"
+
+type IdAllocatorSlot = {
+  allocators: WeakMap<NativeRenderer, ElementIdAllocator>
+}
+
+function idAllocatorSlot(): IdAllocatorSlot {
+  const existing = Reflect.get(globalThis, ID_ALLOCATOR_KEY) as IdAllocatorSlot | undefined
+  if (existing) return existing
+
+  const created: IdAllocatorSlot = { allocators: new WeakMap() }
+  Reflect.set(globalThis, ID_ALLOCATOR_KEY, created)
+  return created
+}
 
 function idAllocatorFor(renderer: NativeRenderer): ElementIdAllocator {
-  let alloc = idAllocators.get(renderer)
+  const { allocators } = idAllocatorSlot()
+  let alloc = allocators.get(renderer)
   if (!alloc) {
     alloc = { nextElementId: 0 }
-    idAllocators.set(renderer, alloc)
+    allocators.set(renderer, alloc)
   }
   return alloc
 }
