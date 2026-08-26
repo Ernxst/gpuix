@@ -41,7 +41,16 @@ function createElementTable() {
     ],
     [
       3,
-      { id: 3, type: "text", style: {}, text: "Ore", events: new Set(), children: [], parentId: 2 },
+      {
+        id: 3,
+        type: "text",
+        style: {},
+        text: "Ore",
+        events: new Set(),
+        children: [],
+        parentId: 2,
+        authorId: "ore",
+      },
     ],
     [
       4,
@@ -70,6 +79,7 @@ function createElementTable() {
         events: new Set(),
         children: [],
         parentId: 5,
+        dataTestId: "ore-rate",
       },
     ],
     [
@@ -121,7 +131,7 @@ describe("Testing Library-style text queries", () => {
     const { renderer } = createElementTable()
 
     expect(() => getByText(renderer, "Moss")).toThrowError(
-      /Unable to find an element with text "Moss".*Near misses:\n.*<text#3>: "Ore".*<text#4>: "Rate".*<text#6>: "Ore rate".*<text#7>: "Mossy stone"/s
+      /Unable to find an element with text "Moss" within <div data-testid="page" text="OreRateOre rateMossy stone">.*Near misses:\n.*<text id="ore" text="Ore">.*<text text="Rate">.*<text data-testid="ore-rate" text="Ore rate">.*<text text="Mossy stone">/s
     )
   })
 
@@ -129,7 +139,7 @@ describe("Testing Library-style text queries", () => {
     const { renderer } = createElementTable()
 
     expect(() => getByText(renderer, /Ore/)).toThrowError(
-      /Found multiple elements with text \/Ore\/:\n  <text#3>\n  <text#6>/
+      /Found multiple elements with text \/Ore\/:\n  <text id="ore" text="Ore">\n  <text data-testid="ore-rate" text="Ore rate">/
     )
     expect(() => queryByText(renderer, /Ore/)).toThrowError("Found multiple elements")
   })

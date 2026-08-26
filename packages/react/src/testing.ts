@@ -718,15 +718,17 @@ export class TestRenderer implements NativeRenderer {
 /** Returns every direct child, resolving the renderer's numeric element table. */
 export function getChildren(renderer: TestRenderer, element: TestElement): TestElement[] {
   return element.children.map((childId) =>
-    getElement(renderer, childId, `child of ${describeElement(element)}`)
+    getElement(renderer, childId, `child of <${element.type}>`)
   )
 }
 
 /** Returns an element's parent from the renderer's numeric element table. */
 export function getParent(renderer: TestRenderer, element: TestElement): TestElement {
-  if (element.parentId === null) throw new Error(`${describeElement(element)} has no parent`)
+  if (element.parentId === null) {
+    throw new Error(`${describeElement(renderer, element)} has no parent`)
+  }
 
-  return getElement(renderer, element.parentId, `parent of ${describeElement(element)}`)
+  return getElement(renderer, element.parentId, `parent of ${describeElement(renderer, element)}`)
 }
 
 /** Returns an element's text, including the text rendered by every descendant. */
@@ -759,7 +761,7 @@ function getQueries(renderer: TestRenderer, scope: TestElement): TextQueries {
       const matches = findAllByText(renderer, scope, text)
 
       if (matches.length === 0) throw noMatchError(renderer, scope, text)
-      if (matches.length > 1) throw multipleMatchesError(text, matches)
+      if (matches.length > 1) throw multipleMatchesError(renderer, text, matches)
 
       const [match] = matches
       if (match === undefined) throw noMatchError(renderer, scope, text)
@@ -769,7 +771,7 @@ function getQueries(renderer: TestRenderer, scope: TestElement): TextQueries {
     queryByText: (text) => {
       const matches = findAllByText(renderer, scope, text)
 
-      if (matches.length > 1) throw multipleMatchesError(text, matches)
+      if (matches.length > 1) throw multipleMatchesError(renderer, text, matches)
 
       return matches[0]
     },
@@ -837,25 +839,39 @@ function noMatchError(renderer: TestRenderer, scope: TestElement, text: TextMatc
     .map((element) => ({ element, content: textContent(renderer, element) }))
     .filter(({ element, content }) => element.text !== null && content.length > 0)
     .slice(0, 5)
-    .map(({ element, content }) => `  ${describeElement(element)}: ${JSON.stringify(content)}`)
+    .map(({ element }) => `  ${describeElement(renderer, element)}`)
   const nearby =
     nearMisses.length === 0 ? "No text was rendered in this scope." : nearMisses.join("\n")
 
   return new Error(
-    `Unable to find an element with text ${describeMatcher(text)} within ${describeElement(scope)}. Near misses:\n${nearby}`
+    `Unable to find an element with text ${describeMatcher(text)} within ${describeElement(renderer, scope)}. Near misses:\n${nearby}`
   )
 }
 
-function multipleMatchesError(text: TextMatcher, matches: TestElement[]): Error {
+function multipleMatchesError(
+  renderer: TestRenderer,
+  text: TextMatcher,
+  matches: TestElement[]
+): Error {
   return new Error(
     `Found multiple elements with text ${describeMatcher(text)}:\n${matches
-      .map((element) => `  ${describeElement(element)}`)
+      .map((element) => `  ${describeElement(renderer, element)}`)
       .join("\n")}`
   )
 }
 
-function describeElement(element: TestElement): string {
-  return `<${element.type}#${element.id}>`
+function describeElement(renderer: TestRenderer, element: TestElement): string {
+  const identity = [
+    element.dataTestId === undefined ? undefined : `data-testid=${JSON.stringify(element.dataTestId)}`,
+    element.authorId === undefined ? undefined : `id=${JSON.stringify(element.authorId)}`,
+  ]
+    .filter((attribute): attribute is string => attribute !== undefined)
+    .join(" ")
+  const attributes = [identity, `text=${JSON.stringify(textContent(renderer, element))}`]
+    .filter((attribute) => attribute.length > 0)
+    .join(" ")
+
+  return `<${element.type} ${attributes}>`
 }
 
 function describeMatcher(text: TextMatcher): string {
