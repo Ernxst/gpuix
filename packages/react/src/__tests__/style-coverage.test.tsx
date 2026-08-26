@@ -605,7 +605,7 @@ describe("style props reach the renderer", () => {
     )
   })
 
-  it("clears hoverWithin when a captured child leaves the group", () => {
+  it("retains hoverWithin outside the group until child capture releases", () => {
     const { render, renderer } = createTestRoot()
     render(<HoverWithinCaptureProbe capture="child" />)
 
@@ -615,14 +615,24 @@ describe("style props reach the renderer", () => {
       SHOTS_DIR,
       "hover-within-child-capture-leave-idle.png"
     )
+    const hovered = path.join(
+      SHOTS_DIR,
+      "hover-within-child-capture-leave-hovered.png"
+    )
     const capturedOutside = path.join(
       SHOTS_DIR,
       "hover-within-child-capture-outside.png"
+    )
+    const releasedOutside = path.join(
+      SHOTS_DIR,
+      "hover-within-child-capture-released.png"
     )
 
     renderer.nativeSimulateMouseMove(10, 10)
     renderer.captureScreenshot(idle)
     renderer.nativeSimulateMouseMove(centerX(childBounds), centerY(childBounds))
+    renderer.captureScreenshot(hovered)
+    expectScreenshotsDiffer(idle, hovered)
     renderer.nativeSimulateMouseDown(centerX(childBounds), centerY(childBounds), 0)
     renderer.nativeSimulateMouseMove(
       rowBounds[0] + rowBounds[2] + 40,
@@ -631,15 +641,17 @@ describe("style props reach the renderer", () => {
     )
     renderer.captureScreenshot(capturedOutside)
 
-    expectScreenshotsEqual(idle, capturedOutside)
+    expectScreenshotsEqual(hovered, capturedOutside)
     renderer.nativeSimulateMouseUp(
       rowBounds[0] + rowBounds[2] + 40,
       centerY(rowBounds),
       0
     )
+    renderer.captureScreenshot(releasedOutside)
+    expectScreenshotsEqual(idle, releasedOutside)
   })
 
-  it("clears hoverWithin when the capturing group owner leaves its bounds", () => {
+  it("retains hoverWithin outside the group until group capture releases", () => {
     const { render, renderer } = createTestRoot()
     render(<HoverWithinCaptureProbe capture="group" />)
 
@@ -649,12 +661,18 @@ describe("style props reach the renderer", () => {
       SHOTS_DIR,
       "hover-within-group-capture-outside.png"
     )
+    const releasedOutside = path.join(
+      SHOTS_DIR,
+      "hover-within-group-capture-released.png"
+    )
     const captureX = rowBounds[0] + 20
     const captureY = rowBounds[1] + 20
 
     renderer.nativeSimulateMouseMove(10, 10)
     renderer.captureScreenshot(idle)
     renderer.nativeSimulateMouseMove(captureX, captureY)
+    const hovered = path.join(SHOTS_DIR, "hover-within-group-capture-hovered.png")
+    renderer.captureScreenshot(hovered)
     renderer.nativeSimulateMouseDown(captureX, captureY, 0)
     renderer.nativeSimulateMouseMove(
       rowBounds[0] + rowBounds[2] + 40,
@@ -663,12 +681,14 @@ describe("style props reach the renderer", () => {
     )
     renderer.captureScreenshot(capturedOutside)
 
-    expectScreenshotsEqual(idle, capturedOutside)
+    expectScreenshotsEqual(hovered, capturedOutside)
     renderer.nativeSimulateMouseUp(
       rowBounds[0] + rowBounds[2] + 40,
       centerY(rowBounds),
       0
     )
+    renderer.captureScreenshot(releasedOutside)
+    expectScreenshotsEqual(idle, releasedOutside)
   })
 
   it("focuses an element with autoFocus so it receives keys", () => {
