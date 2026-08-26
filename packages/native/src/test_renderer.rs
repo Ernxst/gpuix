@@ -420,7 +420,7 @@ impl TestGpuixRenderer {
                 "advanceAsyncClock delta must be a finite non-negative number",
             ));
         }
-        with_test_state(|cx, _window, _view| {
+        with_test_state(self.state_id, |cx, _window, _view| {
             cx.advance_clock(std::time::Duration::from_secs_f64(delta_ms / 1000.0));
             cx.run_until_parked();
             Ok(())
