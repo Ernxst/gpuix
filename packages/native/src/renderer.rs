@@ -2553,6 +2553,16 @@ fn notify_web() {
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 fn web_event_callback(callback: js_sys::Function) -> EventCallback {
+    web_callback(callback, true)
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn web_window_event_callback(callback: js_sys::Function) -> EventCallback {
+    web_callback(callback, false)
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn web_callback(callback: js_sys::Function, includes_error_argument: bool) -> EventCallback {
     Rc::new(move |payload| {
         let Ok(json) = serde_json::to_string(&payload) else {
             log::error!("Failed to serialize GPUIX browser event");
@@ -2564,11 +2574,16 @@ fn web_event_callback(callback: js_sys::Function) -> EventCallback {
         };
         let callback = callback.clone();
         let task = wasm_bindgen::closure::Closure::once_into_js(move || {
-            if let Err(error) = callback.call2(
-                &wasm_bindgen::JsValue::UNDEFINED,
-                &wasm_bindgen::JsValue::NULL,
-                &payload,
-            ) {
+            let result = if includes_error_argument {
+                callback.call2(
+                    &wasm_bindgen::JsValue::UNDEFINED,
+                    &wasm_bindgen::JsValue::NULL,
+                    &payload,
+                )
+            } else {
+                callback.call1(&wasm_bindgen::JsValue::UNDEFINED, &payload)
+            };
+            if let Err(error) = result {
                 log::error!("GPUIX browser event callback failed: {error:?}");
             }
         });
@@ -2861,7 +2876,7 @@ impl WebGpuixRenderer {
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowEventHandler)]
     pub fn set_window_event_handler(&self, event_callback: Option<js_sys::Function>) {
-        *self.window_event_callback.borrow_mut() = event_callback.map(web_event_callback);
+        *self.window_event_callback.borrow_mut() = event_callback.map(web_window_event_callback);
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowTitle)]
