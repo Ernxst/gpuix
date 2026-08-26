@@ -158,6 +158,15 @@ export interface TestElement {
   customProps?: Record<string, unknown>
 }
 
+export type TextMatcher = RegExp | string
+
+/** Text queries over the GPU-IX desktop test renderer. */
+export interface TextQueries {
+  getByText: (text: TextMatcher) => TestElement
+  queryByText: (text: TextMatcher) => TestElement | undefined
+  getAllByText: (text: TextMatcher) => TestElement[]
+}
+
 /** Current async load state for a live native `<img>` test element. */
 export interface ImageLoadState {
   status: "idle" | "loading" | "loaded" | "error"
@@ -705,6 +714,161 @@ export class TestRenderer implements NativeRenderer {
 }
 
 // ── Test root helper ─────────────────────────────────────────────────
+
+/** Returns every direct child, resolving the renderer's numeric element table. */
+export function getChildren(renderer: TestRenderer, element: TestElement): TestElement[] {
+  return element.children.map((childId) =>
+    getElement(renderer, childId, `child of ${describeElement(element)}`)
+  )
+}
+
+/** Returns an element's parent from the renderer's numeric element table. */
+export function getParent(renderer: TestRenderer, element: TestElement): TestElement {
+  if (element.parentId === null) throw new Error(`${describeElement(element)} has no parent`)
+
+  return getElement(renderer, element.parentId, `parent of ${describeElement(element)}`)
+}
+
+/** Returns an element's text, including the text rendered by every descendant. */
+export function textContent(renderer: TestRenderer, element: TestElement): string {
+  return `${element.text ?? ""}${getChildren(renderer, element)
+    .map((child) => textContent(renderer, child))
+    .join("")}`
+}
+
+export function getByText(renderer: TestRenderer, text: TextMatcher): TestElement {
+  return getQueries(renderer, getRoot(renderer)).getByText(text)
+}
+
+export function queryByText(renderer: TestRenderer, text: TextMatcher): TestElement | undefined {
+  return getQueries(renderer, getRoot(renderer)).queryByText(text)
+}
+
+export function getAllByText(renderer: TestRenderer, text: TextMatcher): TestElement[] {
+  return getQueries(renderer, getRoot(renderer)).getAllByText(text)
+}
+
+/** Limits text queries to an element and its descendants. */
+export function within(renderer: TestRenderer, element: TestElement): TextQueries {
+  return getQueries(renderer, element)
+}
+
+function getQueries(renderer: TestRenderer, scope: TestElement): TextQueries {
+  return {
+    getByText: (text) => {
+      const matches = findAllByText(renderer, scope, text)
+
+      if (matches.length === 0) throw noMatchError(renderer, scope, text)
+      if (matches.length > 1) throw multipleMatchesError(text, matches)
+
+      const [match] = matches
+      if (match === undefined) throw noMatchError(renderer, scope, text)
+
+      return match
+    },
+    queryByText: (text) => {
+      const matches = findAllByText(renderer, scope, text)
+
+      if (matches.length > 1) throw multipleMatchesError(text, matches)
+
+      return matches[0]
+    },
+    getAllByText: (text) => {
+      const matches = findAllByText(renderer, scope, text)
+
+      if (matches.length === 0) throw noMatchError(renderer, scope, text)
+
+      return matches
+    },
+  }
+}
+
+function findAllByText(
+  renderer: TestRenderer,
+  scope: TestElement,
+  text: TextMatcher
+): TestElement[] {
+  return getElements(renderer, scope).filter(
+    (element) =>
+      matchesText(textContent(renderer, element), text) &&
+      !hasMatchingChild(renderer, element, text)
+  )
+}
+
+function hasMatchingChild(
+  renderer: TestRenderer,
+  element: TestElement,
+  text: TextMatcher
+): boolean {
+  return getChildren(renderer, element).some((child) =>
+    matchesText(textContent(renderer, child), text)
+  )
+}
+
+function getElements(renderer: TestRenderer, scope: TestElement): TestElement[] {
+  return [scope, ...getChildren(renderer, scope).flatMap((child) => getElements(renderer, child))]
+}
+
+function getRoot(renderer: TestRenderer): TestElement {
+  const root = renderer.getRoot()
+  if (root === undefined) throw missingRootError()
+
+  return root
+}
+
+function getElement(renderer: TestRenderer, id: number, relationship: string): TestElement {
+  const element = renderer.getElement(id)
+  if (element === undefined) throw missingElementError(id, relationship)
+
+  return element
+}
+
+function matchesText(content: string, text: TextMatcher): boolean {
+  if (!(text instanceof RegExp)) return content === text
+
+  text.lastIndex = 0
+  const matches = text.test(content)
+  text.lastIndex = 0
+  return matches
+}
+
+function noMatchError(renderer: TestRenderer, scope: TestElement, text: TextMatcher): Error {
+  const nearMisses = getElements(renderer, scope)
+    .map((element) => ({ element, content: textContent(renderer, element) }))
+    .filter(({ element, content }) => element.text !== null && content.length > 0)
+    .slice(0, 5)
+    .map(({ element, content }) => `  ${describeElement(element)}: ${JSON.stringify(content)}`)
+  const nearby =
+    nearMisses.length === 0 ? "No text was rendered in this scope." : nearMisses.join("\n")
+
+  return new Error(
+    `Unable to find an element with text ${describeMatcher(text)} within ${describeElement(scope)}. Near misses:\n${nearby}`
+  )
+}
+
+function multipleMatchesError(text: TextMatcher, matches: TestElement[]): Error {
+  return new Error(
+    `Found multiple elements with text ${describeMatcher(text)}:\n${matches
+      .map((element) => `  ${describeElement(element)}`)
+      .join("\n")}`
+  )
+}
+
+function describeElement(element: TestElement): string {
+  return `<${element.type}#${element.id}>`
+}
+
+function describeMatcher(text: TextMatcher): string {
+  return text instanceof RegExp ? text.toString() : JSON.stringify(text)
+}
+
+function missingRootError(): Error {
+  return new Error("Unable to search rendered text because the renderer has no root element")
+}
+
+function missingElementError(id: number, relationship: string): Error {
+  return new Error(`Unable to find ${relationship}: element #${id} is absent`)
+}
 
 export interface TestRoot {
   root: Root
