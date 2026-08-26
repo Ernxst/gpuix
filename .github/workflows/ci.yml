@@ -20,35 +20,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Fork cost control (macOS runners bill at 10x, Windows at 2x): push/PR
+  # builds only Linux x64 — the one platform not buildable locally — and
+  # the full matrix runs on workflow_dispatch. Computed in a plan job
+  # because job-level `if` cannot reference the matrix context.
+  # One target per OS, on the architecture that OS is mostly used on
+  # (upstream's set): `packages/native/package.json` `napi.targets` must
+  # list exactly the same set as the FULL matrix below.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      settings: ${{ steps.set.outputs.settings }}
+    steps:
+      - id: set
+        run: |
+          # macOS (Metal): default features include test-support.
+          # Linux (Vulkan/wgpu): build:release disables test-support until wgpu image readback lands.
+          # Windows (Direct3D): test support includes TestGpuixRenderer and render_to_image.
+          FULL='[
+            {"host":"macos-latest","target":"aarch64-apple-darwin","bunTarget":"bun-darwin-arm64","build":"bun run build --target aarch64-apple-darwin"},
+            {"host":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","bunTarget":"bun-linux-x64","build":"bun run build:release --target x86_64-unknown-linux-gnu"},
+            {"host":"windows-latest","target":"x86_64-pc-windows-msvc","bunTarget":"bun-windows-x64","build":"bun run build --target x86_64-pc-windows-msvc"}
+          ]'
+          LINUX_ONLY='[
+            {"host":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","bunTarget":"bun-linux-x64","build":"bun run build:release --target x86_64-unknown-linux-gnu"}
+          ]'
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CHOSEN="$FULL"
+          else
+            CHOSEN="$LINUX_ONLY"
+          fi
+          echo "settings=$(echo "$CHOSEN" | jq -c .)" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        # One target per OS, on the architecture that OS is mostly used on.
-        # Every extra target is a full gpui build, and gpui is most of the
-        # wall clock of this workflow. Add a target back when someone asks
-        # for it, not before: `packages/native/package.json` `napi.targets`
-        # must list exactly the same set, or the published loader looks for
-        # a platform package that CI never built.
-        settings:
-          # ── macOS (Metal) ──────────────────────────────────────────
-          # default features include test-support (TestGpuixRenderer)
-          - host: macos-latest
-            target: aarch64-apple-darwin
-            bunTarget: bun-darwin-arm64
-            build: bun run build --target aarch64-apple-darwin
-          # ── Linux (Vulkan/wgpu) ────────────────────────────────────
-          # build:release disables test-support until wgpu image readback lands.
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            bunTarget: bun-linux-x64
-            build: bun run build:release --target x86_64-unknown-linux-gnu
-          # ── Windows (Direct3D) ─────────────────────────────────────
-          # Test support includes TestGpuixRenderer and render_to_image.
-          - host: windows-latest
-            target: x86_64-pc-windows-msvc
-            bunTarget: bun-windows-x64
-            build: bun run build --target x86_64-pc-windows-msvc
+        settings: ${{ fromJSON(needs.plan.outputs.settings) }}
     name: build - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     defaults:
@@ -180,6 +189,8 @@ jobs:
   test:
     name: test
     needs: build
+    # Needs the macOS artifact, which only exists on dispatch runs.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -232,6 +243,8 @@ jobs:
   test-windows:
     name: test-windows
     needs: build
+    # Needs the Windows artifact, which only exists on dispatch runs.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
