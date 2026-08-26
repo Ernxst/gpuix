@@ -22,44 +22,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cost control on this private repo: push/PR builds only Linux x64 (the
+  # one platform not buildable locally); the full 6-target matrix runs on
+  # workflow_dispatch. Matrix is computed here because job-level `if`
+  # cannot reference the matrix context.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      settings: ${{ steps.set.outputs.settings }}
+    steps:
+      - id: set
+        run: |
+          # ── macOS (Metal): default features include test-support (TestGpuixRenderer)
+          # ── Linux (Vulkan/wgpu): build:release skips test-support (pulls gpui_macos, macOS-only)
+          # ── Windows (Direct3D/wgpu)
+          FULL='[
+            {"host":"macos-latest","target":"aarch64-apple-darwin","bunTarget":"bun-darwin-arm64","build":"bun run build --target aarch64-apple-darwin"},
+            {"host":"macos-latest","target":"x86_64-apple-darwin","bunTarget":"bun-darwin-x64","build":"bun run build --target x86_64-apple-darwin"},
+            {"host":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","bunTarget":"bun-linux-x64","build":"bun run build:release --target x86_64-unknown-linux-gnu"},
+            {"host":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-gnu","bunTarget":"bun-linux-arm64","build":"bun run build:release --target aarch64-unknown-linux-gnu"},
+            {"host":"windows-latest","target":"x86_64-pc-windows-msvc","bunTarget":"bun-windows-x64","build":"bun run build:release --target x86_64-pc-windows-msvc"},
+            {"host":"windows-latest","target":"aarch64-pc-windows-msvc","bunTarget":"bun-windows-arm64","build":"bun run build:release --target aarch64-pc-windows-msvc"}
+          ]'
+          LINUX_ONLY='[
+            {"host":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","bunTarget":"bun-linux-x64","build":"bun run build:release --target x86_64-unknown-linux-gnu"}
+          ]'
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CHOSEN="$FULL"
+          else
+            CHOSEN="$LINUX_ONLY"
+          fi
+          echo "settings=$(echo "$CHOSEN" | jq -c .)" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        settings:
-          # ── macOS (Metal) ──────────────────────────────────────────
-          # default features include test-support (TestGpuixRenderer)
-          - host: macos-latest
-            target: aarch64-apple-darwin
-            bunTarget: bun-darwin-arm64
-            build: bun run build --target aarch64-apple-darwin
-          - host: macos-latest
-            target: x86_64-apple-darwin
-            bunTarget: bun-darwin-x64
-            build: bun run build --target x86_64-apple-darwin
-          # ── Linux (Vulkan/wgpu) ────────────────────────────────────
-          # build:release skips test-support (pulls gpui_macos, macOS-only)
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            bunTarget: bun-linux-x64
-            build: bun run build:release --target x86_64-unknown-linux-gnu
-          - host: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            bunTarget: bun-linux-arm64
-            build: bun run build:release --target aarch64-unknown-linux-gnu
-          # ── Windows (Direct3D/wgpu) ────────────────────────────────
-          - host: windows-latest
-            target: x86_64-pc-windows-msvc
-            bunTarget: bun-windows-x64
-            build: bun run build:release --target x86_64-pc-windows-msvc
-          - host: windows-latest
-            target: aarch64-pc-windows-msvc
-            bunTarget: bun-windows-arm64
-            build: bun run build:release --target aarch64-pc-windows-msvc
+        settings: ${{ fromJSON(needs.plan.outputs.settings) }}
     name: build - ${{ matrix.settings.target }}
-    # Cost control on this private repo: push/PR builds only Linux x64 (the
-    # one platform not buildable locally); macOS verification stays local.
-    if: github.event_name == 'workflow_dispatch' || matrix.settings.target == 'x86_64-unknown-linux-gnu'
     runs-on: ${{ matrix.settings.host }}
     defaults:
       run:
