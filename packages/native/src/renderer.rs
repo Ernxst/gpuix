@@ -5008,6 +5008,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("center") => el = el.items_center(),
         Some("start") | Some("flex-start") => el = el.items_start(),
         Some("end") | Some("flex-end") => el = el.items_end(),
+        Some("baseline") => el = el.items_baseline(),
         Some("stretch") => el = el.items_stretch(),
         _ => {}
     }
