@@ -14,10 +14,12 @@ import fs from "fs"
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import React, { useState, useRef } from "react"
 import {
+  createRoute,
   createLink,
   createMemoryHistory,
   createRootRoute,
   createRouter,
+  Link,
   RouterContextProvider,
 } from "@tanstack/react-router"
 import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing"
@@ -485,6 +487,51 @@ describeNative("events", () => {
 
       expect(navigate).toHaveBeenCalledOnce()
       expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ to: "/factory" }))
+    })
+
+    function renderBareTanStackLink() {
+      const rootRoute = createRootRoute()
+      const factoryRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: "factory",
+      })
+      const router = createRouter({
+        routeTree: rootRoute.addChildren([factoryRoute]),
+        history: createMemoryHistory({ initialEntries: ["/"] }),
+        isServer: false,
+      })
+
+      testRoot.render(
+        <RouterContextProvider router={router}>
+          <Link to="/factory" preload={false} style={{ width: 180, height: 50 }}>
+            Factory
+          </Link>
+        </RouterContextProvider>
+      )
+
+      const text = testRoot.renderer.findByText("Factory")!
+      const anchor = testRoot.renderer.getElement(text.parentId!)!
+      return { router, anchor }
+    }
+
+    it("navigates a bare TanStack Link on primary click", () => {
+      vi.stubGlobal("window", { origin: "http://localhost" })
+      const { router, anchor } = renderBareTanStackLink()
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(anchor.id)!
+
+      testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
+
+      expect(router.history.location.pathname).toBe("/factory")
+    })
+
+    it("navigates a bare TanStack Link on focused Enter through simulateKeystrokes", () => {
+      vi.stubGlobal("window", { origin: "http://localhost" })
+      const { router, anchor } = renderBareTanStackLink()
+
+      testRoot.renderer.focusElement(anchor.id)
+      testRoot.renderer.simulateKeystrokes("enter")
+
+      expect(router.history.location.pathname).toBe("/factory")
     })
 
     it("routes pointer click and focused Space through the same click handler", () => {
