@@ -26,6 +26,80 @@ function Counter() {
 }
 
 describeNative("automation", () => {
+  it("preserves identity attributes for native automation and synthetic events", async () => {
+    const attributes: Array<string | null> = []
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div
+        id="site-state"
+        data-testid="hover-underline"
+        data-state="ready"
+        onClick={(event) => {
+          attributes.push(
+            event.currentTarget.getAttribute("id"),
+            event.currentTarget.getAttribute("data-testid"),
+            event.currentTarget.getAttribute("data-state")
+          )
+        }}
+        style={{ width: 200, height: 80 }}
+      />
+    )
+
+    const heading = renderer.findByElementId("site-state")
+    expect(heading).toMatchObject({
+      authorId: "site-state",
+      dataTestId: "hover-underline",
+      customProps: { "data-testid": "hover-underline", "data-state": "ready" },
+    })
+    expect(renderer.findByTestId("hover-underline")).toMatchObject({
+      id: heading?.id,
+      type: "div",
+    })
+    expect(renderer.findByElementId("missing")).toBeUndefined()
+
+    const app = await connectTest(renderer)
+    await expect(app.call("getTree", {})).resolves.toMatchObject({
+      tree: { authorId: "site-state" },
+    })
+    await expect(app.getByTestId("hover-underline").element()).resolves.toMatchObject({
+      id: heading?.id,
+      dataTestId: "hover-underline",
+    })
+    await app.close()
+
+    renderer.nativeSimulateClick(100, 40)
+    expect(attributes).toEqual(["site-state", "hover-underline", "ready"])
+  })
+
+  it("removes identity attributes instead of retaining a literal null value", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(<div id="site" data-testid="row" />)
+    expect(renderer.findByElementId("site")).toBeDefined()
+    expect(renderer.findByTestId("row")).toBeDefined()
+
+    render(<div />)
+    expect(renderer.findByElementId("site")).toBeUndefined()
+    expect(renderer.findByTestId("row")).toBeUndefined()
+    expect(renderer.findByElementId("null")).toBeUndefined()
+    expect(renderer.findByTestId("null")).toBeUndefined()
+  })
+
+  it("normalizes numeric and boolean data-testid props for lookup", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <div data-testid={42} />
+        <div data-testid />
+      </div>
+    )
+
+    expect(renderer.findByTestId("42")?.dataTestId).toBe("42")
+    expect(renderer.findByTestId("true")?.dataTestId).toBe("true")
+  })
+
   it("clicks a testId locator and waits for text", async () => {
     const { render, renderer } = createTestRoot()
     render(<Counter />)

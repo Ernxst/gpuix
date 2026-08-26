@@ -62,6 +62,8 @@ pub struct GpuixStyleDiagnostic {
     pub message: String,
     pub element_id: f64,
     pub element_type: String,
+    pub author_id: Option<String>,
+    pub data_test_id: Option<String>,
     pub test_id: Option<String>,
     pub property: String,
     pub value: String,
@@ -97,24 +99,46 @@ pub(crate) fn pending_style_diagnostics(
 fn style_diagnostic_context(
     diagnostic: &PendingStyleDiagnostic,
     tree: &RetainedTree,
-) -> (String, String, Option<String>) {
+) -> (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     let element = tree.elements.get(&diagnostic.element_id);
     let element_type = element
         .map(|element| element.element_type.clone())
         .unwrap_or_else(|| "unknown".into());
     let test_id = element.and_then(|element| element.test_id.clone());
+    let author_id = element.and_then(|element| element.author_id.clone());
+    let data_test_id = element.and_then(|element| {
+        element
+            .custom_props
+            .get("data-testid")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    });
+    let author_id_label = author_id
+        .as_ref()
+        .map(|author_id| format!(" id={author_id:?}"))
+        .unwrap_or_default();
     let test_id_label = test_id
         .as_ref()
         .map(|test_id| format!(" testId={test_id:?}"))
         .unwrap_or_default();
+    let data_test_id_label = data_test_id
+        .as_ref()
+        .map(|data_test_id| format!(" data-testid={data_test_id:?}"))
+        .unwrap_or_default();
     let message = format!(
-        "[gpuix] Invalid style on <{element_type}{test_id_label}> (element {}): property {:?} rejected value {}: {}",
+        "[gpuix] Invalid style on <{element_type}{author_id_label}{data_test_id_label}{test_id_label}> (element {}): property {:?} rejected value {}: {}",
         diagnostic.element_id,
         diagnostic.problem.property,
         diagnostic.problem.value,
         diagnostic.problem.reason,
     );
-    (message, element_type, test_id)
+    (message, element_type, author_id, data_test_id, test_id)
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -127,11 +151,14 @@ pub(crate) fn drain_style_diagnostics(
     pending
         .into_iter()
         .map(|diagnostic| {
-            let (message, element_type, test_id) = style_diagnostic_context(&diagnostic, &tree);
+            let (message, element_type, author_id, data_test_id, test_id) =
+                style_diagnostic_context(&diagnostic, &tree);
             GpuixStyleDiagnostic {
                 message,
                 element_id: diagnostic.element_id as f64,
                 element_type,
+                author_id,
+                data_test_id,
                 test_id,
                 property: diagnostic.problem.property,
                 value: diagnostic.problem.value,
@@ -2804,7 +2831,7 @@ impl WebGpuixRenderer {
         tree.set_style(id, parsed.style);
         if self.strict_styles.load(Ordering::Relaxed) {
             for diagnostic in pending_style_diagnostics(id, parsed.problems) {
-                let (message, _, _) = style_diagnostic_context(&diagnostic, &tree);
+                let (message, _, _, _, _) = style_diagnostic_context(&diagnostic, &tree);
                 web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
             }
         }
@@ -2892,7 +2919,7 @@ impl WebGpuixRenderer {
             .map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
         if self.strict_styles.load(Ordering::Relaxed) {
             for diagnostic in outcome.diagnostics {
-                let (message, _, _) = style_diagnostic_context(&diagnostic, &tree);
+                let (message, _, _, _, _) = style_diagnostic_context(&diagnostic, &tree);
                 web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
             }
         }

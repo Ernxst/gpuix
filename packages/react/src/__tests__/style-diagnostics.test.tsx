@@ -62,12 +62,14 @@ describeNative("style diagnostics", () => {
     expect(diagnostics[0].message).toContain('"uppercase"')
   })
 
-  it("reports an unknown batched style after later testId metadata is applied", () => {
+  it("reports an unknown batched style after later identity metadata is applied", () => {
     const renderer = new TestRenderer()
     renderer.applyBatch(
       JSON.stringify([
         ["createElement", 73, "div"],
         ["setStyle", 73, { flex: 1, backgroundColor: "red" }],
+        ["setCustomPropValue", 73, "id", "profile-card"],
+        ["setCustomPropValue", 73, "data-testid", 42],
         ["setCustomPropValue", 73, "testId", "batch-card"],
         ["setRoot", 73],
       ])
@@ -76,9 +78,34 @@ describeNative("style diagnostics", () => {
     expect(renderer.getElement(73)?.style).toMatchObject({ backgroundColor: "red" })
     const diagnostics = renderer.drainStyleDiagnostics()
     expect(diagnostics).toHaveLength(1)
-    expect(diagnostics[0].message).toContain('<div testId="batch-card">')
+    expect(diagnostics[0]).toMatchObject({
+      authorId: "profile-card",
+      dataTestId: "42",
+      testId: "batch-card",
+    })
+    expect(diagnostics[0].message).toContain(
+      '<div id="profile-card" data-testid="42" testId="batch-card">'
+    )
     expect(diagnostics[0].message).toContain("flex")
     expect(diagnostics[0].message).toContain("1")
+  })
+
+  it("normalizes boolean data-testid values in style diagnostics", () => {
+    const renderer = new TestRenderer()
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 74, "div"],
+        ["setStyle", 74, { flex: 1 }],
+        ["setCustomPropValue", 74, "data-testid", true],
+        ["setRoot", 74],
+      ])
+    )
+
+    expect(renderer.findByTestId("true")?.id).toBe(74)
+    const diagnostics = renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({ dataTestId: "true" })
+    expect(diagnostics[0].message).toContain('<div data-testid="true">')
   })
 
   it("reports malformed nested grid tracks with their track index", () => {
