@@ -1077,7 +1077,7 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             ["left", "start", "center", "right"]
         );
         number_field!(key, value, "lineHeight", line_height);
-        enum_field!(key, value, "whiteSpace", white_space, ["normal", "nowrap"]);
+        enum_field!(key, value, "whiteSpace", white_space, ["normal", "nowrap", "pre"]);
         if key == "textWrap" {
             let property = property!("textWrap");
             let wrap = decode::<String>(&property, value, &mut parsed.problems);

@@ -6336,6 +6336,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.white_space.as_deref() {
         Some("nowrap") => el = el.whitespace_nowrap(),
         Some("normal") => el = el.whitespace_normal(),
+        Some("pre") => el = el.whitespace_pre(),
         _ => {}
     }
     match style.text_wrap.as_deref() {

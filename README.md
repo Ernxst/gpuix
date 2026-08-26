@@ -2360,14 +2360,10 @@ Anchors with an `href` join the native tab order automatically, so a plain link
 does not need an app-side `tabIndex` or `onKeyDown` adapter. Native text editors
 keep Space as text input instead of synthesizing a click.
 
-> **Note: `white-space: pre` is not supported.** GPUI's text system only has `normal` (wraps) and `nowrap` (single line). To preserve newlines like HTML `<pre>`, split your text on `\n` in React and render each line as a separate `<text>` element in a flex column:
+> **`whiteSpace: "pre"` preserves explicit newlines and repeated spaces without soft wrapping.** It remains one selectable `<text>` layout, including nested inline text runs, so copying and selection preserve the original string. Whitespace policy is layout-wide: put `pre` on the outer `<text>`; a nested inline run cannot switch it mid-sentence.
 >
 > ```tsx
-> <div style={{ display: 'flex', flexDirection: 'column', fontFamily: 'Menlo' }}>
->   {code.split('\n').map((line, i) => (
->     <text key={i} style={{ whiteSpace: 'nowrap' }}>{line}</text>
->   ))}
-> </div>
+> <text style={{ whiteSpace: 'pre', fontFamily: 'Menlo' }}>{code}</text>
 > ```
 
 > **Note: GPUI defaults text color to black, not white.** Unlike CSS, GPUI does not inherit `color` from parent elements. Every `<text>` element that doesn't set an explicit `color` style will render as black — invisible on dark backgrounds. Always set `color` on your text elements or on a parent `<div>` (which applies `text_color` to all children in that subtree via GPUI's `Styled` trait).

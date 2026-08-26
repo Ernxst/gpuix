@@ -427,7 +427,7 @@ export interface StyleDesc {
   textTransform?: "none" | "uppercase" | "lowercase"
   textAlign?: "left" | "start" | "center" | "right"
   lineHeight?: number
-  whiteSpace?: "normal" | "nowrap"
+  whiteSpace?: "normal" | "nowrap" | "pre"
   textWrap?: "wrap" | "nowrap"
   textOverflow?: "ellipsis" | "ellipsis-start"
   lineClamp?: number
