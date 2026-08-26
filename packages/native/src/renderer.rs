@@ -4042,7 +4042,9 @@ pub(crate) fn build_div(
         match event_type.as_str() {
             // ── Click ────────────────────────────────────────────
             "click" => {
-                el = el.on_click(move |click_event, _window, _cx| {
+                el = el.on_click(move |click_event, _window, cx| {
+                    let stop_native_propagation =
+                        !matches!(click_event, gpui::ClickEvent::Keyboard(_));
                     emit_event_full(&callback, id, "click", |p| {
                         let (x, y) = point_to_xy(click_event.position());
                         p.x = Some(x);
@@ -4050,7 +4052,27 @@ pub(crate) fn build_div(
                         p.modifiers = Some(click_event.modifiers().into());
                         p.click_count = Some(click_event.click_count() as u32);
                         p.is_right_click = Some(click_event.is_right_click());
+                        p.button = Some(match click_event {
+                            gpui::ClickEvent::Mouse(event) => {
+                                mouse_button_to_u32(event.down.button)
+                            }
+                            gpui::ClickEvent::Keyboard(_) | gpui::ClickEvent::Touch(_) => 0,
+                        });
+                        p.input_source = Some(
+                            match click_event {
+                                gpui::ClickEvent::Mouse(_) => "mouse",
+                                gpui::ClickEvent::Keyboard(_) => "keyboard",
+                                gpui::ClickEvent::Touch(_) => "touch",
+                            }
+                            .to_string(),
+                        );
                     });
+                    if stop_native_propagation {
+                        // React owns propagation from this native target onward. A keyboard
+                        // click fires within key-up dispatch, so it must leave propagation
+                        // active for this element's key-up listener to run afterward.
+                        cx.stop_propagation();
+                    }
                 });
             }
 

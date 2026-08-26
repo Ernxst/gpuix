@@ -60,6 +60,8 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     renderer: batchedRenderer,
     ids: idAllocatorFor(renderer),
     eventHandlers: new Map(),
+    eventTargets: new Map(),
+    preventedKeyboardActivations: new Map(),
   }
   attachRoot(renderer, gpuixContainer)
   attachRoot(batchedRenderer, gpuixContainer)

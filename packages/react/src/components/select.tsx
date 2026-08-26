@@ -11,7 +11,7 @@ import React, {
   useState,
 } from "react"
 import type { ReactElement, ReactNode } from "react"
-import type { EventPayload } from "@gpuix/native"
+import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
@@ -258,7 +258,7 @@ export const SelectValue = forwardRef<PublicInstance, SelectValueProps>(
 )
 
 export interface SelectContentProps extends FloatingContentProps {
-  onEscapeKeyDown?: (event: EventPayload) => void
+  onEscapeKeyDown?: (event: GpuixSyntheticEvent) => void
 }
 
 export const SelectContent = forwardRef<PublicInstance, SelectContentProps>(
@@ -332,11 +332,11 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
         {...props}
         ref={ref}
         style={resolveStyle(style, state)}
-        onMouseEnter={(event: EventPayload) => {
+        onMouseEnter={(event: GpuixSyntheticEvent) => {
           onMouseEnter?.(event)
           if (!disabled) context.setActiveValue(value)
         }}
-        onClick={(event: EventPayload) => {
+        onClick={(event: GpuixSyntheticEvent) => {
           onClick?.(event)
           if (!disabled) context.selectValue(value)
         }}
