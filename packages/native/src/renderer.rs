@@ -4612,6 +4612,11 @@ pub(crate) fn build_div(
     // Some events (on_hover, on_click) require a stateful element (.id()),
     // which we already set above. Others (on_mouse_down, on_key_down) work
     // on any InteractiveElement.
+    let activates_on_space = element
+        .custom_props
+        .get("activationKind")
+        .and_then(serde_json::Value::as_str)
+        != Some("anchor");
     for event_type in &element.events {
         let id = element.id;
         let callback = ctx.event_callback.clone();
@@ -4619,6 +4624,15 @@ pub(crate) fn build_div(
             // ── Click ────────────────────────────────────────────
             "click" => {
                 el = el.on_click(move |click_event, _window, cx| {
+                    if !activates_on_space
+                        && matches!(
+                            click_event,
+                            gpui::ClickEvent::Keyboard(event)
+                                if event.button == gpui::KeyboardButton::Space
+                        )
+                    {
+                        return;
+                    }
                     let stop_native_propagation =
                         !matches!(click_event, gpui::ClickEvent::Keyboard(_));
                     emit_event_full(&callback, id, "click", |p| {
