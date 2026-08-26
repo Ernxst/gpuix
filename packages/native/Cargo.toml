@@ -41,7 +41,7 @@ napi-derive = "3"
 gpui_platform = { path = "../../zed/crates/gpui_platform", default-features = false }
 js-sys = "0.3"
 wasm-bindgen = "=0.2.127"
-web-sys = { version = "0.3", features = ["Navigator", "Window"] }
+web-sys = { version = "0.3", features = ["Event", "EventTarget", "Navigator", "Window"] }
 
 # macOS text/graphics deps - pinned to avoid core-graphics version conflicts
 # core-text 21.1.0 uses core-graphics 0.25 which conflicts with font-kit's core-graphics 0.24

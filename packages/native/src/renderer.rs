@@ -2433,6 +2433,17 @@ mod initialization_tests {
         assert_eq!(payload.height, Some(540.0));
         assert_eq!(payload.scale_factor, Some(2.0));
     }
+
+    #[test]
+    fn browser_window_resize_contract_includes_dpr_and_event_fields() {
+        let size = window_size_from_metrics(1280.0, 720.0, 2.0);
+        let payload = window_resize_payload(size);
+
+        assert_eq!(payload.event_type, "windowResize");
+        assert_eq!(payload.width, Some(1280.0));
+        assert_eq!(payload.height, Some(720.0));
+        assert_eq!(payload.scale_factor, Some(2.0));
+    }
 }
 
 fn collect_text(id: u64, tree: &RetainedTree, texts: &mut Vec<String>) {
@@ -2451,6 +2462,7 @@ fn start_web_app(
     tree: Arc<Mutex<RetainedTree>>,
     selection: SharedSelection,
     event_callback: EventCallback,
+    window_event_callback: WindowEventCallback,
 ) -> Result<(), wasm_bindgen::JsValue> {
     if WEB_APP.with(|stored| stored.borrow().is_some()) {
         return Err(wasm_bindgen::JsValue::from_str(
@@ -2461,7 +2473,6 @@ fn start_web_app(
     let app = gpui_platform::single_threaded_web().run_embedded(move |cx| {
         init_key_bindings(cx);
         crate::custom_elements::input::init(cx);
-        let window_event_callback = Rc::new(RefCell::new(Some(event_callback.clone())));
         let window = cx.open_window(Default::default(), |_window, cx| {
             cx.new(|_view_cx| {
                 GpuixView::new(
@@ -2565,12 +2576,50 @@ fn web_event_callback(callback: js_sys::Function) -> EventCallback {
     })
 }
 
+#[cfg(any(test, all(target_arch = "wasm32", target_os = "unknown")))]
+fn window_size_from_metrics(width: f64, height: f64, scale_factor: f64) -> WindowSize {
+    WindowSize {
+        width,
+        height,
+        scale_factor,
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn web_window_size(window: &web_sys::Window) -> Result<WindowSize, wasm_bindgen::JsValue> {
+    let width = window
+        .inner_width()?
+        .as_f64()
+        .ok_or_else(|| wasm_bindgen::JsValue::from_str("Browser innerWidth is not a number"))?;
+    let height = window
+        .inner_height()?
+        .as_f64()
+        .ok_or_else(|| wasm_bindgen::JsValue::from_str("Browser innerHeight is not a number"))?;
+
+    Ok(window_size_from_metrics(
+        width,
+        height,
+        window.device_pixel_ratio(),
+    ))
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn web_window_size_value(size: WindowSize) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    let value = js_sys::Object::new();
+    js_sys::Reflect::set(&value, &"width".into(), &size.width.into())?;
+    js_sys::Reflect::set(&value, &"height".into(), &size.height.into())?;
+    js_sys::Reflect::set(&value, &"scaleFactor".into(), &size.scale_factor.into())?;
+    Ok(value.into())
+}
+
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = GpuixRenderer)]
 pub struct WebGpuixRenderer {
     tree: Arc<Mutex<RetainedTree>>,
     selection: SharedSelection,
     event_callback: EventCallback,
+    window_event_callback: WindowEventCallback,
+    window_resize_listener: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::Event)>,
     strict_styles: AtomicBool,
 }
 
@@ -2579,10 +2628,33 @@ pub struct WebGpuixRenderer {
 impl WebGpuixRenderer {
     #[wasm_bindgen::prelude::wasm_bindgen(constructor)]
     pub fn new(event_callback: js_sys::Function) -> Self {
+        let window_event_callback = Rc::new(RefCell::new(None));
+        let callback = window_event_callback.clone();
+        let window_resize_listener = wasm_bindgen::closure::Closure::new(move |_event| {
+            let Some(window) = web_sys::window() else {
+                return;
+            };
+
+            match web_window_size(&window) {
+                Ok(size) => emit_window_resize_payload(&callback, size),
+                Err(error) => log::error!("Failed to read GPUIX browser window size: {error:?}"),
+            }
+        });
+        if let Some(window) = web_sys::window() {
+            if let Err(error) = window.add_event_listener_with_callback(
+                "resize",
+                window_resize_listener.as_ref().unchecked_ref(),
+            ) {
+                log::error!("Failed to observe GPUIX browser window resizes: {error:?}");
+            }
+        }
+
         Self {
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             selection: SharedSelection::default(),
             event_callback: web_event_callback(event_callback),
+            window_event_callback,
+            window_resize_listener,
             strict_styles: AtomicBool::new(true),
         }
     }
@@ -2592,6 +2664,7 @@ impl WebGpuixRenderer {
             self.tree.clone(),
             self.selection.clone(),
             self.event_callback.clone(),
+            self.window_event_callback.clone(),
         )
     }
 
@@ -2780,10 +2853,12 @@ impl WebGpuixRenderer {
     pub fn get_window_size(&self) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
         let window = web_sys::window()
             .ok_or_else(|| wasm_bindgen::JsValue::from_str("Browser window is unavailable"))?;
-        let size = js_sys::Object::new();
-        js_sys::Reflect::set(&size, &"width".into(), &window.inner_width()?)?;
-        js_sys::Reflect::set(&size, &"height".into(), &window.inner_height()?)?;
-        Ok(size.into())
+        web_window_size_value(web_window_size(&window)?)
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowEventHandler)]
+    pub fn set_window_event_handler(&self, event_callback: Option<js_sys::Function>) {
+        *self.window_event_callback.borrow_mut() = event_callback.map(web_event_callback);
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowTitle)]
@@ -3046,6 +3121,18 @@ impl WebGpuixRenderer {
             cx.notify();
             now_ms
         })
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+impl Drop for WebGpuixRenderer {
+    fn drop(&mut self) {
+        if let Some(window) = web_sys::window() {
+            let _ = window.remove_event_listener_with_callback(
+                "resize",
+                self.window_resize_listener.as_ref().unchecked_ref(),
+            );
+        }
     }
 }
 
@@ -4829,13 +4916,17 @@ fn emit_window_resize_payload(callback: &WindowEventCallback, size: WindowSize) 
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     let callback = callback.borrow().clone();
     if let Some(callback) = callback {
-        callback(EventPayload {
-            event_type: "windowResize".to_string(),
-            width: Some(size.width),
-            height: Some(size.height),
-            scale_factor: Some(size.scale_factor),
-            ..EventPayload::default()
-        });
+        callback(window_resize_payload(size));
+    }
+}
+
+fn window_resize_payload(size: WindowSize) -> EventPayload {
+    EventPayload {
+        event_type: "windowResize".to_string(),
+        width: Some(size.width),
+        height: Some(size.height),
+        scale_factor: Some(size.scale_factor),
+        ..EventPayload::default()
     }
 }
 

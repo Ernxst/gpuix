@@ -404,6 +404,23 @@ describeNative("render()", () => {
     expect(windowHandlers.at(-1)).toBeNull()
   })
 
+  it("normalizes an incomplete browser window-size response", () => {
+    const incompleteBrowserRenderer = Object.assign(new TestRenderer(), {
+      getWindowSize: () => ({ width: 1280, height: 720 }) as unknown as ReturnType<TestRenderer["getWindowSize"]>,
+    })
+    let renderedSize: ReturnType<typeof useWindowSize> | undefined
+
+    function Size() {
+      renderedSize = useWindowSize()
+      return <text />
+    }
+
+    render(<Size />, { renderer: incompleteBrowserRenderer })
+    incompleteBrowserRenderer.flush()
+
+    expect(renderedSize).toEqual({ width: 1280, height: 720, scaleFactor: 1 })
+  })
+
   it("runs graceful termination exactly once", () => {
     let terminated = 0
     render(<text>Termination test</text>, {

@@ -19,6 +19,24 @@ export interface WindowResizeEvent extends EventPayload {
 
 const DEFAULT_WINDOW_SIZE: WindowSize = { width: 800, height: 600, scaleFactor: 1 }
 
+function normalizedDimension(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback
+}
+
+function normalizedScaleFactor(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_WINDOW_SIZE.scaleFactor
+}
+
+function normalizeWindowSize(size: Partial<WindowSize> | null | undefined): WindowSize {
+  return {
+    width: normalizedDimension(size?.width, DEFAULT_WINDOW_SIZE.width),
+    height: normalizedDimension(size?.height, DEFAULT_WINDOW_SIZE.height),
+    scaleFactor: normalizedScaleFactor(size?.scaleFactor),
+  }
+}
+
 class WindowSizeStore {
   private listeners = new Set<() => void>()
   private snapshot: WindowSize
@@ -48,7 +66,7 @@ class WindowSizeStore {
 
   private read(): WindowSize {
     try {
-      return this.renderer.getWindowSize?.() ?? DEFAULT_WINDOW_SIZE
+      return normalizeWindowSize(this.renderer.getWindowSize?.())
     } catch {
       return DEFAULT_WINDOW_SIZE
     }
@@ -64,11 +82,7 @@ class WindowSizeStore {
       return
     }
 
-    const next: WindowSize = {
-      width: event.width,
-      height: event.height,
-      scaleFactor: event.scaleFactor,
-    }
+    const next = normalizeWindowSize(event)
     if (
       next.width === this.snapshot.width &&
       next.height === this.snapshot.height &&
