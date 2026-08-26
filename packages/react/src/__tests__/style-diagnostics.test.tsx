@@ -62,12 +62,13 @@ describeNative("style diagnostics", () => {
     expect(diagnostics[0].message).toContain('"uppercase"')
   })
 
-  it("reports an unknown batched style after later testId metadata is applied", () => {
+  it("reports an unknown batched style after later identity metadata is applied", () => {
     const renderer = new TestRenderer()
     renderer.applyBatch(
       JSON.stringify([
         ["createElement", 73, "div"],
         ["setStyle", 73, { flex: 1, backgroundColor: "red" }],
+        ["setCustomPropValue", 73, "id", "profile-card"],
         ["setCustomPropValue", 73, "testId", "batch-card"],
         ["setRoot", 73],
       ])
@@ -76,7 +77,8 @@ describeNative("style diagnostics", () => {
     expect(renderer.getElement(73)?.style).toMatchObject({ backgroundColor: "red" })
     const diagnostics = renderer.drainStyleDiagnostics()
     expect(diagnostics).toHaveLength(1)
-    expect(diagnostics[0].message).toContain('<div testId="batch-card">')
+    expect(diagnostics[0]).toMatchObject({ authorId: "profile-card", testId: "batch-card" })
+    expect(diagnostics[0].message).toContain('<div id="profile-card" testId="batch-card">')
     expect(diagnostics[0].message).toContain("flex")
     expect(diagnostics[0].message).toContain("1")
   })

@@ -335,6 +335,11 @@ export interface Props {
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
 
+  /** Author-defined identity preserved for shared DOM/native JSX and native diagnostics. */
+  id?: string
+  /** Inert author metadata preserved for automation and event host handles. */
+  [key: `data-${string}`]: string | number | boolean | undefined
+
   /** Establishes a native hover group for descendant `style.hoverWithin` states. */
   hoverGroup?: string
 
@@ -578,6 +583,8 @@ export interface StyleDiagnostic {
   message: string
   elementId: number
   elementType: string
+  /** The author's `id` attribute, when the affected element has one. */
+  authorId?: string
   testId?: string
   property: string
   value: string

@@ -1537,8 +1537,8 @@ to hard-clipped sRGB before GPUI paints them.
 Style objects are decoded field-by-field. An invalid value rejects only that
 field; valid siblings still commit and the error never escapes React's commit
 phase. In a Node runtime outside `NODE_ENV=production`, strict styles are
-enabled by default and each rejection warns with the element id, element type,
-`testId` when present, property, and offending value. Unknown properties,
+enabled by default and each rejection warns with the renderer id, element type,
+author `id` and `testId` when present, property, and offending value. Unknown properties,
 unsupported enum values, invalid colors, radial gradients, and supported
 properties with malformed values all use the same diagnostic path.
 
@@ -1684,6 +1684,11 @@ keep Space as text input instead of synthesizing a click.
 
 Mark elements with **`testId`**, then drive them like Playwright. The same
 client works in vitest, inside browser pages, and against a child process.
+
+Standard `id` and `data-*` attributes are also preserved on every host element,
+so shared DOM/native JSX can use semantic IDs. GPU-backed tests can resolve an
+author ID with `renderer.findByElementId('site-state')`; locator queries remain
+the `testId`, text, and type API listed below.
 
 ```tsx
 <div testId="sidebar-collapse" onClick={onCollapse}>‹</div>

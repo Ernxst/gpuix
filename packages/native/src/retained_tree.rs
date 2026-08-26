@@ -28,6 +28,8 @@ pub struct RetainedElement {
     pub subtree_revision: u64,
     /// Stable locator id from the React `testId` prop.
     pub test_id: Option<String>,
+    /// Author-defined `id` attribute, distinct from the renderer's numeric element ID.
+    pub author_id: Option<String>,
 }
 
 impl RetainedElement {
@@ -43,6 +45,7 @@ impl RetainedElement {
             auto_focus: false,
             subtree_revision: revision,
             test_id: None,
+            author_id: None,
             custom_props: HashMap::new(),
         }
     }
@@ -217,6 +220,10 @@ impl RetainedTree {
                 element.test_id = value.as_str().map(str::to_string);
                 return;
             }
+            if key == "id" {
+                element.author_id = value.as_str().map(str::to_string);
+                return;
+            }
             if value.is_null() {
                 changed = element.custom_props.remove(&key).is_some();
             } else {
@@ -234,6 +241,18 @@ impl RetainedTree {
     /// Read a custom prop value from an element.
     pub fn get_custom_prop(&self, id: u64, key: &str) -> Option<&serde_json::Value> {
         self.elements.get(&id)?.custom_props.get(key)
+    }
+
+    /// Resolve an author-defined `id` to its numeric renderer ID.
+    ///
+    /// HTML requires document IDs to be unique. If malformed input contains
+    /// duplicates, choose the earliest renderer ID so test results stay stable.
+    pub fn find_by_element_id(&self, author_id: &str) -> Option<u64> {
+        self.elements
+            .values()
+            .filter(|element| element.author_id.as_deref() == Some(author_id))
+            .map(|element| element.id)
+            .min()
     }
 
     pub fn to_json(
@@ -284,6 +303,13 @@ fn element_to_json(
         obj.insert(
             "testId".to_string(),
             serde_json::Value::String(test_id.clone()),
+        );
+    }
+
+    if let Some(ref author_id) = element.author_id {
+        obj.insert(
+            "authorId".to_string(),
+            serde_json::Value::String(author_id.clone()),
         );
     }
 

@@ -26,6 +26,43 @@ function Counter() {
 }
 
 describeNative("automation", () => {
+  it("preserves identity attributes for native automation and synthetic events", async () => {
+    const attributes: Array<string | null> = []
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div
+        id="site-state"
+        data-testid="site-state-heading"
+        data-state="ready"
+        onClick={(event) => {
+          attributes.push(
+            event.currentTarget.getAttribute("id"),
+            event.currentTarget.getAttribute("data-testid"),
+            event.currentTarget.getAttribute("data-state")
+          )
+        }}
+        style={{ width: 200, height: 80 }}
+      />
+    )
+
+    const heading = renderer.findByElementId("site-state")
+    expect(heading).toMatchObject({
+      authorId: "site-state",
+      customProps: { "data-testid": "site-state-heading", "data-state": "ready" },
+    })
+    expect(renderer.findByElementId("missing")).toBeUndefined()
+
+    const app = await connectTest(renderer)
+    await expect(app.call("getTree", {})).resolves.toMatchObject({
+      tree: { authorId: "site-state" },
+    })
+    await app.close()
+
+    renderer.nativeSimulateClick(100, 40)
+    expect(attributes).toEqual(["site-state", "site-state-heading", "ready"])
+  })
+
   it("clicks a testId locator and waits for text", async () => {
     const { render, renderer } = createTestRoot()
     render(<Counter />)

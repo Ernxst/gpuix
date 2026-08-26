@@ -55,6 +55,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   clockResume(): number
   getRootId(): number | null
   getAllText(): string[]
+  findByElementId(authorId: string): number | null
   scrollTo(elementId: number, x: number, y: number): void
   scrollToItem(elementId: number, index: number): void
   getScrollOffset(elementId: number): number[] | null
@@ -143,6 +144,8 @@ export interface TestElement {
   children: number[]
   parentId: number | null
   testId?: string
+  /** The author-defined `id` attribute, distinct from the numeric renderer ID. */
+  authorId?: string
   customProps?: Record<string, unknown>
 }
 
@@ -462,6 +465,7 @@ export class TestRenderer implements NativeRenderer {
         events: new Set(node.events ?? []),
         children: (node.children ?? []).map((c: any) => c.id),
         parentId,
+        ...(node.authorId ? { authorId: node.authorId } : {}),
         ...(node.testId ? { testId: node.testId } : {}),
         ...(node.customProps ? { customProps: node.customProps } : {}),
       })
@@ -499,6 +503,12 @@ export class TestRenderer implements NativeRenderer {
 
   findByTestId(testId: string): TestElement | undefined {
     return [...this.buildElementMap().values()].find((el) => el.testId === testId)
+  }
+
+  /** Resolve an author-defined `id` attribute in the native retained tree. */
+  findByElementId(authorId: string): TestElement | undefined {
+    const id = this.native.findByElementId(authorId)
+    return id == null ? undefined : this.getElement(id)
   }
 
   /** Get all text content in the tree (depth-first). */
