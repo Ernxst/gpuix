@@ -1825,6 +1825,10 @@ cd packages/native && bun pm pack
 cd ../react && bun pm pack
 ```
 
+Relative `file:` pins can break when the consuming project is checked out via
+git worktree at a different depth. Prefer absolute tarball paths in that case,
+or regenerate the `file:` pins per worktree after cloning.
+
 ```json
 {
   "dependencies": {
