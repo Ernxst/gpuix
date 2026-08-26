@@ -536,6 +536,9 @@ thread_local! {
     static WEB_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     static WEB_WINDOW: RefCell<Option<gpui::WindowHandle<GpuixView>>> = const { RefCell::new(None) };
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    static PENDING_DEBUG_OVERLAY: RefCell<Option<gpui::DebugFrameOverlayMode>> =
+        const { RefCell::new(None) };
     /// Shared scroll handles — GpuixView writes here during render(),
     /// platform-local handlers read from here for programmatic scroll control.
     /// ScrollHandle is Rc<RefCell<...>> so its methods (set_offset, offset,
@@ -548,19 +551,24 @@ thread_local! {
     static VIRTUAL_LIST_STATES: RefCell<HashMap<u64, gpui::ListState>> = RefCell::new(HashMap::new());
 }
 
-#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-pub(crate) fn parse_debug_frame_overlay_mode(mode: &str) -> Result<gpui::DebugFrameOverlayMode> {
+fn parse_debug_frame_overlay_mode_str(
+    mode: &str,
+) -> std::result::Result<gpui::DebugFrameOverlayMode, String> {
     match mode {
         "hidden" => Ok(gpui::DebugFrameOverlayMode::Hidden),
         "minimal" => Ok(gpui::DebugFrameOverlayMode::Minimal),
         "full" => Ok(gpui::DebugFrameOverlayMode::Full),
-        other => Err(Error::from_reason(format!(
+        other => Err(format!(
             "Unknown debug frame overlay mode {other:?}. Use hidden, minimal, or full."
-        ))),
+        )),
     }
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn parse_debug_frame_overlay_mode(mode: &str) -> Result<gpui::DebugFrameOverlayMode> {
+    parse_debug_frame_overlay_mode_str(mode).map_err(Error::from_reason)
+}
+
 pub(crate) fn debug_frame_overlay_mode_name(mode: gpui::DebugFrameOverlayMode) -> &'static str {
     match mode {
         gpui::DebugFrameOverlayMode::Hidden => "hidden",
@@ -1874,6 +1882,15 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    #[napi]
+    pub fn get_window_insets(&self) -> Result<WindowInsets> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| WindowInsets::from_gpui(window.insets()));
+
+        #[cfg(not(target_os = "macos"))]
+        Ok(WindowInsets::default())
+    }
+
     /// `"hidden"` | `"minimal"` | `"full"`. Paints into the scene after layout.
     #[napi]
     pub fn set_debug_frame_overlay(&self, mode: String) -> Result<String> {
@@ -2617,7 +2634,10 @@ fn start_web_app(
     let app = gpui_platform::single_threaded_web().run_embedded(move |cx| {
         init_key_bindings(cx);
         crate::custom_elements::input::init(cx);
-        let window = cx.open_window(Default::default(), |_window, cx| {
+        let window = cx.open_window(Default::default(), |window, cx| {
+            if let Some(mode) = PENDING_DEBUG_OVERLAY.with(|pending| pending.borrow_mut().take()) {
+                window.set_debug_frame_overlay_mode(mode);
+            }
             cx.new(|_view_cx| {
                 GpuixView::new(
                     tree,
@@ -3027,6 +3047,12 @@ impl WebGpuixRenderer {
         *self.window_event_callback.borrow_mut() = event_callback.map(web_window_event_callback);
     }
 
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getWindowInsets)]
+    pub fn get_window_insets(&self) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let insets = update_web_window(|_view, window, _cx| window.insets())?;
+        window_insets_js(insets)
+    }
+
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowTitle)]
     pub fn set_window_title(&self, title: String) -> Result<(), wasm_bindgen::JsValue> {
         update_web_window(move |view, _window, cx| {
@@ -3288,6 +3314,36 @@ impl WebGpuixRenderer {
             now_ms
         })
     }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setDebugFrameOverlay)]
+    pub fn set_debug_frame_overlay(&self, mode: String) -> Result<String, wasm_bindgen::JsValue> {
+        let mode = parse_debug_frame_overlay_mode_str(&mode)
+            .map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
+        // Graphics init is async. render() sets the overlay before WEB_WINDOW exists.
+        if WEB_WINDOW.with(|window| window.borrow().is_none()) {
+            PENDING_DEBUG_OVERLAY.with(|pending| *pending.borrow_mut() = Some(mode));
+            return Ok(debug_frame_overlay_mode_name(mode).to_string());
+        }
+        update_web_window(move |_view, window, cx| {
+            window.set_debug_frame_overlay_mode(mode);
+            cx.notify();
+            debug_frame_overlay_mode_name(window.debug_frame_overlay_mode()).to_string()
+        })
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getDebugFrameOverlay)]
+    pub fn get_debug_frame_overlay(&self) -> Result<String, wasm_bindgen::JsValue> {
+        if WEB_WINDOW.with(|window| window.borrow().is_none()) {
+            let pending = PENDING_DEBUG_OVERLAY.with(|pending| *pending.borrow());
+            return Ok(debug_frame_overlay_mode_name(
+                pending.unwrap_or(gpui::DebugFrameOverlayMode::Hidden),
+            )
+            .to_string());
+        }
+        update_web_window(|_view, window, _cx| {
+            debug_frame_overlay_mode_name(window.debug_frame_overlay_mode()).to_string()
+        })
+    }
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -3453,7 +3509,12 @@ impl GpuixView {
                 .and_then(|offset| list.children.get(offset))
         }) == Some(&expected_child_id);
         if !child_matches {
-            return gpui::Empty.into_any_element();
+            let height = self
+                .virtual_lists
+                .get(&list_id)
+                .and_then(|entry| entry.config.estimated_item_height)
+                .unwrap_or(1.0);
+            return unmounted_virtual_row(height);
         }
 
         let callback = self.event_callback.clone();
@@ -3693,7 +3754,7 @@ impl VirtualListConfig {
             .and_then(serde_json::Value::as_f64)
             .filter(|height| *height > 0.0)
             .map(|height| height as f32);
-        let item_count = prop("itemCount").and_then(json_usize);
+        let item_count = estimated_item_height.and_then(|_| prop("itemCount").and_then(json_usize));
         Self {
             alignment,
             follow_tail,
@@ -3909,11 +3970,37 @@ impl VirtualListEntry {
             self.state
                 .remeasure_items(start..window_start + child_ids.len());
         }
+        self.remeasure_unknown_rows(window_start, &child_ids, &old_rows);
 
         self.window_start = window_start;
         self.child_ids = child_ids;
         self.child_revisions = child_revisions;
         self.row_focus_handles = row_focus_handles;
+    }
+
+    fn remeasure_unknown_rows(
+        &mut self,
+        window_start: usize,
+        child_ids: &[u64],
+        known: &HashMap<u64, (u64, Option<gpui::FocusHandle>)>,
+    ) {
+        let mut range_start = None;
+        for (offset, id) in child_ids.iter().enumerate() {
+            let logical = window_start + offset;
+            let is_new = !known.contains_key(id);
+            match (range_start, is_new) {
+                (None, true) => range_start = Some(logical),
+                (Some(start), false) => {
+                    self.state.remeasure_items(start..logical);
+                    range_start = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(start) = range_start {
+            self.state
+                .remeasure_items(start..window_start + child_ids.len());
+        }
     }
 }
 
@@ -4030,14 +4117,6 @@ impl gpui::Render for GpuixView {
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
         let callback = self.event_callback.clone();
-
-        if !self
-            .pointer_router
-            .borrow_mut()
-            .retain_owner(|id| tree.elements.contains_key(&id))
-        {
-            window.release_pointer();
-        }
 
         // Sync focus handles before building elements.
         self.sync_focus_handles(&tree, &callback, window, cx);
@@ -4272,7 +4351,11 @@ fn build_virtual_list(
             })
         });
     let config = VirtualListConfig::from_element(element);
-    let window_start = window_start_from_element(element);
+    let window_start = if config.item_count.is_some() {
+        window_start_from_element(element)
+    } else {
+        0
+    };
     let list_state = match ctx.virtual_lists.entry(element.id) {
         std::collections::hash_map::Entry::Occupied(mut entry) => {
             entry.get_mut().sync(
@@ -4332,12 +4415,12 @@ fn build_virtual_list(
     let list_id = element.id;
     let inherited = ctx.inherited.clone();
     let render_item = cx.processor(move |view, index: usize, window, cx| {
-        let Some(child_id) = view
-            .virtual_lists
-            .get(&list_id)
-            .and_then(|entry| entry.child_at(index))
-        else {
-            return gpui::Empty.into_any_element();
+        let Some(entry) = view.virtual_lists.get(&list_id) else {
+            return unmounted_virtual_row(1.0);
+        };
+        let Some(child_id) = entry.child_at(index) else {
+            // Empty measures as 0 and poisons ListState. Keep the estimate.
+            return unmounted_virtual_row(entry.config.estimated_item_height.unwrap_or(1.0));
         };
         view.build_virtual_child(list_id, index, child_id, inherited.clone(), window, cx)
     });
@@ -4347,6 +4430,11 @@ fn build_virtual_list(
         list = apply_styles(list, style);
     }
     list.into_any_element()
+}
+
+fn unmounted_virtual_row(height: f32) -> gpui::AnyElement {
+    use gpui::prelude::*;
+    gpui::div().h(gpui::px(height.max(1.0))).w_full().into_any()
 }
 
 fn virtual_row_ancestor(tree: &RetainedTree, list_id: u64, element_id: u64) -> Option<u64> {
@@ -4729,6 +4817,10 @@ pub(crate) fn build_div(
 
             _ => {}
         }
+    }
+
+    if element.events.contains("mouseDown") && element.events.contains("mouseMove") {
+        el = el.capture_pointer();
     }
 
     // Text content — selectable, same as a <text> leaf.
@@ -5669,6 +5761,81 @@ pub struct WindowSize {
     pub width: f64,
     pub height: f64,
     pub scale_factor: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct EdgeInsets {
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+    pub left: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct WindowInsets {
+    pub safe_area: EdgeInsets,
+    pub ime: EdgeInsets,
+    pub effective: EdgeInsets,
+}
+
+impl WindowInsets {
+    fn from_gpui(insets: gpui::WindowInsets) -> Self {
+        let effective = insets.effective();
+        Self {
+            safe_area: EdgeInsets::from_gpui(insets.safe_area),
+            ime: EdgeInsets::from_gpui(insets.ime),
+            effective: EdgeInsets::from_gpui(effective),
+        }
+    }
+}
+
+impl EdgeInsets {
+    fn from_gpui(insets: gpui::Edges<gpui::Pixels>) -> Self {
+        Self {
+            top: f32::from(insets.top) as f64,
+            right: f32::from(insets.right) as f64,
+            bottom: f32::from(insets.bottom) as f64,
+            left: f32::from(insets.left) as f64,
+        }
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn edge_insets_js(
+    insets: gpui::Edges<gpui::Pixels>,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    let object = js_sys::Object::new();
+    for (key, value) in [
+        ("top", insets.top),
+        ("right", insets.right),
+        ("bottom", insets.bottom),
+        ("left", insets.left),
+    ] {
+        js_sys::Reflect::set(
+            &object,
+            &wasm_bindgen::JsValue::from_str(key),
+            &wasm_bindgen::JsValue::from_f64(f32::from(value) as f64),
+        )?;
+    }
+    Ok(object.into())
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn window_insets_js(
+    insets: gpui::WindowInsets,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    let effective = insets.effective();
+    let object = js_sys::Object::new();
+    for (key, value) in [
+        ("safeArea", edge_insets_js(insets.safe_area)?),
+        ("ime", edge_insets_js(insets.ime)?),
+        ("effective", edge_insets_js(effective)?),
+    ] {
+        js_sys::Reflect::set(&object, &wasm_bindgen::JsValue::from_str(key), &value)?;
+    }
+    Ok(object.into())
 }
 
 /// Recorded draw times from the debug frame overlay.

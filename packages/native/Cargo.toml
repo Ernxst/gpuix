@@ -21,7 +21,7 @@ futures = "0.3"
 
 # Use the GPUI fork checked out in the zed submodule.
 # Wasm cannot use the desktop gpui_platform features.
-gpui = { path = "../../zed/crates/gpui", default-features = false }
+gpui = { path = "../../zed/crates/gpui", default-features = false, features = ["profiler"] }
 thiserror = "2"
 syntect = { version = "5.3", default-features = false, features = ["regex-fancy"] }
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }

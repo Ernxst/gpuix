@@ -1706,6 +1706,237 @@ describeNative("events", () => {
         ]
       `)
     })
+
+    it("keeps mouseMove and mouseUp after the pointer leaves the hitbox", () => {
+      const received: string[] = []
+
+      function Handle() {
+        return (
+          <div
+            style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+            onMouseDown={() => received.push("down")}
+            onMouseMove={(e: EventPayload) =>
+              received.push(`move:${Math.round(e.x ?? 0)},${e.pressedButton}`)
+            }
+            onMouseUp={() => received.push("up")}
+          >
+            <text>handle</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<Handle />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(200, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(200, 20, 0)
+
+      expect(received).toEqual(["down", "move:200,0", "up"])
+    })
+
+    it("does not capture when the element only listens for mouseDown and mouseUp", () => {
+      const received: string[] = []
+
+      function PressOnly() {
+        return (
+          <div
+            style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+            onMouseDown={() => received.push("down")}
+            onMouseUp={() => received.push("up")}
+          >
+            <text>press</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<PressOnly />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseUp(200, 20, 0)
+
+      expect(received).toEqual(["down"])
+    })
+
+    it("still delivers move and up to an overlay mounted on mouseDown", () => {
+      const received: string[] = []
+
+      function OverlayDrag() {
+        const [dragging, setDragging] = useState(false)
+        return (
+          <div
+            style={{
+              width: 400,
+              height: 200,
+              position: "relative",
+              backgroundColor: "#111111",
+            }}
+          >
+            <div
+              style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+              onMouseDown={() => {
+                received.push("clip-down")
+                setDragging(true)
+              }}
+            >
+              <text>clip</text>
+            </div>
+            {dragging && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: 400,
+                  height: 200,
+                  backgroundColor: "#00000001",
+                }}
+                onMouseMove={() => received.push("overlay-move")}
+                onMouseUp={() => received.push("overlay-up")}
+              >
+                <text>overlay</text>
+              </div>
+            )}
+          </div>
+        )
+      }
+
+      testRoot.render(<OverlayDrag />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(200, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(200, 20, 0)
+
+      expect(received).toEqual(["clip-down", "overlay-move", "overlay-up"])
+    })
+
+    it("fires mouseUp once when released inside the captured element", () => {
+      const received: string[] = []
+
+      function Handle() {
+        return (
+          <div
+            style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+            onMouseDown={() => received.push("down")}
+            onMouseMove={() => received.push("move")}
+            onMouseUp={() => received.push("up")}
+          >
+            <text>handle</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<Handle />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(30, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(30, 20, 0)
+
+      expect(received).toEqual(["down", "move", "up"])
+    })
+
+    it("does not deliver captured moves to a sibling", () => {
+      const received: string[] = []
+
+      function Pair() {
+        return (
+          <div style={{ width: 400, height: 80, display: "flex" }}>
+            <div
+              style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+              onMouseDown={() => received.push("handle-down")}
+              onMouseMove={() => received.push("handle-move")}
+              onMouseUp={() => received.push("handle-up")}
+            >
+              <text>handle</text>
+            </div>
+            <div
+              style={{ width: 200, height: 40, backgroundColor: "#22aa66" }}
+              onMouseMove={() => received.push("sibling-move")}
+              onMouseUp={() => received.push("sibling-up")}
+            >
+              <text>sibling</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<Pair />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(160, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(160, 20, 0)
+
+      expect(received).toEqual(["handle-down", "handle-move", "handle-up"])
+    })
+
+    it("releases capture when the captured node is removed", () => {
+      const received: string[] = []
+
+      function Drag() {
+        const [gone, setGone] = useState(false)
+        if (gone) {
+          return (
+            <div
+              style={{ width: 400, height: 80, backgroundColor: "#22aa66" }}
+              onMouseMove={() => received.push("replacement-move")}
+              onMouseUp={() => received.push("replacement-up")}
+            >
+              <text>replacement</text>
+            </div>
+          )
+        }
+        return (
+          <div
+            style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+            onMouseDown={() => {
+              received.push("down")
+              setGone(true)
+            }}
+            onMouseMove={() => received.push("handle-move")}
+            onMouseUp={() => received.push("handle-up")}
+          >
+            <text>handle</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<Drag />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(20, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(20, 20, 0)
+
+      expect(received).toEqual(["down", "replacement-move", "replacement-up"])
+    })
+
+    it("does not hover a sibling while the pointer is captured", () => {
+      const received: string[] = []
+
+      function Pair() {
+        return (
+          <div style={{ width: 400, height: 80, display: "flex" }}>
+            <div
+              style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+              onMouseDown={() => received.push("handle-down")}
+              onMouseMove={() => received.push("handle-move")}
+              onMouseUp={() => received.push("handle-up")}
+            >
+              <text>handle</text>
+            </div>
+            <div
+              style={{ width: 200, height: 40, backgroundColor: "#22aa66" }}
+              onMouseEnter={() => received.push("sibling-enter")}
+            >
+              <text>sibling</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<Pair />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(160, 20, 0)
+      expect(received).toEqual(["handle-down", "handle-move"])
+      testRoot.renderer.nativeSimulateMouseUp(160, 20, 0)
+      expect(received.slice(0, 3)).toEqual([
+        "handle-down",
+        "handle-move",
+        "handle-up",
+      ])
+    })
   })
 
   describe("pointer hit testing", () => {

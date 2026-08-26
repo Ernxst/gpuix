@@ -703,7 +703,7 @@ The list needs a **bounded height** or bounded flex space. `renderItem` must ret
 | `alignment` | `"top"` | Use `"bottom"` for chat-style initial positioning |
 | `followTail` | `false` | Follow appended rows until the user scrolls away |
 | `overdraw` | `240` | Extra pixels mounted and built outside the viewport |
-| `estimatedItemHeight` | `48` | Gives unmeasured rows an initial height estimate |
+| `estimatedItemHeight` | `48` | Height hint for unmeasured rows. Pass `null` to opt out; native ignores `itemCount` when no estimate reaches it |
 
 ### How virtualization works
 
@@ -829,7 +829,9 @@ viewport. Put fat content in one native node (`<markdown>`, `<code>`, `<diff>`),
 not a tree of React spans.
 
 The host `<virtual-list>` still retains every React child. Pass `itemCount`
-and `renderItem` through `VirtualList` so mount only creates the window.
+and `estimatedItemHeight` with `renderItem` through `VirtualList` so mount
+only creates the window. Native ignores `itemCount` when the estimate is
+missing, so a jump cannot collapse unmounted rows to height 0.
 
 ```tsx
 import { VirtualList } from '@gpuix/react'
@@ -1525,6 +1527,13 @@ GPUIX does not currently synthesize `pointercancel` or `lostpointercapture`.
 Keyboard and focus listeners create a persistent GPUI `FocusHandle`
 automatically. A listener alone does not put a `div` in the Tab order; add
 `tabIndex={0}` for that. Inputs and textareas already use tab index `0`.
+
+A node that listens for both `onMouseDown` and `onMouseMove` **captures the
+pointer**, like HTML [`setPointerCapture`](https://developer.mozilla.org/en-US/docs/Web/API/Element/setPointerCapture).
+`onMouseMove` and `onMouseUp` keep firing after the pointer leaves the hitbox.
+You do not need a full-window overlay or `window` listeners to drag a clip or
+resize a pane. A node with only `onMouseDown` / `onMouseUp` does not capture,
+so a click still ends if you release outside.
 
 ## Supported Styles
 

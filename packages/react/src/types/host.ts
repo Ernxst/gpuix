@@ -593,6 +593,7 @@ export interface NativeRenderer {
   getWindowSize?(): { width: number; height: number; scaleFactor: number }
   /** Internal transport for renderer-global native window events. */
   setWindowEventHandler?(handler: ((event: EventPayload) => void) | null): void
+  getWindowInsets?(): NativeWindowInsets
   setWindowTitle?(title: string): void
   setDebugFrameOverlay?(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay?(): string
@@ -615,6 +616,19 @@ export interface StyleDiagnostic {
 }
 
 export type DebugFrameOverlayMode = "hidden" | "minimal" | "full"
+
+export interface EdgeInsets {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
+export interface NativeWindowInsets {
+  safeArea: EdgeInsets
+  ime: EdgeInsets
+  effective: EdgeInsets
+}
 
 export interface DebugFrameOverlayStats {
   currentMs?: number

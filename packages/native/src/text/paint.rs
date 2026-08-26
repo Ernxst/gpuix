@@ -657,23 +657,33 @@ fn register_down_listener(window: &mut Window, selection: &SharedSelection) {
             })
         });
         let mut sel = selection.lock();
+        let was_active = sel.is_active();
         if let Some((key, text, ix)) = hit {
-            window.blur();
             match e.click_count {
                 2 => {
+                    window.blur();
                     let range = selection::word_range(&text, ix);
                     sel.begin_with_span(&key, &text, range);
                 }
-                n if n >= 3 => sel.begin_with_span(&key, &text, 0..text.len()),
-                _ => sel.begin(&key, ix),
+                n if n >= 3 => {
+                    window.blur();
+                    sel.begin_with_span(&key, &text, 0..text.len());
+                }
+                // A tap must not select or blur. iOS uses that gesture to
+                // scroll or to focus an input; the first dragging move
+                // promotes this press into a real selection.
+                _ => sel.arm(&key, ix),
             }
-        } else if sel.is_active() {
+        } else if sel.is_active() || sel.is_pending() {
             sel.clear();
         } else {
             return;
         }
+        let needs_refresh = was_active || sel.is_active();
         drop(sel);
-        window.refresh();
+        if needs_refresh {
+            window.refresh();
+        }
     });
 }
 
@@ -690,6 +700,9 @@ fn register_listeners(window: &mut Window, key: &Arc<str>, selection: &SharedSel
         window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, _cx| {
             if phase != DispatchPhase::Bubble || !e.dragging() {
                 return;
+            }
+            if selection.lock().promote_pending_for(&key) {
+                window.blur();
             }
             // Only the anchor element's listener drives the drag.
             let Some(anchor_ix) = selection.lock().drag_anchor(&key) else {
@@ -709,7 +722,9 @@ fn register_listeners(window: &mut Window, key: &Arc<str>, selection: &SharedSel
             if phase != DispatchPhase::Bubble {
                 return;
             }
-            selection.lock().end_drag(&key);
+            let mut sel = selection.lock();
+            sel.cancel_pending();
+            sel.end_drag(&key);
         });
     }
 }
