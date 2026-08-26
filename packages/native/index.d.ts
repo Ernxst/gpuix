@@ -73,13 +73,34 @@ export declare class GpuixRenderer {
   simulateMenuAction(id: string): void
   /** Gracefully terminate the native application through GPUI's platform abstraction. */
   quit(): void
-  /** Pump the native event loop. Returns false after the last window closes. */
+  /**
+   * Pump the native event loop. Returns false after the last window closes.
+   * A pending display-link token is dispatched immediately before this pump.
+   */
   tick(): boolean
+  /**
+   * Pump idle platform work without dispatching a pending frame token.
+   * This keeps input and application lifecycle events responsive between frames.
+   */
+  tickIdle(): boolean
+  /**
+   * Test seam for a native frame callback that arrives after tickIdle's
+   * outstanding-work precheck. The callback is queued from a background
+   * thread while the embedded AppKit pump owns the JavaScript thread.
+   */
+  testIdlePumpFrameRequestRace(callback: FrameRequestCallback): boolean
   isInitialized(): boolean
   /** Whether JavaScript must drive the native event loop with tick(). */
   requiresTick(): boolean
+  /**
+   * Registers a coalesced display-link frame request callback when supported.
+   * Returns false when this renderer must be timer-driven instead.
+   */
+  setFrameRequestHandler(callback?: ((() => unknown)) | undefined | null): boolean
   /** Whether this native window is active and receiving key events. */
   isActive(): boolean
+  /** Bring the native window and application to the foreground. */
+  activateWindow(): void
   getWindowSize(): WindowSize
   getWindowInsets(): WindowInsets
   /** `"hidden"` | `"minimal"` | `"full"`. Paints into the scene after layout. */
@@ -109,6 +130,10 @@ export declare class GpuixRenderer {
   scrollTo(elementId: number, x: number, y: number): void
   /** Scroll a child into view by its index in the children list. */
   scrollToItem(elementId: number, index: number): void
+  /** Starts a macOS profiler capture at GPUI's post-platform-submit present boundary. */
+  startPresentTimingCapture(): void
+  /** Ends the capture and returns ordered millisecond offsets for submitted frames. */
+  takePresentTimestamps(): Array<number>
   /**
    * Get the current scroll offset of a scrollable element.
    * Returns [x, y] or null if the element has no scroll handle.

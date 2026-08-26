@@ -446,11 +446,14 @@ This is a remount, not React Refresh. Keeping hook state needs Bun to inject
 
 Native `.node` edits still need a rebuild. See [Developing the Rust side](#developing-the-rust-side).
 
-On **macOS**, `startFrameLoop` calls `renderer.tick()` at a fixed rate (~125fps by
-default). This pumps AppKit on the process main thread without blocking Node. Pass
-`{ frameMs }` to change the rate, and call `.stop()` on the returned handle to end it.
-One thrown tick is reported and retried; repeated failures quit instead of
-abandoning the native window.
+On **macOS**, `startFrameLoop` receives coalesced frame requests from the native
+display link and performs one AppKit pump for each callback. At most one callback
+can be outstanding. If the display link is unavailable or stops while a window is
+occluded, a timer continues pumping input, menus, close, and Cmd+Q without
+releasing a pending frame token. `{ frameMs }` controls that idle and capability
+fallback cadence; it does not override the display refresh rate. Call `.stop()`
+on the returned handle to end it. One thrown tick is reported and retried;
+repeated failures quit instead of abandoning the native window.
 
 On **Windows and Linux**, GPUI runs its normal blocking native event loop on one
 dedicated Rust UI thread. Node sends in-process commands to that thread, so

@@ -10,9 +10,8 @@
 //!   renderer.createElement(1, "div")     // mutations from React reconciler
 //!   renderer.appendChild(0, 1)
 //!   renderer.commitMutations()           // signal batch complete
-//!   setTimeout(function loop() {         // drive AppKit on macOS
+//!   renderer.setFrameRequestHandler(() => {
 //!     if (!renderer.tick()) onTerminated()
-//!     setTimeout(loop, 8)
 //!   })
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use futures::{channel::mpsc, StreamExt as _};
@@ -633,6 +632,11 @@ fn invalidate_window() -> Result<()> {
     })
 }
 
+#[cfg(target_os = "macos")]
+fn should_defer_idle_pump(dispatch_frame_request: bool, frame_request_outstanding: bool) -> bool {
+    !dispatch_frame_request && frame_request_outstanding
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum MouseInput {
     Click {
@@ -1071,6 +1075,16 @@ enum RendererLifecycle {
     Terminated,
 }
 
+#[cfg(target_os = "macos")]
+type FrameRequestCallback = ThreadsafeFunction<(), Unknown<'static>, (), Status, false, false, 1>;
+
+#[cfg(target_os = "macos")]
+struct PresentTimingCapture {
+    collector: gpui::FrameTimingCollector,
+    window_id: gpui::WindowId,
+    disable_trace_when_done: bool,
+}
+
 /// The main GPUI renderer exposed to Node.js.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[napi]
@@ -1080,6 +1094,14 @@ pub struct GpuixRenderer {
     window_event_callback: WindowEventCallback,
     tree: Arc<Mutex<RetainedTree>>,
     lifecycle: Arc<Mutex<RendererLifecycle>>,
+    #[cfg(target_os = "macos")]
+    frame_request_callback: Arc<Mutex<Option<Arc<FrameRequestCallback>>>>,
+    #[cfg(target_os = "macos")]
+    frame_request_outstanding: Arc<AtomicBool>,
+    #[cfg(target_os = "macos")]
+    pending_frame_request: Arc<Mutex<Option<gpui_macos::FrameRequest>>>,
+    #[cfg(target_os = "macos")]
+    present_timing_capture: Mutex<Option<PresentTimingCapture>>,
     /// Shared with GpuixView so napi methods can read the live selection
     /// without an App context. Paint and napi calls can use different threads.
     selection: SharedSelection,
@@ -1219,6 +1241,14 @@ impl GpuixRenderer {
             window_event_callback: Arc::new(Mutex::new(None)),
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
+            #[cfg(target_os = "macos")]
+            frame_request_callback: Arc::new(Mutex::new(None)),
+            #[cfg(target_os = "macos")]
+            frame_request_outstanding: Arc::new(AtomicBool::new(false)),
+            #[cfg(target_os = "macos")]
+            pending_frame_request: Arc::new(Mutex::new(None)),
+            #[cfg(target_os = "macos")]
+            present_timing_capture: Mutex::new(None),
             selection: SharedSelection::default(),
             image_network_policy: crate::custom_elements::img::ImageNetworkPolicy::default(),
             strict_styles: AtomicBool::new(true),
@@ -1321,6 +1351,58 @@ impl GpuixRenderer {
         let window_options = options.clone();
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
+        let frame_request_callback = self.frame_request_callback.clone();
+        let frame_request_outstanding = self.frame_request_outstanding.clone();
+        let pending_frame_request = self.pending_frame_request.clone();
+        platform.on_request_frame(move |frame_request| {
+            let callback = frame_request_callback
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            let Some(callback) = callback else {
+                frame_request.dispatch();
+                return;
+            };
+
+            if frame_request_outstanding
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_err()
+            {
+                return;
+            }
+
+            *pending_frame_request
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(frame_request);
+
+            let completed = frame_request_outstanding.clone();
+            let pending_on_completion = pending_frame_request.clone();
+            let status = callback.call_with_return_value(
+                (),
+                ThreadsafeFunctionCallMode::NonBlocking,
+                move |_result, _env| {
+                    if let Some(frame_request) = pending_on_completion
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .take()
+                    {
+                        frame_request.dispatch();
+                    }
+                    completed.store(false, Ordering::Release);
+                    Ok(())
+                },
+            );
+            if status != Status::Ok {
+                if let Some(frame_request) = pending_frame_request
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take()
+                {
+                    frame_request.dispatch();
+                }
+                frame_request_outstanding.store(false, Ordering::Release);
+            }
+        });
 
         let tree = self.tree.clone();
         let callback = self.event_callback_for_view();
@@ -1846,9 +1928,15 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
-    /// Pump the native event loop. Returns false after the last window closes.
-    #[napi]
-    pub fn tick(&self) -> Result<bool> {
+    fn pump_native_event_loop(&self, dispatch_frame_request: bool) -> Result<bool> {
+        self.pump_native_event_loop_after_precheck(dispatch_frame_request, || {})
+    }
+
+    fn pump_native_event_loop_after_precheck(
+        &self,
+        dispatch_frame_request: bool,
+        after_precheck: impl FnOnce(),
+    ) -> Result<bool> {
         match *self.lifecycle.lock().unwrap() {
             RendererLifecycle::Uninitialized => {
                 return Err(Error::from_reason(
@@ -1861,6 +1949,26 @@ impl GpuixRenderer {
 
         #[cfg(target_os = "macos")]
         {
+            // Avoid an extra idle pump when a native callback is already queued.
+            // This is only a latency optimization: a request can race this load,
+            // so MacPlatform::pump_events itself must always return before waiting.
+            if should_defer_idle_pump(
+                dispatch_frame_request,
+                self.frame_request_outstanding.load(Ordering::Acquire),
+            ) {
+                return Ok(true);
+            }
+            after_precheck();
+            if dispatch_frame_request {
+                if let Some(frame_request) = self
+                    .pending_frame_request
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take()
+                {
+                    frame_request.dispatch();
+                }
+            }
             let running = MAC_PLATFORM.with(|p| {
                 p.borrow()
                     .as_ref()
@@ -1874,7 +1982,10 @@ impl GpuixRenderer {
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return Ok(true);
+        {
+            let _ = after_precheck;
+            return Ok(true);
+        }
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1882,9 +1993,44 @@ impl GpuixRenderer {
             target_os = "linux",
             target_os = "freebsd"
         )))]
-        Err(Error::from_reason(
-            "The production GPUIX renderer does not support this operating system",
-        ))
+        {
+            let _ = after_precheck;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Pump the native event loop. Returns false after the last window closes.
+    /// A pending display-link token is dispatched immediately before this pump.
+    #[napi]
+    pub fn tick(&self) -> Result<bool> {
+        self.pump_native_event_loop(true)
+    }
+
+    /// Pump idle platform work without dispatching a pending frame token.
+    /// This keeps input and application lifecycle events responsive between frames.
+    #[napi]
+    pub fn tick_idle(&self) -> Result<bool> {
+        self.pump_native_event_loop(false)
+    }
+
+    /// Test seam for a native frame callback that arrives after tickIdle's
+    /// outstanding-work precheck. The callback is queued from a background
+    /// thread while the embedded AppKit pump owns the JavaScript thread.
+    #[cfg(all(target_os = "macos", feature = "test-support"))]
+    #[napi]
+    pub fn test_idle_pump_frame_request_race(&self, callback: FrameRequestCallback) -> Result<bool> {
+        self.pump_native_event_loop_after_precheck(false, move || {
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                let _ = callback.call_with_return_value(
+                    (),
+                    ThreadsafeFunctionCallMode::NonBlocking,
+                    |_result, _env| Ok(()),
+                );
+            });
+        })
     }
 
     #[napi]
@@ -1896,6 +2042,40 @@ impl GpuixRenderer {
     #[napi]
     pub fn requires_tick(&self) -> bool {
         cfg!(target_os = "macos")
+    }
+
+    /// Registers a coalesced display-link frame request callback when supported.
+    /// Returns false when this renderer must be timer-driven instead.
+    #[napi]
+    pub fn set_frame_request_handler(
+        &self,
+        callback: Option<ThreadsafeFunction<(), Unknown<'static>, (), Status, false, false, 1>>,
+    ) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            let unregistering = callback.is_none();
+            *self
+                .frame_request_callback
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = callback.map(Arc::new);
+            if unregistering {
+                if let Some(frame_request) = self
+                    .pending_frame_request
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take()
+                {
+                    frame_request.dispatch();
+                }
+            }
+            return true;
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = callback;
+            false
+        }
     }
 
     /// Whether this native window is active and receiving key events.
@@ -1918,6 +2098,28 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Bring the native window and application to the foreground.
+    #[napi]
+    pub fn activate_window(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            GPUI_APP.with(|app| {
+                let app = app.borrow();
+                let app = app
+                    .as_ref()
+                    .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+                app.update(|cx| cx.activate(true));
+                Ok::<(), Error>(())
+            })?;
+            return update_window(|_view, window, _cx| window.activate_window());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason(
+            "Window activation is only available on macOS",
+        ))
     }
 
     #[napi]
@@ -2292,6 +2494,80 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Starts a macOS profiler capture at GPUI's post-platform-submit present boundary.
+    #[napi]
+    pub fn start_present_timing_capture(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let window_id = GPUI_WINDOW.with(|window| {
+                window
+                    .borrow()
+                    .as_ref()
+                    .map(|window| window.window_id())
+                    .ok_or_else(|| Error::from_reason("Window not initialized"))
+            })?;
+            let mut capture = self
+                .present_timing_capture
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let disable_trace_when_done = capture
+                .as_ref()
+                .is_some_and(|capture| capture.disable_trace_when_done)
+                || gpui::set_trace_enabled(true);
+            *capture = Some(PresentTimingCapture {
+                collector: gpui::FrameTimingCollector::new(),
+                window_id,
+                disable_trace_when_done,
+            });
+            return Ok(());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason(
+            "Present timing capture is only available on macOS",
+        ))
+    }
+
+    /// Ends the capture and returns ordered millisecond offsets for submitted frames.
+    #[napi]
+    pub fn take_present_timestamps(&self) -> Result<Vec<f64>> {
+        #[cfg(target_os = "macos")]
+        {
+            let mut capture = self
+                .present_timing_capture
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take()
+                .ok_or_else(|| Error::from_reason("Present timing capture has not started"))?;
+            let present_ends = capture
+                .collector
+                .collect_unseen()
+                .into_iter()
+                .filter_map(|event| match event {
+                    gpui::FrameEvent::Present(timing) if timing.window_id == capture.window_id => {
+                        Some(timing.present_end)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if capture.disable_trace_when_done {
+                gpui::set_trace_enabled(false);
+            }
+            let Some(first) = present_ends.first().copied() else {
+                return Ok(Vec::new());
+            };
+            return Ok(present_ends
+                .into_iter()
+                .map(|presented_at| presented_at.duration_since(first).as_secs_f64() * 1_000.0)
+                .collect());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason(
+            "Present timing capture is only available on macOS",
+        ))
+    }
+
     /// Get the current scroll offset of a scrollable element.
     /// Returns [x, y] or null if the element has no scroll handle.
     #[napi]
@@ -2629,6 +2905,18 @@ impl GpuixRenderer {
                 "captureScreenshot needs the test-support build on macOS",
             ))
         }
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod frame_loop_tests {
+    use super::*;
+
+    #[test]
+    fn idle_pump_skips_when_a_frame_callback_is_already_outstanding() {
+        assert!(should_defer_idle_pump(false, true));
+        assert!(!should_defer_idle_pump(false, false));
+        assert!(!should_defer_idle_pump(true, true));
     }
 }
 

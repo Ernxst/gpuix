@@ -132,6 +132,115 @@ describe("frame loop", () => {
     loop.stop()
   })
 
+  it("drives AppKit from native frame requests when available", async () => {
+    let ticks = 0
+    let frameRequest: (() => void) | null = null
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          ticks += 1
+        },
+        tickIdle: () => true,
+        setFrameRequestHandler: (callback) => {
+          frameRequest = callback ?? null
+          return true
+        },
+      },
+      { frameMs: 50 },
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(ticks).toBe(0)
+    frameRequest?.()
+    expect(ticks).toBe(1)
+    loop.stop()
+    expect(frameRequest).toBeNull()
+  })
+
+  it("falls back to timer pumps when native frame requests stall", async () => {
+    let frameTicks = 0
+    let idleTicks = 0
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          frameTicks += 1
+        },
+        tickIdle: () => {
+          idleTicks += 1
+        },
+        setFrameRequestHandler: () => true,
+      },
+      { frameMs: 2 },
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 18))
+    loop.stop()
+    expect(idleTicks).toBeGreaterThanOrEqual(2)
+    expect(frameTicks).toBe(0)
+  })
+
+  it("ignores a queued native frame request after stop", () => {
+    let ticks = 0
+    let frameRequest: (() => void) | null = null
+    const loop = startFrameLoop({
+      requiresTick: () => true,
+      tick: () => {
+        ticks += 1
+      },
+      tickIdle: () => true,
+      setFrameRequestHandler: (callback) => {
+        if (callback) frameRequest = callback
+        return true
+      },
+    })
+    const queuedFrameRequest = frameRequest
+
+    loop.stop()
+    queuedFrameRequest?.()
+    expect(ticks).toBe(0)
+  })
+
+  it("does not let successful idle pumps mask repeated frame failures", async () => {
+    let frameRequest: (() => void) | null = null
+    let quitCalls = 0
+    let unrecoverableErrors = 0
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          throw new Error("injected native frame failure")
+        },
+        tickIdle: () => true,
+        quit: () => {
+          quitCalls += 1
+        },
+        setFrameRequestHandler: (callback) => {
+          frameRequest = callback ?? null
+          return true
+        },
+      },
+      {
+        frameMs: 2,
+        maxConsecutiveTickErrors: 3,
+        onUnrecoverableError: () => {
+          unrecoverableErrors += 1
+        },
+      },
+    )
+
+    const request = frameRequest
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      request?.()
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+
+    expect(quitCalls).toBe(1)
+    expect(unrecoverableErrors).toBe(1)
+    loop.stop()
+  })
+
   it("schedules the next tick immediately after a long tick", async () => {
     let ticks = 0
     const loop = startFrameLoop(
