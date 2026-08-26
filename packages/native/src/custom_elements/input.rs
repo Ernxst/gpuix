@@ -362,7 +362,15 @@ impl CustomElement for TextEditorElement {
         {
             editor = editor.relative();
         }
-        editor = editor.child(crate::text::selection_start_region(false));
+        // Custom elements paint themselves, so nothing registers their box for
+        // automation unless the builder does it. Without this, a locator on an
+        // editor fails with "Element has no painted bounds" and `click()` has
+        // no target. `<div>` and `<text>` get this from `build_element`.
+        //
+        // `Some(false)` also claims the same box as a non-selectable
+        // selection-start region: a drag inside an editor must move the caret,
+        // not start a document selection.
+        editor = editor.child(crate::automation::bounds_tracker(ctx.id, Some(false)));
         if ctx.events.contains("click") {
             let callback = ctx.event_callback.clone();
             let id = ctx.id;

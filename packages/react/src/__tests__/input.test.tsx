@@ -169,7 +169,11 @@ describeNative("native text editors", () => {
     expect(testRoot.renderer.getAllText()).toContain("Value: abc")
   })
 
-  it("moves by words with alt-left and alt-right on macOS", () => {
+  // Native binds word motion to alt on macOS and to ctrl everywhere else, the
+  // same split every platform's own text fields use, so the test has to ask
+  // for the chord this host actually binds.
+  it("moves by words with the platform's word chord", () => {
+    const word = process.platform === "darwin" ? "alt" : "ctrl"
     function TextInput() {
       const [text, setText] = useState("hello world")
       return (
@@ -186,7 +190,10 @@ describeNative("native text editors", () => {
 
     testRoot.render(<TextInput />)
     const input = testRoot.renderer.findByType("input")[0]
-    testRoot.renderer.nativeSimulateKeystrokes(input.id, "alt-left X alt-right Y")
+    testRoot.renderer.nativeSimulateKeystrokes(
+      input.id,
+      `${word}-left X ${word}-right Y`,
+    )
 
     expect(testRoot.renderer.getAllText()).toContain("Value: hello XworldY")
   })

@@ -9,6 +9,12 @@ export {
 } from "./reconciler/renderer.js"
 export { GpuixContext, useGpuix, useGpuixRequired } from "./hooks/use-gpuix.js"
 export { useWindowInsets, useWindowSize } from "./hooks/use-window-size.js"
+export { findRanges, useTextSearch } from "./hooks/use-text-search.js"
+export type {
+  FindRangesOptions,
+  TextSearch,
+  TextSearchOptions,
+} from "./hooks/use-text-search.js"
 export {
   Select,
   SelectContent,
@@ -59,7 +65,7 @@ export type {
   TooltipProviderProps,
   TooltipTriggerProps,
 } from "./components/tooltip.js"
-export { motion, VirtualList } from "./components/index.js"
+export { motion } from "./components/index.js"
 export type {
   Root,
   FrameLoop,
@@ -74,8 +80,9 @@ export type {
 } from "./hooks/use-window-size.js"
 
 // Re-export types
-export type { MotionDivProps, WindowedVirtualListProps } from "./components/index.js"
+export type { MotionDivProps } from "./components/index.js"
 export type {
+  CursorValue,
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
   BackgroundValue,
@@ -91,6 +98,8 @@ export type {
   LinearGradient,
   LinearGradientStop,
   EdgeInsets,
+  HighlightMatch,
+  HighlightSpec,
   MotionEase,
   MotionProps,
   MotionStyle,

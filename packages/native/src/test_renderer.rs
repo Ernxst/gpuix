@@ -1,19 +1,18 @@
 /// TestGpuixRenderer — GPU-backed GPUI test renderer exposed to Node.js via napi.
 ///
 /// Uses gpui::VisualTestAppContext with a deterministic virtual display,
-/// real Metal rendering on macOS, and TestDispatcher scheduling. Runs the
-/// SAME GpuixView, build_element(), apply_styles(), and event handlers as
+/// the native Metal or DirectX renderer, and TestDispatcher scheduling. Runs
+/// the SAME GpuixView, build_element(), apply_styles(), and event handlers as
 /// production without consulting the host display list.
 ///
 /// Windows are positioned offscreen at (-10000, -10000) — invisible but
-/// fully rendered by Metal. This enables capture_screenshot() for visual
+/// fully rendered by the native GPU. This enables capture_screenshot() for visual
 /// test validation.
 ///
 /// VisualTestAppContext is !Send, so it is stored in thread-local state.
 /// All napi calls happen on the JS main thread.
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -24,10 +23,10 @@ use gpui::AppContext as _;
 
 use crate::element_tree::EventPayload;
 use crate::renderer::{
-    apply_batch_to_tree, catch_gpui_initialization, debug_frame_overlay_mode_name,
-    debug_frame_overlay_stats_js, default_application_menus, default_http_client,
-    dispatch_application_menu_action, drain_style_diagnostics, has_application_menus,
-    init_application_menu_support, parse_debug_frame_overlay_mode, parse_style_json,
+    apply_batch_to_tree_with_diagnostics, catch_gpui_initialization, debug_frame_overlay_mode_name,
+    debug_frame_overlay_stats_js, default_http_client, dispatch_application_menu_action,
+    drain_style_diagnostics, has_application_menus, init_application_menu_support,
+    install_application_menus, parse_debug_frame_overlay_mode, parse_style_json,
     pending_custom_prop_diagnostic, pending_style_diagnostics, set_application_menus,
     to_element_id, DebugFrameOverlayStats, EventCallback, GpuixStyleDiagnostic, GpuixView,
     MenuSpec, PendingStyleDiagnostic, WindowSize,
@@ -46,6 +45,46 @@ struct VisualTestState {
     view: gpui::Entity<GpuixView>,
     window: gpui::AnyWindowHandle,
     cx: gpui::VisualTestAppContext,
+}
+
+/// Release every `Entity` handle the view is holding, while the `App` is alive.
+///
+/// The test build enables gpui's leak detector, which panics if a handle
+/// outlives its `App`. `<input>` keeps an `Entity<TextEditorState>` in the
+/// view's custom element registry, so that panic fires from a thread-local
+/// destructor at process exit. macOS never runs this destructor, so the panic
+/// only appeared once Windows started running the suite: every test file
+/// passed and then the vitest worker died with "Worker exited unexpectedly".
+///
+/// `drop` runs before the fields are dropped, so `view` and `cx` are both
+/// still usable here.
+impl Drop for VisualTestState {
+    fn drop(&mut self) {
+        let view = self.view.clone();
+        // Unmount, exactly as React would: empty the tree, then paint one more
+        // frame. The registry is not the only owner of the entity. `<input>`
+        // installs an `ElementInputHandler` during paint, and a clone of that
+        // lives in the window's rendered frame and in the platform window. A
+        // frame with nothing in it is what drops those, and it has to happen
+        // while the `App` is still alive.
+        self.cx.update(|cx| {
+            view.update(cx, |view, cx| {
+                if let Ok(mut tree) = view.tree.lock() {
+                    tree.root_id = None;
+                }
+                view.custom_registry.destroy_all();
+                view.focus_subscriptions.clear();
+                view.focus_handles.clear();
+                cx.notify();
+            });
+        });
+        // Err only means the window is already gone, which is the state this
+        // is trying to reach.
+        self.cx
+            .update_window(self.window, |_, window, _| window.refresh())
+            .ok();
+        self.cx.run_until_parked();
+    }
 }
 
 thread_local! {
@@ -76,6 +115,32 @@ fn with_test_state<R>(
 
 fn dispose_test_state(state_id: u64) {
     let _ = TEST_STATES.try_with(|cell| cell.borrow_mut().remove(&state_id));
+}
+
+/// Default offscreen window size. Matches gpui's `open_offscreen_window_default`,
+/// so a `new TestGpuixRenderer()` with no size behaves exactly as before.
+///
+/// Note for layout tests: 1280 is wide enough that a centered max-width content
+/// column stays capped whether a sidebar is open or closed. A test that needs to
+/// observe re-wrapping must pass a narrower width explicitly.
+const DEFAULT_WINDOW_WIDTH: f64 = 1280.0;
+const DEFAULT_WINDOW_HEIGHT: f64 = 800.0;
+
+/// Validate a caller-supplied window dimension, falling back to `default`.
+///
+/// Checks the value *after* the `f32` cast: a finite `f64` such as `1e300`
+/// saturates to `f32::INFINITY`, which would open a window with no usable size.
+fn window_dimension(value: Option<f64>, default: f64, label: &str) -> Result<f32> {
+    let Some(value) = value else {
+        return Ok(default as f32);
+    };
+    let pixels = value as f32;
+    if !pixels.is_finite() || pixels <= 0.0 {
+        return Err(Error::from_reason(format!(
+            "TestGpuixRenderer {label} must be a positive, finite number, got {value}"
+        )));
+    }
+    Ok(pixels)
 }
 
 /// Convert JS button number (0=left, 1=middle, 2=right) to GPUI MouseButton.
@@ -142,8 +207,8 @@ fn refine_style_object(
 
 // ── TestGpuixRenderer ────────────────────────────────────────────────
 
-/// GPU-backed GPUI test renderer. Uses VisualTestAppContext (real Metal
-/// rendering on macOS) with TestDispatcher for deterministic scheduling.
+/// GPU-backed GPUI test renderer. Uses VisualTestAppContext with the native
+/// Metal or DirectX renderer and TestDispatcher for deterministic scheduling.
 /// Same GpuixView and rendering pipeline as production.
 ///
 /// Usage from JS:
@@ -151,7 +216,7 @@ fn refine_style_object(
 ///   r.createElement(1, "div")
 ///   r.setRoot(1)
 ///   r.commitMutations()
-///   r.flush()                  // triggers GpuixView::render() via Metal
+///   r.flush()                  // triggers GpuixView::render() on the GPU
 ///   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
 ///   const events = r.drainEvents()
 ///   r.captureScreenshot("/tmp/test.png")  // saves rendered UI as PNG
@@ -174,12 +239,18 @@ pub struct TestGpuixRenderer {
 #[napi]
 impl TestGpuixRenderer {
     #[napi(constructor)]
-    pub fn new() -> Result<Self> {
-        catch_gpui_initialization("GPUI test renderer initialization", Self::try_new)
+    pub fn new(width: Option<f64>, height: Option<f64>) -> Result<Self> {
+        catch_gpui_initialization("GPUI test renderer initialization", || {
+            Self::try_new(width, height)
+        })
     }
 
-    fn try_new() -> Result<Self> {
+    fn try_new(width: Option<f64>, height: Option<f64>) -> Result<Self> {
         let state_id = NEXT_TEST_STATE_ID.fetch_add(1, Ordering::Relaxed);
+        let window_size = gpui::size(
+            gpui::px(window_dimension(width, DEFAULT_WINDOW_WIDTH, "width")?),
+            gpui::px(window_dimension(height, DEFAULT_WINDOW_HEIGHT, "height")?),
+        );
         let tree = Arc::new(Mutex::new(RetainedTree::new()));
         let events: Arc<Mutex<Vec<EventPayload>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -196,23 +267,20 @@ impl TestGpuixRenderer {
         let image_network_policy = crate::custom_elements::img::ImageNetworkPolicy::default();
         let image_network_policy_for_view = image_network_policy.clone();
 
-        // Create VisualTestAppContext with real macOS Metal rendering +
-        // TestDispatcher for deterministic scheduling.
-        let mac_platform = gpui_macos::MacPlatform::new(false);
-        let mut cx = gpui::VisualTestAppContext::new(Rc::new(mac_platform));
+        let platform = gpui_platform::current_platform(false);
+        let mut cx = gpui::VisualTestAppContext::new(platform);
         cx.update(|cx| {
             cx.set_http_client(default_http_client());
             crate::renderer::init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
             init_application_menu_support(cx, event_callback.clone());
-            set_application_menus(cx, default_application_menus("GPUIX Test"))
-                .expect("default test menu is valid");
+            install_application_menus(cx, "GPUIX Test", None).expect("default test menu is valid");
         });
 
-        // Open an offscreen window at (-10000, -10000) — invisible but fully
-        // rendered by Metal. Uses the same GpuixView as production.
+        // Open an offscreen window at (-10000, -10000) with the same GpuixView
+        // and native GPU renderer as production.
         let window_handle = cx
-            .open_offscreen_window_default(|_window, app| {
+            .open_offscreen_window(window_size, |_window, app| {
                 app.new(|_cx| {
                     GpuixView::new(
                         tree_clone,
@@ -309,7 +377,14 @@ impl TestGpuixRenderer {
     pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
         let id = to_element_id(id)?;
         let parsed = parse_style_json(&style_json);
-        self.tree.lock().unwrap().set_style(id, parsed.style);
+        let mut tree = self.tree.lock().unwrap();
+        let style = tree
+            .styles
+            .intern_parsed(style_json.as_bytes(), parsed.style);
+        tree.set_style(id, style);
+        let live_elements = tree.elements.len();
+        tree.styles.maybe_sweep(live_elements);
+        drop(tree);
         if self.strict_styles.load(Ordering::Relaxed) {
             self.style_diagnostics
                 .lock()
@@ -404,12 +479,13 @@ impl TestGpuixRenderer {
     /// Returns accumulated destroyed IDs from all destroyElement ops.
     #[napi]
     pub fn apply_batch(&self, json: String) -> Result<Vec<f64>> {
-        let ops: Vec<serde_json::Value> = serde_json::from_str(&json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse batch: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
-        let outcome = apply_batch_to_tree(&mut tree, &ops).map_err(Error::from_reason)?;
+        let strict_styles = self.strict_styles.load(Ordering::Relaxed);
+        let outcome =
+            apply_batch_to_tree_with_diagnostics(&mut tree, json.as_bytes(), strict_styles)
+                .map_err(Error::from_reason)?;
         drop(tree);
-        if self.strict_styles.load(Ordering::Relaxed) {
+        if strict_styles {
             self.style_diagnostics
                 .lock()
                 .unwrap()
@@ -520,13 +596,40 @@ impl TestGpuixRenderer {
     /// Dispatches MouseDown + MouseUp through GPUI's input pipeline,
     /// which triggers the same event handlers as production.
     /// IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
+    /// `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
     #[napi]
-    pub fn simulate_click(&self, x: f64, y: f64) -> Result<()> {
+    pub fn simulate_click(
+        &self,
+        x: f64,
+        y: f64,
+        button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let button = button.unwrap_or(0);
         let result = with_test_state(self.state_id, |cx, window, _view| {
-            cx.simulate_click(
+            // Not `cx.simulate_click`: that helper hard-codes the left button,
+            // so a right click silently became a left click.
+            let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+            let gpui_button = u32_to_mouse_button(button);
+            cx.simulate_event(
                 window,
-                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-                gpui::Modifiers::default(),
+                gpui::MouseDownEvent {
+                    position,
+                    modifiers,
+                    button: gpui_button,
+                    click_count: 1,
+                    first_mouse: false,
+                },
+            );
+            cx.simulate_event(
+                window,
+                gpui::MouseUpEvent {
+                    position,
+                    modifiers,
+                    button: gpui_button,
+                    click_count: 1,
+                },
             );
             Ok(())
         });
@@ -603,7 +706,14 @@ impl TestGpuixRenderer {
     /// pressed_button: optional mouse button held during move (0=left, 1=middle, 2=right).
     /// Used to simulate drag events.
     #[napi]
-    pub fn simulate_mouse_move(&self, x: f64, y: f64, pressed_button: Option<u32>) -> Result<()> {
+    pub fn simulate_mouse_move(
+        &self,
+        x: f64,
+        y: f64,
+        pressed_button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(self.state_id, |cx, window, _view| {
             let button: Option<gpui::MouseButton> = pressed_button.map(u32_to_mouse_button);
 
@@ -611,7 +721,7 @@ impl TestGpuixRenderer {
                 window,
                 gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
                 button,
-                gpui::Modifiers::default(),
+                modifiers,
             );
 
             Ok(())
@@ -709,13 +819,20 @@ impl TestGpuixRenderer {
     /// Simulate a mouse down event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]
-    pub fn simulate_mouse_down(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
+    pub fn simulate_mouse_down(
+        &self,
+        x: f64,
+        y: f64,
+        button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         let result = with_test_state(self.state_id, |cx, window, _view| {
             cx.simulate_mouse_down(
                 window,
                 gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
                 u32_to_mouse_button(button.unwrap_or(0)),
-                gpui::Modifiers::default(),
+                modifiers,
             );
             Ok(())
         });
@@ -728,13 +845,20 @@ impl TestGpuixRenderer {
     /// Simulate a mouse up event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]
-    pub fn simulate_mouse_up(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
+    pub fn simulate_mouse_up(
+        &self,
+        x: f64,
+        y: f64,
+        button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         let result = with_test_state(self.state_id, |cx, window, _view| {
             cx.simulate_mouse_up(
                 window,
                 gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
                 u32_to_mouse_button(button.unwrap_or(0)),
-                gpui::Modifiers::default(),
+                modifiers,
             );
             Ok(())
         });
@@ -801,6 +925,20 @@ impl TestGpuixRenderer {
         Ok(crate::text::painted_text())
     }
 
+    /// Every highlight wash painted in the last frame, in paint order.
+    ///
+    /// A quad is invisible to `getPaintedText()`, so this is the only way to
+    /// assert on `highlight` without a screenshot. Each entry carries its rects,
+    /// so a soft-wrapped match is provably two boxes.
+    #[napi]
+    pub fn get_painted_highlights(&self) -> Result<Vec<crate::element_tree::HighlightMatch>> {
+        self.flush()?;
+        Ok(crate::text::painted_highlights()
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
     /// Drag-select from one point to another: mouse down, move, up.
     ///
     /// A single helper rather than three calls because the listeners that drive
@@ -810,11 +948,11 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn drag_select(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> Result<()> {
         self.flush()?;
-        self.simulate_mouse_down(x1, y1, None)?;
+        self.simulate_mouse_down(x1, y1, None, None)?;
         self.flush()?;
-        self.simulate_mouse_move(x2, y2, Some(0))?;
+        self.simulate_mouse_move(x2, y2, Some(0), None)?;
         self.flush()?;
-        self.simulate_mouse_up(x2, y2, None)?;
+        self.simulate_mouse_up(x2, y2, None, None)?;
         self.flush()?;
         Ok(())
     }
@@ -953,7 +1091,7 @@ impl TestGpuixRenderer {
     }
 
     /// Capture a screenshot of the current rendered state and save as PNG.
-    /// macOS only — requires Metal GPU rendering via VisualTestAppContext.
+    /// Supported on macOS through Metal and Windows through DirectX.
     #[napi]
     pub fn capture_screenshot(&self, path: String) -> Result<()> {
         with_test_state(self.state_id, |cx, window, view| {
@@ -976,7 +1114,7 @@ impl TestGpuixRenderer {
 
             cx.run_until_parked();
 
-            // Capture via GPUI's render_to_image (Metal texture → RgbaImage).
+            // Capture via the platform renderer's render_to_image implementation.
             let image = cx
                 .capture_screenshot(window)
                 .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {}", e)))?;

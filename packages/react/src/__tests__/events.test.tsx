@@ -32,7 +32,7 @@ import type { EventPayload } from "@gpuix/native"
 import { handleGpuixEvent } from "../reconciler/event-registry.js"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance } from "../types/host.js"
-import { expectScreenshotsDiffer, expectScreenshotsEqual } from "./test-utils"
+import { expectScreenshotsDiffer, expectScreenshotsEqual, SHOTS_DIR } from "./test-utils"
 
 // All tests require the native GPUI test renderer (cargo build with test-support).
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
@@ -1259,8 +1259,8 @@ describeNative("events", () => {
 
       testRoot.render(<DialogScreenshotProbe />)
 
-      const path0 = "/tmp/gpuix-dialog-0.png"
-      const path1 = "/tmp/gpuix-dialog-1.png"
+      const path0 = `${SHOTS_DIR}/gpuix-dialog-0.png`
+      const path1 = `${SHOTS_DIR}/gpuix-dialog-1.png`
 
       if (fs.existsSync(path0)) fs.unlinkSync(path0)
       if (fs.existsSync(path1)) fs.unlinkSync(path1)
@@ -2132,7 +2132,7 @@ describeNative("events", () => {
       left: 0,
     }
 
-    it("passes through an absolute-fill decoration with no behavior", () => {
+    it("lets an absolute painted decoration block ordinary pointer hits", () => {
       const clicks: string[] = []
       testRoot.render(
         <div style={{ position: "relative", width: 200, height: 100 }}>
@@ -2142,7 +2142,7 @@ describeNative("events", () => {
       )
 
       testRoot.renderer.nativeSimulateClick(50, 50)
-      expect(clicks).toEqual(["button"])
+      expect(clicks).toEqual([])
     })
 
     it("lets an explicitly interactive overlay own the hit", () => {
@@ -2283,8 +2283,8 @@ describeNative("events", () => {
       testRoot.render(<ScreenshotProbe />)
 
       // Capture initial state
-      const path0 = "/tmp/gpuix-counter-0.png"
-      const path1 = "/tmp/gpuix-counter-1.png"
+      const path0 = `${SHOTS_DIR}/gpuix-counter-0.png`
+      const path1 = `${SHOTS_DIR}/gpuix-counter-1.png`
 
       // Clean up from previous runs
       if (fs.existsSync(path0)) fs.unlinkSync(path0)
@@ -2343,8 +2343,8 @@ describeNative("events", () => {
         .findByType("div")
         .find((d) => d.events.has("keyDown"))!
 
-      const path0 = "/tmp/gpuix-keydown-0.png"
-      const path1 = "/tmp/gpuix-keydown-1.png"
+      const path0 = `${SHOTS_DIR}/gpuix-keydown-0.png`
+      const path1 = `${SHOTS_DIR}/gpuix-keydown-1.png`
 
       if (fs.existsSync(path0)) fs.unlinkSync(path0)
       if (fs.existsSync(path1)) fs.unlinkSync(path1)
@@ -2398,8 +2398,8 @@ describeNative("events", () => {
 
       testRoot.render(<HoverScreenshotProbe />)
 
-      const path0 = "/tmp/gpuix-hover-0.png"
-      const path1 = "/tmp/gpuix-hover-1.png"
+      const path0 = `${SHOTS_DIR}/gpuix-hover-0.png`
+      const path1 = `${SHOTS_DIR}/gpuix-hover-1.png`
 
       if (fs.existsSync(path0)) fs.unlinkSync(path0)
       if (fs.existsSync(path1)) fs.unlinkSync(path1)
@@ -2605,6 +2605,132 @@ describeNative("events", () => {
       expect(offset![1]).toBeLessThan(0)
     })
 
+    it("lets an ancestor take the wheel over an absolutely placed child", () => {
+      // A pannable canvas places every item absolutely: a timeline clip, a
+      // graph node. If absolute stole the wheel, the pan listener never ran.
+      const deltas: number[] = []
+
+      function Canvas() {
+        return (
+          <div
+            style={{ width: 320, height: 200, position: "relative" }}
+            onScroll={(e: EventPayload) => deltas.push(e.deltaY ?? 0)}
+          >
+            <div
+              style={{
+                position: "absolute",
+                left: 40,
+                top: 40,
+                width: 120,
+                height: 40,
+                backgroundColor: "#3366ff",
+              }}
+            >
+              <text>clip</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<Canvas />)
+      testRoot.renderer.nativeSimulateScrollWheel(100, 60, 0, -80)
+
+      expect(deltas).toEqual([-80])
+    })
+
+    it("lets an absolute sibling pass the wheel to a scroller below it", () => {
+      // BlockMouseExceptScroll is not DOM ancestor bubbling: it lets every
+      // scroll hitbox behind the element take the wheel, including one that
+      // is not an ancestor. An overlay that must not do this needs
+      // `pointerEvents: "auto"`.
+      function OverlayOverScroller() {
+        return (
+          <div style={{ width: 320, height: 200, position: "relative" }}>
+            <div style={{ width: 320, height: 200, overflowY: "scroll" }}>
+              <div style={{ height: 900, backgroundColor: "#1e1e2e" }}>
+                <text>tall</text>
+              </div>
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                width: 320,
+                height: 200,
+                backgroundColor: "#101010",
+              }}
+            >
+              <text>card</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<OverlayOverScroller />)
+      const scroller = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflowY === "scroll")!
+      testRoot.renderer.nativeSimulateScrollWheel(160, 100, 0, -80)
+
+      const offset = testRoot.renderer.getScrollOffset(scroller.id)
+      expect(offset).not.toBeNull()
+      expect(offset![1]).toBeLessThan(0)
+    })
+
+    it("stops the wheel at a child with pointerEvents auto", () => {
+      const deltas: number[] = []
+
+      function ModalOverCanvas() {
+        return (
+          <div
+            style={{ width: 320, height: 200, position: "relative" }}
+            onScroll={(e: EventPayload) => deltas.push(e.deltaY ?? 0)}
+          >
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                width: 320,
+                height: 200,
+                backgroundColor: "#101010",
+                pointerEvents: "auto",
+              }}
+            >
+              <text>modal</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<ModalOverCanvas />)
+      testRoot.renderer.nativeSimulateScrollWheel(100, 60, 0, -80)
+
+      expect(deltas).toEqual([])
+    })
+
+    it("reports the modifiers held during a simulated wheel", () => {
+      const held: Array<boolean | undefined> = []
+
+      function ZoomSurface() {
+        return (
+          <div
+            style={{ width: 200, height: 200, backgroundColor: "#101010" }}
+            onScroll={(e: EventPayload) => held.push(e.modifiers?.cmd)}
+          >
+            <text>surface</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<ZoomSurface />)
+      testRoot.renderer.nativeSimulateScrollWheel(100, 100, 0, -40)
+      testRoot.renderer.nativeSimulateScrollWheel(100, 100, 0, -40, "cmd")
+
+      expect(held).toEqual([false, true])
+    })
+
     it("should support overflow-y scroll only", () => {
       function VerticalScroll() {
         return (
@@ -2745,8 +2871,8 @@ describeNative("events", () => {
 
       testRoot.render(<ScreenshotScroller />)
 
-      const path0 = "/tmp/gpuix-scroll-before.png"
-      const path1 = "/tmp/gpuix-scroll-after.png"
+      const path0 = `${SHOTS_DIR}/gpuix-scroll-before.png`
+      const path1 = `${SHOTS_DIR}/gpuix-scroll-after.png`
 
       if (fs.existsSync(path0)) fs.unlinkSync(path0)
       if (fs.existsSync(path1)) fs.unlinkSync(path1)

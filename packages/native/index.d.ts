@@ -143,10 +143,26 @@ export declare class GpuixRenderer {
   getElementBounds(id: number): Array<number> | null
   getAllText(): Array<string>
   getPaintedText(): Array<string>
-  simulateClick(x: number, y: number, button?: number | undefined | null): void
-  simulateMouseDown(x: number, y: number, button?: number | undefined | null): void
-  simulateMouseUp(x: number, y: number, button?: number | undefined | null): void
-  simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null): void
+  /**
+   * Every highlight wash painted in the last frame, in paint order.
+   *
+   * A quad is invisible to `getPaintedText()`, so this is the only way to
+   * assert on `highlight` without a screenshot.
+   */
+  getPaintedHighlights(): Array<HighlightMatch>
+  /** Simulate space-separated keystrokes through the focused element's input pipeline. */
+  simulateKeystrokes(keystrokes: string): void
+  simulateKeyDown(keystroke: string, isHeld?: boolean | undefined | null): void
+  simulateKeyUp(keystroke: string): void
+  /** `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt". */
+  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateMouseDown(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null, modifiers?: string | undefined | null): void
+  /**
+   * Dispatch a wheel event through the same GPUI hit test the trackpad uses.
+   * The options preserve gesture phase, line/pixel units, and modifiers.
+   */
   simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, options?: ScrollWheelOptions | undefined | null): void
   clockPause(): number
   clockSet(nowMs: number): number
@@ -156,8 +172,8 @@ export declare class GpuixRenderer {
 }
 
 /**
- * GPU-backed GPUI test renderer. Uses VisualTestAppContext (real Metal
- * rendering on macOS) with TestDispatcher for deterministic scheduling.
+ * GPU-backed GPUI test renderer. Uses VisualTestAppContext with the native
+ * Metal or DirectX renderer and TestDispatcher for deterministic scheduling.
  * Same GpuixView and rendering pipeline as production.
  *
  * Usage from JS:
@@ -165,13 +181,13 @@ export declare class GpuixRenderer {
  *   r.createElement(1, "div")
  *   r.setRoot(1)
  *   r.commitMutations()
- *   r.flush()                  // triggers GpuixView::render() via Metal
+ *   r.flush()                  // triggers GpuixView::render() on the GPU
  *   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
  *   const events = r.drainEvents()
  *   r.captureScreenshot("/tmp/test.png")  // saves rendered UI as PNG
  */
 export declare class TestGpuixRenderer {
-  constructor()
+  constructor(width?: number | undefined | null, height?: number | undefined | null)
   /**
    * Dispose this renderer's offscreen window and GPUI application context.
    * Further interaction attempts fail instead of being routed to another root.
@@ -239,8 +255,9 @@ export declare class TestGpuixRenderer {
    * Dispatches MouseDown + MouseUp through GPUI's input pipeline,
    * which triggers the same event handlers as production.
    * IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
+   * `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
    */
-  simulateClick(x: number, y: number): void
+  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
    * Simulate key strokes through GPUI's input pipeline.
    * Format: space-separated keys, e.g. "a", "enter", "cmd-shift-p".
@@ -266,7 +283,7 @@ export declare class TestGpuixRenderer {
    * pressed_button: optional mouse button held during move (0=left, 1=middle, 2=right).
    * Used to simulate drag events.
    */
-  simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null): void
+  simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
    * Focus an element by its numeric ID.
    * The element must have a FocusHandle (created by sync_focus_handles when
@@ -286,12 +303,12 @@ export declare class TestGpuixRenderer {
    * Simulate a mouse down event at the given window coordinates.
    * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
    */
-  simulateMouseDown(x: number, y: number, button?: number | undefined | null): void
+  simulateMouseDown(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
    * Simulate a mouse up event at the given window coordinates.
    * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
    */
-  simulateMouseUp(x: number, y: number, button?: number | undefined | null): void
+  simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
    * Simulate a scroll wheel event at the given position.
    * delta_x and delta_y default to pixels (negative = scroll up/left).
@@ -317,6 +334,14 @@ export declare class TestGpuixRenderer {
    * this is the only way to assert on what they actually rendered.
    */
   getPaintedText(): Array<string>
+  /**
+   * Every highlight wash painted in the last frame, in paint order.
+   *
+   * A quad is invisible to `getPaintedText()`, so this is the only way to
+   * assert on `highlight` without a screenshot. Each entry carries its rects,
+   * so a soft-wrapped match is provably two boxes.
+   */
+  getPaintedHighlights(): Array<HighlightMatch>
   /**
    * Drag-select from one point to another: mouse down, move, up.
    *
@@ -353,7 +378,7 @@ export declare class TestGpuixRenderer {
   getScrollOffset(elementId: number): Array<number> | null
   /**
    * Capture a screenshot of the current rendered state and save as PNG.
-   * macOS only — requires Metal GPU rendering via VisualTestAppContext.
+   * Supported on macOS through Metal and Windows through DirectX.
    */
   captureScreenshot(path: string): void
   /**
@@ -524,6 +549,13 @@ export interface EventPayload {
   startIndex?: number
   /** Exclusive end of the visible logical range. Populated for: visibleRange. */
   endIndex?: number
+  /**
+   * Matches found by this element's `highlight` prop. Counted once per match
+   * even when it is split across several painted runs, and it counts every
+   * retained match, not only the ones currently on screen.
+   * Populated for: highlight.
+   */
+  matchCount?: number
   modifiers?: EventModifiers
 }
 
@@ -536,6 +568,34 @@ export interface GpuixStyleDiagnostic {
   testId?: string
   property: string
   value: string
+}
+
+/**
+ * One highlight wash painted in the last frame, with the boxes it drew.
+ *
+ * The rects matter: a quad never lands in `getPaintedText()`, and a match that
+ * soft-wraps must produce one box per visual row. Without the geometry the only
+ * way to assert either is a screenshot.
+ */
+export interface HighlightMatch {
+  /** Numeric id of the element that painted the run. */
+  elementId: number
+  /** Index of the run within that element. 0 for a plain `<text>`. */
+  sub: number
+  /** The full string of the run, so `text.slice(start, end)` is the match. */
+  text: string
+  /** UTF-16 code-unit offsets into `text`, the units JS strings use. */
+  start: number
+  end: number
+  active: boolean
+  rects: Array<HighlightRect>
+}
+
+export interface HighlightRect {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 /**
@@ -594,7 +654,9 @@ export interface WindowInsets {
 
 export interface WindowOptions {
   title?: string
-  /** Application menus. Omit for a minimal Quit menu; pass `[]` to opt out. */
+  /** The name used for the default application menu. Defaults to `title`. */
+  appName?: string
+  /** Application menus. Omit for the platform default; pass `[]` to opt out. */
   menus?: Array<MenuSpec>
   width?: number
   height?: number

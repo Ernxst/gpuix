@@ -6,12 +6,14 @@
  * GPUI layout → Metal → screenshot.
  *
  * Each test renders a diff, takes a screenshot, and verifies text content.
- * Screenshots are saved to /tmp/gpuix-diff-*.png for manual inspection.
+ * Screenshots are saved to `examples/screenshots/` for manual inspection.
  *
  * @ts-nocheck
  */
 
 import fs from "fs"
+import path from "path"
+import { fileURLToPath } from "url"
 import { describe, it, expect, beforeEach } from "vitest"
 import React from "react"
 import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "@gpuix/react/testing"
@@ -20,7 +22,13 @@ import { DiffViewer } from "./diff"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
-const SCREENSHOT_DIR = "/tmp"
+// Not `/tmp`: that path does not exist on Windows, and native never creates
+// the parent directory, so every capture failed the test there.
+const SCREENSHOT_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "screenshots",
+)
+fs.mkdirSync(SCREENSHOT_DIR, { recursive: true })
 
 // Background for the scroll container — matches the diff viewer's unchanged line bg
 // so the area below content doesn't look different.

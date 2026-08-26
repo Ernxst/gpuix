@@ -133,7 +133,7 @@ describe("<virtual-list>", () => {
       const error = reportError.mock.calls[0]?.[0]
       expect(error).toBeInstanceOf(Error)
       expect((error as Error).message).toMatch(
-        /immediate children are rows.*VirtualList.*itemCount.*renderItem/is
+        /immediate children are rows.*itemCount.*windowStart.*estimatedItemHeight/is
       )
       expect(invalid.renderer.findByType("virtual-list")).toHaveLength(0)
     } finally {
@@ -170,7 +170,7 @@ describe("<virtual-list>", () => {
       const error = reportError.mock.calls[0]?.[0]
       expect(error).toBeInstanceOf(Error)
       expect((error as Error).message).toMatch(
-        /immediate children are rows.*VirtualList.*itemCount.*renderItem/is
+        /immediate children are rows.*itemCount.*windowStart.*estimatedItemHeight/is
       )
 
       const list = invalid.renderer.findByType("virtual-list")[0]
@@ -534,6 +534,85 @@ describe("<virtual-list>", () => {
     expect(painted).toContain("row-50")
     expect(painted).not.toContain("row-0")
     expect(painted.length).toBeLessThan(5)
+  })
+
+  // gpui anchors a list on a logical item, so a prepend keeps the rows that are
+  // already on screen and pushes the new ones above the viewport. A browser does
+  // the same, except that it suppresses scroll anchoring at scrollTop 0. A list
+  // pinned to the top must match the browser, or a prepend is never seen.
+  //
+  // This only bites once the content is taller than the viewport. While it is
+  // shorter, gpui re-anchors to item 0 on every layout and hides the drift.
+  const grown = (count: number) => (
+    <virtual-list
+      overdraw={0}
+      estimatedItemHeight={40}
+      style={{ width: 400, height: 160 }}
+    >
+      {Array.from({ length: count }, (_, index) => (
+        <div
+          key={count - index}
+          style={{
+            display: "flex",
+            height: 40,
+            flexShrink: 0,
+            alignItems: "center",
+          }}
+        >
+          <text>{`row-${count - index}`}</text>
+        </div>
+      ))}
+    </virtual-list>
+  )
+
+  it("stays at the top when rows are prepended past the viewport", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(grown(2))
+    expect(renderer.getPaintedText()[0]).toBe("row-2")
+
+    for (let count = 3; count <= 12; count += 1) {
+      render(grown(count))
+      expect(renderer.getPaintedText()[0], `after ${count} rows`).toBe(
+        `row-${count}`,
+      )
+    }
+  })
+
+  it("keeps following the tail on a short list that is pinned at the top", () => {
+    // A following list that does not fill its viewport ends layout anchored at
+    // {0, 0}, which reads exactly like "the user is at the top". Pinning it
+    // there would call stop_following and break the chat tail.
+    const { render, renderer } = createTestRoot()
+    const following = (count: number) => (
+      <virtual-list
+        followTail
+        overdraw={0}
+        estimatedItemHeight={40}
+        style={{ width: 400, height: 160 }}
+      >
+        <Rows count={count} />
+      </virtual-list>
+    )
+
+    render(following(2))
+    render(following(3))
+    render(following(12))
+    expect(renderer.getPaintedText()).toContain("row-11")
+    expect(renderer.getPaintedText()).not.toContain("row-0")
+  })
+
+  it("keeps the scroll anchor when rows are prepended below the top", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(grown(12))
+    const list = renderer.findByType("virtual-list")[0]
+    renderer.scrollToItem(list.id, 5)
+    expect(renderer.getPaintedText()[0]).toBe("row-7")
+
+    // Away from the top, a prepend must not move the rows under the pointer.
+    render(grown(13))
+    expect(renderer.getPaintedText()[0]).toBe("row-7")
   })
 
   it("lets overflow-x inside a row pan without moving the list", () => {

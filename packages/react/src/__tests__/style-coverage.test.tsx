@@ -836,4 +836,46 @@ describe("style props reach the renderer", () => {
     unfocused.renderer.simulateKeystrokes("h i")
     expect(unfocused.renderer.getPaintedText()).toContain("type")
   })
+
+  it('lays out position: "fixed" like "absolute"', () => {
+    // "fixed" already blocked hits like "absolute" but stayed in flow, so a
+    // box moved when its siblings changed. Taffy has no viewport-fixed mode
+    // and GPUI has no scrolling document, so the two are the same layout.
+    const box = (position: "absolute" | "fixed") => (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          backgroundColor: "#101010",
+          height: "100%",
+          position: "relative",
+        }}
+      >
+        <div style={{ height: 120, backgroundColor: "#1f2937" }} />
+        <div
+          style={{
+            position,
+            top: 20,
+            left: 20,
+            width: 160,
+            height: 60,
+            backgroundColor: "#f97316",
+          }}
+        />
+      </div>
+    )
+
+    const absolute = path.join(SHOTS_DIR, "position-absolute.png")
+    const fixed = path.join(SHOTS_DIR, "position-fixed.png")
+
+    const first = createTestRoot()
+    first.render(box("absolute"))
+    first.renderer.captureScreenshot(absolute)
+
+    const second = createTestRoot()
+    second.render(box("fixed"))
+    second.renderer.captureScreenshot(fixed)
+
+    expectScreenshotsEqual(absolute, fixed)
+  })
 })

@@ -89,7 +89,7 @@ pub enum DimensionValue {
 
 /// One serializable CSS Grid track. Track lists deliberately use tagged objects
 /// rather than CSS strings so the renderer can validate every nested function.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GridTrackValue {
     Px {
@@ -112,7 +112,7 @@ pub enum GridTrackValue {
 }
 
 /// Valid lower-bound functions for a `minmax()` grid track.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GridTrackMinValue {
     Px { value: f64 },
@@ -122,7 +122,7 @@ pub enum GridTrackMinValue {
 }
 
 /// Valid upper-bound functions for a `minmax()` grid track.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GridTrackMaxValue {
     Px { value: f64 },
@@ -133,7 +133,7 @@ pub enum GridTrackMaxValue {
 }
 
 /// Integer grid counts remain a compatibility shorthand for `repeat(count, 1fr)`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum GridTemplateValue {
     LegacyCount(f64),
@@ -208,7 +208,7 @@ impl<'de> Deserialize<'de> for DimensionValue {
 }
 
 /// Style description retained by the native renderer.
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StyleDesc {
     pub display: Option<String>,
@@ -925,7 +925,13 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         number_field!(key, value, "marginBottom", margin_bottom);
         number_field!(key, value, "marginLeft", margin_left);
 
-        enum_field!(key, value, "position", position, ["relative", "absolute"]);
+        enum_field!(
+            key,
+            value,
+            "position",
+            position,
+            ["relative", "absolute", "fixed"]
+        );
         number_field!(key, value, "top", top);
         number_field!(key, value, "right", right);
         number_field!(key, value, "bottom", bottom);
@@ -1123,7 +1129,17 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             overflow_y,
             ["visible", "hidden", "scroll"]
         );
-        enum_field!(key, value, "cursor", cursor, ["default", "pointer"]);
+        if key == "cursor" {
+            let property = property!("cursor");
+            if let Some(cursor) = decode::<String>(&property, value, &mut parsed.problems) {
+                if parse_cursor(&cursor).is_some() {
+                    parsed.style.cursor = Some(cursor);
+                } else {
+                    reject(&mut parsed.problems, property, value, "unsupported cursor");
+                }
+            }
+            continue;
+        }
         enum_field!(
             key,
             value,
@@ -1428,13 +1444,72 @@ fn split_top_level(value: &str, separator: char) -> Vec<&str> {
 pub use crate::color::{parse_color, parse_color_hex};
 
 /// Whether an element should block ordinary pointer hits behind it.
-/// Explicit `pointerEvents` wins; otherwise only interactive behavior blocks.
+/// Explicit `pointerEvents` wins. Otherwise interactive elements, painted
+/// fills, and positioned boxes own a hitbox while still allowing wheel input
+/// to reach an ancestor scroller.
 pub fn should_occlude(style: Option<&StyleDesc>, interactive: bool) -> bool {
     match style.and_then(|style| style.pointer_events.as_deref()) {
-        Some("none") => false,
-        Some("auto") => true,
-        _ => interactive,
+        Some("none") => return false,
+        Some("auto") => return true,
+        _ => {}
     }
+    if interactive {
+        return true;
+    }
+    let Some(style) = style else {
+        return false;
+    };
+    if matches!(style.position.as_deref(), Some("absolute") | Some("fixed")) {
+        return true;
+    }
+    let color = if let Some(color) = style.background_color.as_deref() {
+        color
+    } else {
+        match style.background.as_ref() {
+            Some(BackgroundValue::String(color)) => color,
+            Some(BackgroundValue::Image(_)) => return true,
+            None => return false,
+        }
+    };
+    match crate::color::parse_color_rgba(color) {
+        Some(color) => color.a > 0.0,
+        None => true,
+    }
+}
+
+/// Map a CSS `cursor` keyword onto a GPUI cursor. Unknown keywords return
+/// `None` so the property is ignored, like every other invalid style value.
+///
+/// `ResizeUpLeftDownRight` is the NorthWest/SouthEast cursor on every backend,
+/// so it is `nwse-resize`. GPUI's doc comments and its browser backend named
+/// the opposite CSS values until the pinned fork corrected them, so do not
+/// "fix" this pair back by reading an older GPUI.
+pub fn parse_cursor(name: &str) -> Option<gpui::CursorStyle> {
+    use gpui::CursorStyle;
+    Some(match name {
+        "default" | "auto" => CursorStyle::Arrow,
+        "pointer" => CursorStyle::PointingHand,
+        "text" => CursorStyle::IBeam,
+        "vertical-text" => CursorStyle::IBeamCursorForVerticalLayout,
+        "crosshair" => CursorStyle::Crosshair,
+        "grab" => CursorStyle::OpenHand,
+        "grabbing" | "move" | "all-scroll" => CursorStyle::ClosedHand,
+        "col-resize" => CursorStyle::ResizeColumn,
+        "row-resize" => CursorStyle::ResizeRow,
+        "ew-resize" => CursorStyle::ResizeLeftRight,
+        "ns-resize" => CursorStyle::ResizeUpDown,
+        "nwse-resize" | "nw-resize" | "se-resize" => CursorStyle::ResizeUpLeftDownRight,
+        "nesw-resize" | "ne-resize" | "sw-resize" => CursorStyle::ResizeUpRightDownLeft,
+        "w-resize" => CursorStyle::ResizeLeft,
+        "e-resize" => CursorStyle::ResizeRight,
+        "n-resize" => CursorStyle::ResizeUp,
+        "s-resize" => CursorStyle::ResizeDown,
+        "not-allowed" | "no-drop" => CursorStyle::OperationNotAllowed,
+        "alias" => CursorStyle::DragLink,
+        "copy" => CursorStyle::DragCopy,
+        "context-menu" => CursorStyle::ContextualMenu,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -1797,5 +1872,92 @@ mod tests {
                 "{key} is declared but has no renderer application path"
             );
         }
+    }
+    fn with_fill(fill: &str) -> StyleDesc {
+        StyleDesc {
+            background_color: Some(fill.to_owned()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn transparent_function_does_not_occlude() {
+        assert!(!should_occlude(Some(&with_fill("transparent")), false));
+        assert!(!should_occlude(
+            Some(&with_fill("oklch(50% 0.2 30 / 0%)")),
+            false
+        ));
+    }
+
+    #[test]
+    fn invalid_fill_keeps_conservative_occlusion() {
+        assert!(should_occlude(Some(&with_fill("not-a-color")), false));
+    }
+
+    #[test]
+    fn maps_the_timeline_cursors() {
+        assert_eq!(
+            parse_cursor("col-resize"),
+            Some(gpui::CursorStyle::ResizeColumn)
+        );
+        assert_eq!(parse_cursor("grab"), Some(gpui::CursorStyle::OpenHand));
+        assert_eq!(
+            parse_cursor("grabbing"),
+            Some(gpui::CursorStyle::ClosedHand)
+        );
+        assert_eq!(
+            parse_cursor("pointer"),
+            Some(gpui::CursorStyle::PointingHand)
+        );
+        assert_eq!(parse_cursor("default"), Some(gpui::CursorStyle::Arrow));
+    }
+
+    #[test]
+    fn strict_style_parsing_accepts_every_paintable_cursor() {
+        for cursor in [
+            "default",
+            "auto",
+            "pointer",
+            "text",
+            "vertical-text",
+            "crosshair",
+            "grab",
+            "grabbing",
+            "move",
+            "all-scroll",
+            "col-resize",
+            "row-resize",
+            "ew-resize",
+            "ns-resize",
+            "nwse-resize",
+            "nesw-resize",
+            "n-resize",
+            "e-resize",
+            "s-resize",
+            "w-resize",
+            "ne-resize",
+            "nw-resize",
+            "se-resize",
+            "sw-resize",
+            "not-allowed",
+            "no-drop",
+            "alias",
+            "copy",
+            "context-menu",
+        ] {
+            let parsed = parse_style_value(&json!({ "cursor": cursor }));
+            assert!(
+                parsed.problems.is_empty(),
+                "{cursor}: {:?}",
+                parsed.problems
+            );
+            assert_eq!(parsed.style.cursor.as_deref(), Some(cursor));
+        }
+    }
+
+    #[test]
+    fn ignores_an_unknown_cursor() {
+        assert_eq!(parse_cursor("zoom-in"), None);
+        assert_eq!(parse_cursor("POINTER"), None);
     }
 }

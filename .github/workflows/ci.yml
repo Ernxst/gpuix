@@ -14,52 +14,41 @@ env:
       - "**/*.gitignore"
       - docs/**
   pull_request: null
-  # Full 6-target matrix (macOS at 10x billing, Windows at 2x) only on
-  # manual dispatch; push/PR runs build only the Linux x64 target.
   workflow_dispatch: null
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Cost control on this private repo: push/PR builds only Linux x64 (the
-  # one platform not buildable locally); the full 6-target matrix runs on
-  # workflow_dispatch. Matrix is computed here because job-level `if`
-  # cannot reference the matrix context.
-  plan:
-    runs-on: ubuntu-latest
-    outputs:
-      settings: ${{ steps.set.outputs.settings }}
-    steps:
-      - id: set
-        run: |
-          # ── macOS (Metal): default features include test-support (TestGpuixRenderer)
-          # ── Linux (Vulkan/wgpu): build:release skips test-support (pulls gpui_macos, macOS-only)
-          # ── Windows (Direct3D/wgpu)
-          FULL='[
-            {"host":"macos-latest","target":"aarch64-apple-darwin","bunTarget":"bun-darwin-arm64","build":"bun run build --target aarch64-apple-darwin"},
-            {"host":"macos-latest","target":"x86_64-apple-darwin","bunTarget":"bun-darwin-x64","build":"bun run build --target x86_64-apple-darwin"},
-            {"host":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","bunTarget":"bun-linux-x64","build":"bun run build:release --target x86_64-unknown-linux-gnu"},
-            {"host":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-gnu","bunTarget":"bun-linux-arm64","build":"bun run build:release --target aarch64-unknown-linux-gnu"},
-            {"host":"windows-latest","target":"x86_64-pc-windows-msvc","bunTarget":"bun-windows-x64","build":"bun run build:release --target x86_64-pc-windows-msvc"},
-            {"host":"windows-latest","target":"aarch64-pc-windows-msvc","bunTarget":"bun-windows-arm64","build":"bun run build:release --target aarch64-pc-windows-msvc"}
-          ]'
-          LINUX_ONLY='[
-            {"host":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","bunTarget":"bun-linux-x64","build":"bun run build:release --target x86_64-unknown-linux-gnu"}
-          ]'
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            CHOSEN="$FULL"
-          else
-            CHOSEN="$LINUX_ONLY"
-          fi
-          echo "settings=$(echo "$CHOSEN" | jq -c .)" >> "$GITHUB_OUTPUT"
-
   build:
-    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        settings: ${{ fromJSON(needs.plan.outputs.settings) }}
+        # One target per OS, on the architecture that OS is mostly used on.
+        # Every extra target is a full gpui build, and gpui is most of the
+        # wall clock of this workflow. Add a target back when someone asks
+        # for it, not before: `packages/native/package.json` `napi.targets`
+        # must list exactly the same set, or the published loader looks for
+        # a platform package that CI never built.
+        settings:
+          # ── macOS (Metal) ──────────────────────────────────────────
+          # default features include test-support (TestGpuixRenderer)
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            bunTarget: bun-darwin-arm64
+            build: bun run build --target aarch64-apple-darwin
+          # ── Linux (Vulkan/wgpu) ────────────────────────────────────
+          # build:release disables test-support until wgpu image readback lands.
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bunTarget: bun-linux-x64
+            build: bun run build:release --target x86_64-unknown-linux-gnu
+          # ── Windows (Direct3D) ─────────────────────────────────────
+          # Test support includes TestGpuixRenderer and render_to_image.
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            bunTarget: bun-windows-x64
+            build: bun run build --target x86_64-pc-windows-msvc
     name: build - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     defaults:
@@ -162,18 +151,35 @@ jobs:
           COMPILE_SKIP_APP: "1"
         run: bun compile-chat.ts
 
+      # A release asset is served as raw bytes, so a download loses the
+      # executable bit and arrives with no extension: macOS and Linux users
+      # got a file the OS refused to open. `.tar.gz` keeps the mode and names
+      # itself. Windows already ships a `.exe`, which needs no unpacking.
+      - name: Package chat example
+        working-directory: examples/dist
+        shell: bash
+        env:
+          NAME: example-chat-${{ matrix.settings.target }}
+        run: |
+          if [ -f "$NAME.exe" ]; then
+            echo "$NAME.exe already carries an extension"
+            exit 0
+          fi
+          chmod +x "$NAME"
+          tar -czf "$NAME.tar.gz" "$NAME"
+          rm "$NAME"
+          ls -l
+
       - name: Upload example artifact
         uses: actions/upload-artifact@v4
         with:
           name: example-chat-${{ matrix.settings.target }}
-          path: examples/dist/example-chat-${{ matrix.settings.target }}*
+          path: examples/dist/example-chat-${{ matrix.settings.target }}.*
           if-no-files-found: error
 
   test:
     name: test
     needs: build
-    # Needs the macOS artifact, which only exists on dispatch runs.
-    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -217,11 +223,15 @@ jobs:
         run: bun run test
         working-directory: examples
 
+      # Bun never typechecks. This step is what catches a broken public type,
+      # such as `key` disappearing from every element.
+      - name: Typecheck the example app
+        run: bun run typecheck
+        working-directory: example-app
+
   test-windows:
-    name: test-windows-load
+    name: test-windows
     needs: build
-    # Needs the Windows artifact, which only exists on dispatch runs.
-    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -234,6 +244,9 @@ jobs:
         with:
           node-version: 24
 
+      - name: Install dependencies
+        run: bun install
+
       - name: Download Windows x64 artifact
         uses: actions/download-artifact@v4
         with:
@@ -245,6 +258,22 @@ jobs:
 
       - name: Load native binding with Node
         run: node -e "require('./packages/native'); console.log('Windows native binding OK (node)')"
+
+      - name: Verify Windows test renderer
+        shell: bash
+        run: bun -e "const { statSync } = require('node:fs'); const { TestGpuixRenderer } = require('./packages/native'); const renderer = new TestGpuixRenderer(320, 200); renderer.createElement(1, 'text'); renderer.setText(1, 'Windows test renderer'); renderer.setRoot(1); renderer.flush(); renderer.captureScreenshot('windows-test-renderer.png'); if (renderer.getAllText()[0] !== 'Windows test renderer' || statSync('windows-test-renderer.png').size === 0) throw new Error('TestGpuixRenderer did not render')"
+
+      - name: Run React tests
+        run: bun run test
+        working-directory: packages/react
+
+      - name: Build React package
+        run: bun run build
+        working-directory: packages/react
+
+      - name: Run example tests
+        run: bun run test
+        working-directory: examples
 
   publish:
     name: publish

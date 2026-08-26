@@ -175,8 +175,8 @@ fn collect_node(
     }
 
     let start = output.text.len();
-    let style = inherited_style.descend(element.style.as_ref());
-    let transform_kind = descend_transform(inherited_transform, element.style.as_ref());
+    let style = inherited_style.descend(element.style.as_deref());
+    let transform_kind = descend_transform(inherited_transform, element.style.as_deref());
 
     if let Some(content) = &element.content {
         push_content(output, &transform(content, transform_kind), style.clone());
@@ -348,7 +348,9 @@ mod tests {
         tree.create_element(3, "text".into());
         tree.set_style(
             3,
-            parse_style_value(&json!({ "color": "red", "letterSpacing": 2 })).style,
+            parse_style_value(&json!({ "color": "red", "letterSpacing": 2 }))
+                .style
+                .into(),
         );
         tree.create_element(4, "text".into());
         tree.set_text(4, "核🚀".into());
@@ -375,7 +377,9 @@ mod tests {
         tree.create_element(2, "text".into());
         tree.set_style(
             2,
-            parse_style_value(&json!({ "textTransform": "uppercase" })).style,
+            parse_style_value(&json!({ "textTransform": "uppercase" }))
+                .style
+                .into(),
         );
         tree.create_element(3, "text".into());
         tree.set_text(3, "straße".into());

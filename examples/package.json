@@ -8,11 +8,13 @@
     "frame-pacing:smoke": "bun frame-pacing.smoke.ts",
     "frame-pump-race:smoke": "bun frame-pump-race.smoke.ts",
     "test": "vitest run --exclude '**/*.perf.test.tsx'",
-    "test:perf": "vitest run chat.perf.test.tsx",
+    "test:perf": "vitest run chat.perf.test.tsx timeline.perf.test.tsx",
     "native-text": "bun --hot native-text.tsx",
     "live-scroll-wheel:smoke": "bun live-scroll-wheel.smoke.ts",
     "chat": "bun --hot chat.tsx",
-    "compile": "bun compile-chat.ts"
+    "timeline": "bun --hot timeline.tsx",
+    "compile": "bun compile-chat.ts",
+    "bench:serde": "bun bench-serialization.ts"
   },
   "dependencies": {
     "@gpuix/react": "workspace:*",
@@ -25,6 +27,8 @@
   "devDependencies": {
     "@types/mdast": "^4.0.4",
     "@types/react": "^19.2.0",
+    "cbor-x": "^1.6.6",
+    "msgpackr": "^2.0.6",
     "tsx": "^4.19.0",
     "vitest": "^4.0.18"
   }

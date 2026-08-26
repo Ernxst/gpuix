@@ -31,16 +31,54 @@ export interface AutomationBackend {
 }
 
 /** Fields that GPUI receives from a platform scroll-wheel event. */
+export interface ScrollWheelModifiers {
+  shift?: boolean
+  ctrl?: boolean
+  alt?: boolean
+  cmd?: boolean
+  function?: boolean
+}
+
 export interface ScrollWheelOptions {
   phase?: "started" | "moved" | "ended" | "cancelled"
   deltaUnit?: "pixels" | "lines"
-  modifiers?: {
-    shift?: boolean
-    ctrl?: boolean
-    alt?: boolean
-    cmd?: boolean
-    function?: boolean
+  /** Either the phased API's object form or `press()`-style modifier names. */
+  modifiers?: ScrollWheelModifiers | string
+}
+
+export type ScrollWheelInput = ScrollWheelOptions | string
+
+export interface NativeScrollWheelOptions
+  extends Omit<ScrollWheelOptions, "modifiers"> {
+  modifiers?: ScrollWheelModifiers
+}
+
+export function normalizeScrollWheelOptions(
+  input?: ScrollWheelInput
+): NativeScrollWheelOptions | undefined {
+  if (input === undefined) return undefined
+  const options = typeof input === "string" ? { modifiers: input } : input
+  if (typeof options.modifiers !== "string") {
+    return options as NativeScrollWheelOptions
   }
+  const modifiers: ScrollWheelModifiers = {}
+  for (const part of options.modifiers.split("-")) {
+    switch (part.trim().toLowerCase()) {
+      case "shift": modifiers.shift = true; break
+      case "ctrl":
+      case "control": modifiers.ctrl = true; break
+      case "alt":
+      case "option": modifiers.alt = true; break
+      case "cmd":
+      case "meta":
+      case "super":
+      case "win":
+      case "platform": modifiers.cmd = true; break
+      case "fn":
+      case "function": modifiers.function = true; break
+    }
+  }
+  return { ...options, modifiers }
 }
 
 abstract class ValidatedAutomationBackend implements AutomationBackend {
@@ -73,16 +111,36 @@ abstract class ValidatedAutomationBackend implements AutomationBackend {
 }
 
 export interface TestAutomationRenderer {
-  nativeSimulateClick(x: number, y: number): void
-  nativeSimulateMouseDown(x: number, y: number, button?: number): void
-  nativeSimulateMouseUp(x: number, y: number, button?: number): void
-  nativeSimulateMouseMove(x: number, y: number, pressedButton?: number): void
+  nativeSimulateClick(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void
+  nativeSimulateMouseDown(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void
+  nativeSimulateMouseUp(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void
+  nativeSimulateMouseMove(
+    x: number,
+    y: number,
+    pressedButton?: number,
+    modifiers?: string
+  ): void
   nativeSimulateScrollWheel(
     x: number,
     y: number,
     deltaX: number,
     deltaY: number,
-    options?: ScrollWheelOptions
+    options?: ScrollWheelInput
   ): void
   simulateKeystrokes(keystrokes: string): void
   nativeSimulateKeystrokes(elementId: number, keystrokes: string): void
@@ -145,22 +203,38 @@ export class InProcessBackend extends ValidatedAutomationBackend {
     }),
     cancel: () => ({ ok: true as const }),
     click: (params) => {
-      this.renderer.nativeSimulateClick(params.x, params.y)
+      this.renderer.nativeSimulateClick(
+        params.x,
+        params.y,
+        params.button,
+        params.modifiers
+      )
       return { ok: true as const }
     },
     mouseDown: (params) => {
-      this.renderer.nativeSimulateMouseDown(params.x, params.y, params.button)
+      this.renderer.nativeSimulateMouseDown(
+        params.x,
+        params.y,
+        params.button,
+        params.modifiers
+      )
       return { ok: true as const }
     },
     mouseUp: (params) => {
-      this.renderer.nativeSimulateMouseUp(params.x, params.y, params.button)
+      this.renderer.nativeSimulateMouseUp(
+        params.x,
+        params.y,
+        params.button,
+        params.modifiers
+      )
       return { ok: true as const }
     },
     mouseMove: (params) => {
       this.renderer.nativeSimulateMouseMove(
         params.x,
         params.y,
-        params.pressedButton
+        params.pressedButton,
+        params.modifiers
       )
       return { ok: true as const }
     },
@@ -383,6 +457,38 @@ function collect(node: TreeNode | null, selector: Selector): TreeNode[] {
   return dataMatches.length > 0 ? dataMatches : find("legacy")
 }
 
+/** A window-space point, or a locator resolved to the centre of its bounds. */
+export type PointTarget = { x: number; y: number } | Locator
+
+export interface MouseOptions {
+  /** 0 = left (default), 1 = middle, 2 = right. */
+  button?: number
+  /** Held modifiers in `press()` syntax: `"cmd"`, `"cmd-shift"`, `"alt"`. */
+  modifiers?: string
+}
+
+export interface DragOptions extends MouseOptions {
+  /**
+   * Move events sent between the press and the release. Default 8.
+   *
+   * One jump would test nothing that matters: snapping, live previews and
+   * per-move commits only appear when the pointer actually travels.
+   */
+  steps?: number
+  /** Pixels from the source centre where the press lands. */
+  offset?: { x: number; y: number }
+}
+
+function centerOf(bounds: ElementBounds): { x: number; y: number } {
+  return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
+}
+
+function collectText(node: TreeNode): string {
+  let text = node.text ?? ""
+  for (const child of node.children ?? []) text += collectText(child)
+  return text
+}
+
 export class Locator {
   constructor(
     private readonly app: App,
@@ -434,12 +540,44 @@ export class Locator {
     return bounds
   }
 
-  async click(): Promise<void> {
-    const bounds = await this.bounds()
-    await this.app.call("click", {
-      x: bounds.x + bounds.width / 2,
-      y: bounds.y + bounds.height / 2,
-    })
+  /** The centre of the last painted bounds, in window coordinates. */
+  async center(): Promise<{ x: number; y: number }> {
+    return centerOf(await this.bounds())
+  }
+
+  async click(options: MouseOptions = {}): Promise<void> {
+    const point = await this.center()
+    await this.app.call("click", { ...point, ...options })
+  }
+
+  /** Move the pointer to the centre, so hover styles and tooltips fire. */
+  async hover(options: MouseOptions = {}): Promise<void> {
+    await this.app.mouse.move(await this.center(), options)
+  }
+
+  /** Send one wheel event over the centre of this element. */
+  async wheel(
+    deltaX: number,
+    deltaY: number,
+    options: MouseOptions = {}
+  ): Promise<void> {
+    await this.app.mouse.wheel(await this.center(), deltaX, deltaY, options)
+  }
+
+  /** Press on this element, travel to `target`, release there. */
+  async dragTo(target: PointTarget, options: DragOptions = {}): Promise<void> {
+    await this.app.mouse.drag(this, target, options)
+  }
+
+  /** Press on this element and release `dx`/`dy` pixels away. */
+  async dragBy(dx: number, dy: number, options: DragOptions = {}): Promise<void> {
+    const start = await this.center()
+    const offset = options.offset ?? { x: 0, y: 0 }
+    await this.app.mouse.drag(
+      this,
+      { x: start.x + offset.x + dx, y: start.y + offset.y + dy },
+      options
+    )
   }
 
   async fill(text: string): Promise<void> {
@@ -465,9 +603,13 @@ export class Locator {
     })
   }
 
+  /**
+   * Own text plus every descendant's, concatenated in document order, like
+   * DOM `textContent`. `<text>{value}</text>` puts the string on a child node,
+   * so reading only `node.text` returned an empty string for every wrapper.
+   */
   async textContent(): Promise<string> {
-    const node = await this.element()
-    return node.text ?? ""
+    return collectText(await this.element())
   }
 
   async waitFor(options: { timeoutMs?: number } = {}): Promise<TreeNode> {
@@ -495,7 +637,88 @@ export class App {
     resume: () => Promise<number>
   }
 
+  /**
+   * Raw pointer input in window coordinates. Prefer a locator when the target
+   * is an element; use this for empty space, marquee selection, and gestures
+   * that end outside every hitbox.
+   */
+  readonly mouse: {
+    move: (
+      target: PointTarget,
+      options?: MouseOptions & { pressedButton?: number }
+    ) => Promise<void>
+    down: (target: PointTarget, options?: MouseOptions) => Promise<void>
+    up: (target: PointTarget, options?: MouseOptions) => Promise<void>
+    click: (target: PointTarget, options?: MouseOptions) => Promise<void>
+    wheel: (
+      target: PointTarget,
+      deltaX: number,
+      deltaY: number,
+      options?: MouseOptions
+    ) => Promise<void>
+    drag: (
+      from: PointTarget,
+      to: PointTarget,
+      options?: DragOptions
+    ) => Promise<void>
+  }
+
   constructor(private readonly backend: AutomationBackend) {
+    this.mouse = {
+      move: async (target, options = {}) => {
+        const point = await this.resolvePoint(target)
+        await this.call("mouseMove", {
+          ...point,
+          pressedButton: options.pressedButton,
+          modifiers: options.modifiers,
+        })
+      },
+      down: async (target, options = {}) => {
+        const point = await this.resolvePoint(target)
+        await this.call("mouseDown", { ...point, ...options })
+      },
+      up: async (target, options = {}) => {
+        const point = await this.resolvePoint(target)
+        await this.call("mouseUp", { ...point, ...options })
+      },
+      click: async (target, options = {}) => {
+        const point = await this.resolvePoint(target)
+        await this.call("click", { ...point, ...options })
+      },
+      wheel: async (target, deltaX, deltaY, options = {}) => {
+        const point = await this.resolvePoint(target)
+        await this.call("scrollWheel", {
+          ...point,
+          deltaX,
+          deltaY,
+          modifiers: options.modifiers,
+        })
+      },
+      drag: async (from, to, options = {}) => {
+        const offset = options.offset ?? { x: 0, y: 0 }
+        const origin = await this.resolvePoint(from)
+        const start = { x: origin.x + offset.x, y: origin.y + offset.y }
+        // Resolve the destination before the press. A locator target can move
+        // under a live preview, and the caller means where it is now.
+        const end = await this.resolvePoint(to)
+        const button = options.button ?? 0
+        const modifiers = options.modifiers
+        const steps = Math.max(1, Math.floor(options.steps ?? 8))
+
+        await this.call("mouseMove", { ...start, modifiers })
+        await this.call("mouseDown", { ...start, button, modifiers })
+        for (let step = 1; step <= steps; step += 1) {
+          const t = step / steps
+          await this.call("mouseMove", {
+            x: start.x + (end.x - start.x) * t,
+            y: start.y + (end.y - start.y) * t,
+            pressedButton: button,
+            modifiers,
+          })
+        }
+        await this.call("mouseUp", { ...end, button, modifiers })
+      },
+    }
     this.clock = {
       pause: async () => (await this.call("clockPause", {})).nowMs,
       set: async (nowMs) => (await this.call("clockSet", { nowMs })).nowMs,
@@ -510,6 +733,10 @@ export class App {
     params: ParamsOf<M>
   ): Promise<ResultOf<M>> {
     return this.backend.call(method, params)
+  }
+
+  private async resolvePoint(target: PointTarget): Promise<{ x: number; y: number }> {
+    return target instanceof Locator ? target.center() : target
   }
 
   getByTestId(testId: string): Locator {
@@ -561,16 +788,26 @@ export class App {
 }
 
 export interface LiveAutomationRenderer {
-  simulateClick(x: number, y: number, button?: number): void
-  simulateMouseDown(x: number, y: number, button?: number): void
-  simulateMouseUp(x: number, y: number, button?: number): void
-  simulateMouseMove(x: number, y: number, pressedButton?: number): void
-  simulateScrollWheel?(
+  simulateClick(x: number, y: number, button?: number, modifiers?: string): void
+  simulateMouseDown(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void
+  simulateMouseUp(x: number, y: number, button?: number, modifiers?: string): void
+  simulateMouseMove(
+    x: number,
+    y: number,
+    pressedButton?: number,
+    modifiers?: string
+  ): void
+  simulateScrollWheel(
     x: number,
     y: number,
     deltaX: number,
     deltaY: number,
-    options?: ScrollWheelOptions
+    options?: NativeScrollWheelOptions
   ): void
   simulateKeystrokes?(keystrokes: string): void
   simulateKeyDown?(keystroke: string, isHeld?: boolean): void
@@ -600,27 +837,34 @@ export function liveRendererAsTest(
     renderer.tick?.()
   }
   return {
-    nativeSimulateClick(x, y) {
-      renderer.simulateClick(x, y)
+    nativeSimulateClick(x, y, button, modifiers) {
+      renderer.simulateClick(x, y, button, modifiers)
       afterInput()
     },
-    nativeSimulateMouseDown(x, y, button) {
-      renderer.simulateMouseDown(x, y, button)
+    nativeSimulateMouseDown(x, y, button, modifiers) {
+      renderer.simulateMouseDown(x, y, button, modifiers)
       afterInput()
     },
-    nativeSimulateMouseUp(x, y, button) {
-      renderer.simulateMouseUp(x, y, button)
+    nativeSimulateMouseUp(x, y, button, modifiers) {
+      renderer.simulateMouseUp(x, y, button, modifiers)
       afterInput()
     },
-    nativeSimulateMouseMove(x, y, pressedButton) {
-      renderer.simulateMouseMove(x, y, pressedButton)
+    nativeSimulateMouseMove(x, y, pressedButton, modifiers) {
+      renderer.simulateMouseMove(x, y, pressedButton, modifiers)
       afterInput()
     },
     nativeSimulateScrollWheel(x, y, deltaX, deltaY, options) {
       if (!renderer.simulateScrollWheel) {
         throw new AutomationError("Unsupported", "scrollWheel is not supported by this live renderer")
       }
-      renderer.simulateScrollWheel(x, y, deltaX, deltaY, options)
+      renderer.simulateScrollWheel(
+        x,
+        y,
+        deltaX,
+        deltaY,
+        normalizeScrollWheelOptions(options)
+      )
+      afterInput()
     },
     simulateKeystrokes(keys) {
       if (!renderer.simulateKeystrokes) {
@@ -720,6 +964,23 @@ export function browserKeystrokeInit(
   }
 }
 
+/**
+ * The hidden element GPUI's browser platform appends to `<body>`.
+ *
+ * A GPUI web app has two event surfaces: the `<canvas>` takes pointer events,
+ * and this element takes **every keyboard and IME event**. `gpui_web` attaches
+ * its `keydown` / `keyup` listeners here, not to the window or the canvas, so
+ * dispatching a synthetic `KeyboardEvent` at this element is the only way to
+ * type into a browser GPUIX app.
+ *
+ * Match on the attribute alone. The element used to be an `<input>` and is now
+ * a `<textarea>`, because a single-line input strips newlines from an assigned
+ * value and would desynchronise the mirror from the document. See
+ * zed-industries/zed#63201 and `gpui_web/src/ime_mirror.rs`. A tag-qualified
+ * selector silently turns every keystroke into an "unavailable" error.
+ */
+export const IME_MIRROR_SELECTOR = "[data-gpui-input]"
+
 function dispatchBrowserKeystroke({
   keystroke,
   type,
@@ -729,11 +990,15 @@ function dispatchBrowserKeystroke({
   type: "keydown" | "keyup"
   isHeld?: boolean
 }): void {
-  const input = document.querySelector("input[data-gpui-input]")
-  if (!input) {
-    throw new AutomationError("Unsupported", "GPUI browser input is unavailable")
+  const mirror = document.querySelector(IME_MIRROR_SELECTOR)
+  if (!mirror) {
+    throw new AutomationError(
+      "Unsupported",
+      `No GPUI keyboard target: nothing matches "${IME_MIRROR_SELECTOR}". ` +
+        "Call this only after render() has painted a frame in a browser page."
+    )
   }
-  input.dispatchEvent(new KeyboardEvent(type, browserKeystrokeInit(keystroke, isHeld)))
+  mirror.dispatchEvent(new KeyboardEvent(type, browserKeystrokeInit(keystroke, isHeld)))
 }
 
 export function browserRendererAsTest(

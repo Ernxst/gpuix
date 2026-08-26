@@ -1,5 +1,5 @@
 /**
- * Compile the Waku-style chat example into a standalone Bun binary.
+ * Compile the GPUIX chat example into a standalone Bun binary.
  * On macOS also wraps it in a .app so Finder and Dock can show a custom icon.
  *
  * CI sets COMPILE_OUT, COMPILE_TARGET, COMPILE_SKIP_ICONS, COMPILE_SKIP_APP.
@@ -142,7 +142,7 @@ async function compileBinary(): Promise<void> {
       title: APP_NAME,
       publisher: 'GPUIX',
       version: '0.1.0',
-      description: 'Waku-style desktop app built with GPUIX',
+      description: 'Native GPUIX chat example',
     }
     if (process.platform === 'win32' && existsSync(ICO)) {
       compile.windows.icon = ICO
