@@ -280,7 +280,14 @@ const BUILT_IN_TYPES = new Set(["div", "text", ...DIV_ALIASES])
 
 // Props that reach Rust on EVERY element type, including div and text.
 // Custom props are otherwise skipped for built-ins.
-const UNIVERSAL_PROPS = new Set(["autoFocus", "tabIndex", "motion", "testId", "hoverGroup"])
+const UNIVERSAL_PROPS = new Set([
+  "activationKind",
+  "autoFocus",
+  "tabIndex",
+  "motion",
+  "testId",
+  "hoverGroup",
+])
 
 function isIdentityProp(name: string): boolean {
   return name === "id" || name.startsWith("data-")
@@ -328,12 +335,20 @@ function nativeTabIndex(type: string, props: Props): number | undefined {
   return typeof href === "string" ? 0 : undefined
 }
 
+/** Keep the original anchor semantics after host aliases become native divs. */
+function nativeActivationKind(type: string, props: Props): "anchor" | undefined {
+  const href = (props as Props & { href?: unknown }).href
+  return type === "a" || typeof href === "string" ? "anchor" : undefined
+}
+
 function customPropEntries(type: string, props: Props): Array<[string, CustomPropInput]> {
   const entries = (Object.entries(props) as Array<[string, CustomPropInput]>).filter(
-    ([key]) => key !== "tabIndex"
+    ([key]) => key !== "activationKind" && key !== "tabIndex"
   )
   const tabIndex = nativeTabIndex(type, props)
   if (tabIndex !== undefined) entries.push(["tabIndex", tabIndex])
+  const activationKind = nativeActivationKind(type, props)
+  if (activationKind) entries.push(["activationKind", activationKind])
 
   const virtualListProps = props as Props & VirtualListProps
   if (type !== "virtual-list" || virtualListProps.estimatedItemHeight !== undefined) {
