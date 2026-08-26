@@ -42,8 +42,8 @@ export function createRenderer(
   return renderer
 }
 
-/** ~125fps. Above any common display refresh rate, so frames are never the
- *  bottleneck, while still leaving the Node event loop almost entirely idle. */
+/** Timer cadence for platforms without native frame requests and for the
+ *  embedded macOS idle-wake fallback while its display link is stopped. */
 const DEFAULT_FRAME_MS = 8
 const DEFAULT_MAX_CONSECUTIVE_TICK_ERRORS = 3
 const TERMINATION_CLEANUP_TIMEOUT_MS = 5_000
@@ -53,6 +53,7 @@ export interface FrameLoop {
 }
 
 export interface FrameLoopOptions {
+  /** Cadence for the capability fallback or the idle pump that cannot release frame tokens. */
   frameMs?: number
   onTerminated?: () => void
   onError?: (error: unknown) => void
@@ -61,25 +62,17 @@ export interface FrameLoopOptions {
 }
 
 /**
- * Drive GPUI's embedded macOS event loop at a fixed rate.
+ * Drive GPUI's embedded macOS event loop from its native display link.
  *
  * On Windows and Linux, GPUI owns a blocking event loop on a Rust UI thread,
  * so this function returns a no-op handle without creating a timer.
  *
- * On macOS, `renderer.tick()` pumps AppKit and asks GPUI for a frame, so it
- * must be called repeatedly. Do NOT call it from a `setImmediate` loop: that
- * spins the CPU at tens of thousands of ticks per second (measured: 73% CPU on
- * an idle app, versus 1.5% when paced).
+ * On macOS, a coalesced native callback asks JavaScript for one AppKit pump per
+ * display-link request. A separate timer pump cannot dispatch frame tokens; it
+ * only keeps input, menus, occluded windows, and termination responsive.
  *
- * Pacing lives in JS rather than blocking inside `tick()` on purpose. Node owns
- * the event loop here, so a blocking tick would stall every timer, promise and
- * socket in the process.
- *
- * Each frame is scheduled only after the previous one finishes, so a slow frame
- * delays the next one instead of letting timers pile up.
- *
- * If `tick()` already used the whole budget, wait 0ms. A fixed 8ms sleep after a
- * 10ms frame would cap scroll at ~55fps on a 120Hz display.
+ * Both sources enter the same tick/error/termination path. Timer ticks schedule
+ * only after the previous pump finishes, so failures recover without piling up.
  *
  * `tick()` returning false means the last window closed. The loop stops and
  * `onTerminated` runs. `render()` uses that to unmount React and finish cleanup.
@@ -90,7 +83,7 @@ export function enableAutomation(renderer: LiveAutomationRenderer): void {
 
 export function startFrameLoop(
   renderer: Pick<GpuixRenderer, "requiresTick" | "tick"> &
-    Partial<Pick<GpuixRenderer, "quit">>,
+    Partial<Pick<GpuixRenderer, "quit" | "setFrameRequestHandler" | "tickIdle">>,
   options: FrameLoopOptions = {}
 ): FrameLoop {
   if (!renderer.requiresTick()) {
@@ -100,27 +93,47 @@ export function startFrameLoop(
   const frameMs = options.frameMs ?? DEFAULT_FRAME_MS
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
-  let consecutiveTickErrors = 0
+  let nativeFrameSource = false
+  let consecutiveFrameTickErrors = 0
+  let consecutiveIdleTickErrors = 0
   const maxConsecutiveTickErrors = Math.max(
     1,
     options.maxConsecutiveTickErrors ?? DEFAULT_MAX_CONSECUTIVE_TICK_ERRORS
   )
 
   const stop = (): void => {
+    if (stopped) return
     stopped = true
     if (timer !== null) clearTimeout(timer)
     timer = null
+    if (nativeFrameSource) {
+      renderer.setFrameRequestHandler?.(null)
+    }
   }
 
-  const loop = (): void => {
+  const scheduleTimer = (callback: () => void, delayMs: number): void => {
+    if (timer !== null) clearTimeout(timer)
+    timer = setTimeout(callback, delayMs)
+  }
+
+  const drive = (source: "native" | "idle" | "timer"): void => {
     if (stopped) return
+    if (timer !== null) clearTimeout(timer)
+    timer = null
     const started = performance.now()
-    let running: boolean | void
+    let running: boolean | void = true
     try {
-      running = renderer.tick()
-      consecutiveTickErrors = 0
+      running = source === "idle" ? renderer.tickIdle?.() : renderer.tick()
+      if (source === "idle") {
+        consecutiveIdleTickErrors = 0
+      } else {
+        consecutiveFrameTickErrors = 0
+      }
     } catch (error) {
-      consecutiveTickErrors += 1
+      const consecutiveTickErrors =
+        source === "idle"
+          ? (consecutiveIdleTickErrors += 1)
+          : (consecutiveFrameTickErrors += 1)
       console.error("[gpuix] native frame tick failed", error)
       try {
         options.onError?.(error)
@@ -144,20 +157,35 @@ export function startFrameLoop(
         }
         return
       }
-
-      const wait = Math.max(0, frameMs - (performance.now() - started))
-      timer = setTimeout(loop, wait)
-      return
     }
     if (running === false) {
       stop()
       options.onTerminated?.()
       return
     }
+
     const wait = Math.max(0, frameMs - (performance.now() - started))
-    timer = setTimeout(loop, wait)
+    scheduleTimer(() => drive(nativeFrameSource ? "idle" : "timer"), wait)
   }
-  loop()
+
+  if (renderer.setFrameRequestHandler && renderer.tickIdle) {
+    try {
+      nativeFrameSource = renderer.setFrameRequestHandler(() => drive("native"))
+    } catch (error) {
+      console.error("[gpuix] failed to install native frame requests", error)
+      try {
+        options.onError?.(error)
+      } catch (reportingError) {
+        console.error("[gpuix] frame-loop error reporter failed", reportingError)
+      }
+    }
+  }
+
+  if (nativeFrameSource) {
+    scheduleTimer(() => drive("idle"), frameMs)
+  } else {
+    drive("timer")
+  }
 
   return { stop }
 }

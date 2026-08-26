@@ -10,9 +10,8 @@
 //!   renderer.createElement(1, "div")     // mutations from React reconciler
 //!   renderer.appendChild(0, 1)
 //!   renderer.commitMutations()           // signal batch complete
-//!   setTimeout(function loop() {         // drive AppKit on macOS
+//!   renderer.setFrameRequestHandler(() => {
 //!     if (!renderer.tick()) onTerminated()
-//!     setTimeout(loop, 8)
 //!   })
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use futures::{channel::mpsc, StreamExt as _};
@@ -1071,6 +1070,9 @@ enum RendererLifecycle {
     Terminated,
 }
 
+#[cfg(target_os = "macos")]
+type FrameRequestCallback = ThreadsafeFunction<(), Unknown<'static>, (), Status, false, false, 1>;
+
 /// The main GPUI renderer exposed to Node.js.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[napi]
@@ -1080,6 +1082,12 @@ pub struct GpuixRenderer {
     window_event_callback: WindowEventCallback,
     tree: Arc<Mutex<RetainedTree>>,
     lifecycle: Arc<Mutex<RendererLifecycle>>,
+    #[cfg(target_os = "macos")]
+    frame_request_callback: Arc<Mutex<Option<Arc<FrameRequestCallback>>>>,
+    #[cfg(target_os = "macos")]
+    frame_request_outstanding: Arc<AtomicBool>,
+    #[cfg(target_os = "macos")]
+    pending_frame_request: Arc<Mutex<Option<gpui_macos::FrameRequest>>>,
     /// Shared with GpuixView so napi methods can read the live selection
     /// without an App context. Paint and napi calls can use different threads.
     selection: SharedSelection,
@@ -1219,6 +1227,12 @@ impl GpuixRenderer {
             window_event_callback: Arc::new(Mutex::new(None)),
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
+            #[cfg(target_os = "macos")]
+            frame_request_callback: Arc::new(Mutex::new(None)),
+            #[cfg(target_os = "macos")]
+            frame_request_outstanding: Arc::new(AtomicBool::new(false)),
+            #[cfg(target_os = "macos")]
+            pending_frame_request: Arc::new(Mutex::new(None)),
             selection: SharedSelection::default(),
             image_network_policy: crate::custom_elements::img::ImageNetworkPolicy::default(),
             strict_styles: AtomicBool::new(true),
@@ -1321,6 +1335,58 @@ impl GpuixRenderer {
         let window_options = options.clone();
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
+        let frame_request_callback = self.frame_request_callback.clone();
+        let frame_request_outstanding = self.frame_request_outstanding.clone();
+        let pending_frame_request = self.pending_frame_request.clone();
+        platform.on_request_frame(move |frame_request| {
+            let callback = frame_request_callback
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            let Some(callback) = callback else {
+                frame_request.dispatch();
+                return;
+            };
+
+            if frame_request_outstanding
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_err()
+            {
+                return;
+            }
+
+            *pending_frame_request
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(frame_request);
+
+            let completed = frame_request_outstanding.clone();
+            let pending_on_completion = pending_frame_request.clone();
+            let status = callback.call_with_return_value(
+                (),
+                ThreadsafeFunctionCallMode::NonBlocking,
+                move |_result, _env| {
+                    if let Some(frame_request) = pending_on_completion
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .take()
+                    {
+                        frame_request.dispatch();
+                    }
+                    completed.store(false, Ordering::Release);
+                    Ok(())
+                },
+            );
+            if status != Status::Ok {
+                if let Some(frame_request) = pending_frame_request
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take()
+                {
+                    frame_request.dispatch();
+                }
+                frame_request_outstanding.store(false, Ordering::Release);
+            }
+        });
 
         let tree = self.tree.clone();
         let callback = self.event_callback_for_view();
@@ -1846,9 +1912,7 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
-    /// Pump the native event loop. Returns false after the last window closes.
-    #[napi]
-    pub fn tick(&self) -> Result<bool> {
+    fn pump_native_event_loop(&self, dispatch_frame_request: bool) -> Result<bool> {
         match *self.lifecycle.lock().unwrap() {
             RendererLifecycle::Uninitialized => {
                 return Err(Error::from_reason(
@@ -1861,6 +1925,16 @@ impl GpuixRenderer {
 
         #[cfg(target_os = "macos")]
         {
+            if dispatch_frame_request {
+                if let Some(frame_request) = self
+                    .pending_frame_request
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take()
+                {
+                    frame_request.dispatch();
+                }
+            }
             let running = MAC_PLATFORM.with(|p| {
                 p.borrow()
                     .as_ref()
@@ -1887,6 +1961,20 @@ impl GpuixRenderer {
         ))
     }
 
+    /// Pump the native event loop. Returns false after the last window closes.
+    /// A pending display-link token is dispatched immediately before this pump.
+    #[napi]
+    pub fn tick(&self) -> Result<bool> {
+        self.pump_native_event_loop(true)
+    }
+
+    /// Pump idle platform work without dispatching a pending frame token.
+    /// This keeps input and application lifecycle events responsive between frames.
+    #[napi]
+    pub fn tick_idle(&self) -> Result<bool> {
+        self.pump_native_event_loop(false)
+    }
+
     #[napi]
     pub fn is_initialized(&self) -> bool {
         *self.lifecycle.lock().unwrap() == RendererLifecycle::Running
@@ -1896,6 +1984,40 @@ impl GpuixRenderer {
     #[napi]
     pub fn requires_tick(&self) -> bool {
         cfg!(target_os = "macos")
+    }
+
+    /// Registers a coalesced display-link frame request callback when supported.
+    /// Returns false when this renderer must be timer-driven instead.
+    #[napi]
+    pub fn set_frame_request_handler(
+        &self,
+        callback: Option<ThreadsafeFunction<(), Unknown<'static>, (), Status, false, false, 1>>,
+    ) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            let unregistering = callback.is_none();
+            *self
+                .frame_request_callback
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = callback.map(Arc::new);
+            if unregistering {
+                if let Some(frame_request) = self
+                    .pending_frame_request
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take()
+                {
+                    frame_request.dispatch();
+                }
+            }
+            return true;
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = callback;
+            false
+        }
     }
 
     /// Whether this native window is active and receiving key events.

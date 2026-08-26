@@ -73,11 +73,24 @@ export declare class GpuixRenderer {
   simulateMenuAction(id: string): void
   /** Gracefully terminate the native application through GPUI's platform abstraction. */
   quit(): void
-  /** Pump the native event loop. Returns false after the last window closes. */
+  /**
+   * Pump the native event loop. Returns false after the last window closes.
+   * A pending display-link token is dispatched immediately before this pump.
+   */
   tick(): boolean
+  /**
+   * Pump idle platform work without dispatching a pending frame token.
+   * This keeps input and application lifecycle events responsive between frames.
+   */
+  tickIdle(): boolean
   isInitialized(): boolean
   /** Whether JavaScript must drive the native event loop with tick(). */
   requiresTick(): boolean
+  /**
+   * Registers a coalesced display-link frame request callback when supported.
+   * Returns false when this renderer must be timer-driven instead.
+   */
+  setFrameRequestHandler(callback?: ((() => unknown)) | undefined | null): boolean
   /** Whether this native window is active and receiving key events. */
   isActive(): boolean
   getWindowSize(): WindowSize

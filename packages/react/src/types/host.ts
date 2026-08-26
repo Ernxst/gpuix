@@ -796,6 +796,10 @@ export interface NativeRenderer {
   // ── Application lifecycle ──────────────────────────────────────
   setMenus?(menus: MenuSpec[]): void
   quit?(): void
+  /** Install a coalesced native frame source. Returns false when timers must drive ticks. */
+  setFrameRequestHandler?(handler: (() => void) | null): boolean
+  /** Pump idle platform work without releasing a pending display-link frame token. */
+  tickIdle?(): boolean
   /** Internal hook used by injected renderers to deliver non-element events. */
   setApplicationEventHandler?(handler: ((event: EventPayload) => void) | null): void
 
