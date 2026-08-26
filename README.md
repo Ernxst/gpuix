@@ -8,7 +8,7 @@ Build native GPU-accelerated desktop apps with React and TypeScript. Your compon
 
 Everything above is GPUIX: the sidebar, the scrolling list, the composer,
 and native `<markdown>`. Start it with **`bun --hot`** so a save remounts React
-on the same window:
+and reconnects its event handlers on the same window:
 
 ```bash
 cd examples && bun --hot chat.tsx
@@ -434,7 +434,10 @@ Each save unmounts the React tree and mounts a new one on that same host.
 
 **Stays:** window, GPU device, native `.node` addon, GPUI scroll physics.
 
-**Resets:** `useState`, focus, React event handlers.
+**Resets:** `useState`, focus.
+
+**Rebinds:** React event handlers to the newly evaluated tree, so hover, click,
+and keyboard events continue to dispatch after every remount.
 
 This is a remount, not React Refresh. Keeping hook state needs Bun to inject
 `$RefreshReg$` during `--hot`. That transform exists on
