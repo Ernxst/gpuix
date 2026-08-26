@@ -19,6 +19,8 @@ let startedTicks = 0
 let startedFrameCallbacks = 0
 let frameCallbacks = 0
 const tickDurations: number[] = []
+let markPreflightReady: (() => void) | undefined
+const requiredPreflightCallbacks = 4
 
 function doScrollWork(): void {
   const deadline = performance.now() + workMs
@@ -28,7 +30,9 @@ function doScrollWork(): void {
 }
 
 function FramePacing() {
+  const [preflight, setPreflight] = useState("PACING_PREFLIGHT pending")
   const [result, setResult] = useState("PACING_PENDING")
+  markPreflightReady = () => setPreflight("PACING_PREFLIGHT ready")
 
   const handleScroll = (event: EventPayload): void => {
     if (event.touchPhase === "started") {
@@ -73,6 +77,9 @@ function FramePacing() {
       }}
     >
       <text style={{ color: "#f5f5f5", fontSize: 18 }}>Display-link frame pacing</text>
+      <text testId="pacing-preflight" style={{ color: "#fbbf24" }}>
+        {preflight}
+      </text>
       <text testId="pacing-result" style={{ color: "#a3e635" }}>
         {result}
       </text>
@@ -105,21 +112,36 @@ const setFrameRequestHandler = (callback: (() => void) | null): boolean => {
     callback
       ? () => {
           frameCallbacks += 1
+          if (!preflightReady && frameCallbacks >= requiredPreflightCallbacks) {
+            preflightReady = true
+            queueMicrotask(() => {
+              if (forceTimer) {
+                loop.stop()
+                loop = startFrameLoop({
+                  requiresTick: renderer.requiresTick.bind(renderer),
+                  tick: measuredTick,
+                  quit: renderer.quit.bind(renderer),
+                })
+              }
+              markPreflightReady?.()
+            })
+          }
           callback()
         }
       : null
   )
 }
-startFrameLoop(
-  {
-    requiresTick: renderer.requiresTick.bind(renderer),
-    tick: measuredTick,
-    quit: renderer.quit.bind(renderer),
-    ...(forceTimer
-      ? {}
-      : {
-          setFrameRequestHandler,
-          tickIdle: renderer.tickIdle.bind(renderer),
-        }),
-  }
-)
+let preflightReady = false
+let loop = startFrameLoop({
+  requiresTick: renderer.requiresTick.bind(renderer),
+  tick: measuredTick,
+  quit: renderer.quit.bind(renderer),
+  setFrameRequestHandler,
+  tickIdle: renderer.tickIdle.bind(renderer),
+})
+
+for (const delayMs of [0, 100, 250, 500, 750, 1_000]) {
+  setTimeout(() => {
+    if (!preflightReady) renderer.activateWindow()
+  }, delayMs)
+}

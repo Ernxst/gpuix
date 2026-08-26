@@ -93,6 +93,8 @@ export declare class GpuixRenderer {
   setFrameRequestHandler(callback?: ((() => unknown)) | undefined | null): boolean
   /** Whether this native window is active and receiving key events. */
   isActive(): boolean
+  /** Bring the native window and application to the foreground. */
+  activateWindow(): void
   getWindowSize(): WindowSize
   getWindowInsets(): WindowInsets
   /** `"hidden"` | `"minimal"` | `"full"`. Paints into the scene after layout. */

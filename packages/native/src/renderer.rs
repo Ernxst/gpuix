@@ -2053,6 +2053,28 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Bring the native window and application to the foreground.
+    #[napi]
+    pub fn activate_window(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            GPUI_APP.with(|app| {
+                let app = app.borrow();
+                let app = app
+                    .as_ref()
+                    .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+                app.update(|cx| cx.activate(true));
+                Ok::<(), Error>(())
+            })?;
+            return update_window(|_view, window, _cx| window.activate_window());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason(
+            "Window activation is only available on macOS",
+        ))
+    }
+
     #[napi]
     pub fn get_window_size(&self) -> Result<WindowSize> {
         #[cfg(target_os = "macos")]

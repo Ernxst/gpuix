@@ -18,13 +18,22 @@ interface PacingResult {
   frameSource: string
 }
 
-async function withTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
+class OperationTimeoutError extends Error {}
+
+async function withTimeout<T>(
+  operation: Promise<T>,
+  label: string,
+  timeoutMs = 10_000
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
       operation,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`Timed out during ${label}`)), 10_000)
+        timer = setTimeout(
+          () => reject(new OperationTimeoutError(`Timed out during ${label}`)),
+          timeoutMs
+        )
       }),
     ])
   } finally {
@@ -32,7 +41,27 @@ async function withTimeout<T>(operation: Promise<T>, label: string): Promise<T> 
   }
 }
 
-async function measure(forceTimer: boolean): Promise<PacingResult> {
+async function waitForVisibleWindow(app: Awaited<ReturnType<typeof launch>>): Promise<boolean> {
+  const deadline = performance.now() + 1_500
+  while (performance.now() < deadline) {
+    const remaining = deadline - performance.now()
+    try {
+      const { text } = await withTimeout(
+        app.call("getAllText", {}),
+        "CoreVideo callback preflight",
+        Math.min(300, remaining)
+      )
+      if (text.includes("PACING_PREFLIGHT ready")) return true
+    } catch (error) {
+      if (error instanceof OperationTimeoutError) return false
+      throw error
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return false
+}
+
+async function measure(forceTimer: boolean): Promise<PacingResult | null> {
   const app = await launch({
     command: "bun",
     args: ["frame-pacing.tsx"],
@@ -42,7 +71,7 @@ async function measure(forceTimer: boolean): Promise<PacingResult> {
   })
 
   try {
-    await new Promise((resolve) => setTimeout(resolve, 250))
+    if (!(await waitForVisibleWindow(app))) return null
     const startedAt = performance.now()
 
     const samples: Promise<unknown>[] = []
@@ -101,9 +130,17 @@ function report(result: PacingResult): void {
 }
 
 const timer = await measure(true)
+if (!timer) {
+  console.log("SKIP frame pacing: window occluded — cannot measure")
+  process.exit(0)
+}
 report(timer)
 await new Promise((resolve) => setTimeout(resolve, 1_000))
 const displayLink = await measure(false)
+if (!displayLink) {
+  console.log("SKIP frame pacing: window occluded — cannot measure")
+  process.exit(0)
+}
 report(displayLink)
 
 if (displayLink.frameSource !== "display-link") {
