@@ -9,15 +9,8 @@
 use napi_derive::napi;
 
 /// Event payload sent back to JS when a user interacts with an element.
-#[derive(Debug, Clone)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(serde::Serialize)
-)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    serde(rename_all = "camelCase")
-)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
 pub struct EventPayload {
     /// Numeric element ID (matches the ID assigned in JS via createElement).
@@ -45,6 +38,10 @@ pub struct EventPayload {
     /// Whether this is a right-click (convenience for click events).
     /// true when button==2 or ClickEvent::is_right_click().
     pub is_right_click: Option<bool>,
+
+    /// Physical input that produced a click: "mouse", "keyboard", or "touch".
+    /// Populated for: click.
+    pub input_source: Option<String>,
 
     /// Which mouse button is currently held during a mouseMove.
     /// Same encoding as `button`: 0=left, 1=middle, 2=right.
@@ -120,6 +117,7 @@ impl Default for EventPayload {
             button: None,
             click_count: None,
             is_right_click: None,
+            input_source: None,
             pressed_button: None,
             key: None,
             key_char: None,
@@ -139,11 +137,7 @@ impl Default for EventPayload {
     }
 }
 
-#[derive(Debug, Clone)]
-#[cfg_attr(
-    all(target_arch = "wasm32", target_os = "unknown"),
-    derive(serde::Serialize)
-)]
+#[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
 pub struct EventModifiers {
     pub shift: bool,
@@ -172,5 +166,32 @@ impl From<gpui::Modifiers> for EventModifiers {
             alt: m.alt,
             cmd: m.platform, // platform = Cmd on macOS, Win on Windows
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_the_native_event_contract_in_camel_case() {
+        let payload = EventPayload {
+            element_id: 42.0,
+            event_type: "click".to_string(),
+            button: Some(0),
+            input_source: Some("keyboard".to_string()),
+            modifiers: Some(EventModifiers {
+                shift: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let value = serde_json::to_value(payload).expect("event payload should serialize");
+        assert_eq!(value["elementId"], 42.0);
+        assert_eq!(value["eventType"], "click");
+        assert_eq!(value["button"], 0);
+        assert_eq!(value["inputSource"], "keyboard");
+        assert_eq!(value["modifiers"]["shift"], true);
     }
 }

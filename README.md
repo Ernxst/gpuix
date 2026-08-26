@@ -170,6 +170,21 @@ State update triggers re-render → reconciler sends mutations back to Rust
 
 Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)`. Rust only knows **whether** an element has a listener (via `setEventListener`), not the closure itself — the actual handler lives in JS.
 
+Handlers receive a `GpuixSyntheticEvent`, not the raw native payload. Native
+fields such as `key`, `x`, and `value` remain available at the top level and
+the unchanged payload is exposed as `nativeEvent`. The synthetic surface adds:
+
+- `target` and phase-specific `currentTarget` host handles with
+  `getAttribute(name)`
+- flattened `altKey`, `ctrlKey`, `metaKey`, and `shiftKey` values
+- a primary-button default (`button === 0`)
+- capture and bubble dispatch through the retained React ancestry
+- `preventDefault()` / `defaultPrevented` and `stopPropagation()`
+
+`handleGpuixEvent()` returns the synchronous prevention result. A prevented
+Enter or Space key event cancels the keyboard-generated click that follows;
+future native defaults must likewise check this result before running.
+
 ## Packages
 
 - **`@gpuix/native`** — Rust bindings to GPUI. It publishes napi-rs desktop binaries and a wasm-bindgen browser build, both backed by `GpuixRenderer`, `RetainedTree`, `build_element()`, and `apply_styles()`.

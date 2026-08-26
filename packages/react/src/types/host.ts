@@ -1,4 +1,5 @@
 import type { EventPayload, MenuSpec } from "@gpuix/native"
+import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 
 export type DimensionValue = number | string
 
@@ -325,36 +326,47 @@ export interface Props {
   ref?: React.Ref<PublicInstance>
 
   // ── Mouse events ───────────────────────────────────────────────
-  onClick?: (event: EventPayload) => void
-  onMouseDown?: (event: EventPayload) => void
-  onMouseUp?: (event: EventPayload) => void
-  onMouseEnter?: (event: EventPayload) => void
-  onMouseLeave?: (event: EventPayload) => void
-  onMouseMove?: (event: EventPayload) => void
+  onClick?: (event: GpuixSyntheticEvent) => void
+  onClickCapture?: (event: GpuixSyntheticEvent) => void
+  onMouseDown?: (event: GpuixSyntheticEvent) => void
+  onMouseDownCapture?: (event: GpuixSyntheticEvent) => void
+  onMouseUp?: (event: GpuixSyntheticEvent) => void
+  onMouseUpCapture?: (event: GpuixSyntheticEvent) => void
+  onMouseEnter?: (event: GpuixSyntheticEvent) => void
+  onMouseLeave?: (event: GpuixSyntheticEvent) => void
+  onMouseMove?: (event: GpuixSyntheticEvent) => void
+  onMouseMoveCapture?: (event: GpuixSyntheticEvent) => void
   /** Fires when user clicks OUTSIDE this element. Use for "click outside to close". */
-  onMouseDownOutside?: (event: EventPayload) => void
+  onMouseDownOutside?: (event: GpuixSyntheticEvent) => void
 
   // ── Keyboard events (need focus: autoFocus, or a click on the element) ──
-  onKeyDown?: (event: EventPayload) => void
-  onKeyUp?: (event: EventPayload) => void
+  onKeyDown?: (event: GpuixSyntheticEvent) => void
+  onKeyDownCapture?: (event: GpuixSyntheticEvent) => void
+  onKeyUp?: (event: GpuixSyntheticEvent) => void
+  onKeyUpCapture?: (event: GpuixSyntheticEvent) => void
 
   // ── Focus events ───────────────────────────────────────────────
-  onFocus?: (event: EventPayload) => void
-  onBlur?: (event: EventPayload) => void
+  onFocus?: (event: GpuixSyntheticEvent) => void
+  onFocusCapture?: (event: GpuixSyntheticEvent) => void
+  onBlur?: (event: GpuixSyntheticEvent) => void
+  onBlurCapture?: (event: GpuixSyntheticEvent) => void
 
   // ── Scroll events ──────────────────────────────────────────────
-  onScroll?: (event: EventPayload) => void
+  onScroll?: (event: GpuixSyntheticEvent) => void
+  onScrollCapture?: (event: GpuixSyntheticEvent) => void
 
   // ── Text editor events ─────────────────────────────────────────
-  onChange?: (event: EventPayload) => void
-  onSubmit?: (event: EventPayload) => void
+  onChange?: (event: GpuixSyntheticEvent) => void
+  onChangeCapture?: (event: GpuixSyntheticEvent) => void
+  onSubmit?: (event: GpuixSyntheticEvent) => void
+  onSubmitCapture?: (event: GpuixSyntheticEvent) => void
 
   // ── Native component events ─────────────────────────────────────
-  onToggleFile?: (event: EventPayload) => void
-  onShowMore?: (event: EventPayload) => void
-  onLineClick?: (event: EventPayload) => void
-  onLinkClick?: (event: EventPayload) => void
-  onVisibleRange?: (event: EventPayload) => void
+  onToggleFile?: (event: GpuixSyntheticEvent) => void
+  onShowMore?: (event: GpuixSyntheticEvent) => void
+  onLineClick?: (event: GpuixSyntheticEvent) => void
+  onLinkClick?: (event: GpuixSyntheticEvent) => void
+  onVisibleRange?: (event: GpuixSyntheticEvent) => void
 
   // ── Focus props ────────────────────────────────────────────────
   /** Take keyboard focus when the element first mounts. Required for `<input>`:
@@ -396,7 +408,7 @@ export interface VirtualListProps {
   itemCount?: number
   /** Logical index of `children[0]`. Ignored when `itemCount` is unset. */
   windowStart?: number
-  onVisibleRange?: (event: EventPayload) => void
+  onVisibleRange?: (event: GpuixSyntheticEvent) => void
 }
 
 // Props for native <img> rendering.
@@ -445,12 +457,12 @@ export interface DiffProps extends Props {
   maxLines?: number
   theme?: GpuixTheme
   /** Fires when a file header is clicked. `event.value` is the file path. */
-  onToggleFile?: (event: EventPayload) => void
+  onToggleFile?: (event: GpuixSyntheticEvent) => void
   /** Fires when Show more is clicked. `event.value` is the hidden line count. */
-  onShowMore?: (event: EventPayload) => void
+  onShowMore?: (event: GpuixSyntheticEvent) => void
   /** Fires when a diff line is clicked. `event.value` is the line text,
    *  `event.oldLine` / `event.newLine` are its line numbers. */
-  onLineClick?: (event: EventPayload) => void
+  onLineClick?: (event: GpuixSyntheticEvent) => void
 }
 
 // Props for the <markdown> custom element.
@@ -459,7 +471,7 @@ export interface MarkdownProps extends Props {
   source?: string
   theme?: GpuixTheme
   /** Fires when a block containing links is clicked. `event.value` is the URL. */
-  onLinkClick?: (event: EventPayload) => void
+  onLinkClick?: (event: GpuixSyntheticEvent) => void
 }
 
 // Props for the <anchored> custom element.
@@ -564,7 +576,7 @@ export interface DebugFrameOverlayStats {
 
 export type EventHandlerMap = Map<
   number,
-  Map<string, (event: EventPayload) => void>
+  Map<string, (event: GpuixSyntheticEvent) => void>
 >
 
 export interface ElementIdAllocator {
@@ -578,6 +590,8 @@ export interface Container {
   renderer: NativeRenderer
   ids: ElementIdAllocator
   eventHandlers: EventHandlerMap
+  eventTargets: Map<number, Instance>
+  preventedKeyboardActivations: Map<number, string>
 }
 
 // Instance — minimal handle for React's reconciler.
@@ -586,6 +600,8 @@ export interface Instance {
   id: number
   type: ElementType
   props: Props
+  parentId: number | null
+  getAttribute(name: string): string | null
 }
 
 // Text instance for raw text nodes
