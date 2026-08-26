@@ -1,0 +1,131 @@
+import React from "react"
+import { describe, expect, it } from "vitest"
+import { createTestRoot } from "../testing.js"
+
+describe("resolved test-renderer styles", () => {
+  it("reads the hoverWithin style applied by the issue #52 repro", () => {
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div style={{ width: 400, height: 120, backgroundColor: "#222222" }}>
+          <div
+            hoverGroup="row"
+            style={{ display: "flex", flexDirection: "row", width: 400, height: 40 }}
+          >
+            <span style={{ width: 200, height: 40, backgroundColor: "#333333" }} />
+            <span
+              style={{
+                width: 200,
+                height: 40,
+                background: "rgba(0, 0, 0, 0)",
+                hoverWithin: { background: "#7d8b8c" },
+              }}
+            />
+          </div>
+        </div>
+      )
+      const r = root.renderer
+      r.flush()
+      const before = JSON.stringify(r.getElement(2)?.style)
+      r.nativeSimulateMouseMove(100, 20) // into the LEFT sibling
+      r.dispatchNativeEvents()
+      r.flush()
+      const after = JSON.stringify(r.getElement(2)?.style)
+      // before === after → true   (captureScreenshot at this point shows #7d8b8c painted)
+      expect(before).toBe(after)
+      expect(r.getResolvedStyle(2)).toMatchObject({ background: "#7d8b8c" })
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("resolves hover and active styles at read time", () => {
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div
+          style={{
+            width: 400,
+            height: 120,
+            padding: 40,
+            backgroundColor: "#111111",
+          }}
+        >
+          <div
+            testId="state-target"
+            style={{
+              width: 160,
+              height: 40,
+              backgroundColor: "#333333",
+              hover: { backgroundColor: "#667788" },
+              active: { backgroundColor: "#aabbcc" },
+            }}
+          />
+        </div>
+      )
+
+      const target = root.renderer.findByTestId("state-target")!
+      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        backgroundColor: "#333333",
+      })
+
+      root.renderer.nativeSimulateMouseMove(centerX, centerY)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        backgroundColor: "#667788",
+      })
+
+      root.renderer.nativeSimulateMouseDown(centerX, centerY)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        backgroundColor: "#aabbcc",
+      })
+
+      root.renderer.nativeSimulateMouseMove(300, 100, 0)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        backgroundColor: "#aabbcc",
+      })
+
+      root.renderer.nativeSimulateMouseUp(300, 100)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        backgroundColor: "#333333",
+      })
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("resolves focus styles at read time", () => {
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div style={{ width: 400, height: 120, padding: 40 }}>
+          <div
+            testId="focus-target"
+            tabIndex={0}
+            style={{
+              width: 160,
+              height: 40,
+              backgroundColor: "#333333",
+              focus: { backgroundColor: "#c2415d" },
+            }}
+          />
+        </div>
+      )
+
+      const target = root.renderer.findByTestId("focus-target")!
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        backgroundColor: "#333333",
+      })
+
+      root.renderer.focusElement(target.id)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        backgroundColor: "#c2415d",
+      })
+    } finally {
+      root.unmount()
+    }
+  })
+})
