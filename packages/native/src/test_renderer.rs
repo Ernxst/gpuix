@@ -540,7 +540,20 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn simulate_keystrokes(&self, keystrokes: String) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.simulate_keystrokes(window, &keystrokes);
+            let keystrokes = keystrokes
+                .split_whitespace()
+                .map(|keystroke| {
+                    gpui::Keystroke::parse(keystroke).map_err(|error| {
+                        Error::from_reason(format!("Invalid keystroke '{}': {}", keystroke, error))
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            for keystroke in keystrokes {
+                // Match GPUI's simulated key-down/text-input path before releasing the key.
+                cx.dispatch_keystroke(window, keystroke.clone());
+                cx.simulate_event(window, gpui::KeyUpEvent { keystroke });
+            }
             Ok(())
         })
     }
