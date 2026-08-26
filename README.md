@@ -654,6 +654,28 @@ clipboard, keyboard, and IME implementations. The embedded macOS run-loop
 extension comes from the pinned GPUIX fork. CI runs the full React and example
 test suites through DirectX on Windows.
 
+### Renderer capabilities
+
+Use one stable read to choose platform-specific paths instead of probing
+individual methods:
+
+```ts
+const capabilities = renderer.capabilities()
+
+if (capabilities.automation.screenshot) {
+  renderer.captureScreenshot('/tmp/frame.png')
+}
+if (capabilities.window.activation) {
+  console.log(renderer.isActive())
+}
+```
+
+`capabilities` includes `platform`, `frameClock` (`display-link` or `timer`),
+window activation/resize/multi-window support, private-network image opt-in,
+and live automation support (hover, drag, scroll-wheel, keyboard, screenshots,
+clock, and tree). Existing methods such as `requiresTick()`, `isActive()`, and
+`captureScreenshot()` remain supported for compatibility.
+
 > [!IMPORTANT]
 > On macOS, never drive `tick()` from a `setImmediate` loop. That spins at tens of thousands of
 > ticks per second and burns **73% CPU on a completely idle app**, versus **1%** when

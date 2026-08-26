@@ -915,6 +915,8 @@ export interface NativeRenderer {
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   setRoot(id: number): void
   commitMutations(): void
+  /** Stable platform and renderer feature read. Legacy probes remain available. */
+  capabilities?(): RendererCapabilities
   /** Drop a buffered commit after JS-side contract validation fails. */
   discardMutations?(): void
   setCustomProp(id: number, key: string, valueJson: string | object | number | boolean | null): void
@@ -994,6 +996,34 @@ export interface StyleDiagnostic {
 }
 
 export type DebugFrameOverlayMode = "hidden" | "minimal" | "full"
+
+/** Features offered by one renderer instance on its current platform. */
+export interface RendererCapabilities {
+  platform: "macos" | "windows" | "linux" | "freebsd" | "browser" | "unknown"
+  frameClock: {
+    kind: "display-link" | "timer"
+    requiresTick: boolean
+  }
+  window: {
+    activation: boolean
+    activate: boolean
+    resize: boolean
+    multiple: boolean
+  }
+  images: {
+    privateNetwork: boolean
+  }
+  automation: {
+    click: boolean
+    hover: boolean
+    drag: boolean
+    scrollWheel: boolean
+    keyboard: "native" | "browser"
+    screenshot: boolean
+    clock: boolean
+    tree: boolean
+  }
+}
 
 export interface EdgeInsets {
   top: number

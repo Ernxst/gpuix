@@ -90,6 +90,11 @@ export declare class GpuixRenderer {
    */
   testIdlePumpFrameRequestRace(callback: FrameRequestCallback): boolean
   isInitialized(): boolean
+  /**
+   * Stable platform and renderer feature read. Keep individual methods for
+   * backwards compatibility; new callers should branch on this object.
+   */
+  capabilities(): RendererCapabilities
   /** Whether JavaScript must drive the native event loop with tick(). */
   requiresTick(): boolean
   /**
@@ -193,6 +198,11 @@ export declare class TestGpuixRenderer {
    * Further interaction attempts fail instead of being routed to another root.
    */
   dispose(): void
+  /**
+   * The same capability contract as a live renderer, scoped to this
+   * offscreen GPU-backed window.
+   */
+  capabilities(): RendererCapabilities
   createElement(id: number, elementType: string): void
   /**
    * Destroy an element and all descendants. Returns destroyed IDs
@@ -422,6 +432,18 @@ export declare class TestGpuixRenderer {
   getRootId(): number | null
 }
 
+export interface AutomationCapabilities {
+  click: boolean
+  hover: boolean
+  drag: boolean
+  scrollWheel: boolean
+  /** `native` injects through GPUI; `browser` uses the browser IME mirror. */
+  keyboard: "native" | "browser"
+  screenshot: boolean
+  clock: boolean
+  tree: boolean
+}
+
 /** Recorded draw times from the debug frame overlay. */
 export interface DebugFrameOverlayStats {
   currentMs?: number
@@ -559,6 +581,15 @@ export interface EventPayload {
   modifiers?: EventModifiers
 }
 
+export interface FrameClockCapabilities {
+  /**
+   * `display-link` uses macOS's native display callback; `timer` has no
+   * JavaScript frame pump to drive.
+   */
+  kind: "display-link" | "timer"
+  requiresTick: boolean
+}
+
 export interface GpuixStyleDiagnostic {
   message: string
   elementId: number
@@ -598,6 +629,11 @@ export interface HighlightRect {
   height: number
 }
 
+export interface ImageCapabilities {
+  /** `setAllowPrivateNetworkImages()` is available. */
+  privateNetwork: boolean
+}
+
 /**
  * A cross-platform application menu item.
  *
@@ -626,6 +662,21 @@ export interface MenuSpec {
   disabled?: boolean
 }
 
+/**
+ * Features offered by one renderer instance on its current platform.
+ *
+ * This is deliberately descriptive rather than a mirror of every method:
+ * unsupported methods still retain their established error behaviour, while
+ * consumers can choose a supported path before calling one.
+ */
+export interface RendererCapabilities {
+  platform: "macos" | "windows" | "linux" | "freebsd" | "browser" | "unknown"
+  frameClock: FrameClockCapabilities
+  window: WindowCapabilities
+  images: ImageCapabilities
+  automation: AutomationCapabilities
+}
+
 export interface ScrollWheelModifiers {
   shift?: boolean
   ctrl?: boolean
@@ -644,6 +695,17 @@ export interface ScrollWheelOptions {
   phase?: string
   deltaUnit?: string
   modifiers?: ScrollWheelModifiers
+}
+
+export interface WindowCapabilities {
+  /** `isActive()` is available for this renderer/window. */
+  activation: boolean
+  /** `activateWindow()` can request foreground activation. */
+  activate: boolean
+  /** Native/browser resize notifications are available. */
+  resize: boolean
+  /** GPUIX currently owns one window per renderer process. */
+  multiple: boolean
 }
 
 export interface WindowInsets {

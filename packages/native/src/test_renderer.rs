@@ -327,6 +327,13 @@ impl TestGpuixRenderer {
         dispose_test_state(self.state_id);
     }
 
+    /// The same capability contract as a live renderer, scoped to this
+    /// offscreen GPU-backed window.
+    #[napi]
+    pub fn capabilities(&self) -> crate::renderer::RendererCapabilities {
+        crate::renderer::test_renderer_capabilities()
+    }
+
     // ── Mutation API (same interface as GpuixRenderer) ────────────────
 
     #[napi]

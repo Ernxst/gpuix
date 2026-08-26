@@ -5,8 +5,14 @@ import os from "os"
 import path from "path"
 import React, { useState } from "react"
 import { describe, expect, it } from "vitest"
-import { connectTest } from "../automation/index.js"
-import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
+import {
+  browserRendererAsTest,
+  connectTest,
+  type LiveAutomationRenderer,
+} from "../automation/index.js"
+import { createRenderer } from "../reconciler/renderer.js"
+import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing.js"
+import type { RendererCapabilities } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -26,6 +32,51 @@ function Counter() {
 }
 
 describeNative("automation", () => {
+  it("reads live native renderer capabilities before opening a window", () => {
+    const capabilities = createRenderer().capabilities()
+    const platform = process.platform === "darwin" ? "macos" : "windows"
+
+    expect(capabilities).toMatchObject({
+      platform,
+      frameClock:
+        platform === "macos"
+          ? { kind: "display-link", requiresTick: true }
+          : { kind: "timer", requiresTick: false },
+      window: { activation: true, activate: platform === "macos", resize: true, multiple: false },
+      images: { privateNetwork: true },
+      automation: {
+        click: true,
+        hover: true,
+        drag: true,
+        scrollWheel: true,
+        keyboard: "native",
+        screenshot: true,
+        clock: true,
+        tree: true,
+      },
+    })
+  })
+
+  it("reads offscreen renderer capabilities separately from the display clock", () => {
+    const renderer = new TestRenderer()
+    try {
+      expect(renderer.capabilities()).toMatchObject({
+        platform: process.platform === "darwin" ? "macos" : "windows",
+        frameClock: { kind: "timer", requiresTick: false },
+        window: { activation: true, activate: false, resize: true, multiple: false },
+        images: { privateNetwork: true },
+        automation: {
+          hover: true,
+          drag: true,
+          scrollWheel: true,
+          screenshot: true,
+        },
+      })
+    } finally {
+      renderer.dispose()
+    }
+  })
+
   it("preserves identity attributes for native automation and synthetic events", async () => {
     const attributes: Array<string | null> = []
     const { render, renderer } = createTestRoot()
@@ -302,6 +353,59 @@ describeNative("automation", () => {
     // The textarea is laid out under the input, so its box must start lower.
     expect(multi!.y).toBeGreaterThan(single!.y)
 
+    await app.close()
+  })
+})
+
+describe("browser renderer capability adapter", () => {
+  it("retains browser capabilities and omits unsupported screenshots from automation", async () => {
+    const capabilities: RendererCapabilities = {
+      platform: "browser",
+      frameClock: { kind: "timer", requiresTick: false },
+      window: { activation: false, activate: false, resize: true, multiple: false },
+      images: { privateNetwork: false },
+      automation: {
+        click: true,
+        hover: true,
+        drag: true,
+        scrollWheel: true,
+        keyboard: "browser",
+        screenshot: false,
+        clock: true,
+        tree: true,
+      },
+    }
+    const renderer: LiveAutomationRenderer = {
+      capabilities: () => capabilities,
+      simulateClick() {},
+      simulateMouseDown() {},
+      simulateMouseUp() {},
+      simulateMouseMove() {},
+      simulateScrollWheel() {},
+      focusElement() {},
+      blur() {},
+      scrollTo() {},
+      getScrollOffset: () => null,
+      getAllText: () => [],
+      getPaintedText: () => [],
+      getSelectedText: () => null,
+      clearSelection() {},
+      getAutomationTree: () => "{}",
+      getElementBounds: () => null,
+      clockPause: () => 0,
+      clockSet: (nowMs) => nowMs,
+      clockFastForward: (deltaMs) => deltaMs,
+      clockResume: () => 0,
+    }
+    const adapter = browserRendererAsTest(renderer)
+    expect(adapter.capabilities?.()).toEqual(capabilities)
+
+    const app = await connectTest(adapter)
+    const initialized = await app.call("initialize", {
+      protocolVersion: 1,
+      client: "browser-capability-test",
+    })
+    expect(initialized.capabilities).toEqual(["input", "clock", "tree"])
     await app.close()
   })
 })
