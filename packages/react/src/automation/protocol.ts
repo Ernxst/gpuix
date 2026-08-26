@@ -134,6 +134,17 @@ export const methods = {
     params: pointSchema.extend({
       deltaX: z.number(),
       deltaY: z.number(),
+      phase: z.enum(["started", "moved", "ended", "cancelled"]).optional(),
+      deltaUnit: z.enum(["pixels", "lines"]).optional(),
+      modifiers: z
+        .object({
+          shift: z.boolean().optional(),
+          ctrl: z.boolean().optional(),
+          alt: z.boolean().optional(),
+          cmd: z.boolean().optional(),
+          function: z.boolean().optional(),
+        })
+        .optional(),
     }),
     result: okSchema,
   },

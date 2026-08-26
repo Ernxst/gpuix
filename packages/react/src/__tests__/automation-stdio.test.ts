@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest"
 import {
+  connectTest,
   connectStdio,
   encodeSse,
   handleAutomationRequest,
@@ -52,6 +53,34 @@ function fakeRenderer(): TestAutomationRenderer {
 }
 
 describe("automation stdio", () => {
+  it("forwards platform scroll fields without advancing the renderer", async () => {
+    const renderer = fakeRenderer()
+    let received: unknown[] | undefined
+    renderer.nativeSimulateScrollWheel = (...args) => {
+      received = args
+    }
+    const app = await connectTest(renderer)
+
+    await app.call("scrollWheel", {
+      x: 12,
+      y: 24,
+      deltaX: 0,
+      deltaY: -2,
+      phase: "started",
+      deltaUnit: "lines",
+      modifiers: { alt: true },
+    })
+
+    expect(received).toEqual([
+      12,
+      24,
+      0,
+      -2,
+      { phase: "started", deltaUnit: "lines", modifiers: { alt: true } },
+    ])
+    await app.close()
+  })
+
   it("preserves browser key characters and held state", () => {
     expect(browserKeystrokeInit("A")).toMatchObject({ key: "A" })
     expect(browserKeystrokeInit("-")).toMatchObject({ key: "-" })

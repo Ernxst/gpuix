@@ -17,7 +17,43 @@ use gpui::{
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollDelta, ScrollWheelEvent, Styled,
     TouchPhase, Window,
 };
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+use napi_derive::napi;
 use web_time::Instant;
+
+/// The platform-level fields GPUI records for a scroll-wheel input.
+///
+/// Keep this at the automation boundary so the test and live renderers inject
+/// identical events.
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct ScrollWheelOptions {
+    pub phase: Option<String>,
+    pub delta_unit: Option<String>,
+    pub modifiers: Option<ScrollWheelModifiers>,
+}
+
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct ScrollWheelModifiers {
+    pub shift: Option<bool>,
+    pub ctrl: Option<bool>,
+    pub alt: Option<bool>,
+    pub cmd: Option<bool>,
+    pub function: Option<bool>,
+}
+
+impl From<ScrollWheelModifiers> for Modifiers {
+    fn from(modifiers: ScrollWheelModifiers) -> Self {
+        Self {
+            shift: modifiers.shift.unwrap_or_default(),
+            control: modifiers.ctrl.unwrap_or_default(),
+            alt: modifiers.alt.unwrap_or_default(),
+            platform: modifiers.cmd.unwrap_or_default(),
+            function: modifiers.function.unwrap_or_default(),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct ElementBounds {
@@ -252,13 +288,33 @@ pub fn dispatch_mouse_move(
     );
 }
 
-fn scroll_wheel_event(x: f64, y: f64, delta_x: f64, delta_y: f64) -> ScrollWheelEvent {
-    ScrollWheelEvent {
+pub fn scroll_wheel_event(
+    x: f64,
+    y: f64,
+    delta_x: f64,
+    delta_y: f64,
+    options: Option<ScrollWheelOptions>,
+) -> Result<ScrollWheelEvent, String> {
+    let options = options.unwrap_or_default();
+    let delta = match options.delta_unit.as_deref().unwrap_or("pixels") {
+        "pixels" => ScrollDelta::Pixels(point(px(delta_x as f32), px(delta_y as f32))),
+        "lines" => ScrollDelta::Lines(point(delta_x as f32, delta_y as f32)),
+        unit => return Err(format!("Unknown scroll-wheel delta unit: {unit}")),
+    };
+    let touch_phase = match options.phase.as_deref().unwrap_or("moved") {
+        "started" => TouchPhase::Started,
+        "moved" => TouchPhase::Moved,
+        "ended" => TouchPhase::Ended,
+        "cancelled" => TouchPhase::Cancelled,
+        phase => return Err(format!("Unknown scroll-wheel phase: {phase}")),
+    };
+
+    Ok(ScrollWheelEvent {
         position: point(px(x as f32), px(y as f32)),
-        delta: ScrollDelta::Pixels(point(px(delta_x as f32), px(delta_y as f32))),
-        modifiers: Modifiers::default(),
-        touch_phase: TouchPhase::Moved,
-    }
+        delta,
+        modifiers: options.modifiers.map(Modifiers::from).unwrap_or_default(),
+        touch_phase,
+    })
 }
 
 pub fn dispatch_scroll_wheel(
@@ -268,11 +324,13 @@ pub fn dispatch_scroll_wheel(
     y: f64,
     delta_x: f64,
     delta_y: f64,
-) {
+    options: Option<ScrollWheelOptions>,
+) -> Result<(), String> {
     window.dispatch_event(
-        scroll_wheel_event(x, y, delta_x, delta_y).to_platform_input(),
+        scroll_wheel_event(x, y, delta_x, delta_y, options)?.to_platform_input(),
         cx,
     );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -295,16 +353,38 @@ mod tests {
     }
 
     #[test]
-    fn scroll_wheel_event_preserves_pixel_coordinates_and_delta() {
-        let event = scroll_wheel_event(12.5, 34.25, -8.0, 16.0);
+    fn scroll_wheel_event_preserves_platform_scroll_fields() {
+        let event = scroll_wheel_event(
+            12.5,
+            34.25,
+            -8.0,
+            16.0,
+            Some(ScrollWheelOptions {
+                phase: Some("started".into()),
+                delta_unit: Some("lines".into()),
+                modifiers: Some(ScrollWheelModifiers {
+                    shift: Some(true),
+                    ctrl: Some(true),
+                    alt: Some(true),
+                    cmd: Some(true),
+                    function: Some(true),
+                }),
+            }),
+        )
+        .unwrap();
 
         assert_eq!(f32::from(event.position.x), 12.5);
         assert_eq!(f32::from(event.position.y), 34.25);
-        assert!(matches!(event.touch_phase, TouchPhase::Moved));
-        let ScrollDelta::Pixels(delta) = event.delta else {
-            panic!("automation scroll must use a pixel delta")
+        assert!(matches!(event.touch_phase, TouchPhase::Started));
+        let ScrollDelta::Lines(delta) = event.delta else {
+            panic!("automation scroll must preserve a line delta")
         };
         assert_eq!(f32::from(delta.x), -8.0);
         assert_eq!(f32::from(delta.y), 16.0);
+        assert!(event.modifiers.shift);
+        assert!(event.modifiers.control);
+        assert!(event.modifiers.alt);
+        assert!(event.modifiers.platform);
+        assert!(event.modifiers.function);
     }
 }

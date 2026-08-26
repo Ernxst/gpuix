@@ -120,7 +120,7 @@ export declare class GpuixRenderer {
   simulateMouseDown(x: number, y: number, button?: number | undefined | null): void
   simulateMouseUp(x: number, y: number, button?: number | undefined | null): void
   simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null): void
-  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
+  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, options?: ScrollWheelOptions | undefined | null): void
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -263,9 +263,9 @@ export declare class TestGpuixRenderer {
   simulateMouseUp(x: number, y: number, button?: number | undefined | null): void
   /**
    * Simulate a scroll wheel event at the given position.
-   * delta_x and delta_y are in pixels (negative = scroll up/left).
+   * delta_x and delta_y default to pixels (negative = scroll up/left).
    */
-  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
+  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, options?: ScrollWheelOptions | undefined | null): void
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
   /** Drop the current selection. */
@@ -531,6 +531,26 @@ export interface MenuSpec {
   name: string
   items: Array<MenuItemSpec>
   disabled?: boolean
+}
+
+export interface ScrollWheelModifiers {
+  shift?: boolean
+  ctrl?: boolean
+  alt?: boolean
+  cmd?: boolean
+  function?: boolean
+}
+
+/**
+ * The platform-level fields GPUI records for a scroll-wheel input.
+ *
+ * Keep this at the automation boundary so the test and live renderers inject
+ * identical events.
+ */
+export interface ScrollWheelOptions {
+  phase?: string
+  deltaUnit?: string
+  modifiers?: ScrollWheelModifiers
 }
 
 export interface WindowInsets {
