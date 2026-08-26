@@ -32,6 +32,7 @@ web-time = "1"
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 gpui = { path = "../../zed/crates/gpui", default-features = false, features = ["font-kit", "profiler"] }
 gpui_platform = { path = "../../zed/crates/gpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
+reqwest_client = { path = "../../zed/crates/reqwest_client" }
 
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
 napi = { version = "3", features = ["napi8", "serde-json"] }

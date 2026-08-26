@@ -424,10 +424,29 @@ export interface VirtualListProps {
   onVisibleRange?: (event: GpuixSyntheticEvent) => void
 }
 
+export type ImageMimeType =
+  | "image/png"
+  | "image/jpeg"
+  | "image/webp"
+  | "image/gif"
+  | "image/svg+xml"
+
+/** An unambiguous, serialisable source for native image rendering. */
+export type ImageSource =
+  | { kind: "path"; path: string }
+  | { kind: "url"; url: string }
+  | {
+      kind: "data"
+      mimeType: ImageMimeType
+      bytes: ArrayBuffer | Uint8Array | readonly number[]
+    }
+
 // Props for native <img> rendering.
 export interface ImgProps extends Props {
-  src?: string
+  src?: ImageSource
   objectFit?: "fill" | "contain" | "cover" | "scaleDown" | "none"
+  /** For SVG only: resolve authored `currentColor` references from inherited style.color. */
+  tint?: "currentColor"
   alt?: string
 }
 

@@ -47,10 +47,25 @@ use crate::style::{
 use crate::text::{selectable_text, selection_frame_reset, selection_key, SharedSelection};
 use crate::theme::Theme;
 
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn default_http_client() -> Arc<dyn gpui::http_client::HttpClient> {
+    Arc::new(
+        reqwest_client::ReqwestClient::user_agent(concat!("GPUIX/", env!("CARGO_PKG_VERSION")))
+            .unwrap_or_else(|_| reqwest_client::ReqwestClient::new()),
+    )
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct PendingStyleDiagnostic {
     element_id: u64,
     problem: StyleProblem,
+    kind: DiagnosticKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DiagnosticKind {
+    Style,
+    Property,
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -89,7 +104,23 @@ pub(crate) fn pending_style_diagnostics(
         .map(move |problem| PendingStyleDiagnostic {
             element_id,
             problem,
+            kind: DiagnosticKind::Style,
         })
+}
+
+pub(crate) fn pending_custom_prop_diagnostic(
+    tree: &RetainedTree,
+    element_id: u64,
+    key: &str,
+    value: &serde_json::Value,
+) -> Option<PendingStyleDiagnostic> {
+    let element_type = tree.elements.get(&element_id)?.element_type.as_str();
+    let problem = crate::custom_elements::img::image_prop_problem(element_type, key, value)?;
+    Some(PendingStyleDiagnostic {
+        element_id,
+        problem,
+        kind: DiagnosticKind::Property,
+    })
 }
 
 fn style_diagnostic_context(
@@ -105,8 +136,12 @@ fn style_diagnostic_context(
         .as_ref()
         .map(|test_id| format!(" testId={test_id:?}"))
         .unwrap_or_default();
+    let subject = match diagnostic.kind {
+        DiagnosticKind::Style => "style",
+        DiagnosticKind::Property => "property",
+    };
     let message = format!(
-        "[gpuix] Invalid style on <{element_type}{test_id_label}> (element {}): property {:?} rejected value {}: {}",
+        "[gpuix] Invalid {subject} on <{element_type}{test_id_label}> (element {}): property {:?} rejected value {}: {}",
         diagnostic.element_id,
         diagnostic.problem.property,
         diagnostic.problem.value,
@@ -1249,6 +1284,7 @@ impl GpuixRenderer {
         // bun/node is not a .app. A Dock icon with no window cannot relaunch.
         // Last window close quits AppKit; tick() returns false and JS exits.
         let app = gpui::Application::with_platform(platform.clone())
+            .with_http_client(default_http_client())
             .with_quit_mode(gpui::QuitMode::LastWindowClosed);
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             init_key_bindings(cx);
@@ -1363,7 +1399,8 @@ impl GpuixRenderer {
             .name("gpuix-ui".to_string())
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    gpui_platform::application().run(move |cx| {
+                    let app = gpui_platform::application().with_http_client(default_http_client());
+                    app.run(move |cx| {
                         init_key_bindings(cx);
                         crate::custom_elements::input::init(cx);
                         init_application_menu_support(cx, Some(application_callback.clone()));
@@ -1555,7 +1592,14 @@ impl GpuixRenderer {
         let value: serde_json::Value = serde_json::from_str(&value_json)
             .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
+        let diagnostic = pending_custom_prop_diagnostic(&tree, id, &key, &value);
         tree.set_custom_prop(id, key, value);
+        drop(tree);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            if let Some(diagnostic) = diagnostic {
+                self.style_diagnostics.lock().unwrap().push(diagnostic);
+            }
+        }
         Ok(())
     }
 
@@ -2877,13 +2921,19 @@ impl WebGpuixRenderer {
         key: String,
         value_json: String,
     ) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(id)?;
         let value = serde_json::from_str(&value_json).map_err(|error| {
             wasm_bindgen::JsValue::from_str(&format!("Failed to parse custom prop: {error}"))
         })?;
-        self.tree
-            .lock()
-            .unwrap()
-            .set_custom_prop(web_element_id(id)?, key, value);
+        let mut tree = self.tree.lock().unwrap();
+        let diagnostic = pending_custom_prop_diagnostic(&tree, id, &key, &value);
+        tree.set_custom_prop(id, key, value);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            if let Some(diagnostic) = diagnostic {
+                let (message, _, _) = style_diagnostic_context(&diagnostic, &tree);
+                web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
+            }
+        }
         Ok(())
     }
 
@@ -3514,6 +3564,8 @@ pub(crate) struct Inherited {
     pub selection_wash: gpui::Hsla,
     /// Text case transformation inherited by plain text descendants.
     pub text_transform: TextTransform,
+    /// Resolved CSS currentColor value for custom image elements.
+    pub current_color: gpui::Rgba,
     /// Nearest native hover group for descendant `hoverWithin` styles.
     pub hover_group: Option<gpui::SharedString>,
 }
@@ -3534,6 +3586,7 @@ impl Inherited {
             selectable: true,
             selection_wash: wash,
             text_transform: TextTransform::None,
+            current_color: gpui::rgba(0x000000ff),
             hover_group: None,
         }
     }
@@ -3558,6 +3611,13 @@ impl Inherited {
                 Some("uppercase") => self.text_transform = TextTransform::Uppercase,
                 Some("lowercase") => self.text_transform = TextTransform::Lowercase,
                 _ => {}
+            }
+            if let Some(color) = style
+                .color
+                .as_deref()
+                .and_then(crate::color::parse_color_rgba)
+            {
+                self.current_color = color;
             }
         }
         if let Some(hover_group) = hover_group {
@@ -4133,6 +4193,7 @@ pub(crate) fn build_element(
                 selection: ctx.selection.clone(),
                 selectable: inherited.selectable,
                 selection_wash: inherited.selection_wash,
+                current_color: inherited.current_color,
             };
             ctx.custom_registry
                 .render(custom_type, &element.custom_props, render_ctx, window, cx)
@@ -5464,6 +5525,9 @@ pub(crate) fn apply_batch_to_tree(
                 tree.root_id = Some(id);
             }
             BatchOp::SetCustomProp { id, key, value } => {
+                if let Some(diagnostic) = pending_custom_prop_diagnostic(tree, id, &key, &value) {
+                    diagnostics.push(diagnostic);
+                }
                 tree.set_custom_prop(id, key, value);
             }
         }

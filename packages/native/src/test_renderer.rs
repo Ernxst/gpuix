@@ -24,11 +24,12 @@ use gpui::AppContext as _;
 use crate::element_tree::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree, catch_gpui_initialization, debug_frame_overlay_mode_name,
-    debug_frame_overlay_stats_js, default_application_menus, dispatch_application_menu_action,
-    drain_style_diagnostics, has_application_menus, init_application_menu_support,
-    parse_debug_frame_overlay_mode, parse_style_json, pending_style_diagnostics,
-    set_application_menus, to_element_id, DebugFrameOverlayStats, EventCallback,
-    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
+    debug_frame_overlay_stats_js, default_application_menus, default_http_client,
+    dispatch_application_menu_action, drain_style_diagnostics, has_application_menus,
+    init_application_menu_support, parse_debug_frame_overlay_mode, parse_style_json,
+    pending_custom_prop_diagnostic, pending_style_diagnostics, set_application_menus,
+    to_element_id, DebugFrameOverlayStats, EventCallback, GpuixStyleDiagnostic, GpuixView,
+    MenuSpec, PendingStyleDiagnostic, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 
@@ -130,6 +131,7 @@ impl TestGpuixRenderer {
         let mac_platform = gpui_macos::MacPlatform::new(false);
         let mut cx = gpui::VisualTestAppContext::new(Rc::new(mac_platform));
         cx.update(|cx| {
+            cx.set_http_client(default_http_client());
             crate::renderer::init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
             init_application_menu_support(cx, event_callback.clone());
@@ -279,7 +281,15 @@ impl TestGpuixRenderer {
         let id = to_element_id(id)?;
         let value: serde_json::Value = serde_json::from_str(&value_json)
             .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
-        self.tree.lock().unwrap().set_custom_prop(id, key, value);
+        let mut tree = self.tree.lock().unwrap();
+        let diagnostic = pending_custom_prop_diagnostic(&tree, id, &key, &value);
+        tree.set_custom_prop(id, key, value);
+        drop(tree);
+        if self.strict_styles.load(Ordering::Relaxed) {
+            if let Some(diagnostic) = diagnostic {
+                self.style_diagnostics.lock().unwrap().push(diagnostic);
+            }
+        }
         Ok(())
     }
 
