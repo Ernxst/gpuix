@@ -877,6 +877,16 @@ impl TestGpuixRenderer {
             .map(|id| id as f64)
     }
 
+    /// Resolve a standard `data-testid` attribute to the renderer element ID.
+    #[napi]
+    pub fn find_by_data_test_id(&self, data_test_id: String) -> Option<f64> {
+        self.tree
+            .lock()
+            .unwrap()
+            .find_by_data_test_id(&data_test_id)
+            .map(|id| id as f64)
+    }
+
     /// Check if an element has a specific event listener.
     #[napi]
     pub fn has_event_listener(&self, id: f64, event_type: String) -> Result<bool> {

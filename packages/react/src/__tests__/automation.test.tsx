@@ -33,7 +33,7 @@ describeNative("automation", () => {
     render(
       <div
         id="site-state"
-        data-testid="site-state-heading"
+        data-testid="hover-underline"
         data-state="ready"
         onClick={(event) => {
           attributes.push(
@@ -49,7 +49,12 @@ describeNative("automation", () => {
     const heading = renderer.findByElementId("site-state")
     expect(heading).toMatchObject({
       authorId: "site-state",
-      customProps: { "data-testid": "site-state-heading", "data-state": "ready" },
+      dataTestId: "hover-underline",
+      customProps: { "data-testid": "hover-underline", "data-state": "ready" },
+    })
+    expect(renderer.findByTestId("hover-underline")).toMatchObject({
+      id: heading?.id,
+      type: "div",
     })
     expect(renderer.findByElementId("missing")).toBeUndefined()
 
@@ -60,7 +65,7 @@ describeNative("automation", () => {
     await app.close()
 
     renderer.nativeSimulateClick(100, 40)
-    expect(attributes).toEqual(["site-state", "site-state-heading", "ready"])
+    expect(attributes).toEqual(["site-state", "hover-underline", "ready"])
   })
 
   it("clicks a testId locator and waits for text", async () => {

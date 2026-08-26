@@ -319,6 +319,8 @@ export declare class TestGpuixRenderer {
   findByType(elementType: string): Array<number>
   /** Resolve an author-defined `id` attribute to the renderer element ID. */
   findByElementId(authorId: string): number | null
+  /** Resolve a standard `data-testid` attribute to the renderer element ID. */
+  findByDataTestId(dataTestId: string): number | null
   /** Check if an element has a specific event listener. */
   hasEventListener(id: number, eventType: string): boolean
   /** Get the text content of an element. */
@@ -463,6 +465,7 @@ export interface GpuixStyleDiagnostic {
   elementId: number
   elementType: string
   authorId?: string
+  dataTestId?: string
   testId?: string
   property: string
   value: string

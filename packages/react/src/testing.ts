@@ -56,6 +56,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getRootId(): number | null
   getAllText(): string[]
   findByElementId(authorId: string): number | null
+  findByDataTestId(dataTestId: string): number | null
   scrollTo(elementId: number, x: number, y: number): void
   scrollToItem(elementId: number, index: number): void
   getScrollOffset(elementId: number): number[] | null
@@ -144,6 +145,8 @@ export interface TestElement {
   children: number[]
   parentId: number | null
   testId?: string
+  /** The standard `data-testid` attribute used by the test renderer lookup. */
+  dataTestId?: string
   /** The author-defined `id` attribute, distinct from the numeric renderer ID. */
   authorId?: string
   customProps?: Record<string, unknown>
@@ -466,6 +469,7 @@ export class TestRenderer implements NativeRenderer {
         children: (node.children ?? []).map((c: any) => c.id),
         parentId,
         ...(node.authorId ? { authorId: node.authorId } : {}),
+        ...(node.dataTestId ? { dataTestId: node.dataTestId } : {}),
         ...(node.testId ? { testId: node.testId } : {}),
         ...(node.customProps ? { customProps: node.customProps } : {}),
       })
@@ -502,6 +506,8 @@ export class TestRenderer implements NativeRenderer {
   }
 
   findByTestId(testId: string): TestElement | undefined {
+    const dataTestId = this.native.findByDataTestId(testId)
+    if (dataTestId != null) return this.getElement(dataTestId)
     return [...this.buildElementMap().values()].find((el) => el.testId === testId)
   }
 

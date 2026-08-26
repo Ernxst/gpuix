@@ -255,6 +255,24 @@ impl RetainedTree {
             .min()
     }
 
+    /// Resolve a standard `data-testid` attribute to its numeric renderer ID.
+    ///
+    /// Test IDs are expected to be unique. Choose the earliest renderer ID for
+    /// malformed duplicates so the test surface remains deterministic.
+    pub fn find_by_data_test_id(&self, data_test_id: &str) -> Option<u64> {
+        self.elements
+            .values()
+            .filter(|element| {
+                element
+                    .custom_props
+                    .get("data-testid")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(data_test_id)
+            })
+            .map(|element| element.id)
+            .min()
+    }
+
     pub fn to_json(
         &self,
         bounds: &std::collections::HashMap<u64, crate::automation::ElementBounds>,
@@ -310,6 +328,17 @@ fn element_to_json(
         obj.insert(
             "authorId".to_string(),
             serde_json::Value::String(author_id.clone()),
+        );
+    }
+
+    if let Some(data_test_id) = element
+        .custom_props
+        .get("data-testid")
+        .and_then(serde_json::Value::as_str)
+    {
+        obj.insert(
+            "dataTestId".to_string(),
+            serde_json::Value::String(data_test_id.to_string()),
         );
     }
 

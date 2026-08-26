@@ -585,6 +585,8 @@ export interface StyleDiagnostic {
   elementType: string
   /** The author's `id` attribute, when the affected element has one. */
   authorId?: string
+  /** The standard `data-testid` attribute, when the affected element has one. */
+  dataTestId?: string
   testId?: string
   property: string
   value: string
