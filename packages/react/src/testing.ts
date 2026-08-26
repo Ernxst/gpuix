@@ -28,6 +28,7 @@ export {
 export type { MacCpuThrottle } from "./cpu-throttle.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
+  dispose(): void
   applyBatch(json: string): number[]
   flush(): void
   advanceAsyncClock(deltaMs: number): void
@@ -158,6 +159,7 @@ export interface TestElement {
 
 export class TestRenderer implements NativeRenderer {
   commitCount = 0
+  private disposed = false
   private applicationEventHandler: ((event: EventPayload) => void) | null = null
   private windowEventHandler: ((event: EventPayload) => void) | null = null
 
@@ -175,6 +177,13 @@ export class TestRenderer implements NativeRenderer {
     }
     this.native = probedNativeTestRenderer ?? new NativeTestRendererConstructor()
     probedNativeTestRenderer = null
+  }
+
+  /** Release this renderer's offscreen window and native GPUI context. */
+  dispose(): void {
+    if (this.disposed) return
+    this.native.dispose()
+    this.disposed = true
   }
 
   // ── NativeRenderer interface (all mutations delegate to native) ──
@@ -698,6 +707,7 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   const renderer = new TestRenderer()
   renderer.setAllowPrivateNetworkImages(options.allowPrivateNetworkImages ?? false)
   const root = createRoot(renderer)
+  let unmounted = false
 
   const render = (node: ReactNode): void => {
     flushSync(() => root.render(node))
@@ -705,10 +715,20 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
     renderer.flush()
   }
 
+  const unmount = (): void => {
+    if (unmounted) return
+    unmounted = true
+    try {
+      root.unmount()
+    } finally {
+      renderer.dispose()
+    }
+  }
+
   return {
     root,
     renderer,
     render,
-    unmount: root.unmount,
+    unmount,
   }
 }

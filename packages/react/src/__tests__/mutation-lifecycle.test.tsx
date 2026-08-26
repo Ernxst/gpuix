@@ -106,6 +106,29 @@ describeNative("mutation lifecycle", () => {
     }
   })
 
+  it("creates a working offscreen root after disposing the previous root", () => {
+    const first = createTestRoot()
+    first.render(<div style={{ width: 100, height: 100 }}>first</div>)
+    first.unmount()
+
+    expect(() => first.renderer.flush()).toThrow("TestGpuixRenderer has been disposed")
+
+    const second = createTestRoot()
+    const onClick = vi.fn()
+    try {
+      second.render(
+        <div style={{ width: 100, height: 100 }} onClick={onClick}>
+          second
+        </div>
+      )
+      second.renderer.nativeSimulateClick(10, 10)
+
+      expect(onClick).toHaveBeenCalledTimes(1)
+    } finally {
+      second.unmount()
+    }
+  })
+
   it("does not give a remounted root the old element ids", () => {
     const renderer = new TestRenderer()
     const first = createRoot(renderer)

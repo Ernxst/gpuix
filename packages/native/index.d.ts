@@ -143,6 +143,11 @@ export declare class GpuixRenderer {
  */
 export declare class TestGpuixRenderer {
   constructor()
+  /**
+   * Dispose this renderer's offscreen window and GPUI application context.
+   * Further interaction attempts fail instead of being routed to another root.
+   */
+  dispose(): void
   createElement(id: number, elementType: string): void
   /**
    * Destroy an element and all descendants. Returns destroyed IDs

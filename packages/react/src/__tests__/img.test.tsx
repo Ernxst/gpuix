@@ -3,7 +3,7 @@
 import fs from "fs"
 import { createServer, type Server } from "node:http"
 import type { AddressInfo } from "node:net"
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import React from "react"
 import {
   createTestRoot,
@@ -56,6 +56,32 @@ let retryRequestCount = 0
 let slowRequestCount = 0
 let slowResponseCloseCount = 0
 const slowResponseTimers = new Set<ReturnType<typeof setTimeout>>()
+const liveTestRoots = new Set<ReturnType<typeof createTestRoot>>()
+const liveRenderers = new Set<TestRenderer>()
+
+function createImageTestRoot(options?: Parameters<typeof createTestRoot>[0]) {
+  const testRoot = createTestRoot(options)
+  liveTestRoots.add(testRoot)
+  return testRoot
+}
+
+function disposeImageTestRoot(testRoot: ReturnType<typeof createTestRoot>) {
+  testRoot.unmount()
+  liveTestRoots.delete(testRoot)
+}
+
+function createImageRenderer() {
+  const renderer = new TestRenderer()
+  liveRenderers.add(renderer)
+  return renderer
+}
+
+afterEach(() => {
+  for (const testRoot of liveTestRoots) testRoot.unmount()
+  liveTestRoots.clear()
+  for (const renderer of liveRenderers) renderer.dispose()
+  liveRenderers.clear()
+})
 
 function sourceFrame(source?: ImageSource, tint?: "currentColor") {
   return (
@@ -85,26 +111,31 @@ function sourceFrame(source?: ImageSource, tint?: "currentColor") {
 }
 
 async function captureLoadedSource(source: ImageSource, name: string, tint?: "currentColor") {
-  const baseline = createTestRoot({ allowPrivateNetworkImages: true })
+  const baseline = createImageTestRoot({ allowPrivateNetworkImages: true })
   baseline.render(sourceFrame())
   const baselinePath = `/tmp/gpuix-image-${name}-baseline.png`
   baseline.renderer.captureScreenshot(baselinePath)
   const baselineBytes = fs.readFileSync(baselinePath)
 
-  const testRoot = createTestRoot({ allowPrivateNetworkImages: true })
+  const testRoot = createImageTestRoot({ allowPrivateNetworkImages: true })
   testRoot.render(sourceFrame(source, tint))
   const screenshotPath = `/tmp/gpuix-image-${name}.png`
 
-  for (let attempt = 0; attempt < 100; attempt++) {
-    testRoot.renderer.flush()
-    testRoot.renderer.captureScreenshot(screenshotPath)
-    const paintedText = testRoot.renderer.getPaintedText().join("\n")
-    const changed = bufferSimilarity(baselineBytes, fs.readFileSync(screenshotPath)) < 0.99
-    if (changed && !paintedText.includes("img:")) return screenshotPath
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
+  try {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      testRoot.renderer.flush()
+      testRoot.renderer.captureScreenshot(screenshotPath)
+      const paintedText = testRoot.renderer.getPaintedText().join("\n")
+      const changed = bufferSimilarity(baselineBytes, fs.readFileSync(screenshotPath)) < 0.99
+      if (changed && !paintedText.includes("img:")) return screenshotPath
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
 
-  throw new Error(`image ${name} did not paint: ${testRoot.renderer.getPaintedText().join(" | ")}`)
+    throw new Error(`image ${name} did not paint: ${testRoot.renderer.getPaintedText().join(" | ")}`)
+  } finally {
+    disposeImageTestRoot(testRoot)
+    disposeImageTestRoot(baseline)
+  }
 }
 
 describeNative("custom element: img", () => {
@@ -205,7 +236,7 @@ describeNative("custom element: img", () => {
   })
 
   it("serialises Buffer-backed data sources through the custom-prop pipeline", () => {
-    const testRoot = createTestRoot()
+    const testRoot = createImageTestRoot()
     const source: ImageSource = {
       kind: "data",
       mimeType: "image/webp",
@@ -221,7 +252,7 @@ describeNative("custom element: img", () => {
   })
 
   it("reports malformed direct and batched sources with element, property, and value", () => {
-    const direct = new TestRenderer()
+    const direct = createImageRenderer()
     direct.createElement(41, "img")
     direct.setCustomProp(41, "testId", JSON.stringify("direct-image"))
     direct.setCustomProp(41, "src", JSON.stringify("/tmp/ambiguous.png"))
@@ -233,7 +264,7 @@ describeNative("custom element: img", () => {
       value: '"/tmp/ambiguous.png"',
     })
 
-    const batched = new TestRenderer()
+    const batched = createImageRenderer()
     batched.applyBatch(
       JSON.stringify([
         ["createElement", 73, "img"],
@@ -310,7 +341,7 @@ describeNative("custom element: img", () => {
   }, 15_000)
 
   it("denies loopback URL images by default before opening a connection", async () => {
-    const testRoot = createTestRoot()
+    const testRoot = createImageTestRoot()
     testRoot.render(
       sourceFrame({
         kind: "url",
@@ -330,7 +361,7 @@ describeNative("custom element: img", () => {
   })
 
   it("retries a transient failure after the bounded failure TTL", async () => {
-    const testRoot = createTestRoot({ allowPrivateNetworkImages: true })
+    const testRoot = createImageTestRoot({ allowPrivateNetworkImages: true })
     testRoot.render(
       sourceFrame({
         kind: "url",
@@ -371,7 +402,7 @@ describeNative("custom element: img", () => {
   })
 
   it("redacts URL secrets and never paints response bodies", async () => {
-    const testRoot = createTestRoot({ allowPrivateNetworkImages: true })
+    const testRoot = createImageTestRoot({ allowPrivateNetworkImages: true })
     testRoot.render(
       sourceFrame({
         kind: "url",
@@ -391,25 +422,28 @@ describeNative("custom element: img", () => {
   })
 
   it("cancels an in-flight URL body when its image unmounts", async () => {
-    const testRoot = createTestRoot({ allowPrivateNetworkImages: true })
-    testRoot.render(
-      sourceFrame({
-        kind: "url",
-        url: `http://127.0.0.1:${serverPort}/slow`,
-      })
-    )
-    for (let frame = 0; frame < 50 && slowRequestCount < 1; frame++) {
-      testRoot.renderer.flush()
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-    expect(slowRequestCount).toBe(1)
+    const testRoot = createImageTestRoot({ allowPrivateNetworkImages: true })
+    try {
+      testRoot.render(
+        sourceFrame({
+          kind: "url",
+          url: `http://127.0.0.1:${serverPort}/slow`,
+        })
+      )
+      for (let frame = 0; frame < 50 && slowRequestCount < 1; frame++) {
+        testRoot.renderer.flush()
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(slowRequestCount).toBe(1)
 
-    testRoot.unmount()
-    testRoot.renderer.flush()
-    for (let attempt = 0; attempt < 50 && slowResponseCloseCount < 1; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      testRoot.render(null)
+      for (let attempt = 0; attempt < 50 && slowResponseCloseCount < 1; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(slowResponseCloseCount).toBe(1)
+    } finally {
+      disposeImageTestRoot(testRoot)
     }
-    expect(slowResponseCloseCount).toBe(1)
   })
 
   it("keeps URL status, MIME, size, and decode failures recoverable in the GPU renderer", async () => {
@@ -421,7 +455,7 @@ describeNative("custom element: img", () => {
     ]
 
     for (const failure of cases) {
-      const testRoot = createTestRoot({ allowPrivateNetworkImages: true })
+      const testRoot = createImageTestRoot({ allowPrivateNetworkImages: true })
       testRoot.render(
         sourceFrame({
           kind: "url",
@@ -439,12 +473,13 @@ describeNative("custom element: img", () => {
       const screenshot = `/tmp/gpuix-image-error-${failure.path}.png`
       expect(() => testRoot.renderer.captureScreenshot(screenshot)).not.toThrow()
       expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
+      disposeImageTestRoot(testRoot)
     }
   })
 
   it("warns through React for malformed source values", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-    const testRoot = createTestRoot()
+    const testRoot = createImageTestRoot()
     testRoot.render(
       <img
         testId="bad-image"
@@ -457,8 +492,21 @@ describeNative("custom element: img", () => {
 })
 
 describeNative("custom element: svg", () => {
+  it("renders raw monochrome SVG source with the inherited style color", () => {
+    const testRoot = createImageTestRoot()
+    testRoot.render(
+      <div style={{ color: "#5ca9ff" }}>
+        <svg source={SVG_FIXTURE} style={{ width: 240, height: 140 }} />
+      </div>
+    )
+
+    const screenshot = "/tmp/gpuix-svg-icon.png"
+    testRoot.renderer.captureScreenshot(screenshot)
+    expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
+  })
+
   it("tints #000 and currentColor SVG icons from an ancestor color", () => {
-    const testRoot = createTestRoot()
+    const testRoot = createImageTestRoot()
     const sources = {
       blackFill:
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="4" y="4" width="24" height="24" rx="4" fill="#000"/></svg>',
@@ -496,12 +544,12 @@ describeNative("custom element: svg", () => {
   })
 
   it("uses the light default icon colour on a dark surface", () => {
-    const baseline = createTestRoot()
+    const baseline = createImageTestRoot()
     baseline.render(<div style={{ width: "100%", height: "100%", backgroundColor: "#101522" }} />)
     const baselinePath = "/tmp/gpuix-svg-default-baseline.png"
     baseline.renderer.captureScreenshot(baselinePath)
 
-    const icon = createTestRoot()
+    const icon = createImageTestRoot()
     icon.render(
       <div
         style={{
