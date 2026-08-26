@@ -673,6 +673,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] React reconciler with mutation-based protocol
 - [x] napi-rs FFI bindings and RetainedTree
 - [x] Style mapping, including native `hover` / `active`
+- [x] Native focus styles, paint-only outlines, and keyboard activation
 - [x] Mouse, keyboard, focus, scroll, and click-outside events
 - [x] `commitMutations()` stores the view entity and calls `cx.notify()`
 - [x] GPU-backed test renderer

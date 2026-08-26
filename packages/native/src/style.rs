@@ -248,6 +248,9 @@ pub struct StyleDesc {
     pub border_bottom_left_radius: Option<f64>,
     pub border_bottom_right_radius: Option<f64>,
     pub box_shadow: Option<BoxShadowValue>,
+    pub outline_color: Option<String>,
+    pub outline_width: Option<f64>,
+    pub outline_offset: Option<f64>,
 
     pub font_size: Option<f64>,
     pub font_family: Option<String>,
@@ -272,6 +275,8 @@ pub struct StyleDesc {
 
     pub hover: Option<Box<StyleDesc>>,
     pub active: Option<Box<StyleDesc>>,
+    pub focus: Option<Box<StyleDesc>>,
+    pub focus_visible: Option<Box<StyleDesc>>,
 }
 
 /// One rejected field. The renderer adds element context when diagnostics are drained,
@@ -914,6 +919,7 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             ("backgroundColor", &mut parsed.style.background_color),
             ("color", &mut parsed.style.color),
             ("borderColor", &mut parsed.style.border_color),
+            ("outlineColor", &mut parsed.style.outline_color),
             ("selectionColor", &mut parsed.style.selection_color),
         ] {
             if key == name {
@@ -970,6 +976,8 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             }
             continue;
         }
+        number_field!(key, value, "outlineWidth", outline_width);
+        number_field!(key, value, "outlineOffset", outline_offset);
 
         number_field!(key, value, "fontSize", font_size);
         string_field!(key, value, "fontFamily", font_family);
@@ -1096,23 +1104,41 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             ["auto", "text", "none"]
         );
 
-        if key == "hover" || key == "active" {
-            let property = if key == "hover" {
-                property!("hover")
-            } else {
-                property!("active")
+        if matches!(key.as_str(), "hover" | "active" | "focus" | "focusVisible") {
+            let property = match key.as_str() {
+                "hover" => property!("hover"),
+                "active" => property!("active"),
+                "focus" => property!("focus"),
+                "focusVisible" => property!("focusVisible"),
+                _ => unreachable!(),
             };
             if !prefix.is_empty() {
                 reject(
                     &mut parsed.problems,
                     property,
                     value,
-                    "nested hover/active styles are not supported",
+                    "nested state styles are not supported",
                 );
-            } else if key == "hover" {
-                parsed.style.hover = parse_nested_style("hover", value, &mut parsed.problems);
             } else {
-                parsed.style.active = parse_nested_style("active", value, &mut parsed.problems);
+                match key.as_str() {
+                    "hover" => {
+                        parsed.style.hover =
+                            parse_nested_style("hover", value, &mut parsed.problems)
+                    }
+                    "active" => {
+                        parsed.style.active =
+                            parse_nested_style("active", value, &mut parsed.problems)
+                    }
+                    "focus" => {
+                        parsed.style.focus =
+                            parse_nested_style("focus", value, &mut parsed.problems)
+                    }
+                    "focusVisible" => {
+                        parsed.style.focus_visible =
+                            parse_nested_style("focusVisible", value, &mut parsed.problems)
+                    }
+                    _ => unreachable!(),
+                }
             }
             continue;
         }
@@ -1208,6 +1234,7 @@ fn validate_ranges(parsed: &mut ParsedStyle, prefix: &str) {
         border_top_right_radius => "borderTopRightRadius",
         border_bottom_left_radius => "borderBottomLeftRadius",
         border_bottom_right_radius => "borderBottomRightRadius",
+        outline_width => "outlineWidth",
     );
 }
 
@@ -1501,6 +1528,43 @@ mod tests {
     }
 
     #[test]
+    fn outline_and_focus_fields_use_the_shared_validation_path() {
+        let parsed = parse_style_value(&json!({
+            "outlineColor": "not-a-color",
+            "outlineWidth": -1,
+            "outlineOffset": "wide",
+            "focusVisible": {
+                "backgroundColor": "blue",
+                "outlineWidth": -2
+            }
+        }));
+
+        let mut properties = parsed
+            .problems
+            .iter()
+            .map(|problem| problem.property.as_str())
+            .collect::<Vec<_>>();
+        properties.sort_unstable();
+        assert_eq!(
+            properties,
+            [
+                "focusVisible.outlineWidth",
+                "outlineColor",
+                "outlineOffset",
+                "outlineWidth"
+            ]
+        );
+        assert_eq!(
+            parsed
+                .style
+                .focus_visible
+                .as_deref()
+                .and_then(|style| style.background_color.as_deref()),
+            Some("blue")
+        );
+    }
+
+    #[test]
     fn parses_css_and_structured_linear_gradients() {
         let css = parse_background(&BackgroundValue::String(
             "linear-gradient(90deg in oklab, red 0%, blue 100%)".into(),
@@ -1631,6 +1695,9 @@ mod tests {
                 "spreadRadius": 1,
                 "color": "red"
             },
+            "outlineColor": "blue",
+            "outlineWidth": 2,
+            "outlineOffset": 3,
             "fontSize": 16,
             "fontFamily": "Helvetica",
             "fontWeight": "bold",
@@ -1650,7 +1717,9 @@ mod tests {
             "userSelect": "text",
             "selectionColor": "red",
             "hover": { "color": "blue" },
-            "active": { "color": "green" }
+            "active": { "color": "green" },
+            "focus": { "borderColor": "yellow" },
+            "focusVisible": { "outlineColor": "cyan" }
         }"#,
         )
         .unwrap();

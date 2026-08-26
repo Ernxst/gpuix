@@ -1449,7 +1449,7 @@ object with a `type`: `px`, `fr`, `auto`, `min-content`, `max-content`,
 
 **Position:** `position` (`"relative"` | `"absolute"`), `top`, `right`, `bottom`, `left`
 
-**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
+**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`, `outlineColor`, `outlineWidth`, `outlineOffset`
 
 `background` accepts a solid color, a CSS `linear-gradient()` with two through
 eight stops, or a structured native gradient:
@@ -1562,11 +1562,12 @@ does not yet implement those wrapping algorithms.
 
 **Selection:** `userSelect` (`"text"` | `"none"`), `selectionColor` — both inherit down the tree
 
-### Hover and active
+### Hover, active, and focus
 
-`hover` and `active` are **nested style objects**. GPUI applies them natively
-when the pointer is over the element or the mouse is down. There is no
-JavaScript round trip.
+`hover`, `active`, `focus`, and `focusVisible` are **nested style objects**.
+GPUI applies them natively without a JavaScript round trip. `focus` applies for
+pointer and keyboard focus. `focusVisible` applies only while the directly
+tracked element has keyboard-modality focus, matching CSS `:focus-visible`.
 
 ```tsx
 <div
@@ -1576,14 +1577,33 @@ JavaScript round trip.
     padding: 12,
     hover: { backgroundColor: '#45475a' },
     active: { backgroundColor: '#585b70' },
+    focusVisible: {
+      outlineColor: '#89b4fa',
+      outlineWidth: 2,
+      outlineOffset: 2,
+    },
   }}
+  tabIndex={0}
 >
   Press
 </div>
 ```
 
-Nesting is one level deep. A `hover` object cannot contain another `hover` or
-`active`.
+An outline is painted outside the border and does not change measured size or
+move content. Focus styles do not make an element focusable: use `tabIndex`, a
+keyboard/focus event, or a native input. A focused descendant does not apply a
+parent's `focus` or `focusVisible` style.
+
+Nesting is one level deep. A state style cannot contain `hover`, `active`,
+`focus`, or `focusVisible`.
+
+### Keyboard activation
+
+A focused, clickable non-text element dispatches its existing `onClick` handler
+for Enter or Space, using the same native click path as pointer activation.
+Anchors with an `href` join the native tab order automatically, so a plain link
+does not need an app-side `tabIndex` or `onKeyDown` adapter. Native text editors
+keep Space as text input instead of synthesizing a click.
 
 > **Note: `white-space: pre` is not supported.** GPUI's text system only has `normal` (wraps) and `nowrap` (single line). To preserve newlines like HTML `<pre>`, split your text on `\n` in React and render each line as a separate `<text>` element in a flex column:
 >
@@ -1871,6 +1891,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Cross-element text selection
 - [x] Headless Select, Combobox, and Tooltip
 - [x] Native `hover` and `active` styles
+- [x] Native focus styles, paint-only outlines, and keyboard activation
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Application menus, Cmd+Q, explicit quit, and graceful React termination
