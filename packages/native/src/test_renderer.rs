@@ -674,19 +674,36 @@ impl TestGpuixRenderer {
         })
     }
 
-    /// Simulate the platform deactivating the test window.
+    /// Simulate a platform window activation change through the production observer path.
     #[napi]
-    pub fn simulate_window_deactivation(&self) -> Result<()> {
+    pub fn simulate_window_activation(&self, active: bool) -> Result<()> {
         let result = with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, app| {
-                window.simulate_active_status_change(false, app);
+                window.simulate_active_status_change(active, app);
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
             cx.run_until_parked();
             Ok(())
         });
-        *self.active_pointer_origin.lock().unwrap() = None;
+        if !active {
+            *self.active_pointer_origin.lock().unwrap() = None;
+        }
         result
+    }
+
+    /// Simulate the platform deactivating the test window.
+    #[napi]
+    pub fn simulate_window_deactivation(&self) -> Result<()> {
+        self.simulate_window_activation(false)
+    }
+
+    /// Whether the offscreen native window is active and receiving key events.
+    #[napi]
+    pub fn is_active(&self) -> Result<bool> {
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, |_, window, _app| window.is_window_active())
+                .map_err(|error| Error::from_reason(error.to_string()))
+        })
     }
 
     /// Simulate a mouse down event at the given window coordinates.

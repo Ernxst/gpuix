@@ -41,6 +41,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   focusElement(elementId: number): void
   setPointerCapture(elementId: number): void
   releasePointerCapture(elementId: number): void
+  simulateWindowActivation(active: boolean): void
   simulateWindowDeactivation(): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
@@ -319,7 +320,7 @@ export class TestRenderer implements NativeRenderer {
       const events = this.native.drainEvents()
       if (events.length === 0) break
       for (const event of events) {
-        if (event.eventType === "windowResize") {
+        if (event.eventType === "windowResize" || event.eventType === "windowActivation") {
           flushSync(() => {
             this.windowEventHandler?.(event)
           })
@@ -471,12 +472,17 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
-  /** End-to-end: simulate the platform deactivating the native window. */
-  nativeSimulateWindowDeactivation(): void {
+  /** End-to-end: simulate a native window activation change. */
+  nativeSimulateWindowActivation(active: boolean): void {
     this.native.flush()
-    this.native.simulateWindowDeactivation()
+    this.native.simulateWindowActivation(active)
     this.dispatchNativeEvents()
     this.native.flush()
+  }
+
+  /** End-to-end: simulate the platform deactivating the native window. */
+  nativeSimulateWindowDeactivation(): void {
+    this.nativeSimulateWindowActivation(false)
   }
 
   /** End-to-end: simulate mouse up through GPUI hit testing →
@@ -701,6 +707,10 @@ export class TestRenderer implements NativeRenderer {
 
   getWindowSize(): { width: number; height: number; scaleFactor: number } {
     return this.native.getWindowSize!()
+  }
+
+  isActive(): boolean {
+    return this.native.isActive!()
   }
 
   simulateResize(width: number, height: number): void {

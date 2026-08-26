@@ -440,6 +440,29 @@ describeNative("render()", () => {
     expect(windowHandlers.at(-1)).toBeNull()
   })
 
+  it("forwards native activation changes through the window event handler", () => {
+    const activations: Array<{ eventType: string; isActive?: boolean }> = []
+    renderer.setWindowEventHandler((event) => activations.push(event))
+
+    // Install the production observer before changing the offscreen window state.
+    render(<div />, { renderer })
+    renderer.flush()
+
+    renderer.nativeSimulateWindowActivation(false)
+    expect(renderer.isActive()).toBe(false)
+    renderer.nativeSimulateWindowActivation(true)
+    expect(renderer.isActive()).toBe(true)
+
+    expect(
+      activations
+        .filter((event) => event.eventType === "windowActivation")
+        .map(({ eventType, isActive }) => ({ eventType, isActive }))
+    ).toEqual([
+      { eventType: "windowActivation", isActive: false },
+      { eventType: "windowActivation", isActive: true },
+    ])
+  })
+
   it("normalizes an incomplete browser window-size response", () => {
     const incompleteBrowserRenderer = Object.assign(new TestRenderer(), {
       getWindowSize: () => ({ width: 1280, height: 720 }) as unknown as ReturnType<TestRenderer["getWindowSize"]>,
