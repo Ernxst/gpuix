@@ -431,6 +431,111 @@ describe("<virtual-list>", () => {
     expect(renderer.getPaintedText()).not.toContain("row-0")
   })
 
+  it("ignores itemCount when the estimate is explicitly disabled", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <virtual-list
+        itemCount={1000}
+        windowStart={0}
+        estimatedItemHeight={null}
+        style={{ width: 400, height: 160 }}
+      >
+        {Array.from({ length: 8 }, (_, index) => (
+          <div
+            key={index}
+            style={{
+              display: "flex",
+              height: 40,
+              flexShrink: 0,
+              alignItems: "center",
+            }}
+          >
+            <text>{`row-${index}`}</text>
+          </div>
+        ))}
+      </virtual-list>,
+    )
+
+    const list = renderer.findByType("virtual-list")[0]
+    renderer.scrollToItem(list.id, 80)
+
+    const painted = renderer.getPaintedText()
+    expect(painted.some((line) => line.startsWith("row-"))).toBe(true)
+    expect(renderer.getAllText()).toHaveLength(8)
+  })
+
+  it("keeps estimated height for logical rows React has not mounted", () => {
+    const { render, renderer } = createTestRoot()
+    const windowed = (start: number) => (
+      <virtual-list
+        itemCount={1000}
+        windowStart={start}
+        overdraw={0}
+        estimatedItemHeight={40}
+        style={{ width: 400, height: 160 }}
+      >
+        {Array.from({ length: 8 }, (_, offset) => (
+          <div
+            key={start + offset}
+            style={{
+              display: "flex",
+              height: 40,
+              flexShrink: 0,
+              alignItems: "center",
+            }}
+          >
+            <text>{`row-${start + offset}`}</text>
+          </div>
+        ))}
+      </virtual-list>
+    )
+
+    render(windowed(0))
+    const list = renderer.findByType("virtual-list")[0]
+    renderer.scrollToItem(list.id, 50)
+    renderer.scrollToItem(list.id, 80)
+
+    const offset = renderer.getScrollOffset(list.id)?.[1] ?? 0
+    expect(offset).toBeCloseTo(-80 * 40, 0)
+  })
+
+  it("paints a newly mounted window after a jump past unmounted rows", () => {
+    const { render, renderer } = createTestRoot()
+    const windowed = (start: number, rowHeight: number) => (
+      <virtual-list
+        itemCount={1000}
+        windowStart={start}
+        overdraw={0}
+        estimatedItemHeight={40}
+        style={{ width: 400, height: 160 }}
+      >
+        {Array.from({ length: 8 }, (_, offset) => (
+          <div
+            key={start + offset}
+            style={{
+              display: "flex",
+              height: rowHeight,
+              flexShrink: 0,
+              alignItems: "center",
+            }}
+          >
+            <text>{`row-${start + offset}`}</text>
+          </div>
+        ))}
+      </virtual-list>
+    )
+
+    render(windowed(0, 40))
+    const list = renderer.findByType("virtual-list")[0]
+    renderer.scrollToItem(list.id, 50)
+    render(windowed(50, 80))
+
+    const painted = renderer.getPaintedText()
+    expect(painted).toContain("row-50")
+    expect(painted).not.toContain("row-0")
+    expect(painted.length).toBeLessThan(5)
+  })
+
   it("lets overflow-x inside a row pan without moving the list", () => {
     const { render, renderer } = createTestRoot()
     render(

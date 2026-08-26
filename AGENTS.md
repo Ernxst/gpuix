@@ -10,6 +10,14 @@ GPUIX enables building **native GPU-accelerated desktop applications** using **R
 
 Instead of Electron/web rendering, your React components render directly to the GPU via Metal/Vulkan.
 
+## Stay close to HTML
+
+GPUIX should feel like **HTML and the DOM**. Agents already know `onMouseDown` / `onMouseMove` / `onMouseUp`, flexbox, and `setPointerCapture`. Prefer those names over a GPUI-only primitive.
+
+Do **not** fight GPUI or work around it. If GPUI is different from the DOM, follow GPUI. The goal is the lowest complexity and the highest performance. Do not add HTML machinery that GPUI does not need.
+
+A `div` with `onMouseDown`, `onMouseMove`, and `onMouseUp` keeps move and up after the pointer leaves the hitbox. That is HTML `setPointerCapture`, applied automatically when the same node listens for down and move. Overlay-as-document-listener still works. It is not required.
+
 ```
 React (TypeScript)  →  napi-rs  →  GPUI (Rust)  →  GPU
      Your code         Bridge      Native render    Metal/Vulkan
@@ -568,6 +576,52 @@ xcodebuild -downloadComponent MetalToolchain
 3. Fast-forward the `zed/` submodule to the updated `gpuix` branch.
 4. Match `rust-toolchain.toml` to `zed/rust-toolchain.toml`.
 5. Run `cargo check --all-targets`, `bun run build`, and the test suites.
+
+### Search Zed before you touch GPUI
+
+Before you debug a GPUI behaviour, add a GPUIX feature that needs a new GPUI API,
+or patch the fork, **search `zed-industries/zed` first**. Zed is a large project
+with an active roadmap. The answer is often one of:
+
+- someone already reported the same bug
+- an open PR already implements the API, so **wait and bump the submodule**
+- a merged PR already added it, so **bump the submodule** instead of writing code
+- a closed issue says the Zed team declined it, so plan a fork-only fix
+
+Search issues and PRs together, then search code:
+
+```bash
+# issues + PRs, full text
+gh search issues --repo zed-industries/zed --include-prs --limit 30 'TransformationMatrix' \
+  --json number,title,url,state,isPullRequest \
+  --jq '.[] | [.number, .isPullRequest, .state, .title, .url] | @tsv'
+
+# title only, to find the feature rather than every mention
+gh search issues --repo zed-industries/zed --include-prs --match title --limit 30 'transform'
+
+# where the API already exists in the tree
+gh search code --repo zed-industries/zed --language Rust --limit 30 'TransformationMatrix'
+```
+
+Then read the promising ones in full. A closed issue is the important signal, and
+its `stateReason` and comments explain whether the idea was rejected or shipped:
+
+```bash
+gh issue view 53303 -R zed-industries/zed --json number,title,state,stateReason,body,comments
+gh pr view 59413 -R zed-industries/zed --json title,state,body,files,comments,reviews
+```
+
+**Use the `--repo` and `--match` flags. Do not put `repo:` or `in:title` inside the
+query string.** `gh search` mangles the inline form: `repo:` first fails with
+`Invalid search query`, and `in:title ... repo:owner/name` silently drops the repo
+filter and returns results from unrelated repositories.
+
+Search the real symbol names, not concepts. `TransformationMatrix`,
+`with_element_offset`, and `request_animation_frame` find the discussion.
+"animation is slow" does not.
+
+Record the outcome in the changeset or PR body, with issue and PR URLs, so the
+next session does not repeat the search.
 
 ### Fixing GPUI for GPUIX
 

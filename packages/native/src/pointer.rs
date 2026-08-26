@@ -48,17 +48,6 @@ impl PointerRouter {
         had_sequence || had_capture
     }
 
-    pub(crate) fn retain_owner(&mut self, owner_exists: impl FnOnce(u64) -> bool) -> bool {
-        let Some(owner) = self.capture_owner else {
-            return true;
-        };
-        if owner_exists(owner) {
-            return true;
-        }
-        self.cancel();
-        false
-    }
-
     #[cfg(test)]
     fn owner(&self) -> Option<u64> {
         self.capture_owner
@@ -124,17 +113,6 @@ mod tests {
         assert_eq!(router.owner(), Some(7));
         assert!(router.release(7));
         assert_eq!(router.owner(), None);
-    }
-
-    #[test]
-    fn removing_the_owner_cancels_capture_and_the_pressed_sequence() {
-        let mut router = PointerRouter::default();
-        router.begin(MouseButton::Left);
-        router.capture(7);
-
-        assert!(!router.retain_owner(|id| id != 7));
-        assert_eq!(router.owner(), None);
-        assert!(!router.capture(8));
     }
 
     #[test]

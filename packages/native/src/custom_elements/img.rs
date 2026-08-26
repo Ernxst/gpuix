@@ -9,7 +9,8 @@ use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use futures::AsyncReadExt as _;
 use gpui::http_client::HttpRequestExt as _;

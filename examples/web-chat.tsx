@@ -6,5 +6,10 @@ import { ChatApp } from './chat'
 
 render(
   <ChatApp includeSafeMdx />,
-  { title: 'GPUIX Chat', width: 1180, height: 820 },
+  {
+    title: 'GPUIX Chat',
+    width: 1180,
+    height: 820,
+    debugFrameOverlay: 'full',
+  },
 )
