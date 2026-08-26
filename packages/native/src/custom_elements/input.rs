@@ -1531,7 +1531,11 @@ impl gpui::Element for EditorTextElement {
             ElementInputHandler::new(bounds, self.input.clone()),
             cx,
         );
-        window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
+        let content_mask = gpui::ContentMask {
+            bounds,
+            ..Default::default()
+        };
+        window.with_content_mask(Some(content_mask), |window| {
             for quad in prepaint.selection.drain(..) {
                 window.paint_quad(quad);
             }
