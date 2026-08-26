@@ -6,6 +6,7 @@
  * composer chips, and the workspace footer. Data is hardcoded.
  *
  * Run on desktop: cd examples && bun --hot chat.tsx
+ * JavaScript saves remount React while hover, click, and keyboard events keep dispatching.
  * Run in a browser: bun run web
  * Slow CPU: THROTTLE=utility bun --hot chat.tsx
  */

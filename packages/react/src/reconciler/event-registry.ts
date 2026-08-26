@@ -11,7 +11,21 @@ import {
   type GpuixSyntheticEvent,
 } from "./synthetic-event.js"
 
-const containersByRenderer = new WeakMap<NativeRenderer, Container>()
+const EVENT_REGISTRY_KEY = "__gpuixEventRegistry"
+
+type EventRegistrySlot = {
+  containersByRenderer: WeakMap<NativeRenderer, Container>
+}
+
+function eventRegistrySlot(): EventRegistrySlot {
+  const existing = Reflect.get(globalThis, EVENT_REGISTRY_KEY) as EventRegistrySlot | undefined
+  if (existing) return existing
+
+  const created: EventRegistrySlot = { containersByRenderer: new WeakMap() }
+  Reflect.set(globalThis, EVENT_REGISTRY_KEY, created)
+  return created
+}
+
 const NON_BUBBLING_EVENTS = new Set([
   "mouseEnter",
   "mouseLeave",
@@ -24,15 +38,15 @@ const NON_BUBBLING_EVENTS = new Set([
 ])
 
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
-  containersByRenderer.set(renderer, container)
+  eventRegistrySlot().containersByRenderer.set(renderer, container)
 }
 
 export function detachRoot(renderer: NativeRenderer): void {
-  containersByRenderer.delete(renderer)
+  eventRegistrySlot().containersByRenderer.delete(renderer)
 }
 
 export function containerForRenderer(renderer: NativeRenderer): Container | undefined {
-  return containersByRenderer.get(renderer)
+  return eventRegistrySlot().containersByRenderer.get(renderer)
 }
 
 function eventPath(container: Container, target: Instance): Instance[] {
@@ -107,7 +121,7 @@ export function handleGpuixEvent(
   payload: EventPayload,
   renderer: NativeRenderer
 ): GpuixEventDispatchResult {
-  const container = containersByRenderer.get(renderer)
+  const container = eventRegistrySlot().containersByRenderer.get(renderer)
   if (!container) return { defaultPrevented: false, propagationStopped: false }
 
   if (shouldSuppressKeyboardClick(container, payload)) {
