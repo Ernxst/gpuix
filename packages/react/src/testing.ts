@@ -40,6 +40,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   applyBatch(json: string): number[]
   flush(): void
   advanceAsyncClock(deltaMs: number): void
+  setReducedMotion(enabled: boolean): void
   drainEvents(): EventPayload[]
   setMenus(menus: MenuSpec[]): void
   simulateMenuAction(id: string): void
@@ -336,9 +337,14 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
-  /** Advance timers owned by GPUI's async executor without sleeping. */
+  /** Advance GPUI timers and, when paused, the native animation frame clock. */
   advanceAsyncClock(deltaMs: number): void {
     this.native.advanceAsyncClock(deltaMs)
+  }
+
+  /** Override GPUI's reduced-motion policy for deterministic tests. */
+  setReducedMotion(enabled: boolean): void {
+    this.native.setReducedMotion(enabled)
   }
 
   /** Drain events collected by the native GPUI event handlers. */

@@ -546,7 +546,9 @@ impl TestGpuixRenderer {
     }
 
     /// Advance GPUI's async executor clock so tests can deterministically fire
-    /// timers such as bounded image retry/revalidation deadlines.
+    /// timers such as bounded image retry/revalidation deadlines. When the
+    /// renderer animation clock is paused, advance that clock by the same
+    /// amount and render the resulting transition frame as well.
     #[napi]
     pub fn advance_async_clock(&self, delta_ms: f64) -> Result<()> {
         if !delta_ms.is_finite() || delta_ms < 0.0 {
@@ -554,8 +556,32 @@ impl TestGpuixRenderer {
                 "advanceAsyncClock delta must be a finite non-negative number",
             ));
         }
-        with_test_state(self.state_id, |cx, _window, _view| {
+        with_test_state(self.state_id, |cx, window, view| {
             cx.advance_clock(std::time::Duration::from_secs_f64(delta_ms / 1000.0));
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, cx| {
+                    if view.clock.fast_forward_if_frozen_ms(delta_ms).is_some() {
+                        cx.notify();
+                    }
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// Override GPUI's reduced-motion policy for deterministic tests.
+    #[napi]
+    pub fn set_reduced_motion(&self, enabled: bool) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                app.set_reduce_motion(enabled);
+                view.update(app, |_, cx| cx.notify());
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
             cx.run_until_parked();
             Ok(())
         })
@@ -1239,21 +1265,27 @@ impl TestGpuixRenderer {
         let hover_group_bounds = hover_group_id.and_then(crate::automation::get_bounds);
         let active_pointer_origin = *self.active_pointer_origin.lock().unwrap();
 
-        let (pointer, focus, keyboard_input) =
+        let (pointer, focus, keyboard_input, transitioned_style) =
             with_test_state(self.state_id, |cx, window, view| {
                 let view = view.clone();
                 cx.update_window(window, |_, window, app| {
                     let mouse = window.mouse_position();
+                    let reduce_motion = app.reduce_motion();
+                    let view = view.read(app);
                     let focus = view
-                        .read(app)
                         .focus_handles
                         .get(&id)
                         .is_some_and(|handle| handle.is_focused(window));
                     let keyboard = window.last_input_was_keyboard();
+                    let transitioned_style = view
+                        .transition_states
+                        .get(&id)
+                        .map(|state| state.frame(view.clock.now(), reduce_motion).style);
                     (
                         (f64::from(f32::from(mouse.x)), f64::from(f32::from(mouse.y))),
                         focus,
                         keyboard,
+                        transitioned_style,
                     )
                 })
                 .map_err(|error| Error::from_reason(error.to_string()))
@@ -1271,21 +1303,22 @@ impl TestGpuixRenderer {
                 element_bounds.is_some_and(|bounds| point_is_inside(bounds, origin))
             });
 
-        let mut resolved = style_object(&style)?;
+        let effective_style = transitioned_style.as_ref().unwrap_or(&style);
+        let mut resolved = style_object(effective_style)?;
         if focus {
-            refine_style_object(&mut resolved, style.focus.as_deref())?;
+            refine_style_object(&mut resolved, effective_style.focus.as_deref())?;
         }
         if focus && keyboard_input {
-            refine_style_object(&mut resolved, style.focus_visible.as_deref())?;
+            refine_style_object(&mut resolved, effective_style.focus_visible.as_deref())?;
         }
         if hover_within {
-            refine_style_object(&mut resolved, style.hover_within.as_deref())?;
+            refine_style_object(&mut resolved, effective_style.hover_within.as_deref())?;
         }
         if hovered {
-            refine_style_object(&mut resolved, style.hover.as_deref())?;
+            refine_style_object(&mut resolved, effective_style.hover.as_deref())?;
         }
         if active {
-            refine_style_object(&mut resolved, style.active.as_deref())?;
+            refine_style_object(&mut resolved, effective_style.active.as_deref())?;
         }
 
         serde_json::to_string(&resolved)

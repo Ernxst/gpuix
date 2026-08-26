@@ -105,9 +105,11 @@ export type {
   MotionStyle,
   MotionTransition,
   NativeRenderer,
+  StyleTransition,
   StyleDiagnostic,
   NativeWindowInsets,
   StyleDesc,
+  TransitionProperty,
 } from "./types/host.js"
 export { handleGpuixEvent } from "./reconciler/event-registry.js"
 export type {

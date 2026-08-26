@@ -1511,6 +1511,7 @@ impl GpuixRenderer {
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
         let app_name = options.app_name.clone().unwrap_or_else(|| title.clone());
         let menus = options.menus.clone();
+        let reduced_motion = options.reduced_motion.unwrap_or(false);
         let window_options = options.clone();
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
@@ -1584,6 +1585,7 @@ impl GpuixRenderer {
             .with_http_client(default_http_client())
             .with_quit_mode(gpui::QuitMode::LastWindowClosed);
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
+            cx.set_reduce_motion(reduced_motion);
             init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
             init_application_menu_support(cx, Some(application_callback.clone()));
@@ -1678,6 +1680,7 @@ impl GpuixRenderer {
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
         let app_name = options.app_name.clone().unwrap_or_else(|| title.clone());
         let menus = options.menus.clone();
+        let reduced_motion = options.reduced_motion.unwrap_or(false);
         let window_options = options.clone();
         let tree = self.tree.clone();
         let selection = self.selection.clone();
@@ -1700,6 +1703,7 @@ impl GpuixRenderer {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let app = gpui_platform::application().with_http_client(default_http_client());
                     app.run(move |cx| {
+                        cx.set_reduce_motion(reduced_motion);
                         init_key_bindings(cx);
                         crate::custom_elements::input::init(cx);
                         init_application_menu_support(cx, Some(application_callback.clone()));
@@ -4163,6 +4167,8 @@ pub(crate) struct GpuixView {
     pub(crate) scroll_handles: HashMap<u64, gpui::ScrollHandle>,
     /// Native animation clocks keyed by retained element ID.
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
+    /// CSS-like style transition tracks keyed by retained element ID.
+    pub(crate) transition_states: HashMap<u64, crate::motion::StyleTransitionState>,
     /// Live text selection, shared with the paint closures and the napi methods.
     pub(crate) selection: SharedSelection,
     pub(crate) image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
@@ -4308,6 +4314,7 @@ impl GpuixView {
             custom_registry: CustomElementRegistry::with_defaults(),
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
+            transition_states: HashMap::new(),
             selection,
             image_network_policy,
             pointer_router: Default::default(),
@@ -4346,10 +4353,13 @@ impl GpuixView {
         }
     }
 
-    fn cancel_pointer_sequence(&mut self, window: &mut gpui::Window) {
+    fn cancel_pointer_sequence(&mut self, window: &mut gpui::Window) -> bool {
         if self.pointer_router.borrow_mut().cancel() {
             window.release_pointer();
         }
+        self.transition_states
+            .values_mut()
+            .fold(false, |changed, state| state.set_active(false) || changed)
     }
 
     fn observe_window_resize(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) {
@@ -4407,7 +4417,8 @@ impl GpuixView {
 
         let callback = self.event_callback.clone();
         let now = self.clock.now();
-        let mut motion_active = false;
+        let mut animation_active = false;
+        let reduce_motion = cx.reduce_motion();
         let mut highlight_events = Vec::new();
 
         // Re-resolve against the tree as it is NOW. gpui calls this during
@@ -4442,8 +4453,10 @@ impl GpuixView {
             custom_registry: &mut self.custom_registry,
             virtual_lists: &mut self.virtual_lists,
             motion_states: &mut self.motion_states,
+            transition_states: &mut self.transition_states,
             now,
-            motion_active: &mut motion_active,
+            animation_active: &mut animation_active,
+            reduce_motion,
             selection: self.selection.clone(),
             image_network_policy: &self.image_network_policy,
             inherited,
@@ -4452,7 +4465,7 @@ impl GpuixView {
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
-        if motion_active {
+        if animation_active {
             window.request_animation_frame();
         }
         let row = gpui::div()
@@ -4549,8 +4562,10 @@ pub(crate) struct BuildCtx<'a> {
     pub custom_registry: &'a mut CustomElementRegistry,
     virtual_lists: &'a mut HashMap<u64, VirtualListEntry>,
     pub motion_states: &'a mut HashMap<u64, crate::motion::MotionState>,
+    pub transition_states: &'a mut HashMap<u64, crate::motion::StyleTransitionState>,
     pub now: web_time::Instant,
-    pub motion_active: &'a mut bool,
+    pub animation_active: &'a mut bool,
+    pub reduce_motion: bool,
     pub selection: SharedSelection,
     pub image_network_policy: &'a crate::custom_elements::img::ImageNetworkPolicy,
     /// Inherited text state, resolved the way CSS inherits it. The renderer's
@@ -5066,11 +5081,11 @@ impl gpui::Render for GpuixView {
 
         if self.window_activation_subscription.is_none() {
             self.window_activation_subscription =
-                Some(cx.observe_window_activation(window, |view, window, _cx| {
+                Some(cx.observe_window_activation(window, |view, window, cx| {
                     let is_active = window.is_window_active();
                     emit_window_activation(&view.window_event_callback, is_active);
-                    if !is_active {
-                        view.cancel_pointer_sequence(window);
+                    if !is_active && view.cancel_pointer_sequence(window) {
+                        cx.notify();
                     }
                 }));
         }
@@ -5096,12 +5111,15 @@ impl gpui::Render for GpuixView {
             .retain(|id, _| tree.elements.contains_key(id));
         self.motion_states
             .retain(|id, _| tree.elements.contains_key(id));
+        self.transition_states
+            .retain(|id, _| tree.elements.contains_key(id));
 
         // Build the element tree. custom_registry, focus_handles, and scroll_handles
         // are different fields of self, so Rust allows borrowing all simultaneously.
         let theme = Theme::dark();
         let now = self.clock.now();
-        let mut motion_active = false;
+        let mut animation_active = false;
+        let reduce_motion = cx.reduce_motion();
         // Pruned by DECLARATION, not existence: an element that drops its
         // `highlight` prop keeps living, and its cached group list holds a copy
         // of every string in its subtree.
@@ -5121,8 +5139,10 @@ impl gpui::Render for GpuixView {
                     custom_registry: &mut self.custom_registry,
                     virtual_lists: &mut self.virtual_lists,
                     motion_states: &mut self.motion_states,
+                    transition_states: &mut self.transition_states,
                     now,
-                    motion_active: &mut motion_active,
+                    animation_active: &mut animation_active,
+                    reduce_motion,
                     selection: self.selection.clone(),
                     image_network_policy: &self.image_network_policy,
                     inherited: Inherited::root(&theme),
@@ -5174,7 +5194,7 @@ impl gpui::Render for GpuixView {
             }
         });
 
-        if motion_active {
+        if animation_active {
             window.request_animation_frame();
         }
 
@@ -5196,7 +5216,30 @@ pub(crate) fn build_element(
         return gpui::Empty.into_any_element();
     };
 
-    let animated_style = if let Some(source) = element.custom_props.get("motion") {
+    let declared_style = element.style.as_deref();
+    let transitioned_style =
+        if let Some(style) = declared_style.filter(|style| style.transition.is_some()) {
+            let focused = ctx
+                .focus_handles
+                .get(&id)
+                .is_some_and(|handle| handle.is_focused(window));
+            let focus_state = crate::motion::StyleState {
+                focused,
+                focus_visible: focused && window.last_input_was_keyboard(),
+            };
+            let state = ctx.transition_states.entry(id).or_insert_with(|| {
+                crate::motion::StyleTransitionState::new(style, focus_state, ctx.now)
+            });
+            state.sync(style, focus_state, ctx.now, ctx.reduce_motion);
+            let frame = state.frame(ctx.now, ctx.reduce_motion);
+            *ctx.animation_active |= frame.active;
+            Some(frame.style)
+        } else {
+            ctx.transition_states.remove(&id);
+            None
+        };
+
+    let motion_style = if let Some(source) = element.custom_props.get("motion") {
         let state = match ctx.motion_states.entry(id) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::hash_map::Entry::Vacant(entry) => {
@@ -5214,11 +5257,14 @@ pub(crate) fn build_element(
         }
         state.is_valid().then(|| {
             let frame = state.frame(ctx.now);
-            *ctx.motion_active |= frame.active;
+            *ctx.animation_active |= frame.active;
             // `Arc<StyleDesc>` is shared, so the animated frame is applied to a
             // copy. Mutating through the pointer would restyle every element
             // that declared the same style.
-            let mut resolved = element.style.as_deref().cloned().unwrap_or_default();
+            let mut resolved = transitioned_style
+                .clone()
+                .or_else(|| declared_style.cloned())
+                .unwrap_or_default();
             frame.style.apply_to(&mut resolved);
             resolved
         })
@@ -5226,7 +5272,10 @@ pub(crate) fn build_element(
         ctx.motion_states.remove(&id);
         None
     };
-    let style = animated_style.as_ref().or(element.style.as_deref());
+    let style = motion_style
+        .as_ref()
+        .or(transitioned_style.as_ref())
+        .or(declared_style);
 
     // Inheritable style resolves once here so both built-ins and custom
     // elements see the same cascade.
@@ -5483,6 +5532,10 @@ pub(crate) fn build_div(
 ) -> gpui::AnyElement {
     use gpui::prelude::*;
 
+    let transition_hover =
+        style.is_some_and(|style| style.transition.is_some() && style.hover.is_some());
+    let transition_active =
+        style.is_some_and(|style| style.transition.is_some() && style.active.is_some());
     let element_id_str = format!("__gpuix_{}", element.id);
     let mut el = gpui::div().id(gpui::SharedString::from(element_id_str));
 
@@ -5621,8 +5674,8 @@ pub(crate) fn build_div(
         .get("activationKind")
         .and_then(serde_json::Value::as_str)
         != Some("anchor");
+    let id = element.id;
     for event_type in &element.events {
-        let id = element.id;
         let callback = ctx.event_callback.clone();
         match event_type.as_str() {
             // ── Click ────────────────────────────────────────────
@@ -5743,38 +5796,9 @@ pub(crate) fn build_div(
             }
 
             // ── Hover (mouseEnter + mouseLeave) ──────────────────
-            // GPUI's on_hover fires with true on enter, false on leave.
-            // We split into two distinct event types for the React side.
-            "mouseEnter" | "mouseLeave" => {
-                // Only wire once even if both mouseEnter and mouseLeave are registered.
-                // Check if we already wired on_hover via the other event.
-                let has_enter = element.events.contains("mouseEnter");
-                let has_leave = element.events.contains("mouseLeave");
-                // Wire on first encounter (mouseEnter sorts before mouseLeave).
-                if event_type.as_str() == "mouseEnter" || !has_enter {
-                    let callback_enter = if has_enter {
-                        ctx.event_callback.clone()
-                    } else {
-                        None
-                    };
-                    let callback_leave = if has_leave {
-                        ctx.event_callback.clone()
-                    } else {
-                        None
-                    };
-                    el = el.on_hover(move |&is_hovered, _window, _cx| {
-                        if is_hovered {
-                            emit_event_full(&callback_enter, id, "mouseEnter", |p| {
-                                p.hovered = Some(true);
-                            });
-                        } else {
-                            emit_event_full(&callback_leave, id, "mouseLeave", |p| {
-                                p.hovered = Some(false);
-                            });
-                        }
-                    });
-                }
-            }
+            // One combined listener below owns React enter/leave events and
+            // native transition retargeting. GPUI stores only one hover listener.
+            "mouseEnter" | "mouseLeave" => {}
 
             // ── Mouse down outside ───────────────────────────────
             // Fires when the user clicks OUTSIDE this element.
@@ -5851,6 +5875,72 @@ pub(crate) fn build_div(
 
             _ => {}
         }
+    }
+
+    let has_enter = element.events.contains("mouseEnter");
+    let has_leave = element.events.contains("mouseLeave");
+    if transition_hover || has_enter || has_leave {
+        let callback_enter = has_enter.then(|| ctx.event_callback.clone()).flatten();
+        let callback_leave = has_leave.then(|| ctx.event_callback.clone()).flatten();
+        el = el.on_hover(cx.listener(move |view, is_hovered: &bool, _window, cx| {
+            if transition_hover
+                && view
+                    .transition_states
+                    .get_mut(&id)
+                    .is_some_and(|state| state.set_hovered(*is_hovered))
+            {
+                cx.notify();
+            }
+            if *is_hovered {
+                emit_event_full(&callback_enter, id, "mouseEnter", |payload| {
+                    payload.hovered = Some(true);
+                });
+            } else {
+                emit_event_full(&callback_leave, id, "mouseLeave", |payload| {
+                    payload.hovered = Some(false);
+                });
+            }
+        }));
+    }
+
+    if transition_active {
+        el = el
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(move |view, _event: &gpui::MouseDownEvent, _window, cx| {
+                    if view
+                        .transition_states
+                        .get_mut(&id)
+                        .is_some_and(|state| state.set_active(true))
+                    {
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
+                    if view
+                        .transition_states
+                        .get_mut(&id)
+                        .is_some_and(|state| state.set_active(false))
+                    {
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_mouse_up_out(
+                gpui::MouseButton::Left,
+                cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
+                    if view
+                        .transition_states
+                        .get_mut(&id)
+                        .is_some_and(|state| state.set_active(false))
+                    {
+                        cx.notify();
+                    }
+                }),
+            );
     }
 
     if element.events.contains("mouseDown") && element.events.contains("mouseMove") {
@@ -7168,6 +7258,8 @@ pub struct WindowOptions {
     pub window_background: Option<String>,
     pub traffic_light_x: Option<f64>,
     pub traffic_light_y: Option<f64>,
+    /// Force GPUI's reduced-motion policy for this application.
+    pub reduced_motion: Option<bool>,
     /// Allow URL-backed images to connect to loopback and private networks.
     /// Link-local and cloud-metadata ranges remain blocked.
     pub allow_private_network_images: Option<bool>,
@@ -7190,6 +7282,7 @@ impl Default for WindowOptions {
             window_background: None,
             traffic_light_x: None,
             traffic_light_y: None,
+            reduced_motion: Some(false),
             allow_private_network_images: Some(false),
         }
     }

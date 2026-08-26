@@ -5,7 +5,402 @@ use std::time::Duration;
 use serde::Deserialize;
 use web_time::Instant;
 
-use crate::style::{DimensionValue, StyleDesc};
+use crate::style::{
+    DimensionValue, StyleDesc, StyleTransition, TransitionEasing, TransitionProperty,
+};
+
+#[derive(Clone, Debug, PartialEq)]
+enum TransitionValue {
+    Number(f64),
+    Dimension(DimensionValue),
+    Color([f32; 4]),
+}
+
+impl TransitionValue {
+    fn from_style(style: &StyleDesc, property: TransitionProperty) -> Option<Self> {
+        use TransitionProperty::*;
+
+        let number = |value: Option<f64>| value.map(Self::Number);
+        let dimension = |value: &Option<DimensionValue>| value.clone().map(Self::Dimension);
+        let color = |value: &Option<String>| {
+            value
+                .as_deref()
+                .and_then(crate::color::parse_color_rgba)
+                .map(|color| Self::Color([color.r, color.g, color.b, color.a]))
+        };
+
+        match property {
+            Opacity => number(style.opacity),
+            BackgroundColor => color(&style.background_color),
+            Color => color(&style.color),
+            BorderColor => color(&style.border_color),
+            OutlineColor => color(&style.outline_color),
+            Width => dimension(&style.width),
+            Height => dimension(&style.height),
+            MinWidth => dimension(&style.min_width),
+            MinHeight => dimension(&style.min_height),
+            MaxWidth => dimension(&style.max_width),
+            MaxHeight => dimension(&style.max_height),
+            Top => number(style.top),
+            Right => number(style.right),
+            Bottom => number(style.bottom),
+            Left => number(style.left),
+            BorderRadius => number(style.border_radius),
+            BorderTopLeftRadius => number(style.border_top_left_radius),
+            BorderTopRightRadius => number(style.border_top_right_radius),
+            BorderBottomLeftRadius => number(style.border_bottom_left_radius),
+            BorderBottomRightRadius => number(style.border_bottom_right_radius),
+        }
+    }
+
+    fn interpolate(&self, target: &Self, progress: f64) -> Self {
+        let number = |from: f64, to: f64| from + (to - from) * progress;
+        match (self, target) {
+            (Self::Number(from), Self::Number(to)) => Self::Number(number(*from, *to)),
+            (
+                Self::Dimension(DimensionValue::Pixels(from)),
+                Self::Dimension(DimensionValue::Pixels(to)),
+            ) => Self::Dimension(DimensionValue::Pixels(number(*from, *to))),
+            (
+                Self::Dimension(DimensionValue::Percentage(from)),
+                Self::Dimension(DimensionValue::Percentage(to)),
+            ) => Self::Dimension(DimensionValue::Percentage(number(*from, *to))),
+            (Self::Color(from), Self::Color(to)) => Self::Color([
+                from[0] + (to[0] - from[0]) * progress as f32,
+                from[1] + (to[1] - from[1]) * progress as f32,
+                from[2] + (to[2] - from[2]) * progress as f32,
+                from[3] + (to[3] - from[3]) * progress as f32,
+            ]),
+            _ => target.clone(),
+        }
+    }
+
+    fn apply_to(&self, style: &mut StyleDesc, property: TransitionProperty) {
+        use TransitionProperty::*;
+
+        let color = |channels: [f32; 4]| {
+            format!(
+                "rgba({} {} {} / {})",
+                channels[0] * 255.0,
+                channels[1] * 255.0,
+                channels[2] * 255.0,
+                channels[3]
+            )
+        };
+
+        match (property, self) {
+            (Opacity, Self::Number(value)) => style.opacity = Some(*value),
+            (BackgroundColor, Self::Color(value)) => style.background_color = Some(color(*value)),
+            (Color, Self::Color(value)) => style.color = Some(color(*value)),
+            (BorderColor, Self::Color(value)) => style.border_color = Some(color(*value)),
+            (OutlineColor, Self::Color(value)) => style.outline_color = Some(color(*value)),
+            (Width, Self::Dimension(value)) => style.width = Some(value.clone()),
+            (Height, Self::Dimension(value)) => style.height = Some(value.clone()),
+            (MinWidth, Self::Dimension(value)) => style.min_width = Some(value.clone()),
+            (MinHeight, Self::Dimension(value)) => style.min_height = Some(value.clone()),
+            (MaxWidth, Self::Dimension(value)) => style.max_width = Some(value.clone()),
+            (MaxHeight, Self::Dimension(value)) => style.max_height = Some(value.clone()),
+            (Top, Self::Number(value)) => style.top = Some(*value),
+            (Right, Self::Number(value)) => style.right = Some(*value),
+            (Bottom, Self::Number(value)) => style.bottom = Some(*value),
+            (Left, Self::Number(value)) => style.left = Some(*value),
+            (BorderRadius, Self::Number(value)) => style.border_radius = Some(*value),
+            (BorderTopLeftRadius, Self::Number(value)) => {
+                style.border_top_left_radius = Some(*value)
+            }
+            (BorderTopRightRadius, Self::Number(value)) => {
+                style.border_top_right_radius = Some(*value)
+            }
+            (BorderBottomLeftRadius, Self::Number(value)) => {
+                style.border_bottom_left_radius = Some(*value)
+            }
+            (BorderBottomRightRadius, Self::Number(value)) => {
+                style.border_bottom_right_radius = Some(*value)
+            }
+            _ => {}
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TransitionValues(Vec<(TransitionProperty, Option<TransitionValue>)>);
+
+impl TransitionValues {
+    fn from_style(style: &StyleDesc, transition: &StyleTransition) -> Self {
+        Self(
+            transition
+                .properties
+                .iter()
+                .copied()
+                .map(|property| (property, TransitionValue::from_style(style, property)))
+                .collect(),
+        )
+    }
+
+    fn interpolate(&self, target: &Self, progress: f64) -> Self {
+        Self(
+            target
+                .0
+                .iter()
+                .map(|(property, target)| {
+                    let from = self
+                        .0
+                        .iter()
+                        .find(|(candidate, _)| candidate == property)
+                        .and_then(|(_, value)| value.as_ref());
+                    let value = match (from, target.as_ref()) {
+                        (Some(from), Some(target)) => Some(from.interpolate(target, progress)),
+                        (_, target) => target.cloned(),
+                    };
+                    (*property, value)
+                })
+                .collect(),
+        )
+    }
+
+    fn apply_to(&self, style: &mut StyleDesc) {
+        for (property, value) in &self.0 {
+            if let Some(value) = value {
+                value.apply_to(style, *property);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct StyleState {
+    pub focused: bool,
+    pub focus_visible: bool,
+}
+
+pub(crate) struct StyleTransitionFrame {
+    pub style: StyleDesc,
+    pub active: bool,
+}
+
+pub(crate) struct StyleTransitionState {
+    from: TransitionValues,
+    target: TransitionValues,
+    target_style: StyleDesc,
+    transition: StyleTransition,
+    started: Instant,
+    hovered: bool,
+    active: bool,
+}
+
+impl StyleTransitionState {
+    pub(crate) fn new(style: &StyleDesc, state: StyleState, now: Instant) -> Self {
+        let target_style = resolve_transition_target(style, state, false, false);
+        let transition = style
+            .transition
+            .clone()
+            .expect("a transition state is created only for a declared transition");
+        let target = TransitionValues::from_style(&target_style, &transition);
+        Self {
+            from: target.clone(),
+            target,
+            target_style,
+            transition,
+            started: now,
+            hovered: false,
+            active: false,
+        }
+    }
+
+    pub(crate) fn sync(
+        &mut self,
+        style: &StyleDesc,
+        state: StyleState,
+        now: Instant,
+        reduce_motion: bool,
+    ) {
+        let target_style = resolve_transition_target(style, state, self.hovered, self.active);
+        let transition = style
+            .transition
+            .clone()
+            .expect("a transition state is retained only for a declared transition");
+        let target = TransitionValues::from_style(&target_style, &transition);
+
+        if target != self.target || transition != self.transition {
+            let visible = self.values(now);
+            self.from = visible.interpolate(&target, 0.0);
+            self.target = target;
+            self.started = now;
+        }
+        self.target_style = target_style;
+        self.transition = transition;
+        if reduce_motion {
+            self.from = self.target.clone();
+        }
+    }
+
+    pub(crate) fn frame(&self, now: Instant, reduce_motion: bool) -> StyleTransitionFrame {
+        if reduce_motion || self.from == self.target {
+            return StyleTransitionFrame {
+                style: self.target_style.clone(),
+                active: false,
+            };
+        }
+
+        let delay = milliseconds(self.transition.delay_ms);
+        let duration = milliseconds(self.transition.duration_ms);
+        let elapsed = now.saturating_duration_since(self.started);
+        let raw = if elapsed < delay {
+            0.0
+        } else if duration.is_zero() {
+            1.0
+        } else {
+            elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
+        };
+        if raw >= 1.0 {
+            return StyleTransitionFrame {
+                style: self.target_style.clone(),
+                active: false,
+            };
+        }
+
+        let mut style = self.target_style.clone();
+        self.from
+            .interpolate(
+                &self.target,
+                transition_ease(raw.clamp(0.0, 1.0), &self.transition.easing),
+            )
+            .apply_to(&mut style);
+        StyleTransitionFrame {
+            style,
+            active: true,
+        }
+    }
+
+    pub(crate) fn set_hovered(&mut self, hovered: bool) -> bool {
+        if self.hovered == hovered {
+            return false;
+        }
+        self.hovered = hovered;
+        true
+    }
+
+    pub(crate) fn set_active(&mut self, active: bool) -> bool {
+        if self.active == active {
+            return false;
+        }
+        self.active = active;
+        true
+    }
+
+    fn values(&self, now: Instant) -> TransitionValues {
+        let delay = milliseconds(self.transition.delay_ms);
+        let duration = milliseconds(self.transition.duration_ms);
+        let elapsed = now.saturating_duration_since(self.started);
+        let raw = if elapsed < delay {
+            0.0
+        } else if duration.is_zero() {
+            1.0
+        } else {
+            elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
+        };
+        self.from.interpolate(
+            &self.target,
+            transition_ease(raw.clamp(0.0, 1.0), &self.transition.easing),
+        )
+    }
+}
+
+fn resolve_transition_target(
+    style: &StyleDesc,
+    state: StyleState,
+    hovered: bool,
+    active: bool,
+) -> StyleDesc {
+    let mut resolved = style.clone();
+    let Some(transition) = style.transition.as_ref() else {
+        return resolved;
+    };
+
+    for property in transition.properties.iter().copied() {
+        if state.focused {
+            refine_transition_property(&mut resolved, style.focus.as_deref(), property);
+        }
+        if state.focus_visible {
+            refine_transition_property(&mut resolved, style.focus_visible.as_deref(), property);
+        }
+        if hovered {
+            refine_transition_property(&mut resolved, style.hover.as_deref(), property);
+        }
+        if active {
+            refine_transition_property(&mut resolved, style.active.as_deref(), property);
+        }
+
+        if let Some(refinement) = resolved.focus.as_deref_mut() {
+            clear_transition_property(refinement, property);
+        }
+        if let Some(refinement) = resolved.focus_visible.as_deref_mut() {
+            clear_transition_property(refinement, property);
+        }
+        if let Some(refinement) = resolved.hover.as_deref_mut() {
+            clear_transition_property(refinement, property);
+        }
+        if let Some(refinement) = resolved.active.as_deref_mut() {
+            clear_transition_property(refinement, property);
+        }
+    }
+    resolved
+}
+
+fn refine_transition_property(
+    style: &mut StyleDesc,
+    refinement: Option<&StyleDesc>,
+    property: TransitionProperty,
+) {
+    if let Some(value) = refinement.and_then(|style| TransitionValue::from_style(style, property)) {
+        value.apply_to(style, property);
+    }
+}
+
+fn clear_transition_property(style: &mut StyleDesc, property: TransitionProperty) {
+    use TransitionProperty::*;
+    match property {
+        Opacity => style.opacity = None,
+        BackgroundColor => style.background_color = None,
+        Color => style.color = None,
+        BorderColor => style.border_color = None,
+        OutlineColor => style.outline_color = None,
+        Width => style.width = None,
+        Height => style.height = None,
+        MinWidth => style.min_width = None,
+        MinHeight => style.min_height = None,
+        MaxWidth => style.max_width = None,
+        MaxHeight => style.max_height = None,
+        Top => style.top = None,
+        Right => style.right = None,
+        Bottom => style.bottom = None,
+        Left => style.left = None,
+        BorderRadius => style.border_radius = None,
+        BorderTopLeftRadius => style.border_top_left_radius = None,
+        BorderTopRightRadius => style.border_top_right_radius = None,
+        BorderBottomLeftRadius => style.border_bottom_left_radius = None,
+        BorderBottomRightRadius => style.border_bottom_right_radius = None,
+    }
+}
+
+fn transition_ease(progress: f64, easing: &TransitionEasing) -> f64 {
+    let curve = match easing {
+        TransitionEasing::CubicBezier(curve) => *curve,
+        TransitionEasing::Name(name) => match name.as_str() {
+            "linear" => return progress,
+            "easeIn" => [0.42, 0.0, 1.0, 1.0],
+            "easeInOut" => [0.42, 0.0, 0.58, 1.0],
+            "easeOut" => [0.0, 0.0, 0.58, 1.0],
+            _ => [0.25, 0.1, 0.25, 1.0],
+        },
+    };
+    cubic_bezier(progress, curve)
+}
+
+fn milliseconds(value: f64) -> Duration {
+    Duration::try_from_secs_f64(value / 1000.0)
+        .expect("style transition durations are validated when parsed")
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -339,6 +734,134 @@ fn cubic_bezier(x: f64, [x1, y1, x2, y2]: [f64; 4]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn style(value: serde_json::Value) -> StyleDesc {
+        let parsed = crate::style::parse_style_value(&value);
+        assert_eq!(parsed.problems, []);
+        parsed.style
+    }
+
+    #[test]
+    fn style_transition_interpolates_state_refinements_and_retargets() {
+        let started = Instant::now();
+        let style = style(serde_json::json!({
+            "opacity": 0.0,
+            "backgroundColor": "#000000",
+            "width": 100,
+            "top": 0,
+            "borderRadius": 0,
+            "hover": {
+                "opacity": 1.0,
+                "backgroundColor": "#ffffff",
+                "width": 200,
+                "top": 20,
+                "borderRadius": 16
+            },
+            "transition": {
+                "properties": ["opacity", "backgroundColor", "width", "top", "borderRadius"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), started);
+        assert!(state.set_hovered(true));
+        state.sync(&style, StyleState::default(), started, false);
+
+        let middle_at = started + Duration::from_millis(50);
+        let middle = state.frame(middle_at, false);
+        assert_eq!(middle.style.opacity, Some(0.5));
+        assert_eq!(middle.style.width, Some(DimensionValue::Pixels(150.0)));
+        assert_eq!(middle.style.top, Some(10.0));
+        assert_eq!(middle.style.border_radius, Some(8.0));
+        assert_eq!(
+            TransitionValue::from_style(&middle.style, TransitionProperty::BackgroundColor),
+            Some(TransitionValue::Color([0.5, 0.5, 0.5, 1.0]))
+        );
+        assert!(middle.active);
+
+        assert!(state.set_hovered(false));
+        state.sync(&style, StyleState::default(), middle_at, false);
+        assert_eq!(state.frame(middle_at, false).style.opacity, Some(0.5));
+        assert_eq!(
+            state
+                .frame(middle_at + Duration::from_millis(50), false)
+                .style
+                .opacity,
+            Some(0.25)
+        );
+    }
+
+    #[test]
+    fn style_transition_uses_state_precedence_and_reduced_motion() {
+        let now = Instant::now();
+        let style = style(serde_json::json!({
+            "opacity": 0.0,
+            "focus": { "opacity": 0.2 },
+            "focusVisible": { "opacity": 0.4 },
+            "hover": { "opacity": 0.6 },
+            "active": { "opacity": 1.0 },
+            "transition": {
+                "properties": ["opacity"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        let focus = StyleState {
+            focused: true,
+            focus_visible: true,
+        };
+        let mut state = StyleTransitionState::new(&style, focus, now);
+        assert_eq!(state.frame(now, false).style.opacity, Some(0.4));
+
+        state.set_hovered(true);
+        state.set_active(true);
+        state.sync(&style, focus, now, true);
+        let reduced = state.frame(now, true);
+        assert_eq!(reduced.style.opacity, Some(1.0));
+        assert!(!reduced.active);
+    }
+
+    #[test]
+    fn style_transition_snaps_incompatible_dimensions() {
+        let now = Instant::now();
+        let style = style(serde_json::json!({
+            "width": "auto",
+            "hover": { "width": 200 },
+            "transition": {
+                "properties": ["width"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), now);
+        state.set_hovered(true);
+        state.sync(&style, StyleState::default(), now, false);
+
+        assert_eq!(
+            state
+                .frame(now + Duration::from_millis(50), false)
+                .style
+                .width,
+            Some(DimensionValue::Pixels(200.0))
+        );
+    }
+
+    #[test]
+    fn zero_duration_style_transition_finishes_on_the_retarget_frame() {
+        let now = Instant::now();
+        let style = style(serde_json::json!({
+            "opacity": 0.0,
+            "hover": { "opacity": 1.0 },
+            "transition": { "properties": ["opacity"], "durationMs": 0 }
+        }));
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), now);
+        state.set_hovered(true);
+        state.sync(&style, StyleState::default(), now, false);
+
+        let frame = state.frame(now, false);
+        assert_eq!(frame.style.opacity, Some(1.0));
+        assert!(!frame.active);
+    }
 
     #[test]
     fn interpolates_and_retargets_from_the_visible_value() {

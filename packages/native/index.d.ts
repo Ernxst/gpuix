@@ -244,9 +244,13 @@ export declare class TestGpuixRenderer {
   flush(): void
   /**
    * Advance GPUI's async executor clock so tests can deterministically fire
-   * timers such as bounded image retry/revalidation deadlines.
+   * timers such as bounded image retry/revalidation deadlines. When the
+   * renderer animation clock is paused, advance that clock by the same
+   * amount and render the resulting transition frame as well.
    */
   advanceAsyncClock(deltaMs: number): void
+  /** Override GPUI's reduced-motion policy for deterministic tests. */
+  setReducedMotion(enabled: boolean): void
   getWindowSize(): WindowSize
   /** Simulate a native window resize through GPUI's bounds observer. */
   simulateResize(width: number, height: number): void
@@ -675,6 +679,8 @@ export interface WindowOptions {
   windowBackground?: string
   trafficLightX?: number
   trafficLightY?: number
+  /** Force GPUI's reduced-motion policy for this application. */
+  reducedMotion?: boolean
   /**
    * Allow URL-backed images to connect to loopback and private networks.
    * Link-local and cloud-metadata ranges remain blocked.

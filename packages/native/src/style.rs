@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashSet;
 
 const MAX_LINEAR_GRADIENT_STOPS: usize = 8;
 
@@ -85,6 +86,75 @@ pub enum DimensionValue {
     Pixels(f64),
     Percentage(f64), // 0.0 to 1.0
     Auto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TransitionProperty {
+    Opacity,
+    BackgroundColor,
+    Color,
+    BorderColor,
+    OutlineColor,
+    Width,
+    Height,
+    MinWidth,
+    MinHeight,
+    MaxWidth,
+    MaxHeight,
+    Top,
+    Right,
+    Bottom,
+    Left,
+    BorderRadius,
+    BorderTopLeftRadius,
+    BorderTopRightRadius,
+    BorderBottomLeftRadius,
+    BorderBottomRightRadius,
+}
+
+impl TransitionProperty {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "opacity" => Self::Opacity,
+            "backgroundColor" => Self::BackgroundColor,
+            "color" => Self::Color,
+            "borderColor" => Self::BorderColor,
+            "outlineColor" => Self::OutlineColor,
+            "width" => Self::Width,
+            "height" => Self::Height,
+            "minWidth" => Self::MinWidth,
+            "minHeight" => Self::MinHeight,
+            "maxWidth" => Self::MaxWidth,
+            "maxHeight" => Self::MaxHeight,
+            "top" => Self::Top,
+            "right" => Self::Right,
+            "bottom" => Self::Bottom,
+            "left" => Self::Left,
+            "borderRadius" => Self::BorderRadius,
+            "borderTopLeftRadius" => Self::BorderTopLeftRadius,
+            "borderTopRightRadius" => Self::BorderTopRightRadius,
+            "borderBottomLeftRadius" => Self::BorderBottomLeftRadius,
+            "borderBottomRightRadius" => Self::BorderBottomRightRadius,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TransitionEasing {
+    Name(String),
+    CubicBezier([f64; 4]),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StyleTransition {
+    pub(crate) properties: Vec<TransitionProperty>,
+    pub(crate) duration_ms: f64,
+    pub(crate) delay_ms: f64,
+    pub(crate) easing: TransitionEasing,
 }
 
 /// One serializable CSS Grid track. Track lists deliberately use tagged objects
@@ -298,6 +368,8 @@ pub struct StyleDesc {
     pub pointer_events: Option<String>,
     pub user_select: Option<String>,
     pub selection_color: Option<String>,
+
+    pub transition: Option<StyleTransition>,
 
     pub hover: Option<Box<StyleDesc>>,
     pub hover_within: Option<Box<StyleDesc>>,
@@ -716,6 +788,157 @@ fn parse_nested_style(
     Some(Box::new(nested.style))
 }
 
+fn parse_transition(
+    value: &serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<StyleTransition> {
+    let Some(object) = value.as_object() else {
+        reject(
+            problems,
+            "transition",
+            value,
+            "expected a transition object",
+        );
+        return None;
+    };
+
+    let mut valid = true;
+    for (key, value) in object {
+        if !matches!(
+            key.as_str(),
+            "properties" | "durationMs" | "delayMs" | "easing"
+        ) {
+            reject(
+                problems,
+                format!("transition.{key}"),
+                value,
+                "unsupported transition field",
+            );
+            valid = false;
+        }
+    }
+
+    let mut properties = Vec::new();
+    let mut seen = HashSet::new();
+    match object
+        .get("properties")
+        .and_then(serde_json::Value::as_array)
+    {
+        Some(values) if values.is_empty() => {
+            reject(
+                problems,
+                "transition.properties",
+                object.get("properties").unwrap(),
+                "expected at least one transition property",
+            );
+            valid = false;
+        }
+        Some(values) => {
+            for (index, value) in values.iter().enumerate() {
+                let path = format!("transition.properties[{index}]");
+                let Some(name) = value.as_str() else {
+                    reject(problems, path, value, "expected a property name");
+                    valid = false;
+                    continue;
+                };
+                let Some(property) = TransitionProperty::from_name(name) else {
+                    reject(problems, path, value, "property is not transitionable");
+                    valid = false;
+                    continue;
+                };
+                if !seen.insert(property) {
+                    reject(problems, path, value, "duplicate transition property");
+                    valid = false;
+                    continue;
+                }
+                properties.push(property);
+            }
+        }
+        None => {
+            reject(
+                problems,
+                "transition.properties",
+                object.get("properties").unwrap_or(&serde_json::Value::Null),
+                "expected an array of transitionable property names",
+            );
+            valid = false;
+        }
+    }
+
+    let duration_ms = match object.get("durationMs").and_then(serde_json::Value::as_f64) {
+        Some(value) if valid_transition_milliseconds(value) => value,
+        _ => {
+            reject(
+                problems,
+                "transition.durationMs",
+                object.get("durationMs").unwrap_or(&serde_json::Value::Null),
+                "expected a supported finite non-negative number of milliseconds",
+            );
+            valid = false;
+            0.0
+        }
+    };
+    let delay_ms = match object.get("delayMs") {
+        None => 0.0,
+        Some(value) => match value.as_f64() {
+            Some(value) if valid_transition_milliseconds(value) => value,
+            _ => {
+                reject(
+                    problems,
+                    "transition.delayMs",
+                    value,
+                    "expected a supported finite non-negative number of milliseconds",
+                );
+                valid = false;
+                0.0
+            }
+        },
+    };
+    let easing = match object.get("easing") {
+        None => TransitionEasing::Name("ease".to_string()),
+        Some(value) => match serde_json::from_value::<TransitionEasing>(value.clone()) {
+            Ok(TransitionEasing::Name(name))
+                if matches!(
+                    name.as_str(),
+                    "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut"
+                ) =>
+            {
+                TransitionEasing::Name(name)
+            }
+            Ok(TransitionEasing::CubicBezier(curve))
+                if curve.iter().all(|value| value.is_finite())
+                    && (0.0..=1.0).contains(&curve[0])
+                    && (0.0..=1.0).contains(&curve[2]) =>
+            {
+                TransitionEasing::CubicBezier(curve)
+            }
+            _ => {
+                reject(
+                    problems,
+                    "transition.easing",
+                    value,
+                    "expected linear, ease, easeIn, easeOut, easeInOut, or a cubic-bezier tuple with x values from 0 through 1",
+                );
+                valid = false;
+                TransitionEasing::Name("ease".to_string())
+            }
+        },
+    };
+
+    valid.then_some(StyleTransition {
+        properties,
+        duration_ms,
+        delay_ms,
+        easing,
+    })
+}
+
+fn valid_transition_milliseconds(value: f64) -> bool {
+    value.is_finite()
+        && value >= 0.0
+        && std::time::Duration::try_from_secs_f64(value / 1000.0).is_ok()
+}
+
 /// Parse one style object field-by-field. A malformed field is omitted while valid
 /// siblings survive, so one bad value can never abort a React commit.
 pub fn parse_style_value(value: &serde_json::Value) -> ParsedStyle {
@@ -787,6 +1010,19 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
     }
 
     'fields: for (key, value) in object {
+        if key == "transition" {
+            if prefix.is_empty() {
+                parsed.style.transition = parse_transition(value, &mut parsed.problems);
+            } else {
+                reject(
+                    &mut parsed.problems,
+                    property!("transition"),
+                    value,
+                    "nested transitions are not supported; declare transition on the base style",
+                );
+            }
+            continue;
+        }
         enum_field!(key, value, "display", display, ["flex", "grid"]);
         enum_field!(key, value, "visibility", visibility, ["visible", "hidden"]);
         enum_field!(
@@ -1556,6 +1792,51 @@ mod tests {
     }
 
     #[test]
+    fn malformed_transition_specs_are_rejected_as_a_whole() {
+        let parsed = parse_style_value(&json!({
+            "opacity": 0.5,
+            "transition": {
+                "properties": ["opacity", "display", "opacity"],
+                "durationMs": -1,
+                "easing": [2, 0, 0, 1],
+                "duration": 100
+            }
+        }));
+
+        assert_eq!(parsed.style.opacity, Some(0.5));
+        assert_eq!(parsed.style.transition, None);
+        let properties = parsed
+            .problems
+            .iter()
+            .map(|problem| problem.property.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            properties,
+            [
+                "transition.duration",
+                "transition.properties[1]",
+                "transition.properties[2]",
+                "transition.durationMs",
+                "transition.easing"
+            ]
+        );
+
+        let nested = parse_style_value(&json!({
+            "hover": {
+                "transition": { "properties": ["opacity"], "durationMs": 100 }
+            }
+        }));
+        assert_eq!(nested.problems[0].property, "hover.transition");
+        assert!(nested.style.hover.unwrap().transition.is_none());
+
+        let oversized = parse_style_value(&json!({
+            "transition": { "properties": ["opacity"], "durationMs": 1e300 }
+        }));
+        assert_eq!(oversized.style.transition, None);
+        assert_eq!(oversized.problems[0].property, "transition.durationMs");
+    }
+
+    #[test]
     fn parses_mixed_grid_track_lists_and_preserves_integer_shorthand() {
         let parsed = parse_style_value(&json!({
             "gridTemplateColumns": [
@@ -1825,6 +2106,12 @@ mod tests {
             "pointerEvents": "auto",
             "userSelect": "text",
             "selectionColor": "red",
+            "transition": {
+                "properties": ["opacity", "backgroundColor", "width"],
+                "durationMs": 140,
+                "delayMs": 20,
+                "easing": "ease"
+            },
             "hover": { "color": "blue" },
             "hoverWithin": { "backgroundColor": "magenta" },
             "active": { "color": "green" },
