@@ -342,6 +342,11 @@ export declare class TestGpuixRenderer {
   getText(id: number): string | null
   /** Get the full tree as JSON for snapshot testing. */
   getTreeJson(): string
+  /**
+   * Return the declared descriptor with currently applied state refinements
+   * overlaid in the same order GPUI resolves them for painting.
+   */
+  getResolvedStyle(id: number): string | null
   /** Tree JSON with last-paint bounds. Used by the automation locators. */
   getAutomationTree(): string
   /** Last painted bounds for an element, or null if it was not painted. */

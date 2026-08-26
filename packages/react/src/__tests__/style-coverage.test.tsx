@@ -143,6 +143,7 @@ function HoverWithinSiblingProbe({
           style={{
             width: 180,
             height: 8,
+            pointerEvents: "none",
             backgroundColor: forceHovered ? "#f59e0b" : "#334155",
             hoverWithin: forceHovered ? undefined : { backgroundColor: "#f59e0b" },
           }}
@@ -622,14 +623,21 @@ describe("style props reach the renderer", () => {
     render(<HoverWithinSiblingProbe />)
 
     const label = renderer.findByTestId("destination-label")!
-    expect(renderer.findByTestId("destination-hover-underline")?.type).toBe("div")
+    const underline = renderer.findByTestId("destination-hover-underline")!
+    expect(underline.type).toBe("div")
     const [x, y, width, height] = renderer.getElementBounds(label.id)!
     const before = path.join(SHOTS_DIR, "hover-within-before.png")
     const after = path.join(SHOTS_DIR, "hover-within-after.png")
 
     renderer.nativeSimulateMouseMove(10, 10)
+    expect(renderer.getResolvedStyle(underline.id)).toMatchObject({
+      backgroundColor: "#334155",
+    })
     renderer.captureScreenshot(before)
     renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+    expect(renderer.getResolvedStyle(underline.id)).toMatchObject({
+      backgroundColor: "#f59e0b",
+    })
     renderer.captureScreenshot(after)
 
     expectScreenshotsDiffer(before, after)

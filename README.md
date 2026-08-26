@@ -1950,6 +1950,17 @@ const screenshot = renderer.captureScreenshot('/tmp/test.png')
 const text = renderer.getAllText()
 ```
 
+`TestElement.style` is the declared descriptor and keeps nested state styles
+unchanged. Use `getResolvedStyle(elementId)` after simulating input to read the
+descriptor with the currently painted `hover`, `hoverWithin`, `active`, `focus`,
+and `focusVisible` refinements applied:
+
+```ts
+const target = renderer.findByTestId('row-underline')!
+renderer.nativeSimulateMouseMove(100, 20)
+expect(renderer.getResolvedStyle(target.id)?.backgroundColor).toBe('#7d8b8c')
+```
+
 ### Testing native elements
 
 `getAllText()` only sees `<text>` nodes in the retained tree. `<code>`, `<diff>`

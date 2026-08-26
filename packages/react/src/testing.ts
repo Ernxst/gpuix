@@ -16,6 +16,7 @@ import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
   NativeRenderer,
+  StyleDesc,
   StyleDiagnostic,
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
@@ -49,6 +50,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   simulateMouseDown(x: number, y: number, button: number): void
   simulateMouseUp(x: number, y: number, button: number): void
   getTreeJson(): string
+  getResolvedStyle(elementId: number): string | null
   getAutomationTree(): string
   getElementBounds(elementId: number): number[] | null
   clockPause(): number
@@ -511,6 +513,12 @@ export class TestRenderer implements NativeRenderer {
   /** Get an element by ID. */
   getElement(id: number): TestElement | undefined {
     return this.buildElementMap().get(id)
+  }
+
+  /** Read the style currently applied after hover, active, and focus resolution. */
+  getResolvedStyle(id: number): StyleDesc | undefined {
+    const json = this.native.getResolvedStyle(id)
+    return json == null ? undefined : JSON.parse(json)
   }
 
   /** Find elements by type (e.g. "div", "text"). */

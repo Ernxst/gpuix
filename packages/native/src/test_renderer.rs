@@ -33,6 +33,7 @@ use crate::renderer::{
     MenuSpec, PendingStyleDiagnostic, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
+use crate::style::StyleDesc;
 
 // ── Thread-local storage for !Send GPUI types ────────────────────────
 
@@ -86,6 +87,59 @@ fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
     }
 }
 
+fn point_is_inside(bounds: crate::automation::ElementBounds, point: (f64, f64)) -> bool {
+    point.0 >= bounds.x
+        && point.0 < bounds.x + bounds.width
+        && point.1 >= bounds.y
+        && point.1 < bounds.y + bounds.height
+}
+
+fn nearest_hover_group(tree: &RetainedTree, element_id: u64) -> Option<u64> {
+    let mut current = Some(element_id);
+    while let Some(id) = current {
+        let element = tree.elements.get(&id)?;
+        if element
+            .custom_props
+            .get("hoverGroup")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+        {
+            return Some(id);
+        }
+        current = element.parent;
+    }
+    None
+}
+
+fn style_object(style: &StyleDesc) -> Result<serde_json::Map<String, serde_json::Value>> {
+    let serde_json::Value::Object(mut object) = serde_json::to_value(style)
+        .map_err(|error| Error::from_reason(format!("Style serialization failed: {error}")))?
+    else {
+        return Err(Error::from_reason(
+            "Style serialization returned a non-object",
+        ));
+    };
+    object.retain(|key, value| {
+        !value.is_null()
+            && !matches!(
+                key.as_str(),
+                "hover" | "hoverWithin" | "active" | "focus" | "focusVisible"
+            )
+    });
+    Ok(object)
+}
+
+fn refine_style_object(
+    resolved: &mut serde_json::Map<String, serde_json::Value>,
+    refinement: Option<&StyleDesc>,
+) -> Result<()> {
+    let Some(refinement) = refinement else {
+        return Ok(());
+    };
+    resolved.extend(style_object(refinement)?);
+    Ok(())
+}
+
 // ── TestGpuixRenderer ────────────────────────────────────────────────
 
 /// GPU-backed GPUI test renderer. Uses VisualTestAppContext (real Metal
@@ -112,6 +166,9 @@ pub struct TestGpuixRenderer {
     image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
+    /// Mouse-down origin for the current GPUI active-state sequence.
+    /// GPUI keeps `active` applied until mouse-up even if the pointer moves.
+    active_pointer_origin: Mutex<Option<(f64, f64)>>,
 }
 
 #[napi]
@@ -191,6 +248,7 @@ impl TestGpuixRenderer {
             image_network_policy,
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(Vec::new()),
+            active_pointer_origin: Mutex::new(None),
         })
     }
 
@@ -464,14 +522,16 @@ impl TestGpuixRenderer {
     /// IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
     #[napi]
     pub fn simulate_click(&self, x: f64, y: f64) -> Result<()> {
-        with_test_state(self.state_id, |cx, window, _view| {
+        let result = with_test_state(self.state_id, |cx, window, _view| {
             cx.simulate_click(
                 window,
                 gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
                 gpui::Modifiers::default(),
             );
             Ok(())
-        })
+        });
+        *self.active_pointer_origin.lock().unwrap() = None;
+        result
     }
 
     /// Simulate key strokes through GPUI's input pipeline.
@@ -604,21 +664,23 @@ impl TestGpuixRenderer {
     /// Simulate the platform deactivating the test window.
     #[napi]
     pub fn simulate_window_deactivation(&self) -> Result<()> {
-        with_test_state(self.state_id, |cx, window, _view| {
+        let result = with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, app| {
                 window.simulate_active_status_change(false, app);
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
             cx.run_until_parked();
             Ok(())
-        })
+        });
+        *self.active_pointer_origin.lock().unwrap() = None;
+        result
     }
 
     /// Simulate a mouse down event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]
     pub fn simulate_mouse_down(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
-        with_test_state(self.state_id, |cx, window, _view| {
+        let result = with_test_state(self.state_id, |cx, window, _view| {
             cx.simulate_mouse_down(
                 window,
                 gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
@@ -626,14 +688,18 @@ impl TestGpuixRenderer {
                 gpui::Modifiers::default(),
             );
             Ok(())
-        })
+        });
+        if result.is_ok() {
+            *self.active_pointer_origin.lock().unwrap() = Some((x, y));
+        }
+        result
     }
 
     /// Simulate a mouse up event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]
     pub fn simulate_mouse_up(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
-        with_test_state(self.state_id, |cx, window, _view| {
+        let result = with_test_state(self.state_id, |cx, window, _view| {
             cx.simulate_mouse_up(
                 window,
                 gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
@@ -641,7 +707,9 @@ impl TestGpuixRenderer {
                 gpui::Modifiers::default(),
             );
             Ok(())
-        })
+        });
+        *self.active_pointer_origin.lock().unwrap() = None;
+        result
     }
 
     /// Simulate a scroll wheel event at the given position.
@@ -973,6 +1041,90 @@ impl TestGpuixRenderer {
         let json = tree.to_json(&std::collections::HashMap::new());
         serde_json::to_string_pretty(&json)
             .map_err(|e| Error::from_reason(format!("JSON serialization failed: {}", e)))
+    }
+
+    /// Return the declared descriptor with currently applied state refinements
+    /// overlaid in the same order GPUI resolves them for painting.
+    #[napi]
+    pub fn get_resolved_style(&self, id: f64) -> Result<Option<String>> {
+        let id = to_element_id(id)?;
+        let (style, hover_group_id, hover_group_accepts_pointer) = {
+            let tree = self.tree.lock().unwrap();
+            let Some(element) = tree.elements.get(&id) else {
+                return Ok(None);
+            };
+            let hover_group_id = nearest_hover_group(&tree, id);
+            let hover_group_accepts_pointer = hover_group_id.is_some_and(|group_id| {
+                tree.elements
+                    .get(&group_id)
+                    .and_then(|group| group.style.as_ref())
+                    .and_then(|style| style.pointer_events.as_deref())
+                    != Some("none")
+            });
+            (
+                element.style.clone().unwrap_or_default(),
+                hover_group_id,
+                hover_group_accepts_pointer,
+            )
+        };
+
+        self.flush()?;
+        let element_bounds = crate::automation::get_bounds(id);
+        let hover_group_bounds = hover_group_id.and_then(crate::automation::get_bounds);
+        let active_pointer_origin = *self.active_pointer_origin.lock().unwrap();
+
+        let (pointer, focus, keyboard_input) =
+            with_test_state(self.state_id, |cx, window, view| {
+                let view = view.clone();
+                cx.update_window(window, |_, window, app| {
+                    let mouse = window.mouse_position();
+                    let focus = view
+                        .read(app)
+                        .focus_handles
+                        .get(&id)
+                        .is_some_and(|handle| handle.is_focused(window));
+                    let keyboard = window.last_input_was_keyboard();
+                    (
+                        (f64::from(f32::from(mouse.x)), f64::from(f32::from(mouse.y))),
+                        focus,
+                        keyboard,
+                    )
+                })
+                .map_err(|error| Error::from_reason(error.to_string()))
+            })?;
+
+        let accepts_pointer = style.pointer_events.as_deref() != Some("none");
+        let hovered = accepts_pointer
+            && !keyboard_input
+            && element_bounds.is_some_and(|bounds| point_is_inside(bounds, pointer));
+        let hover_within = hover_group_accepts_pointer
+            && !keyboard_input
+            && hover_group_bounds.is_some_and(|bounds| point_is_inside(bounds, pointer));
+        let active = accepts_pointer
+            && active_pointer_origin.is_some_and(|origin| {
+                element_bounds.is_some_and(|bounds| point_is_inside(bounds, origin))
+            });
+
+        let mut resolved = style_object(&style)?;
+        if focus {
+            refine_style_object(&mut resolved, style.focus.as_deref())?;
+        }
+        if focus && keyboard_input {
+            refine_style_object(&mut resolved, style.focus_visible.as_deref())?;
+        }
+        if hover_within {
+            refine_style_object(&mut resolved, style.hover_within.as_deref())?;
+        }
+        if hovered {
+            refine_style_object(&mut resolved, style.hover.as_deref())?;
+        }
+        if active {
+            refine_style_object(&mut resolved, style.active.as_deref())?;
+        }
+
+        serde_json::to_string(&resolved)
+            .map(Some)
+            .map_err(|error| Error::from_reason(format!("Style serialization failed: {error}")))
     }
 
     /// Tree JSON with last-paint bounds. Used by the automation locators.
