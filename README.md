@@ -1427,6 +1427,22 @@ CSS-like styling via the `style` prop:
 
 **Layout:** `display` (`"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
 
+`gridTemplateColumns` and `gridTemplateRows` accept the existing integer shorthand
+(`2` means `repeat(2, 1fr)`) or a typed CSS Grid track list. Each entry is an
+object with a `type`: `px`, `fr`, `auto`, `min-content`, `max-content`,
+`minmax`, or `repeat`.
+
+```tsx
+<div style={{
+  display: 'grid',
+  gridTemplateColumns: [
+    { type: 'max-content' },
+    { type: 'minmax', min: { type: 'px', value: 0 }, max: { type: 'fr', value: 1 } },
+    { type: 'auto' },
+  ],
+}} />
+```
+
 **Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accepts pixels (number) or percentages (string like `"100%"`)
 
 **Spacing:** `padding`, `paddingTop/Right/Bottom/Left`, `margin`, `marginTop/Right/Bottom/Left`

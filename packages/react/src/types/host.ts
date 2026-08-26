@@ -60,6 +60,31 @@ export interface LinearGradient {
 
 export type BackgroundValue = string | LinearGradient
 
+export type GridTrackSizing =
+  | { type: "px"; value: number }
+  | { type: "fr"; value: number }
+  | { type: "auto" }
+  | { type: "min-content" }
+  | { type: "max-content" }
+
+export type GridTrackMin = Exclude<GridTrackSizing, { type: "fr" }>
+export type GridTrackMax = GridTrackSizing
+
+export type GridTrackMinmax = {
+  type: "minmax"
+  min: GridTrackMin
+  max: GridTrackMax
+}
+
+export type GridTrackNonRepeat = GridTrackSizing | GridTrackMinmax
+
+/** A serializable CSS Grid track function. Integer templates remain supported as `repeat(n, 1fr)`. */
+export type GridTrack =
+  | GridTrackNonRepeat
+  | { type: "repeat"; count: number; tracks: GridTrackNonRepeat[] }
+
+export type GridTemplate = number | GridTrack[]
+
 export interface StyleDesc {
   display?: string
   visibility?: string
@@ -75,8 +100,8 @@ export interface StyleDesc {
   gap?: number
   rowGap?: number
   columnGap?: number
-  gridTemplateColumns?: number
-  gridTemplateRows?: number
+  gridTemplateColumns?: GridTemplate
+  gridTemplateRows?: GridTemplate
   gridColumnMin?: "zero" | "min-content" | "max-content"
   gridRowMin?: "zero" | "min-content" | "max-content"
 
