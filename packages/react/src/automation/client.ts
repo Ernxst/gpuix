@@ -594,7 +594,7 @@ export function liveRendererAsTest(
     },
     nativeSimulateScrollWheel(x, y, deltaX, deltaY) {
       if (!renderer.simulateScrollWheel) {
-        throw new AutomationError("Unsupported", "scrollWheel is not live yet")
+        throw new AutomationError("Unsupported", "scrollWheel is not supported by this live renderer")
       }
       renderer.simulateScrollWheel(x, y, deltaX, deltaY)
       afterInput()

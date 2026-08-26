@@ -1899,6 +1899,18 @@ await app.screenshot({ path: 'live.png' })
 await app.close()
 ```
 
+`scrollWheel` uses the same live native input pipeline as a physical wheel.
+The repository includes a real-window smoke target that checks both the scroll
+event and the automation transport:
+
+```bash
+cd examples
+bun run live-scroll-wheel:smoke
+```
+
+The window may briefly appear while the controller sends a `-96px` vertical
+wheel event. The command prints `live scroll-wheel automation passed` on success.
+
 ## Testing
 
 The locators above sit on a **GPU-backed test renderer** (`TestGpuixRenderer`).

@@ -14,7 +14,8 @@ use std::time::Duration;
 
 use gpui::{
     canvas, point, px, App, Bounds, InputEvent, IntoElement, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Styled, Window,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollDelta, ScrollWheelEvent, Styled,
+    TouchPhase, Window,
 };
 use web_time::Instant;
 
@@ -251,7 +252,15 @@ pub fn dispatch_mouse_move(
     );
 }
 
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn scroll_wheel_event(x: f64, y: f64, delta_x: f64, delta_y: f64) -> ScrollWheelEvent {
+    ScrollWheelEvent {
+        position: point(px(x as f32), px(y as f32)),
+        delta: ScrollDelta::Pixels(point(px(delta_x as f32), px(delta_y as f32))),
+        modifiers: Modifiers::default(),
+        touch_phase: TouchPhase::Moved,
+    }
+}
+
 pub fn dispatch_scroll_wheel(
     window: &mut Window,
     cx: &mut App,
@@ -261,13 +270,7 @@ pub fn dispatch_scroll_wheel(
     delta_y: f64,
 ) {
     window.dispatch_event(
-        gpui::ScrollWheelEvent {
-            position: point(px(x as f32), px(y as f32)),
-            delta: gpui::ScrollDelta::Pixels(point(px(delta_x as f32), px(delta_y as f32))),
-            modifiers: Modifiers::default(),
-            touch_phase: gpui::TouchPhase::Moved,
-        }
-        .to_platform_input(),
+        scroll_wheel_event(x, y, delta_x, delta_y).to_platform_input(),
         cx,
     );
 }
@@ -289,5 +292,19 @@ mod tests {
             clock.now().saturating_duration_since(later),
             Duration::from_millis(150)
         );
+    }
+
+    #[test]
+    fn scroll_wheel_event_preserves_pixel_coordinates_and_delta() {
+        let event = scroll_wheel_event(12.5, 34.25, -8.0, 16.0);
+
+        assert_eq!(f32::from(event.position.x), 12.5);
+        assert_eq!(f32::from(event.position.y), 34.25);
+        assert!(matches!(event.touch_phase, TouchPhase::Moved));
+        let ScrollDelta::Pixels(delta) = event.delta else {
+            panic!("automation scroll must use a pixel delta")
+        };
+        assert_eq!(f32::from(delta.x), -8.0);
+        assert_eq!(f32::from(delta.y), 16.0);
     }
 }

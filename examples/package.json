@@ -8,6 +8,7 @@
     "test": "vitest run --exclude '**/*.perf.test.tsx'",
     "test:perf": "vitest run chat.perf.test.tsx",
     "native-text": "bun --hot native-text.tsx",
+    "live-scroll-wheel:smoke": "bun live-scroll-wheel.smoke.ts",
     "chat": "bun --hot chat.tsx",
     "compile": "bun compile-chat.ts"
   },
