@@ -1317,32 +1317,108 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `input`         | Native single-line text editor                   |
 | `textarea`      | Native multiline, auto-growing text editor       |
 | `virtual-list`  | Long collections; only visible rows are built    |
-| `img`           | Local raster or SVG images                       |
+| `img`           | Raster or full-colour SVG images from paths, URLs, or bytes |
 | `svg`           | Tintable monochrome SVG icons from source or disk |
 | `anchored`      | Positioned overlay                               |
 | `canvas`        | Custom drawing (planned)                         |
 
-## Images and icons
+### Inline text runs
 
-`<img>` takes a **filesystem path**, not a URL. Resolve the file with
-`fileURLToPath` or `path.join` and pass that string as `src`.
+Nest `<text>` elements to style part of a sentence without creating another
+layout box. GPUIX flattens the descendants into one shaped string, so wrapping,
+ellipsis, selection, and copying operate across run boundaries.
+
+```tsx
+<text style={{ width: 240, color: '#e6edf7' }}>
+  Output is{' '}
+  <text
+    testId="output-rate"
+    onClick={showRateDetails}
+    style={{ color: '#7dd3fc', fontWeight: 700, letterSpacing: 1 }}
+  >
+    240 parts
+  </text>{' '}
+  per minute.
+</text>
+```
+
+Inline runs can vary `color`, `fontFamily`, `fontWeight`, `letterSpacing`,
+`backgroundColor`, `textDecoration`, and `textTransform`. Nested `onClick`,
+refs, and `testId` retain the nested text host as their target. Layout styles
+belong on the outer `<text>`; strict style diagnostics report them on inline
+descendants. A `<text>` accepts only strings and nested `<text>` elements, so
+block and custom children are rejected during React render.
+
+## Images and icons
 
 ### `<img>`
 
-`<img>` paints through GPUI's image element. It loads **PNG, JPEG, WebP, GIF,
-and SVG** from disk. SVG here is a full-colour image, not a tintable icon.
+`<img>` paints **PNG, JPEG, WebP, GIF, and full-colour SVG** from one explicit
+source union. Strings are not inferred: choose a filesystem path, an HTTP(S)
+URL, or in-memory bytes.
 
 ```tsx
 <img
-  src={fileURLToPath(new URL('./photo.png', import.meta.url))}
+  src={{
+    kind: 'path',
+    path: fileURLToPath(new URL('./photo.png', import.meta.url)),
+  }}
   objectFit="cover"
   style={{ width: 240, height: 140, borderRadius: 12 }}
+/>
+
+<img
+  src={{ kind: 'url', url: 'https://example.com/photo.webp' }}
+  style={{ width: 240, height: 140 }}
+/>
+
+<img
+  src={{ kind: 'data', mimeType: 'image/png', bytes: pngBuffer }}
+  style={{ width: 240, height: 140 }}
 />
 ```
 
 `objectFit` matches CSS: `"contain"` (default), `"cover"`, `"fill"`,
-`"scaleDown"`, or `"none"`. An empty `src` or a failed load shows a fallback
-placeholder instead of crashing.
+`"scaleDown"`, or `"none"`. `bytes` accepts an `ArrayBuffer`, `Uint8Array`
+(including Node.js `Buffer`), or a number array. Every source is capped at
+**10 MiB** before decode. URL responses are cached by URL and revalidated with
+`ETag` or `Last-Modified` when another image instance needs the same asset.
+Failed requests retry with bounded backoff, successful path and URL loads have
+a five-minute revalidation deadline, and unmounting an image cancels its active
+load. HTTP requests have a 15-second total deadline and follow at most five
+redirects.
+
+URL images are public-network-only by default. GPUIX rejects URL credentials,
+resolves and validates every redirect target before connecting, and never
+includes URL credentials, query strings, or response bodies in painted/logged
+load errors. Loopback and private-network development servers require an
+explicit renderer-level opt-in:
+
+```tsx
+render(<App />, { allowPrivateNetworkImages: true })
+```
+
+Link-local and cloud-metadata address ranges remain blocked with the opt-in.
+
+SVG preserves its authored colours by default. Set `tint="currentColor"` to
+replace only authored `currentColor` references with the resolved inherited
+`style.color`; other authored fills and strokes, IDs, text, and URL references
+remain unchanged.
+
+```tsx
+<div style={{ color: '#5ca9ff' }}>
+  <img
+    src={{ kind: 'data', mimeType: 'image/svg+xml', bytes: iconBytes }}
+    tint="currentColor"
+    style={{ width: 20, height: 20 }}
+  />
+</div>
+```
+
+An omitted source shows the placeholder. Invalid source objects, unsupported
+MIME types, HTTP status failures, decode failures, and over-limit responses
+produce an element-specific diagnostic or fallback instead of crashing the
+renderer.
 
 ### `<svg>`
 
@@ -1358,9 +1434,11 @@ only for a desktop app that intentionally ships loose asset files.
 Bun `import … with { type: 'file' }` bindings emit the data URL. GPUIX decodes
 both.
 
-`style.color` is required. Without it the icon does not paint. Prefer
-`fill="#000"` or `stroke="#000"` in the file. `currentColor` in the SVG is not
-the same as `style.color`.
+`color` follows normal inherited semantics across built-in text and custom
+elements. `<svg>` is always a monochrome icon surface, so its resolved color
+comes from itself or an ancestor regardless of whether the SVG source uses
+`fill="#000"` or `currentColor`. Use `<img>` for a full-colour SVG document;
+its authored colours stay intact unless `tint="currentColor"` is explicit.
 
 #### Bun
 
@@ -1537,8 +1615,8 @@ to hard-clipped sRGB before GPUI paints them.
 Style objects are decoded field-by-field. An invalid value rejects only that
 field; valid siblings still commit and the error never escapes React's commit
 phase. In a Node runtime outside `NODE_ENV=production`, strict styles are
-enabled by default and each rejection warns with the element id, element type,
-`testId` when present, property, and offending value. Unknown properties,
+enabled by default and each rejection warns with the renderer id, element type,
+author `id` and `testId` when present, property, and offending value. Unknown properties,
 unsupported enum values, invalid colors, radial gradients, and supported
 properties with malformed values all use the same diagnostic path.
 
@@ -1596,7 +1674,7 @@ Limited relative-color forms can derive a new color from a base value:
 
 **Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` creates a native scrollable container with persistent scroll state
 
-**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textDecoration` (`"underline"` | `"line-through"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`
 
 `textWrap` accepts `"wrap"` and `"nowrap"`. `"balance"` and `"pretty"` are
 recognized but explicitly rejected with a strict-style diagnostic because GPUI
@@ -1634,9 +1712,10 @@ tracked element has keyboard-modality focus, matching CSS `:focus-visible`.
 Put `hoverGroup` on a container when its hover should style an opted-in
 descendant. The descendant's `hoverWithin` style follows the nearest hover
 group, including while the pointer is over a sibling such as the destination
-label. During pointer capture it remains active only while the pointer is within
-the group's hit-test bounds, so capture by the group or a descendant neither
-clears nor pins the style. No React hover state or mouse handlers are involved.
+label. During pointer capture it remains active while the pointer is within the
+group's hit-test bounds or the capture owner is the group or one of its
+descendants. Releasing capture outside the group clears the style. No React
+hover state or mouse handlers are involved.
 
 ```tsx
 <div hoverGroup="destination-row" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1684,6 +1763,11 @@ keep Space as text input instead of synthesizing a click.
 
 Mark elements with **`testId`**, then drive them like Playwright. The same
 client works in vitest, inside browser pages, and against a child process.
+
+Standard `id` and `data-*` attributes are also preserved on every host element,
+so shared DOM/native JSX can use semantic IDs. GPU-backed tests can resolve an
+author ID with `renderer.findByElementId('site-state')`; locator queries remain
+the `testId`, text, and type API listed below.
 
 ```tsx
 <div testId="sidebar-collapse" onClick={onCollapse}>‹</div>
@@ -1824,6 +1908,10 @@ consuming app:
 cd packages/native && bun pm pack
 cd ../react && bun pm pack
 ```
+
+Relative `file:` pins can break when the consuming project is checked out via
+git worktree at a different depth. Prefer absolute tarball paths in that case,
+or regenerate the `file:` pins per worktree after cloning.
 
 ```json
 {

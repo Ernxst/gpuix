@@ -132,4 +132,29 @@ describe("flex baseline layout", () => {
     expect(nestedSmall[1]).toBeCloseTo(outerSmall[1], 0)
     expect(nestedLarge[1]).toBeLessThan(nestedSmall[1])
   })
+
+  it("uses the shaped font metrics of a flattened inline run", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "row", alignItems: "baseline" }}>
+        <text
+          testId="inline-run-baseline"
+          style={{ fontFamily: "Courier New", fontSize: 32, lineHeight: 40 }}
+        >
+          <text style={{ fontFamily: "Times New Roman" }}>Ag</text>
+        </text>
+        <text
+          testId="inline-run-reference"
+          style={{ fontFamily: "Times New Roman", fontSize: 32, lineHeight: 40 }}
+        >
+          Ag
+        </text>
+      </div>,
+    )
+
+    const inlineRun = boundsFor(renderer, "inline-run-baseline")
+    const reference = boundsFor(renderer, "inline-run-reference")
+    expect(inlineRun[1]).toBeCloseTo(reference[1], 0)
+    expect(inlineRun[3]).toBeCloseTo(reference[3], 0)
+  })
 })

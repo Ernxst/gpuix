@@ -158,6 +158,7 @@ export interface StyleDesc {
   fontFamily?: string
   fontWeight?: string | number
   letterSpacing?: number
+  textDecoration?: "underline" | "line-through"
   textTransform?: "none" | "uppercase" | "lowercase"
   textAlign?: string
   lineHeight?: number
@@ -335,6 +336,11 @@ export interface Props {
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
 
+  /** Author-defined identity preserved for shared DOM/native JSX and native diagnostics. */
+  id?: string
+  /** Inert author metadata preserved for automation and event host handles. */
+  [key: `data-${string}`]: string | number | boolean | undefined
+
   /** Establishes a native hover group for descendant `style.hoverWithin` states. */
   hoverGroup?: string
 
@@ -424,10 +430,29 @@ export interface VirtualListProps {
   onVisibleRange?: (event: GpuixSyntheticEvent) => void
 }
 
+export type ImageMimeType =
+  | "image/png"
+  | "image/jpeg"
+  | "image/webp"
+  | "image/gif"
+  | "image/svg+xml"
+
+/** An unambiguous, serialisable source for native image rendering. */
+export type ImageSource =
+  | { kind: "path"; path: string }
+  | { kind: "url"; url: string }
+  | {
+      kind: "data"
+      mimeType: ImageMimeType
+      bytes: ArrayBuffer | Uint8Array | readonly number[]
+    }
+
 // Props for native <img> rendering.
 export interface ImgProps extends Props {
-  src?: string
+  src?: ImageSource
   objectFit?: "fill" | "contain" | "cover" | "scaleDown" | "none"
+  /** For SVG only: resolve authored `currentColor` references from inherited style.color. */
+  tint?: "currentColor"
   alt?: string
 }
 
@@ -530,6 +555,8 @@ export interface NativeRenderer {
   /** Apply a batch of mutations in a single FFI call. Returns destroyed IDs. */
   applyBatch?(json: string): Array<number>
   setStrictStyles?(enabled: boolean): void
+  /** Opt in to loopback/private URL images. Link-local and metadata ranges stay blocked. */
+  setAllowPrivateNetworkImages?(enabled: boolean): void
   drainStyleDiagnostics?(): StyleDiagnostic[]
 
   // ── Application lifecycle ──────────────────────────────────────
@@ -578,6 +605,10 @@ export interface StyleDiagnostic {
   message: string
   elementId: number
   elementType: string
+  /** The author's `id` attribute, when the affected element has one. */
+  authorId?: string
+  /** The standard `data-testid` attribute, when the affected element has one. */
+  dataTestId?: string
   testId?: string
   property: string
   value: string

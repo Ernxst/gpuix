@@ -28,8 +28,10 @@ export {
 export type { MacCpuThrottle } from "./cpu-throttle.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
+  dispose(): void
   applyBatch(json: string): number[]
   flush(): void
+  advanceAsyncClock(deltaMs: number): void
   drainEvents(): EventPayload[]
   setMenus(menus: MenuSpec[]): void
   simulateMenuAction(id: string): void
@@ -55,6 +57,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   clockResume(): number
   getRootId(): number | null
   getAllText(): string[]
+  findByElementId(authorId: string): number | null
+  findByDataTestId(dataTestId: string): number | null
   scrollTo(elementId: number, x: number, y: number): void
   scrollToItem(elementId: number, index: number): void
   getScrollOffset(elementId: number): number[] | null
@@ -69,6 +73,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   setStrictStyles(enabled: boolean): void
+  setAllowPrivateNetworkImages(enabled: boolean): void
   drainStyleDiagnostics(): StyleDiagnostic[]
   captureScreenshot(path: string): void
   simulateResize(width: number, height: number): void
@@ -143,6 +148,10 @@ export interface TestElement {
   children: number[]
   parentId: number | null
   testId?: string
+  /** The standard `data-testid` attribute used by the test renderer lookup. */
+  dataTestId?: string
+  /** The author-defined `id` attribute, distinct from the numeric renderer ID. */
+  authorId?: string
   customProps?: Record<string, unknown>
 }
 
@@ -150,6 +159,7 @@ export interface TestElement {
 
 export class TestRenderer implements NativeRenderer {
   commitCount = 0
+  private disposed = false
   private applicationEventHandler: ((event: EventPayload) => void) | null = null
   private windowEventHandler: ((event: EventPayload) => void) | null = null
 
@@ -167,6 +177,13 @@ export class TestRenderer implements NativeRenderer {
     }
     this.native = probedNativeTestRenderer ?? new NativeTestRendererConstructor()
     probedNativeTestRenderer = null
+  }
+
+  /** Release this renderer's offscreen window and native GPUI context. */
+  dispose(): void {
+    if (this.disposed) return
+    this.native.dispose()
+    this.disposed = true
   }
 
   // ── NativeRenderer interface (all mutations delegate to native) ──
@@ -244,6 +261,10 @@ export class TestRenderer implements NativeRenderer {
     this.native.setStrictStyles(enabled)
   }
 
+  setAllowPrivateNetworkImages(enabled: boolean): void {
+    this.native.setAllowPrivateNetworkImages(enabled)
+  }
+
   drainStyleDiagnostics(): StyleDiagnostic[] {
     return this.native.drainStyleDiagnostics()
   }
@@ -254,6 +275,11 @@ export class TestRenderer implements NativeRenderer {
    *  build_element() → apply_styles() → layout). */
   flush(): void {
     this.native.flush()
+  }
+
+  /** Advance timers owned by GPUI's async executor without sleeping. */
+  advanceAsyncClock(deltaMs: number): void {
+    this.native.advanceAsyncClock(deltaMs)
   }
 
   /** Drain events collected by the native GPUI event handlers. */
@@ -462,6 +488,8 @@ export class TestRenderer implements NativeRenderer {
         events: new Set(node.events ?? []),
         children: (node.children ?? []).map((c: any) => c.id),
         parentId,
+        ...(node.authorId ? { authorId: node.authorId } : {}),
+        ...(node.dataTestId ? { dataTestId: node.dataTestId } : {}),
         ...(node.testId ? { testId: node.testId } : {}),
         ...(node.customProps ? { customProps: node.customProps } : {}),
       })
@@ -498,7 +526,15 @@ export class TestRenderer implements NativeRenderer {
   }
 
   findByTestId(testId: string): TestElement | undefined {
+    const dataTestId = this.native.findByDataTestId(testId)
+    if (dataTestId != null) return this.getElement(dataTestId)
     return [...this.buildElementMap().values()].find((el) => el.testId === testId)
+  }
+
+  /** Resolve an author-defined `id` attribute in the native retained tree. */
+  findByElementId(authorId: string): TestElement | undefined {
+    const id = this.native.findByElementId(authorId)
+    return id == null ? undefined : this.getElement(id)
   }
 
   /** Get all text content in the tree (depth-first). */
@@ -656,15 +692,22 @@ export interface TestRoot {
   unmount: () => void
 }
 
+export interface TestRootOptions {
+  /** Opt in to loopback/private URL images for local fixture servers. */
+  allowPrivateNetworkImages?: boolean
+}
+
 /**
  * Create a test root for rendering React components.
  * All mutations go to the real GPUI pipeline via native TestGpuixRenderer.
  * Returns the Root (for rendering), the TestRenderer (for inspection/events),
  * and convenience methods.
  */
-export function createTestRoot(): TestRoot {
+export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   const renderer = new TestRenderer()
+  renderer.setAllowPrivateNetworkImages(options.allowPrivateNetworkImages ?? false)
   const root = createRoot(renderer)
+  let unmounted = false
 
   const render = (node: ReactNode): void => {
     flushSync(() => root.render(node))
@@ -672,10 +715,20 @@ export function createTestRoot(): TestRoot {
     renderer.flush()
   }
 
+  const unmount = (): void => {
+    if (unmounted) return
+    unmounted = true
+    try {
+      root.unmount()
+    } finally {
+      renderer.dispose()
+    }
+  }
+
   return {
     root,
     renderer,
     render,
-    unmount: root.unmount,
+    unmount,
   }
 }

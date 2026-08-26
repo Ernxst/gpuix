@@ -143,6 +143,11 @@ export declare class GpuixRenderer {
  */
 export declare class TestGpuixRenderer {
   constructor()
+  /**
+   * Dispose this renderer's offscreen window and GPUI application context.
+   * Further interaction attempts fail instead of being routed to another root.
+   */
+  dispose(): void
   createElement(id: number, elementType: string): void
   /**
    * Destroy an element and all descendants. Returns destroyed IDs
@@ -154,6 +159,11 @@ export declare class TestGpuixRenderer {
   insertBefore(parentId: number, childId: number, beforeId: number): void
   setStyle(id: number, styleJson: string): void
   setStrictStyles(enabled: boolean): void
+  /**
+   * Opt in to loopback and private-network URL image sources for local tests.
+   * Link-local and cloud-metadata addresses remain blocked.
+   */
+  setAllowPrivateNetworkImages(enabled: boolean): void
   drainStyleDiagnostics(): Array<GpuixStyleDiagnostic>
   setText(id: number, content: string): void
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
@@ -187,6 +197,11 @@ export declare class TestGpuixRenderer {
    * hit testing requires elements to be laid out).
    */
   flush(): void
+  /**
+   * Advance GPUI's async executor clock so tests can deterministically fire
+   * timers such as bounded image retry/revalidation deadlines.
+   */
+  advanceAsyncClock(deltaMs: number): void
   getWindowSize(): WindowSize
   /** Simulate a native window resize through GPUI's bounds observer. */
   simulateResize(width: number, height: number): void
@@ -317,6 +332,10 @@ export declare class TestGpuixRenderer {
   getAllText(): Array<string>
   /** Find element IDs matching the given type (e.g. "div", "text"). */
   findByType(elementType: string): Array<number>
+  /** Resolve an author-defined `id` attribute to the renderer element ID. */
+  findByElementId(authorId: string): number | null
+  /** Resolve a standard `data-testid` attribute to the renderer element ID. */
+  findByDataTestId(dataTestId: string): number | null
   /** Check if an element has a specific event listener. */
   hasEventListener(id: number, eventType: string): boolean
   /** Get the text content of an element. */
@@ -460,6 +479,8 @@ export interface GpuixStyleDiagnostic {
   message: string
   elementId: number
   elementType: string
+  authorId?: string
+  dataTestId?: string
   testId?: string
   property: string
   value: string
@@ -514,6 +535,11 @@ export interface WindowOptions {
   windowBackground?: string
   trafficLightX?: number
   trafficLightY?: number
+  /**
+   * Allow URL-backed images to connect to loopback and private networks.
+   * Link-local and cloud-metadata ranges remain blocked.
+   */
+  allowPrivateNetworkImages?: boolean
 }
 
 export interface WindowSize {
