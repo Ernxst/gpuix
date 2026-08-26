@@ -251,6 +251,60 @@ describe("style props reach the renderer", () => {
     )
   })
 
+  it("aligns mixed-size text to a flex row baseline", () => {
+    const pair = (alignItems: "baseline" | "flex-end") => (
+      <div style={{ display: "flex", flexDirection: "row", alignItems }}>
+        <text testId={`${alignItems}-figure`} style={{ color: "#ffffff", fontSize: 32 }}>
+          13
+        </text>
+        <text testId={`${alignItems}-unit`} style={{ color: "#ffffff", fontSize: 12 }}>
+          MW
+        </text>
+      </div>
+    )
+
+    const baseline = createTestRoot()
+    baseline.render(pair("baseline"))
+    expect(baseline.renderer.drainStyleDiagnostics()).toEqual([])
+
+    const baselineFigure = boundsFor(baseline.renderer, "baseline-figure")
+    const baselineUnit = boundsFor(baseline.renderer, "baseline-unit")
+
+    const selfBaseline = createTestRoot()
+    selfBaseline.render(
+      <div style={{ display: "flex", flexDirection: "row", alignItems: "flex-end" }}>
+        <text
+          testId="self-baseline-figure"
+          style={{ color: "#ffffff", fontSize: 32, alignSelf: "baseline" }}
+        >
+          13
+        </text>
+        <text
+          testId="self-baseline-unit"
+          style={{ color: "#ffffff", fontSize: 12, alignSelf: "baseline" }}
+        >
+          MW
+        </text>
+      </div>,
+    )
+    expect(selfBaseline.renderer.drainStyleDiagnostics()).toEqual([])
+    const selfBaselineUnit = boundsFor(selfBaseline.renderer, "self-baseline-unit")
+
+    const flexEnd = createTestRoot()
+    flexEnd.render(pair("flex-end"))
+
+    const flexEndUnit = boundsFor(flexEnd.renderer, "flex-end-unit")
+
+    // GPUI passes the measured font baseline into Taffy's flex layout. The
+    // smaller unit therefore sits above the flex-end approximation while
+    // sharing the figure's baseline.
+    expect(baselineUnit[1]).toBeLessThan(flexEndUnit[1])
+    expect(selfBaselineUnit[1]).toBeLessThan(flexEndUnit[1])
+    expect(baselineUnit[1] + baselineUnit[3]).toBeLessThan(
+      baselineFigure[1] + baselineFigure[3],
+    )
+  })
+
   it("clears a border with borderWidth 0", () => {
     // `borderWidth: 0` was skipped by a `> 0.0` guard, so an element that drew
     // its own border could never have it removed by the caller.
