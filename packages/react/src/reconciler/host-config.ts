@@ -362,7 +362,7 @@ function diffCustomProps(
     if (isReservedProp(key)) continue
     if (builtIn && !UNIVERSAL_PROPS.has(key) && !isIdentityProp(key)) continue
     if (!newKeys.includes(key)) {
-      renderer.setCustomProp(id, key, JSON.stringify(null))
+      renderer.setCustomProp(id, key, null)
     }
   }
 }

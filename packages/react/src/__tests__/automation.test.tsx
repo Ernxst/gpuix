@@ -62,10 +62,42 @@ describeNative("automation", () => {
     await expect(app.call("getTree", {})).resolves.toMatchObject({
       tree: { authorId: "site-state" },
     })
+    await expect(app.getByTestId("hover-underline").element()).resolves.toMatchObject({
+      id: heading?.id,
+      dataTestId: "hover-underline",
+    })
     await app.close()
 
     renderer.nativeSimulateClick(100, 40)
     expect(attributes).toEqual(["site-state", "hover-underline", "ready"])
+  })
+
+  it("removes identity attributes instead of retaining a literal null value", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(<div id="site" data-testid="row" />)
+    expect(renderer.findByElementId("site")).toBeDefined()
+    expect(renderer.findByTestId("row")).toBeDefined()
+
+    render(<div />)
+    expect(renderer.findByElementId("site")).toBeUndefined()
+    expect(renderer.findByTestId("row")).toBeUndefined()
+    expect(renderer.findByElementId("null")).toBeUndefined()
+    expect(renderer.findByTestId("null")).toBeUndefined()
+  })
+
+  it("normalizes numeric and boolean data-testid props for lookup", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <div data-testid={42} />
+        <div data-testid />
+      </div>
+    )
+
+    expect(renderer.findByTestId("42")?.dataTestId).toBe("42")
+    expect(renderer.findByTestId("true")?.dataTestId).toBe("true")
   })
 
   it("clicks a testId locator and waits for text", async () => {

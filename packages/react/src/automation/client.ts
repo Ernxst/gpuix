@@ -317,8 +317,15 @@ interface Selector {
   parent?: Selector
 }
 
-function matches(node: TreeNode, selector: Selector): boolean {
-  if (selector.testId != null && node.testId !== selector.testId) return false
+function matches(
+  node: TreeNode,
+  selector: Selector,
+  testIdSource: "data" | "legacy" = "legacy"
+): boolean {
+  if (selector.testId != null) {
+    const testId = testIdSource === "data" ? node.dataTestId : node.testId
+    if (testId !== selector.testId) return false
+  }
   if (selector.type != null && node.type !== selector.type) return false
   if (selector.text != null && !(node.text ?? "").includes(selector.text)) {
     return false
@@ -331,19 +338,26 @@ function collect(node: TreeNode | null, selector: Selector): TreeNode[] {
   const roots = selector.parent
     ? collect(node, selector.parent)
     : [node]
-  const found: TreeNode[] = []
-  const walk = (current: TreeNode) => {
-    if (matches(current, selector)) found.push(current)
-    for (const child of current.children ?? []) walk(child)
-  }
-  for (const root of roots) {
-    if (selector.parent) {
-      for (const child of root.children ?? []) walk(child)
-    } else {
-      walk(root)
+
+  const find = (testIdSource: "data" | "legacy"): TreeNode[] => {
+    const found: TreeNode[] = []
+    const walk = (current: TreeNode) => {
+      if (matches(current, selector, testIdSource)) found.push(current)
+      for (const child of current.children ?? []) walk(child)
     }
+    for (const root of roots) {
+      if (selector.parent) {
+        for (const child of root.children ?? []) walk(child)
+      } else {
+        walk(root)
+      }
+    }
+    return found
   }
-  return found
+
+  if (selector.testId == null) return find("legacy")
+  const dataMatches = find("data")
+  return dataMatches.length > 0 ? dataMatches : find("legacy")
 }
 
 export class Locator {

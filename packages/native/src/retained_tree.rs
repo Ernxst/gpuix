@@ -224,7 +224,25 @@ impl RetainedTree {
                 element.author_id = value.as_str().map(str::to_string);
                 return;
             }
-            if value.is_null() {
+            if key == "data-testid" {
+                let normalized = match value {
+                    serde_json::Value::Null => None,
+                    serde_json::Value::String(value) => Some(value),
+                    value => Some(value.to_string()),
+                };
+                changed = match normalized {
+                    Some(value) => {
+                        let value = serde_json::Value::String(value);
+                        if element.custom_props.get(&key) == Some(&value) {
+                            false
+                        } else {
+                            element.custom_props.insert(key, value);
+                            true
+                        }
+                    }
+                    None => element.custom_props.remove(&key).is_some(),
+                };
+            } else if value.is_null() {
                 changed = element.custom_props.remove(&key).is_some();
             } else {
                 if element.custom_props.get(&key) != Some(&value) {
