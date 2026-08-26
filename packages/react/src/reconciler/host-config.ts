@@ -82,7 +82,7 @@ function validateVirtualListRowContract(instance: Instance, state: HostNodeState
   }
 
   throw new VirtualListRowContractError(
-    "GPUIX <virtual-list> received exactly one immediate child. Its immediate children are rows, so wrapping a collection in one container creates one virtual row and defeats virtualization. Render the rows as direct children, or use <VirtualList itemCount={...} renderItem={...} /> for windowed data. Pass itemCount={1} only when the list intentionally contains one row."
+    "GPUIX <virtual-list> received exactly one immediate child. Its immediate children are rows, so wrapping a collection in one container creates one virtual row and defeats virtualization. Render rows as direct children. For windowed data, pass itemCount, windowStart, and estimatedItemHeight, then render that slice directly. Pass itemCount={1} only when the list intentionally contains one row."
   )
 }
 
@@ -145,6 +145,7 @@ const EVENT_PROPS = [
   ["onLineClick", "lineClick", "bubble"],
   ["onLinkClick", "linkClick", "bubble"],
   ["onVisibleRange", "visibleRange", "bubble"],
+  ["onHighlight", "highlight", "bubble"],
   ["onChangeCapture", "change", "capture"],
   ["onChange", "change", "bubble"],
   ["onSubmitCapture", "submit", "capture"],
@@ -152,6 +153,8 @@ const EVENT_PROPS = [
   // Mouse events
   ["onClickCapture", "click", "capture"],
   ["onClick", "click", "bubble"],
+  ["onAuxClickCapture", "auxClick", "capture"],
+  ["onAuxClick", "auxClick", "bubble"],
   ["onMouseDownCapture", "mouseDown", "capture"],
   ["onMouseDown", "mouseDown", "bubble"],
   ["onMouseUpCapture", "mouseUp", "capture"],
@@ -287,6 +290,10 @@ const UNIVERSAL_PROPS = new Set([
   "motion",
   "testId",
   "hoverGroup",
+  // `highlight` is scoped by where it sits in the tree, so it has to reach a
+  // plain `div`. Without it here, custom props are dropped for built-ins and
+  // the prop silently never arrives in Rust.
+  "highlight",
 ])
 
 function isIdentityProp(name: string): boolean {

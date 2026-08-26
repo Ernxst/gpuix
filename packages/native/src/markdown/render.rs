@@ -165,6 +165,9 @@ pub struct MdContext {
     pub selectable: bool,
     pub selection_wash: Hsla,
     pub theme: Theme,
+    /// Inherited `highlight`, matched per painted string. See
+    /// [`crate::text::search::washes_for_native_run`].
+    pub highlight_set: Option<Arc<crate::text::HighlightContext>>,
     /// Monotonic sub-key counter. Must advance in document order so a drag
     /// resolves spans the same way the reader sees them.
     next_sub: usize,
@@ -181,6 +184,7 @@ impl MdContext {
         selection_wash: Hsla,
         theme: Theme,
         on_link: Option<Arc<dyn Fn(&str)>>,
+        highlight_set: Option<Arc<crate::text::HighlightContext>>,
     ) -> Self {
         Self {
             element_id,
@@ -188,6 +192,7 @@ impl MdContext {
             selectable,
             selection_wash,
             theme,
+            highlight_set,
             next_sub: 0,
             on_link,
         }
@@ -385,10 +390,15 @@ fn flat_text_element(flat: &FlatText, ctx: &mut MdContext) -> AnyElement {
         links: flat.links.clone(),
         on_link: ctx.on_link.clone(),
         selectable: ctx.selectable,
+        highlight: ctx
+            .highlight_set
+            .clone()
+            .map(crate::text::HighlightSource::Native),
         ..crate::text::SelectableText::new(
+            ctx.element_id,
+            sub,
             flat.text.clone(),
             Some(flat.runs.clone()),
-            crate::text::selection_key(ctx.element_id, sub),
             ctx.selection.clone(),
             ctx.selection_wash,
         )
@@ -411,8 +421,8 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
         .flex_none()
         .flex()
         .flex_col()
-        .px(px(m.code_padding_x))
-        .py(px(m.code_padding_y))
+        .px(px(m.md_code_padding_x))
+        .py(px(m.md_code_padding_y))
         .font_family(theme.font_mono.clone())
         .text_size(px(m.code_text_size))
         .line_height(px(m.code_line_height))
@@ -431,17 +441,23 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
             .unwrap_or_default();
         let runs = runs_for_spans(line, &spans, &mono, theme.text);
         let sub = ctx.take_sub();
-        let text: AnyElement = if ctx.selectable {
-            crate::text::selectable_text(crate::text::SelectableText::new(
+        // Content, not chrome: `userSelect: "none"` stops the drag, not the
+        // find, and `chrome_text` cannot paint a highlight wash.
+        let text: AnyElement = crate::text::selectable_text(crate::text::SelectableText {
+            selectable: ctx.selectable,
+            highlight: ctx
+                .highlight_set
+                .clone()
+                .map(crate::text::HighlightSource::Native),
+            ..crate::text::SelectableText::new(
+                ctx.element_id,
+                sub,
                 SharedString::from(line.to_string()),
                 Some(runs),
-                crate::text::selection_key(ctx.element_id, sub),
                 ctx.selection.clone(),
                 ctx.selection_wash,
-            ))
-        } else {
-            crate::text::chrome_text(SharedString::from(line.to_string()), Some(runs))
-        };
+            )
+        });
         lines = lines.child(div().h(px(m.code_line_height)).flex_none().child(text));
     }
 
@@ -459,7 +475,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
     let mut block = div()
         .w_full()
         .min_w_0()
-        .rounded(px(m.code_radius))
+        .rounded(px(m.md_code_radius))
         .bg(ink(&theme, 0.035))
         .border_1()
         .border_color(theme.border)
@@ -468,12 +484,12 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
     if let Some(language) = language {
         block = block.child(
             div()
-                .px(px(m.code_padding_x))
-                .py(px(m.code_header_padding_y))
+                .px(px(m.md_code_padding_x))
+                .py(px(m.md_code_header_padding_y))
                 .border_b_1()
                 .border_color(theme.border)
                 .bg(ink(&theme, 0.02))
-                .text_size(px(m.code_header_text_size))
+                .text_size(px(m.md_code_header_text_size))
                 .text_color(theme.text_muted)
                 .child(crate::text::chrome_text(
                     SharedString::from(language.to_string()),

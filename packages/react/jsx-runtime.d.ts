@@ -1,6 +1,10 @@
 /// GPUIX JSX runtime types — maps intrinsic elements to GPUIX Props
 /// instead of DOM types. Activated via "jsxImportSource": "@gpuix/react".
+///
+/// `key` is declared on `Props`, not on `IntrinsicAttributes` below.
+/// TypeScript 5 ignores `IntrinsicAttributes` for intrinsic elements.
 
+import type * as React from "react"
 import type {
   AnchoredProps,
   CodeProps,

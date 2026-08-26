@@ -358,7 +358,17 @@ pub fn highlight_with_limits(
 fn syntax_set() -> &'static SyntaxSet {
     static SET: OnceLock<SyntaxSet> = OnceLock::new();
     // Default syntect dump has no TypeScript, TSX, or TOML. two-face is bat's
-    // extra syntax pack and still uses Syntect's fancy-regex engine.
+    // extra syntax pack.
+    //
+    // Loading this dump costs ~3ms. The expensive part is that syntect compiles
+    // a grammar's TextMate regexes lazily, on the FIRST highlight of that
+    // language, on the frame thread, inside a paint. With fancy-regex that was
+    // ~133ms for TypeScript and ~17ms for Rust, which read as a slow mount and
+    // as one dropped frame when a scroll first revealed a code block. Cargo.toml
+    // therefore picks regex-onig off wasm (~12ms and ~1.6ms) and keeps
+    // regex-fancy for wasm, where onig_sys cannot compile its C sources because
+    // wasm32-unknown-unknown has no libc. Do not "simplify" that split back into
+    // one dependency, and do not retry onig on wasm.
     SET.get_or_init(two_face::syntax::extra_newlines)
 }
 

@@ -1,5 +1,9 @@
 /// GPUIX JSX dev-runtime types — mirrors jsx-runtime.d.ts for development builds.
+///
+/// React 19's `react/jsx-dev-runtime` exports only `jsxDEV`, so the aliases here
+/// must match jsx-dev-runtime.js instead of re-exporting `jsx` and `jsxs`.
 
+import type * as React from "react"
 import type {
   AnchoredProps,
   CodeProps,
@@ -13,7 +17,7 @@ import type {
   VirtualListProps,
 } from "./dist/types/host"
 
-export { jsx, jsxs, Fragment } from "react/jsx-dev-runtime"
+export { jsxDEV, jsxDEV as jsx, jsxDEV as jsxs, Fragment } from "react/jsx-dev-runtime"
 
 export namespace JSX {
   type ElementType = React.JSX.ElementType

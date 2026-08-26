@@ -1,16 +1,8 @@
 // GPUIX component definitions and native motion wrappers.
 
-import { createElement, forwardRef, useCallback, useState } from "react"
+import { createElement, forwardRef } from "react"
 import type { ReactElement, ReactNode } from "react"
-import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
-import type {
-  MotionProps,
-  Props,
-  PublicInstance,
-  StyleDesc,
-  VirtualListProps,
-} from "../types/host.js"
-import { DEFAULT_VIRTUAL_LIST_ESTIMATED_ITEM_HEIGHT } from "./virtual-list-contract.js"
+import type { MotionProps, Props, PublicInstance, StyleDesc } from "../types/host.js"
 
 export const gpuixComponents = {
   div: "div",
@@ -65,76 +57,8 @@ export const motion = {
   div: MotionDiv,
 } as const
 
-export interface WindowedVirtualListProps
-  extends Omit<VirtualListProps, "estimatedItemHeight"> {
-  itemCount: number
-  renderItem: (index: number) => ReactNode
-  estimatedItemHeight?: number
-}
-
-function initialWindow(options: {
-  itemCount: number
-  pad: number
-  alignment: VirtualListProps["alignment"]
-  followTail: boolean | undefined
-}): { start: number; end: number } {
-  if (options.followTail || options.alignment === "bottom") {
-    return { start: Math.max(0, options.itemCount - options.pad), end: options.itemCount }
-  }
-  return { start: 0, end: Math.min(options.itemCount, options.pad) }
-}
-
-/** Mounts only the visible window of a virtual list. */
-export const VirtualList = forwardRef<PublicInstance, WindowedVirtualListProps>(
-  function VirtualList(
-    {
-      itemCount,
-      renderItem,
-      estimatedItemHeight = DEFAULT_VIRTUAL_LIST_ESTIMATED_ITEM_HEIGHT,
-      overdraw = 240,
-      alignment,
-      followTail,
-      onVisibleRange,
-      children: _children,
-      ...props
-    },
-    ref,
-  ): ReactElement {
-    const pad = Math.max(2, Math.ceil((800 + overdraw * 2) / Math.max(1, estimatedItemHeight)))
-    const [range, setRange] = useState(() =>
-      initialWindow({ itemCount, pad, alignment, followTail }),
-    )
-    const handleRange = useCallback(
-      (event: GpuixSyntheticEvent) => {
-        const next = {
-          start: Math.max(0, Math.floor(event.startIndex ?? 0) - pad),
-          end: Math.min(itemCount, Math.ceil(event.endIndex ?? 0) + pad),
-        }
-        setRange((current) =>
-          current.start === next.start && current.end === next.end ? current : next,
-        )
-        onVisibleRange?.(event)
-      },
-      [itemCount, onVisibleRange, pad],
-    )
-    const start = Math.min(range.start, itemCount)
-    const end = Math.min(range.end, itemCount)
-    return createElement(
-      "virtual-list",
-      {
-        ...props,
-        ref,
-        alignment,
-        followTail,
-        estimatedItemHeight,
-        overdraw,
-        itemCount,
-        windowStart: start,
-        onVisibleRange: handleRange,
-      },
-      Array.from({ length: Math.max(0, end - start) }, (_, offset) =>
-        renderItem(start + offset),
-      ),
-    )
-  },
-)
+// There is no `VirtualList` React wrapper. Windowing on the React side is the
+// app's job: pass `itemCount`, `estimatedItemHeight` and `windowStart` to the
+// host `<virtual-list>` and render only that slice. A generic wrapper cannot
+// know when to widen its own window, so it silently dropped rows whenever
+// `itemCount` grew without a scroll.

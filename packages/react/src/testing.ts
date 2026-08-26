@@ -9,13 +9,19 @@
 /// flush the tree, dispatch through GPUI, drain events, and feed them into
 /// the React event registry via handleGpuixEvent.
 
+import { createRequire } from "node:module"
+
 import type { ReactNode } from "react"
 import type { EventPayload, MenuSpec } from "@gpuix/native"
-import type { ScrollWheelOptions } from "./automation/client.js"
-import { createRequire } from "node:module"
+import {
+  normalizeScrollWheelOptions,
+  type NativeScrollWheelOptions,
+  type ScrollWheelInput,
+} from "./automation/client.js"
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
+  HighlightMatch,
   NativeRenderer,
   StyleDesc,
   StyleDiagnostic,
@@ -46,17 +52,22 @@ interface NativeTestRendererApi extends NativeRenderer {
   simulateWindowDeactivation(): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
-  simulateClick(x: number, y: number): void
+  simulateClick(x: number, y: number, button?: number, modifiers?: string): void
   simulateScrollWheel(
     x: number,
     y: number,
     deltaX: number,
     deltaY: number,
-    options?: ScrollWheelOptions
+    options?: NativeScrollWheelOptions
   ): void
-  simulateMouseMove(x: number, y: number, pressedButton?: number): void
-  simulateMouseDown(x: number, y: number, button: number): void
-  simulateMouseUp(x: number, y: number, button: number): void
+  simulateMouseMove(
+    x: number,
+    y: number,
+    pressedButton?: number,
+    modifiers?: string
+  ): void
+  simulateMouseDown(x: number, y: number, button: number, modifiers?: string): void
+  simulateMouseUp(x: number, y: number, button: number, modifiers?: string): void
   getTreeJson(): string
   getResolvedStyle(elementId: number): string | null
   getImageLoadState(elementId: number): string | null
@@ -67,6 +78,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   clockFastForward(deltaMs: number): number
   clockResume(): number
   getRootId(): number | null
+  getWindowSize(): { width: number; height: number; scaleFactor: number }
   getAllText(): string[]
   findByElementId(authorId: string): number | null
   findByDataTestId(dataTestId: string): number | null
@@ -81,6 +93,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   dragSelect(x1: number, y1: number, x2: number, y2: number): void
   getSelectedText(): string | null
   getPaintedText(): string[]
+  getPaintedHighlights(): HighlightMatch[]
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   setStrictStyles(enabled: boolean): void
@@ -91,10 +104,23 @@ interface NativeTestRendererApi extends NativeRenderer {
 }
 
 interface NativeTestRendererConstructor {
-  new (): NativeTestRendererApi
+  new (width?: number, height?: number): NativeTestRendererApi
 }
 
-// The native test renderer is currently exported only by macOS builds.
+/** Offscreen window size for a test root. Defaults to 1280x800 in native. */
+export interface TestWindowOptions {
+  width?: number
+  height?: number
+}
+
+// The native test renderer is exported by macOS and Windows builds.
+//
+// Loaded through `createRequire`, never a bare `require`. This file ships as
+// ESM, and Node has no `require` there: in a workspace vitest inlines it and
+// happens to provide one, but a real dependency is externalized and run by
+// Node, where the bare call threw `require is not defined`. The `catch` then
+// made `hasNativeTestRenderer` false, so every suite that guards on it
+// silently skipped for anyone consuming the published package.
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
 let probedNativeTestRenderer: NativeTestRendererApi | null = null
 let nativeTestRendererInitialized = false
@@ -192,7 +218,7 @@ export class TestRenderer implements NativeRenderer {
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
 
-  constructor() {
+  constructor(options: TestWindowOptions = {}) {
     const NativeTestRendererConstructor = initializeNativeTestRenderer()
     if (!NativeTestRendererConstructor) {
       throw new Error(
@@ -201,7 +227,14 @@ export class TestRenderer implements NativeRenderer {
         }`
       )
     }
-    this.native = probedNativeTestRenderer ?? new NativeTestRendererConstructor()
+    const customSize = options.width !== undefined || options.height !== undefined
+    if (probedNativeTestRenderer && customSize) {
+      probedNativeTestRenderer.dispose()
+      probedNativeTestRenderer = null
+    }
+    this.native =
+      probedNativeTestRenderer ??
+      new NativeTestRendererConstructor(options.width, options.height)
     probedNativeTestRenderer = null
   }
 
@@ -409,9 +442,14 @@ export class TestRenderer implements NativeRenderer {
 
   /** End-to-end: simulate a click through GPUI hit testing →
    *  dispatch resulting events to React. */
-  nativeSimulateClick(x: number, y: number): void {
+  nativeSimulateClick(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void {
     this.native.flush()
-    this.native.simulateClick(x, y)
+    this.native.simulateClick(x, y, button, modifiers)
     this.dispatchNativeEvents()
     // Flush again after React state updates so the Rust RetainedTree
     // is fully rebuilt and GPUI has re-laid-out before any screenshot.
@@ -441,30 +479,63 @@ export class TestRenderer implements NativeRenderer {
     y: number,
     deltaX: number,
     deltaY: number,
-    options?: ScrollWheelOptions
+    options?: ScrollWheelInput
   ): void {
     this.native.flush()
-    this.native.simulateScrollWheel(x, y, deltaX, deltaY, options)
+    this.native.simulateScrollWheel(
+      x,
+      y,
+      deltaX,
+      deltaY,
+      normalizeScrollWheelOptions(options)
+    )
     this.dispatchNativeEvents()
   }
 
+  /** Dispatch a wheel without the surrounding flushes, for perf sampling.
+   *  Call `flush()` yourself, or the sample is the React update only and
+   *  none of the GPUI build, layout and paint that follows. */
   dispatchScrollWheel(
     x: number,
     y: number,
     deltaX: number,
     deltaY: number,
-    options?: ScrollWheelOptions
+    options?: ScrollWheelInput
   ): void {
-    this.native.simulateScrollWheel(x, y, deltaX, deltaY, options)
+    this.native.simulateScrollWheel(
+      x,
+      y,
+      deltaX,
+      deltaY,
+      normalizeScrollWheelOptions(options)
+    )
+    this.dispatchNativeEvents()
+  }
+
+  /** Dispatch a move without the surrounding flushes, for perf sampling.
+   *  `nativeSimulateMouseMove` flushes before and after, so a drag timed with
+   *  it contains two complete paints and cannot be compared to a wheel. */
+  dispatchMouseMove(
+    x: number,
+    y: number,
+    pressedButton?: number,
+    modifiers?: string
+  ): void {
+    this.native.simulateMouseMove(x, y, pressedButton, modifiers)
     this.dispatchNativeEvents()
   }
 
   /** End-to-end: simulate mouse move through GPUI →
    *  dispatch resulting events to React.
    *  @param pressedButton - optional button held during move (0=left, 1=middle, 2=right) for drag simulation */
-  nativeSimulateMouseMove(x: number, y: number, pressedButton?: number): void {
+  nativeSimulateMouseMove(
+    x: number,
+    y: number,
+    pressedButton?: number,
+    modifiers?: string
+  ): void {
     this.native.flush()
-    this.native.simulateMouseMove(x, y, pressedButton)
+    this.native.simulateMouseMove(x, y, pressedButton, modifiers)
     this.dispatchNativeEvents()
     // Flush again after React state updates so hover styles are applied
     // and the Rust tree is current before any screenshot.
@@ -474,9 +545,14 @@ export class TestRenderer implements NativeRenderer {
   /** End-to-end: simulate mouse down through GPUI hit testing →
    *  dispatch resulting events to React.
    *  @param button - 0=left (default), 1=middle, 2=right */
-  nativeSimulateMouseDown(x: number, y: number, button?: number): void {
+  nativeSimulateMouseDown(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void {
     this.native.flush()
-    this.native.simulateMouseDown(x, y, button ?? 0)
+    this.native.simulateMouseDown(x, y, button ?? 0, modifiers)
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -497,9 +573,14 @@ export class TestRenderer implements NativeRenderer {
   /** End-to-end: simulate mouse up through GPUI hit testing →
    *  dispatch resulting events to React.
    *  @param button - 0=left (default), 1=middle, 2=right */
-  nativeSimulateMouseUp(x: number, y: number, button?: number): void {
+  nativeSimulateMouseUp(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void {
     this.native.flush()
-    this.native.simulateMouseUp(x, y, button ?? 0)
+    this.native.simulateMouseUp(x, y, button ?? 0, modifiers)
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -676,6 +757,14 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getPaintedText()
   }
 
+  /** Every highlight wash painted in the last frame, in paint order.
+   *
+   *  A quad never lands in `getPaintedText()`, and a soft-wrapped match must
+   *  draw one box per visual row, so each entry carries its `rects`. */
+  getPaintedHighlights(): HighlightMatch[] {
+    return this.native.getPaintedHighlights()
+  }
+
   /** Syntax-cache counters as `[hits, misses, documents]`. */
   getSyntaxCacheStats(): [number, number, number] {
     const [hits, misses, documents] = this.native.getSyntaxCacheStats()
@@ -707,8 +796,7 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getDebugFrameOverlayStats()
   }
 
-  /** Capture a screenshot of the current rendered UI and save as PNG.
-   *  macOS only — requires Metal GPU rendering via VisualTestAppContext. */
+  /** Capture the current Metal or DirectX frame and save it as a PNG. */
   captureScreenshot(path: string): void {
     this.native.flush()
     this.native.captureScreenshot(path)
@@ -912,7 +1000,7 @@ export interface TestRoot {
   unmount: () => void
 }
 
-export interface TestRootOptions {
+export interface TestRootOptions extends TestWindowOptions {
   /** Opt in to loopback/private URL images for local fixture servers. */
   allowPrivateNetworkImages?: boolean
 }
@@ -922,9 +1010,13 @@ export interface TestRootOptions {
  * All mutations go to the real GPUI pipeline via native TestGpuixRenderer.
  * Returns the Root (for rendering), the TestRenderer (for inspection/events),
  * and convenience methods.
+ *
+ * Pass `width` / `height` to size the offscreen window. The 1280x800 default is
+ * wide enough to keep a centered max-width column capped, so a layout test that
+ * needs to observe re-wrapping must ask for a narrower window.
  */
 export function createTestRoot(options: TestRootOptions = {}): TestRoot {
-  const renderer = new TestRenderer()
+  const renderer = new TestRenderer(options)
   renderer.setAllowPrivateNetworkImages(options.allowPrivateNetworkImages ?? false)
   const root = createRoot(renderer)
   let unmounted = false

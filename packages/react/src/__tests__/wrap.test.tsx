@@ -256,7 +256,8 @@ describeNative("text wrapping", () => {
     const before = path.join(SHOTS_DIR, "wrap-code-x-before.png")
     const after = path.join(SHOTS_DIR, "wrap-code-x-after.png")
     renderer.captureScreenshot(before)
-    renderer.nativeSimulateScrollWheel(80, 50, -160, 0)
+    // Two rows of 18px from y=8, so the wheel must sit inside that band.
+    renderer.nativeSimulateScrollWheel(80, 20, -160, 0)
     renderer.captureScreenshot(after)
     expectScreenshotsDiffer(before, after)
   })
@@ -280,5 +281,91 @@ describeNative("text wrapping", () => {
     const offset = renderer.getScrollOffset(scroller!.id)
     expect(offset).not.toBeNull()
     expect(offset![1]).toBeLessThan(0)
+  })
+})
+
+/// The default 1280x800 window is wide enough that a centered max-width column
+/// stays capped, so a test that needs to observe re-wrapping must ask for a
+/// narrower window. These tests pin that contract.
+///
+/// **Never assert a literal window size here.** The offscreen window is a real
+/// platform window, so a display smaller than the request clamps it: a GitHub
+/// macOS runner is 1024x768 and turned a green suite red without a code change.
+/// Everything below is expressed against `getWindowSize()`, which is what the
+/// platform actually granted, or against a size derived from it.
+describeNative("test window size", () => {
+  function sized(options: Parameters<typeof createTestRoot>[0]) {
+    const root = createTestRoot(options)
+    root.render(
+      <div testId="full" style={{ width: "100%", height: "100%", backgroundColor: "#111" }} />,
+    )
+    return { window: root.renderer.getWindowSize(), full: rect(root.renderer, "full") }
+  }
+
+  it("lays the root out over the whole window", () => {
+    const { window, full } = sized({})
+    expect(full).toMatchObject({ x: 0, y: 0, width: window.width, height: window.height })
+  })
+
+  it("never asks for more than the 1280x800 default", () => {
+    const { window } = sized({})
+    expect(window.width).toBeLessThanOrEqual(1280)
+    expect(window.height).toBeLessThanOrEqual(800)
+  })
+
+  it("rejects a size that cannot be laid out", () => {
+    expect(() => createTestRoot({ width: 0 })).toThrow(/positive/)
+    expect(() => createTestRoot({ width: -10 })).toThrow(/positive/)
+    expect(() => createTestRoot({ height: Number.NaN })).toThrow(/finite/)
+    expect(() => createTestRoot({ height: Number.POSITIVE_INFINITY })).toThrow(/finite/)
+    // Finite as f64, but saturates to f32 infinity once converted to pixels.
+    expect(() => createTestRoot({ width: 1e300 })).toThrow(/finite/)
+  })
+
+  /// Windows opens every offscreen test window at the display size and ignores
+  /// the requested one, so `createTestRoot({ width })` has no effect there:
+  /// 1280x800, 640x480 and 640-only all came back 1024 wide on the runner.
+  /// Skipped rather than relaxed, because relaxing would let the option stay
+  /// broken on the one platform where it already is.
+  /// https://github.com/remorses/gpuix/issues/21
+  const itSizes = process.platform === "win32" ? it.skip : it
+
+  // Half of a window the platform already granted, so no display can clamp it
+  // and the assertion holds on any monitor.
+  itSizes("honours a custom window size", () => {
+    const base = sized({}).window
+    const want = { width: Math.round(base.width / 2), height: Math.round(base.height / 2) }
+    expect(sized(want).full).toMatchObject(want)
+  })
+
+  itSizes("keeps the default for the dimension that is omitted", () => {
+    const base = sized({}).window
+    const width = Math.round(base.width / 2)
+    expect(sized({ width }).full).toMatchObject({ width, height: base.height })
+  })
+
+  /// Why the option exists: a centered `maxWidth` column only re-wraps once the
+  /// window is narrow enough to fall under the cap. In a window at or above the
+  /// cap both states resolve to the cap, so the wrap width never moves and a
+  /// reflow cost is invisible.
+  itSizes("only re-wraps a capped column once the window falls under the cap", () => {
+    const base = sized({}).window
+    const cap = Math.round(base.width / 2)
+
+    function columnWidth(windowWidth: number) {
+      const root = createTestRoot({ width: windowWidth, height: 400 })
+      root.render(
+        <div style={{ width: "100%", flexDirection: "row", justifyContent: "center" }}>
+          <div testId="column" style={{ width: cap, maxWidth: "100%" }}>
+            <text style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>{PROSE}</text>
+          </div>
+        </div>,
+      )
+      return rect(root.renderer, "column").width
+    }
+
+    expect(columnWidth(base.width)).toBe(cap)
+    expect(columnWidth(cap + 3)).toBe(cap)
+    expect(columnWidth(Math.round(cap / 2))).toBe(Math.round(cap / 2))
   })
 })

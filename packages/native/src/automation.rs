@@ -13,9 +13,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::{
-    canvas, point, px, App, Bounds, InputEvent, IntoElement, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollDelta, ScrollWheelEvent, Styled,
-    TouchPhase, Window,
+    canvas, point, px, App, Bounds, InputEvent, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke,
+    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollDelta,
+    ScrollWheelEvent, Styled, TouchPhase, Window,
 };
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use napi_derive::napi;
@@ -217,14 +217,92 @@ pub fn mouse_button(button: u32) -> MouseButton {
     }
 }
 
-pub fn dispatch_click(window: &mut Window, cx: &mut App, x: f64, y: f64, button: u32) {
+/// Parse the held modifiers of a simulated mouse event from the same
+/// hyphenated syntax `press("cmd-a")` already uses: `"cmd"`, `"cmd-shift"`,
+/// `"alt"`. `None` and `""` mean no modifier. Unknown names are ignored, so a
+/// typo weakens the gesture instead of failing the whole automation call.
+///
+/// A string, not an object, because the same value has to cross the napi, the
+/// wasm and the stdio boundary, and only wasm makes objects awkward.
+pub fn parse_modifiers(modifiers: Option<&str>) -> Modifiers {
+    let mut parsed = Modifiers::default();
+    let Some(text) = modifiers else {
+        return parsed;
+    };
+    for part in text.split('-') {
+        match part.trim().to_ascii_lowercase().as_str() {
+            "cmd" | "meta" | "super" | "win" | "platform" => parsed.platform = true,
+            "ctrl" | "control" => parsed.control = true,
+            "alt" | "option" => parsed.alt = true,
+            "shift" => parsed.shift = true,
+            "fn" | "function" => parsed.function = true,
+            _ => {}
+        }
+    }
+    parsed
+}
+
+pub fn dispatch_keystrokes(
+    window: &mut Window,
+    cx: &mut App,
+    keystrokes: &str,
+) -> Result<(), String> {
+    for keystroke in keystrokes.split(' ') {
+        window.dispatch_keystroke(parse_keystroke(keystroke)?, cx);
+    }
+    Ok(())
+}
+
+pub fn dispatch_key_down(
+    window: &mut Window,
+    cx: &mut App,
+    keystroke: &str,
+    is_held: bool,
+) -> Result<(), String> {
+    window.dispatch_event(
+        KeyDownEvent {
+            keystroke: parse_keystroke(keystroke)?,
+            is_held,
+            prefer_character_input: false,
+        }
+        .to_platform_input(),
+        cx,
+    );
+    Ok(())
+}
+
+pub fn dispatch_key_up(window: &mut Window, cx: &mut App, keystroke: &str) -> Result<(), String> {
+    window.dispatch_event(
+        KeyUpEvent {
+            keystroke: parse_keystroke(keystroke)?,
+        }
+        .to_platform_input(),
+        cx,
+    );
+    Ok(())
+}
+
+fn parse_keystroke(keystroke: &str) -> Result<Keystroke, String> {
+    Keystroke::parse(keystroke).map_err(|error| format!("Invalid keystroke '{keystroke}': {error}"))
+}
+
+/// Every automation mouse dispatcher takes modifiers, so a test can drive
+/// cmd-wheel zoom, shift-click range selection, or alt-drag duplication.
+pub fn dispatch_click(
+    window: &mut Window,
+    cx: &mut App,
+    x: f64,
+    y: f64,
+    button: u32,
+    modifiers: Modifiers,
+) {
     let position = point(px(x as f32), px(y as f32));
     let button = mouse_button(button);
     window.dispatch_event(
         MouseDownEvent {
             button,
             position,
-            modifiers: Modifiers::default(),
+            modifiers,
             click_count: 1,
             first_mouse: false,
         }
@@ -235,7 +313,7 @@ pub fn dispatch_click(window: &mut Window, cx: &mut App, x: f64, y: f64, button:
         MouseUpEvent {
             button,
             position,
-            modifiers: Modifiers::default(),
+            modifiers,
             click_count: 1,
         }
         .to_platform_input(),
@@ -243,12 +321,19 @@ pub fn dispatch_click(window: &mut Window, cx: &mut App, x: f64, y: f64, button:
     );
 }
 
-pub fn dispatch_mouse_down(window: &mut Window, cx: &mut App, x: f64, y: f64, button: u32) {
+pub fn dispatch_mouse_down(
+    window: &mut Window,
+    cx: &mut App,
+    x: f64,
+    y: f64,
+    button: u32,
+    modifiers: Modifiers,
+) {
     window.dispatch_event(
         MouseDownEvent {
             button: mouse_button(button),
             position: point(px(x as f32), px(y as f32)),
-            modifiers: Modifiers::default(),
+            modifiers,
             click_count: 1,
             first_mouse: false,
         }
@@ -257,12 +342,19 @@ pub fn dispatch_mouse_down(window: &mut Window, cx: &mut App, x: f64, y: f64, bu
     );
 }
 
-pub fn dispatch_mouse_up(window: &mut Window, cx: &mut App, x: f64, y: f64, button: u32) {
+pub fn dispatch_mouse_up(
+    window: &mut Window,
+    cx: &mut App,
+    x: f64,
+    y: f64,
+    button: u32,
+    modifiers: Modifiers,
+) {
     window.dispatch_event(
         MouseUpEvent {
             button: mouse_button(button),
             position: point(px(x as f32), px(y as f32)),
-            modifiers: Modifiers::default(),
+            modifiers,
             click_count: 1,
         }
         .to_platform_input(),
@@ -276,12 +368,13 @@ pub fn dispatch_mouse_move(
     x: f64,
     y: f64,
     pressed_button: Option<u32>,
+    modifiers: Modifiers,
 ) {
     window.dispatch_event(
         MouseMoveEvent {
             position: point(px(x as f32), px(y as f32)),
             pressed_button: pressed_button.map(mouse_button),
-            modifiers: Modifiers::default(),
+            modifiers,
         }
         .to_platform_input(),
         cx,

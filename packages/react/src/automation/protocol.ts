@@ -44,6 +44,9 @@ const pointSchema = z.object({
 
 const buttonSchema = z.number().int().min(0).max(2).optional()
 
+/** Held modifiers, in the same hyphenated syntax as `press("cmd-a")`. */
+const modifiersSchema = z.string().optional()
+
 export const boundsSchema = z.object({
   x: z.number(),
   y: z.number(),
@@ -115,19 +118,29 @@ export const methods = {
       x: z.number(),
       y: z.number(),
       button: buttonSchema,
+      modifiers: modifiersSchema,
     }),
     result: okSchema,
   },
   mouseDown: {
-    params: pointSchema.extend({ button: buttonSchema }),
+    params: pointSchema.extend({
+      button: buttonSchema,
+      modifiers: modifiersSchema,
+    }),
     result: okSchema,
   },
   mouseUp: {
-    params: pointSchema.extend({ button: buttonSchema }),
+    params: pointSchema.extend({
+      button: buttonSchema,
+      modifiers: modifiersSchema,
+    }),
     result: okSchema,
   },
   mouseMove: {
-    params: pointSchema.extend({ pressedButton: buttonSchema }),
+    params: pointSchema.extend({
+      pressedButton: buttonSchema,
+      modifiers: modifiersSchema,
+    }),
     result: okSchema,
   },
   scrollWheel: {
@@ -136,15 +149,16 @@ export const methods = {
       deltaY: z.number(),
       phase: z.enum(["started", "moved", "ended", "cancelled"]).optional(),
       deltaUnit: z.enum(["pixels", "lines"]).optional(),
-      modifiers: z
-        .object({
+      modifiers: z.union([
+        modifiersSchema.unwrap(),
+        z.object({
           shift: z.boolean().optional(),
           ctrl: z.boolean().optional(),
           alt: z.boolean().optional(),
           cmd: z.boolean().optional(),
           function: z.boolean().optional(),
-        })
-        .optional(),
+        }),
+      ]).optional(),
     }),
     result: okSchema,
   },

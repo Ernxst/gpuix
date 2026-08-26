@@ -1,0 +1,54 @@
+{
+  "$schema": "https://holocron.so/docs.json",
+  "name": "GPUIX",
+  "description": "React bindings for GPUI, Zed's GPU-accelerated UI framework",
+  "colors": {
+    "primary": "#f97316"
+  },
+  "appearance": {
+    "default": "system"
+  },
+  "icons": {
+    "library": "lucide"
+  },
+  "navbar": {
+    "links": [
+      {
+        "type": "github",
+        "href": "https://github.com/remorses/gpuix"
+      }
+    ]
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "icon": "lucide:book-open",
+        "groups": [
+          {
+            "group": "Overview",
+            "icon": "lucide:home",
+            "pages": ["index"]
+          }
+        ]
+      },
+      {
+        "tab": "Changelog",
+        "icon": "lucide:newspaper",
+        "changelog": "https://github.com/remorses/gpuix",
+        "initialContent": "changelog/intro"
+      },
+      {
+        "tab": "GitHub",
+        "icon": "lucide:github",
+        "href": "https://github.com/remorses/gpuix"
+      },
+      {
+        "tab": "npm",
+        "icon": "lucide:package",
+        "href": "https://www.npmjs.com/package/@gpuix/react"
+      }
+    ]
+  },
+  "decorativeLines": "none"
+}

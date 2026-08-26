@@ -1,6 +1,6 @@
 {
   "name": "@gpuix/react",
-  "version": "0.4.0-fork.7",
+  "version": "0.5.1-fork.1",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -65,11 +65,12 @@
   },
   "scripts": {
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/react locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
-    "build": "rm -rf dist && tsc",
+    "build": "tsc",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc --noEmit && tsc --project tsconfig.test.json",
     "dev": "tsc --watch",
     "test": "bun run build && vitest run",
-  "test:watch": "bun run build && vitest"
+    "test:watch": "bun run build && vitest"
   },
   "dependencies": {
     "@gpuix/native": "workspace:^",
@@ -89,6 +90,7 @@
     "@types/react-reconciler": "^0.28.0",
     "react-reconciler": "^0.31.0",
     "scheduler": "^0.25.0",
+    "react-refresh": "^0.18.0",
     "typescript": "^5.3.0",
     "vitest": "^4.0.18"
   }
