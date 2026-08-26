@@ -5111,8 +5111,7 @@ impl gpui::Render for GpuixView {
             .retain(|id, _| tree.elements.contains_key(id));
         self.motion_states
             .retain(|id, _| tree.elements.contains_key(id));
-        self.transition_states
-            .retain(|id, _| tree.elements.contains_key(id));
+        self.transition_states.retain(|id, _| tree.is_attached(*id));
 
         // Build the element tree. custom_registry, focus_handles, and scroll_handles
         // are different fields of self, so Rust allows borrowing all simultaneously.

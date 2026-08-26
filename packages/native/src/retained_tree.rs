@@ -214,6 +214,30 @@ pub struct RetainedTree {
 }
 
 impl RetainedTree {
+    /// Whether an element is still connected to the current React root.
+    ///
+    /// React may detach a child before its later `destroyElement` callback, so
+    /// existence in `elements` alone is not a mounted-lifecycle check.
+    pub(crate) fn is_attached(&self, id: u64) -> bool {
+        let Some(root_id) = self.root_id else {
+            return false;
+        };
+        let mut current = Some(id);
+        for _ in 0..=self.elements.len() {
+            let Some(candidate) = current else {
+                return false;
+            };
+            if candidate == root_id {
+                return true;
+            }
+            current = self
+                .elements
+                .get(&candidate)
+                .and_then(|element| element.parent);
+        }
+        false
+    }
+
     pub fn new() -> Self {
         Self {
             elements: ElementMap::default(),
@@ -704,6 +728,23 @@ mod tests {
         tree.destroy_element(1);
         assert_eq!(tree.root_id, None);
         assert!(tree.elements.is_empty());
+    }
+
+    #[test]
+    fn attachment_follows_the_parent_chain_not_table_existence() {
+        let mut tree = RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+        tree.create_element(2, "div".to_string());
+        tree.create_element(3, "div".to_string());
+        tree.root_id = Some(1);
+        tree.append_child(1, 2);
+        tree.append_child(2, 3);
+
+        assert!(tree.is_attached(3));
+        tree.remove_child(1, 2);
+        assert!(!tree.is_attached(2));
+        assert!(!tree.is_attached(3));
+        assert!(tree.elements.contains_key(&3));
     }
 
     /// The whole point of `search_revision`: `highlight` is a custom prop, so

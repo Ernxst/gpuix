@@ -184,4 +184,27 @@ describeNative("native style transitions", () => {
       root.unmount()
     }
   })
+
+  it("drops retained tracks when their host element unmounts", () => {
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div>
+          <div
+            testId="leaving-target"
+            style={{
+              opacity: 0.5,
+              transition: { properties: ["opacity"], durationMs: 100 },
+            }}
+          />
+        </div>
+      )
+      expect(root.renderer.getStyleTransitionCount()).toBe(1)
+
+      root.render(<div />)
+      expect(root.renderer.getStyleTransitionCount()).toBe(0)
+    } finally {
+      root.unmount()
+    }
+  })
 })

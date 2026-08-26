@@ -251,6 +251,11 @@ export declare class TestGpuixRenderer {
   advanceAsyncClock(deltaMs: number): void
   /** Override GPUI's reduced-motion policy for deterministic tests. */
   setReducedMotion(enabled: boolean): void
+  /**
+   * Number of retained style-transition tracks. Exposed only by the
+   * offscreen renderer so lifecycle tests can prove unmounted tracks leave.
+   */
+  getStyleTransitionCount(): number
   getWindowSize(): WindowSize
   /** Simulate a native window resize through GPUI's bounds observer. */
   simulateResize(width: number, height: number): void

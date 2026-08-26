@@ -587,6 +587,20 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Number of retained style-transition tracks. Exposed only by the
+    /// offscreen renderer so lifecycle tests can prove unmounted tracks leave.
+    #[napi]
+    pub fn get_style_transition_count(&self) -> Result<u32> {
+        self.flush()?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                u32::try_from(view.read(app).transition_states.len()).unwrap_or(u32::MAX)
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
     #[napi]
     pub fn get_window_size(&self) -> Result<WindowSize> {
         with_test_state(self.state_id, |cx, window, _view| {

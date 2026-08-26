@@ -864,6 +864,39 @@ mod tests {
     }
 
     #[test]
+    fn style_transition_holds_during_its_delay() {
+        let now = Instant::now();
+        let style = style(serde_json::json!({
+            "opacity": 0.0,
+            "hover": { "opacity": 1.0 },
+            "transition": {
+                "properties": ["opacity"],
+                "durationMs": 100,
+                "delayMs": 50,
+                "easing": "linear"
+            }
+        }));
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), now);
+        state.set_hovered(true);
+        state.sync(&style, StyleState::default(), now, false);
+
+        assert_eq!(
+            state
+                .frame(now + Duration::from_millis(49), false)
+                .style
+                .opacity,
+            Some(0.0)
+        );
+        assert_eq!(
+            state
+                .frame(now + Duration::from_millis(100), false)
+                .style
+                .opacity,
+            Some(0.5)
+        );
+    }
+
+    #[test]
     fn interpolates_and_retargets_from_the_visible_value() {
         let started = Instant::now();
         let initial = serde_json::json!({
