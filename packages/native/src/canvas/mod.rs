@@ -22,6 +22,7 @@ pub(crate) struct CanvasPreparationDiagnostic {
 #[derive(Clone, Default)]
 pub struct SharedDisplayLists {
     lists: Arc<Mutex<DisplayLists>>,
+    last_revisions: Arc<Mutex<FxHashMap<u64, u64>>>,
     preparation_diagnostics: Arc<Mutex<Vec<CanvasPreparationDiagnostic>>>,
 }
 
@@ -59,6 +60,14 @@ impl SharedDisplayLists {
 /// while resolving intersections. B3 can replace this conservative admission
 /// limit when it adds explicit, scale-aware tessellation policy.
 const MAX_B1_FILL_SEGMENTS: usize = 128;
+pub(crate) const DEFAULT_CANVAS_WIDTH: f64 = 300.0;
+pub(crate) const DEFAULT_CANVAS_HEIGHT: f64 = 150.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CanvasSize {
+    pub width: f64,
+    pub height: f64,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CanvasPoint {
@@ -66,12 +75,15 @@ pub struct CanvasPoint {
     pub y: f64,
 }
 
+pub type CanvasQuad = [CanvasPoint; 4];
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct FillRect {
     /// Rectangle corners after applying the current transformation matrix.
     pub points: [CanvasPoint; 4],
     pub color: gpui::Rgba,
     pub op_index: usize,
+    pub clear_regions: Vec<CanvasQuad>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -88,12 +100,41 @@ pub struct FillPath {
     pub commands: Vec<PathCommand>,
     pub color: gpui::Rgba,
     pub op_index: usize,
+    pub clear_regions: Vec<CanvasQuad>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CanvasLineJoin {
+    Miter,
+    Round,
+    Bevel,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StrokeStyle {
+    pub color: gpui::Rgba,
+    pub line_width: f64,
+    pub line_join: CanvasLineJoin,
+    pub miter_limit: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StrokeRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub transform: CanvasTransform,
+    pub style: StrokeStyle,
+    pub op_index: usize,
+    pub clear_regions: Vec<CanvasQuad>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DisplayItem {
     FillRect(FillRect),
     FillPath(FillPath),
+    StrokeRect(StrokeRect),
 }
 
 #[derive(Clone, Debug)]
@@ -142,11 +183,16 @@ pub(crate) struct CanvasApplyOutcome {
 #[derive(Clone)]
 struct ReplayState {
     fill_style: gpui::Rgba,
-    transform: Transform2D,
+    stroke_style: gpui::Rgba,
+    line_width: f64,
+    global_alpha: f64,
+    line_join: CanvasLineJoin,
+    miter_limit: f64,
+    transform: CanvasTransform,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Transform2D {
+pub struct CanvasTransform {
     a: f64,
     b: f64,
     c: f64,
@@ -155,8 +201,8 @@ struct Transform2D {
     f: f64,
 }
 
-impl Transform2D {
-    const IDENTITY: Self = Self {
+impl CanvasTransform {
+    pub(crate) const IDENTITY: Self = Self {
         a: 1.0,
         b: 0.0,
         c: 0.0,
@@ -176,7 +222,7 @@ impl Transform2D {
         }
     }
 
-    fn transform_point(self, x: f64, y: f64) -> CanvasPoint {
+    pub(crate) fn transform_point(self, x: f64, y: f64) -> CanvasPoint {
         CanvasPoint {
             x: self.a * x + self.c * y + self.e,
             y: self.b * x + self.d * y + self.f,
@@ -212,6 +258,207 @@ fn path_preparation_problem(commands: &[PathCommand]) -> Option<String> {
     })
 }
 
+fn rect_quad(transform: CanvasTransform, x: f64, y: f64, width: f64, height: f64) -> CanvasQuad {
+    [
+        transform.transform_point(x, y),
+        transform.transform_point(x + width, y),
+        transform.transform_point(x + width, y + height),
+        transform.transform_point(x, y + height),
+    ]
+}
+
+fn cross(a: CanvasPoint, b: CanvasPoint, point: CanvasPoint) -> f64 {
+    (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
+}
+
+fn quad_area(quad: &CanvasQuad) -> f64 {
+    quad.iter()
+        .zip(quad.iter().cycle().skip(1))
+        .take(4)
+        .map(|(a, b)| a.x * b.y - b.x * a.y)
+        .sum::<f64>()
+        * 0.5
+}
+
+fn quad_contains_point(quad: &CanvasQuad, point: CanvasPoint) -> bool {
+    let orientation = quad_area(quad).signum();
+    if orientation == 0.0 {
+        return false;
+    }
+    quad.iter()
+        .zip(quad.iter().cycle().skip(1))
+        .take(4)
+        .all(|(&a, &b)| cross(a, b, point) * orientation >= -1e-9)
+}
+
+fn segments_intersect(a: CanvasPoint, b: CanvasPoint, c: CanvasPoint, d: CanvasPoint) -> bool {
+    let ranges_overlap =
+        |a: f64, b: f64, c: f64, d: f64| a.min(b) <= c.max(d) + 1e-9 && c.min(d) <= a.max(b) + 1e-9;
+    if !ranges_overlap(a.x, b.x, c.x, d.x) || !ranges_overlap(a.y, b.y, c.y, d.y) {
+        return false;
+    }
+    let ab_c = cross(a, b, c);
+    let ab_d = cross(a, b, d);
+    let cd_a = cross(c, d, a);
+    let cd_b = cross(c, d, b);
+    ab_c * ab_d <= 1e-9 && cd_a * cd_b <= 1e-9
+}
+
+fn quad_edges(quad: &CanvasQuad) -> impl Iterator<Item = (CanvasPoint, CanvasPoint)> + '_ {
+    quad.iter()
+        .copied()
+        .zip(quad.iter().copied().cycle().skip(1))
+        .take(4)
+}
+
+fn quads_intersect(left: &CanvasQuad, right: &CanvasQuad) -> bool {
+    left.iter()
+        .copied()
+        .any(|point| quad_contains_point(right, point))
+        || right
+            .iter()
+            .copied()
+            .any(|point| quad_contains_point(left, point))
+        || quad_edges(left)
+            .any(|(a, b)| quad_edges(right).any(|(c, d)| segments_intersect(a, b, c, d)))
+}
+
+fn path_subpaths(commands: &[PathCommand]) -> Vec<Vec<CanvasPoint>> {
+    let mut subpaths = Vec::new();
+    let mut current = Vec::new();
+    for command in commands {
+        match command {
+            PathCommand::MoveTo(point) => {
+                if current.len() > 1 {
+                    subpaths.push(std::mem::take(&mut current));
+                } else {
+                    current.clear();
+                }
+                current.push(*point);
+            }
+            PathCommand::LineTo(point) => current.push(*point),
+            PathCommand::ClosePath => {
+                if current.len() > 1 {
+                    subpaths.push(std::mem::take(&mut current));
+                } else {
+                    current.clear();
+                }
+            }
+        }
+    }
+    if current.len() > 1 {
+        subpaths.push(current);
+    }
+    subpaths
+}
+
+fn path_winding_at(subpaths: &[Vec<CanvasPoint>], point: CanvasPoint) -> i32 {
+    let mut winding = 0;
+    for subpath in subpaths {
+        for (&a, &b) in subpath
+            .iter()
+            .zip(subpath.iter().cycle().skip(1))
+            .take(subpath.len())
+        {
+            if a.y <= point.y {
+                if b.y > point.y && cross(a, b, point) > 0.0 {
+                    winding += 1;
+                }
+            } else if b.y <= point.y && cross(a, b, point) < 0.0 {
+                winding -= 1;
+            }
+        }
+    }
+    winding
+}
+
+fn path_intersects_quad(commands: &[PathCommand], quad: &CanvasQuad) -> bool {
+    let subpaths = path_subpaths(commands);
+    subpaths.iter().any(|subpath| {
+        subpath
+            .iter()
+            .copied()
+            .any(|point| quad_contains_point(quad, point))
+            || subpath
+                .iter()
+                .copied()
+                .zip(subpath.iter().copied().cycle().skip(1))
+                .take(subpath.len())
+                .any(|(a, b)| quad_edges(quad).any(|(c, d)| segments_intersect(a, b, c, d)))
+    }) || quad
+        .iter()
+        .copied()
+        .any(|point| path_winding_at(&subpaths, point) != 0)
+}
+
+impl DisplayItem {
+    fn clear_regions(&self) -> &[CanvasQuad] {
+        match self {
+            Self::FillRect(rect) => &rect.clear_regions,
+            Self::FillPath(path) => &path.clear_regions,
+            Self::StrokeRect(rect) => &rect.clear_regions,
+        }
+    }
+
+    fn clear_regions_mut(&mut self) -> &mut Vec<CanvasQuad> {
+        match self {
+            Self::FillRect(rect) => &mut rect.clear_regions,
+            Self::FillPath(path) => &mut path.clear_regions,
+            Self::StrokeRect(rect) => &mut rect.clear_regions,
+        }
+    }
+
+    fn intersects_quad(&self, quad: &CanvasQuad) -> bool {
+        if self
+            .clear_regions()
+            .iter()
+            .any(|clear| quad.iter().all(|point| quad_contains_point(clear, *point)))
+        {
+            return false;
+        }
+        match self {
+            Self::FillRect(rect) => quads_intersect(&rect.points, quad),
+            Self::FillPath(path) => path_intersects_quad(&path.commands, quad),
+            Self::StrokeRect(rect) => {
+                let half_width = rect.style.line_width * 0.5;
+                let left = rect.x.min(rect.x + rect.width);
+                let right = rect.x.max(rect.x + rect.width);
+                let top = rect.y.min(rect.y + rect.height);
+                let bottom = rect.y.max(rect.y + rect.height);
+                let outer = rect_quad(
+                    rect.transform,
+                    left - half_width,
+                    top - half_width,
+                    right - left + rect.style.line_width,
+                    bottom - top + rect.style.line_width,
+                );
+                if !quads_intersect(&outer, quad) {
+                    return false;
+                }
+                let inner_width = right - left - rect.style.line_width;
+                let inner_height = bottom - top - rect.style.line_width;
+                if inner_width <= 0.0 || inner_height <= 0.0 {
+                    return true;
+                }
+                let inner = rect_quad(
+                    rect.transform,
+                    left + half_width,
+                    top + half_width,
+                    inner_width,
+                    inner_height,
+                );
+                !quad.iter().all(|point| quad_contains_point(&inner, *point))
+            }
+        }
+    }
+}
+
+fn quad_covers_canvas(quad: &CanvasQuad, size: CanvasSize) -> bool {
+    rect_quad(CanvasTransform::IDENTITY, 0.0, 0.0, size.width, size.height)
+        .iter()
+        .all(|point| quad_contains_point(quad, *point))
+}
+
 fn malformed(op_index: usize, reason: impl Into<String>) -> DecodeError {
     DecodeError {
         op_index: Some(op_index),
@@ -237,6 +484,7 @@ pub(crate) fn decode(
     ops: &[u32],
     operands: &[f64],
     strings: &[String],
+    canvas_size: CanvasSize,
 ) -> Result<DecodedDisplayList, DecodeError> {
     if ops.len() < 2 {
         return Err(DecodeError {
@@ -266,7 +514,12 @@ pub(crate) fn decode(
     let mut op_index = 0usize;
     let mut state = ReplayState {
         fill_style: crate::color::parse_color_rgba("#000000").expect("black is valid"),
-        transform: Transform2D::IDENTITY,
+        stroke_style: crate::color::parse_color_rgba("#000000").expect("black is valid"),
+        line_width: 1.0,
+        global_alpha: 1.0,
+        line_join: CanvasLineJoin::Miter,
+        miter_limit: 10.0,
+        transform: CanvasTransform::IDENTITY,
     };
     let mut stack = Vec::new();
     let mut current_path = Vec::new();
@@ -355,26 +608,26 @@ pub(crate) fn decode(
             }
             opcodes::TRANSLATE => {
                 if command_operands.iter().all(|value| value.is_finite()) {
-                    state.transform = state.transform.multiply(Transform2D {
+                    state.transform = state.transform.multiply(CanvasTransform {
                         e: command_operands[0],
                         f: command_operands[1],
-                        ..Transform2D::IDENTITY
+                        ..CanvasTransform::IDENTITY
                     });
                 }
             }
             opcodes::SCALE => {
                 if command_operands.iter().all(|value| value.is_finite()) {
-                    state.transform = state.transform.multiply(Transform2D {
+                    state.transform = state.transform.multiply(CanvasTransform {
                         a: command_operands[0],
                         d: command_operands[1],
-                        ..Transform2D::IDENTITY
+                        ..CanvasTransform::IDENTITY
                     });
                 }
             }
             opcodes::ROTATE => {
                 if command_operands[0].is_finite() {
                     let (sin, cos) = command_operands[0].sin_cos();
-                    state.transform = state.transform.multiply(Transform2D {
+                    state.transform = state.transform.multiply(CanvasTransform {
                         a: cos,
                         b: sin,
                         c: -sin,
@@ -386,7 +639,7 @@ pub(crate) fn decode(
             }
             opcodes::TRANSFORM => {
                 if command_operands.iter().all(|value| value.is_finite()) {
-                    state.transform = state.transform.multiply(Transform2D {
+                    state.transform = state.transform.multiply(CanvasTransform {
                         a: command_operands[0],
                         b: command_operands[1],
                         c: command_operands[2],
@@ -398,7 +651,7 @@ pub(crate) fn decode(
             }
             opcodes::SET_TRANSFORM => {
                 if command_operands.iter().all(|value| value.is_finite()) {
-                    state.transform = Transform2D {
+                    state.transform = CanvasTransform {
                         a: command_operands[0],
                         b: command_operands[1],
                         c: command_operands[2],
@@ -408,7 +661,7 @@ pub(crate) fn decode(
                     };
                 }
             }
-            opcodes::RESET_TRANSFORM => state.transform = Transform2D::IDENTITY,
+            opcodes::RESET_TRANSFORM => state.transform = CanvasTransform::IDENTITY,
             opcodes::FILL_STYLE => {
                 let index = side_table_index(command_operands[0], op_index, 0)?;
                 let value = &strings[index];
@@ -422,18 +675,60 @@ pub(crate) fn decode(
                     });
                 }
             }
+            opcodes::STROKE_STYLE => {
+                let index = side_table_index(command_operands[0], op_index, 0)?;
+                let value = &strings[index];
+                if let Some(color) = crate::color::parse_color_rgba(value) {
+                    state.stroke_style = color;
+                } else {
+                    diagnostics.push(CanvasDiagnostic {
+                        op_index,
+                        op_name: spec.name.to_string(),
+                        reason: format!("unsupported Canvas 2D color {value:?}"),
+                    });
+                }
+            }
+            opcodes::LINE_WIDTH => {
+                let value = command_operands[0];
+                if value.is_finite() && value > 0.0 {
+                    state.line_width = value;
+                }
+            }
+            opcodes::GLOBAL_ALPHA => {
+                let value = command_operands[0];
+                if value.is_finite() && (0.0..=1.0).contains(&value) {
+                    state.global_alpha = value;
+                }
+            }
+            opcodes::LINE_JOIN => {
+                let index = side_table_index(command_operands[0], op_index, 0)?;
+                state.line_join = match strings[index].as_str() {
+                    "miter" => CanvasLineJoin::Miter,
+                    "round" => CanvasLineJoin::Round,
+                    "bevel" => CanvasLineJoin::Bevel,
+                    value => {
+                        diagnostics.push(CanvasDiagnostic {
+                            op_index,
+                            op_name: spec.name.to_string(),
+                            reason: format!("unsupported Canvas 2D lineJoin {value:?}"),
+                        });
+                        state.line_join
+                    }
+                };
+            }
+            opcodes::MITER_LIMIT => {
+                let value = command_operands[0];
+                if value.is_finite() && value > 0.0 {
+                    state.miter_limit = value;
+                }
+            }
             opcodes::FILL_RECT => {
                 if command_operands.iter().all(|value| value.is_finite()) {
                     let x = command_operands[0];
                     let y = command_operands[1];
                     let width = command_operands[2];
                     let height = command_operands[3];
-                    let points = [
-                        state.transform.transform_point(x, y),
-                        state.transform.transform_point(x + width, y),
-                        state.transform.transform_point(x + width, y + height),
-                        state.transform.transform_point(x, y + height),
-                    ];
+                    let points = rect_quad(state.transform, x, y, width, height);
                     if let Some(reason) = points
                         .iter()
                         .find_map(|point| point_preparation_problem(*point))
@@ -446,13 +741,113 @@ pub(crate) fn decode(
                     } else {
                         items.push(DisplayItem::FillRect(FillRect {
                             points,
-                            color: state.fill_style,
+                            color: state.fill_style.opacity(state.global_alpha as f32),
                             op_index,
+                            clear_regions: Vec::new(),
                         }));
                         invalidates = true;
                     }
                 }
                 // Browser Canvas treats non-finite rectangle arguments as a no-op.
+            }
+            opcodes::STROKE_RECT => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    let x = command_operands[0];
+                    let y = command_operands[1];
+                    let width = command_operands[2];
+                    let height = command_operands[3];
+                    let left = x.min(x + width);
+                    let right = x.max(x + width);
+                    let top = y.min(y + height);
+                    let bottom = y.max(y + height);
+                    let outer = rect_quad(
+                        state.transform,
+                        left - state.line_width * 0.5,
+                        top - state.line_width * 0.5,
+                        right - left + state.line_width,
+                        bottom - top + state.line_width,
+                    );
+                    if let Some(reason) = outer
+                        .iter()
+                        .find_map(|point| point_preparation_problem(*point))
+                    {
+                        diagnostics.push(CanvasDiagnostic {
+                            op_index,
+                            op_name: spec.name.to_string(),
+                            reason: reason.to_string(),
+                        });
+                    } else {
+                        items.push(DisplayItem::StrokeRect(StrokeRect {
+                            x,
+                            y,
+                            width,
+                            height,
+                            transform: state.transform,
+                            style: StrokeStyle {
+                                color: state.stroke_style.opacity(state.global_alpha as f32),
+                                line_width: state.line_width,
+                                line_join: state.line_join,
+                                miter_limit: state.miter_limit,
+                            },
+                            op_index,
+                            clear_regions: Vec::new(),
+                        }));
+                        invalidates = true;
+                    }
+                }
+            }
+            opcodes::CLEAR_RECT => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    let clear = rect_quad(
+                        state.transform,
+                        command_operands[0],
+                        command_operands[1],
+                        command_operands[2],
+                        command_operands[3],
+                    );
+                    if let Some(reason) = clear
+                        .iter()
+                        .find_map(|point| point_preparation_problem(*point))
+                    {
+                        diagnostics.push(CanvasDiagnostic {
+                            op_index,
+                            op_name: spec.name.to_string(),
+                            reason: reason.to_string(),
+                        });
+                    } else if quad_area(&clear).abs() > 1e-9 {
+                        let canvas = rect_quad(
+                            CanvasTransform::IDENTITY,
+                            0.0,
+                            0.0,
+                            canvas_size.width,
+                            canvas_size.height,
+                        );
+                        if quads_intersect(&clear, &canvas) {
+                            if quad_covers_canvas(&clear, canvas_size) {
+                                items.clear();
+                                invalidates = true;
+                            } else {
+                                let mut intersects_prior_content = false;
+                                for item in &mut items {
+                                    if item.intersects_quad(&clear) {
+                                        item.clear_regions_mut().push(clear);
+                                        intersects_prior_content = true;
+                                    }
+                                }
+                                if intersects_prior_content {
+                                    invalidates = true;
+                                } else {
+                                    diagnostics.push(CanvasDiagnostic {
+                                        op_index,
+                                        op_name: spec.name.to_string(),
+                                        reason: "partial clearRect does not intersect prior canvas content and would punch through to GPUI content behind the canvas"
+                                            .to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
             }
             opcodes::BEGIN_PATH => {
                 current_path.clear();
@@ -501,8 +896,9 @@ pub(crate) fn decode(
                         } else {
                             items.push(DisplayItem::FillPath(FillPath {
                                 commands: current_path.clone(),
-                                color: state.fill_style,
+                                color: state.fill_style.opacity(state.global_alpha as f32),
                                 op_index,
+                                clear_regions: Vec::new(),
                             }));
                             invalidates = true;
                         }
@@ -524,7 +920,7 @@ pub(crate) fn decode(
             _ => diagnostics.push(CanvasDiagnostic {
                 op_index,
                 op_name: spec.name.to_string(),
-                reason: "recognized by stream version 1 but not implemented in canvas phase B1"
+                reason: "recognized by stream version 1 but not implemented in canvas phase B2"
                     .to_string(),
             }),
         }
@@ -578,9 +974,19 @@ pub(crate) fn install_decoded_display_list(
             invalidates: false,
         };
     }
-    let revision = lists
-        .get(&element_id)
-        .map_or(1, |list| list.revision.saturating_add(1));
+    if items.is_empty() {
+        let removed = lists.remove(&element_id).is_some();
+        return CanvasApplyOutcome {
+            diagnostics,
+            invalidates: removed,
+        };
+    }
+    let revision = {
+        let mut revisions = display_lists.last_revisions.lock().unwrap();
+        let revision = revisions.entry(element_id).or_default();
+        *revision = revision.saturating_add(1);
+        *revision
+    };
     lists.insert(element_id, Arc::new(DisplayList { revision, items }));
     CanvasApplyOutcome {
         diagnostics,
@@ -596,10 +1002,32 @@ pub fn replace_display_list(
     operands: &[f64],
     strings: &[String],
 ) -> Result<CanvasApplyOutcome, DecodeError> {
+    replace_display_list_with_size(
+        display_lists,
+        element_id,
+        ops,
+        operands,
+        strings,
+        CanvasSize {
+            width: DEFAULT_CANVAS_WIDTH,
+            height: DEFAULT_CANVAS_HEIGHT,
+        },
+    )
+}
+
+#[cfg(test)]
+fn replace_display_list_with_size(
+    display_lists: &SharedDisplayLists,
+    element_id: u64,
+    ops: &[u32],
+    operands: &[f64],
+    strings: &[String],
+    canvas_size: CanvasSize,
+) -> Result<CanvasApplyOutcome, DecodeError> {
     Ok(install_decoded_display_list(
         display_lists,
         element_id,
-        decode(ops, operands, strings)?,
+        decode(ops, operands, strings, canvas_size)?,
     ))
 }
 
@@ -610,6 +1038,10 @@ pub fn remove_display_lists(display_lists: &SharedDisplayLists, element_ids: &[u
     }
     drop(lists);
     if !element_ids.is_empty() {
+        let mut revisions = display_lists.last_revisions.lock().unwrap();
+        for id in element_ids {
+            revisions.remove(id);
+        }
         display_lists
             .preparation_diagnostics
             .lock()
@@ -862,6 +1294,194 @@ mod tests {
     }
 
     #[test]
+    fn global_alpha_and_stroke_rect_state_compose_with_save_restore() {
+        let strings = vec![
+            "#ef444480".to_string(),
+            "#2563eb".to_string(),
+            "round".to_string(),
+        ];
+        let (ops, operands) = stream(&[
+            (opcodes::FILL_STYLE, &[0.0]),
+            (opcodes::GLOBAL_ALPHA, &[0.5]),
+            (opcodes::FILL_RECT, &[0.0, 0.0, 20.0, 10.0]),
+            (opcodes::SAVE, &[]),
+            (opcodes::GLOBAL_ALPHA, &[0.25]),
+            (opcodes::STROKE_STYLE, &[1.0]),
+            (opcodes::LINE_WIDTH, &[8.0]),
+            (opcodes::LINE_JOIN, &[2.0]),
+            (opcodes::MITER_LIMIT, &[3.0]),
+            (opcodes::STROKE_RECT, &[30.0, 30.0, -20.0, -12.0]),
+            (opcodes::RESTORE, &[]),
+            (opcodes::STROKE_RECT, &[60.0, 10.0, 16.0, 12.0]),
+        ]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list(&store, 17, &ops, &operands, &strings).unwrap();
+
+        assert!(outcome.diagnostics.is_empty());
+        let list = store.lock().unwrap().get(&17).unwrap().clone();
+        let DisplayItem::FillRect(fill) = &list.items[0] else {
+            panic!("expected fillRect first");
+        };
+        assert!((fill.color.a - (128.0 / 255.0 * 0.5)).abs() < 1e-6);
+        let DisplayItem::StrokeRect(saved) = &list.items[1] else {
+            panic!("expected saved strokeRect second");
+        };
+        assert_eq!(saved.width, -20.0);
+        assert_eq!(saved.height, -12.0);
+        assert_eq!(saved.style.line_width, 8.0);
+        assert_eq!(saved.style.line_join, CanvasLineJoin::Round);
+        assert_eq!(saved.style.miter_limit, 3.0);
+        assert!((saved.style.color.a - 0.25).abs() < 1e-6);
+        let DisplayItem::StrokeRect(restored) = &list.items[2] else {
+            panic!("expected restored strokeRect third");
+        };
+        assert_eq!(restored.style.line_width, 1.0);
+        assert_eq!(restored.style.line_join, CanvasLineJoin::Miter);
+        assert_eq!(restored.style.miter_limit, 10.0);
+        assert!((restored.style.color.a - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn transformed_negative_full_clear_drops_prior_items_but_not_later_draws() {
+        let (ops, operands) = stream(&[
+            (opcodes::FILL_RECT, &[0.0, 0.0, 100.0, 80.0]),
+            (opcodes::SCALE, &[2.0, 2.0]),
+            (opcodes::CLEAR_RECT, &[50.0, 40.0, -50.0, -40.0]),
+            (opcodes::RESET_TRANSFORM, &[]),
+            (opcodes::FILL_RECT, &[8.0, 6.0, 20.0, 10.0]),
+        ]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list_with_size(
+            &store,
+            18,
+            &ops,
+            &operands,
+            &[],
+            CanvasSize {
+                width: 100.0,
+                height: 80.0,
+            },
+        )
+        .unwrap();
+
+        assert!(outcome.diagnostics.is_empty());
+        let list = store.lock().unwrap().get(&18).unwrap().clone();
+        assert_eq!(list.items.len(), 1);
+        assert_eq!(
+            fill_rect(&list.items[0]).points[0],
+            CanvasPoint { x: 8.0, y: 6.0 }
+        );
+    }
+
+    #[test]
+    fn full_clear_with_no_later_draw_removes_the_retained_list() {
+        let store = SharedDisplayLists::default();
+        let (initial_ops, initial_operands) =
+            stream(&[(opcodes::FILL_RECT, &[0.0, 0.0, 100.0, 80.0])]);
+        replace_display_list_with_size(
+            &store,
+            21,
+            &initial_ops,
+            &initial_operands,
+            &[],
+            CanvasSize {
+                width: 100.0,
+                height: 80.0,
+            },
+        )
+        .unwrap();
+
+        let (cleared_ops, cleared_operands) = stream(&[
+            (opcodes::FILL_RECT, &[0.0, 0.0, 100.0, 80.0]),
+            (opcodes::CLEAR_RECT, &[0.0, 0.0, 100.0, 80.0]),
+        ]);
+        let outcome = replace_display_list_with_size(
+            &store,
+            21,
+            &cleared_ops,
+            &cleared_operands,
+            &[],
+            CanvasSize {
+                width: 100.0,
+                height: 80.0,
+            },
+        )
+        .unwrap();
+
+        assert!(outcome.invalidates);
+        assert!(!store.lock().unwrap().contains_key(&21));
+    }
+
+    #[test]
+    fn redraw_after_full_clear_uses_a_fresh_cache_revision() {
+        let store = SharedDisplayLists::default();
+        let (draw_ops, draw_operands) = stream(&[(opcodes::FILL_RECT, &[0.0, 0.0, 10.0, 10.0])]);
+        replace_display_list(&store, 22, &draw_ops, &draw_operands, &[]).unwrap();
+        assert_eq!(store.lock().unwrap().get(&22).unwrap().revision, 1);
+
+        let (clear_ops, clear_operands) = stream(&[(
+            opcodes::CLEAR_RECT,
+            &[0.0, 0.0, DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT],
+        )]);
+        replace_display_list(&store, 22, &clear_ops, &clear_operands, &[]).unwrap();
+        assert!(!store.lock().unwrap().contains_key(&22));
+
+        replace_display_list(&store, 22, &draw_ops, &draw_operands, &[]).unwrap();
+        assert_eq!(store.lock().unwrap().get(&22).unwrap().revision, 2);
+    }
+
+    #[test]
+    fn partial_clear_surgery_only_marks_prior_intersecting_items() {
+        let (ops, operands) = stream(&[
+            (opcodes::FILL_RECT, &[0.0, 0.0, 100.0, 80.0]),
+            (opcodes::CLEAR_RECT, &[60.0, 50.0, -24.0, -20.0]),
+            (opcodes::FILL_RECT, &[40.0, 34.0, 12.0, 8.0]),
+        ]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list_with_size(
+            &store,
+            19,
+            &ops,
+            &operands,
+            &[],
+            CanvasSize {
+                width: 100.0,
+                height: 80.0,
+            },
+        )
+        .unwrap();
+
+        assert!(outcome.diagnostics.is_empty());
+        let list = store.lock().unwrap().get(&19).unwrap().clone();
+        assert_eq!(list.items.len(), 2);
+        assert_eq!(fill_rect(&list.items[0]).clear_regions.len(), 1);
+        assert!(fill_rect(&list.items[1]).clear_regions.is_empty());
+    }
+
+    #[test]
+    fn partial_clear_without_prior_canvas_content_is_a_named_diagnostic() {
+        let (ops, operands) = stream(&[(opcodes::CLEAR_RECT, &[10.0, 10.0, 20.0, 20.0])]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list_with_size(
+            &store,
+            20,
+            &ops,
+            &operands,
+            &[],
+            CanvasSize {
+                width: 100.0,
+                height: 80.0,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(outcome.diagnostics[0].op_name, "clearRect");
+        assert!(outcome.diagnostics[0].reason.contains("punch through"));
+        assert!(!outcome.invalidates);
+    }
+
+    #[test]
     fn evenodd_fill_remains_a_named_phase_b3_diagnostic() {
         let (ops, operands) = stream(&[
             (opcodes::BEGIN_PATH, &[]),
@@ -913,14 +1533,11 @@ mod tests {
 
     #[test]
     fn known_and_unknown_unimplemented_opcodes_decode_with_diagnostics() {
-        let (ops, operands) = stream(&[
-            (opcodes::STROKE_RECT, &[0.0, 0.0, 4.0, 8.0]),
-            (0xffff, &[1.0, 2.0, 3.0]),
-        ]);
+        let (ops, operands) = stream(&[(opcodes::STROKE, &[]), (0xffff, &[1.0, 2.0, 3.0])]);
         let store = SharedDisplayLists::default();
         let outcome = replace_display_list(&store, 9, &ops, &operands, &[]).unwrap();
         assert_eq!(outcome.diagnostics.len(), 2);
-        assert_eq!(outcome.diagnostics[0].op_name, "strokeRect");
+        assert_eq!(outcome.diagnostics[0].op_name, "stroke");
         assert_eq!(outcome.diagnostics[1].op_name, "unknown(0x0000ffff)");
         assert!(!outcome.invalidates);
         assert!(!store.lock().unwrap().contains_key(&9));

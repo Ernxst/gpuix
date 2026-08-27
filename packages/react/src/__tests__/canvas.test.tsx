@@ -104,13 +104,13 @@ describeNative("retained canvas element", () => {
           new Uint32Array([
             CANVAS_STREAM_MAGIC,
             CANVAS_STREAM_VERSION,
-            CANVAS_OPCODES.strokeRect,
-            4,
+            CANVAS_OPCODES.stroke,
+            0,
           ]),
-          new Float64Array([0, 0, 4, 8]),
+          new Float64Array(),
           []
         )
-      ).toThrow(/strokeRect.*not implemented in canvas phase B1/)
+      ).toThrow(/stroke.*not implemented in canvas phase B2/)
       expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
     } finally {
       testRoot.unmount()
@@ -126,10 +126,10 @@ describeNative("retained canvas element", () => {
       ops: new Uint32Array([
         CANVAS_STREAM_MAGIC,
         CANVAS_STREAM_VERSION,
-        CANVAS_OPCODES.strokeRect,
-        4,
+        CANVAS_OPCODES.stroke,
+        0,
       ]),
-      operands: new Float64Array([0, 0, 4, 8]),
+      operands: new Float64Array(),
     }
     try {
       testRoot.render(
@@ -146,7 +146,7 @@ describeNative("retained canvas element", () => {
 
       __applyCanvasCommands(canvasRef, unsupported.ops, unsupported.operands, [])
       expect(warn).toHaveBeenCalledTimes(1)
-      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/warning-canvas.*strokeRect/))
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/warning-canvas.*stroke/))
 
       __applyCanvasCommands(canvasRef, unsupported.ops, unsupported.operands, [])
       __applyCanvasCommands(
@@ -157,7 +157,7 @@ describeNative("retained canvas element", () => {
       )
       expect(warn).toHaveBeenCalledTimes(2)
       expect(warn).toHaveBeenLastCalledWith(
-        expect.stringMatching(/second-warning-canvas.*strokeRect/)
+        expect.stringMatching(/second-warning-canvas.*stroke/)
       )
       testRoot.render(
         <div>
@@ -257,6 +257,119 @@ describeNative("retained canvas element", () => {
     } finally {
       warn.mockRestore()
       testRoot.unmount()
+    }
+  })
+
+  it("routes partial clearRect punch-through through strict and deduplicated diagnostics", () => {
+    const strict = createTestRoot({ width: 100, height: 80, strictStyles: true })
+    const strictRef = createRef<CanvasPublicInstance>()
+    try {
+      strict.render(
+        <canvas ref={strictRef} testId="strict-clear-canvas" width={100} height={80} />
+      )
+      const context = strictRef.current!.getContext("2d")!
+      context.clearRect(10, 10, 20, 20)
+      expect(() => flushRecordingContext2D(context)).toThrow(
+        /strict-clear-canvas.*clearRect.*punch through/
+      )
+    } finally {
+      strict.unmount()
+    }
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const nonStrict = createTestRoot({ width: 100, height: 80, strictStyles: false })
+    const nonStrictRef = createRef<CanvasPublicInstance>()
+    try {
+      nonStrict.render(
+        <canvas
+          ref={nonStrictRef}
+          testId="warning-clear-canvas"
+          width={100}
+          height={80}
+        />
+      )
+      const context = nonStrictRef.current!.getContext("2d")!
+      context.clearRect(10, 10, 20, 20)
+      flushRecordingContext2D(context)
+      context.clearRect(40, 10, 20, 20)
+      flushRecordingContext2D(context)
+
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(/warning-clear-canvas.*clearRect.*punch through/)
+      )
+      expect(nonStrict.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      warn.mockRestore()
+      nonStrict.unmount()
+    }
+  })
+
+  it("makes full clear exact and partial clear surgery preserve later painter order", () => {
+    const render = (
+      name: string,
+      draw: (context: CanvasRenderingContext2D) => void
+    ) => {
+      const root = createTestRoot({ width: 100, height: 80, strictStyles: true })
+      const ref = createRef<CanvasPublicInstance>()
+      const output = path.join(SHOTS_DIR, `canvas-b2-${name}.png`)
+      try {
+        root.render(<canvas ref={ref} width={100} height={80} />)
+        const context = ref.current!.getContext("2d")!
+        draw(context)
+        flushRecordingContext2D(context)
+        root.renderer.flush()
+        root.renderer.captureScreenshot(output)
+      } finally {
+        root.unmount()
+      }
+      return output
+    }
+
+    const fullActual = render("full-clear-actual", (context) => {
+      context.fillStyle = "#ef4444"
+      context.fillRect(0, 0, 100, 80)
+      context.save()
+      context.scale(2, 2)
+      context.clearRect(50, 40, -50, -40)
+      context.restore()
+      context.fillStyle = "#2563eb"
+      context.fillRect(42, 32, 16, 16)
+    })
+    const fullExpected = render("full-clear-expected", (context) => {
+      context.fillStyle = "#2563eb"
+      context.fillRect(42, 32, 16, 16)
+    })
+    const partialActual = render("partial-clear-actual", (context) => {
+      context.fillStyle = "#ef4444"
+      context.fillRect(0, 0, 100, 80)
+      context.clearRect(36, 28, 28, 24)
+      context.fillStyle = "#2563eb"
+      context.globalAlpha = 0.65
+      context.fillRect(42, 32, 16, 16)
+    })
+    const partialExpected = render("partial-clear-expected", (context) => {
+      context.fillStyle = "#ef4444"
+      context.fillRect(0, 0, 100, 28)
+      context.fillRect(0, 52, 100, 28)
+      context.fillRect(0, 28, 36, 24)
+      context.fillRect(64, 28, 36, 24)
+      context.fillStyle = "#2563eb"
+      context.globalAlpha = 0.65
+      context.fillRect(42, 32, 16, 16)
+    })
+    const comparer = createTestRoot({ width: 1, height: 1 })
+    try {
+      expect(comparer.renderer.compareImages(fullActual, fullExpected, 0)).toEqual({
+        differingPixelRatio: 0,
+        maxChannelDelta: 0,
+      })
+      expect(comparer.renderer.compareImages(partialActual, partialExpected, 0)).toEqual({
+        differingPixelRatio: 0,
+        maxChannelDelta: 0,
+      })
+    } finally {
+      comparer.unmount()
     }
   })
 

@@ -1263,9 +1263,13 @@ export function expectCanvasMatchesBrowser(
     )
   }
 
-  if (resolved.name !== "fill-rect-grid" && resolved.name !== "translate-scale") {
+  if (
+    resolved.name !== "fill-rect-grid" &&
+    resolved.name !== "translate-scale" &&
+    resolved.name !== "translucent-overlap"
+  ) {
     return skipCanvasComparison(
-      `native replay for scene ${JSON.stringify(resolved.name)} remains queued for a later canvas phase; B1 replays transforms, fillRect, and minimum nonzero paths`,
+      `native replay for scene ${JSON.stringify(resolved.name)} remains queued for a later canvas phase; B2 replays transformed rect fills, alpha, and minimum nonzero paths`,
       options.skip
     )
   }

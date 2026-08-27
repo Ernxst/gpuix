@@ -4,8 +4,8 @@ use gpui::prelude::*;
 
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 
-const DEFAULT_WIDTH: f64 = 300.0;
-const DEFAULT_HEIGHT: f64 = 150.0;
+const DEFAULT_WIDTH: f64 = crate::canvas::DEFAULT_CANVAS_WIDTH;
+const DEFAULT_HEIGHT: f64 = crate::canvas::DEFAULT_CANVAS_HEIGHT;
 
 #[derive(Clone, Copy)]
 struct CanvasGeometry {
@@ -107,6 +107,155 @@ fn local_point(
     )
 }
 
+#[derive(Clone, Copy)]
+struct FlatPoint {
+    x: f32,
+    y: f32,
+}
+
+fn flat(point: gpui::Point<gpui::Pixels>) -> FlatPoint {
+    FlatPoint {
+        x: f32::from(point.x),
+        y: f32::from(point.y),
+    }
+}
+
+fn pixel(point: FlatPoint) -> gpui::Point<gpui::Pixels> {
+    gpui::point(gpui::px(point.x), gpui::px(point.y))
+}
+
+fn flat_cross(a: FlatPoint, b: FlatPoint, point: FlatPoint) -> f32 {
+    (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
+}
+
+fn polygon_area(points: &[FlatPoint]) -> f32 {
+    points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .take(points.len())
+        .map(|(a, b)| a.x * b.y - b.x * a.y)
+        .sum::<f32>()
+        * 0.5
+}
+
+fn clip_half_plane(
+    polygon: &[FlatPoint],
+    edge_start: FlatPoint,
+    edge_end: FlatPoint,
+    keep_inside: bool,
+) -> Vec<FlatPoint> {
+    if polygon.is_empty() {
+        return Vec::new();
+    }
+    let accepted = |point: FlatPoint| {
+        let inside = flat_cross(edge_start, edge_end, point) >= -1e-5;
+        inside == keep_inside
+    };
+    let mut output = Vec::new();
+    for (&start, &end) in polygon
+        .iter()
+        .zip(polygon.iter().cycle().skip(1))
+        .take(polygon.len())
+    {
+        let start_accepted = accepted(start);
+        let end_accepted = accepted(end);
+        if start_accepted != end_accepted {
+            let start_distance = flat_cross(edge_start, edge_end, start);
+            let end_distance = flat_cross(edge_start, edge_end, end);
+            let t = start_distance / (start_distance - end_distance);
+            output.push(FlatPoint {
+                x: start.x + (end.x - start.x) * t,
+                y: start.y + (end.y - start.y) * t,
+            });
+        }
+        if end_accepted {
+            output.push(end);
+        }
+    }
+    output
+}
+
+fn push_polygon(path: &mut Option<gpui::Path<gpui::Pixels>>, polygon: &[FlatPoint]) {
+    if polygon.len() < 3 || polygon_area(polygon).abs() <= 1e-5 {
+        return;
+    }
+    let path = path.get_or_insert_with(|| gpui::Path::new(pixel(polygon[0])));
+    for index in 1..polygon.len() - 1 {
+        path.push_triangle(
+            (
+                pixel(polygon[0]),
+                pixel(polygon[index]),
+                pixel(polygon[index + 1]),
+            ),
+            (
+                gpui::point(0.0, 1.0),
+                gpui::point(0.0, 1.0),
+                gpui::point(0.0, 1.0),
+            ),
+        );
+    }
+}
+
+fn subtract_convex_quad(
+    path: &gpui::Path<gpui::Pixels>,
+    mut clear: [FlatPoint; 4],
+) -> Option<gpui::Path<gpui::Pixels>> {
+    if polygon_area(&clear) < 0.0 {
+        clear.reverse();
+    }
+    let mut output = None;
+    for triangle in path.vertices.chunks_exact(3) {
+        let mut inside = triangle
+            .iter()
+            .map(|vertex| flat(vertex.xy_position))
+            .collect::<Vec<_>>();
+        for (&edge_start, &edge_end) in clear.iter().zip(clear.iter().cycle().skip(1)).take(4) {
+            let outside = clip_half_plane(&inside, edge_start, edge_end, false);
+            push_polygon(&mut output, &outside);
+            inside = clip_half_plane(&inside, edge_start, edge_end, true);
+            if inside.is_empty() {
+                break;
+            }
+        }
+    }
+    output
+}
+
+fn subtract_clear_regions(
+    mut path: gpui::Path<gpui::Pixels>,
+    clear_regions: &[crate::canvas::CanvasQuad],
+    layout_point: &impl Fn(crate::canvas::CanvasPoint) -> gpui::Point<gpui::Pixels>,
+) -> Option<gpui::Path<gpui::Pixels>> {
+    for clear in clear_regions {
+        let mapped = clear.map(|point| flat(layout_point(point)));
+        path = subtract_convex_quad(&path, mapped)?;
+    }
+    Some(path)
+}
+
+fn map_path(
+    path: &gpui::Path<gpui::Pixels>,
+    map: impl Fn(gpui::Point<gpui::Pixels>) -> gpui::Point<gpui::Pixels>,
+) -> Option<gpui::Path<gpui::Pixels>> {
+    let first = path.vertices.first()?;
+    let mut mapped = gpui::Path::new(map(first.xy_position));
+    for triangle in path.vertices.chunks_exact(3) {
+        mapped.push_triangle(
+            (
+                map(triangle[0].xy_position),
+                map(triangle[1].xy_position),
+                map(triangle[2].xy_position),
+            ),
+            (
+                triangle[0].st_position,
+                triangle[1].st_position,
+                triangle[2].st_position,
+            ),
+        );
+    }
+    Some(mapped)
+}
+
 fn prepare(
     list: &crate::canvas::DisplayList,
     bounds: gpui::Bounds<gpui::Pixels>,
@@ -133,11 +282,14 @@ fn prepare(
         )
     };
 
-    let build_path = |op_index: usize,
-                      op_name: &'static str,
-                      commands: &[crate::canvas::PathCommand],
-                      color: gpui::Rgba|
-     -> Result<PreparedItem, crate::canvas::CanvasDiagnostic> {
+    let build_fill_path = |op_index: usize,
+                           op_name: &'static str,
+                           commands: &[crate::canvas::PathCommand],
+                           clear_regions: &[crate::canvas::CanvasQuad]|
+     -> Result<
+        Option<gpui::Path<gpui::Pixels>>,
+        crate::canvas::CanvasDiagnostic,
+    > {
         let options = gpui::FillOptions::default().with_fill_rule(gpui::FillRule::NonZero);
         let mut builder = gpui::PathBuilder::fill().with_style(gpui::PathStyle::Fill(options));
         for command in commands {
@@ -149,8 +301,8 @@ fn prepare(
         }
         builder
             .build()
-            .map(|path| PreparedItem::Path { path, color })
-            .map_err(|error| path_build_diagnostic(op_index, op_name, &error))
+            .map(|path| subtract_clear_regions(path, clear_regions, &layout_point))
+            .map_err(|error| path_build_diagnostic(op_index, op_name, "nonzero fill", &error))
     };
 
     for item in &list.items {
@@ -161,7 +313,7 @@ fn prepare(
                     && top_right.x == bottom_right.x
                     && bottom_right.y == bottom_left.y
                     && bottom_left.x == top_left.x;
-                if axis_aligned {
+                if axis_aligned && rect.clear_regions.is_empty() {
                     let x1 = rect
                         .points
                         .iter()
@@ -201,16 +353,79 @@ fn prepare(
                         crate::canvas::PathCommand::LineTo(bottom_left),
                         crate::canvas::PathCommand::ClosePath,
                     ];
-                    match build_path(rect.op_index, "fillRect", &commands, rect.color) {
-                        Ok(path) => items.push(path),
+                    match build_fill_path(rect.op_index, "fillRect", &commands, &rect.clear_regions)
+                    {
+                        Ok(Some(path)) => items.push(PreparedItem::Path {
+                            path,
+                            color: rect.color,
+                        }),
+                        Ok(None) => {}
                         Err(diagnostic) => diagnostics.push(diagnostic),
                     }
                 }
             }
             crate::canvas::DisplayItem::FillPath(path) => {
-                match build_path(path.op_index, "fill", &path.commands, path.color) {
-                    Ok(path) => items.push(path),
+                match build_fill_path(path.op_index, "fill", &path.commands, &path.clear_regions) {
+                    Ok(Some(prepared)) => items.push(PreparedItem::Path {
+                        path: prepared,
+                        color: path.color,
+                    }),
+                    Ok(None) => {}
                     Err(diagnostic) => diagnostics.push(diagnostic),
+                }
+            }
+            crate::canvas::DisplayItem::StrokeRect(rect) => {
+                let join = match rect.style.line_join {
+                    crate::canvas::CanvasLineJoin::Miter => lyon::path::LineJoin::Miter,
+                    crate::canvas::CanvasLineJoin::Round => lyon::path::LineJoin::Round,
+                    crate::canvas::CanvasLineJoin::Bevel => lyon::path::LineJoin::Bevel,
+                };
+                let options = gpui::StrokeOptions::default()
+                    .with_line_width(rect.style.line_width as f32)
+                    .with_line_join(join)
+                    .with_miter_limit(rect.style.miter_limit.max(1.0) as f32);
+                let mut builder = gpui::PathBuilder::stroke(gpui::px(rect.style.line_width as f32))
+                    .with_style(gpui::PathStyle::Stroke(options));
+                builder.move_to(gpui::point(
+                    gpui::px(rect.x as f32),
+                    gpui::px(rect.y as f32),
+                ));
+                builder.line_to(gpui::point(
+                    gpui::px((rect.x + rect.width) as f32),
+                    gpui::px(rect.y as f32),
+                ));
+                builder.line_to(gpui::point(
+                    gpui::px((rect.x + rect.width) as f32),
+                    gpui::px((rect.y + rect.height) as f32),
+                ));
+                builder.line_to(gpui::point(
+                    gpui::px(rect.x as f32),
+                    gpui::px((rect.y + rect.height) as f32),
+                ));
+                builder.close();
+                match builder.build() {
+                    Ok(path) => {
+                        let transformed = map_path(&path, |point| {
+                            layout_point(rect.transform.transform_point(
+                                f64::from(f32::from(point.x)),
+                                f64::from(f32::from(point.y)),
+                            ))
+                        });
+                        if let Some(path) = transformed.and_then(|path| {
+                            subtract_clear_regions(path, &rect.clear_regions, &layout_point)
+                        }) {
+                            items.push(PreparedItem::Path {
+                                path,
+                                color: rect.style.color,
+                            });
+                        }
+                    }
+                    Err(error) => diagnostics.push(path_build_diagnostic(
+                        rect.op_index,
+                        "strokeRect",
+                        "closed rectangle stroke",
+                        &error,
+                    )),
                 }
             }
         }
@@ -222,12 +437,13 @@ fn prepare(
 fn path_build_diagnostic(
     op_index: usize,
     op_name: &str,
+    geometry: &str,
     error: &dyn std::fmt::Display,
 ) -> crate::canvas::CanvasDiagnostic {
     crate::canvas::CanvasDiagnostic {
         op_index,
         op_name: op_name.to_string(),
-        reason: format!("GPUI PathBuilder failed to build nonzero fill geometry: {error}"),
+        reason: format!("GPUI PathBuilder failed to build {geometry} geometry: {error}"),
     }
 }
 
@@ -545,7 +761,10 @@ impl CustomElementFactory for CanvasFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::canvas::{CanvasPoint, DisplayItem, FillPath, FillRect, PathCommand};
+    use crate::canvas::{
+        CanvasLineJoin, CanvasPoint, CanvasTransform, DisplayItem, FillPath, FillRect, PathCommand,
+        StrokeRect, StrokeStyle,
+    };
 
     fn color() -> gpui::Rgba {
         crate::color::parse_color_rgba("#2563eb").unwrap()
@@ -585,6 +804,7 @@ mod tests {
                 ],
                 color: color(),
                 op_index: 0,
+                clear_regions: Vec::new(),
             })],
         };
         let dpr_scaled = crate::canvas::DisplayList {
@@ -598,6 +818,7 @@ mod tests {
                 ],
                 color: color(),
                 op_index: 0,
+                clear_regions: Vec::new(),
             })],
         };
 
@@ -632,6 +853,7 @@ mod tests {
                 ],
                 color: color(),
                 op_index: 4,
+                clear_regions: Vec::new(),
             })],
         };
         let logical = prepare(&path(1.0), test_bounds(), 320.0, 240.0);
@@ -659,12 +881,114 @@ mod tests {
                 ],
                 color: color(),
                 op_index: 7,
+                clear_regions: Vec::new(),
             })],
         };
 
         let prepared = prepare(&list, test_bounds(), 320.0, 240.0);
         assert!(matches!(prepared.items[0], PreparedItem::Path { .. }));
         assert!(prepared.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn partial_clear_subtracts_triangles_without_reordering_the_later_item() {
+        let clear = [
+            CanvasPoint { x: 40.0, y: 30.0 },
+            CanvasPoint { x: 60.0, y: 30.0 },
+            CanvasPoint { x: 60.0, y: 50.0 },
+            CanvasPoint { x: 40.0, y: 50.0 },
+        ];
+        let list = crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![
+                DisplayItem::FillRect(FillRect {
+                    points: [
+                        CanvasPoint { x: 0.0, y: 0.0 },
+                        CanvasPoint { x: 100.0, y: 0.0 },
+                        CanvasPoint { x: 100.0, y: 80.0 },
+                        CanvasPoint { x: 0.0, y: 80.0 },
+                    ],
+                    color: color().opacity(0.5),
+                    op_index: 0,
+                    clear_regions: vec![clear],
+                }),
+                DisplayItem::FillRect(FillRect {
+                    points: [
+                        CanvasPoint { x: 44.0, y: 34.0 },
+                        CanvasPoint { x: 56.0, y: 34.0 },
+                        CanvasPoint { x: 56.0, y: 46.0 },
+                        CanvasPoint { x: 44.0, y: 46.0 },
+                    ],
+                    color: color(),
+                    op_index: 2,
+                    clear_regions: Vec::new(),
+                }),
+            ],
+        };
+        let prepared = prepare(
+            &list,
+            gpui::bounds(
+                gpui::point(gpui::px(0.0), gpui::px(0.0)),
+                gpui::size(gpui::px(100.0), gpui::px(80.0)),
+            ),
+            100.0,
+            80.0,
+        );
+
+        assert_eq!(prepared.items.len(), 2);
+        let PreparedItem::Path { path, color: first } = &prepared.items[0] else {
+            panic!("cleared quad should be prepared as clipped triangles");
+        };
+        assert!((first.a - 0.5).abs() < 1e-6);
+        for triangle in path.vertices.chunks_exact(3) {
+            let centroid_x = triangle
+                .iter()
+                .map(|vertex| f32::from(vertex.xy_position.x))
+                .sum::<f32>()
+                / 3.0;
+            let centroid_y = triangle
+                .iter()
+                .map(|vertex| f32::from(vertex.xy_position.y))
+                .sum::<f32>()
+                / 3.0;
+            assert!(
+                centroid_x <= 40.0
+                    || centroid_x >= 60.0
+                    || centroid_y <= 30.0
+                    || centroid_y >= 50.0
+            );
+        }
+        assert!(matches!(prepared.items[1], PreparedItem::Quad(_)));
+    }
+
+    #[test]
+    fn stroke_rect_uses_the_requested_closed_corner_join() {
+        let make = |line_join| crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::StrokeRect(StrokeRect {
+                x: 20.0,
+                y: 20.0,
+                width: 60.0,
+                height: 40.0,
+                transform: CanvasTransform::IDENTITY,
+                style: StrokeStyle {
+                    color: color(),
+                    line_width: 10.0,
+                    line_join,
+                    miter_limit: 10.0,
+                },
+                op_index: 0,
+                clear_regions: Vec::new(),
+            })],
+        };
+        let miter = prepare(&make(CanvasLineJoin::Miter), test_bounds(), 320.0, 240.0);
+        let bevel = prepare(&make(CanvasLineJoin::Bevel), test_bounds(), 320.0, 240.0);
+        let miter = prepared_path(&miter);
+        let bevel = prepared_path(&bevel);
+
+        assert_ne!(miter.vertices.len(), bevel.vertices.len());
+        assert_eq!(f32::from(miter.bounds.origin.x), 15.0);
+        assert_eq!(f32::from(miter.bounds.origin.y), 15.0);
     }
 
     #[test]
@@ -686,7 +1010,8 @@ mod tests {
 
     #[test]
     fn path_build_failures_keep_the_operation_name_and_a_loud_reason() {
-        let diagnostic = path_build_diagnostic(9, "fillRect", &"vertex limit exceeded");
+        let diagnostic =
+            path_build_diagnostic(9, "fillRect", "nonzero fill", &"vertex limit exceeded");
 
         assert_eq!(diagnostic.op_index, 9);
         assert_eq!(diagnostic.op_name, "fillRect");

@@ -162,6 +162,25 @@ pub(crate) fn validate_canvas_target(
     Ok(())
 }
 
+pub(crate) fn canvas_size(tree: &RetainedTree, element_id: u64) -> crate::canvas::CanvasSize {
+    let element = tree
+        .elements
+        .get(&element_id)
+        .expect("validated canvas target remains in the retained tree");
+    let dimension = |name: &str, fallback: f64| {
+        element
+            .custom_props
+            .get(name)
+            .and_then(serde_json::Value::as_f64)
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .unwrap_or(fallback)
+    };
+    crate::canvas::CanvasSize {
+        width: dimension("width", crate::canvas::DEFAULT_CANVAS_WIDTH),
+        height: dimension("height", crate::canvas::DEFAULT_CANVAS_HEIGHT),
+    }
+}
+
 pub(crate) fn fresh_canvas_diagnostics(
     element_id: u64,
     diagnostics: Vec<CanvasDiagnostic>,
@@ -2229,8 +2248,13 @@ impl GpuixRenderer {
         let id = to_element_id(id)?;
         let tree = self.tree.lock().unwrap();
         validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
-        let decoded = crate::canvas::decode(ops.as_ref(), operands.as_ref(), &strings)
-            .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
+        let decoded = crate::canvas::decode(
+            ops.as_ref(),
+            operands.as_ref(),
+            &strings,
+            canvas_size(&tree, id),
+        )
+        .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
         let strict = self.strict_styles.load(Ordering::Relaxed);
         if strict && !decoded.diagnostics.is_empty() {
             let message = first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics)
@@ -4253,10 +4277,15 @@ impl WebGpuixRenderer {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let decoded =
-            crate::canvas::decode(&op_values, &operand_values, &strings).map_err(|error| {
-                wasm_bindgen::JsValue::from_str(&format!("<canvas> element {id}: {error}"))
-            })?;
+        let decoded = crate::canvas::decode(
+            &op_values,
+            &operand_values,
+            &strings,
+            canvas_size(&tree, id),
+        )
+        .map_err(|error| {
+            wasm_bindgen::JsValue::from_str(&format!("<canvas> element {id}: {error}"))
+        })?;
         let strict = self.strict_styles.load(Ordering::Relaxed);
         if strict && !decoded.diagnostics.is_empty() {
             let message = first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics)

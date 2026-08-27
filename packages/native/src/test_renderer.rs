@@ -24,15 +24,15 @@ use gpui::AppContext as _;
 use crate::element_tree::EventPayload;
 use crate::renderer::{
     animation_frame_origin, animation_frame_timestamp_ms,
-    apply_batch_to_tree_with_diagnostics, catch_gpui_initialization, debug_frame_overlay_mode_name,
-    debug_frame_overlay_stats_js, default_http_client, dispatch_application_menu_action,
-    dispatch_animation_frame_callback, drain_style_diagnostics, first_canvas_diagnostic_message,
-    forget_canvas_diagnostics, fresh_canvas_diagnostics, has_application_menus,
-    init_application_menu_support, install_application_menus, parse_debug_frame_overlay_mode,
-    parse_style_json, pending_custom_prop_diagnostic, pending_style_diagnostics,
-    set_application_menus, to_element_id, validate_canvas_target, AnimationFrameCallback,
-    DebugFrameOverlayStats, EventCallback, FrameTimestampOrigin, GpuixStyleDiagnostic,
-    GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
+    apply_batch_to_tree_with_diagnostics, canvas_size, catch_gpui_initialization,
+    debug_frame_overlay_mode_name, debug_frame_overlay_stats_js, default_http_client,
+    dispatch_animation_frame_callback, dispatch_application_menu_action, drain_style_diagnostics,
+    first_canvas_diagnostic_message, forget_canvas_diagnostics, fresh_canvas_diagnostics,
+    has_application_menus, init_application_menu_support, install_application_menus,
+    parse_debug_frame_overlay_mode, parse_style_json, pending_custom_prop_diagnostic,
+    pending_style_diagnostics, set_application_menus, to_element_id, validate_canvas_target,
+    AnimationFrameCallback, DebugFrameOverlayStats, EventCallback, FrameTimestampOrigin,
+    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -531,8 +531,13 @@ impl TestGpuixRenderer {
         let id = to_element_id(id)?;
         let tree = self.tree.lock().unwrap();
         validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
-        let decoded = crate::canvas::decode(ops.as_ref(), operands.as_ref(), &strings)
-            .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
+        let decoded = crate::canvas::decode(
+            ops.as_ref(),
+            operands.as_ref(),
+            &strings,
+            canvas_size(&tree, id),
+        )
+        .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
         let strict = self.strict_styles.load(Ordering::Relaxed);
         if strict && !decoded.diagnostics.is_empty() {
             let message = first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics)
