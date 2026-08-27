@@ -1,5 +1,6 @@
 // GPUIX React - React bindings for GPUI
 export { createRoot, flushSync } from "./reconciler/index.js"
+export { __applyCanvasCommands } from "./canvas/commands.js"
 export {
   createRenderer,
   enableAutomation,
@@ -84,6 +85,8 @@ export type {
 // Re-export types
 export type { MotionDivProps } from "./components/index.js"
 export type {
+  CanvasProps,
+  CanvasPublicInstance,
   CursorValue,
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,

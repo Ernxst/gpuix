@@ -24,6 +24,7 @@ import {
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
+  CanvasPublicInstance,
   HighlightMatch,
   NativeRenderer,
   PublicInstance,
@@ -33,6 +34,7 @@ import type {
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
+import { flushRecordingContext2D } from "./canvas/context-2d.js"
 import {
   attachAnimationFrameSource,
   detachAnimationFrameSource,
@@ -68,6 +70,12 @@ interface NativeTestRendererApi extends NativeRenderer {
   dispose(): void
   capabilities(): RendererCapabilities
   applyBatch(json: string): number[]
+  applyCanvasCommands(
+    id: number,
+    ops: Uint32Array,
+    operands: Float64Array,
+    strings: readonly string[]
+  ): void
   flush(): void
   advanceAsyncClock(deltaMs: number): void
   requestFrame(callback: (timestamp: number) => void): void
@@ -336,6 +344,15 @@ export class TestRenderer implements NativeRenderer {
 
   applyBatch(json: string): Array<number> {
     return this.native.applyBatch(json)
+  }
+
+  applyCanvasCommands(
+    id: number,
+    ops: Uint32Array,
+    operands: Float64Array,
+    strings: readonly string[]
+  ): void {
+    this.native.applyCanvasCommands(id, ops, operands, strings)
   }
 
   setMenus(menus: MenuSpec[]): void {
@@ -1083,6 +1100,8 @@ export interface TestRoot {
 export interface TestRootOptions extends TestWindowOptions {
   /** Opt in to loopback/private URL images for local fixture servers. */
   allowPrivateNetworkImages?: boolean
+  /** Match render()'s strict diagnostic mode. Defaults to the active runtime policy. */
+  strictStyles?: boolean
 }
 
 /**
@@ -1102,7 +1121,7 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
     request: (callback) => renderer.requestFrame(callback),
   })
   renderer.setAllowPrivateNetworkImages(options.allowPrivateNetworkImages ?? false)
-  const root = createRoot(renderer)
+  const root = createRoot(renderer, { strictStyles: options.strictStyles })
   let unmounted = false
 
   const render = (node: ReactNode): void => {
@@ -1154,10 +1173,6 @@ export class CanvasComparisonSkippedError extends Error {
     super(message)
     this.name = "CanvasComparisonSkippedError"
   }
-}
-
-type CanvasPublicInstance = PublicInstance & {
-  getContext?: (contextId: "2d") => CanvasRenderingContext2D | null
 }
 
 const canvasGoldenDirectory = fileURLToPath(new URL("../canvas-goldens", import.meta.url))
@@ -1248,6 +1263,13 @@ export function expectCanvasMatchesBrowser(
     )
   }
 
+  if (resolved.name !== "fill-rect-grid") {
+    return skipCanvasComparison(
+      `native replay for scene ${JSON.stringify(resolved.name)} remains queued for canvas phase B; A1 replays fillStyle + fillRect only`,
+      options.skip
+    )
+  }
+
   if (!isNativeTestRendererAvailable()) {
     return skipCanvasComparison(
       `the native test renderer is unavailable: ${nativeTestRendererLoadError?.message ?? "unknown error"}`,
@@ -1271,22 +1293,10 @@ export function expectCanvasMatchesBrowser(
     )
 
     const canvas = canvasRef.current
-    if (!canvas || typeof canvas.getContext !== "function") {
-      return skipCanvasComparison(
-        'the GPUIX <canvas> ref does not expose getContext("2d") (phase A1/A2 has not landed)',
-        options.skip
-      )
-    }
-
+    if (!canvas) throw new Error("The GPUIX <canvas> ref was not mounted")
     const context = canvas.getContext("2d")
-    if (!context) {
-      return skipCanvasComparison(
-        'the GPUIX <canvas> ref returned no context for getContext("2d")',
-        options.skip
-      )
-    }
-
     resolved.draw(context, CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT)
+    flushRecordingContext2D(context)
     testRoot.renderer.flush()
 
     const windowSize = testRoot.renderer.getWindowSize()

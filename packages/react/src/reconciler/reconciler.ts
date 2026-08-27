@@ -87,7 +87,8 @@ function idAllocatorFor(renderer: NativeRenderer): ElementIdAllocator {
 }
 
 export function createRoot(renderer: NativeRenderer, options: RootOptions = {}): Root {
-  renderer.setStrictStyles?.(options.strictStyles ?? strictStylesDefault())
+  const strictStyles = options.strictStyles ?? strictStylesDefault()
+  renderer.setStrictStyles?.(strictStyles)
   let container: OpaqueRoot | null = null
   const batchedRenderer = wrapWithBatching(renderer)
   const gpuixContainer: Container = {
@@ -96,6 +97,7 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     eventHandlers: new Map(),
     eventTargets: new Map(),
     preventedKeyboardActivations: new Map(),
+    strictStyles,
   }
   attachRoot(renderer, gpuixContainer)
   attachRoot(batchedRenderer, gpuixContainer)

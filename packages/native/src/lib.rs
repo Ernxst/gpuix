@@ -3,6 +3,7 @@
 #[cfg(target_os = "macos")]
 mod app_menu;
 mod automation;
+mod canvas;
 mod color;
 mod custom_elements;
 mod diff;

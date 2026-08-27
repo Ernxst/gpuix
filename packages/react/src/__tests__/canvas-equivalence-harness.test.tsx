@@ -63,14 +63,6 @@ describeLocalMac("canvas browser-equivalence harness", () => {
     const tempDirectory = mkdtempSync(path.join(tmpdir(), "gpuix-canvas-equivalence-"))
     const actualPath = path.join(tempDirectory, "actual.png")
     const perturbed = path.join(fixturesDirectory, "fill-rect-grid-perturbed.png")
-    const previousGetContext = Object.getOwnPropertyDescriptor(Object.prototype, "getContext")
-    Object.defineProperty(Object.prototype, "getContext", {
-      configurable: true,
-      value(this: { type?: string }, contextId: string) {
-        if (this.type !== "canvas" || contextId !== "2d") return null
-        return { fillStyle: "", fillRect: vi.fn() } as unknown as CanvasRenderingContext2D
-      },
-    })
     const captureScreenshot = vi
       .spyOn(TestRenderer.prototype, "captureScreenshot")
       .mockImplementation((outputPath) => copyFileSync(perturbed, outputPath))
@@ -83,11 +75,6 @@ describeLocalMac("canvas browser-equivalence harness", () => {
       ).toThrowError(/max channel delta 250, ceiling 16/)
     } finally {
       captureScreenshot.mockRestore()
-      if (previousGetContext) {
-        Object.defineProperty(Object.prototype, "getContext", previousGetContext)
-      } else {
-        Reflect.deleteProperty(Object.prototype, "getContext")
-      }
       rmSync(tempDirectory, { recursive: true, force: true })
     }
   })
