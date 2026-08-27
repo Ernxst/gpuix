@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest"
 import { connectTest } from "../automation/index.js"
 import type { GpuixSyntheticEvent, PublicInstance, StyleDesc } from "../index.js"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
-import { SHOTS_DIR } from "./test-utils.js"
+import { expectScreenshotsEqual, SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -103,6 +103,31 @@ describeNative("inline text runs", () => {
 
     renderer.captureScreenshot(shot)
     expect(fs.statSync(shot).size).toBeGreaterThan(0)
+  })
+
+  it("renders CRLF preformatted text identically to LF", () => {
+    const lfSource = "line  1\nline  2: ready"
+    const crlfSource = lfSource.replace(/\n/g, "\r\n")
+    const style = { whiteSpace: "pre" as const, color: "#e6edf7", fontSize: 20, lineHeight: "1.4" }
+    const source = (content: string) => (
+      <div style={{ display: "flex", padding: 24, width: 420, backgroundColor: "#10131a" }}>
+        <text style={style}>{content}</text>
+      </div>
+    )
+
+    const lf = createTestRoot()
+    lf.render(source(lfSource))
+    const lfShot = path.join(SHOTS_DIR, "inline-text-preformatted-lf.png")
+    lf.renderer.captureScreenshot(lfShot)
+
+    const crlf = createTestRoot()
+    crlf.render(source(crlfSource))
+    const crlfShot = path.join(SHOTS_DIR, "inline-text-preformatted-crlf.png")
+    crlf.renderer.captureScreenshot(crlfShot)
+
+    expect(crlf.renderer.getPaintedText()).toEqual(lf.renderer.getPaintedText())
+    expect(crlf.renderer.getAllText()).toEqual([lfSource])
+    expectScreenshotsEqual(crlfShot, lfShot)
   })
 
   it("selects continuously across run boundaries and soft wraps", () => {
