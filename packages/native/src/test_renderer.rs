@@ -27,9 +27,9 @@ use crate::renderer::{
     debug_frame_overlay_stats_js, default_http_client, dispatch_application_menu_action,
     drain_style_diagnostics, has_application_menus, init_application_menu_support,
     install_application_menus, parse_debug_frame_overlay_mode, parse_style_json,
-    pending_custom_prop_diagnostic, pending_style_diagnostics, set_application_menus,
-    to_element_id, DebugFrameOverlayStats, EventCallback, GpuixStyleDiagnostic, GpuixView,
-    MenuSpec, PendingStyleDiagnostic, WindowSize,
+    pending_canvas_diagnostics, pending_custom_prop_diagnostic, pending_style_diagnostics,
+    set_application_menus, to_element_id, DebugFrameOverlayStats, EventCallback,
+    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -242,6 +242,7 @@ pub struct ImageComparisonResult {
 pub struct TestGpuixRenderer {
     state_id: u64,
     tree: Arc<Mutex<RetainedTree>>,
+    canvas_display_lists: crate::canvas::SharedDisplayLists,
     events: Arc<Mutex<Vec<EventPayload>>>,
     /// Same handle GpuixView paints against, so tests can assert on the live
     /// selection after simulating a drag.
@@ -270,6 +271,7 @@ impl TestGpuixRenderer {
             gpui::px(window_dimension(height, DEFAULT_WINDOW_HEIGHT, "height")?),
         );
         let tree = Arc::new(Mutex::new(RetainedTree::new()));
+        let canvas_display_lists = crate::canvas::SharedDisplayLists::default();
         let events: Arc<Mutex<Vec<EventPayload>>> = Arc::new(Mutex::new(Vec::new()));
 
         // Event callback: push to Vec instead of ThreadsafeFunction.
@@ -279,6 +281,7 @@ impl TestGpuixRenderer {
         }));
 
         let tree_clone = tree.clone();
+        let canvas_display_lists_for_view = canvas_display_lists.clone();
         let callback_clone = event_callback.clone();
         let selection = crate::text::SharedSelection::default();
         let selection_clone = selection.clone();
@@ -302,6 +305,7 @@ impl TestGpuixRenderer {
                 app.new(|_cx| {
                     GpuixView::new(
                         tree_clone,
+                        canvas_display_lists_for_view,
                         callback_clone,
                         Arc::new(Mutex::new(event_callback.clone())),
                         "GPUIX Test".to_string(),
@@ -329,6 +333,7 @@ impl TestGpuixRenderer {
         Ok(Self {
             state_id,
             tree,
+            canvas_display_lists,
             events,
             selection,
             image_network_policy,
@@ -367,6 +372,7 @@ impl TestGpuixRenderer {
     pub fn destroy_element(&self, id: f64) -> Result<Vec<f64>> {
         let id = to_element_id(id)?;
         let destroyed = self.tree.lock().unwrap().destroy_element(id);
+        crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed);
         Ok(destroyed.iter().map(|&id| id as f64).collect())
     }
 
@@ -499,6 +505,34 @@ impl TestGpuixRenderer {
         Ok(())
     }
 
+    /// Replace one canvas element's retained display list and notify the
+    /// offscreen view without requiring a React commit.
+    #[napi]
+    pub fn apply_canvas_commands(
+        &self,
+        id: f64,
+        ops: Uint32Array,
+        operands: Float64Array,
+        strings: Vec<String>,
+    ) -> Result<()> {
+        let id = to_element_id(id)?;
+        let diagnostics = crate::canvas::replace_display_list(
+            &self.canvas_display_lists,
+            id,
+            ops.as_ref(),
+            operands.as_ref(),
+            &strings,
+        )
+        .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
+        if self.strict_styles.load(Ordering::Relaxed) {
+            self.style_diagnostics
+                .lock()
+                .unwrap()
+                .extend(pending_canvas_diagnostics(id, diagnostics));
+        }
+        self.request_invalidate()
+    }
+
     /// Apply a batch of mutations in a single FFI call.
     /// Same format as GpuixRenderer::apply_batch (string op names).
     /// Returns accumulated destroyed IDs from all destroyElement ops.
@@ -516,6 +550,9 @@ impl TestGpuixRenderer {
                 .unwrap()
                 .extend(outcome.diagnostics);
         }
+        let destroyed_canvas_ids: Vec<u64> =
+            outcome.destroyed_ids.iter().map(|id| *id as u64).collect();
+        crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed_canvas_ids);
         Ok(outcome.destroyed_ids)
     }
 
@@ -550,21 +587,26 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Notify the offscreen view without drawing it yet.
+    fn request_invalidate(&self) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |_, cx| cx.notify());
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            Ok(())
+        })
+    }
+
     /// Notify the view entity and run GPUI until parked.
     /// This triggers GpuixView::render() → build_element() → GPUI layout.
     /// Must be called after mutations and before simulating events (GPUI's
     /// hit testing requires elements to be laid out).
     #[napi]
     pub fn flush(&self) -> Result<()> {
-        with_test_state(self.state_id, |cx, window, view| {
-            let view = view.clone();
-            cx.update_window(window, |_, _window, app| {
-                view.update(app, |_, cx| {
-                    cx.notify();
-                });
-            })
-            .map_err(|e| Error::from_reason(e.to_string()))?;
-
+        self.request_invalidate()?;
+        with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, app| window.draw(app).clear(app))
                 .map_err(|e| Error::from_reason(e.to_string()))?;
             cx.run_until_parked();

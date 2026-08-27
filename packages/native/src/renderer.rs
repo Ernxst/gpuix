@@ -37,6 +37,7 @@ use std::time::Duration;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen::JsCast as _;
 
+use crate::canvas::{CanvasDiagnostic, SharedDisplayLists};
 use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::retained_tree::{RetainedTree, StyleTable};
@@ -66,6 +67,7 @@ pub(crate) struct PendingStyleDiagnostic {
 enum DiagnosticKind {
     Style,
     Property,
+    Canvas,
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -125,6 +127,23 @@ pub(crate) fn pending_custom_prop_diagnostic(
     })
 }
 
+pub(crate) fn pending_canvas_diagnostics(
+    element_id: u64,
+    diagnostics: Vec<CanvasDiagnostic>,
+) -> impl Iterator<Item = PendingStyleDiagnostic> {
+    diagnostics
+        .into_iter()
+        .map(move |diagnostic| PendingStyleDiagnostic {
+            element_id,
+            problem: StyleProblem {
+                property: diagnostic.op_name,
+                value: format!("op[{}]", diagnostic.op_index),
+                reason: diagnostic.reason,
+            },
+            kind: DiagnosticKind::Canvas,
+        })
+}
+
 fn style_diagnostic_context(
     diagnostic: &PendingStyleDiagnostic,
     tree: &RetainedTree,
@@ -159,6 +178,7 @@ fn style_diagnostic_context(
     let subject = match diagnostic.kind {
         DiagnosticKind::Style => "style",
         DiagnosticKind::Property => "property",
+        DiagnosticKind::Canvas => "canvas command",
     };
     let data_test_id_label = data_test_id
         .as_ref()
@@ -1264,6 +1284,7 @@ pub struct GpuixRenderer {
     application_event_callback: Arc<Mutex<Option<EventCallback>>>,
     window_event_callback: WindowEventCallback,
     tree: Arc<Mutex<RetainedTree>>,
+    canvas_display_lists: SharedDisplayLists,
     lifecycle: Arc<Mutex<RendererLifecycle>>,
     #[cfg(target_os = "macos")]
     frame_request_callback: Arc<Mutex<Option<Arc<FrameRequestCallback>>>>,
@@ -1437,6 +1458,7 @@ impl GpuixRenderer {
             application_event_callback: Arc::new(Mutex::new(initial_application_event_callback)),
             window_event_callback: Arc::new(Mutex::new(None)),
             tree: Arc::new(Mutex::new(RetainedTree::new())),
+            canvas_display_lists: SharedDisplayLists::default(),
             lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
             #[cfg(target_os = "macos")]
             frame_request_callback: Arc::new(Mutex::new(None)),
@@ -1605,6 +1627,7 @@ impl GpuixRenderer {
         });
 
         let tree = self.tree.clone();
+        let canvas_display_lists = self.canvas_display_lists.clone();
         let callback = self.event_callback_for_view();
         let window_event_callback = self.window_event_callback();
         let application_callback = self.application_event_callback();
@@ -1646,6 +1669,7 @@ impl GpuixRenderer {
                     cx.new(|_view_cx| {
                         GpuixView::new(
                             tree.clone(),
+                            canvas_display_lists.clone(),
                             callback.clone(),
                             window_event_callback.clone(),
                             title,
@@ -1719,6 +1743,7 @@ impl GpuixRenderer {
         let reduced_motion = options.reduced_motion.unwrap_or(false);
         let window_options = options.clone();
         let tree = self.tree.clone();
+        let canvas_display_lists = self.canvas_display_lists.clone();
         let selection = self.selection.clone();
         let image_network_policy = self.image_network_policy.clone();
         let callback = self.event_callback_for_view();
@@ -1759,6 +1784,7 @@ impl GpuixRenderer {
                                 cx.new(|_view_cx| {
                                     GpuixView::new(
                                         tree,
+                                        canvas_display_lists,
                                         callback,
                                         window_event_callback,
                                         title,
@@ -1836,6 +1862,8 @@ impl GpuixRenderer {
         let id = to_element_id(id)?;
         let mut tree = self.tree.lock().unwrap();
         let destroyed = tree.destroy_element(id);
+        drop(tree);
+        crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed);
         Ok(destroyed.iter().map(|&id| id as f64).collect())
     }
 
@@ -1972,6 +2000,34 @@ impl GpuixRenderer {
         self.request_invalidate()
     }
 
+    /// Replace one canvas element's retained display list and repaint without
+    /// requiring a React commit.
+    #[napi]
+    pub fn apply_canvas_commands(
+        &self,
+        id: f64,
+        ops: Uint32Array,
+        operands: Float64Array,
+        strings: Vec<String>,
+    ) -> Result<()> {
+        let id = to_element_id(id)?;
+        let diagnostics = crate::canvas::replace_display_list(
+            &self.canvas_display_lists,
+            id,
+            ops.as_ref(),
+            operands.as_ref(),
+            &strings,
+        )
+        .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
+        if self.strict_styles.load(Ordering::Relaxed) {
+            self.style_diagnostics
+                .lock()
+                .unwrap()
+                .extend(pending_canvas_diagnostics(id, diagnostics));
+        }
+        self.request_invalidate()
+    }
+
     /// Apply a batch of mutations in a single FFI call.
     ///
     /// Accepts a JSON array of mutation tuples. Each tuple is an array where
@@ -2011,6 +2067,9 @@ impl GpuixRenderer {
                 .unwrap()
                 .extend(outcome.diagnostics);
         }
+        let destroyed_canvas_ids: Vec<u64> =
+            outcome.destroyed_ids.iter().map(|id| *id as u64).collect();
+        crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed_canvas_ids);
         self.request_invalidate()?;
         Ok(outcome.destroyed_ids)
     }
@@ -3453,6 +3512,7 @@ fn collect_text(id: u64, tree: &RetainedTree, texts: &mut Vec<String>) {
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 fn start_web_app(
     tree: Arc<Mutex<RetainedTree>>,
+    canvas_display_lists: SharedDisplayLists,
     selection: SharedSelection,
     event_callback: EventCallback,
     window_event_callback: WindowEventCallback,
@@ -3473,6 +3533,7 @@ fn start_web_app(
             cx.new(|_view_cx| {
                 GpuixView::new(
                     tree,
+                    canvas_display_lists,
                     Some(event_callback),
                     window_event_callback,
                     "GPUIX Web".to_string(),
@@ -3628,6 +3689,7 @@ fn web_window_size_value(size: WindowSize) -> Result<wasm_bindgen::JsValue, wasm
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = GpuixRenderer)]
 pub struct WebGpuixRenderer {
     tree: Arc<Mutex<RetainedTree>>,
+    canvas_display_lists: SharedDisplayLists,
     selection: SharedSelection,
     event_callback: EventCallback,
     window_event_callback: WindowEventCallback,
@@ -3663,6 +3725,7 @@ impl WebGpuixRenderer {
 
         Self {
             tree: Arc::new(Mutex::new(RetainedTree::new())),
+            canvas_display_lists: SharedDisplayLists::default(),
             selection: SharedSelection::default(),
             event_callback: web_event_callback(event_callback),
             window_event_callback,
@@ -3674,6 +3737,7 @@ impl WebGpuixRenderer {
     pub fn init(&self, _options: wasm_bindgen::JsValue) -> Result<(), wasm_bindgen::JsValue> {
         start_web_app(
             self.tree.clone(),
+            self.canvas_display_lists.clone(),
             self.selection.clone(),
             self.event_callback.clone(),
             self.window_event_callback.clone(),
@@ -3701,8 +3765,10 @@ impl WebGpuixRenderer {
             .unwrap()
             .destroy_element(web_element_id(id)?)
             .into_iter()
-            .map(|id| id as f64);
-        Ok(web_number_array(destroyed))
+            .collect::<Vec<_>>();
+        let destroyed_canvas_ids: Vec<u64> = destroyed.iter().map(|id| *id as u64).collect();
+        crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed_canvas_ids);
+        Ok(web_number_array(destroyed.into_iter().map(|id| id as f64)))
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = appendChild)]
@@ -3850,6 +3916,8 @@ impl WebGpuixRenderer {
         }
         let destroyed = outcome.destroyed_ids;
         drop(tree);
+        let destroyed_canvas_ids: Vec<u64> = destroyed.iter().map(|id| *id as u64).collect();
+        crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed_canvas_ids);
         notify_web();
         Ok(web_number_array(destroyed))
     }
@@ -3857,6 +3925,51 @@ impl WebGpuixRenderer {
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = commitMutations)]
     pub fn commit_mutations(&self) {
         notify_web();
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = applyCanvasCommands)]
+    pub fn apply_canvas_commands(
+        &self,
+        id: f64,
+        ops: js_sys::Uint32Array,
+        operands: js_sys::Float64Array,
+        strings: js_sys::Array,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(id)?;
+        let mut op_values = vec![0; ops.length() as usize];
+        ops.copy_to(&mut op_values);
+        let mut operand_values = vec![0.0; operands.length() as usize];
+        operands.copy_to(&mut operand_values);
+        let strings = strings
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                value.as_string().ok_or_else(|| {
+                    wasm_bindgen::JsValue::from_str(&format!(
+                        "<canvas> element {id}: side-table entry {index} is not a string"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let diagnostics = crate::canvas::replace_display_list(
+            &self.canvas_display_lists,
+            id,
+            &op_values,
+            &operand_values,
+            &strings,
+        )
+        .map_err(|error| {
+            wasm_bindgen::JsValue::from_str(&format!("<canvas> element {id}: {error}"))
+        })?;
+        if self.strict_styles.load(Ordering::Relaxed) {
+            let tree = self.tree.lock().unwrap();
+            for diagnostic in pending_canvas_diagnostics(id, diagnostics) {
+                let (message, _, _, _, _) = style_diagnostic_context(&diagnostic, &tree);
+                web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
+            }
+        }
+        notify_web();
+        Ok(())
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = isInitialized)]
@@ -4265,6 +4378,7 @@ impl Drop for GpuixRenderer {
 
 pub(crate) struct GpuixView {
     pub(crate) tree: Arc<Mutex<RetainedTree>>,
+    pub(crate) canvas_display_lists: SharedDisplayLists,
     pub(crate) event_callback: Option<EventCallback>,
     window_event_callback: WindowEventCallback,
     window_bounds_subscription: Option<gpui::Subscription>,
@@ -4451,6 +4565,7 @@ fn resolve_highlight(
 impl GpuixView {
     pub(crate) fn new(
         tree: Arc<Mutex<RetainedTree>>,
+        canvas_display_lists: SharedDisplayLists,
         event_callback: Option<EventCallback>,
         window_event_callback: WindowEventCallback,
         window_title: String,
@@ -4459,6 +4574,7 @@ impl GpuixView {
     ) -> Self {
         Self {
             tree,
+            canvas_display_lists,
             event_callback,
             window_event_callback,
             window_bounds_subscription: None,
@@ -4610,6 +4726,7 @@ impl GpuixView {
 
         let mut build_ctx = BuildCtx {
             tree: &tree,
+            canvas_display_lists: &self.canvas_display_lists,
             event_callback: &callback,
             focus_handles: &self.focus_handles,
             scroll_handles: &mut self.scroll_handles,
@@ -4725,6 +4842,7 @@ impl GpuixView {
 /// `cx` stay separate parameters: they are `&mut` and gpui reborrows them.
 pub(crate) struct BuildCtx<'a> {
     pub tree: &'a RetainedTree,
+    pub canvas_display_lists: &'a SharedDisplayLists,
     pub event_callback: &'a Option<EventCallback>,
     pub focus_handles: &'a HashMap<u64, gpui::FocusHandle>,
     pub scroll_handles: &'a mut HashMap<u64, gpui::ScrollHandle>,
@@ -5403,6 +5521,7 @@ impl gpui::Render for GpuixView {
             Some(root_id) => {
                 let mut ctx = BuildCtx {
                     tree: &tree,
+                    canvas_display_lists: &self.canvas_display_lists,
                     event_callback: &callback,
                     focus_handles: &self.focus_handles,
                     scroll_handles: &mut self.scroll_handles,
@@ -5655,6 +5774,7 @@ pub(crate) fn build_element(
                 selection_wash: inherited.selection_wash,
                 current_color: inherited.current_color,
                 image_network_policy: ctx.image_network_policy,
+                canvas_display_lists: ctx.canvas_display_lists,
                 highlight_set: inherited.highlight.clone(),
             };
             ctx.custom_registry

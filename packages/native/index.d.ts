@@ -50,6 +50,11 @@ export declare class GpuixRenderer {
   /** Signal that a batch of mutations is complete. Triggers re-render. */
   commitMutations(): void
   /**
+   * Replace one canvas element's retained display list and repaint without
+   * requiring a React commit.
+   */
+  applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  /**
    * Apply a batch of mutations in a single FFI call.
    *
    * Accepts a JSON array of mutation tuples. Each tuple is an array where
@@ -240,6 +245,11 @@ export declare class TestGpuixRenderer {
    * In tests, this is a no-op — flush() handles the actual re-render.
    */
   commitMutations(): void
+  /**
+   * Replace one canvas element's retained display list and notify the
+   * offscreen view without requiring a React commit.
+   */
+  applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
   /**
    * Apply a batch of mutations in a single FFI call.
    * Same format as GpuixRenderer::apply_batch (string op names).
