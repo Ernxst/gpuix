@@ -8,10 +8,7 @@ import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
  * `packages/native/src/style.rs`.
  */
 type LengthAtom = `${number}px` | `${number}%` | `${number}ch`
-type CalcExpression =
-  | LengthAtom
-  | `${LengthAtom} + ${LengthAtom}`
-  | `${LengthAtom} - ${LengthAtom}`
+type CalcExpression = `${LengthAtom} + ${LengthAtom}` | `${LengthAtom} - ${LengthAtom}`
 export type DimensionValue =
   | number
   | "auto"

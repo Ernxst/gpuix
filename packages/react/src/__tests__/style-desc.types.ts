@@ -52,6 +52,26 @@ const invalidCalc: StyleDesc = {
   width: "calc(100% - 2rem)",
 }
 
+const invalidBareDimensionString: StyleDesc = {
+  // @ts-expect-error Bare strings are not JSON numeric length values.
+  width: "12",
+}
+
+const invalidCalcWithoutOperator: StyleDesc = {
+  // @ts-expect-error calc() always has exactly one binary operator.
+  width: "calc(24ch)",
+}
+
+const invalidUnspacedCalc: StyleDesc = {
+  // @ts-expect-error calc operators use the canonical spaced grammar.
+  width: "calc(100%-4ch)",
+}
+
+const invalidNestedCalc: StyleDesc = {
+  // @ts-expect-error The native grammar accepts one binary calc level only.
+  width: "calc(calc(100% - 4ch) + 2px)",
+}
+
 const invalidColor: StyleDesc = {
   // @ts-expect-error Colour values are always strings, including runtime-validated ones.
   background: 42,
@@ -95,6 +115,10 @@ const invalidImage: ImgProps = {
 void invalidDisplay
 void invalidDimension
 void invalidCalc
+void invalidBareDimensionString
+void invalidCalcWithoutOperator
+void invalidUnspacedCalc
+void invalidNestedCalc
 void invalidColor
 void invalidTextWrap
 void invalidHoverStyle

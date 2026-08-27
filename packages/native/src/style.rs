@@ -302,6 +302,9 @@ impl<'de> Deserialize<'de> for LineHeightValue {
 }
 
 fn parse_dimension(value: &str) -> Result<DimensionValue, String> {
+    // Keep this compact, canonical grammar in lockstep with the literal types
+    // in packages/react/src/types/host.ts. JSON numbers remain pixels; strings
+    // must name their unit, and calc has exactly one spaced binary operator.
     let value = value.trim();
     if value == "auto" {
         return Ok(DimensionValue::Auto);
@@ -313,15 +316,10 @@ fn parse_dimension(value: &str) -> Result<DimensionValue, String> {
         let (index, operator) = find_calc_operator(inner).ok_or_else(|| {
             "invalid calc() at byte 5: expected `length + length` or `length - length`".to_string()
         })?;
-        let left = parse_dimension(&inner[..index])
+        let left = parse_length_atom(&inner[..index])
             .map_err(|error| format!("invalid calc() at byte 5: {error}"))?;
-        let right = parse_dimension(&inner[index + 1..])
-            .map_err(|error| format!("invalid calc() at byte {}: {error}", index + 6))?;
-        if matches!(left, DimensionValue::Auto) || matches!(right, DimensionValue::Auto) {
-            return Err(
-                "invalid calc() at byte 5: `auto` cannot participate in an expression".into(),
-            );
-        }
+        let right = parse_length_atom(&inner[index + 3..])
+            .map_err(|error| format!("invalid calc() at byte {}: {error}", index + 8))?;
         return Ok(DimensionValue::Calc {
             source: value.to_owned(),
             left: Box::new(left),
@@ -333,11 +331,11 @@ fn parse_dimension(value: &str) -> Result<DimensionValue, String> {
         .strip_prefix("clamp(")
         .and_then(|value| value.strip_suffix(')'))
     {
-        let parts = split_top_level(inner, ',');
+        let parts: Vec<_> = inner.split(", ").collect();
         if parts.len() != 3 {
             return Err("invalid clamp() at byte 6: expected three comma-separated lengths".into());
         }
-        let parse = |part: &str| parse_dimension(part).map(Box::new);
+        let parse = |part: &str| parse_length_atom(part).map(Box::new);
         let min = parse(parts[0]).map_err(|error| format!("invalid clamp() at byte 6: {error}"))?;
         let preferred = parse(parts[1])
             .map_err(|error| format!("invalid clamp() at byte {}: {error}", parts[0].len() + 7))?;
@@ -347,14 +345,6 @@ fn parse_dimension(value: &str) -> Result<DimensionValue, String> {
                 parts[0].len() + parts[1].len() + 8
             )
         })?;
-        if [&min, &preferred, &max]
-            .into_iter()
-            .any(|part| matches!(part.as_ref(), DimensionValue::Auto))
-        {
-            return Err(
-                "invalid clamp() at byte 6: `auto` cannot participate in an expression".into(),
-            );
-        }
         return Ok(DimensionValue::Clamp {
             source: value.to_owned(),
             min,
@@ -379,24 +369,18 @@ fn parse_length_atom(value: &str) -> Result<DimensionValue, String> {
     if let Some(number) = value.strip_suffix("ch") {
         return parse(number, "ch").map(DimensionValue::Ch);
     }
-    match value.parse::<f64>() {
-        Ok(value) if value.is_finite() => Ok(DimensionValue::Pixels(value)),
-        _ => Err("invalid length at byte 0: expected a number with px, %, or ch".into()),
-    }
+    Err("invalid length at byte 0: expected a number with px, %, or ch".into())
 }
 
 fn find_calc_operator(value: &str) -> Option<(usize, CalcOperator)> {
-    let mut depth = 0usize;
-    for (index, character) in value.char_indices() {
-        match character {
-            '(' => depth += 1,
-            ')' => depth = depth.saturating_sub(1),
-            '+' if depth == 0 => return Some((index, CalcOperator::Add)),
-            '-' if depth == 0 && index > 0 => return Some((index, CalcOperator::Subtract)),
-            _ => {}
-        }
-    }
-    None
+    value
+        .find(" + ")
+        .map(|index| (index, CalcOperator::Add))
+        .or_else(|| {
+            value
+                .find(" - ")
+                .map(|index| (index, CalcOperator::Subtract))
+        })
 }
 
 /// Style description retained by the native renderer.
@@ -1778,6 +1762,21 @@ mod tests {
         assert_eq!(parsed.problems[0].property, "width");
         assert_eq!(parsed.problems[0].value, "\"calc(100% - 2rem)\"");
         assert!(parsed.problems[0].reason.contains("byte"));
+    }
+
+    #[test]
+    fn keeps_the_length_grammar_in_lockstep_with_the_literal_types() {
+        for value in [
+            "12",
+            "calc(24ch)",
+            "calc(100%-4ch)",
+            "calc(calc(100% - 4ch) + 2px)",
+        ] {
+            let parsed = parse_style_value(&json!({ "width": value, "height": 40 }));
+            assert_eq!(parsed.style.height, Some(DimensionValue::Pixels(40.0)));
+            assert_eq!(parsed.problems.len(), 1, "{value}");
+            assert_eq!(parsed.problems[0].property, "width", "{value}");
+        }
     }
 
     #[test]
