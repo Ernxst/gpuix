@@ -278,6 +278,35 @@ export interface MotionProps {
   transition?: MotionTransition
 }
 
+export type TransitionProperty =
+  | "opacity"
+  | "backgroundColor"
+  | "color"
+  | "borderColor"
+  | "outlineColor"
+  | "width"
+  | "height"
+  | "minWidth"
+  | "minHeight"
+  | "maxWidth"
+  | "maxHeight"
+  | "top"
+  | "right"
+  | "bottom"
+  | "left"
+  | "borderRadius"
+  | "borderTopLeftRadius"
+  | "borderTopRightRadius"
+  | "borderBottomLeftRadius"
+  | "borderBottomRightRadius"
+
+export interface StyleTransition {
+  properties: TransitionProperty[]
+  durationMs: number
+  delayMs?: number
+  easing?: MotionEase
+}
+
 /**
  * CSS `cursor` keywords GPUI can paint. An unlisted keyword is ignored, like
  * every other invalid style value.
@@ -362,7 +391,13 @@ export type GridTrack =
 
 export type GridTemplate = number | GridTrack[]
 
-type NativeStateStyleKey = "hover" | "hoverWithin" | "active" | "focus" | "focusVisible"
+type NativeStateStyleKey =
+  | "transition"
+  | "hover"
+  | "hoverWithin"
+  | "active"
+  | "focus"
+  | "focusVisible"
 type NativeStateStyle = Omit<StyleDesc, NativeStateStyleKey>
 
 export interface StyleDesc {
@@ -459,6 +494,9 @@ export interface StyleDesc {
   userSelect?: "text" | "none" | "auto"
   /** Selection wash colour for this subtree. Defaults to the theme accent at 35%. */
   selectionColor?: GpuixColor
+
+  /** Native, interruptible interpolation for the named properties. */
+  transition?: StyleTransition
 
   // Native state styles — applied by GPUI without a JS round trip.
   // Nesting is one level deep: a state style cannot contain another state style.

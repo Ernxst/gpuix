@@ -159,6 +159,32 @@ describeNative("style diagnostics", () => {
     expect(diagnostics[0].message).toContain('<div testId="ledger-grid">')
   })
 
+  it("rejects a malformed transition as one descriptor with precise paths", () => {
+    const renderer = new TestRenderer()
+    renderer.createElement(83, "div")
+    renderer.setCustomProp(83, "testId", JSON.stringify("animated-card"))
+    renderer.setStyle(
+      83,
+      JSON.stringify({
+        opacity: 0.4,
+        transition: {
+          properties: ["opacity", "display"],
+          durationMs: -100,
+        },
+      })
+    )
+    renderer.setRoot(83)
+
+    expect(renderer.getElement(83)?.style).toMatchObject({ opacity: 0.4 })
+    expect(renderer.getElement(83)?.style).not.toHaveProperty("transition")
+    expect(
+      renderer.drainStyleDiagnostics().map(({ property, testId }) => ({ property, testId }))
+    ).toEqual([
+      { property: "transition.properties[1]", testId: "animated-card" },
+      { property: "transition.durationMs", testId: "animated-card" },
+    ])
+  })
+
   it("keeps deterministic field dropping when strict diagnostics are disabled", () => {
     const renderer = new TestRenderer()
     renderer.setStrictStyles(false)

@@ -21,6 +21,11 @@ const validStyle = {
     outlineColor: "rgba(124, 134, 255, 0.9)",
     outlineWidth: 2,
   },
+  transition: {
+    properties: ["opacity", "backgroundColor", "borderRadius"],
+    durationMs: 140,
+    easing: "ease",
+  },
   gridTemplateColumns: [
     { type: "minmax", min: { type: "px", value: 120 }, max: { type: "fr", value: 1 } },
     { type: "repeat", count: 2, tracks: [{ type: "auto" }] },
@@ -89,6 +94,26 @@ const invalidHoverStyle: StyleDesc = {
   },
 }
 
+const invalidTransitionProperty: StyleDesc = {
+  transition: {
+    // @ts-expect-error Only natively interpolated style fields are accepted.
+    properties: ["display"],
+    durationMs: 140,
+  },
+}
+
+const missingTransitionDuration: StyleDesc = {
+  // @ts-expect-error A transition always declares its duration explicitly.
+  transition: { properties: ["opacity"] },
+}
+
+const nestedTransition: StyleDesc = {
+  hover: {
+    // @ts-expect-error State refinements inherit the base transition declaration.
+    transition: { properties: ["opacity"], durationMs: 140 },
+  },
+}
+
 const invalidGrid: StyleDesc = {
   gridTemplateColumns: [
     {
@@ -122,5 +147,8 @@ void invalidNestedCalc
 void invalidColor
 void invalidTextWrap
 void invalidHoverStyle
+void invalidTransitionProperty
+void missingTransitionDuration
+void nestedTransition
 void invalidGrid
 void invalidImage

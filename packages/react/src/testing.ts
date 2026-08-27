@@ -42,6 +42,9 @@ interface NativeTestRendererApi extends NativeRenderer {
   applyBatch(json: string): number[]
   flush(): void
   advanceAsyncClock(deltaMs: number): void
+  setReducedMotion(enabled: boolean): void
+  getStyleTransitionCount(): number
+  getStyleTransitionFrameRequestCount(): number
   drainEvents(): EventPayload[]
   setMenus(menus: MenuSpec[]): void
   simulateMenuAction(id: string): void
@@ -343,9 +346,24 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
-  /** Advance timers owned by GPUI's async executor without sleeping. */
+  /** Advance GPUI timers and, when paused, the native animation frame clock. */
   advanceAsyncClock(deltaMs: number): void {
     this.native.advanceAsyncClock(deltaMs)
+  }
+
+  /** Override GPUI's reduced-motion policy for deterministic tests. */
+  setReducedMotion(enabled: boolean): void {
+    this.native.setReducedMotion(enabled)
+  }
+
+  /** Number of transition tracks retained by the offscreen native view. */
+  getStyleTransitionCount(): number {
+    return this.native.getStyleTransitionCount()
+  }
+
+  /** Number of GPUI frames requested by retained style transitions. */
+  getStyleTransitionFrameRequestCount(): number {
+    return this.native.getStyleTransitionFrameRequestCount()
   }
 
   /** Drain events collected by the native GPUI event handlers. */
