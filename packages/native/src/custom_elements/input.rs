@@ -260,6 +260,9 @@ impl CustomElement for TextEditorElement {
         _window: &mut Window,
         cx: &mut Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement {
+        let native_disabled = crate::accessibility::is_native_disabled(ctx.retained_element)
+            || ctx.accessibility_hidden;
+        let action_disabled = crate::accessibility::is_action_disabled(ctx.retained_element);
         let focus_handle = ctx
             .focus_handle
             .cloned()
@@ -277,6 +280,7 @@ impl CustomElement for TextEditorElement {
                 let placeholder = self.placeholder.clone();
                 let multiline = self.multiline;
                 let read_only = self.read_only;
+                let disabled = native_disabled;
                 let min_rows = self.min_rows;
                 let max_rows = self.max_rows;
                 let caret_color = self.theme.caret;
@@ -295,7 +299,9 @@ impl CustomElement for TextEditorElement {
                     content: value,
                     placeholder: placeholder.into(),
                     multiline,
-                    read_only,
+                    read_only: read_only || action_disabled,
+                    disabled,
+                    action_disabled,
                     min_rows,
                     max_rows,
                     selected_range: cursor..cursor,
@@ -330,7 +336,9 @@ impl CustomElement for TextEditorElement {
             state.emits_key_down = emits_key_down;
             state.emits_key_up = emits_key_up;
             state.placeholder = self.placeholder.clone().into();
-            state.read_only = self.read_only;
+            state.read_only = self.read_only || action_disabled;
+            state.disabled = native_disabled;
+            state.action_disabled = action_disabled;
             state.min_rows = self.min_rows.max(1);
             state.max_rows = self.max_rows.max(state.min_rows);
             if state.caret_color != self.theme.caret {
@@ -344,13 +352,11 @@ impl CustomElement for TextEditorElement {
         self.last_prop_value = Some(self.value.clone());
 
         let element_id = gpui::SharedString::from(format!("__gpuix_editor_{}", ctx.id));
-        let mut editor = div()
-            .id(element_id)
-            .flex()
-            .min_w_0()
-            .w_full()
-            .track_focus(&focus_handle)
-            .child(state);
+        let mut editor = div().id(element_id).flex().min_w_0().w_full();
+        if !native_disabled {
+            editor = editor.track_focus(&focus_handle);
+        }
+        editor = editor.child(state);
         if let Some(style) = ctx.style {
             editor = crate::renderer::apply_styles(editor, style);
             editor = crate::renderer::apply_focus_styles(editor, style);
@@ -371,7 +377,14 @@ impl CustomElement for TextEditorElement {
         // selection-start region: a drag inside an editor must move the caret,
         // not start a document selection.
         editor = editor.child(crate::automation::bounds_tracker(ctx.id, Some(false)));
-        if ctx.events.contains("click") {
+        editor = crate::accessibility::apply(
+            editor,
+            ctx.retained_element,
+            ctx.event_callback,
+            Some(&focus_handle),
+            ctx.accessibility_hidden,
+        );
+        if ctx.events.contains("click") && !action_disabled {
             let callback = ctx.event_callback.clone();
             let id = ctx.id;
             editor = editor.on_click(move |event, _window, _cx| {
@@ -447,6 +460,8 @@ struct TextEditorState {
     placeholder: SharedString,
     multiline: bool,
     read_only: bool,
+    disabled: bool,
+    action_disabled: bool,
     min_rows: usize,
     max_rows: usize,
     selected_range: Range<usize>,
@@ -907,6 +922,9 @@ impl TextEditorState {
     }
 
     fn submit(&mut self, _: &Submit, _: &mut Window, _: &mut Context<Self>) {
+        if self.action_disabled {
+            return;
+        }
         self.emit_submit();
     }
 
@@ -976,6 +994,9 @@ impl TextEditorState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.disabled {
+            return;
+        }
         if !self.read_only {
             window.request_text_input();
         }

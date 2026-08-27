@@ -29,6 +29,9 @@ pub mod markdown;
 pub struct CustomRenderContext<'a> {
     /// Numeric element ID (matches React's instance ID).
     pub id: u64,
+    /// Full retained declaration. Accessibility is universal rather than a
+    /// custom-adapter prop, so supported hosts read it from this shared seam.
+    pub retained_element: &'a crate::retained_tree::RetainedElement,
     /// Event types registered by React (e.g. "keyDown", "click").
     pub events: &'a HashSet<String>,
     /// Callback for emitting events back to JS.
@@ -45,6 +48,8 @@ pub struct CustomRenderContext<'a> {
     pub selection: crate::text::SharedSelection,
     /// False when an ancestor set `userSelect: "none"`.
     pub selectable: bool,
+    /// True when this host is inside an `ariaHidden` subtree.
+    pub accessibility_hidden: bool,
     /// Inherited selection wash colour.
     pub selection_wash: gpui::Hsla,
     /// Resolved inherited colour for custom elements that rasterize

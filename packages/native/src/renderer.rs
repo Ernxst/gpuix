@@ -135,6 +135,23 @@ pub(crate) fn pending_custom_prop_diagnostic(
     })
 }
 
+pub(crate) fn pending_accessibility_diagnostics(
+    tree: &RetainedTree,
+    element_id: u64,
+) -> Vec<PendingStyleDiagnostic> {
+    tree.elements
+        .get(&element_id)
+        .map(crate::accessibility::element_problems)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|problem| PendingStyleDiagnostic {
+            element_id,
+            problem,
+            kind: DiagnosticKind::Property,
+        })
+        .collect()
+}
+
 pub(crate) fn pending_canvas_diagnostics(
     element_id: u64,
     diagnostics: Vec<CanvasDiagnostic>,
@@ -2341,12 +2358,18 @@ impl GpuixRenderer {
             .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
         let diagnostic = pending_custom_prop_diagnostic(&tree, id, &key, &value);
+        let accessibility_changed = crate::accessibility::is_accessibility_prop(&key);
         tree.set_custom_prop(id, key, value);
+        let accessibility_diagnostics = accessibility_changed
+            .then(|| pending_accessibility_diagnostics(&tree, id))
+            .unwrap_or_default();
         drop(tree);
         if self.strict_styles.load(Ordering::Relaxed) {
+            let mut pending = self.style_diagnostics.lock().unwrap();
             if let Some(diagnostic) = diagnostic {
-                self.style_diagnostics.lock().unwrap().push(diagnostic);
+                pending.push(diagnostic);
             }
+            pending.extend(accessibility_diagnostics);
         }
         Ok(())
     }
@@ -4425,9 +4448,13 @@ impl WebGpuixRenderer {
         })?;
         let mut tree = self.tree.lock().unwrap();
         let diagnostic = pending_custom_prop_diagnostic(&tree, id, &key, &value);
+        let accessibility_changed = crate::accessibility::is_accessibility_prop(&key);
         tree.set_custom_prop(id, key, value);
+        let accessibility_diagnostics = accessibility_changed
+            .then(|| pending_accessibility_diagnostics(&tree, id))
+            .unwrap_or_default();
         if self.strict_styles.load(Ordering::Relaxed) {
-            if let Some(diagnostic) = diagnostic {
+            for diagnostic in diagnostic.into_iter().chain(accessibility_diagnostics) {
                 let (message, _, _, _, _) = style_diagnostic_context(&diagnostic, &tree);
                 web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
             }
@@ -5504,6 +5531,9 @@ pub(crate) struct BuildCtx<'a> {
 pub(crate) struct Inherited {
     /// False once an ancestor sets `userSelect: "none"`.
     pub selectable: bool,
+    /// True for an `ariaHidden` element and every descendant. Semantics are
+    /// omitted at build time so AccessKit never receives a partial hidden tree.
+    pub accessibility_hidden: bool,
     /// Selection wash colour for this subtree.
     pub selection_wash: gpui::Hsla,
     /// Text case transformation inherited by plain text descendants.
@@ -5538,6 +5568,7 @@ impl Inherited {
         wash.a = 0.35;
         Self {
             selectable: true,
+            accessibility_hidden: false,
             selection_wash: wash,
             text_transform: TextTransform::None,
             current_color: gpui::rgba(0xe2e2e2ff),
@@ -6001,6 +6032,11 @@ impl GpuixView {
         cx: &mut gpui::Context<Self>,
     ) {
         let tab_index = |element: &crate::retained_tree::RetainedElement| {
+            if crate::accessibility::is_native_disabled(element)
+                || accessibility_hidden_in_ancestry(tree, element.id)
+            {
+                return None;
+            }
             element
                 .custom_props
                 .get("tabIndex")
@@ -6010,6 +6046,7 @@ impl GpuixView {
         let needs_focus = |element: &crate::retained_tree::RetainedElement| {
             matches!(element.element_type.as_str(), "input" | "textarea")
                 || tab_index(element).is_some()
+                || element.events.contains("accessibilityAction")
                 || element.events.contains("keyDown")
                 || element.events.contains("keyUp")
                 || element.events.contains("focus")
@@ -6021,6 +6058,8 @@ impl GpuixView {
                 matches!(element.element_type.as_str(), "input" | "textarea").then_some(0)
             });
 
+            let native_disabled = crate::accessibility::is_native_disabled(element)
+                || accessibility_hidden_in_ancestry(tree, id);
             if needs_focus(element) && !self.focus_handles.contains_key(&id) {
                 let handle = match tab_index {
                     Some(index) => cx.focus_handle().tab_index(index).tab_stop(index >= 0),
@@ -6028,7 +6067,7 @@ impl GpuixView {
                 };
                 // Focus once, at creation. Re-focusing every frame would
                 // steal focus back from whatever the user clicked next.
-                if element.auto_focus {
+                if element.auto_focus && !native_disabled {
                     handle.focus(window, cx);
                 }
                 self.focus_handles.insert(id, handle);
@@ -6345,6 +6384,7 @@ pub(crate) fn build_element(
     ctx.inherited = parent_inherited
         .clone()
         .descend(style, hover_group, id, current_color, font);
+    ctx.inherited.accessibility_hidden |= crate::accessibility::is_hidden(element);
 
     // A `highlight` here replaces any ancestor's: the nearest declaration wins,
     // and `GroupList::collect` skips nested declarations so an ancestor never
@@ -6391,6 +6431,7 @@ pub(crate) fn build_element(
             let inherited = ctx.inherited.clone();
             let render_ctx = CustomRenderContext {
                 id,
+                retained_element: element,
                 events: &element.events,
                 event_callback: ctx.event_callback,
                 focus_handle: ctx.focus_handles.get(&id),
@@ -6398,6 +6439,7 @@ pub(crate) fn build_element(
                 children: custom_children,
                 selection: ctx.selection.clone(),
                 selectable: inherited.selectable,
+                accessibility_hidden: inherited.accessibility_hidden,
                 selection_wash: inherited.selection_wash,
                 current_color: inherited.current_color,
                 image_network_policy: ctx.image_network_policy,
@@ -6623,6 +6665,93 @@ fn tracks_pointer_event(
     false
 }
 
+fn accessibility_hidden_in_ancestry(tree: &RetainedTree, element_id: u64) -> bool {
+    let mut current = Some(element_id);
+    while let Some(id) = current {
+        let Some(element) = tree.elements.get(&id) else {
+            return false;
+        };
+        if crate::accessibility::is_hidden(element) {
+            return true;
+        }
+        current = element.parent;
+    }
+    false
+}
+
+fn action_disabled_in_ancestry(tree: &RetainedTree, element_id: u64) -> bool {
+    let mut current = Some(element_id);
+    while let Some(id) = current {
+        let Some(element) = tree.elements.get(&id) else {
+            return false;
+        };
+        if crate::accessibility::is_action_disabled(element) {
+            return true;
+        }
+        current = element.parent;
+    }
+    false
+}
+
+fn apply_click_handler<E>(
+    mut el: E,
+    element: &crate::retained_tree::RetainedElement,
+    ctx: &BuildCtx,
+) -> E
+where
+    E: gpui::StatefulInteractiveElement,
+{
+    if !tracks_pointer_event(element, ctx.tree, "click")
+        || action_disabled_in_ancestry(ctx.tree, element.id)
+    {
+        return el;
+    }
+
+    let activates_on_space = element
+        .custom_props
+        .get("activationKind")
+        .and_then(serde_json::Value::as_str)
+        != Some("anchor");
+    let callback = ctx.event_callback.clone();
+    let id = element.id;
+    el = el.on_click(move |click_event, _window, cx| {
+        if !activates_on_space
+            && matches!(
+                click_event,
+                gpui::ClickEvent::Keyboard(event)
+                    if event.button == gpui::KeyboardButton::Space
+            )
+        {
+            return;
+        }
+        let stop_native_propagation = !matches!(click_event, gpui::ClickEvent::Keyboard(_));
+        emit_event_full(&callback, id, "click", |payload| {
+            let (x, y) = point_to_xy(click_event.position());
+            payload.x = Some(x);
+            payload.y = Some(y);
+            payload.modifiers = Some(click_event.modifiers().into());
+            payload.click_count = Some(click_event.click_count() as u32);
+            payload.is_right_click = Some(click_event.is_right_click());
+            payload.button = Some(match click_event {
+                gpui::ClickEvent::Mouse(event) => mouse_button_to_u32(event.down.button),
+                gpui::ClickEvent::Keyboard(_) | gpui::ClickEvent::Touch(_) => 0,
+            });
+            payload.input_source = Some(
+                match click_event {
+                    gpui::ClickEvent::Mouse(_) => "mouse",
+                    gpui::ClickEvent::Keyboard(_) => "keyboard",
+                    gpui::ClickEvent::Touch(_) => "touch",
+                }
+                .to_string(),
+            );
+        });
+        if stop_native_propagation {
+            cx.stop_propagation();
+        }
+    });
+    el
+}
+
 fn captures_pointer_in_ancestry(
     element: &crate::retained_tree::RetainedElement,
     tree: &RetainedTree,
@@ -6784,27 +6913,35 @@ pub(crate) fn build_div(
         selection_start_flag(style),
     ));
 
-    if let Some(handle) = ctx.focus_handles.get(&element.id) {
-        el = el.track_focus(handle);
+    let native_disabled =
+        crate::accessibility::is_native_disabled(element) || ctx.inherited.accessibility_hidden;
+    if !native_disabled {
+        if let Some(handle) = ctx.focus_handles.get(&element.id) {
+            el = el.track_focus(handle);
+        }
     }
-    if let Some(tab_index) = element
-        .custom_props
-        .get("tabIndex")
-        .and_then(|value| value.as_i64())
-        .and_then(|index| isize::try_from(index).ok())
-    {
-        el = el.tab_index(tab_index).tab_stop(tab_index >= 0);
+    el = crate::accessibility::apply(
+        el,
+        element,
+        ctx.event_callback,
+        ctx.focus_handles.get(&element.id),
+        ctx.inherited.accessibility_hidden,
+    );
+    if !native_disabled {
+        if let Some(tab_index) = element
+            .custom_props
+            .get("tabIndex")
+            .and_then(|value| value.as_i64())
+            .and_then(|index| isize::try_from(index).ok())
+        {
+            el = el.tab_index(tab_index).tab_stop(tab_index >= 0);
+        }
     }
 
     // Wire up events.
     // Some events (on_hover, on_click) require a stateful element (.id()),
     // which we already set above. Others (on_mouse_down, on_key_down) work
     // on any InteractiveElement.
-    let activates_on_space = element
-        .custom_props
-        .get("activationKind")
-        .and_then(serde_json::Value::as_str)
-        != Some("anchor");
     let id = element.id;
     for event_type in &element.events {
         let callback = ctx.event_callback.clone();
@@ -6913,45 +7050,7 @@ pub(crate) fn build_div(
     // capture/target/bubble walk from that source to the listener's ancestor.
     // This preserves an interactive child's target identity while allowing an
     // inert background-painted child to reach an ancestor listener.
-    if tracks_pointer_event(element, ctx.tree, "click") {
-        let callback = ctx.event_callback.clone();
-        let id = element.id;
-        el = el.on_click(move |click_event, _window, cx| {
-            if !activates_on_space
-                && matches!(
-                    click_event,
-                    gpui::ClickEvent::Keyboard(event)
-                        if event.button == gpui::KeyboardButton::Space
-                )
-            {
-                return;
-            }
-            let stop_native_propagation = !matches!(click_event, gpui::ClickEvent::Keyboard(_));
-            emit_event_full(&callback, id, "click", |p| {
-                let (x, y) = point_to_xy(click_event.position());
-                p.x = Some(x);
-                p.y = Some(y);
-                p.modifiers = Some(click_event.modifiers().into());
-                p.click_count = Some(click_event.click_count() as u32);
-                p.is_right_click = Some(click_event.is_right_click());
-                p.button = Some(match click_event {
-                    gpui::ClickEvent::Mouse(event) => mouse_button_to_u32(event.down.button),
-                    gpui::ClickEvent::Keyboard(_) | gpui::ClickEvent::Touch(_) => 0,
-                });
-                p.input_source = Some(
-                    match click_event {
-                        gpui::ClickEvent::Mouse(_) => "mouse",
-                        gpui::ClickEvent::Keyboard(_) => "keyboard",
-                        gpui::ClickEvent::Touch(_) => "touch",
-                    }
-                    .to_string(),
-                );
-            });
-            if stop_native_propagation {
-                cx.stop_propagation();
-            }
-        });
-    }
+    el = apply_click_handler(el, element, ctx);
 
     if tracks_pointer_event(element, ctx.tree, "auxClick") {
         let callback = ctx.event_callback.clone();
@@ -7183,7 +7282,11 @@ pub(crate) fn build_text(
     // Fast path: plain text leaf without style. It still goes through
     // `text_content` so the glyphs land in the selection registry — the old
     // raw-string return was the reason text was not selectable.
-    if style.is_none() && element.children.is_empty() && element.events.is_empty() {
+    if style.is_none()
+        && element.children.is_empty()
+        && element.events.is_empty()
+        && !crate::accessibility::has_semantics(element)
+    {
         let content = element.content.clone().unwrap_or_default();
         return gpui::div()
             .relative()
@@ -7195,7 +7298,7 @@ pub(crate) fn build_text(
     // The full style set, exactly as `<div>` gets it. `<text>` used to apply a
     // text-only subset, so `padding`, `width` and every layout prop on a text
     // node were silently dropped — a hole with no error and no warning.
-    let mut el = gpui::div();
+    let mut el = gpui::div().id(gpui::SharedString::from(format!("__gpuix_{}", element.id)));
     if let Some(style) = style {
         el = apply_styles(el, style);
     }
@@ -7206,6 +7309,31 @@ pub(crate) fn build_text(
         element.id,
         selection_start_flag(style),
     ));
+    let native_disabled =
+        crate::accessibility::is_native_disabled(element) || ctx.inherited.accessibility_hidden;
+    if !native_disabled {
+        if let Some(handle) = ctx.focus_handles.get(&element.id) {
+            el = el.track_focus(handle);
+        }
+    }
+    el = crate::accessibility::apply(
+        el,
+        element,
+        ctx.event_callback,
+        ctx.focus_handles.get(&element.id),
+        ctx.inherited.accessibility_hidden,
+    );
+    if !native_disabled {
+        if let Some(tab_index) = element
+            .custom_props
+            .get("tabIndex")
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|index| isize::try_from(index).ok())
+        {
+            el = el.tab_index(tab_index).tab_stop(tab_index >= 0);
+        }
+    }
+    el = apply_click_handler(el, element, ctx);
 
     let inline = match crate::text::inline::flatten_inline_text(
         ctx.tree,
@@ -7241,7 +7369,7 @@ pub(crate) fn build_text(
         crate::text::HighlightSource::FlattenedResolved(highlight, highlight_mappings)
     });
 
-    if !content.clickable_ranges.is_empty() {
+    if !content.clickable_ranges.is_empty() && !action_disabled_in_ancestry(ctx.tree, element.id) {
         let callback = ctx.event_callback.clone();
         content.on_inline_click = Some(Arc::new(move |id, event| {
             emit_event_full(&callback, id, "click", |payload| {
@@ -8327,6 +8455,7 @@ pub(crate) fn apply_batch_to_tree_with_diagnostics(
     let mut diagnostics = Vec::new();
     let mut inline_style_candidates = HashSet::new();
     let mut inline_subtree_roots = Vec::new();
+    let mut accessibility_candidates = HashSet::new();
     for batch_op in parsed {
         match batch_op {
             BatchOp::CreateElement { id, element_type } => {
@@ -8380,8 +8509,19 @@ pub(crate) fn apply_batch_to_tree_with_diagnostics(
                 if let Some(diagnostic) = pending_custom_prop_diagnostic(tree, id, &key, &value) {
                     diagnostics.push(diagnostic);
                 }
+                if crate::accessibility::is_accessibility_prop(&key) {
+                    accessibility_candidates.insert(id);
+                }
                 tree.set_custom_prop(id, key, value);
             }
+        }
+    }
+
+    if collect_diagnostics {
+        let mut accessibility_candidates = accessibility_candidates.into_iter().collect::<Vec<_>>();
+        accessibility_candidates.sort_unstable();
+        for id in accessibility_candidates {
+            diagnostics.extend(pending_accessibility_diagnostics(tree, id));
         }
     }
 

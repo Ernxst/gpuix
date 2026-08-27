@@ -86,6 +86,8 @@ export type {
 // Re-export types
 export type { MotionDivProps } from "./components/index.js"
 export type {
+  AccessibilityAction,
+  AccessibilityRole,
   CanvasProps,
   CanvasPublicInstance,
   CursorValue,

@@ -1443,6 +1443,81 @@ Adding `onKeyDown`, `onKeyUp`, `onFocus`, or `onBlur` creates a persistent focus
 handle. Add `tabIndex` as well when the element must be reachable with Tab.
 Removing `tabIndex` removes the element from the tab order.
 
+## Native accessibility
+
+Semantic host elements feed GPUI's AccessKit tree directly. Roles are always
+explicit: GPUIX does not infer a role from JSX aliases such as `<button>` or
+`<h2>`, so custom controls and shared JSX have the same predictable contract.
+
+```tsx
+<button
+  role="button"
+  ariaLabel="Save factory"
+  tabIndex={0}
+  onClick={save}
+>
+  <text>Save</text>
+</button>
+```
+
+The role set is `button`, `checkbox`, `heading`, `img`, `link`, `option`,
+`slider`, `spinbutton`, `switch`, and `textbox`. These props map without
+inference to their GPUI / AccessKit equivalents:
+
+| React prop | Native meaning |
+|---|---|
+| `ariaLabel`, `ariaDescription` | Accessible name and supplementary description; requires an explicit supported `role` |
+| `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
+| `ariaExpanded`, `ariaSelected` | Boolean semantic states |
+| `ariaValue` | Human-readable value text |
+| `ariaValueMin`, `ariaValueMax`, `ariaValueNow` | Numeric value range and current value |
+| `ariaLevel` | One-based heading level |
+| `disabled` | Unavailable, non-activating, and removed from tab order |
+| `ariaDisabled` | Unavailable and non-activating, but retained in tab order |
+| `ariaHidden` | Excludes the element and its complete subtree from AccessKit |
+
+Role/state combinations are validated rather than silently approximated:
+
+| Role | Role-specific properties and actions |
+|---|---|
+| `button` | `ariaExpanded`; Activate uses the ordinary `onClick` pipeline |
+| `checkbox` | `ariaChecked` (`boolean` or `"mixed"`); Activate uses `onClick` |
+| `heading` | positive `ariaLevel` |
+| `img` | accessible name and description |
+| `link` | `ariaExpanded`; Activate uses `onClick` |
+| `option` | `ariaSelected` |
+| `slider`, `spinbutton` | value text/range; Increment and Decrement use `onAccessibilityAction` |
+| `switch` | boolean `ariaChecked` only; `"mixed"` is rejected; Activate uses `onClick` |
+| `textbox` | accessible name and description |
+
+`disabled` and `ariaDisabled` are accepted on control roles. Do not combine
+them. `onAccessibilityAction` reports specialised `increment`, `decrement`, or
+`focus` requests. AccessKit Activate deliberately converges on `onClick`, so
+pointer, keyboard, and assistive-technology activation share capture/bubble,
+target/currentTarget, and preventDefault behavior exactly once. The application
+remains responsible for applying requested value changes.
+
+Semantics are implemented on `<div>`/JSX aliases, `<text>`, `<input>`,
+`<textarea>`, and `<img>`. Other native custom hosts reject accessibility props
+with the standard property diagnostic instead of dropping them. `ariaHidden`
+is universal because it suppresses a whole subtree, including supported hosts
+inside an otherwise unsupported container.
+
+Semantic nodes use GPUIX's stable retained element identity for their AccessKit
+node ID. The author `id` remains platform-visible metadata and is not the node
+identity source, so keyed React reorders preserve IDs and unmounts remove the
+old node.
+
+GPU-backed tests can inspect GPUI's real last-drawn AccessKit tree with
+`renderer.getAccessibilityTree()` and inject platform requests with
+`renderer.nativeSimulateAccessibilityAction(accesskitId, action)`. Neither call
+draws. `render()` and an explicit `renderer.flush()` establish the rendered
+state boundary; reads and action injection use that last snapshot and its
+installed listeners until the next explicit draw. This is not a parallel
+reconstruction from React props.
+See [the platform accessibility smoke guide](./docs/accessibility-smoke.md) for
+the manual OS and screen-reader checks that snapshots cannot prove.
+
 ## Headless controls
 
 The built-in controls are **unstyled primitives**, not a fixed component

@@ -290,6 +290,10 @@ export declare class TestGpuixRenderer {
    * hit testing requires elements to be laid out).
    */
   flush(): void
+  /** Read GPUI's real AccessKit tree from the last explicit draw. */
+  getAccessibilityTree(): string
+  /** Dispatch one requested action through GPUI's production AccessKit route. */
+  simulateAccessibilityAction(accesskitId: string, action: "activate" | "increment" | "decrement" | "focus"): void
   /**
    * Draw one platform-style pending frame without notifying the view first.
    * A clean window remains clean, so this only repaints work already
@@ -670,6 +674,11 @@ export interface EventPayload {
    * Populated for: highlight.
    */
   matchCount?: number
+  /**
+   * AccessKit action requested by assistive technology.
+   * Populated for: accessibilityAction.
+   */
+  accessibilityAction?: "increment" | "decrement" | "focus"
   modifiers?: EventModifiers
 }
 

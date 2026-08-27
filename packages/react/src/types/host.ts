@@ -714,6 +714,22 @@ export interface HighlightMatch {
   rects: Array<{ x: number; y: number; width: number; height: number }>
 }
 
+/** Explicit roles currently translated to GPUI's AccessKit tree. */
+export type AccessibilityRole =
+  | "button"
+  | "checkbox"
+  | "heading"
+  | "img"
+  | "link"
+  | "option"
+  | "slider"
+  | "spinbutton"
+  | "switch"
+  | "textbox"
+
+/** AccessKit actions delivered through `onAccessibilityAction`. */
+export type AccessibilityAction = "increment" | "decrement" | "focus"
+
 // Props passed to elements.
 // Element IDs are auto-generated numeric IDs (not user-settable).
 // Use React refs to get an element's ID: ref.current.id
@@ -731,6 +747,38 @@ export interface Props {
   id?: string
   /** Inert author metadata preserved for automation and event host handles. */
   [key: `data-${string}`]: string | number | boolean | undefined
+
+  // ── Accessibility ───────────────────────────────────────────────
+  /** Explicit native accessibility role. No role is inferred from JSX aliases. */
+  role?: AccessibilityRole
+  /** Accessible name announced for this semantic node. */
+  ariaLabel?: string
+  /** Supplementary accessible description announced after the name, role, and value. */
+  ariaDescription?: string
+  /** Checked state for checkboxes and switches. */
+  ariaChecked?: boolean | "mixed"
+  /** Expanded state for controls that disclose another region. */
+  ariaExpanded?: boolean
+  /** Selected state for selectable semantic nodes. */
+  ariaSelected?: boolean
+  /** Human-readable value text for a value control. */
+  ariaValue?: string
+  /** Minimum numeric value for a value control. */
+  ariaValueMin?: number
+  /** Maximum numeric value for a value control. */
+  ariaValueMax?: number
+  /** Current numeric value for a value control. */
+  ariaValueNow?: number
+  /** One-based heading level. */
+  ariaLevel?: number
+  /** Native disabled state: unavailable, non-activating, and removed from tab order. */
+  disabled?: boolean
+  /** Unavailable and non-activating, but intentionally retained in tab order. */
+  ariaDisabled?: boolean
+  /** Exclude this element and its descendants from the accessibility tree. */
+  ariaHidden?: boolean
+  /** Value or focus action requested by assistive technology. Activate uses onClick. */
+  onAccessibilityAction?: (event: GpuixSyntheticEvent) => void
 
   /** Establishes a native hover group for descendant `style.hoverWithin` states. */
   hoverGroup?: string

@@ -14,6 +14,35 @@ afterEach(() => {
 })
 
 describeNative("style diagnostics", () => {
+  it("reports malformed, incompatible, hidden-focus, and unsupported-host accessibility props", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot()
+
+    testRoot.render(
+      <div>
+        <div {...({ role: "bogus" } as Record<string, string>)} ariaLabel="Bad role" />
+        <div ariaLabel="Missing role" />
+        <a role="link" ariaLabel="Link" ariaSelected />
+        <div role="switch" ariaLabel="Mode" ariaChecked="mixed" />
+        <h2 role="heading" ariaLabel="Heading" ariaLevel={0} />
+        <div role="slider" ariaLabel="Speed" ariaValueNow={Number.NaN} />
+        <div ariaHidden tabIndex={0} />
+        <markdown role="heading" ariaLabel="Unsupported host" source="# Notes" />
+      </div>
+    )
+
+    const messages = warn.mock.calls.map(([message]) => String(message)).join("\n")
+    expect(messages).toContain("unsupported accessibility role")
+    expect(messages).toContain("requires an explicit supported role")
+    expect(messages).toContain("ariaSelected")
+    expect(messages).toContain("ariaChecked")
+    expect(messages).toContain("binary")
+    expect(messages).toContain("positive integer")
+    expect(messages).toContain("finite number")
+    expect(messages).toContain("must not contain or be a focusable control")
+    expect(messages).toContain("does not support accessibility semantics")
+  })
+
   it("rejects one malformed field without throwing through React", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot()

@@ -12,7 +12,7 @@ import {
 } from "../automation/index.js"
 import { createRenderer } from "../reconciler/renderer.js"
 import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing.js"
-import type { RendererCapabilities } from "../types/host.js"
+import type { GpuixSyntheticEvent, RendererCapabilities } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -154,6 +154,334 @@ describeNative("automation", () => {
     expect(renderer.findByTestId("row")).toBeUndefined()
     expect(renderer.findByElementId("null")).toBeUndefined()
     expect(renderer.findByTestId("null")).toBeUndefined()
+  })
+
+  it("publishes a labelled button and dispatches AccessKit activate as one click", () => {
+    const actions: string[] = []
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <button
+        id="save"
+        role="button"
+        ariaLabel="Save factory"
+        style={{ width: 120, height: 50 }}
+        onClick={() => actions.push("click")}
+        onAccessibilityAction={(event) => actions.push(event.accessibilityAction ?? "missing")}
+      />
+    )
+
+    const tree = renderer.getAccessibilityTree()
+    const button = Object.values(tree.nodes).find(
+      (node) => node.aria.role === "Button" && node.aria.label === "Save factory"
+    )
+    expect(button).toMatchObject({
+      aria: {
+        role: "Button",
+        label: "Save factory",
+        on_action: expect.arrayContaining(["Click", "Focus"]),
+      },
+    })
+    expect(button?.aria.on_action).not.toEqual(expect.arrayContaining(["Increment", "Decrement"]))
+
+    renderer.nativeSimulateAccessibilityAction(button!.accesskit_id, "activate")
+    expect(actions).toEqual(["click"])
+  })
+
+  it("routes AccessKit activate through the same click pipeline with or without an action handler", () => {
+    const { render, renderer } = createTestRoot()
+    const trace: string[] = []
+    const record = (name: string, event: GpuixSyntheticEvent) => {
+      trace.push(`${name}:${event.eventPhase}:${event.target.id}:${event.currentTarget.id}`)
+      if (name === "target-bubble") event.preventDefault()
+    }
+    const app = (withActionHandler: boolean) => (
+      <div
+        testId="activation-parent"
+        style={{ width: 240, height: 100 }}
+        onClickCapture={(event) => record("parent-capture", event)}
+        onClick={(event) => record("parent-bubble", event)}
+      >
+        <button
+          testId="activation-target"
+          role="button"
+          ariaLabel="Run"
+          style={{ width: 120, height: 50 }}
+          onClickCapture={(event) => record("target-capture", event)}
+          onClick={(event) => record("target-bubble", event)}
+          {...(withActionHandler
+            ? { onAccessibilityAction: () => trace.push("accessibility-action") }
+            : {})}
+        />
+      </div>
+    )
+
+    render(app(false))
+    const withoutHandlerNode = Object.values(renderer.getAccessibilityTree().nodes).find(
+      (node) => node.aria.label === "Run"
+    )!
+    renderer.nativeSimulateAccessibilityAction(withoutHandlerNode.accesskit_id, "activate")
+    const withoutHandler = [...trace]
+
+    trace.length = 0
+    render(app(true))
+    const withHandlerNode = Object.values(renderer.getAccessibilityTree().nodes).find(
+      (node) => node.aria.label === "Run"
+    )!
+    renderer.nativeSimulateAccessibilityAction(withHandlerNode.accesskit_id, "activate")
+
+    expect(trace).toEqual(withoutHandler)
+    expect(trace.map((entry) => entry.split(":")[0])).toEqual([
+      "parent-capture",
+      "target-capture",
+      "target-bubble",
+      "parent-bubble",
+    ])
+  })
+
+  it.each([
+    ["disabled", { disabled: true }],
+    ["ariaDisabled", { ariaDisabled: true }],
+  ] as const)("refuses pointer, keyboard, and AccessKit activation when %s", (_name, state) => {
+    const seen: string[] = []
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ width: 240, height: 100 }}>
+        <button
+          {...(state as Record<string, boolean>)}
+          testId="disabled-control"
+          role="button"
+          ariaLabel="Unavailable"
+          tabIndex={0}
+          style={{ width: 120, height: 50 }}
+          onClick={() => seen.push("click")}
+          onAccessibilityAction={(event) =>
+            seen.push(`a11y:${event.accessibilityAction ?? "missing"}`)
+          }
+        >
+          <text>Unavailable</text>
+        </button>
+      </div>
+    )
+
+    const element = renderer.findByTestId("disabled-control")!
+    const tree = renderer.getAccessibilityTree()
+    const node = Object.values(tree.nodes).find((candidate) => candidate.aria.label === "Unavailable")!
+    expect(node.aria.disabled).toBe(true)
+    expect(tree.frame?.tab_stop_count).toBe(_name === "ariaDisabled" ? 1 : 0)
+    expect(node.aria.on_action ?? []).not.toContain("Click")
+    if (_name === "ariaDisabled") {
+      expect(node.aria.on_action ?? []).toContain("Focus")
+    } else {
+      expect(node.aria.on_action ?? []).not.toContain("Focus")
+    }
+
+    renderer.nativeSimulateClick(20, 20)
+    renderer.nativeSimulateKeystrokes(element.id, "enter")
+    renderer.nativeSimulateAccessibilityAction(node.accesskit_id, "activate")
+
+    expect(seen).toEqual([])
+  })
+
+  it("publishes semantics on text, input, and img hosts", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <text role="heading" ariaLabel="Search heading" ariaLevel={2}>
+          Search
+        </text>
+        <input role="textbox" ariaLabel="Recipe search" />
+        <img role="img" ariaLabel="Recipe preview" />
+      </div>
+    )
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    const byLabel = (label: string) => nodes.find((node) => node.aria.label === label)
+    expect(byLabel("Search heading")).toMatchObject({
+      aria: { role: "Heading", label: "Search heading", level: 2 },
+    })
+    expect(byLabel("Recipe search")).toMatchObject({
+      aria: { role: "TextInput", label: "Recipe search" },
+    })
+    expect(byLabel("Recipe preview")).toMatchObject({
+      aria: { role: "Image", label: "Recipe preview" },
+    })
+  })
+
+  it("keeps accessibility reads and actions on the last explicit draw", () => {
+    const clicks: string[] = []
+    const { render, renderer } = createTestRoot()
+    render(
+      <button
+        role="button"
+        ariaLabel="Snapshot"
+        style={{ width: 120, height: 50 }}
+        onClick={() => clicks.push("click")}
+      />
+    )
+
+    const first = renderer.getAccessibilityTree()
+    const node = Object.values(first.nodes).find((candidate) => candidate.aria.label === "Snapshot")!
+    const frameNumber = first.frame?.frame_number
+    const readFrameNumber = () => renderer.getAccessibilityTree().frame?.frame_number
+    expect(readFrameNumber()).toBe(frameNumber)
+
+    renderer.nativeSimulateAccessibilityAction(node.accesskit_id, "activate")
+    expect(clicks).toEqual(["click"])
+    expect(readFrameNumber()).toBe(frameNumber)
+  })
+
+  it("publishes explicit roles, states, descriptions, and values", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <div
+          role="checkbox"
+          ariaLabel="Include byproducts"
+          ariaDescription="Adds secondary outputs"
+          ariaChecked="mixed"
+          disabled
+        />
+        <h2 role="heading" ariaLabel="Production" ariaLevel={2} />
+        <a role="link" ariaLabel="Open recipe" ariaExpanded={false} />
+        <div role="option" ariaLabel="Turbo motor" ariaSelected />
+        <div
+          role="slider"
+          ariaLabel="Clock speed"
+          ariaValue="42 percent"
+          ariaValueMin={0}
+          ariaValueMax={100}
+          ariaValueNow={42}
+        />
+        <div role="spinbutton" ariaLabel="Machine count" ariaValueNow={8} />
+      </div>
+    )
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    const byLabel = (label: string) => nodes.find((node) => node.aria.label === label)?.aria
+
+    expect(byLabel("Include byproducts")).toMatchObject({
+      role: "CheckBox",
+      description: "Adds secondary outputs",
+      toggled: "Mixed",
+      disabled: true,
+    })
+    expect(byLabel("Production")).toMatchObject({ role: "Heading", level: 2 })
+    expect(byLabel("Open recipe")).toMatchObject({
+      role: "Link",
+      expanded: false,
+    })
+    expect(byLabel("Turbo motor")).toMatchObject({ role: "ListBoxOption", selected: true })
+    expect(byLabel("Clock speed")).toMatchObject({
+      role: "Slider",
+      value: "42 percent",
+      min_numeric_value: 0,
+      max_numeric_value: 100,
+      numeric_value: 42,
+    })
+    expect(byLabel("Machine count")).toMatchObject({
+      role: "SpinButton",
+      numeric_value: 8,
+    })
+  })
+
+  it("dispatches value and focus actions and reflects semantic focus", () => {
+    const actions: string[] = []
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div
+        id="machine-count"
+        role="spinbutton"
+        ariaLabel="Machine count"
+        ariaValueNow={8}
+        tabIndex={0}
+        onAccessibilityAction={(event) => actions.push(event.accessibilityAction ?? "missing")}
+      />
+    )
+
+    const before = renderer.getAccessibilityTree()
+    const control = Object.values(before.nodes).find(
+      (node) => node.aria.label === "Machine count"
+    )!
+    expect(control.aria.on_action).toEqual(
+      expect.arrayContaining(["Increment", "Decrement", "Focus"])
+    )
+
+    renderer.nativeSimulateAccessibilityAction(control.accesskit_id, "increment")
+    renderer.nativeSimulateAccessibilityAction(control.accesskit_id, "decrement")
+    renderer.nativeSimulateAccessibilityAction(control.accesskit_id, "focus")
+    expect(actions).toEqual(["increment", "decrement", "focus"])
+
+    renderer.flush()
+    const focused = renderer.getAccessibilityTree()
+    const focusedEntry = Object.entries(focused.nodes).find(
+      ([, node]) => node.accesskit_id === control.accesskit_id
+    )
+    expect(focused.gpui_focus).toBe(focusedEntry?.[0])
+  })
+
+  it("keeps semantic IDs stable across reorder and removes stale nodes", () => {
+    const { render, renderer } = createTestRoot()
+    const list = (labels: string[]) => (
+      <div>
+        {labels.map((label) => (
+          <div key={label} role="button" ariaLabel={label} />
+        ))}
+      </div>
+    )
+    const semanticNodes = () =>
+      Object.entries(renderer.getAccessibilityTree().nodes).filter(([, node]) =>
+        ["Alpha", "Beta"].includes(node.aria.label ?? "")
+      )
+
+    render(list(["Alpha", "Beta"]))
+    const initial = new Map(
+      semanticNodes().map(([, node]) => [node.aria.label!, node.accesskit_id] as const)
+    )
+
+    render(list(["Beta", "Alpha"]))
+    const reorderedTree = renderer.getAccessibilityTree()
+    const reordered = new Map(
+      Object.values(reorderedTree.nodes)
+        .filter((node) => ["Alpha", "Beta"].includes(node.aria.label ?? ""))
+        .map((node) => [node.aria.label!, node.accesskit_id] as const)
+    )
+    expect(reordered).toEqual(initial)
+    const reorderedLabels = reorderedTree.nodes[reorderedTree.root!].children
+      ?.map((key) => reorderedTree.nodes[key]?.aria.label)
+      .filter((label): label is string => label === "Alpha" || label === "Beta")
+    expect(reorderedLabels).toEqual(["Beta", "Alpha"])
+
+    render(list(["Beta"]))
+    const removed = new Map(
+      semanticNodes().map(([, node]) => [node.aria.label!, node.accesskit_id] as const)
+    )
+    expect(removed).toEqual(new Map([["Beta", initial.get("Beta")!]]))
+    expect(Object.values(renderer.getAccessibilityTree().nodes)).not.toContainEqual(
+      expect.objectContaining({ accesskit_id: initial.get("Alpha") })
+    )
+  })
+
+  it("suppresses an ariaHidden subtree from AccessKit without hiding its pixels", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div>
+        <div ariaHidden>
+          <div role="button" ariaLabel="Decorative action" />
+        </div>
+        <div role="button" ariaLabel="Visible action" />
+      </div>
+    )
+
+    const labels = Object.values(renderer.getAccessibilityTree().nodes).map(
+      (node) => node.aria.label
+    )
+    expect(labels).toContain("Visible action")
+    expect(labels).not.toContain("Decorative action")
   })
 
   it("normalizes numeric and boolean data-testid props for lookup", () => {

@@ -167,6 +167,7 @@ const EVENT_PROPS = [
   ["onLinkClick", "linkClick", "bubble"],
   ["onVisibleRange", "visibleRange", "bubble"],
   ["onHighlight", "highlight", "bubble"],
+  ["onAccessibilityAction", "accessibilityAction", "bubble"],
   ["onChangeCapture", "change", "capture"],
   ["onChange", "change", "bubble"],
   ["onSubmitCapture", "submit", "capture"],
@@ -348,6 +349,20 @@ const UNIVERSAL_PROPS = new Set([
   "motion",
   "testId",
   "hoverGroup",
+  "role",
+  "ariaLabel",
+  "ariaDescription",
+  "ariaChecked",
+  "ariaExpanded",
+  "ariaSelected",
+  "ariaValue",
+  "ariaValueMin",
+  "ariaValueMax",
+  "ariaValueNow",
+  "ariaLevel",
+  "ariaDisabled",
+  "ariaHidden",
+  "disabled",
   // `highlight` is scoped by where it sits in the tree, so it has to reach a
   // plain `div`. Without it here, custom props are dropped for built-ins and
   // the prop silently never arrives in Rust.
@@ -368,6 +383,16 @@ function serializeCustomProp(
   value: object | string | number | boolean | null | undefined
 ): string | object | number | boolean | null {
   if (value === undefined || typeof value === "function") return null
+  if (
+    typeof value === "number" &&
+    !Number.isFinite(value) &&
+    ["ariaValueMin", "ariaValueMax", "ariaValueNow", "ariaLevel"].includes(key)
+  ) {
+    // JSON.stringify would silently turn these into null, which means prop
+    // removal. Preserve the malformed value as text so Rust can issue the
+    // same loud property diagnostic as every other invalid ARIA state.
+    return String(value)
+  }
   if (
     type === "img" &&
     key === "src" &&
@@ -395,6 +420,7 @@ type CustomPropInput = object | string | number | boolean | null | undefined
 
 /** Preserve the browser's natural tab stop when an `<a href>` becomes a native div. */
 function nativeTabIndex(type: string, props: Props): number | undefined {
+  if (props.disabled === true) return undefined
   if (props.tabIndex !== undefined) return props.tabIndex
   const href = type === "a" ? (props as Props & { href?: unknown }).href : undefined
   return typeof href === "string" ? 0 : undefined
