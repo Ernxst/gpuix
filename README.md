@@ -654,6 +654,39 @@ clipboard, keyboard, and IME implementations. The embedded macOS run-loop
 extension comes from the pinned GPUIX fork. CI runs the full React and example
 test suites through DirectX on Windows.
 
+### Renderer capabilities
+
+Use one stable read to choose platform-specific paths instead of probing
+individual methods:
+
+```ts
+const capabilities = renderer.capabilities()
+
+if (capabilities.automation.screenshotFormats.includes('png')) {
+  renderer.captureScreenshot('/tmp/frame.png')
+}
+if (capabilities.window.activation) {
+  console.log(renderer.isActive())
+}
+```
+
+`capabilities` includes `platform`; the **active** `frameClock` source
+(`display-link`, `timer`, `raf`, or deterministic `manual`); and whether an
+external frame source can be selected through `frameClock.externalFrame`.
+It also describes window activation/resize/multi-window support,
+private-network image opt-in, and live automation (hover, drag, scroll-wheel,
+keyboard, screenshots, clock, and tree). Screenshot formats are listed in
+`automation.screenshotFormats`; `captureScreenshot()` is typed when `png` is
+listed. `images.privateNetwork` means
+`setAllowPrivateNetworkImages(enabled)` is available on that renderer (the
+same policy can also be set at creation with `allowPrivateNetworkImages`).
+
+Existing probes such as `requiresTick()`, `isActive()`, and
+`captureScreenshot()` remain supported for compatibility. A call that is not
+supported by its renderer fails with `UnsupportedCapabilityError`, whose
+`code` is `ERR_GPUX_UNSUPPORTED_CAPABILITY` and whose `capability` identifies
+the unavailable feature.
+
 > [!IMPORTANT]
 > On macOS, never drive `tick()` from a `setImmediate` loop. That spins at tens of thousands of
 > ticks per second and burns **73% CPU on a completely idle app**, versus **1%** when

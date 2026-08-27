@@ -1207,6 +1207,35 @@ enum RendererLifecycle {
 }
 
 #[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActiveFrameClockKind {
+    DisplayLink,
+    Timer,
+}
+
+#[cfg(target_os = "macos")]
+impl ActiveFrameClockKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::DisplayLink => "display-link",
+            Self::Timer => "timer",
+        }
+    }
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn unsupported_capability(env: Env, capability: &str) -> Result<()> {
+    let mut error = env.create_error(Error::new(
+        Status::GenericFailure,
+        format!("{capability} is not supported by this renderer"),
+    ))?;
+    error.set_named_property("name", "UnsupportedCapabilityError")?;
+    error.set_named_property("code", "ERR_GPUX_UNSUPPORTED_CAPABILITY")?;
+    error.set_named_property("capability", capability)?;
+    Err(error.into_unknown(&env)?.into())
+}
+
+#[cfg(target_os = "macos")]
 type FrameRequestCallback = ThreadsafeFunction<(), Unknown<'static>, (), Status, false, false, 1>;
 
 #[cfg(target_os = "macos")]
@@ -1228,6 +1257,8 @@ pub struct GpuixRenderer {
     #[cfg(target_os = "macos")]
     frame_request_callback: Arc<Mutex<Option<Arc<FrameRequestCallback>>>>,
     #[cfg(target_os = "macos")]
+    active_frame_clock_kind: Arc<Mutex<ActiveFrameClockKind>>,
+    #[cfg(target_os = "macos")]
     frame_request_outstanding: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     pending_frame_request: Arc<Mutex<Option<gpui_macos::FrameRequest>>>,
@@ -1246,6 +1277,18 @@ pub struct GpuixRenderer {
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[napi]
 impl GpuixRenderer {
+    fn active_frame_clock_kind(&self) -> &'static str {
+        #[cfg(target_os = "macos")]
+        return self
+            .active_frame_clock_kind
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_str();
+
+        #[cfg(not(target_os = "macos"))]
+        "timer"
+    }
+
     fn event_callback_for_view(&self) -> Option<EventCallback> {
         self.event_callback.lock().unwrap().clone().map(|tsf| {
             Arc::new(move |payload: EventPayload| {
@@ -1384,6 +1427,8 @@ impl GpuixRenderer {
             lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
             #[cfg(target_os = "macos")]
             frame_request_callback: Arc::new(Mutex::new(None)),
+            #[cfg(target_os = "macos")]
+            active_frame_clock_kind: Arc::new(Mutex::new(ActiveFrameClockKind::Timer)),
             #[cfg(target_os = "macos")]
             frame_request_outstanding: Arc::new(AtomicBool::new(false)),
             #[cfg(target_os = "macos")]
@@ -1832,6 +1877,13 @@ impl GpuixRenderer {
         }
     }
 
+    /// Opt in to loopback and private-network URL image sources.
+    /// Link-local and cloud-metadata addresses remain blocked.
+    #[napi]
+    pub fn set_allow_private_network_images(&self, enabled: bool) {
+        self.image_network_policy.set_allow_private(enabled);
+    }
+
     /// Drain rejected style fields after a commit, once element type and testId are known.
     #[napi]
     pub fn drain_style_diagnostics(&self) -> Vec<GpuixStyleDiagnostic> {
@@ -2163,6 +2215,13 @@ impl GpuixRenderer {
         *self.lifecycle.lock().unwrap() == RendererLifecycle::Running
     }
 
+    /// Stable platform and renderer feature read. Keep individual methods for
+    /// backwards compatibility; new callers should branch on this object.
+    #[napi]
+    pub fn capabilities(&self) -> RendererCapabilities {
+        renderer_capabilities(self.active_frame_clock_kind())
+    }
+
     /// Whether JavaScript must drive the native event loop with tick().
     #[napi]
     pub fn requires_tick(&self) -> bool {
@@ -2193,6 +2252,14 @@ impl GpuixRenderer {
                     frame_request.dispatch();
                 }
             }
+            *self
+                .active_frame_clock_kind
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = if unregistering {
+                ActiveFrameClockKind::Timer
+            } else {
+                ActiveFrameClockKind::DisplayLink
+            };
             return true;
         }
 
@@ -2205,7 +2272,7 @@ impl GpuixRenderer {
 
     /// Whether this native window is active and receiving key events.
     #[napi]
-    pub fn is_active(&self) -> Result<bool> {
+    pub fn is_active(&self, _env: Env) -> Result<bool> {
         #[cfg(target_os = "macos")]
         return update_window(|_view, window, _cx| window.is_window_active());
 
@@ -2222,12 +2289,12 @@ impl GpuixRenderer {
             target_os = "linux",
             target_os = "freebsd"
         )))]
-        Err(Error::from_reason("Unsupported operating system"))
+        unsupported_capability(_env, "window.activation")
     }
 
     /// Bring the native window and application to the foreground.
     #[napi]
-    pub fn activate_window(&self) -> Result<()> {
+    pub fn activate_window(&self, _env: Env) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
             GPUI_APP.with(|app| {
@@ -2242,9 +2309,7 @@ impl GpuixRenderer {
         }
 
         #[cfg(not(target_os = "macos"))]
-        Err(Error::from_reason(
-            "Window activation is only available on macOS",
-        ))
+        unsupported_capability(_env, "window.activate")
     }
 
     #[napi]
@@ -3142,7 +3207,7 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn capture_screenshot(&self, path: String) -> Result<()> {
+    pub fn capture_screenshot(&self, _env: Env, path: String) -> Result<()> {
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         {
             let image = update_window(move |_view, window, cx| {
@@ -3170,9 +3235,7 @@ impl GpuixRenderer {
         )))]
         {
             let _ = path;
-            Err(Error::from_reason(
-                "captureScreenshot needs a test-support build on macOS or Windows",
-            ))
+            unsupported_capability(_env, "automation.screenshot")
         }
     }
 }
@@ -3725,6 +3788,11 @@ impl WebGpuixRenderer {
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = isInitialized)]
     pub fn is_initialized(&self) -> bool {
         WEB_APP.with(|app| app.borrow().is_some())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = capabilities)]
+    pub fn capabilities(&self) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        web_renderer_capabilities()
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = requiresTick)]
@@ -7150,6 +7218,179 @@ pub struct WindowOptions {
     /// Allow URL-backed images to connect to loopback and private networks.
     /// Link-local and cloud-metadata ranges remain blocked.
     pub allow_private_network_images: Option<bool>,
+}
+
+/// Features offered by one renderer instance on its current platform.
+///
+/// Each `true` capability corresponds to a callable renderer method. Calls
+/// outside the advertised surface reject with `UnsupportedCapabilityError`.
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct RendererCapabilities {
+    #[napi(ts_type = "\"macos\" | \"windows\" | \"linux\" | \"freebsd\" | \"browser\" | \"unknown\"")]
+    pub platform: String,
+    pub frame_clock: FrameClockCapabilities,
+    pub window: WindowCapabilities,
+    pub images: ImageCapabilities,
+    pub automation: AutomationCapabilities,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct FrameClockCapabilities {
+    /// The source currently driving frame work for this renderer.
+    #[napi(ts_type = "\"display-link\" | \"timer\" | \"raf\" | \"manual\"")]
+    pub kind: String,
+    pub requires_tick: bool,
+    /// Whether `setFrameRequestHandler()` can switch this renderer to an
+    /// external frame source.
+    pub external_frame: bool,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct WindowCapabilities {
+    /// `isActive()` is available for this renderer/window.
+    pub activation: bool,
+    /// `activateWindow()` can request foreground activation.
+    pub activate: bool,
+    /// Native/browser resize notifications are available.
+    pub resize: bool,
+    /// GPUIX currently owns one window per renderer process.
+    pub multiple: bool,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct ImageCapabilities {
+    /// `setAllowPrivateNetworkImages()` is available.
+    pub private_network: bool,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct AutomationCapabilities {
+    pub click: bool,
+    pub hover: bool,
+    pub drag: bool,
+    pub scroll_wheel: bool,
+    /// `native` injects through GPUI; `browser` uses the browser IME mirror.
+    #[napi(ts_type = "\"native\" | \"browser\"")]
+    pub keyboard: String,
+    pub screenshot: bool,
+    /// Screenshot file formats currently accepted by `captureScreenshot()`.
+    #[napi(ts_type = "Array<\"png\">")]
+    pub screenshot_formats: Vec<String>,
+    pub clock: bool,
+    pub tree: bool,
+}
+
+pub(crate) fn renderer_capabilities(frame_clock_kind: &str) -> RendererCapabilities {
+    let (platform, requires_tick, activate, screenshot) = if cfg!(target_os = "macos") {
+        ("macos", true, true, cfg!(feature = "test-support"))
+    } else if cfg!(target_os = "windows") {
+        ("windows", false, false, cfg!(feature = "test-support"))
+    } else if cfg!(target_os = "linux") {
+        ("linux", false, false, false)
+    } else if cfg!(target_os = "freebsd") {
+        ("freebsd", false, false, false)
+    } else {
+        ("unknown", false, false, false)
+    };
+
+    RendererCapabilities {
+        platform: platform.to_string(),
+        frame_clock: FrameClockCapabilities {
+            kind: frame_clock_kind.to_owned(),
+            requires_tick,
+            external_frame: cfg!(target_os = "macos"),
+        },
+        window: WindowCapabilities {
+            activation: matches!(platform, "macos" | "windows" | "linux" | "freebsd"),
+            activate,
+            resize: matches!(platform, "macos" | "windows" | "linux" | "freebsd"),
+            multiple: false,
+        },
+        images: ImageCapabilities {
+            private_network: true,
+        },
+        automation: AutomationCapabilities {
+            click: true,
+            hover: true,
+            drag: true,
+            scroll_wheel: true,
+            keyboard: "native".to_string(),
+            screenshot,
+            screenshot_formats: if screenshot {
+                vec!["png".to_string()]
+            } else {
+                Vec::new()
+            },
+            clock: true,
+            tree: true,
+        },
+    }
+}
+
+pub(crate) fn test_renderer_capabilities() -> RendererCapabilities {
+    let mut capabilities = renderer_capabilities("manual");
+    capabilities.frame_clock.requires_tick = false;
+    capabilities.frame_clock.external_frame = false;
+    capabilities.window.activate = false;
+    capabilities
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn web_renderer_capabilities() -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    let capabilities = js_sys::Object::new();
+    let frame_clock = js_sys::Object::new();
+    let window = js_sys::Object::new();
+    let images = js_sys::Object::new();
+    let automation = js_sys::Object::new();
+
+    for (key, value) in [
+        ("platform", wasm_bindgen::JsValue::from_str("browser")),
+        ("frameClock", frame_clock.clone().into()),
+        ("window", window.clone().into()),
+        ("images", images.clone().into()),
+        ("automation", automation.clone().into()),
+    ] {
+        js_sys::Reflect::set(&capabilities, &key.into(), &value)?;
+    }
+    for (key, value) in [
+        ("kind", wasm_bindgen::JsValue::from_str("raf")),
+        ("requiresTick", wasm_bindgen::JsValue::FALSE),
+        ("externalFrame", wasm_bindgen::JsValue::FALSE),
+    ] {
+        js_sys::Reflect::set(&frame_clock, &key.into(), &value)?;
+    }
+    for (key, value) in [
+        ("activation", wasm_bindgen::JsValue::FALSE),
+        ("activate", wasm_bindgen::JsValue::FALSE),
+        ("resize", wasm_bindgen::JsValue::TRUE),
+        ("multiple", wasm_bindgen::JsValue::FALSE),
+    ] {
+        js_sys::Reflect::set(&window, &key.into(), &value)?;
+    }
+    js_sys::Reflect::set(
+        &images,
+        &"privateNetwork".into(),
+        &wasm_bindgen::JsValue::FALSE,
+    )?;
+    for (key, value) in [
+        ("click", wasm_bindgen::JsValue::TRUE),
+        ("hover", wasm_bindgen::JsValue::TRUE),
+        ("drag", wasm_bindgen::JsValue::TRUE),
+        ("scrollWheel", wasm_bindgen::JsValue::TRUE),
+        ("keyboard", wasm_bindgen::JsValue::from_str("browser")),
+        ("screenshot", wasm_bindgen::JsValue::FALSE),
+        ("screenshotFormats", js_sys::Array::new().into()),
+        ("clock", wasm_bindgen::JsValue::TRUE),
+        ("tree", wasm_bindgen::JsValue::TRUE),
+    ] {
+        js_sys::Reflect::set(&automation, &key.into(), &value)?;
+    }
+    Ok(capabilities.into())
 }
 
 impl Default for WindowOptions {
