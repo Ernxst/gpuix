@@ -427,6 +427,103 @@ fn split_subpaths(commands: &[crate::canvas::PathCommand]) -> Vec<Vec<crate::can
     subpaths
 }
 
+fn zero_length_subpath_point(
+    commands: &[crate::canvas::PathCommand],
+) -> Option<crate::canvas::CanvasPoint> {
+    let crate::canvas::PathCommand::MoveTo(origin) = commands.first()? else {
+        return None;
+    };
+    let is_origin = |point: crate::canvas::CanvasPoint| point == *origin;
+
+    for command in &commands[1..] {
+        let stays_at_origin = match command {
+            crate::canvas::PathCommand::MoveTo(point)
+            | crate::canvas::PathCommand::LineTo(point) => is_origin(*point),
+            crate::canvas::PathCommand::CubicTo {
+                control_a,
+                control_b,
+                to,
+            } => is_origin(*control_a) && is_origin(*control_b) && is_origin(*to),
+            crate::canvas::PathCommand::QuadraticTo { control, to } => {
+                is_origin(*control) && is_origin(*to)
+            }
+            crate::canvas::PathCommand::Ellipse(_) => unreachable!("arcs expand first"),
+            crate::canvas::PathCommand::ClosePath => true,
+        };
+        if !stays_at_origin {
+            return None;
+        }
+    }
+
+    Some(*origin)
+}
+
+fn build_zero_length_stroke_cap(
+    point: crate::canvas::CanvasPoint,
+    style: &crate::canvas::StrokePathStyle,
+    tolerance: f32,
+) -> Result<Option<gpui::Path<gpui::Pixels>>, &'static str> {
+    if style.line_cap == crate::canvas::CanvasLineCap::Butt {
+        return Ok(None);
+    }
+
+    let local_point = |x, y| gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+    let half = style.line_width * 0.5;
+    let mut builder = gpui::PathBuilder::fill().with_style(gpui::PathStyle::Fill(
+        gpui::FillOptions::default()
+            .with_fill_rule(gpui::FillRule::NonZero)
+            .with_tolerance(tolerance),
+    ));
+
+    match style.line_cap {
+        crate::canvas::CanvasLineCap::Butt => unreachable!(),
+        crate::canvas::CanvasLineCap::Square => {
+            builder.move_to(local_point(point.x - half, point.y - half));
+            builder.line_to(local_point(point.x + half, point.y - half));
+            builder.line_to(local_point(point.x + half, point.y + half));
+            builder.line_to(local_point(point.x - half, point.y + half));
+        }
+        crate::canvas::CanvasLineCap::Round => {
+            const KAPPA: f64 = 0.552_284_749_830_793_6;
+            let control = half * KAPPA;
+            builder.move_to(local_point(point.x, point.y - half));
+            builder.cubic_bezier_to(
+                local_point(point.x + half, point.y),
+                local_point(point.x + control, point.y - half),
+                local_point(point.x + half, point.y - control),
+            );
+            builder.cubic_bezier_to(
+                local_point(point.x, point.y + half),
+                local_point(point.x + half, point.y + control),
+                local_point(point.x + control, point.y + half),
+            );
+            builder.cubic_bezier_to(
+                local_point(point.x - half, point.y),
+                local_point(point.x - control, point.y + half),
+                local_point(point.x - half, point.y + control),
+            );
+            builder.cubic_bezier_to(
+                local_point(point.x, point.y - half),
+                local_point(point.x - half, point.y - control),
+                local_point(point.x - control, point.y - half),
+            );
+        }
+    }
+    builder.close();
+    builder
+        .build()
+        .map(Some)
+        .map_err(|_| "zero-length cap tessellation failed")
+}
+
+fn dash_paints_subpath_origin(line_dash: &[f64]) -> bool {
+    line_dash
+        .iter()
+        .enumerate()
+        .find(|(_, length)| **length > 0.0)
+        .is_some_and(|(index, _)| index % 2 == 0)
+}
+
 fn append_transformed_triangles(
     output: &mut Option<gpui::Path<gpui::Pixels>>,
     local: &gpui::Path<gpui::Pixels>,
@@ -762,6 +859,41 @@ fn prepare_with_scale(
         let uses_dash = style.line_dash.iter().any(|segment| *segment > 0.0);
         let mut combined = None;
         for subpath in split_subpaths(&commands) {
+            if uses_dash {
+                if let Some(point) = zero_length_subpath_point(&subpath) {
+                    if !dash_paints_subpath_origin(&style.line_dash) {
+                        continue;
+                    }
+                    if let Some(local) =
+                        build_zero_length_stroke_cap(point, style, stroke_tolerance).map_err(
+                            |reason| crate::canvas::CanvasDiagnostic {
+                                op_index,
+                                op_name: op_name.to_string(),
+                                reason: format!(
+                                    "GPUI PathBuilder failed to build stroke geometry: {reason}"
+                                ),
+                            },
+                        )?
+                    {
+                        append_transformed_triangles(
+                            &mut combined,
+                            &local,
+                            style.transform,
+                            &layout_point,
+                        )
+                        .map_err(|reason| {
+                            crate::canvas::CanvasDiagnostic {
+                                op_index,
+                                op_name: op_name.to_string(),
+                                reason: format!(
+                                    "GPUI PathBuilder failed to build stroke geometry: {reason}"
+                                ),
+                            }
+                        })?;
+                    }
+                    continue;
+                }
+            }
             let mut builder = gpui::PathBuilder::stroke(gpui::px(1.0))
                 .with_style(gpui::PathStyle::Stroke(options));
             if uses_dash {
@@ -865,11 +997,8 @@ fn prepare_with_scale(
                 if rect.width == 0.0 && rect.height == 0.0 {
                     continue;
                 }
-                let is_segment = rect.width == 0.0 || rect.height == 0.0;
                 let solid = !rect.style.line_dash.iter().any(|segment| *segment > 0.0);
-                if solid
-                    && (!is_segment || rect.style.line_cap == crate::canvas::CanvasLineCap::Butt)
-                {
+                if solid {
                     tessellations.set(tessellations.get() + 1);
                     match build_solid_stroke_rect(rect, tolerance, &layout_point) {
                         Ok(Some(path)) => items.push(PreparedItem::Path {
@@ -2124,35 +2253,166 @@ mod tests {
     }
 
     #[test]
-    fn one_axis_degenerate_stroke_rect_is_one_butt_capped_segment() {
-        let list = crate::canvas::DisplayList {
-            revision: 1,
-            items: vec![DisplayItem::StrokeRect(StrokeRect {
-                x: 20.0,
-                y: 20.0,
-                width: 0.0,
-                height: 40.0,
-                transform: CanvasTransform::IDENTITY,
-                style: StrokeStyle {
-                    color: color(),
-                    line_width: 10.0,
-                    line_cap: crate::canvas::CanvasLineCap::Butt,
-                    line_join: CanvasLineJoin::Miter,
-                    miter_limit: 10.0,
-                    line_dash: Vec::new(),
-                    transform: CanvasTransform::IDENTITY,
+    fn solid_one_axis_degenerate_stroke_rect_ignores_line_cap() {
+        let prepare_cap = |line_cap, line_dash| {
+            prepare(
+                &crate::canvas::DisplayList {
+                    revision: 1,
+                    items: vec![DisplayItem::StrokeRect(StrokeRect {
+                        x: 20.0,
+                        y: 20.0,
+                        width: 0.0,
+                        height: 40.0,
+                        transform: CanvasTransform::IDENTITY,
+                        style: StrokeStyle {
+                            color: color(),
+                            line_width: 10.0,
+                            line_cap,
+                            line_join: CanvasLineJoin::Miter,
+                            miter_limit: 10.0,
+                            line_dash,
+                            transform: CanvasTransform::IDENTITY,
+                        },
+                        op_index: 0,
+                        clear_regions: Vec::new(),
+                    })],
                 },
-                op_index: 0,
-                clear_regions: Vec::new(),
-            })],
+                test_bounds(),
+                320.0,
+                240.0,
+            )
         };
 
-        let prepared = prepare(&list, test_bounds(), 320.0, 240.0);
-        let path = prepared_path(&prepared);
-        assert_eq!(f32::from(path.bounds.origin.x), 15.0);
-        assert_eq!(f32::from(path.bounds.origin.y), 20.0);
-        assert_eq!(f32::from(path.bounds.size.width), 10.0);
-        assert_eq!(f32::from(path.bounds.size.height), 40.0);
+        let butt = prepare_cap(CanvasLineCap::Butt, Vec::new());
+        let butt_path = prepared_path(&butt);
+        let expected = vertex_positions(butt_path);
+        assert_eq!(f32::from(butt_path.bounds.origin.x), 15.0);
+        assert_eq!(f32::from(butt_path.bounds.origin.y), 20.0);
+        assert_eq!(f32::from(butt_path.bounds.size.width), 10.0);
+        assert_eq!(f32::from(butt_path.bounds.size.height), 40.0);
+
+        for cap in [CanvasLineCap::Round, CanvasLineCap::Square] {
+            let prepared = prepare_cap(cap, Vec::new());
+            assert_eq!(vertex_positions(prepared_path(&prepared)), expected);
+        }
+
+        let dashed_round = prepare_cap(CanvasLineCap::Round, vec![100.0, 10.0]);
+        assert_eq!(
+            f32::from(prepared_path(&dashed_round).bounds.origin.y),
+            15.0
+        );
+        assert_eq!(
+            f32::from(prepared_path(&dashed_round).bounds.size.height),
+            50.0
+        );
+    }
+
+    #[test]
+    fn dashed_zero_length_subpaths_paint_caps_through_the_full_affine() {
+        let transform = CanvasTransform::from_components(2.0, 0.5, -0.25, 1.5, 20.0, 30.0);
+        let local = CanvasPoint { x: 30.0, y: 40.0 };
+        let transformed = transform.transform_point(local.x, local.y);
+        let prepare_cap = |line_cap| {
+            prepare(
+                &crate::canvas::DisplayList {
+                    revision: 1,
+                    items: vec![DisplayItem::StrokePath(StrokePath {
+                        commands: vec![
+                            PathCommand::MoveTo(transformed),
+                            PathCommand::LineTo(transformed),
+                        ],
+                        style: StrokePathStyle {
+                            color: color(),
+                            line_width: 12.0,
+                            line_cap,
+                            line_join: CanvasLineJoin::Miter,
+                            miter_limit: 10.0,
+                            line_dash: vec![8.0, 4.0],
+                            transform,
+                        },
+                        op_index: 0,
+                        clear_regions: Vec::new(),
+                    })],
+                },
+                test_bounds(),
+                320.0,
+                240.0,
+            )
+        };
+
+        let butt = prepare_cap(CanvasLineCap::Butt);
+        assert!(butt.items.is_empty());
+
+        let square = prepare_cap(CanvasLineCap::Square);
+        let square = prepared_path(&square);
+        assert_eq!(square.vertices.len(), 6);
+        let expected_square = [
+            transform.transform_point(local.x - 6.0, local.y - 6.0),
+            transform.transform_point(local.x + 6.0, local.y - 6.0),
+            transform.transform_point(local.x + 6.0, local.y + 6.0),
+            transform.transform_point(local.x - 6.0, local.y + 6.0),
+        ];
+        let square_vertices = vertex_positions(square);
+        for point in expected_square {
+            assert!(
+                square_vertices.contains(&((point.x as f32).to_bits(), (point.y as f32).to_bits()))
+            );
+        }
+
+        let round = prepare_cap(CanvasLineCap::Round);
+        let round = prepared_path(&round);
+        let round_vertices = vertex_positions(round);
+        for point in [
+            transform.transform_point(local.x, local.y - 6.0),
+            transform.transform_point(local.x + 6.0, local.y),
+            transform.transform_point(local.x, local.y + 6.0),
+            transform.transform_point(local.x - 6.0, local.y),
+        ] {
+            assert!(
+                round_vertices.contains(&((point.x as f32).to_bits(), (point.y as f32).to_bits()))
+            );
+        }
+
+        let starts_with_gap = prepare(
+            &crate::canvas::DisplayList {
+                revision: 1,
+                items: vec![DisplayItem::StrokePath(StrokePath {
+                    commands: vec![
+                        PathCommand::MoveTo(transformed),
+                        PathCommand::LineTo(transformed),
+                    ],
+                    style: StrokePathStyle {
+                        color: color(),
+                        line_width: 12.0,
+                        line_cap: CanvasLineCap::Round,
+                        line_join: CanvasLineJoin::Miter,
+                        miter_limit: 10.0,
+                        line_dash: vec![0.0, 8.0],
+                        transform,
+                    },
+                    op_index: 0,
+                    clear_regions: Vec::new(),
+                })],
+            },
+            test_bounds(),
+            320.0,
+            240.0,
+        );
+        assert!(starts_with_gap.items.is_empty());
+    }
+
+    #[test]
+    fn repeated_points_do_not_add_a_cap_to_nonzero_dashed_subpaths() {
+        let start = CanvasPoint { x: 20.0, y: 40.0 };
+        let end = CanvasPoint { x: 100.0, y: 40.0 };
+        assert_eq!(
+            zero_length_subpath_point(&[
+                PathCommand::MoveTo(start),
+                PathCommand::LineTo(start),
+                PathCommand::LineTo(end),
+            ]),
+            None
+        );
     }
 
     #[test]
