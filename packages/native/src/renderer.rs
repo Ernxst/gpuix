@@ -6010,6 +6010,7 @@ impl GpuixView {
         let needs_focus = |element: &crate::retained_tree::RetainedElement| {
             matches!(element.element_type.as_str(), "input" | "textarea")
                 || tab_index(element).is_some()
+                || element.events.contains("accessibilityAction")
                 || element.events.contains("keyDown")
                 || element.events.contains("keyUp")
                 || element.events.contains("focus")
@@ -6787,6 +6788,12 @@ pub(crate) fn build_div(
     if let Some(handle) = ctx.focus_handles.get(&element.id) {
         el = el.track_focus(handle);
     }
+    el = crate::accessibility::apply(
+        el,
+        element,
+        ctx.event_callback,
+        ctx.focus_handles.get(&element.id),
+    );
     if let Some(tab_index) = element
         .custom_props
         .get("tabIndex")

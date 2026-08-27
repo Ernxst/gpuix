@@ -848,6 +848,71 @@ impl TestGpuixRenderer {
         self.surface_canvas_preparation_diagnostics()
     }
 
+    /// Build and read GPUI's real AccessKit tree for the current retained tree.
+    ///
+    /// The explicit draw is the read boundary: callers never observe a tree
+    /// from before the latest committed React mutations.
+    #[napi]
+    pub fn get_accessibility_tree(&self) -> Result<String> {
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, |_, window, _app| {
+                window.set_a11y_active_for_test(true);
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            Ok(())
+        })?;
+        self.flush()?;
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, |_, window, _app| {
+                window.debug_a11y_tree_json().ok_or_else(|| {
+                    Error::from_reason("Accessibility tree was not built for the drawn frame")
+                })
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?
+        })
+    }
+
+    /// Dispatch one requested action through GPUI's production AccessKit route.
+    #[napi]
+    pub fn simulate_accessibility_action(
+        &self,
+        accesskit_id: String,
+        #[napi(ts_arg_type = "\"activate\" | \"increment\" | \"decrement\" | \"focus\"")]
+        action: String,
+    ) -> Result<()> {
+        let accesskit_id = accesskit_id.parse::<u64>().map_err(|_| {
+            Error::from_reason(format!("Invalid AccessKit node id: {accesskit_id}"))
+        })?;
+        let action = match action.as_str() {
+            "activate" => gpui::AccessibleAction::Click,
+            "increment" => gpui::AccessibleAction::Increment,
+            "decrement" => gpui::AccessibleAction::Decrement,
+            "focus" => gpui::AccessibleAction::Focus,
+            _ => {
+                return Err(Error::from_reason(format!(
+                    "Unsupported accessibility action: {action}"
+                )))
+            }
+        };
+
+        // Drawing first installs the per-frame action listeners and guarantees
+        // the requested node id belongs to the current tree.
+        self.get_accessibility_tree()?;
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, |_, window, app| {
+                window.simulate_a11y_action_for_test(
+                    gpui::accesskit::NodeId(accesskit_id),
+                    action,
+                    None,
+                    app,
+                );
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
     /// Draw one platform-style pending frame without notifying the view first.
     /// A clean window remains clean, so this only repaints work already
     /// scheduled by production code such as an async image load completion.

@@ -76,6 +76,23 @@ export interface ImageComparisonResult {
   erodedGeometryMismatchRatio: number
 }
 
+export interface AccessKitNodeSnapshot {
+  accesskit_id: string
+  children?: string[]
+  aria: {
+    role: string
+    label?: string
+    on_action?: string[]
+  }
+}
+
+export interface AccessKitTreeSnapshot {
+  root: string | null
+  gpui_focus: string | null
+  active_descendant_focus: string | null
+  nodes: Record<string, AccessKitNodeSnapshot>
+}
+
 interface NativeTestRendererApi extends NativeRenderer {
   dispose(): void
   capabilities(): RendererCapabilities
@@ -131,6 +148,11 @@ interface NativeTestRendererApi extends NativeRenderer {
   getCanvasState(elementId: number): string | null
   peekCanvasState(elementId: number): string | null
   getAutomationTree(): string
+  getAccessibilityTree(): string
+  simulateAccessibilityAction(
+    accesskitId: string,
+    action: "activate" | "increment" | "decrement" | "focus"
+  ): void
   getElementBounds(elementId: number): number[] | null
   clockPause(): number
   clockSet(nowMs: number): number
@@ -622,6 +644,16 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
+  /** Dispatch an AccessKit request and deliver the resulting native event to React. */
+  nativeSimulateAccessibilityAction(
+    accesskitId: string,
+    action: "activate" | "increment" | "decrement" | "focus"
+  ): void {
+    this.native.simulateAccessibilityAction(accesskitId, action)
+    this.dispatchNativeEvents()
+    this.native.flush()
+  }
+
   /** Dispatch an installed application-menu action through GPUI. */
   simulateMenuAction(id: string): void {
     this.native.simulateMenuAction(id)
@@ -853,6 +885,11 @@ export class TestRenderer implements NativeRenderer {
 
   getAutomationTree(): string {
     return this.native.getAutomationTree()
+  }
+
+  /** Read GPUI's last explicitly drawn AccessKit tree, never a retained-tree reconstruction. */
+  getAccessibilityTree(): AccessKitTreeSnapshot {
+    return JSON.parse(this.native.getAccessibilityTree())
   }
 
   getElementBounds(elementId: number): number[] | null {

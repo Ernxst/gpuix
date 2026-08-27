@@ -714,6 +714,12 @@ export interface HighlightMatch {
   rects: Array<{ x: number; y: number; width: number; height: number }>
 }
 
+/** Explicit roles currently translated to GPUI's AccessKit tree. */
+export type AccessibilityRole = "button"
+
+/** AccessKit actions delivered through `onAccessibilityAction`. */
+export type AccessibilityAction = "activate" | "increment" | "decrement" | "focus"
+
 // Props passed to elements.
 // Element IDs are auto-generated numeric IDs (not user-settable).
 // Use React refs to get an element's ID: ref.current.id
@@ -731,6 +737,14 @@ export interface Props {
   id?: string
   /** Inert author metadata preserved for automation and event host handles. */
   [key: `data-${string}`]: string | number | boolean | undefined
+
+  // ── Accessibility ───────────────────────────────────────────────
+  /** Explicit native accessibility role. No role is inferred from JSX aliases. */
+  role?: AccessibilityRole
+  /** Accessible name announced for this semantic node. */
+  ariaLabel?: string
+  /** AccessKit action requested by assistive technology. */
+  onAccessibilityAction?: (event: GpuixSyntheticEvent) => void
 
   /** Establishes a native hover group for descendant `style.hoverWithin` states. */
   hoverGroup?: string

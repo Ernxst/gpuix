@@ -156,6 +156,35 @@ describeNative("automation", () => {
     expect(renderer.findByTestId("null")).toBeUndefined()
   })
 
+  it("publishes a labelled button and dispatches AccessKit activate once", () => {
+    const actions: string[] = []
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <button
+        id="save"
+        role="button"
+        ariaLabel="Save factory"
+        onAccessibilityAction={(event) => actions.push(event.accessibilityAction ?? "missing")}
+      />
+    )
+
+    const tree = renderer.getAccessibilityTree()
+    const button = Object.values(tree.nodes).find(
+      (node) => node.aria.role === "Button" && node.aria.label === "Save factory"
+    )
+    expect(button).toMatchObject({
+      aria: {
+        role: "Button",
+        label: "Save factory",
+        on_action: expect.arrayContaining(["Click", "Focus"]),
+      },
+    })
+
+    renderer.nativeSimulateAccessibilityAction(button!.accesskit_id, "activate")
+    expect(actions).toEqual(["activate"])
+  })
+
   it("normalizes numeric and boolean data-testid props for lookup", () => {
     const { render, renderer } = createTestRoot()
 

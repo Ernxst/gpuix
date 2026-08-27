@@ -119,6 +119,14 @@ pub struct EventPayload {
     /// Populated for: highlight.
     pub match_count: Option<f64>,
 
+    /// AccessKit action requested by assistive technology.
+    /// Populated for: accessibilityAction.
+    #[cfg_attr(
+        not(all(target_arch = "wasm32", target_os = "unknown")),
+        napi(ts_type = "\"activate\" | \"increment\" | \"decrement\" | \"focus\"")
+    )]
+    pub accessibility_action: Option<String>,
+
     // ── Modifiers ────────────────────────────────────────────────────
     pub modifiers: Option<EventModifiers>,
 }
@@ -153,6 +161,7 @@ impl Default for EventPayload {
             start_index: None,
             end_index: None,
             match_count: None,
+            accessibility_action: None,
             modifiers: None,
         }
     }

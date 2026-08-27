@@ -291,6 +291,15 @@ export declare class TestGpuixRenderer {
    */
   flush(): void
   /**
+   * Build and read GPUI's real AccessKit tree for the current retained tree.
+   *
+   * The explicit draw is the read boundary: callers never observe a tree
+   * from before the latest committed React mutations.
+   */
+  getAccessibilityTree(): string
+  /** Dispatch one requested action through GPUI's production AccessKit route. */
+  simulateAccessibilityAction(accesskitId: string, action: "activate" | "increment" | "decrement" | "focus"): void
+  /**
    * Draw one platform-style pending frame without notifying the view first.
    * A clean window remains clean, so this only repaints work already
    * scheduled by production code such as an async image load completion.
@@ -670,6 +679,11 @@ export interface EventPayload {
    * Populated for: highlight.
    */
   matchCount?: number
+  /**
+   * AccessKit action requested by assistive technology.
+   * Populated for: accessibilityAction.
+   */
+  accessibilityAction?: "activate" | "increment" | "decrement" | "focus"
   modifiers?: EventModifiers
 }
 
