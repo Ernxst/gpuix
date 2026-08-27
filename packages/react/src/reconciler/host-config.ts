@@ -473,6 +473,18 @@ export const hostConfig = {
       setPointerCapture: () => rootContainerInstance.renderer.setPointerCapture?.(id),
       releasePointerCapture: () =>
         rootContainerInstance.renderer.releasePointerCapture?.(id),
+      __applyCanvasCommands: (ops, operands, strings) => {
+        if (instance.type !== "canvas") {
+          throw new TypeError(
+            `Canvas commands can only target <canvas>, received <${instance.type}>`
+          )
+        }
+        const apply = rootContainerInstance.renderer.applyCanvasCommands
+        if (!apply) {
+          throw new Error("This GPUIX renderer does not support retained canvas commands")
+        }
+        apply.call(rootContainerInstance.renderer, id, ops, operands, strings)
+      },
       parentId: null,
       getAttribute(name): string | null {
         const value = (instance.props as Props & Record<string, unknown>)[name]

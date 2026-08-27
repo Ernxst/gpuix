@@ -33,6 +33,12 @@ import type {
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
+import { __applyCanvasCommands } from "./canvas/commands.js"
+import {
+  CANVAS_OPCODES,
+  CANVAS_STREAM_MAGIC,
+  CANVAS_STREAM_VERSION,
+} from "./canvas/opcodes.js"
 import {
   CANVAS_GOLDEN_DPR,
   CANVAS_GOLDEN_HEIGHT,
@@ -64,6 +70,12 @@ interface NativeTestRendererApi extends NativeRenderer {
   dispose(): void
   capabilities(): RendererCapabilities
   applyBatch(json: string): number[]
+  applyCanvasCommands(
+    id: number,
+    ops: Uint32Array,
+    operands: Float64Array,
+    strings: readonly string[]
+  ): void
   flush(): void
   advanceAsyncClock(deltaMs: number): void
   setReducedMotion(enabled: boolean): void
@@ -329,6 +341,15 @@ export class TestRenderer implements NativeRenderer {
 
   applyBatch(json: string): Array<number> {
     return this.native.applyBatch(json)
+  }
+
+  applyCanvasCommands(
+    id: number,
+    ops: Uint32Array,
+    operands: Float64Array,
+    strings: readonly string[]
+  ): void {
+    this.native.applyCanvasCommands(id, ops, operands, strings)
   }
 
   setMenus(menus: MenuSpec[]): void {
@@ -1131,10 +1152,6 @@ export class CanvasComparisonSkippedError extends Error {
   }
 }
 
-type CanvasPublicInstance = PublicInstance & {
-  getContext?: (contextId: "2d") => CanvasRenderingContext2D | null
-}
-
 const canvasGoldenDirectory = fileURLToPath(new URL("../canvas-goldens", import.meta.url))
 const canvasScreenshotDirectory = fileURLToPath(new URL("../screenshots", import.meta.url))
 
@@ -1163,6 +1180,47 @@ function skipCanvasComparison(
     return undefined
   }
   throw new CanvasComparisonSkippedError(message)
+}
+
+function encodeA1FillRectScene(scene: CanvasScene): {
+  ops: Uint32Array
+  operands: Float64Array
+  strings: string[]
+} {
+  const ops = [CANVAS_STREAM_MAGIC, CANVAS_STREAM_VERSION]
+  const operands: number[] = []
+  const strings: string[] = []
+  let fillStyle = "#000000"
+  const push = (opcode: number, values: readonly number[]) => {
+    ops.push(opcode, values.length)
+    operands.push(...values)
+  }
+  const context = {
+    get fillStyle() {
+      return fillStyle
+    },
+    set fillStyle(value: string | CanvasGradient | CanvasPattern) {
+      if (typeof value !== "string") {
+        throw new TypeError("Phase A1 accepts string fillStyle values only")
+      }
+      fillStyle = value
+      const stringIndex = strings.push(value) - 1
+      push(CANVAS_OPCODES.fillStyle, [stringIndex])
+    },
+    fillRect(x: number, y: number, width: number, height: number) {
+      push(CANVAS_OPCODES.fillRect, [x, y, width, height])
+    },
+  }
+  scene.draw(
+    context as Pick<CanvasRenderingContext2D, "fillStyle" | "fillRect"> as CanvasRenderingContext2D,
+    CANVAS_GOLDEN_WIDTH,
+    CANVAS_GOLDEN_HEIGHT
+  )
+  return {
+    ops: new Uint32Array(ops),
+    operands: new Float64Array(operands),
+    strings,
+  }
 }
 
 /**
@@ -1223,6 +1281,13 @@ export function expectCanvasMatchesBrowser(
     )
   }
 
+  if (resolved.name !== "fill-rect-grid") {
+    return skipCanvasComparison(
+      `canvas phase A1 implements fillStyle + fillRect only; scene ${JSON.stringify(resolved.name)} remains queued for a later phase`,
+      options.skip
+    )
+  }
+
   if (!isNativeTestRendererAvailable()) {
     return skipCanvasComparison(
       `the native test renderer is unavailable: ${nativeTestRendererLoadError?.message ?? "unknown error"}`,
@@ -1234,7 +1299,7 @@ export function expectCanvasMatchesBrowser(
     width: CANVAS_GOLDEN_WIDTH,
     height: CANVAS_GOLDEN_HEIGHT,
   })
-  const canvasRef = createRef<CanvasPublicInstance>()
+  const canvasRef = createRef<PublicInstance>()
 
   try {
     testRoot.render(
@@ -1245,23 +1310,8 @@ export function expectCanvasMatchesBrowser(
       })
     )
 
-    const canvas = canvasRef.current
-    if (!canvas || typeof canvas.getContext !== "function") {
-      return skipCanvasComparison(
-        'the GPUIX <canvas> ref does not expose getContext("2d") (phase A1/A2 has not landed)',
-        options.skip
-      )
-    }
-
-    const context = canvas.getContext("2d")
-    if (!context) {
-      return skipCanvasComparison(
-        'the GPUIX <canvas> ref returned no context for getContext("2d")',
-        options.skip
-      )
-    }
-
-    resolved.draw(context, CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT)
+    const encoded = encodeA1FillRectScene(resolved)
+    __applyCanvasCommands(canvasRef, encoded.ops, encoded.operands, encoded.strings)
     testRoot.renderer.flush()
 
     const windowSize = testRoot.renderer.getWindowSize()

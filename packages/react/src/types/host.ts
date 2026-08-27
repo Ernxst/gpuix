@@ -951,6 +951,12 @@ export interface AnchoredProps extends Props {
   occlude?: boolean
 }
 
+/** Canvas bitmap coordinates. Layout can independently resize the element. */
+export interface CanvasProps extends Props {
+  width?: number
+  height?: number
+}
+
 /// Interface for the renderer that receives mutations from the reconciler.
 /// Implemented by the real napi GpuixRenderer and by TestRenderer (which
 /// delegates to native TestGpuixRenderer for tests).
@@ -965,6 +971,13 @@ export interface NativeRenderer {
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   setRoot(id: number): void
   commitMutations(): void
+  /** Replace a retained canvas display list without a React commit. */
+  applyCanvasCommands?(
+    id: number,
+    ops: Uint32Array,
+    operands: Float64Array,
+    strings: readonly string[]
+  ): void
   /** Stable platform and renderer feature read. Legacy probes remain available. */
   capabilities?(): RendererCapabilities
   /** Drop a buffered commit after JS-side contract validation fails. */
@@ -1133,9 +1146,9 @@ export interface Container {
   preventedKeyboardActivations: Map<number, string>
 }
 
-// Instance — minimal handle for React's reconciler.
-// The real element state lives in Rust's RetainedTree.
-export interface Instance {
+// Public instance exposed via refs. Type-specific APIs are added deliberately;
+// phase A1 does not expose CanvasRenderingContext2D yet.
+export interface PublicInstance {
   id: number
   type: ElementType
   props: Props
@@ -1145,15 +1158,21 @@ export interface Instance {
   getAttribute(name: string): string | null
 }
 
+// Internal host instance. The real element state lives in Rust's RetainedTree.
+export interface Instance extends PublicInstance {
+  __applyCanvasCommands(
+    ops: Uint32Array,
+    operands: Float64Array,
+    strings: readonly string[]
+  ): void
+}
+
 // Text instance for raw text nodes
 export interface TextInstance {
   id: number
   text: string
   parentId: number | null
 }
-
-// Public instance exposed via refs
-export type PublicInstance = Instance
 
 // Host context passed down the tree
 export interface HostContext {
