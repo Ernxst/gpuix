@@ -384,7 +384,7 @@ fn prepare(
                 } else {
                     let join = match rect.style.line_join {
                         crate::canvas::CanvasLineJoin::Miter
-                            if rect.style.miter_limit >= std::f64::consts::FRAC_1_SQRT_2 =>
+                            if rect.style.miter_limit >= std::f64::consts::SQRT_2 =>
                         {
                             crate::canvas::CanvasLineJoin::Miter
                         }
@@ -1009,7 +1009,7 @@ mod tests {
 
     #[test]
     fn stroke_rect_uses_the_requested_closed_corner_join() {
-        let make = |line_join| crate::canvas::DisplayList {
+        let make = |line_join, miter_limit| crate::canvas::DisplayList {
             revision: 1,
             items: vec![DisplayItem::StrokeRect(StrokeRect {
                 x: 20.0,
@@ -1021,18 +1021,47 @@ mod tests {
                     color: color(),
                     line_width: 10.0,
                     line_join,
-                    miter_limit: 10.0,
+                    miter_limit,
                 },
                 op_index: 0,
                 clear_regions: Vec::new(),
             })],
         };
-        let miter = prepare(&make(CanvasLineJoin::Miter), test_bounds(), 320.0, 240.0);
-        let bevel = prepare(&make(CanvasLineJoin::Bevel), test_bounds(), 320.0, 240.0);
+        let miter = prepare(
+            &make(CanvasLineJoin::Miter, 10.0),
+            test_bounds(),
+            320.0,
+            240.0,
+        );
+        let low_miter = prepare(
+            &make(CanvasLineJoin::Miter, 1.0),
+            test_bounds(),
+            320.0,
+            240.0,
+        );
+        let bevel = prepare(
+            &make(CanvasLineJoin::Bevel, 10.0),
+            test_bounds(),
+            320.0,
+            240.0,
+        );
         let miter = prepared_path(&miter);
+        let low_miter = prepared_path(&low_miter);
         let bevel = prepared_path(&bevel);
 
         assert_ne!(miter.vertices.len(), bevel.vertices.len());
+        let positions = |path: &gpui::Path<gpui::Pixels>| {
+            path.vertices
+                .iter()
+                .map(|vertex| {
+                    (
+                        f32::from(vertex.xy_position.x).to_bits(),
+                        f32::from(vertex.xy_position.y).to_bits(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(positions(low_miter), positions(bevel));
         assert_eq!(f32::from(miter.bounds.origin.x), 15.0);
         assert_eq!(f32::from(miter.bounds.origin.y), 15.0);
     }
