@@ -3,6 +3,10 @@ import type { ReactNode } from "react"
 import ReactReconciler from "react-reconciler"
 import type { OpaqueRoot } from "react-reconciler"
 import { ConcurrentRoot } from "react-reconciler/constants.js"
+import {
+  attachCanvasImageLoader,
+  detachCanvasImageLoader,
+} from "../canvas/image.js"
 import { GpuixContext } from "../hooks/use-gpuix.js"
 import type { Container, ElementIdAllocator, NativeRenderer } from "../types/host.js"
 import { wrapWithBatching } from "./batch-renderer.js"
@@ -89,6 +93,7 @@ function idAllocatorFor(renderer: NativeRenderer): ElementIdAllocator {
 export function createRoot(renderer: NativeRenderer, options: RootOptions = {}): Root {
   const strictStyles = options.strictStyles ?? strictStylesDefault()
   renderer.setStrictStyles?.(strictStyles)
+  attachCanvasImageLoader(renderer)
   let container: OpaqueRoot | null = null
   const batchedRenderer = wrapWithBatching(renderer)
   const gpuixContainer: Container = {
@@ -113,6 +118,7 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     }
     detachRoot(renderer)
     detachRoot(batchedRenderer)
+    detachCanvasImageLoader(renderer)
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

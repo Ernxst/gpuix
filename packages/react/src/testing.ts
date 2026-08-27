@@ -25,6 +25,7 @@ import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
   CanvasPublicInstance,
+  CanvasImageLoadState,
   HighlightMatch,
   NativeRenderer,
   PublicInstance,
@@ -85,7 +86,11 @@ interface NativeTestRendererApi extends NativeRenderer {
     operands: Float64Array,
     strings: readonly string[]
   ): void
+  loadCanvasImage(observerId: number, sourceJson: string): void
+  getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
+  releaseCanvasImage(observerId: number): void
   flush(): void
+  drawPendingFrame(): void
   advanceAsyncClock(deltaMs: number): void
   requestFrame(callback: (timestamp: number) => void): void
   setReducedMotion(enabled: boolean): void
@@ -124,6 +129,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getResolvedStyle(elementId: number): string | null
   getImageLoadState(elementId: number): string | null
   getCanvasState(elementId: number): string | null
+  peekCanvasState(elementId: number): string | null
   getAutomationTree(): string
   getElementBounds(elementId: number): number[] | null
   clockPause(): number
@@ -410,6 +416,18 @@ export class TestRenderer implements NativeRenderer {
     this.native.applyCanvasCommands(id, ops, operands, strings)
   }
 
+  loadCanvasImage(observerId: number, sourceJson: string): void {
+    this.native.loadCanvasImage(observerId, sourceJson)
+  }
+
+  getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null {
+    return this.native.getCanvasImageLoadState(observerId)
+  }
+
+  releaseCanvasImage(observerId: number): void {
+    this.native.releaseCanvasImage(observerId)
+  }
+
   setMenus(menus: MenuSpec[]): void {
     this.native.setMenus(menus)
   }
@@ -448,6 +466,11 @@ export class TestRenderer implements NativeRenderer {
    *  build_element() → apply_styles() → layout). */
   flush(): void {
     this.native.flush()
+  }
+
+  /** Draw only work previously dirtied by native production code. */
+  drawPendingFrame(): void {
+    this.native.drawPendingFrame()
   }
 
   /** Advance GPUI timers and, when paused, the native animation frame clock. */
@@ -785,6 +808,12 @@ export class TestRenderer implements NativeRenderer {
   /** Read canvas preparation counters without relying on timing or screenshots. */
   getCanvasState(id: number): CanvasTestState | undefined {
     const json = this.native.getCanvasState(id)
+    return json == null ? undefined : JSON.parse(json)
+  }
+
+  /** Read last-painted canvas counters without forcing an offscreen frame. */
+  peekCanvasState(id: number): CanvasTestState | undefined {
+    const json = this.native.peekCanvasState(id)
     return json == null ? undefined : JSON.parse(json)
   }
 

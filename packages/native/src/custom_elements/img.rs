@@ -1057,6 +1057,7 @@ impl PartialEq for CanvasImageSource {
 struct CanvasImageEntry {
     source: Option<ImageSource>,
     users: HashSet<u64>,
+    observers: HashSet<u64>,
     result: Option<ImageLoadResult>,
     loading: bool,
     reload_due: bool,
@@ -1075,6 +1076,7 @@ struct CanvasImageTestStats {
 #[derive(Default)]
 struct CanvasImageStore {
     entries: HashMap<String, CanvasImageEntry>,
+    observer_keys: HashMap<u64, String>,
     revision: u64,
     test_stats: HashMap<u64, CanvasImageTestStats>,
 }
@@ -1088,6 +1090,13 @@ struct CanvasImageStore {
 #[derive(Clone, Default)]
 pub(crate) struct SharedCanvasImageStore {
     state: Arc<Mutex<CanvasImageStore>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CanvasImageLoadState {
+    Loading,
+    Loaded { width: u32, height: u32 },
+    Error { message: String },
 }
 
 impl SharedCanvasImageStore {
@@ -1104,6 +1113,75 @@ impl SharedCanvasImageStore {
             .and_then(|entry| entry.result.as_ref())
             .and_then(|result| result.as_ref().ok())
             .cloned()
+    }
+
+    pub(crate) fn observe(
+        &self,
+        observer_id: u64,
+        source: CanvasImageSource,
+        policy: ImageNetworkPolicy,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
+    ) {
+        self.release_observer(observer_id, window);
+        let should_load = {
+            let mut state = self.state.lock().unwrap();
+            state
+                .observer_keys
+                .insert(observer_id, source.key.clone());
+            let entry = state.entries.entry(source.key.clone()).or_default();
+            entry.source.get_or_insert(source.source.clone());
+            entry.observers.insert(observer_id);
+            if !entry.loading && entry.result.is_none() {
+                entry.loading = true;
+                true
+            } else {
+                false
+            }
+        };
+        if should_load {
+            self.start_load(source.key, source.source, policy, cx);
+        }
+    }
+
+    pub(crate) fn observer_state(&self, observer_id: u64) -> Option<CanvasImageLoadState> {
+        let state = self.state.lock().unwrap();
+        let key = state.observer_keys.get(&observer_id)?;
+        let entry = state.entries.get(key)?;
+        match entry.result.as_ref() {
+            Some(Ok(image)) => {
+                let size = image.size(0);
+                Some(CanvasImageLoadState::Loaded {
+                    width: u32::try_from(size.width.0).unwrap_or_default(),
+                    height: u32::try_from(size.height.0).unwrap_or_default(),
+                })
+            }
+            Some(Err(error)) => Some(CanvasImageLoadState::Error {
+                message: error.to_string(),
+            }),
+            None => Some(CanvasImageLoadState::Loading),
+        }
+    }
+
+    pub(crate) fn release_observer(&self, observer_id: u64, window: &mut gpui::Window) {
+        let release = {
+            let mut state = self.state.lock().unwrap();
+            let Some(key) = state.observer_keys.remove(&observer_id) else {
+                return;
+            };
+            let Some(entry) = state.entries.get_mut(&key) else {
+                return;
+            };
+            entry.observers.remove(&observer_id);
+            if !entry.users.is_empty() || !entry.observers.is_empty() {
+                return;
+            }
+            state.revision = state.revision.saturating_add(1);
+            state.entries.remove(&key).and_then(|entry| entry.result)
+        };
+        if let Some(Ok(image)) = release {
+            let _ = window.drop_image(image);
+        }
     }
 
     pub(crate) fn sync_element(
@@ -1138,10 +1216,9 @@ impl SharedCanvasImageStore {
                 if let Some(entry) = state.entries.get_mut(&key) {
                     entry.users.remove(&element_id);
                 }
-                if state
-                    .entries
-                    .get(&key)
-                    .is_some_and(|entry| entry.users.is_empty())
+                if state.entries.get(&key).is_some_and(|entry| {
+                    entry.users.is_empty() && entry.observers.is_empty()
+                })
                 {
                     if let Some(Ok(image)) =
                         state.entries.remove(&key).and_then(|entry| entry.result)
@@ -1268,7 +1345,7 @@ impl SharedCanvasImageStore {
                     for user in &removed_users {
                         entry.users.remove(user);
                     }
-                    let empty = entry.users.is_empty();
+                    let empty = entry.users.is_empty() && entry.observers.is_empty();
                     (removed_users, empty)
                 };
                 for user in &removed_users {

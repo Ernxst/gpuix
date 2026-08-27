@@ -729,6 +729,50 @@ pub(crate) fn to_element_id(id: f64) -> Result<u64> {
     raw_element_id(id).map_err(Error::from_reason)
 }
 
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn parse_canvas_image_source(
+    source_json: String,
+) -> Result<crate::custom_elements::img::CanvasImageSource> {
+    let value: serde_json::Value = serde_json::from_str(&source_json)
+        .map_err(|error| Error::from_reason(format!("Invalid canvas image source JSON: {error}")))?;
+    let source = crate::custom_elements::img::ImageSource::parse(&value)
+        .map_err(|error| Error::from_reason(format!("Invalid canvas image source: {error}")))?;
+    Ok(crate::custom_elements::img::CanvasImageSource {
+        key: source_json,
+        source,
+    })
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn canvas_image_load_state_js(
+    state: Option<crate::custom_elements::img::CanvasImageLoadState>,
+) -> Option<CanvasImageLoadState> {
+    state.map(|state| match state {
+        crate::custom_elements::img::CanvasImageLoadState::Loading => CanvasImageLoadState {
+            status: "loading".to_string(),
+            width: None,
+            height: None,
+            error: None,
+        },
+        crate::custom_elements::img::CanvasImageLoadState::Loaded { width, height } => {
+            CanvasImageLoadState {
+                status: "loaded".to_string(),
+                width: Some(width as f64),
+                height: Some(height as f64),
+                error: None,
+            }
+        }
+        crate::custom_elements::img::CanvasImageLoadState::Error { message } => {
+            CanvasImageLoadState {
+                status: "error".to_string(),
+                width: None,
+                height: None,
+                error: Some(message),
+            }
+        }
+    })
+}
+
 thread_local! {
     #[cfg(target_os = "macos")]
     static MAC_PLATFORM: RefCell<Option<Rc<gpui_macos::MacPlatform>>> = const { RefCell::new(None) };
@@ -926,6 +970,16 @@ enum ClockControl {
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum UiCommand {
     Invalidate,
+    ObserveCanvasImage {
+        observer_id: u64,
+        source: crate::custom_elements::img::CanvasImageSource,
+        policy: crate::custom_elements::img::ImageNetworkPolicy,
+    },
+    ReleaseCanvasImageObserver(u64),
+    GetCanvasImageLoadState {
+        observer_id: u64,
+        response: SyncSender<Option<CanvasImageLoadState>>,
+    },
     RequestFrame {
         callback: AnimationFrameCallback,
         timestamp_origin: FrameTimestampOrigin,
@@ -1028,6 +1082,30 @@ async fn run_ui_commands(
     while let Some(command) = commands.next().await {
         let result = match command {
             UiCommand::Invalidate => refresh_ui_window(window, cx),
+            UiCommand::ObserveCanvasImage {
+                observer_id,
+                source,
+                policy,
+            } => window.update(cx, move |view, window, cx| {
+                view.canvas_image_store
+                    .observe(observer_id, source, policy, window, cx);
+            }),
+            UiCommand::ReleaseCanvasImageObserver(observer_id) => {
+                window.update(cx, move |view, window, _cx| {
+                    view.canvas_image_store
+                        .release_observer(observer_id, window);
+                })
+            }
+            UiCommand::GetCanvasImageLoadState {
+                observer_id,
+                response,
+            } => window.update(cx, move |view, _window, _cx| {
+                response
+                    .send(canvas_image_load_state_js(
+                        view.canvas_image_store.observer_state(observer_id),
+                    ))
+                    .ok();
+            }),
             UiCommand::RequestFrame {
                 callback,
                 timestamp_origin,
@@ -2277,6 +2355,91 @@ impl GpuixRenderer {
         if outcome.invalidates {
             self.request_invalidate()?;
         }
+        Ok(())
+    }
+
+    /// Start or join one renderer-local canvas image load. The observer keeps
+    /// the decoded entry alive until JavaScript changes or releases the source.
+    #[napi]
+    pub fn load_canvas_image(&self, observer_id: f64, source_json: String) -> Result<()> {
+        let observer_id = to_element_id(observer_id)?;
+        let source = parse_canvas_image_source(source_json)?;
+        let policy = self.image_network_policy.clone();
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.canvas_image_store
+                .observe(observer_id, source, policy, window, cx);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ObserveCanvasImage {
+            observer_id,
+            source,
+            policy,
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "Canvas image loading is not supported by this renderer",
+        ))
+    }
+
+    #[napi]
+    pub fn get_canvas_image_load_state(
+        &self,
+        observer_id: f64,
+    ) -> Result<Option<CanvasImageLoadState>> {
+        let observer_id = to_element_id(observer_id)?;
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, _cx| {
+            canvas_image_load_state_js(view.canvas_image_store.observer_state(observer_id))
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetCanvasImageLoadState {
+                observer_id,
+                response,
+            })?;
+            return recv_ui_response(receiver, "the canvas image state query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Ok(None)
+    }
+
+    #[napi]
+    pub fn release_canvas_image(&self, observer_id: f64) -> Result<()> {
+        let observer_id = to_element_id(observer_id)?;
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, _cx| {
+            view.canvas_image_store
+                .release_observer(observer_id, window);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ReleaseCanvasImageObserver(observer_id));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
         Ok(())
     }
 
@@ -8232,6 +8395,16 @@ pub struct DebugFrameOverlayStats {
     pub max_ms: Option<f64>,
     pub frames: f64,
     pub samples: f64,
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct CanvasImageLoadState {
+    pub status: String,
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
