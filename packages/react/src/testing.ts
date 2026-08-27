@@ -64,6 +64,10 @@ export type { MacCpuThrottle } from "./cpu-throttle.js"
 export interface ImageComparisonResult {
   differingPixelRatio: number
   maxChannelDelta: number
+  /** Maximum delta outside the reference image's one-pixel-dilated color contour. */
+  maxChannelDeltaOutsideGoldenContour: number
+  /** Stable interior pixels absent from the opposite image after one-pixel erosion. */
+  erodedGeometryMismatchRatio: number
 }
 
 interface NativeTestRendererApi extends NativeRenderer {
@@ -114,6 +118,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getTreeJson(): string
   getResolvedStyle(elementId: number): string | null
   getImageLoadState(elementId: number): string | null
+  getCanvasState(elementId: number): string | null
   getAutomationTree(): string
   getElementBounds(elementId: number): number[] | null
   clockPause(): number
@@ -143,7 +148,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   setAllowPrivateNetworkImages(enabled: boolean): void
   drainStyleDiagnostics(): StyleDiagnostic[]
   captureScreenshot(path: string): void
-  compareImages(pathA: string, pathB: string, tolerance: number): ImageComparisonResult
+  compareImages(goldenPath: string, actualPath: string, tolerance: number): ImageComparisonResult
   simulateResize(width: number, height: number): void
 }
 
@@ -249,6 +254,12 @@ export interface TextQueries {
 export interface ImageLoadState {
   status: "idle" | "loading" | "loaded" | "error"
   error?: string
+}
+
+/** Native path-preparation counters for a live `<canvas>` test element. */
+export interface CanvasTestState {
+  preparationCount: number
+  tessellationCount: number
 }
 
 // ── TestRenderer ─────────────────────────────────────────────────────
@@ -727,6 +738,12 @@ export class TestRenderer implements NativeRenderer {
     return json == null ? undefined : JSON.parse(json)
   }
 
+  /** Read canvas preparation counters without relying on timing or screenshots. */
+  getCanvasState(id: number): CanvasTestState | undefined {
+    const json = this.native.getCanvasState(id)
+    return json == null ? undefined : JSON.parse(json)
+  }
+
   /** Find elements by type (e.g. "div", "text"). */
   findByType(type: string): TestElement[] {
     return [...this.buildElementMap().values()].filter((el) => el.type === type)
@@ -891,8 +908,8 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** Decode two PNGs natively and compare their RGBA pixels. */
-  compareImages(pathA: string, pathB: string, tolerance: number): ImageComparisonResult {
-    return this.native.compareImages(pathA, pathB, tolerance)
+  compareImages(goldenPath: string, actualPath: string, tolerance: number): ImageComparisonResult {
+    return this.native.compareImages(goldenPath, actualPath, tolerance)
   }
 
   getWindowSize(): { width: number; height: number; scaleFactor: number } {
@@ -1177,6 +1194,7 @@ export class CanvasComparisonSkippedError extends Error {
 
 const canvasGoldenDirectory = fileURLToPath(new URL("../canvas-goldens", import.meta.url))
 const canvasScreenshotDirectory = fileURLToPath(new URL("../screenshots", import.meta.url))
+const DEFAULT_CANVAS_MAX_CHANNEL_DELTA = 16
 
 function resolveCanvasScene(scene: CanvasScene | CanvasSceneName): CanvasScene {
   return typeof scene === "string" ? canvasScenes[scene] : scene
@@ -1216,7 +1234,7 @@ export function expectCanvasMatchesBrowser(
   const resolved = resolveCanvasScene(scene)
   const tolerance = options.tolerance ?? 2
   const differingPixelBudget = options.differingPixelBudget ?? 0.01
-  const maxChannelDelta = options.maxChannelDelta ?? 16
+  const maxChannelDelta = options.maxChannelDelta ?? DEFAULT_CANVAS_MAX_CHANNEL_DELTA
 
   if (
     !Number.isFinite(tolerance) ||
@@ -1263,13 +1281,6 @@ export function expectCanvasMatchesBrowser(
     )
   }
 
-  if (resolved.name !== "fill-rect-grid") {
-    return skipCanvasComparison(
-      `native replay for scene ${JSON.stringify(resolved.name)} remains queued for canvas phase B; A1 replays fillStyle + fillRect only`,
-      options.skip
-    )
-  }
-
   if (!isNativeTestRendererAvailable()) {
     return skipCanvasComparison(
       `the native test renderer is unavailable: ${nativeTestRendererLoadError?.message ?? "unknown error"}`,
@@ -1287,14 +1298,19 @@ export function expectCanvasMatchesBrowser(
     testRoot.render(
       createElement("canvas", {
         ref: canvasRef,
-        width: CANVAS_GOLDEN_WIDTH,
-        height: CANVAS_GOLDEN_HEIGHT,
+        width: CANVAS_GOLDEN_WIDTH * CANVAS_GOLDEN_DPR,
+        height: CANVAS_GOLDEN_HEIGHT * CANVAS_GOLDEN_DPR,
+        style: {
+          width: CANVAS_GOLDEN_WIDTH,
+          height: CANVAS_GOLDEN_HEIGHT,
+        },
       })
     )
 
     const canvas = canvasRef.current
     if (!canvas) throw new Error("The GPUIX <canvas> ref was not mounted")
     const context = canvas.getContext("2d")
+    context.scale(CANVAS_GOLDEN_DPR, CANVAS_GOLDEN_DPR)
     resolved.draw(context, CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT)
     flushRecordingContext2D(context)
     testRoot.renderer.flush()
@@ -1314,13 +1330,20 @@ export function expectCanvasMatchesBrowser(
     const comparison = testRoot.renderer.compareImages(goldenPath, actualPath, tolerance)
     if (
       comparison.differingPixelRatio > differingPixelBudget ||
-      comparison.maxChannelDelta > maxChannelDelta
+      comparison.maxChannelDelta > maxChannelDelta ||
+      comparison.maxChannelDeltaOutsideGoldenContour > DEFAULT_CANVAS_MAX_CHANNEL_DELTA ||
+      comparison.erodedGeometryMismatchRatio > 0
     ) {
       throw new Error(
         `Canvas scene ${JSON.stringify(resolved.name)} differs from Chromium: ` +
           `${(comparison.differingPixelRatio * 100).toFixed(3)}% pixels exceed the ` +
           `per-channel tolerance ${tolerance} (budget ${(differingPixelBudget * 100).toFixed(3)}%, ` +
           `max channel delta ${comparison.maxChannelDelta}, ceiling ${maxChannelDelta}). ` +
+          `Outside the one-device-pixel golden contour band, max channel delta ` +
+          `${comparison.maxChannelDeltaOutsideGoldenContour}, ceiling ` +
+          `${DEFAULT_CANVAS_MAX_CHANNEL_DELTA}. ` +
+          `Eroded geometry mismatch ` +
+          `${(comparison.erodedGeometryMismatchRatio * 100).toFixed(3)}% (required 0.000%). ` +
           `Expected ${goldenPath}; actual ${actualPath}.`
       )
     }

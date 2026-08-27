@@ -1,12 +1,21 @@
+import path from "node:path"
+
 import React, { createRef } from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import { __applyCanvasCommands } from "../canvas/commands.js"
+import { flushRecordingContext2D } from "../canvas/context-2d.js"
 import {
   CANVAS_OPCODES,
   CANVAS_STREAM_MAGIC,
   CANVAS_STREAM_VERSION,
 } from "../canvas/opcodes.js"
+import {
+  CANVAS_GOLDEN_DPR,
+  CANVAS_GOLDEN_HEIGHT,
+  CANVAS_GOLDEN_WIDTH,
+  canvasScenes,
+} from "../canvas-scenes.js"
 import { createRoot, flushSync } from "../reconciler/reconciler.js"
 import {
   createTestRoot,
@@ -15,6 +24,7 @@ import {
 } from "../testing.js"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { CanvasPublicInstance, PublicInstance } from "../types/host.js"
+import { SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -81,6 +91,41 @@ describeNative("retained canvas element", () => {
     }
   })
 
+  it("does not retessellate an unchanged display list on a requested frame", () => {
+    const testRoot = createTestRoot({ width: 120, height: 80 })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="cached-canvas" width={120} height={80} />
+      )
+      const context = canvasRef.current!.getContext("2d")!
+      context.beginPath()
+      context.moveTo(8, 8)
+      context.bezierCurveTo(28, 70, 82, 10, 112, 68)
+      context.stroke()
+      flushRecordingContext2D(context)
+      testRoot.renderer.flush()
+
+      const canvas = testRoot.renderer.findByTestId("cached-canvas")!
+      const prepared = testRoot.renderer.getCanvasState(canvas.id)!
+      expect(prepared.tessellationCount).toBeGreaterThan(0)
+
+      testRoot.renderer.requestFrame(() => {})
+      testRoot.renderer.flush()
+      expect(testRoot.renderer.getCanvasState(canvas.id)).toEqual(prepared)
+
+      context.lineTo(116, 72)
+      context.stroke()
+      flushRecordingContext2D(context)
+      testRoot.renderer.flush()
+      const changed = testRoot.renderer.getCanvasState(canvas.id)!
+      expect(changed.preparationCount).toBeGreaterThan(prepared.preparationCount)
+      expect(changed.tessellationCount).toBeGreaterThan(prepared.tessellationCount)
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
   it("throws native decoder diagnostics synchronously in strict mode", () => {
     const testRoot = createTestRoot({ width: 120, height: 80, strictStyles: true })
     const canvasRef = createRef<PublicInstance>()
@@ -94,13 +139,13 @@ describeNative("retained canvas element", () => {
           new Uint32Array([
             CANVAS_STREAM_MAGIC,
             CANVAS_STREAM_VERSION,
-            CANVAS_OPCODES.translate,
-            2,
+            CANVAS_OPCODES.lineDashOffset,
+            1,
           ]),
-          new Float64Array([4, 8]),
+          new Float64Array([2]),
           []
         )
-      ).toThrow(/translate.*not implemented in canvas phase A1/)
+      ).toThrow(/lineDashOffset.*cannot be replayed faithfully/)
       expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
     } finally {
       testRoot.unmount()
@@ -116,10 +161,10 @@ describeNative("retained canvas element", () => {
       ops: new Uint32Array([
         CANVAS_STREAM_MAGIC,
         CANVAS_STREAM_VERSION,
-        CANVAS_OPCODES.translate,
-        2,
+        CANVAS_OPCODES.lineDashOffset,
+        1,
       ]),
-      operands: new Float64Array([4, 8]),
+      operands: new Float64Array([2]),
     }
     try {
       testRoot.render(
@@ -136,7 +181,7 @@ describeNative("retained canvas element", () => {
 
       __applyCanvasCommands(canvasRef, unsupported.ops, unsupported.operands, [])
       expect(warn).toHaveBeenCalledTimes(1)
-      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/warning-canvas.*translate/))
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/warning-canvas.*lineDashOffset/))
 
       __applyCanvasCommands(canvasRef, unsupported.ops, unsupported.operands, [])
       __applyCanvasCommands(
@@ -147,7 +192,7 @@ describeNative("retained canvas element", () => {
       )
       expect(warn).toHaveBeenCalledTimes(2)
       expect(warn).toHaveBeenLastCalledWith(
-        expect.stringMatching(/second-warning-canvas.*translate/)
+        expect.stringMatching(/second-warning-canvas.*lineDashOffset/)
       )
       testRoot.render(
         <div>
@@ -165,6 +210,269 @@ describeNative("retained canvas element", () => {
     } finally {
       warn.mockRestore()
       testRoot.unmount()
+    }
+  })
+
+  it("accepts composed transforms and minimum nonzero paths in strict mode", () => {
+    const testRoot = createTestRoot({ width: 180, height: 120, strictStyles: true })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(<canvas ref={canvasRef} width={180} height={120} />)
+      const context = canvasRef.current!.getContext("2d")
+      context.save()
+      context.translate(18, 12)
+      context.scale(1.5, 1.25)
+      context.rotate(0.2)
+      context.transform(1, 0.1, 0.2, 1, 3, 4)
+      context.fillRect(0, 0, 40, 28)
+      context.beginPath()
+      context.moveTo(8, 62)
+      context.lineTo(42, 34)
+      context.lineTo(76, 62)
+      context.closePath()
+      context.fill()
+      context.restore()
+      context.setTransform(1, 0, 0, 1, 4, 6)
+      context.resetTransform()
+
+      expect(() => flushRecordingContext2D(context)).not.toThrow()
+      testRoot.renderer.flush()
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("throws transformed fillRect preparation diagnostics at the strict command boundary", () => {
+    const testRoot = createTestRoot({ width: 120, height: 80, strictStyles: true })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="overflow-canvas" width={120} height={80} />
+      )
+      const context = canvasRef.current!.getContext("2d")!
+      context.transform(Number.MAX_VALUE, 0, 0, 1, 0, 0)
+      context.fillRect(2, 0, 1, 1)
+
+      expect(() => flushRecordingContext2D(context)).toThrow(
+        /overflow-canvas.*fillRect.*finite/
+      )
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("prepares paths larger than the former B1 cap without warning", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ width: 180, height: 120, strictStyles: false })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="complex-path-canvas" width={180} height={120} />
+      )
+      const context = canvasRef.current!.getContext("2d")!
+      context.beginPath()
+      context.moveTo(0, 0)
+      for (let index = 0; index < 129; index++) {
+        context.lineTo(index, index % 2)
+      }
+      context.fill()
+      flushRecordingContext2D(context)
+
+      testRoot.renderer.flush()
+      expect(warn).not.toHaveBeenCalled()
+
+      context.fill()
+      flushRecordingContext2D(context)
+      testRoot.renderer.flush()
+      expect(warn).not.toHaveBeenCalled()
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      warn.mockRestore()
+      testRoot.unmount()
+    }
+  })
+
+  it("routes partial clearRect punch-through through strict and deduplicated diagnostics", () => {
+    const strict = createTestRoot({ width: 100, height: 80, strictStyles: true })
+    const strictRef = createRef<CanvasPublicInstance>()
+    try {
+      strict.render(
+        <canvas ref={strictRef} testId="strict-clear-canvas" width={100} height={80} />
+      )
+      const context = strictRef.current!.getContext("2d")!
+      context.clearRect(10, 10, 20, 20)
+      expect(() => flushRecordingContext2D(context)).toThrow(
+        /strict-clear-canvas.*clearRect.*punch through/
+      )
+    } finally {
+      strict.unmount()
+    }
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const nonStrict = createTestRoot({ width: 100, height: 80, strictStyles: false })
+    const nonStrictRef = createRef<CanvasPublicInstance>()
+    try {
+      nonStrict.render(
+        <canvas
+          ref={nonStrictRef}
+          testId="warning-clear-canvas"
+          width={100}
+          height={80}
+        />
+      )
+      const context = nonStrictRef.current!.getContext("2d")!
+      context.clearRect(10, 10, 20, 20)
+      flushRecordingContext2D(context)
+      context.clearRect(40, 10, 20, 20)
+      flushRecordingContext2D(context)
+
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(/warning-clear-canvas.*clearRect.*punch through/)
+      )
+      expect(nonStrict.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      warn.mockRestore()
+      nonStrict.unmount()
+    }
+  })
+
+  it("makes full clear exact and partial clear surgery preserve later painter order", () => {
+    const render = (
+      name: string,
+      draw: (context: CanvasRenderingContext2D) => void
+    ) => {
+      const root = createTestRoot({ width: 100, height: 80, strictStyles: true })
+      const ref = createRef<CanvasPublicInstance>()
+      const output = path.join(SHOTS_DIR, `canvas-b2-${name}.png`)
+      try {
+        root.render(<canvas ref={ref} width={100} height={80} />)
+        const context = ref.current!.getContext("2d")!
+        draw(context)
+        flushRecordingContext2D(context)
+        root.renderer.flush()
+        root.renderer.captureScreenshot(output)
+      } finally {
+        root.unmount()
+      }
+      return output
+    }
+
+    const fullActual = render("full-clear-actual", (context) => {
+      context.fillStyle = "#ef4444"
+      context.fillRect(0, 0, 100, 80)
+      context.save()
+      context.scale(2, 2)
+      context.clearRect(50, 40, -50, -40)
+      context.restore()
+      context.fillStyle = "#2563eb"
+      context.fillRect(42, 32, 16, 16)
+    })
+    const fullExpected = render("full-clear-expected", (context) => {
+      context.fillStyle = "#2563eb"
+      context.fillRect(42, 32, 16, 16)
+    })
+    const partialActual = render("partial-clear-actual", (context) => {
+      context.fillStyle = "#ef4444"
+      context.fillRect(0, 0, 100, 80)
+      context.clearRect(36, 28, 28, 24)
+      context.fillStyle = "#2563eb"
+      context.globalAlpha = 0.65
+      context.fillRect(42, 32, 16, 16)
+    })
+    const partialExpected = render("partial-clear-expected", (context) => {
+      context.fillStyle = "#ef4444"
+      context.fillRect(0, 0, 100, 28)
+      context.fillRect(0, 52, 100, 28)
+      context.fillRect(0, 28, 36, 24)
+      context.fillRect(64, 28, 36, 24)
+      context.fillStyle = "#2563eb"
+      context.globalAlpha = 0.65
+      context.fillRect(42, 32, 16, 16)
+    })
+    const comparer = createTestRoot({ width: 1, height: 1 })
+    try {
+      expect(comparer.renderer.compareImages(fullActual, fullExpected, 0)).toEqual({
+        differingPixelRatio: 0,
+        maxChannelDelta: 0,
+        maxChannelDeltaOutsideGoldenContour: 0,
+        erodedGeometryMismatchRatio: 0,
+      })
+      expect(comparer.renderer.compareImages(partialActual, partialExpected, 0)).toEqual({
+        differingPixelRatio: 0,
+        maxChannelDelta: 0,
+        maxChannelDeltaOutsideGoldenContour: 0,
+        erodedGeometryMismatchRatio: 0,
+      })
+    } finally {
+      comparer.unmount()
+    }
+  })
+
+  it("makes the standard DPR backing-store scale visually identical to logical sizing", () => {
+    const logical = createTestRoot({
+      width: CANVAS_GOLDEN_WIDTH,
+      height: CANVAS_GOLDEN_HEIGHT,
+    })
+    const scaled = createTestRoot({
+      width: CANVAS_GOLDEN_WIDTH,
+      height: CANVAS_GOLDEN_HEIGHT,
+    })
+    const logicalRef = createRef<CanvasPublicInstance>()
+    const scaledRef = createRef<CanvasPublicInstance>()
+    const logicalPath = path.join(SHOTS_DIR, "canvas-b1-logical.png")
+    const scaledPath = path.join(SHOTS_DIR, "canvas-b1-standard-dpr.png")
+
+    try {
+      logical.render(
+        <canvas
+          ref={logicalRef}
+          width={CANVAS_GOLDEN_WIDTH}
+          height={CANVAS_GOLDEN_HEIGHT}
+        />
+      )
+      scaled.render(
+        <canvas
+          ref={scaledRef}
+          width={CANVAS_GOLDEN_WIDTH * CANVAS_GOLDEN_DPR}
+          height={CANVAS_GOLDEN_HEIGHT * CANVAS_GOLDEN_DPR}
+          style={{ width: CANVAS_GOLDEN_WIDTH, height: CANVAS_GOLDEN_HEIGHT }}
+        />
+      )
+
+      const logicalContext = logicalRef.current!.getContext("2d")
+      canvasScenes["translate-scale"].draw(
+        logicalContext,
+        CANVAS_GOLDEN_WIDTH,
+        CANVAS_GOLDEN_HEIGHT
+      )
+      flushRecordingContext2D(logicalContext)
+
+      const scaledContext = scaledRef.current!.getContext("2d")
+      scaledContext.scale(CANVAS_GOLDEN_DPR, CANVAS_GOLDEN_DPR)
+      canvasScenes["translate-scale"].draw(
+        scaledContext,
+        CANVAS_GOLDEN_WIDTH,
+        CANVAS_GOLDEN_HEIGHT
+      )
+      flushRecordingContext2D(scaledContext)
+
+      logical.renderer.flush()
+      scaled.renderer.flush()
+      logical.renderer.captureScreenshot(logicalPath)
+      scaled.renderer.captureScreenshot(scaledPath)
+
+      expect(scaled.renderer.compareImages(logicalPath, scaledPath, 0)).toEqual({
+        differingPixelRatio: 0,
+        maxChannelDelta: 0,
+        maxChannelDeltaOutsideGoldenContour: 0,
+        erodedGeometryMismatchRatio: 0,
+      })
+    } finally {
+      logical.unmount()
+      scaled.unmount()
     }
   })
 

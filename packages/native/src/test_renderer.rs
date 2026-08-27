@@ -24,15 +24,15 @@ use gpui::AppContext as _;
 use crate::element_tree::EventPayload;
 use crate::renderer::{
     animation_frame_origin, animation_frame_timestamp_ms,
-    apply_batch_to_tree_with_diagnostics, catch_gpui_initialization, debug_frame_overlay_mode_name,
-    debug_frame_overlay_stats_js, default_http_client, dispatch_application_menu_action,
-    dispatch_animation_frame_callback, drain_style_diagnostics, first_canvas_diagnostic_message,
-    forget_canvas_diagnostics, fresh_canvas_diagnostics, has_application_menus,
-    init_application_menu_support, install_application_menus, parse_debug_frame_overlay_mode,
-    parse_style_json, pending_custom_prop_diagnostic, pending_style_diagnostics,
-    set_application_menus, to_element_id, validate_canvas_target, AnimationFrameCallback,
-    DebugFrameOverlayStats, EventCallback, FrameTimestampOrigin, GpuixStyleDiagnostic,
-    GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
+    apply_batch_to_tree_with_diagnostics, canvas_size, catch_gpui_initialization,
+    debug_frame_overlay_mode_name, debug_frame_overlay_stats_js, default_http_client,
+    dispatch_animation_frame_callback, dispatch_application_menu_action, drain_style_diagnostics,
+    first_canvas_diagnostic_message, forget_canvas_diagnostics, fresh_canvas_diagnostics,
+    has_application_menus, init_application_menu_support, install_application_menus,
+    parse_debug_frame_overlay_mode, parse_style_json, pending_custom_prop_diagnostic,
+    pending_style_diagnostics, set_application_menus, to_element_id, validate_canvas_target,
+    AnimationFrameCallback, DebugFrameOverlayStats, EventCallback, FrameTimestampOrigin,
+    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -226,6 +226,143 @@ fn decode_png_for_comparison(path: &str) -> Result<Arc<gpui::RenderImage>> {
 pub struct ImageComparisonResult {
     pub differing_pixel_ratio: f64,
     pub max_channel_delta: u32,
+    pub max_channel_delta_outside_golden_contour: u32,
+    pub eroded_geometry_mismatch_ratio: f64,
+}
+
+fn pixels_differ(pixel_a: &[u8], pixel_b: &[u8], tolerance: u8) -> bool {
+    pixel_a
+        .iter()
+        .zip(pixel_b)
+        .any(|(&channel_a, &channel_b)| channel_a.abs_diff(channel_b) > tolerance)
+}
+
+fn color_edge_mask(pixels: &[u8], width: usize, height: usize, tolerance: u8) -> Vec<bool> {
+    let mut edges = vec![false; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let index = y * width + x;
+            let pixel = &pixels[index * 4..index * 4 + 4];
+            let neighbors = [
+                x.checked_sub(1).map(|neighbor_x| (neighbor_x, y)),
+                (x + 1 < width).then_some((x + 1, y)),
+                y.checked_sub(1).map(|neighbor_y| (x, neighbor_y)),
+                (y + 1 < height).then_some((x, y + 1)),
+            ];
+            edges[index] = neighbors
+                .into_iter()
+                .flatten()
+                .any(|(neighbor_x, neighbor_y)| {
+                    let neighbor = (neighbor_y * width + neighbor_x) * 4;
+                    pixels_differ(pixel, &pixels[neighbor..neighbor + 4], tolerance)
+                });
+        }
+    }
+    edges
+}
+
+fn dilate_one_pixel(mask: &[bool], width: usize, height: usize) -> Vec<bool> {
+    let mut dilated = vec![false; mask.len()];
+    if width == 0 || height == 0 {
+        return dilated;
+    }
+    for y in 0..height {
+        for x in 0..width {
+            let x_start = x.saturating_sub(1);
+            let x_end = (x + 1).min(width - 1);
+            let y_start = y.saturating_sub(1);
+            let y_end = (y + 1).min(height - 1);
+            dilated[y * width + x] = (y_start..=y_end).any(|neighbor_y| {
+                (x_start..=x_end).any(|neighbor_x| mask[neighbor_y * width + neighbor_x])
+            });
+        }
+    }
+    dilated
+}
+
+fn geometry_mask(pixels: &[u8], tolerance: u8) -> Vec<bool> {
+    let Some(background) = pixels.get(..4) else {
+        return Vec::new();
+    };
+    pixels
+        .chunks_exact(4)
+        .map(|pixel| pixels_differ(pixel, background, tolerance))
+        .collect()
+}
+
+fn erode_one_pixel(mask: &[bool], width: usize, height: usize) -> Vec<bool> {
+    let mut eroded = vec![false; mask.len()];
+    if width < 3 || height < 3 {
+        return eroded;
+    }
+    for y in 1..height - 1 {
+        for x in 1..width - 1 {
+            eroded[y * width + x] = (y - 1..=y + 1).all(|neighbor_y| {
+                (x - 1..=x + 1).all(|neighbor_x| mask[neighbor_y * width + neighbor_x])
+            });
+        }
+    }
+    eroded
+}
+
+fn compare_image_bytes(
+    golden: &[u8],
+    actual: &[u8],
+    width: usize,
+    height: usize,
+    tolerance: u8,
+) -> ImageComparisonResult {
+    let pixel_count = width * height;
+    let golden_contour = dilate_one_pixel(
+        &color_edge_mask(golden, width, height, tolerance),
+        width,
+        height,
+    );
+    let golden_geometry = geometry_mask(golden, tolerance);
+    let actual_geometry = geometry_mask(actual, tolerance);
+    let eroded_golden = erode_one_pixel(&golden_geometry, width, height);
+    let eroded_actual = erode_one_pixel(&actual_geometry, width, height);
+    let mut differing_pixels = 0usize;
+    let mut eroded_geometry_mismatches = 0usize;
+    let mut max_channel_delta = 0u8;
+    let mut max_channel_delta_outside_golden_contour = 0u8;
+
+    for index in 0..pixel_count {
+        let offset = index * 4;
+        let golden_pixel = &golden[offset..offset + 4];
+        let actual_pixel = &actual[offset..offset + 4];
+        let mut pixel_differs = false;
+        for (&golden_channel, &actual_channel) in golden_pixel.iter().zip(actual_pixel) {
+            let delta = golden_channel.abs_diff(actual_channel);
+            max_channel_delta = max_channel_delta.max(delta);
+            if !golden_contour[index] {
+                max_channel_delta_outside_golden_contour =
+                    max_channel_delta_outside_golden_contour.max(delta);
+            }
+            pixel_differs |= delta > tolerance;
+        }
+        differing_pixels += usize::from(pixel_differs);
+        eroded_geometry_mismatches += usize::from(
+            (eroded_golden[index] && !actual_geometry[index])
+                || (eroded_actual[index] && !golden_geometry[index]),
+        );
+    }
+
+    let ratio = |count| {
+        if pixel_count == 0 {
+            0.0
+        } else {
+            count as f64 / pixel_count as f64
+        }
+    };
+    ImageComparisonResult {
+        differing_pixel_ratio: ratio(differing_pixels),
+        max_channel_delta: u32::from(max_channel_delta),
+        max_channel_delta_outside_golden_contour: u32::from(
+            max_channel_delta_outside_golden_contour,
+        ),
+        eroded_geometry_mismatch_ratio: ratio(eroded_geometry_mismatches),
+    }
 }
 
 /// GPU-backed GPUI test renderer. Uses VisualTestAppContext with the native
@@ -450,6 +587,10 @@ impl TestGpuixRenderer {
 
     #[napi]
     pub fn drain_style_diagnostics(&self) -> Vec<GpuixStyleDiagnostic> {
+        if !self.strict_styles.load(Ordering::Relaxed) {
+            self.surface_canvas_preparation_diagnostics()
+                .expect("non-strict canvas preparation diagnostics cannot throw");
+        }
         drain_style_diagnostics(&self.style_diagnostics, &self.tree)
     }
 
@@ -523,11 +664,17 @@ impl TestGpuixRenderer {
         operands: Float64Array,
         strings: Vec<String>,
     ) -> Result<()> {
+        self.surface_canvas_preparation_diagnostics()?;
         let id = to_element_id(id)?;
         let tree = self.tree.lock().unwrap();
         validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
-        let decoded = crate::canvas::decode(ops.as_ref(), operands.as_ref(), &strings)
-            .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
+        let decoded = crate::canvas::decode(
+            ops.as_ref(),
+            operands.as_ref(),
+            &strings,
+            canvas_size(&tree, id),
+        )
+        .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
         let strict = self.strict_styles.load(Ordering::Relaxed);
         if strict && !decoded.diagnostics.is_empty() {
             let message = first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics)
@@ -620,6 +767,18 @@ impl TestGpuixRenderer {
         })
     }
 
+    fn surface_canvas_preparation_diagnostics(&self) -> Result<()> {
+        let pending = crate::renderer::take_canvas_preparation_diagnostics(
+            &self.canvas_display_lists,
+            self.strict_styles.load(Ordering::Relaxed),
+            &self.tree,
+            &self.canvas_diagnostic_members,
+        )
+        .map_err(Error::from_reason)?;
+        self.style_diagnostics.lock().unwrap().extend(pending);
+        Ok(())
+    }
+
     /// Notify the view entity and run GPUI until parked.
     /// This triggers GpuixView::render() → build_element() → GPUI layout.
     /// Must be called after mutations and before simulating events (GPUI's
@@ -632,7 +791,8 @@ impl TestGpuixRenderer {
                 .map_err(|e| Error::from_reason(e.to_string()))?;
             cx.run_until_parked();
             Ok(())
-        })
+        })?;
+        self.surface_canvas_preparation_diagnostics()
     }
 
     /// Queue one callback for the next manually advanced GPUI frame without
@@ -1306,7 +1466,9 @@ impl TestGpuixRenderer {
         })
     }
 
-    /// Compare two PNG screenshots using an absolute tolerance for each RGBA channel.
+    /// Compare a reference PNG with an actual screenshot using an absolute tolerance for each
+    /// RGBA channel. The contour and geometry metrics are intentionally asymmetric: they derive
+    /// their reference masks from the first PNG.
     ///
     /// Future D1/fillText scenes will not be deterministic across browser and native due to
     /// font selection, shaping, and antialiasing. Transparent scenes will require an explicit
@@ -1344,28 +1506,13 @@ impl TestGpuixRenderer {
         let pixels_b = image_b
             .as_bytes(0)
             .ok_or_else(|| Error::from_reason(format!("Decoded PNG has no frame: {path_b}")))?;
-        let pixel_count = pixels_a.len() / 4;
-        let mut differing_pixels = 0usize;
-        let mut max_channel_delta = 0u8;
-
-        for (pixel_a, pixel_b) in pixels_a.chunks_exact(4).zip(pixels_b.chunks_exact(4)) {
-            let mut pixel_differs = false;
-            for (&channel_a, &channel_b) in pixel_a.iter().zip(pixel_b) {
-                let delta = channel_a.abs_diff(channel_b);
-                max_channel_delta = max_channel_delta.max(delta);
-                pixel_differs |= delta > tolerance;
-            }
-            differing_pixels += usize::from(pixel_differs);
-        }
-
-        Ok(ImageComparisonResult {
-            differing_pixel_ratio: if pixel_count == 0 {
-                0.0
-            } else {
-                differing_pixels as f64 / pixel_count as f64
-            },
-            max_channel_delta: u32::from(max_channel_delta),
-        })
+        Ok(compare_image_bytes(
+            pixels_a,
+            pixels_b,
+            usize::try_from(u32::from(size_a.width)).unwrap(),
+            usize::try_from(u32::from(size_a.height)).unwrap(),
+            tolerance,
+        ))
     }
 
     /// Return and clear all collected events since the last drain.
@@ -1591,6 +1738,26 @@ impl TestGpuixRenderer {
             .transpose()
             .map_err(|error| {
                 Error::from_reason(format!("Image state serialization failed: {error}"))
+            })
+    }
+
+    /// Return preparation counters for a live `<canvas>` element.
+    #[napi]
+    pub fn get_canvas_state(&self, id: f64) -> Result<Option<String>> {
+        let id = to_element_id(id)?;
+        self.flush()?;
+        let state = with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.read(app).custom_registry.test_state(id)
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })?;
+        state
+            .map(|state| serde_json::to_string(&state))
+            .transpose()
+            .map_err(|error| {
+                Error::from_reason(format!("Canvas state serialization failed: {error}"))
             })
     }
 

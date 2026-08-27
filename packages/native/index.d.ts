@@ -436,7 +436,9 @@ export declare class TestGpuixRenderer {
    */
   captureScreenshot(path: string): void
   /**
-   * Compare two PNG screenshots using an absolute tolerance for each RGBA channel.
+   * Compare a reference PNG with an actual screenshot using an absolute tolerance for each
+   * RGBA channel. The contour and geometry metrics are intentionally asymmetric: they derive
+   * their reference masks from the first PNG.
    *
    * Future D1/fillText scenes will not be deterministic across browser and native due to
    * font selection, shaping, and antialiasing. Transparent scenes will require an explicit
@@ -472,6 +474,8 @@ export declare class TestGpuixRenderer {
    * This is test-only state; production images keep their loading fallback.
    */
   getImageLoadState(id: number): string | null
+  /** Return preparation counters for a live `<canvas>` element. */
+  getCanvasState(id: number): string | null
   /** Tree JSON with last-paint bounds. Used by the automation locators. */
   getAutomationTree(): string
   /** Last painted bounds for an element, or null if it was not painted. */
@@ -693,6 +697,8 @@ export interface ImageCapabilities {
 export interface ImageComparisonResult {
   differingPixelRatio: number
   maxChannelDelta: number
+  maxChannelDeltaOutsideGoldenContour: number
+  erodedGeometryMismatchRatio: number
 }
 
 /**
