@@ -4151,6 +4151,7 @@ impl WebGpuixRenderer {
         update_web_window(move |_view, window, cx| {
             let options = crate::automation::ScrollWheelOptions {
                 phase: None,
+                momentum_phase: None,
                 delta_unit: None,
                 modifiers: Some(crate::automation::ScrollWheelModifiers {
                     shift: Some(modifiers.shift),

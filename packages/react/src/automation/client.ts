@@ -42,6 +42,7 @@ export interface ScrollWheelModifiers {
 
 export interface ScrollWheelOptions {
   phase?: "started" | "moved" | "ended" | "cancelled"
+  momentumPhase?: "started" | "moved" | "ended" | "cancelled"
   deltaUnit?: "pixels" | "lines"
   /** Either the phased API's object form or `press()`-style modifier names. */
   modifiers?: ScrollWheelModifiers | string

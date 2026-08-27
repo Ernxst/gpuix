@@ -148,6 +148,7 @@ export const methods = {
       deltaX: z.number(),
       deltaY: z.number(),
       phase: z.enum(["started", "moved", "ended", "cancelled"]).optional(),
+      momentumPhase: z.enum(["started", "moved", "ended", "cancelled"]).optional(),
       deltaUnit: z.enum(["pixels", "lines"]).optional(),
       modifiers: z.union([
         modifiersSchema.unwrap(),
