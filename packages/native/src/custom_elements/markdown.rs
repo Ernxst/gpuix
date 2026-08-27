@@ -122,7 +122,7 @@ impl CustomElement for MarkdownElement {
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
         match key {
-            "source" => self.source = value.as_str().unwrap_or("").to_string(),
+            "source" => self.source = value.as_str().unwrap_or("").replace("\r\n", "\n"),
             "theme" => self.theme = Theme::from_prop(Some(&value)),
             _ => {}
         }
