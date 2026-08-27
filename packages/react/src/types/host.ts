@@ -1193,11 +1193,13 @@ export interface CanvasPublicInstance extends PublicInstance {
     options?: CanvasRenderingContext2DSettings
   ): CanvasRenderingContext2D
   getContext(contextId: string, options?: unknown): CanvasRenderingContext2D | null
+  toDataURL(type?: string, quality?: unknown): string
 }
 
 // Internal host instance. The real element state lives in Rust's RetainedTree.
 export interface Instance extends PublicInstance {
   getContext?: CanvasPublicInstance["getContext"]
+  toDataURL?: CanvasPublicInstance["toDataURL"]
   __applyCanvasCommands(
     ops: Uint32Array,
     operands: Float64Array,

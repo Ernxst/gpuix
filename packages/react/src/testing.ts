@@ -1298,6 +1298,7 @@ export function expectCanvasMatchesBrowser(
   const testRoot = createTestRoot({
     width: CANVAS_GOLDEN_WIDTH,
     height: CANVAS_GOLDEN_HEIGHT,
+    strictStyles: true,
   })
   const canvasRef = createRef<CanvasPublicInstance>()
 

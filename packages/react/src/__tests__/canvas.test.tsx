@@ -5,7 +5,10 @@ import React, { createRef } from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import { __applyCanvasCommands } from "../canvas/commands.js"
-import { flushRecordingContext2D } from "../canvas/context-2d.js"
+import {
+  CANVAS_ELEMENT_UNSUPPORTED_MEMBERS,
+  flushRecordingContext2D,
+} from "../canvas/context-2d.js"
 import { createImageBitmap, Image } from "../canvas/image.js"
 import {
   CANVAS_OPCODES,
@@ -116,6 +119,37 @@ describeNative("retained canvas element", () => {
       expect(canvasRef.current?.getContext("webgl")).toBeNull()
     } finally {
       testRoot.unmount()
+    }
+  })
+
+  it("diagnoses toDataURL once per element with the readback reason", () => {
+    const strict = createTestRoot({ width: 80, height: 60, strictStyles: true })
+    const compatibility = createTestRoot({ width: 80, height: 60, strictStyles: false })
+    const strictRef = createRef<CanvasPublicInstance>()
+    const compatibilityRef = createRef<CanvasPublicInstance>()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const spec = CANVAS_ELEMENT_UNSUPPORTED_MEMBERS[0]
+    try {
+      strict.render(<canvas ref={strictRef} testId="strict-data-url" width={80} height={60} />)
+      compatibility.render(
+        <canvas ref={compatibilityRef} testId="compat-data-url" width={80} height={60} />
+      )
+
+      expect(() => strictRef.current!.toDataURL()).toThrow(
+        new RegExp(`strict-data-url.*HTMLCanvasElement\\.toDataURL.*${spec.reason}`)
+      )
+      compatibilityRef.current!.toDataURL()
+      compatibilityRef.current!.toDataURL()
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(
+          new RegExp(`compat-data-url.*HTMLCanvasElement\\.toDataURL.*${spec.reason}`)
+        )
+      )
+    } finally {
+      warn.mockRestore()
+      strict.unmount()
+      compatibility.unmount()
     }
   })
 
