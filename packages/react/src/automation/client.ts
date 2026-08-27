@@ -202,7 +202,7 @@ export class InProcessBackend extends ValidatedAutomationBackend {
         }
         const result: Array<"input" | "screenshot" | "clock" | "tree"> = []
         if (capabilities.automation.click) result.push("input")
-        if (capabilities.automation.screenshot) result.push("screenshot")
+        if (capabilities.automation.screenshotFormats.length > 0) result.push("screenshot")
         if (capabilities.automation.clock) result.push("clock")
         if (capabilities.automation.tree) result.push("tree")
         return result
@@ -924,7 +924,11 @@ export function liveRendererAsTest(
     clearSelection: () => renderer.clearSelection(),
     captureScreenshot(file) {
       const capabilities = renderer.capabilities?.()
-      if (capabilities ? !capabilities.automation.screenshot : !renderer.captureScreenshot) {
+      if (
+        capabilities
+          ? !capabilities.automation.screenshotFormats.includes("png")
+          : !renderer.captureScreenshot
+      ) {
         throw new AutomationError(
           "Unsupported",
           "Browser screenshots must use the controlling browser automation client"

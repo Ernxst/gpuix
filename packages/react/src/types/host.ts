@@ -925,11 +925,15 @@ export interface NativeRenderer {
   setStrictStyles?(enabled: boolean): void
   /** Opt in to loopback/private URL images. Link-local and metadata ranges stay blocked. */
   setAllowPrivateNetworkImages?(enabled: boolean): void
+  /** Capture a frame in a capability-advertised image format. */
+  captureScreenshot?(path: string): void
   drainStyleDiagnostics?(): StyleDiagnostic[]
 
   // ── Application lifecycle ──────────────────────────────────────
   setMenus?(menus: MenuSpec[]): void
   quit?(): void
+  requiresTick?(): boolean
+  tick?(): boolean
   /** Install a coalesced native frame source. Returns false when timers must drive ticks. */
   setFrameRequestHandler?(handler: (() => void) | null): boolean
   /** Pump idle platform work without releasing a pending display-link frame token. */
@@ -969,6 +973,8 @@ export interface NativeRenderer {
   // ── Window API ─────────────────────────────────────────────────
   /** Whether the native window is active and receiving key events. */
   isActive?(): boolean
+  /** Request foreground activation when `capabilities().window.activate` is true. */
+  activateWindow?(): void
   /** Reads the live logical window dimensions and device-pixel scale factor. */
   getWindowSize?(): { width: number; height: number; scaleFactor: number }
   /** Internal transport for renderer-global native window events. */
@@ -997,12 +1003,21 @@ export interface StyleDiagnostic {
 
 export type DebugFrameOverlayMode = "hidden" | "minimal" | "full"
 
+export interface UnsupportedCapabilityError extends Error {
+  name: "UnsupportedCapabilityError"
+  code: "ERR_GPUX_UNSUPPORTED_CAPABILITY"
+  capability: string
+}
+
 /** Features offered by one renderer instance on its current platform. */
 export interface RendererCapabilities {
   platform: "macos" | "windows" | "linux" | "freebsd" | "browser" | "unknown"
   frameClock: {
-    kind: "display-link" | "timer"
+    /** The source actively driving frames now, not a platform default. */
+    kind: "display-link" | "timer" | "raf" | "manual"
     requiresTick: boolean
+    /** `setFrameRequestHandler()` can select an external frame source. */
+    externalFrame: boolean
   }
   window: {
     activation: boolean
@@ -1020,6 +1035,7 @@ export interface RendererCapabilities {
     scrollWheel: boolean
     keyboard: "native" | "browser"
     screenshot: boolean
+    screenshotFormats: Array<"png">
     clock: boolean
     tree: boolean
   }

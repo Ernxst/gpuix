@@ -31,7 +31,7 @@ import {
 import type { EventPayload } from "@gpuix/native"
 import { handleGpuixEvent } from "../reconciler/event-registry.js"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
-import type { Props, PublicInstance } from "../types/host.js"
+import type { Props, PublicInstance, RendererCapabilities } from "../types/host.js"
 import { expectScreenshotsDiffer, expectScreenshotsEqual, SHOTS_DIR } from "./test-utils"
 
 // All tests require the native GPUI test renderer (cargo build with test-support).
@@ -119,6 +119,43 @@ describeNative("application menus", () => {
 })
 
 describe("frame loop", () => {
+  it("keeps the active timer kind when an external frame source falls back", () => {
+    let kind: RendererCapabilities["frameClock"]["kind"] = "display-link"
+    const capabilities = (): RendererCapabilities => ({
+      platform: "macos",
+      frameClock: { kind, requiresTick: true, externalFrame: true },
+      window: { activation: true, activate: true, resize: true, multiple: false },
+      images: { privateNetwork: true },
+      automation: {
+        click: true,
+        hover: true,
+        drag: true,
+        scrollWheel: true,
+        keyboard: "native",
+        screenshot: true,
+        screenshotFormats: ["png"],
+        clock: true,
+        tree: true,
+      },
+    })
+    const loop = startFrameLoop(
+      {
+        capabilities,
+        requiresTick: () => true,
+        tick: () => false,
+        tickIdle: () => true,
+        setFrameRequestHandler: () => {
+          kind = "timer"
+          return false
+        },
+      },
+      { frameMs: 0 },
+    )
+
+    expect(capabilities().frameClock.kind).toBe("timer")
+    loop.stop()
+  })
+
   it("does not tick when the native platform owns its event loop", () => {
     let ticks = 0
     const loop = startFrameLoop({

@@ -52,6 +52,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   releasePointerCapture(elementId: number): void
   simulateWindowActivation(active: boolean): void
   simulateWindowDeactivation(): void
+  activateWindow(): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
   simulateClick(x: number, y: number, button?: number, modifiers?: string): void
@@ -814,6 +815,10 @@ export class TestRenderer implements NativeRenderer {
 
   isActive(): boolean {
     return this.native.isActive!()
+  }
+
+  activateWindow(): void {
+    this.native.activateWindow()
   }
 
   simulateResize(width: number, height: number): void {

@@ -32,16 +32,16 @@ function Counter() {
 }
 
 describeNative("automation", () => {
-  it("reads live native renderer capabilities before opening a window", () => {
-    const capabilities = createRenderer().capabilities()
+  it("reads the active live native frame clock", () => {
+    const renderer = createRenderer()
     const platform = process.platform === "darwin" ? "macos" : "windows"
 
-    expect(capabilities).toMatchObject({
+    expect(renderer.capabilities()).toMatchObject({
       platform,
       frameClock:
         platform === "macos"
-          ? { kind: "display-link", requiresTick: true }
-          : { kind: "timer", requiresTick: false },
+          ? { kind: "timer", requiresTick: true, externalFrame: true }
+          : { kind: "timer", requiresTick: false, externalFrame: false },
       window: { activation: true, activate: platform === "macos", resize: true, multiple: false },
       images: { privateNetwork: true },
       automation: {
@@ -51,10 +51,18 @@ describeNative("automation", () => {
         scrollWheel: true,
         keyboard: "native",
         screenshot: true,
+        screenshotFormats: ["png"],
         clock: true,
         tree: true,
       },
     })
+
+    if (platform === "macos") {
+      expect(renderer.setFrameRequestHandler(() => {})).toBe(true)
+      expect(renderer.capabilities().frameClock.kind).toBe("display-link")
+      renderer.setFrameRequestHandler(null)
+      expect(renderer.capabilities().frameClock.kind).toBe("timer")
+    }
   })
 
   it("reads offscreen renderer capabilities separately from the display clock", () => {
@@ -62,7 +70,7 @@ describeNative("automation", () => {
     try {
       expect(renderer.capabilities()).toMatchObject({
         platform: process.platform === "darwin" ? "macos" : "windows",
-        frameClock: { kind: "timer", requiresTick: false },
+        frameClock: { kind: "manual", requiresTick: false, externalFrame: false },
         window: { activation: true, activate: false, resize: true, multiple: false },
         images: { privateNetwork: true },
         automation: {
@@ -70,8 +78,19 @@ describeNative("automation", () => {
           drag: true,
           scrollWheel: true,
           screenshot: true,
+          screenshotFormats: ["png"],
         },
       })
+      try {
+        renderer.activateWindow()
+        throw new Error("Expected offscreen activation to be unsupported")
+      } catch (error) {
+        expect(error).toMatchObject({
+          name: "UnsupportedCapabilityError",
+          code: "ERR_GPUX_UNSUPPORTED_CAPABILITY",
+          capability: "window.activate",
+        })
+      }
     } finally {
       renderer.dispose()
     }
@@ -361,7 +380,7 @@ describe("browser renderer capability adapter", () => {
   it("retains browser capabilities and omits unsupported screenshots from automation", async () => {
     const capabilities: RendererCapabilities = {
       platform: "browser",
-      frameClock: { kind: "timer", requiresTick: false },
+      frameClock: { kind: "raf", requiresTick: false, externalFrame: false },
       window: { activation: false, activate: false, resize: true, multiple: false },
       images: { privateNetwork: false },
       automation: {
@@ -371,6 +390,7 @@ describe("browser renderer capability adapter", () => {
         scrollWheel: true,
         keyboard: "browser",
         screenshot: false,
+        screenshotFormats: [],
         clock: true,
         tree: true,
       },

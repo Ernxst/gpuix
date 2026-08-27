@@ -662,7 +662,7 @@ individual methods:
 ```ts
 const capabilities = renderer.capabilities()
 
-if (capabilities.automation.screenshot) {
+if (capabilities.automation.screenshotFormats.includes('png')) {
   renderer.captureScreenshot('/tmp/frame.png')
 }
 if (capabilities.window.activation) {
@@ -670,11 +670,22 @@ if (capabilities.window.activation) {
 }
 ```
 
-`capabilities` includes `platform`, `frameClock` (`display-link` or `timer`),
-window activation/resize/multi-window support, private-network image opt-in,
-and live automation support (hover, drag, scroll-wheel, keyboard, screenshots,
-clock, and tree). Existing methods such as `requiresTick()`, `isActive()`, and
-`captureScreenshot()` remain supported for compatibility.
+`capabilities` includes `platform`; the **active** `frameClock` source
+(`display-link`, `timer`, `raf`, or deterministic `manual`); and whether an
+external frame source can be selected through `frameClock.externalFrame`.
+It also describes window activation/resize/multi-window support,
+private-network image opt-in, and live automation (hover, drag, scroll-wheel,
+keyboard, screenshots, clock, and tree). Screenshot formats are listed in
+`automation.screenshotFormats`; `captureScreenshot()` is typed when `png` is
+listed. `images.privateNetwork` means
+`setAllowPrivateNetworkImages(enabled)` is available on that renderer (the
+same policy can also be set at creation with `allowPrivateNetworkImages`).
+
+Existing probes such as `requiresTick()`, `isActive()`, and
+`captureScreenshot()` remain supported for compatibility. A call that is not
+supported by its renderer fails with `UnsupportedCapabilityError`, whose
+`code` is `ERR_GPUX_UNSUPPORTED_CAPABILITY` and whose `capability` identifies
+the unavailable feature.
 
 > [!IMPORTANT]
 > On macOS, never drive `tick()` from a `setImmediate` loop. That spins at tens of thousands of

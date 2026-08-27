@@ -169,9 +169,9 @@ export function startFrameLoop(
     scheduleTimer(() => drive(nativeFrameSource ? "idle" : "timer"), wait)
   }
 
-  const canUseDisplayLink =
-    capabilities === undefined || capabilities.frameClock.kind === "display-link"
-  if (canUseDisplayLink && renderer.setFrameRequestHandler && renderer.tickIdle) {
+  const canUseExternalFrame =
+    capabilities === undefined || capabilities.frameClock.externalFrame
+  if (canUseExternalFrame && renderer.setFrameRequestHandler && renderer.tickIdle) {
     try {
       nativeFrameSource = renderer.setFrameRequestHandler(() => drive("native"))
     } catch (error) {

@@ -29,6 +29,11 @@ export declare class GpuixRenderer {
    * by default outside production builds.
    */
   setStrictStyles(enabled: boolean): void
+  /**
+   * Opt in to loopback and private-network URL image sources.
+   * Link-local and cloud-metadata addresses remain blocked.
+   */
+  setAllowPrivateNetworkImages(enabled: boolean): void
   /** Drain rejected style fields after a commit, once element type and testId are known. */
   drainStyleDiagnostics(): Array<GpuixStyleDiagnostic>
   setText(id: number, content: string): void
@@ -309,6 +314,8 @@ export declare class TestGpuixRenderer {
   simulateWindowDeactivation(): void
   /** Whether the offscreen native window is active and receiving key events. */
   isActive(): boolean
+  /** An offscreen test window cannot request foreground activation. */
+  activateWindow(): void
   /**
    * Simulate a mouse down event at the given window coordinates.
    * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
@@ -440,6 +447,8 @@ export interface AutomationCapabilities {
   /** `native` injects through GPUI; `browser` uses the browser IME mirror. */
   keyboard: "native" | "browser"
   screenshot: boolean
+  /** Screenshot file formats currently accepted by `captureScreenshot()`. */
+  screenshotFormats: Array<"png">
   clock: boolean
   tree: boolean
 }
@@ -582,12 +591,14 @@ export interface EventPayload {
 }
 
 export interface FrameClockCapabilities {
-  /**
-   * `display-link` uses macOS's native display callback; `timer` has no
-   * JavaScript frame pump to drive.
-   */
-  kind: "display-link" | "timer"
+  /** The source currently driving frame work for this renderer. */
+  kind: "display-link" | "timer" | "raf" | "manual"
   requiresTick: boolean
+  /**
+   * Whether `setFrameRequestHandler()` can switch this renderer to an
+   * external frame source.
+   */
+  externalFrame: boolean
 }
 
 export interface GpuixStyleDiagnostic {
@@ -665,9 +676,8 @@ export interface MenuSpec {
 /**
  * Features offered by one renderer instance on its current platform.
  *
- * This is deliberately descriptive rather than a mirror of every method:
- * unsupported methods still retain their established error behaviour, while
- * consumers can choose a supported path before calling one.
+ * Each `true` capability corresponds to a callable renderer method. Calls
+ * outside the advertised surface reject with `UnsupportedCapabilityError`.
  */
 export interface RendererCapabilities {
   platform: "macos" | "windows" | "linux" | "freebsd" | "browser" | "unknown"
@@ -675,6 +685,13 @@ export interface RendererCapabilities {
   window: WindowCapabilities
   images: ImageCapabilities
   automation: AutomationCapabilities
+}
+
+/** Error thrown when a renderer method is outside its advertised capability surface. */
+export interface UnsupportedCapabilityError extends Error {
+  name: "UnsupportedCapabilityError"
+  code: "ERR_GPUX_UNSUPPORTED_CAPABILITY"
+  capability: string
 }
 
 export interface ScrollWheelModifiers {

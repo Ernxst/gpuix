@@ -823,6 +823,12 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// An offscreen test window cannot request foreground activation.
+    #[napi]
+    pub fn activate_window(&self, env: Env) -> Result<()> {
+        crate::renderer::unsupported_capability(env, "window.activate")
+    }
+
     /// Simulate a mouse down event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]
