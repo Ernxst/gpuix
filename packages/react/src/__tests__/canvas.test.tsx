@@ -91,6 +91,41 @@ describeNative("retained canvas element", () => {
     }
   })
 
+  it("does not retessellate an unchanged display list on a requested frame", () => {
+    const testRoot = createTestRoot({ width: 120, height: 80 })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="cached-canvas" width={120} height={80} />
+      )
+      const context = canvasRef.current!.getContext("2d")!
+      context.beginPath()
+      context.moveTo(8, 8)
+      context.bezierCurveTo(28, 70, 82, 10, 112, 68)
+      context.stroke()
+      flushRecordingContext2D(context)
+      testRoot.renderer.flush()
+
+      const canvas = testRoot.renderer.findByTestId("cached-canvas")!
+      const prepared = testRoot.renderer.getCanvasState(canvas.id)!
+      expect(prepared.tessellationCount).toBeGreaterThan(0)
+
+      testRoot.renderer.requestFrame(() => {})
+      testRoot.renderer.flush()
+      expect(testRoot.renderer.getCanvasState(canvas.id)).toEqual(prepared)
+
+      context.lineTo(116, 72)
+      context.stroke()
+      flushRecordingContext2D(context)
+      testRoot.renderer.flush()
+      const changed = testRoot.renderer.getCanvasState(canvas.id)!
+      expect(changed.preparationCount).toBeGreaterThan(prepared.preparationCount)
+      expect(changed.tessellationCount).toBeGreaterThan(prepared.tessellationCount)
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
   it("throws native decoder diagnostics synchronously in strict mode", () => {
     const testRoot = createTestRoot({ width: 120, height: 80, strictStyles: true })
     const canvasRef = createRef<PublicInstance>()
@@ -104,13 +139,13 @@ describeNative("retained canvas element", () => {
           new Uint32Array([
             CANVAS_STREAM_MAGIC,
             CANVAS_STREAM_VERSION,
-            CANVAS_OPCODES.stroke,
-            0,
+            CANVAS_OPCODES.lineDashOffset,
+            1,
           ]),
-          new Float64Array(),
+          new Float64Array([2]),
           []
         )
-      ).toThrow(/stroke.*not implemented in canvas phase B2/)
+      ).toThrow(/lineDashOffset.*cannot be replayed faithfully/)
       expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
     } finally {
       testRoot.unmount()
@@ -126,10 +161,10 @@ describeNative("retained canvas element", () => {
       ops: new Uint32Array([
         CANVAS_STREAM_MAGIC,
         CANVAS_STREAM_VERSION,
-        CANVAS_OPCODES.stroke,
-        0,
+        CANVAS_OPCODES.lineDashOffset,
+        1,
       ]),
-      operands: new Float64Array(),
+      operands: new Float64Array([2]),
     }
     try {
       testRoot.render(
@@ -146,7 +181,7 @@ describeNative("retained canvas element", () => {
 
       __applyCanvasCommands(canvasRef, unsupported.ops, unsupported.operands, [])
       expect(warn).toHaveBeenCalledTimes(1)
-      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/warning-canvas.*stroke/))
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/warning-canvas.*lineDashOffset/))
 
       __applyCanvasCommands(canvasRef, unsupported.ops, unsupported.operands, [])
       __applyCanvasCommands(
@@ -157,7 +192,7 @@ describeNative("retained canvas element", () => {
       )
       expect(warn).toHaveBeenCalledTimes(2)
       expect(warn).toHaveBeenLastCalledWith(
-        expect.stringMatching(/second-warning-canvas.*stroke/)
+        expect.stringMatching(/second-warning-canvas.*lineDashOffset/)
       )
       testRoot.render(
         <div>
@@ -228,7 +263,7 @@ describeNative("retained canvas element", () => {
     }
   })
 
-  it("warns once when a nonzero fill exceeds the safe B1 preparation cap", () => {
+  it("prepares paths larger than the former B1 cap without warning", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ width: 180, height: 120, strictStyles: false })
     const canvasRef = createRef<CanvasPublicInstance>()
@@ -245,14 +280,13 @@ describeNative("retained canvas element", () => {
       context.fill()
       flushRecordingContext2D(context)
 
-      expect(warn).toHaveBeenCalledTimes(1)
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringMatching(/complex-path-canvas.*fill.*128 line segments/)
-      )
+      testRoot.renderer.flush()
+      expect(warn).not.toHaveBeenCalled()
 
       context.fill()
       flushRecordingContext2D(context)
-      expect(warn).toHaveBeenCalledTimes(1)
+      testRoot.renderer.flush()
+      expect(warn).not.toHaveBeenCalled()
       expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
     } finally {
       warn.mockRestore()

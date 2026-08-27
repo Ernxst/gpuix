@@ -472,6 +472,8 @@ export declare class TestGpuixRenderer {
    * This is test-only state; production images keep their loading fallback.
    */
   getImageLoadState(id: number): string | null
+  /** Return preparation counters for a live `<canvas>` element. */
+  getCanvasState(id: number): string | null
   /** Tree JSON with last-paint bounds. Used by the automation locators. */
   getAutomationTree(): string
   /** Last painted bounds for an element, or null if it was not painted. */

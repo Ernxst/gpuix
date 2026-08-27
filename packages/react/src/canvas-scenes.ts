@@ -140,6 +140,29 @@ export const canvasScenes = {
       context.restore()
     },
   },
+
+  "zoomed-curve-stroke": {
+    name: "zoomed-curve-stroke",
+    draw: function zoomedCurveStroke(context, width, height) {
+      context.fillStyle = "#f8fafc"
+      context.fillRect(0, 0, width, height)
+
+      context.save()
+      context.translate(28, 18)
+      context.scale(4, 4)
+      context.beginPath()
+      context.moveTo(4, 42)
+      context.bezierCurveTo(18, 2, 42, 58, 66, 12)
+      context.quadraticCurveTo(72, 3, 70, 30)
+      context.setLineDash([3.5, 2])
+      context.lineWidth = 1.75
+      context.lineCap = "round"
+      context.lineJoin = "round"
+      context.strokeStyle = "#0f766e"
+      context.stroke()
+      context.restore()
+    },
+  },
 } satisfies Record<string, CanvasScene>
 
 export type CanvasSceneName = keyof typeof canvasScenes

@@ -55,11 +55,6 @@ impl SharedDisplayLists {
     }
 }
 
-/// The B1 path surface is deliberately bounded below GPUI's `u16` path-index
-/// ceiling. With line-only input this also leaves room for vertices introduced
-/// while resolving intersections. B3 can replace this conservative admission
-/// limit when it adds explicit, scale-aware tessellation policy.
-const MAX_B1_FILL_SEGMENTS: usize = 128;
 pub(crate) const DEFAULT_CANVAS_WIDTH: f64 = 300.0;
 pub(crate) const DEFAULT_CANVAS_HEIGHT: f64 = 150.0;
 
@@ -90,7 +85,22 @@ pub struct FillRect {
 pub enum PathCommand {
     MoveTo(CanvasPoint),
     LineTo(CanvasPoint),
+    CubicTo {
+        control_a: CanvasPoint,
+        control_b: CanvasPoint,
+        to: CanvasPoint,
+    },
+    QuadraticTo {
+        control: CanvasPoint,
+        to: CanvasPoint,
+    },
     ClosePath,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CanvasFillRule {
+    NonZero,
+    EvenOdd,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -99,6 +109,7 @@ pub struct FillPath {
     /// matching Canvas 2D's current-path semantics.
     pub commands: Vec<PathCommand>,
     pub color: gpui::Rgba,
+    pub fill_rule: CanvasFillRule,
     pub op_index: usize,
     pub clear_regions: Vec<CanvasQuad>,
 }
@@ -110,12 +121,22 @@ pub enum CanvasLineJoin {
     Bevel,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CanvasLineCap {
+    Butt,
+    Round,
+    Square,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct StrokeStyle {
     pub color: gpui::Rgba,
     pub line_width: f64,
+    pub line_cap: CanvasLineCap,
     pub line_join: CanvasLineJoin,
     pub miter_limit: f64,
+    pub line_dash: Vec<f64>,
+    pub transform_scale: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -131,10 +152,30 @@ pub struct StrokeRect {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct StrokePathStyle {
+    pub color: gpui::Rgba,
+    pub line_width: f64,
+    pub line_cap: CanvasLineCap,
+    pub line_join: CanvasLineJoin,
+    pub miter_limit: f64,
+    pub line_dash: Vec<f64>,
+    pub transform_scale: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StrokePath {
+    pub commands: Vec<PathCommand>,
+    pub style: StrokePathStyle,
+    pub op_index: usize,
+    pub clear_regions: Vec<CanvasQuad>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum DisplayItem {
     FillRect(FillRect),
     FillPath(FillPath),
     StrokeRect(StrokeRect),
+    StrokePath(StrokePath),
 }
 
 #[derive(Clone, Debug)]
@@ -186,8 +227,10 @@ struct ReplayState {
     stroke_style: gpui::Rgba,
     line_width: f64,
     global_alpha: f64,
+    line_cap: CanvasLineCap,
     line_join: CanvasLineJoin,
     miter_limit: f64,
+    line_dash: Vec<f64>,
     transform: CanvasTransform,
 }
 
@@ -228,6 +271,27 @@ impl CanvasTransform {
             y: self.b * x + self.d * y + self.f,
         }
     }
+
+    fn inverse_transform_point(self, point: CanvasPoint) -> Option<CanvasPoint> {
+        let determinant = self.a * self.d - self.b * self.c;
+        if !determinant.is_finite() || determinant.abs() <= f64::EPSILON {
+            return None;
+        }
+        let x = point.x - self.e;
+        let y = point.y - self.f;
+        Some(CanvasPoint {
+            x: (self.d * x - self.c * y) / determinant,
+            y: (-self.b * x + self.a * y) / determinant,
+        })
+    }
+
+    fn max_scale(self) -> f64 {
+        let xx = self.a * self.a + self.b * self.b;
+        let yy = self.c * self.c + self.d * self.d;
+        let xy = self.a * self.c + self.b * self.d;
+        let discriminant = ((xx - yy) * (xx - yy) + 4.0 * xy * xy).sqrt();
+        ((xx + yy + discriminant) * 0.5).sqrt()
+    }
 }
 
 fn point_preparation_problem(point: CanvasPoint) -> Option<&'static str> {
@@ -238,22 +302,144 @@ fn point_preparation_problem(point: CanvasPoint) -> Option<&'static str> {
 }
 
 fn path_preparation_problem(commands: &[PathCommand]) -> Option<String> {
-    for point in commands.iter().filter_map(|command| match command {
-        PathCommand::MoveTo(point) | PathCommand::LineTo(point) => Some(*point),
-        PathCommand::ClosePath => None,
-    }) {
-        if let Some(reason) = point_preparation_problem(point) {
-            return Some(reason.to_string());
+    let problem = |point| point_preparation_problem(point).map(str::to_string);
+    for command in commands {
+        let reason = match command {
+            PathCommand::MoveTo(point) | PathCommand::LineTo(point) => problem(*point),
+            PathCommand::CubicTo {
+                control_a,
+                control_b,
+                to,
+            } => problem(*control_a)
+                .or_else(|| problem(*control_b))
+                .or_else(|| problem(*to)),
+            PathCommand::QuadraticTo { control, to } => problem(*control).or_else(|| problem(*to)),
+            PathCommand::ClosePath => None,
+        };
+        if reason.is_some() {
+            return reason;
         }
     }
+    None
+}
 
-    let segment_count = commands
-        .iter()
-        .filter(|command| matches!(command, PathCommand::LineTo(_)))
-        .count();
-    (segment_count > MAX_B1_FILL_SEGMENTS).then(|| {
-        format!(
-            "canvas phase B1 safely prepares at most {MAX_B1_FILL_SEGMENTS} line segments per nonzero fill; got {segment_count}"
+fn same_point(left: CanvasPoint, right: CanvasPoint) -> bool {
+    (left.x - right.x).abs() <= f64::EPSILON && (left.y - right.y).abs() <= f64::EPSILON
+}
+
+fn ellipse_point(
+    center: CanvasPoint,
+    radius_x: f64,
+    radius_y: f64,
+    rotation: f64,
+    angle: f64,
+) -> CanvasPoint {
+    let (sin_rotation, cos_rotation) = rotation.sin_cos();
+    let (sin_angle, cos_angle) = angle.sin_cos();
+    CanvasPoint {
+        x: center.x + radius_x * cos_angle * cos_rotation - radius_y * sin_angle * sin_rotation,
+        y: center.y + radius_x * cos_angle * sin_rotation + radius_y * sin_angle * cos_rotation,
+    }
+}
+
+fn ellipse_derivative(radius_x: f64, radius_y: f64, rotation: f64, angle: f64) -> CanvasPoint {
+    let (sin_rotation, cos_rotation) = rotation.sin_cos();
+    let (sin_angle, cos_angle) = angle.sin_cos();
+    CanvasPoint {
+        x: -radius_x * sin_angle * cos_rotation - radius_y * cos_angle * sin_rotation,
+        y: -radius_x * sin_angle * sin_rotation + radius_y * cos_angle * cos_rotation,
+    }
+}
+
+fn normalized_arc_sweep(start: f64, end: f64, counterclockwise: bool) -> f64 {
+    let tau = std::f64::consts::TAU;
+    let raw = end - start;
+    if counterclockwise {
+        if raw <= -tau {
+            -tau
+        } else if raw >= tau {
+            -tau
+        } else if raw > 0.0 {
+            raw - tau
+        } else {
+            raw
+        }
+    } else if raw >= tau || raw <= -tau {
+        tau
+    } else if raw < 0.0 {
+        raw + tau
+    } else {
+        raw
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_ellipse(
+    commands: &mut Vec<PathCommand>,
+    current_point: &mut Option<CanvasPoint>,
+    subpath_start: &mut Option<CanvasPoint>,
+    transform: CanvasTransform,
+    center: CanvasPoint,
+    radius_x: f64,
+    radius_y: f64,
+    rotation: f64,
+    start: f64,
+    end: f64,
+    counterclockwise: bool,
+) {
+    let start_point = transform.transform_point(
+        ellipse_point(center, radius_x, radius_y, rotation, start).x,
+        ellipse_point(center, radius_x, radius_y, rotation, start).y,
+    );
+    match *current_point {
+        Some(point) if !same_point(point, start_point) => {
+            commands.push(PathCommand::LineTo(start_point))
+        }
+        None => {
+            commands.push(PathCommand::MoveTo(start_point));
+            *subpath_start = Some(start_point);
+        }
+        _ => {}
+    }
+    *current_point = Some(start_point);
+
+    let sweep = normalized_arc_sweep(start, end, counterclockwise);
+    if sweep == 0.0 || radius_x == 0.0 || radius_y == 0.0 {
+        return;
+    }
+    let segment_count = (sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize;
+    let segment_sweep = sweep / segment_count as f64;
+    for segment in 0..segment_count {
+        let from_angle = start + segment_sweep * segment as f64;
+        let to_angle = from_angle + segment_sweep;
+        let alpha = (4.0 / 3.0) * (segment_sweep / 4.0).tan();
+        let from = ellipse_point(center, radius_x, radius_y, rotation, from_angle);
+        let to = ellipse_point(center, radius_x, radius_y, rotation, to_angle);
+        let from_derivative = ellipse_derivative(radius_x, radius_y, rotation, from_angle);
+        let to_derivative = ellipse_derivative(radius_x, radius_y, rotation, to_angle);
+        let control_a = transform.transform_point(
+            from.x + alpha * from_derivative.x,
+            from.y + alpha * from_derivative.y,
+        );
+        let control_b = transform.transform_point(
+            to.x - alpha * to_derivative.x,
+            to.y - alpha * to_derivative.y,
+        );
+        let to = transform.transform_point(to.x, to.y);
+        commands.push(PathCommand::CubicTo {
+            control_a,
+            control_b,
+            to,
+        });
+        *current_point = Some(to);
+    }
+}
+
+fn path_has_segments(commands: &[PathCommand]) -> bool {
+    commands.iter().any(|command| {
+        matches!(
+            command,
+            PathCommand::LineTo(_) | PathCommand::CubicTo { .. } | PathCommand::QuadraticTo { .. }
         )
     })
 }
@@ -336,7 +522,9 @@ fn path_subpaths(commands: &[PathCommand]) -> Vec<Vec<CanvasPoint>> {
                 }
                 current.push(*point);
             }
-            PathCommand::LineTo(point) => current.push(*point),
+            PathCommand::LineTo(point)
+            | PathCommand::CubicTo { to: point, .. }
+            | PathCommand::QuadraticTo { to: point, .. } => current.push(*point),
             PathCommand::ClosePath => {
                 if current.len() > 1 {
                     subpaths.push(std::mem::take(&mut current));
@@ -391,12 +579,78 @@ fn path_intersects_quad(commands: &[PathCommand], quad: &CanvasQuad) -> bool {
         .any(|point| path_winding_at(&subpaths, point) != 0)
 }
 
+fn path_control_bounds(commands: &[PathCommand]) -> Option<(f64, f64, f64, f64)> {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut include = |point: CanvasPoint| {
+        min_x = min_x.min(point.x);
+        min_y = min_y.min(point.y);
+        max_x = max_x.max(point.x);
+        max_y = max_y.max(point.y);
+    };
+    for command in commands {
+        match command {
+            PathCommand::MoveTo(point) | PathCommand::LineTo(point) => include(*point),
+            PathCommand::CubicTo {
+                control_a,
+                control_b,
+                to,
+            } => {
+                include(*control_a);
+                include(*control_b);
+                include(*to);
+            }
+            PathCommand::QuadraticTo { control, to } => {
+                include(*control);
+                include(*to);
+            }
+            PathCommand::ClosePath => {}
+        }
+    }
+    min_x.is_finite().then_some((min_x, min_y, max_x, max_y))
+}
+
+fn bounds_intersect_quad(bounds: (f64, f64, f64, f64), expansion: f64, quad: &CanvasQuad) -> bool {
+    let (min_x, min_y, max_x, max_y) = bounds;
+    let quad_min_x = quad
+        .iter()
+        .map(|point| point.x)
+        .fold(f64::INFINITY, f64::min);
+    let quad_min_y = quad
+        .iter()
+        .map(|point| point.y)
+        .fold(f64::INFINITY, f64::min);
+    let quad_max_x = quad
+        .iter()
+        .map(|point| point.x)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let quad_max_y = quad
+        .iter()
+        .map(|point| point.y)
+        .fold(f64::NEG_INFINITY, f64::max);
+    min_x - expansion <= quad_max_x
+        && max_x + expansion >= quad_min_x
+        && min_y - expansion <= quad_max_y
+        && max_y + expansion >= quad_min_y
+}
+
+fn stroke_path_intersects_quad(path: &StrokePath, quad: &CanvasQuad) -> bool {
+    let Some(bounds) = path_control_bounds(&path.commands) else {
+        return false;
+    };
+    let half_width = path.style.line_width * path.style.transform_scale * 0.5;
+    bounds_intersect_quad(bounds, half_width, quad)
+}
+
 impl DisplayItem {
     fn clear_regions(&self) -> &[CanvasQuad] {
         match self {
             Self::FillRect(rect) => &rect.clear_regions,
             Self::FillPath(path) => &path.clear_regions,
             Self::StrokeRect(rect) => &rect.clear_regions,
+            Self::StrokePath(path) => &path.clear_regions,
         }
     }
 
@@ -405,6 +659,7 @@ impl DisplayItem {
             Self::FillRect(rect) => &mut rect.clear_regions,
             Self::FillPath(path) => &mut path.clear_regions,
             Self::StrokeRect(rect) => &mut rect.clear_regions,
+            Self::StrokePath(path) => &mut path.clear_regions,
         }
     }
 
@@ -418,7 +673,12 @@ impl DisplayItem {
         }
         match self {
             Self::FillRect(rect) => quads_intersect(&rect.points, quad),
-            Self::FillPath(path) => path_intersects_quad(&path.commands, quad),
+            Self::FillPath(path) => {
+                path_intersects_quad(&path.commands, quad)
+                    || path_control_bounds(&path.commands)
+                        .is_some_and(|bounds| bounds_intersect_quad(bounds, 0.0, quad))
+            }
+            Self::StrokePath(path) => stroke_path_intersects_quad(path, quad),
             Self::StrokeRect(rect) => {
                 let half_width = rect.style.line_width * 0.5;
                 if rect.width == 0.0 && rect.height == 0.0 {
@@ -540,13 +800,16 @@ pub(crate) fn decode(
         stroke_style: crate::color::parse_color_rgba("#000000").expect("black is valid"),
         line_width: 1.0,
         global_alpha: 1.0,
+        line_cap: CanvasLineCap::Butt,
         line_join: CanvasLineJoin::Miter,
         miter_limit: 10.0,
+        line_dash: Vec::new(),
         transform: CanvasTransform::IDENTITY,
     };
     let mut stack = Vec::new();
     let mut current_path = Vec::new();
-    let mut has_current_subpath = false;
+    let mut current_point = None;
+    let mut subpath_start = None;
     let mut items = Vec::new();
     let mut diagnostics = Vec::new();
     let mut invalidates = false;
@@ -723,6 +986,22 @@ pub(crate) fn decode(
                     state.global_alpha = value;
                 }
             }
+            opcodes::LINE_CAP => {
+                let index = side_table_index(command_operands[0], op_index, 0)?;
+                state.line_cap = match strings[index].as_str() {
+                    "butt" => CanvasLineCap::Butt,
+                    "round" => CanvasLineCap::Round,
+                    "square" => CanvasLineCap::Square,
+                    value => {
+                        diagnostics.push(CanvasDiagnostic {
+                            op_index,
+                            op_name: spec.name.to_string(),
+                            reason: format!("unsupported Canvas 2D lineCap {value:?}"),
+                        });
+                        state.line_cap
+                    }
+                };
+            }
             opcodes::LINE_JOIN => {
                 let index = side_table_index(command_operands[0], op_index, 0)?;
                 state.line_join = match strings[index].as_str() {
@@ -743,6 +1022,24 @@ pub(crate) fn decode(
                 let value = command_operands[0];
                 if value.is_finite() && value > 0.0 {
                     state.miter_limit = value;
+                }
+            }
+            opcodes::SET_LINE_DASH => {
+                if command_operands
+                    .iter()
+                    .all(|value| value.is_finite() && *value >= 0.0)
+                {
+                    state.line_dash = command_operands.to_vec();
+                }
+            }
+            opcodes::LINE_DASH_OFFSET => {
+                if command_operands[0] != 0.0 {
+                    diagnostics.push(CanvasDiagnostic {
+                        op_index,
+                        op_name: spec.name.to_string(),
+                        reason: "lineDashOffset is not supported by GPUI PathBuilder; nonzero offsets cannot be replayed faithfully"
+                            .to_string(),
+                    });
                 }
             }
             opcodes::FILL_RECT => {
@@ -814,8 +1111,11 @@ pub(crate) fn decode(
                             style: StrokeStyle {
                                 color: state.stroke_style.opacity(state.global_alpha as f32),
                                 line_width: state.line_width,
+                                line_cap: state.line_cap,
                                 line_join: state.line_join,
                                 miter_limit: state.miter_limit,
+                                line_dash: state.line_dash.clone(),
+                                transform_scale: state.transform.max_scale(),
                             },
                             op_index,
                             clear_regions: Vec::new(),
@@ -879,16 +1179,17 @@ pub(crate) fn decode(
             }
             opcodes::BEGIN_PATH => {
                 current_path.clear();
-                has_current_subpath = false;
+                current_point = None;
+                subpath_start = None;
             }
             opcodes::MOVE_TO => {
                 if command_operands.iter().all(|value| value.is_finite()) {
-                    current_path.push(PathCommand::MoveTo(
-                        state
-                            .transform
-                            .transform_point(command_operands[0], command_operands[1]),
-                    ));
-                    has_current_subpath = true;
+                    let point = state
+                        .transform
+                        .transform_point(command_operands[0], command_operands[1]);
+                    current_path.push(PathCommand::MoveTo(point));
+                    current_point = Some(point);
+                    subpath_start = Some(point);
                 }
             }
             opcodes::LINE_TO => {
@@ -896,59 +1197,270 @@ pub(crate) fn decode(
                     let point = state
                         .transform
                         .transform_point(command_operands[0], command_operands[1]);
-                    if has_current_subpath {
+                    if current_point.is_some() {
                         current_path.push(PathCommand::LineTo(point));
                     } else {
                         current_path.push(PathCommand::MoveTo(point));
-                        has_current_subpath = true;
+                        subpath_start = Some(point);
                     }
+                    current_point = Some(point);
+                }
+            }
+            opcodes::BEZIER_CURVE_TO => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    let control_a = state
+                        .transform
+                        .transform_point(command_operands[0], command_operands[1]);
+                    let control_b = state
+                        .transform
+                        .transform_point(command_operands[2], command_operands[3]);
+                    let to = state
+                        .transform
+                        .transform_point(command_operands[4], command_operands[5]);
+                    if current_point.is_none() {
+                        current_path.push(PathCommand::MoveTo(control_a));
+                        subpath_start = Some(control_a);
+                    }
+                    current_path.push(PathCommand::CubicTo {
+                        control_a,
+                        control_b,
+                        to,
+                    });
+                    current_point = Some(to);
+                }
+            }
+            opcodes::QUADRATIC_CURVE_TO => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    let control = state
+                        .transform
+                        .transform_point(command_operands[0], command_operands[1]);
+                    let to = state
+                        .transform
+                        .transform_point(command_operands[2], command_operands[3]);
+                    if current_point.is_none() {
+                        current_path.push(PathCommand::MoveTo(control));
+                        subpath_start = Some(control);
+                    }
+                    current_path.push(PathCommand::QuadraticTo { control, to });
+                    current_point = Some(to);
+                }
+            }
+            opcodes::ARC => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    append_ellipse(
+                        &mut current_path,
+                        &mut current_point,
+                        &mut subpath_start,
+                        state.transform,
+                        CanvasPoint {
+                            x: command_operands[0],
+                            y: command_operands[1],
+                        },
+                        command_operands[2],
+                        command_operands[2],
+                        0.0,
+                        command_operands[3],
+                        command_operands[4],
+                        command_operands[5] != 0.0,
+                    );
+                }
+            }
+            opcodes::ARC_TO => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    let first = CanvasPoint {
+                        x: command_operands[0],
+                        y: command_operands[1],
+                    };
+                    let second = CanvasPoint {
+                        x: command_operands[2],
+                        y: command_operands[3],
+                    };
+                    let radius = command_operands[4];
+                    let Some(transformed_current) = current_point else {
+                        let point = state.transform.transform_point(first.x, first.y);
+                        current_path.push(PathCommand::MoveTo(point));
+                        current_point = Some(point);
+                        subpath_start = Some(point);
+                        op_index += 1;
+                        continue;
+                    };
+                    let Some(current) =
+                        state.transform.inverse_transform_point(transformed_current)
+                    else {
+                        let point = state.transform.transform_point(first.x, first.y);
+                        current_path.push(PathCommand::LineTo(point));
+                        current_point = Some(point);
+                        op_index += 1;
+                        continue;
+                    };
+                    let first_length =
+                        ((current.x - first.x).powi(2) + (current.y - first.y).powi(2)).sqrt();
+                    let second_length =
+                        ((second.x - first.x).powi(2) + (second.y - first.y).powi(2)).sqrt();
+                    let cross_value = (current.x - first.x) * (second.y - first.y)
+                        - (current.y - first.y) * (second.x - first.x);
+                    if radius == 0.0
+                        || first_length <= f64::EPSILON
+                        || second_length <= f64::EPSILON
+                        || cross_value.abs() <= f64::EPSILON
+                    {
+                        let point = state.transform.transform_point(first.x, first.y);
+                        current_path.push(PathCommand::LineTo(point));
+                        current_point = Some(point);
+                    } else {
+                        let first_unit = CanvasPoint {
+                            x: (current.x - first.x) / first_length,
+                            y: (current.y - first.y) / first_length,
+                        };
+                        let second_unit = CanvasPoint {
+                            x: (second.x - first.x) / second_length,
+                            y: (second.y - first.y) / second_length,
+                        };
+                        let dot = (first_unit.x * second_unit.x + first_unit.y * second_unit.y)
+                            .clamp(-1.0, 1.0);
+                        let angle = dot.acos();
+                        let distance = radius / (angle * 0.5).tan();
+                        let tangent_a = CanvasPoint {
+                            x: first.x + first_unit.x * distance,
+                            y: first.y + first_unit.y * distance,
+                        };
+                        let tangent_b = CanvasPoint {
+                            x: first.x + second_unit.x * distance,
+                            y: first.y + second_unit.y * distance,
+                        };
+                        let bisector_length = ((first_unit.x + second_unit.x).powi(2)
+                            + (first_unit.y + second_unit.y).powi(2))
+                        .sqrt();
+                        let center_distance = radius / (angle * 0.5).sin();
+                        let center = CanvasPoint {
+                            x: first.x
+                                + (first_unit.x + second_unit.x) / bisector_length
+                                    * center_distance,
+                            y: first.y
+                                + (first_unit.y + second_unit.y) / bisector_length
+                                    * center_distance,
+                        };
+                        let start = (tangent_a.y - center.y).atan2(tangent_a.x - center.x);
+                        let end = (tangent_b.y - center.y).atan2(tangent_b.x - center.x);
+                        append_ellipse(
+                            &mut current_path,
+                            &mut current_point,
+                            &mut subpath_start,
+                            state.transform,
+                            center,
+                            radius,
+                            radius,
+                            0.0,
+                            start,
+                            end,
+                            cross_value > 0.0,
+                        );
+                    }
+                }
+            }
+            opcodes::ELLIPSE => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    append_ellipse(
+                        &mut current_path,
+                        &mut current_point,
+                        &mut subpath_start,
+                        state.transform,
+                        CanvasPoint {
+                            x: command_operands[0],
+                            y: command_operands[1],
+                        },
+                        command_operands[2],
+                        command_operands[3],
+                        command_operands[4],
+                        command_operands[5],
+                        command_operands[6],
+                        command_operands[7] != 0.0,
+                    );
+                }
+            }
+            opcodes::RECT => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    let points = rect_quad(
+                        state.transform,
+                        command_operands[0],
+                        command_operands[1],
+                        command_operands[2],
+                        command_operands[3],
+                    );
+                    current_path.push(PathCommand::MoveTo(points[0]));
+                    current_path.extend(points[1..].iter().copied().map(PathCommand::LineTo));
+                    current_path.push(PathCommand::ClosePath);
+                    current_point = Some(points[0]);
+                    subpath_start = Some(points[0]);
                 }
             }
             opcodes::CLOSE_PATH => {
-                if has_current_subpath {
+                if current_point.is_some() && subpath_start.is_some() {
                     current_path.push(PathCommand::ClosePath);
+                    current_point = subpath_start;
                 }
             }
-            opcodes::FILL => match command_operands[0] {
-                0.0 => {
-                    if current_path
-                        .iter()
-                        .any(|command| matches!(command, PathCommand::LineTo(_)))
-                    {
-                        if let Some(reason) = path_preparation_problem(&current_path) {
-                            diagnostics.push(CanvasDiagnostic {
-                                op_index,
-                                op_name: spec.name.to_string(),
-                                reason,
-                            });
-                        } else {
-                            items.push(DisplayItem::FillPath(FillPath {
-                                commands: current_path.clone(),
-                                color: state.fill_style.opacity(state.global_alpha as f32),
-                                op_index,
-                                clear_regions: Vec::new(),
-                            }));
-                            invalidates = true;
-                        }
+            opcodes::FILL => {
+                let fill_rule = match command_operands[0] {
+                    0.0 => CanvasFillRule::NonZero,
+                    1.0 => CanvasFillRule::EvenOdd,
+                    value => {
+                        return Err(malformed(
+                            op_index,
+                            format!("fill rule must be 0 (nonzero) or 1 (evenodd), got {value}"),
+                        ));
+                    }
+                };
+                if path_has_segments(&current_path) {
+                    if let Some(reason) = path_preparation_problem(&current_path) {
+                        diagnostics.push(CanvasDiagnostic {
+                            op_index,
+                            op_name: spec.name.to_string(),
+                            reason,
+                        });
+                    } else {
+                        items.push(DisplayItem::FillPath(FillPath {
+                            commands: current_path.clone(),
+                            color: state.fill_style.opacity(state.global_alpha as f32),
+                            fill_rule,
+                            op_index,
+                            clear_regions: Vec::new(),
+                        }));
+                        invalidates = true;
                     }
                 }
-                1.0 => diagnostics.push(CanvasDiagnostic {
-                    op_index,
-                    op_name: spec.name.to_string(),
-                    reason: "evenodd fills remain in canvas phase B3; phase B1 implements nonzero fills only"
-                        .to_string(),
-                }),
-                value => {
-                    return Err(malformed(
-                        op_index,
-                        format!("fill rule must be 0 (nonzero) or 1 (evenodd), got {value}"),
-                    ));
+            }
+            opcodes::STROKE => {
+                if path_has_segments(&current_path) {
+                    if let Some(reason) = path_preparation_problem(&current_path) {
+                        diagnostics.push(CanvasDiagnostic {
+                            op_index,
+                            op_name: spec.name.to_string(),
+                            reason,
+                        });
+                    } else {
+                        items.push(DisplayItem::StrokePath(StrokePath {
+                            commands: current_path.clone(),
+                            style: StrokePathStyle {
+                                color: state.stroke_style.opacity(state.global_alpha as f32),
+                                line_width: state.line_width,
+                                line_cap: state.line_cap,
+                                line_join: state.line_join,
+                                miter_limit: state.miter_limit,
+                                line_dash: state.line_dash.clone(),
+                                transform_scale: state.transform.max_scale(),
+                            },
+                            op_index,
+                            clear_regions: Vec::new(),
+                        }));
+                        invalidates = true;
+                    }
                 }
-            },
+            }
             _ => diagnostics.push(CanvasDiagnostic {
                 op_index,
                 op_name: spec.name.to_string(),
-                reason: "recognized by stream version 1 but not implemented in canvas phase B2"
+                reason: "recognized by stream version 1 but not implemented in canvas phase B3"
                     .to_string(),
             }),
         }
@@ -1297,7 +1809,7 @@ mod tests {
     }
 
     #[test]
-    fn path_too_complex_for_safe_b1_preparation_is_a_named_diagnostic() {
+    fn paths_larger_than_the_old_b1_cap_are_retained_for_tessellation() {
         let mut commands = vec![
             (opcodes::BEGIN_PATH, vec![]),
             (opcodes::MOVE_TO, vec![0.0, 0.0]),
@@ -1314,11 +1826,9 @@ mod tests {
         let store = SharedDisplayLists::default();
         let outcome = replace_display_list(&store, 16, &ops, &operands, &[]).unwrap();
 
-        assert_eq!(outcome.diagnostics.len(), 1);
-        assert_eq!(outcome.diagnostics[0].op_name, "fill");
-        assert!(outcome.diagnostics[0].reason.contains("128"));
-        assert!(!outcome.invalidates);
-        assert!(!store.lock().unwrap().contains_key(&16));
+        assert!(outcome.diagnostics.is_empty());
+        assert!(outcome.invalidates);
+        assert_eq!(store.lock().unwrap().get(&16).unwrap().items.len(), 1);
     }
 
     #[test]
@@ -1537,7 +2047,7 @@ mod tests {
     }
 
     #[test]
-    fn evenodd_fill_remains_a_named_phase_b3_diagnostic() {
+    fn evenodd_fill_is_retained_with_its_rule() {
         let (ops, operands) = stream(&[
             (opcodes::BEGIN_PATH, &[]),
             (opcodes::MOVE_TO, &[0.0, 0.0]),
@@ -1548,10 +2058,13 @@ mod tests {
         let store = SharedDisplayLists::default();
         let outcome = replace_display_list(&store, 14, &ops, &operands, &[]).unwrap();
 
-        assert_eq!(outcome.diagnostics.len(), 1);
-        assert_eq!(outcome.diagnostics[0].op_name, "fill");
-        assert!(outcome.diagnostics[0].reason.contains("phase B3"));
-        assert!(!outcome.invalidates);
+        assert!(outcome.diagnostics.is_empty());
+        assert!(outcome.invalidates);
+        let list = store.lock().unwrap().get(&14).unwrap().clone();
+        let DisplayItem::FillPath(path) = &list.items[0] else {
+            panic!("expected fill path")
+        };
+        assert_eq!(path.fill_rule, CanvasFillRule::EvenOdd);
     }
 
     #[test]
@@ -1587,13 +2100,12 @@ mod tests {
     }
 
     #[test]
-    fn known_and_unknown_unimplemented_opcodes_decode_with_diagnostics() {
+    fn empty_stroke_is_a_noop_and_unknown_opcodes_stay_loud() {
         let (ops, operands) = stream(&[(opcodes::STROKE, &[]), (0xffff, &[1.0, 2.0, 3.0])]);
         let store = SharedDisplayLists::default();
         let outcome = replace_display_list(&store, 9, &ops, &operands, &[]).unwrap();
-        assert_eq!(outcome.diagnostics.len(), 2);
-        assert_eq!(outcome.diagnostics[0].op_name, "stroke");
-        assert_eq!(outcome.diagnostics[1].op_name, "unknown(0x0000ffff)");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(outcome.diagnostics[0].op_name, "unknown(0x0000ffff)");
         assert!(!outcome.invalidates);
         assert!(!store.lock().unwrap().contains_key(&9));
     }
@@ -1664,5 +2176,109 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(trailing.op_index, Some(0));
+    }
+
+    #[test]
+    fn b3_replays_curves_arcs_rects_and_stroke_state() {
+        let strings = vec!["round".to_string(), "bevel".to_string()];
+        let (ops, operands) = stream(&[
+            (opcodes::LINE_CAP, &[0.0]),
+            (opcodes::LINE_JOIN, &[1.0]),
+            (opcodes::LINE_WIDTH, &[3.0]),
+            (opcodes::MITER_LIMIT, &[2.0]),
+            (opcodes::SET_LINE_DASH, &[4.0, 2.0]),
+            (opcodes::BEGIN_PATH, &[]),
+            (opcodes::BEZIER_CURVE_TO, &[2.0, 3.0, 4.0, 5.0, 6.0, 7.0]),
+            (opcodes::QUADRATIC_CURVE_TO, &[8.0, 9.0, 10.0, 11.0]),
+            (
+                opcodes::ARC,
+                &[20.0, 20.0, 5.0, 0.0, std::f64::consts::PI, 0.0],
+            ),
+            (
+                opcodes::ELLIPSE,
+                &[30.0, 20.0, 8.0, 4.0, 0.25, 0.0, std::f64::consts::PI, 1.0],
+            ),
+            (opcodes::ARC_TO, &[40.0, 20.0, 44.0, 28.0, 3.0]),
+            (opcodes::RECT, &[4.0, 5.0, 8.0, 9.0]),
+            (opcodes::STROKE, &[]),
+        ]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list(&store, 31, &ops, &operands, &strings).unwrap();
+
+        assert!(outcome.diagnostics.is_empty());
+        let list = store.lock().unwrap().get(&31).unwrap().clone();
+        let DisplayItem::StrokePath(path) = &list.items[0] else {
+            panic!("expected stroke path")
+        };
+        assert_eq!(path.style.line_cap, CanvasLineCap::Round);
+        assert_eq!(path.style.line_join, CanvasLineJoin::Bevel);
+        assert_eq!(path.style.line_dash, vec![4.0, 2.0]);
+        assert!(path
+            .commands
+            .iter()
+            .any(|command| matches!(command, PathCommand::CubicTo { .. })));
+        assert!(path
+            .commands
+            .iter()
+            .any(|command| matches!(command, PathCommand::QuadraticTo { .. })));
+        assert!(path
+            .commands
+            .iter()
+            .any(|command| matches!(command, PathCommand::ClosePath)));
+    }
+
+    #[test]
+    fn path_is_not_part_of_the_saved_drawing_state() {
+        let (ops, operands) = stream(&[
+            (opcodes::BEGIN_PATH, &[]),
+            (opcodes::MOVE_TO, &[1.0, 2.0]),
+            (opcodes::SAVE, &[]),
+            (opcodes::TRANSLATE, &[10.0, 20.0]),
+            (opcodes::LINE_TO, &[3.0, 4.0]),
+            (opcodes::RESTORE, &[]),
+            (opcodes::LINE_TO, &[5.0, 6.0]),
+            (opcodes::STROKE, &[]),
+        ]);
+        let decoded = decode(
+            &ops,
+            &operands,
+            &[],
+            CanvasSize {
+                width: 100.0,
+                height: 100.0,
+            },
+        )
+        .unwrap();
+        let DisplayItem::StrokePath(path) = &decoded.items[0] else {
+            panic!("expected stroke path")
+        };
+        assert_eq!(
+            path.commands,
+            vec![
+                PathCommand::MoveTo(CanvasPoint { x: 1.0, y: 2.0 }),
+                PathCommand::LineTo(CanvasPoint { x: 13.0, y: 24.0 }),
+                PathCommand::LineTo(CanvasPoint { x: 5.0, y: 6.0 }),
+            ]
+        );
+    }
+
+    #[test]
+    fn line_dash_offset_is_a_named_diagnostic() {
+        let (ops, operands) = stream(&[(opcodes::LINE_DASH_OFFSET, &[2.0])]);
+        let decoded = decode(
+            &ops,
+            &operands,
+            &[],
+            CanvasSize {
+                width: 100.0,
+                height: 100.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(decoded.diagnostics.len(), 1);
+        assert_eq!(decoded.diagnostics[0].op_name, "lineDashOffset");
+        assert!(decoded.diagnostics[0]
+            .reason
+            .contains("cannot be replayed faithfully"));
     }
 }

@@ -114,6 +114,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getTreeJson(): string
   getResolvedStyle(elementId: number): string | null
   getImageLoadState(elementId: number): string | null
+  getCanvasState(elementId: number): string | null
   getAutomationTree(): string
   getElementBounds(elementId: number): number[] | null
   clockPause(): number
@@ -249,6 +250,12 @@ export interface TextQueries {
 export interface ImageLoadState {
   status: "idle" | "loading" | "loaded" | "error"
   error?: string
+}
+
+/** Native path-preparation counters for a live `<canvas>` test element. */
+export interface CanvasTestState {
+  preparationCount: number
+  tessellationCount: number
 }
 
 // ── TestRenderer ─────────────────────────────────────────────────────
@@ -724,6 +731,12 @@ export class TestRenderer implements NativeRenderer {
   /** Read the current async image state without relying on a screenshot or fallback text. */
   getImageLoadState(id: number): ImageLoadState | undefined {
     const json = this.native.getImageLoadState(id)
+    return json == null ? undefined : JSON.parse(json)
+  }
+
+  /** Read canvas preparation counters without relying on timing or screenshots. */
+  getCanvasState(id: number): CanvasTestState | undefined {
+    const json = this.native.getCanvasState(id)
     return json == null ? undefined : JSON.parse(json)
   }
 
@@ -1259,17 +1272,6 @@ export function expectCanvasMatchesBrowser(
   if (!existsSync(goldenPath)) {
     return skipCanvasComparison(
       `browser golden is absent at ${goldenPath}; regenerate it with \`bun run canvas:goldens\``,
-      options.skip
-    )
-  }
-
-  if (
-    resolved.name !== "fill-rect-grid" &&
-    resolved.name !== "translate-scale" &&
-    resolved.name !== "translucent-overlap"
-  ) {
-    return skipCanvasComparison(
-      `native replay for scene ${JSON.stringify(resolved.name)} remains queued for a later canvas phase; B2 replays transformed rect fills, alpha, and minimum nonzero paths`,
       options.skip
     )
   }
