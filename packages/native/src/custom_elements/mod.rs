@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use crate::renderer::EventCallback;
 
 pub mod anchored;
+pub mod canvas;
 pub mod code;
 pub mod diff;
 pub mod img;
@@ -51,6 +52,8 @@ pub struct CustomRenderContext<'a> {
     pub current_color: gpui::Rgba,
     /// Renderer-owned HTTP policy and client for URL-backed images.
     pub image_network_policy: &'a img::ImageNetworkPolicy,
+    /// Retained Canvas 2D display lists updated independently of React commits.
+    pub canvas_display_lists: &'a crate::canvas::SharedDisplayLists,
     /// `highlight` declared by the nearest ancestor, unresolved.
     ///
     /// A native element generates its text during `render()`, so the retained
@@ -212,6 +215,7 @@ impl CustomElementRegistry {
         registry.register(Box::new(input::InputFactory));
         registry.register(Box::new(input::TextareaFactory));
         registry.register(Box::new(anchored::AnchoredFactory));
+        registry.register(Box::new(canvas::CanvasFactory));
         registry.register(Box::new(img::ImgFactory));
         registry.register(Box::new(img::SvgFactory));
         registry.register(Box::new(code::CodeFactory));

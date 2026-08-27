@@ -50,6 +50,11 @@ export declare class GpuixRenderer {
   /** Signal that a batch of mutations is complete. Triggers re-render. */
   commitMutations(): void
   /**
+   * Replace one canvas element's retained display list and repaint without
+   * requiring a React commit.
+   */
+  applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  /**
    * Apply a batch of mutations in a single FFI call.
    *
    * Accepts a JSON array of mutation tuples. Each tuple is an array where
@@ -101,6 +106,12 @@ export declare class GpuixRenderer {
    * Returns false when this renderer must be timer-driven instead.
    */
   setFrameRequestHandler(callback?: ((() => unknown)) | undefined | null): boolean
+  /**
+   * Queue one callback on GPUI's next display-paced frame. `on_next_frame`
+   * creates frame demand without dirtying the window, so an otherwise idle
+   * callback does not force a draw.
+   */
+  requestFrame(callback: (timestamp: number) => void): void
   /** Whether this native window is active and receiving key events. */
   isActive(): boolean
   /** Bring the native window and application to the foreground. */
@@ -241,6 +252,11 @@ export declare class TestGpuixRenderer {
    */
   commitMutations(): void
   /**
+   * Replace one canvas element's retained display list and notify the
+   * offscreen view without requiring a React commit.
+   */
+  applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  /**
    * Apply a batch of mutations in a single FFI call.
    * Same format as GpuixRenderer::apply_batch (string op names).
    * Returns accumulated destroyed IDs from all destroyElement ops.
@@ -259,6 +275,11 @@ export declare class TestGpuixRenderer {
    * hit testing requires elements to be laid out).
    */
   flush(): void
+  /**
+   * Queue one callback for the next manually advanced GPUI frame without
+   * dirtying or synchronously drawing the offscreen window.
+   */
+  requestFrame(callback: (timestamp: number) => void): void
   /**
    * Advance GPUI's async executor clock so tests can deterministically fire
    * timers such as bounded image retry/revalidation deadlines. When the

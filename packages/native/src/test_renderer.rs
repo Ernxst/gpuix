@@ -12,7 +12,7 @@
 /// VisualTestAppContext is !Send, so it is stored in thread-local state.
 /// All napi calls happen on the JS main thread.
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -23,13 +23,16 @@ use gpui::AppContext as _;
 
 use crate::element_tree::EventPayload;
 use crate::renderer::{
+    animation_frame_origin, animation_frame_timestamp_ms,
     apply_batch_to_tree_with_diagnostics, catch_gpui_initialization, debug_frame_overlay_mode_name,
     debug_frame_overlay_stats_js, default_http_client, dispatch_application_menu_action,
-    drain_style_diagnostics, has_application_menus, init_application_menu_support,
-    install_application_menus, parse_debug_frame_overlay_mode, parse_style_json,
-    pending_custom_prop_diagnostic, pending_style_diagnostics, set_application_menus,
-    to_element_id, DebugFrameOverlayStats, EventCallback, GpuixStyleDiagnostic, GpuixView,
-    MenuSpec, PendingStyleDiagnostic, WindowSize,
+    dispatch_animation_frame_callback, drain_style_diagnostics, first_canvas_diagnostic_message,
+    forget_canvas_diagnostics, fresh_canvas_diagnostics, has_application_menus,
+    init_application_menu_support, install_application_menus, parse_debug_frame_overlay_mode,
+    parse_style_json, pending_custom_prop_diagnostic, pending_style_diagnostics,
+    set_application_menus, to_element_id, validate_canvas_target, AnimationFrameCallback,
+    DebugFrameOverlayStats, EventCallback, FrameTimestampOrigin, GpuixStyleDiagnostic,
+    GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -242,6 +245,7 @@ pub struct ImageComparisonResult {
 pub struct TestGpuixRenderer {
     state_id: u64,
     tree: Arc<Mutex<RetainedTree>>,
+    canvas_display_lists: crate::canvas::SharedDisplayLists,
     events: Arc<Mutex<Vec<EventPayload>>>,
     /// Same handle GpuixView paints against, so tests can assert on the live
     /// selection after simulating a drag.
@@ -249,6 +253,8 @@ pub struct TestGpuixRenderer {
     image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
+    canvas_diagnostic_members: Mutex<HashSet<(u64, String)>>,
+    animation_frame_timestamp_origin: FrameTimestampOrigin,
     /// Mouse-down origin for the current GPUI active-state sequence. Retained
     /// for the native test input path, which must mirror main's press lifetime.
     active_pointer_origin: Mutex<Option<(f64, f64)>>,
@@ -270,6 +276,7 @@ impl TestGpuixRenderer {
             gpui::px(window_dimension(height, DEFAULT_WINDOW_HEIGHT, "height")?),
         );
         let tree = Arc::new(Mutex::new(RetainedTree::new()));
+        let canvas_display_lists = crate::canvas::SharedDisplayLists::default();
         let events: Arc<Mutex<Vec<EventPayload>>> = Arc::new(Mutex::new(Vec::new()));
 
         // Event callback: push to Vec instead of ThreadsafeFunction.
@@ -279,6 +286,7 @@ impl TestGpuixRenderer {
         }));
 
         let tree_clone = tree.clone();
+        let canvas_display_lists_for_view = canvas_display_lists.clone();
         let callback_clone = event_callback.clone();
         let selection = crate::text::SharedSelection::default();
         let selection_clone = selection.clone();
@@ -302,6 +310,7 @@ impl TestGpuixRenderer {
                 app.new(|_cx| {
                     GpuixView::new(
                         tree_clone,
+                        canvas_display_lists_for_view,
                         callback_clone,
                         Arc::new(Mutex::new(event_callback.clone())),
                         "GPUIX Test".to_string(),
@@ -329,11 +338,14 @@ impl TestGpuixRenderer {
         Ok(Self {
             state_id,
             tree,
+            canvas_display_lists,
             events,
             selection,
             image_network_policy,
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(Vec::new()),
+            canvas_diagnostic_members: Mutex::new(HashSet::new()),
+            animation_frame_timestamp_origin: Arc::new(Mutex::new(None)),
             active_pointer_origin: Mutex::new(None),
         })
     }
@@ -367,6 +379,8 @@ impl TestGpuixRenderer {
     pub fn destroy_element(&self, id: f64) -> Result<Vec<f64>> {
         let id = to_element_id(id)?;
         let destroyed = self.tree.lock().unwrap().destroy_element(id);
+        crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed);
+        forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed);
         Ok(destroyed.iter().map(|&id| id as f64).collect())
     }
 
@@ -499,6 +513,46 @@ impl TestGpuixRenderer {
         Ok(())
     }
 
+    /// Replace one canvas element's retained display list and notify the
+    /// offscreen view without requiring a React commit.
+    #[napi]
+    pub fn apply_canvas_commands(
+        &self,
+        id: f64,
+        ops: Uint32Array,
+        operands: Float64Array,
+        strings: Vec<String>,
+    ) -> Result<()> {
+        let id = to_element_id(id)?;
+        let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
+        let decoded = crate::canvas::decode(ops.as_ref(), operands.as_ref(), &strings)
+            .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
+        let strict = self.strict_styles.load(Ordering::Relaxed);
+        if strict && !decoded.diagnostics.is_empty() {
+            let message = first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics)
+                .expect("non-empty canvas diagnostics has a first item");
+            return Err(Error::from_reason(message));
+        }
+        let outcome =
+            crate::canvas::install_decoded_display_list(&self.canvas_display_lists, id, decoded);
+        drop(tree);
+        if !strict {
+            self.style_diagnostics
+                .lock()
+                .unwrap()
+                .extend(fresh_canvas_diagnostics(
+                    id,
+                    outcome.diagnostics,
+                    &self.canvas_diagnostic_members,
+                ));
+        }
+        if outcome.invalidates {
+            self.request_invalidate()?;
+        }
+        Ok(())
+    }
+
     /// Apply a batch of mutations in a single FFI call.
     /// Same format as GpuixRenderer::apply_batch (string op names).
     /// Returns accumulated destroyed IDs from all destroyElement ops.
@@ -516,6 +570,10 @@ impl TestGpuixRenderer {
                 .unwrap()
                 .extend(outcome.diagnostics);
         }
+        let destroyed_canvas_ids: Vec<u64> =
+            outcome.destroyed_ids.iter().map(|id| *id as u64).collect();
+        crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed_canvas_ids);
+        forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed_canvas_ids);
         Ok(outcome.destroyed_ids)
     }
 
@@ -550,24 +608,55 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Notify the offscreen view without drawing it yet.
+    fn request_invalidate(&self) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |_, cx| cx.notify());
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            Ok(())
+        })
+    }
+
     /// Notify the view entity and run GPUI until parked.
     /// This triggers GpuixView::render() → build_element() → GPUI layout.
     /// Must be called after mutations and before simulating events (GPUI's
     /// hit testing requires elements to be laid out).
     #[napi]
     pub fn flush(&self) -> Result<()> {
-        with_test_state(self.state_id, |cx, window, view| {
-            let view = view.clone();
-            cx.update_window(window, |_, _window, app| {
-                view.update(app, |_, cx| {
-                    cx.notify();
-                });
-            })
-            .map_err(|e| Error::from_reason(e.to_string()))?;
-
+        self.request_invalidate()?;
+        with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, app| window.draw(app).clear(app))
                 .map_err(|e| Error::from_reason(e.to_string()))?;
             cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// Queue one callback for the next manually advanced GPUI frame without
+    /// dirtying or synchronously drawing the offscreen window.
+    #[napi]
+    pub fn request_frame(
+        &self,
+        #[napi(ts_arg_type = "(timestamp: number) => void")] callback: AnimationFrameCallback,
+    ) -> Result<()> {
+        let timestamp_origin = self.animation_frame_timestamp_origin.clone();
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, move |_, window, app| {
+                let origin = animation_frame_origin(
+                    &timestamp_origin,
+                    app.background_executor().now(),
+                );
+                window.on_next_frame(move |_window, app| {
+                    dispatch_animation_frame_callback(
+                        callback,
+                        animation_frame_timestamp_ms(origin, app.background_executor().now()),
+                    );
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
             Ok(())
         })
     }
@@ -586,7 +675,8 @@ impl TestGpuixRenderer {
         with_test_state(self.state_id, |cx, window, view| {
             cx.advance_clock(std::time::Duration::from_secs_f64(delta_ms / 1000.0));
             let view = view.clone();
-            cx.update_window(window, |_, _window, app| {
+            cx.update_window(window, |_, window, app| {
+                window.simulate_next_frame(app);
                 view.update(app, |view, cx| {
                     if view.clock.fast_forward_if_frozen_ms(delta_ms).is_some() {
                         cx.notify();

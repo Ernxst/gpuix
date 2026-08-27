@@ -29,6 +29,11 @@ import {
   DEFAULT_VIRTUAL_LIST_ESTIMATED_ITEM_HEIGHT,
   VirtualListRowContractError,
 } from "../components/virtual-list-contract.js"
+import {
+  disposeRecordingContext2D,
+  getOrCreateRecordingContext2D,
+} from "../canvas/context-2d.js"
+import { reportStyleDiagnostics } from "./batch-renderer.js"
 
 let currentUpdatePriority = NoEventPriority
 
@@ -61,6 +66,21 @@ function containerFor(node: HostNode): Container {
 
 function rendererFor(node: HostNode): NativeRenderer {
   return containerFor(node).renderer
+}
+
+function describeCanvas(instance: Instance): string {
+  const props = instance.props as Props & Record<string, unknown>
+  const identity = [
+    props.testId === undefined ? undefined : `testId=${JSON.stringify(props.testId)}`,
+    props["data-testid"] === undefined
+      ? undefined
+      : `data-testid=${JSON.stringify(props["data-testid"])}`,
+    props.id === undefined ? undefined : `id=${JSON.stringify(props.id)}`,
+    `elementId=${instance.id}`,
+  ]
+    .filter((attribute): attribute is string => attribute !== undefined)
+    .join(" ")
+  return `<canvas ${identity}>`
 }
 
 function nextId(container: Container): number {
@@ -473,6 +493,19 @@ export const hostConfig = {
       setPointerCapture: () => rootContainerInstance.renderer.setPointerCapture?.(id),
       releasePointerCapture: () =>
         rootContainerInstance.renderer.releasePointerCapture?.(id),
+      __applyCanvasCommands: (ops, operands, strings) => {
+        if (instance.type !== "canvas") {
+          throw new TypeError(
+            `Canvas commands can only target <canvas>, received <${instance.type}>`
+          )
+        }
+        const apply = rootContainerInstance.renderer.applyCanvasCommands
+        if (!apply) {
+          throw new Error("This GPUIX renderer does not support retained canvas commands")
+        }
+        apply.call(rootContainerInstance.renderer, id, ops, operands, strings)
+        reportStyleDiagnostics(rootContainerInstance.renderer)
+      },
       parentId: null,
       getAttribute(name): string | null {
         const value = (instance.props as Props & Record<string, unknown>)[name]
@@ -482,6 +515,17 @@ export const hostConfig = {
         if (value === true) return ""
         return typeof value === "string" || typeof value === "number" ? String(value) : null
       },
+    }
+    if (type === "canvas") {
+      instance.getContext = ((contextId: string): CanvasRenderingContext2D | null => {
+        if (contextId !== "2d") return null
+        return getOrCreateRecordingContext2D(instance, {
+          describeElement: () => describeCanvas(instance),
+          strict: rootContainerInstance.strictStyles,
+          applyCanvasCommands: (ops, operands, strings) =>
+            instance.__applyCanvasCommands(ops, operands, strings),
+        })
+      }) as NonNullable<Instance["getContext"]>
     }
     hostNodeStates.set(instance, {
       container: rootContainerInstance,
@@ -525,6 +569,7 @@ export const hostConfig = {
   ): void {},
 
   removeChildFromContainer(parent: Container, child: Instance): void {
+    disposeRecordingContext2D(child)
     const destroyed = parent.renderer.destroyElement(child.id)
     for (const id of destroyed) {
       unregisterEventHandlers(parent.eventHandlers, id)
@@ -705,6 +750,7 @@ export const hostConfig = {
   },
 
   detachDeletedInstance(instance: Instance): void {
+    disposeRecordingContext2D(instance)
     const container = containerFor(instance)
     const destroyed = container.renderer.destroyElement(instance.id)
     for (const id of destroyed) {

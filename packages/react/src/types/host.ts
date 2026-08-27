@@ -951,6 +951,13 @@ export interface AnchoredProps extends Props {
   occlude?: boolean
 }
 
+/** Canvas bitmap coordinates. Layout can independently resize the element. */
+export interface CanvasProps extends Props {
+  ref?: React.Ref<CanvasPublicInstance>
+  width?: number
+  height?: number
+}
+
 /// Interface for the renderer that receives mutations from the reconciler.
 /// Implemented by the real napi GpuixRenderer and by TestRenderer (which
 /// delegates to native TestGpuixRenderer for tests).
@@ -965,6 +972,13 @@ export interface NativeRenderer {
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   setRoot(id: number): void
   commitMutations(): void
+  /** Replace a retained canvas display list without a React commit. */
+  applyCanvasCommands?(
+    id: number,
+    ops: Uint32Array,
+    operands: Float64Array,
+    strings: readonly string[]
+  ): void
   /** Stable platform and renderer feature read. Legacy probes remain available. */
   capabilities?(): RendererCapabilities
   /** Drop a buffered commit after JS-side contract validation fails. */
@@ -986,6 +1000,8 @@ export interface NativeRenderer {
   tick?(): boolean
   /** Install a coalesced native frame source. Returns false when timers must drive ticks. */
   setFrameRequestHandler?(handler: (() => void) | null): boolean
+  /** Queue one callback on GPUI's next display-paced frame without dirtying the window. */
+  requestFrame?(handler: (timestamp: number) => void): void
   /** Pump idle platform work without releasing a pending display-link frame token. */
   tickIdle?(): boolean
   /** Internal hook used by injected renderers to deliver non-element events. */
@@ -1131,11 +1147,12 @@ export interface Container {
   eventHandlers: EventHandlerMap
   eventTargets: Map<number, Instance>
   preventedKeyboardActivations: Map<number, string>
+  strictStyles: boolean
 }
 
-// Instance — minimal handle for React's reconciler.
-// The real element state lives in Rust's RetainedTree.
-export interface Instance {
+// Public instance exposed via refs. Type-specific interfaces deepen this seam
+// without putting browser-only methods on every native element.
+export interface PublicInstance {
   id: number
   type: ElementType
   props: Props
@@ -1145,15 +1162,31 @@ export interface Instance {
   getAttribute(name: string): string | null
 }
 
+export interface CanvasPublicInstance extends PublicInstance {
+  type: "canvas"
+  getContext(
+    contextId: "2d",
+    options?: CanvasRenderingContext2DSettings
+  ): CanvasRenderingContext2D
+  getContext(contextId: string, options?: unknown): CanvasRenderingContext2D | null
+}
+
+// Internal host instance. The real element state lives in Rust's RetainedTree.
+export interface Instance extends PublicInstance {
+  getContext?: CanvasPublicInstance["getContext"]
+  __applyCanvasCommands(
+    ops: Uint32Array,
+    operands: Float64Array,
+    strings: readonly string[]
+  ): void
+}
+
 // Text instance for raw text nodes
 export interface TextInstance {
   id: number
   text: string
   parentId: number | null
 }
-
-// Public instance exposed via refs
-export type PublicInstance = Instance
 
 // Host context passed down the tree
 export interface HostContext {

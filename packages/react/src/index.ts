@@ -1,5 +1,6 @@
 // GPUIX React - React bindings for GPUI
 export { createRoot, flushSync } from "./reconciler/index.js"
+export { __applyCanvasCommands } from "./canvas/commands.js"
 export {
   createRenderer,
   enableAutomation,
@@ -7,6 +8,8 @@ export {
   resetRender,
   startFrameLoop,
 } from "./reconciler/renderer.js"
+export { cancelAnimationFrame, requestAnimationFrame } from "./frame-clock.js"
+export type { FrameRequestCallback } from "./frame-clock.js"
 export { GpuixContext, useGpuix, useGpuixRequired } from "./hooks/use-gpuix.js"
 export { useWindowInsets, useWindowSize } from "./hooks/use-window-size.js"
 export { findRanges, useTextSearch } from "./hooks/use-text-search.js"
@@ -82,6 +85,8 @@ export type {
 // Re-export types
 export type { MotionDivProps } from "./components/index.js"
 export type {
+  CanvasProps,
+  CanvasPublicInstance,
   CursorValue,
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
