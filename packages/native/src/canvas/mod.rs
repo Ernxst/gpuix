@@ -312,16 +312,76 @@ impl CanvasTransform {
     }
 
     pub(crate) fn inverse_transform_point(self, point: CanvasPoint) -> Option<CanvasPoint> {
-        let determinant = self.a * self.d - self.b * self.c;
-        if !determinant.is_finite() || determinant.abs() <= f64::EPSILON {
-            return None;
-        }
         let x = point.x - self.e;
         let y = point.y - self.f;
-        Some(CanvasPoint {
-            x: (self.d * x - self.c * y) / determinant,
-            y: (-self.b * x + self.a * y) / determinant,
-        })
+        if !x.is_finite() || !y.is_finite() {
+            return None;
+        }
+        let solve = |a: f64, b: f64, c: f64, d: f64, x: f64, y: f64| {
+            let point = if a.abs() >= b.abs() {
+                if a == 0.0 {
+                    return None;
+                }
+                let ratio = b / a;
+                let denominator = d - ratio * c;
+                if denominator == 0.0 || !denominator.is_finite() {
+                    return None;
+                }
+                let local_y = (y - ratio * x) / denominator;
+                CanvasPoint {
+                    x: (x - c * local_y) / a,
+                    y: local_y,
+                }
+            } else {
+                let ratio = a / b;
+                let denominator = c - ratio * d;
+                if denominator == 0.0 || !denominator.is_finite() {
+                    return None;
+                }
+                let local_y = (x - ratio * y) / denominator;
+                CanvasPoint {
+                    x: (y - d * local_y) / b,
+                    y: local_y,
+                }
+            };
+            (point.x.is_finite() && point.y.is_finite()).then_some(point)
+        };
+        if let Some(point) = solve(self.a, self.b, self.c, self.d, x, y) {
+            return Some(point);
+        }
+
+        let scale = self
+            .a
+            .abs()
+            .max(self.b.abs())
+            .max(self.c.abs())
+            .max(self.d.abs());
+        if !scale.is_finite() || scale == 0.0 {
+            return None;
+        }
+        let a = self.a / scale;
+        let b = self.b / scale;
+        let c = self.c / scale;
+        let d = self.d / scale;
+        let determinant = a * d - b * c;
+        if !determinant.is_finite() || determinant == 0.0 {
+            return None;
+        }
+        solve(a, b, c, d, x / scale, y / scale)
+    }
+
+    pub(crate) fn has_invertible_linear_part(self) -> bool {
+        if ![self.a, self.b, self.c, self.d]
+            .into_iter()
+            .all(f64::is_finite)
+        {
+            return false;
+        }
+        if self.a.abs() >= self.b.abs() {
+            self.a != 0.0 && self.d - (self.b / self.a) * self.c != 0.0
+        } else {
+            self.b != 0.0 && self.c - (self.a / self.b) * self.d != 0.0
+        }
     }
 
     pub(crate) fn max_scale_after_output_scale(self, scale_x: f64, scale_y: f64) -> f64 {

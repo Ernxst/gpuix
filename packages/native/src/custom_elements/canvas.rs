@@ -337,12 +337,25 @@ fn expand_arcs(
 fn map_commands_to_stroke_space(
     commands: &[crate::canvas::PathCommand],
     transform: crate::canvas::CanvasTransform,
-) -> Option<Vec<crate::canvas::PathCommand>> {
-    let map = |point| transform.inverse_transform_point(point);
-    commands
+) -> Result<Option<Vec<crate::canvas::PathCommand>>, &'static str> {
+    if !transform.has_invertible_linear_part() {
+        return Ok(None);
+    }
+    let map = |point| {
+        let point = transform
+            .inverse_transform_point(point)
+            .ok_or("inverse stroke geometry is not representable in f64")?;
+        let x = point.x as f32;
+        let y = point.y as f32;
+        if !x.is_finite() || !y.is_finite() {
+            return Err("stroke-local geometry is not representable at GPUI's f32 boundary");
+        }
+        Ok(point)
+    };
+    let commands = commands
         .iter()
         .map(|command| {
-            Some(match command {
+            Ok(match command {
                 crate::canvas::PathCommand::MoveTo(point) => {
                     crate::canvas::PathCommand::MoveTo(map(*point)?)
                 }
@@ -368,25 +381,50 @@ fn map_commands_to_stroke_space(
                 crate::canvas::PathCommand::ClosePath => crate::canvas::PathCommand::ClosePath,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, &'static str>>()?;
+    Ok(Some(commands))
 }
 
-fn split_subpaths(commands: &[crate::canvas::PathCommand]) -> Vec<&[crate::canvas::PathCommand]> {
-    let mut starts = commands
-        .iter()
-        .enumerate()
-        .filter_map(|(index, command)| {
-            matches!(command, crate::canvas::PathCommand::MoveTo(_)).then_some(index)
-        })
-        .collect::<Vec<_>>();
-    starts.push(commands.len());
-    starts
-        .windows(2)
-        .filter_map(|window| {
-            let subpath = &commands[window[0]..window[1]];
-            (subpath.len() > 1).then_some(subpath)
-        })
-        .collect()
+fn split_subpaths(commands: &[crate::canvas::PathCommand]) -> Vec<Vec<crate::canvas::PathCommand>> {
+    let mut subpaths = Vec::new();
+    let mut current = Vec::new();
+    let mut start = None;
+    let mut closed = false;
+    let finish = |subpaths: &mut Vec<Vec<crate::canvas::PathCommand>>,
+                  current: &mut Vec<crate::canvas::PathCommand>| {
+        if current.len() > 1 {
+            subpaths.push(std::mem::take(current));
+        } else {
+            current.clear();
+        }
+    };
+
+    for command in commands {
+        match command {
+            crate::canvas::PathCommand::MoveTo(point) => {
+                finish(&mut subpaths, &mut current);
+                current.push(command.clone());
+                start = Some(*point);
+                closed = false;
+            }
+            crate::canvas::PathCommand::ClosePath => {
+                current.push(command.clone());
+                closed = true;
+            }
+            command => {
+                if closed {
+                    finish(&mut subpaths, &mut current);
+                    if let Some(start) = start {
+                        current.push(crate::canvas::PathCommand::MoveTo(start));
+                    }
+                    closed = false;
+                }
+                current.push(command.clone());
+            }
+        }
+    }
+    finish(&mut subpaths, &mut current);
+    subpaths
 }
 
 fn append_transformed_triangles(
@@ -671,9 +709,6 @@ fn prepare_with_scale(
         let canvas_miter_limit = style.miter_limit;
         let lyon_miter_limit = canvas_miter_limit * 0.5;
         let join = match style.line_join {
-            crate::canvas::CanvasLineJoin::Miter if lyon_miter_limit < 1.0 => {
-                lyon::path::LineJoin::Bevel
-            }
             crate::canvas::CanvasLineJoin::Miter => lyon::path::LineJoin::Miter,
             crate::canvas::CanvasLineJoin::Round => lyon::path::LineJoin::Round,
             crate::canvas::CanvasLineJoin::Bevel => lyon::path::LineJoin::Bevel,
@@ -687,12 +722,17 @@ fn prepare_with_scale(
             return Ok(None);
         }
         let stroke_tolerance = (0.25 / stroke_device_scale).max(0.000_1) as f32;
-        let options = gpui::StrokeOptions::default()
+        let mut options = gpui::StrokeOptions::default()
             .with_line_width(style.line_width as f32)
             .with_line_cap(cap)
             .with_line_join(join)
-            .with_miter_limit(lyon_miter_limit.max(1.0) as f32)
             .with_tolerance(stroke_tolerance);
+        // Canvas measures the complete inner-to-outer miter against lineWidth;
+        // Lyon measures the center-to-tip distance, so its ratio is half. Its
+        // setter rejects ratios below 1, but miter_limit is public,
+        // PathBuilder passes StrokeOptions through unchanged, and Lyon's
+        // per-join predicate supports Canvas' required 0.5..1 range.
+        options.miter_limit = lyon_miter_limit as f32;
         let commands = expand_arcs(commands, scale_x, scale_y, f64::from(device_scale));
         tessellations.set(tessellations.get() + 1);
         if commands.len() > usize::from(u16::MAX) {
@@ -703,7 +743,15 @@ fn prepare_with_scale(
                         .to_string(),
                 });
         }
-        let Some(commands) = map_commands_to_stroke_space(&commands, style.transform) else {
+        let Some(commands) =
+            map_commands_to_stroke_space(&commands, style.transform).map_err(|reason| {
+                crate::canvas::CanvasDiagnostic {
+                    op_index,
+                    op_name: op_name.to_string(),
+                    reason: format!("GPUI PathBuilder failed to build stroke geometry: {reason}"),
+                }
+            })?
+        else {
             return Ok(None);
         };
         let dash = style
@@ -719,7 +767,7 @@ fn prepare_with_scale(
             if uses_dash {
                 builder = builder.dash_array(&dash);
             }
-            append_local_commands(&mut builder, subpath);
+            append_local_commands(&mut builder, &subpath);
             let local = builder
                 .build()
                 .map_err(|error| path_build_diagnostic(op_index, op_name, "stroke", &error))?;
@@ -1295,6 +1343,62 @@ mod tests {
             .collect()
     }
 
+    fn dashed_stroke(commands: Vec<PathCommand>, op_index: usize) -> DisplayItem {
+        DisplayItem::StrokePath(StrokePath {
+            commands,
+            style: StrokePathStyle {
+                color: color(),
+                line_width: 2.0,
+                line_cap: CanvasLineCap::Butt,
+                line_join: CanvasLineJoin::Miter,
+                miter_limit: 10.0,
+                line_dash: vec![10.0, 10.0],
+                transform: CanvasTransform::IDENTITY,
+            },
+            op_index,
+            clear_regions: Vec::new(),
+        })
+    }
+
+    fn assert_dash_restart_matches_separate_paths(
+        combined: Vec<PathCommand>,
+        first: Vec<PathCommand>,
+        second: Vec<PathCommand>,
+    ) {
+        let combined = prepare(
+            &crate::canvas::DisplayList {
+                revision: 1,
+                items: vec![dashed_stroke(combined, 0)],
+            },
+            test_bounds(),
+            320.0,
+            240.0,
+        );
+        let separate = prepare(
+            &crate::canvas::DisplayList {
+                revision: 1,
+                items: vec![dashed_stroke(first, 0), dashed_stroke(second, 1)],
+            },
+            test_bounds(),
+            320.0,
+            240.0,
+        );
+        let separate_positions = separate
+            .items
+            .iter()
+            .flat_map(|item| match item {
+                PreparedItem::Path { path, .. } => vertex_positions(path),
+                PreparedItem::Quad(_) => panic!("expected only paths"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            vertex_positions(prepared_path(&combined)),
+            separate_positions
+        );
+        assert_eq!(combined.tessellations, 1);
+        assert_eq!(separate.tessellations, 2);
+    }
+
     #[test]
     fn dpr_scaled_backing_geometry_maps_to_the_same_layout_geometry() {
         let logical = crate::canvas::DisplayList {
@@ -1590,6 +1694,102 @@ mod tests {
     }
 
     #[test]
+    fn tiny_but_invertible_stroke_transform_remains_visible() {
+        let underflowing_determinant =
+            CanvasTransform::from_components(1e-200, 0.0, 0.0, 1e-200, 0.0, 0.0);
+        let local = underflowing_determinant
+            .inverse_transform_point(CanvasPoint {
+                x: 1e-199,
+                y: 2e-199,
+            })
+            .expect("a finite nonzero scale remains invertible");
+        assert!((local.x - 10.0).abs() < 1e-12);
+        assert!((local.y - 20.0).abs() < 1e-12);
+        let smallest = f64::from_bits(1);
+        let extreme = CanvasTransform::from_components(f64::MAX, 0.0, 0.0, smallest, 0.0, 0.0);
+        assert_eq!(
+            extreme.inverse_transform_point(CanvasPoint {
+                x: f64::MAX,
+                y: smallest,
+            }),
+            Some(CanvasPoint { x: 1.0, y: 1.0 })
+        );
+        assert!(map_commands_to_stroke_space(
+            &[PathCommand::MoveTo(CanvasPoint { x: 0.0, y: 0.0 })],
+            CanvasTransform::from_components(0.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+        )
+        .expect("a singular CTM is a supported no-op")
+        .is_none());
+
+        let display_lists = crate::canvas::SharedDisplayLists::default();
+        crate::canvas::replace_display_list(
+            &display_lists,
+            1,
+            &[
+                crate::canvas::opcodes::STREAM_MAGIC,
+                crate::canvas::opcodes::STREAM_VERSION,
+                crate::canvas::opcodes::SCALE,
+                2,
+                crate::canvas::opcodes::LINE_WIDTH,
+                1,
+                crate::canvas::opcodes::BEGIN_PATH,
+                0,
+                crate::canvas::opcodes::MOVE_TO,
+                2,
+                crate::canvas::opcodes::LINE_TO,
+                2,
+                crate::canvas::opcodes::STROKE,
+                0,
+            ],
+            &[1e-20, 1.0, 2.0, 10.0, 20.0, 200.0, 20.0],
+            &[],
+        )
+        .unwrap();
+        let list = display_lists.lock().unwrap().get(&1).unwrap().clone();
+
+        let prepared = prepare(&list, test_bounds(), 320.0, 240.0);
+        assert!(prepared.diagnostics.is_empty());
+        let path = prepared_path(&prepared);
+        assert!(!path.vertices.is_empty());
+        assert!(f32::from(path.bounds.size.width) > 0.0);
+        assert!((f32::from(path.bounds.size.height) - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn unrepresentable_stroke_local_coordinates_are_a_named_diagnostic() {
+        let transform = CanvasTransform::from_components(1e-40, 0.0, 0.0, 1.0, 0.0, 0.0);
+        let list = crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::StrokePath(StrokePath {
+                commands: vec![
+                    PathCommand::MoveTo(CanvasPoint { x: 1.0, y: 20.0 }),
+                    PathCommand::LineTo(CanvasPoint { x: 2.0, y: 20.0 }),
+                ],
+                style: StrokePathStyle {
+                    color: color(),
+                    line_width: 2.0,
+                    line_cap: CanvasLineCap::Butt,
+                    line_join: CanvasLineJoin::Miter,
+                    miter_limit: 10.0,
+                    line_dash: Vec::new(),
+                    transform,
+                },
+                op_index: 9,
+                clear_regions: Vec::new(),
+            })],
+        };
+
+        let prepared = prepare(&list, test_bounds(), 320.0, 240.0);
+        assert!(prepared.items.is_empty());
+        assert_eq!(prepared.diagnostics.len(), 1);
+        assert_eq!(prepared.diagnostics[0].op_index, 9);
+        assert_eq!(prepared.diagnostics[0].op_name, "stroke");
+        assert!(prepared.diagnostics[0]
+            .reason
+            .contains("stroke-local geometry is not representable"));
+    }
+
+    #[test]
     fn dash_phase_restarts_for_each_subpath_and_zero_dash_is_solid() {
         let style = |line_dash| StrokePathStyle {
             color: color(),
@@ -1608,49 +1808,11 @@ mod tests {
             PathCommand::MoveTo(CanvasPoint { x: 0.0, y: 30.0 }),
             PathCommand::LineTo(CanvasPoint { x: 15.0, y: 30.0 }),
         ];
-        let combined = crate::canvas::DisplayList {
-            revision: 1,
-            items: vec![DisplayItem::StrokePath(StrokePath {
-                commands: first.iter().chain(&second).cloned().collect(),
-                style: style(vec![10.0, 10.0]),
-                op_index: 0,
-                clear_regions: Vec::new(),
-            })],
-        };
-        let separate = crate::canvas::DisplayList {
-            revision: 1,
-            items: vec![
-                DisplayItem::StrokePath(StrokePath {
-                    commands: first.clone(),
-                    style: style(vec![10.0, 10.0]),
-                    op_index: 0,
-                    clear_regions: Vec::new(),
-                }),
-                DisplayItem::StrokePath(StrokePath {
-                    commands: second,
-                    style: style(vec![10.0, 10.0]),
-                    op_index: 1,
-                    clear_regions: Vec::new(),
-                }),
-            ],
-        };
-
-        let combined = prepare(&combined, test_bounds(), 320.0, 240.0);
-        let separate = prepare(&separate, test_bounds(), 320.0, 240.0);
-        let separate_positions = separate
-            .items
-            .iter()
-            .flat_map(|item| match item {
-                PreparedItem::Path { path, .. } => vertex_positions(path),
-                PreparedItem::Quad(_) => panic!("expected only paths"),
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            vertex_positions(prepared_path(&combined)),
-            separate_positions
+        assert_dash_restart_matches_separate_paths(
+            first.iter().chain(&second).cloned().collect(),
+            first.clone(),
+            second,
         );
-        assert_eq!(combined.tessellations, 1);
-        assert_eq!(separate.tessellations, 2);
 
         let solid = |line_dash| crate::canvas::DisplayList {
             revision: 1,
@@ -1667,6 +1829,38 @@ mod tests {
             vertex_positions(prepared_path(&empty)),
             vertex_positions(prepared_path(&zeros))
         );
+    }
+
+    #[test]
+    fn dash_phase_restarts_after_close_path_and_rect() {
+        let closed = vec![
+            PathCommand::MoveTo(CanvasPoint { x: 20.0, y: 20.0 }),
+            PathCommand::LineTo(CanvasPoint { x: 35.0, y: 20.0 }),
+            PathCommand::LineTo(CanvasPoint { x: 35.0, y: 35.0 }),
+            PathCommand::ClosePath,
+        ];
+        let after_closed = vec![
+            PathCommand::MoveTo(CanvasPoint { x: 20.0, y: 20.0 }),
+            PathCommand::LineTo(CanvasPoint { x: 55.0, y: 20.0 }),
+        ];
+        let mut combined = closed.clone();
+        combined.push(PathCommand::LineTo(CanvasPoint { x: 55.0, y: 20.0 }));
+        assert_dash_restart_matches_separate_paths(combined, closed, after_closed);
+
+        let rect = vec![
+            PathCommand::MoveTo(CanvasPoint { x: 80.0, y: 40.0 }),
+            PathCommand::LineTo(CanvasPoint { x: 97.0, y: 40.0 }),
+            PathCommand::LineTo(CanvasPoint { x: 97.0, y: 51.0 }),
+            PathCommand::LineTo(CanvasPoint { x: 80.0, y: 51.0 }),
+            PathCommand::ClosePath,
+        ];
+        let after_rect = vec![
+            PathCommand::MoveTo(CanvasPoint { x: 80.0, y: 40.0 }),
+            PathCommand::LineTo(CanvasPoint { x: 115.0, y: 40.0 }),
+        ];
+        let mut combined = rect.clone();
+        combined.push(PathCommand::LineTo(CanvasPoint { x: 115.0, y: 40.0 }));
+        assert_dash_restart_matches_separate_paths(combined, rect, after_rect);
     }
 
     #[test]
@@ -1762,6 +1956,125 @@ mod tests {
             vertex_positions(prepared_path(&miter)),
             vertex_positions(prepared_path(&bevel))
         );
+
+        let shallow = |line_join, miter_limit| crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::StrokePath(StrokePath {
+                commands: vec![
+                    PathCommand::MoveTo(CanvasPoint { x: 20.0, y: 40.0 }),
+                    PathCommand::LineTo(CanvasPoint { x: 60.0, y: 40.0 }),
+                    PathCommand::LineTo(CanvasPoint { x: 100.0, y: 50.0 }),
+                ],
+                style: StrokePathStyle {
+                    color: color(),
+                    line_width: 10.0,
+                    line_cap: CanvasLineCap::Butt,
+                    line_join,
+                    miter_limit,
+                    line_dash: Vec::new(),
+                    transform: CanvasTransform::IDENTITY,
+                },
+                op_index: 0,
+                clear_regions: Vec::new(),
+            })],
+        };
+        let shallow_low = prepare(
+            &shallow(CanvasLineJoin::Miter, 1.5),
+            test_bounds(),
+            320.0,
+            240.0,
+        );
+        let shallow_default = prepare(
+            &shallow(CanvasLineJoin::Miter, 10.0),
+            test_bounds(),
+            320.0,
+            240.0,
+        );
+        let shallow_bevel = prepare(
+            &shallow(CanvasLineJoin::Bevel, 10.0),
+            test_bounds(),
+            320.0,
+            240.0,
+        );
+        assert_eq!(
+            vertex_positions(prepared_path(&shallow_low)),
+            vertex_positions(prepared_path(&shallow_default))
+        );
+        assert_ne!(
+            vertex_positions(prepared_path(&shallow_low)),
+            vertex_positions(prepared_path(&shallow_bevel))
+        );
+    }
+
+    #[test]
+    fn rect_path_and_stroke_rect_apply_the_same_canvas_miter_limit() {
+        let make = |miter_limit| crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![
+                DisplayItem::StrokeRect(StrokeRect {
+                    x: 20.0,
+                    y: 20.0,
+                    width: 60.0,
+                    height: 40.0,
+                    transform: CanvasTransform::IDENTITY,
+                    style: StrokeStyle {
+                        color: color(),
+                        line_width: 10.0,
+                        line_cap: CanvasLineCap::Butt,
+                        line_join: CanvasLineJoin::Miter,
+                        miter_limit,
+                        line_dash: Vec::new(),
+                        transform: CanvasTransform::IDENTITY,
+                    },
+                    op_index: 0,
+                    clear_regions: Vec::new(),
+                }),
+                DisplayItem::StrokePath(StrokePath {
+                    commands: vec![
+                        PathCommand::MoveTo(CanvasPoint { x: 20.0, y: 20.0 }),
+                        PathCommand::LineTo(CanvasPoint { x: 80.0, y: 20.0 }),
+                        PathCommand::LineTo(CanvasPoint { x: 80.0, y: 60.0 }),
+                        PathCommand::LineTo(CanvasPoint { x: 20.0, y: 60.0 }),
+                        PathCommand::ClosePath,
+                    ],
+                    style: StrokePathStyle {
+                        color: color(),
+                        line_width: 10.0,
+                        line_cap: CanvasLineCap::Butt,
+                        line_join: CanvasLineJoin::Miter,
+                        miter_limit,
+                        line_dash: Vec::new(),
+                        transform: CanvasTransform::IDENTITY,
+                    },
+                    op_index: 1,
+                    clear_regions: Vec::new(),
+                }),
+            ],
+        };
+        let has_outer_miter = |path: &gpui::Path<gpui::Pixels>| {
+            path.vertices.iter().any(|vertex| {
+                (f32::from(vertex.xy_position.x) - 15.0).abs() < 0.01
+                    && (f32::from(vertex.xy_position.y) - 15.0).abs() < 0.01
+            })
+        };
+
+        for (limit, expected_miter) in [(1.0, false), (1.5, true)] {
+            let prepared = prepare(&make(limit), test_bounds(), 320.0, 240.0);
+            let PreparedItem::Path {
+                path: stroke_rect, ..
+            } = &prepared.items[0]
+            else {
+                panic!("expected strokeRect path")
+            };
+            let PreparedItem::Path {
+                path: rect_stroke, ..
+            } = &prepared.items[1]
+            else {
+                panic!("expected rect stroke path")
+            };
+            assert_eq!(has_outer_miter(stroke_rect), expected_miter);
+            assert_eq!(has_outer_miter(rect_stroke), expected_miter);
+        }
     }
 
     #[test]
