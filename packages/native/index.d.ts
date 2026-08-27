@@ -412,7 +412,13 @@ export declare class TestGpuixRenderer {
    * Supported on macOS through Metal and Windows through DirectX.
    */
   captureScreenshot(path: string): void
-  /** Compare two PNG screenshots using an absolute tolerance for each RGBA channel. */
+  /**
+   * Compare two PNG screenshots using an absolute tolerance for each RGBA channel.
+   *
+   * Future D1/fillText scenes will not be deterministic across browser and native due to
+   * font selection, shaping, and antialiasing. Transparent scenes will require an explicit
+   * straight-alpha comparison policy; the current committed scenes intentionally remain opaque.
+   */
   compareImages(pathA: string, pathB: string, tolerance: number): ImageComparisonResult
   /**
    * Return and clear all collected events since the last drain.

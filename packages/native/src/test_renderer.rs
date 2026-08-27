@@ -1210,6 +1210,10 @@ impl TestGpuixRenderer {
     }
 
     /// Compare two PNG screenshots using an absolute tolerance for each RGBA channel.
+    ///
+    /// Future D1/fillText scenes will not be deterministic across browser and native due to
+    /// font selection, shaping, and antialiasing. Transparent scenes will require an explicit
+    /// straight-alpha comparison policy; the current committed scenes intentionally remain opaque.
     #[napi]
     pub fn compare_images(
         &self,
