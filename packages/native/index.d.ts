@@ -88,12 +88,6 @@ export declare class GpuixRenderer {
    * This keeps input and application lifecycle events responsive between frames.
    */
   tickIdle(): boolean
-  /**
-   * Test seam for a native frame callback that arrives after tickIdle's
-   * outstanding-work precheck. The callback is queued from a background
-   * thread while the embedded AppKit pump owns the JavaScript thread.
-   */
-  testIdlePumpFrameRequestRace(callback: FrameRequestCallback): boolean
   isInitialized(): boolean
   /**
    * Stable platform and renderer feature read. Keep individual methods for
@@ -179,6 +173,12 @@ export declare class GpuixRenderer {
   clockFastForward(deltaMs: number): number
   clockResume(): number
   captureScreenshot(path: string): void
+  /**
+   * Test seam for a native frame callback that arrives after tickIdle's
+   * outstanding-work precheck. The callback is queued from a background
+   * thread while the embedded AppKit pump owns the JavaScript thread.
+   */
+  testIdlePumpFrameRequestRace(callback: FrameRequestCallback): boolean
 }
 
 /**
@@ -685,13 +685,6 @@ export interface RendererCapabilities {
   window: WindowCapabilities
   images: ImageCapabilities
   automation: AutomationCapabilities
-}
-
-/** Error thrown when a renderer method is outside its advertised capability surface. */
-export interface UnsupportedCapabilityError extends Error {
-  name: "UnsupportedCapabilityError"
-  code: "ERR_GPUX_UNSUPPORTED_CAPABILITY"
-  capability: string
 }
 
 export interface ScrollWheelModifiers {
