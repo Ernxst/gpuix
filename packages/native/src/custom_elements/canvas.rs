@@ -233,29 +233,6 @@ fn subtract_clear_regions(
     Some(path)
 }
 
-fn map_path(
-    path: &gpui::Path<gpui::Pixels>,
-    map: impl Fn(gpui::Point<gpui::Pixels>) -> gpui::Point<gpui::Pixels>,
-) -> Option<gpui::Path<gpui::Pixels>> {
-    let first = path.vertices.first()?;
-    let mut mapped = gpui::Path::new(map(first.xy_position));
-    for triangle in path.vertices.chunks_exact(3) {
-        mapped.push_triangle(
-            (
-                map(triangle[0].xy_position),
-                map(triangle[1].xy_position),
-                map(triangle[2].xy_position),
-            ),
-            (
-                triangle[0].st_position,
-                triangle[1].st_position,
-                triangle[2].st_position,
-            ),
-        );
-    }
-    Some(mapped)
-}
-
 fn prepare(
     list: &crate::canvas::DisplayList,
     bounds: gpui::Bounds<gpui::Pixels>,
@@ -379,45 +356,106 @@ fn prepare(
                     continue;
                 }
                 let is_segment = rect.width == 0.0 || rect.height == 0.0;
-                let join = match rect.style.line_join {
-                    crate::canvas::CanvasLineJoin::Miter => lyon::path::LineJoin::Miter,
-                    crate::canvas::CanvasLineJoin::Round => lyon::path::LineJoin::Round,
-                    crate::canvas::CanvasLineJoin::Bevel => lyon::path::LineJoin::Bevel,
-                };
-                let options = gpui::StrokeOptions::default()
-                    .with_line_width(rect.style.line_width as f32)
-                    .with_line_join(join)
-                    .with_miter_limit(rect.style.miter_limit.max(1.0) as f32);
-                let mut builder = gpui::PathBuilder::stroke(gpui::px(rect.style.line_width as f32))
-                    .with_style(gpui::PathStyle::Stroke(options));
-                builder.move_to(gpui::point(gpui::px(0.0), gpui::px(0.0)));
+                let options = gpui::FillOptions::default().with_fill_rule(gpui::FillRule::NonZero);
+                let mut builder =
+                    gpui::PathBuilder::fill().with_style(gpui::PathStyle::Fill(options));
+                let point = |x, y| layout_point(rect.transform.transform_point(x, y));
+                let half = rect.style.line_width * 0.5;
+                let left = rect.x.min(rect.x + rect.width);
+                let right = rect.x.max(rect.x + rect.width);
+                let top = rect.y.min(rect.y + rect.height);
+                let bottom = rect.y.max(rect.y + rect.height);
+
                 if rect.width == 0.0 {
                     // A one-axis-degenerate strokeRect is one open segment.
-                    // B2 deliberately keeps StrokeOptions' default butt cap;
-                    // B3 can thread the recorded lineCap through this seam.
-                    builder.line_to(gpui::point(gpui::px(0.0), gpui::px(rect.height as f32)));
-                } else if rect.height == 0.0 {
-                    builder.line_to(gpui::point(gpui::px(rect.width as f32), gpui::px(0.0)));
-                } else {
-                    builder.line_to(gpui::point(gpui::px(rect.width as f32), gpui::px(0.0)));
-                    builder.line_to(gpui::point(
-                        gpui::px(rect.width as f32),
-                        gpui::px(rect.height as f32),
-                    ));
-                    builder.line_to(gpui::point(gpui::px(0.0), gpui::px(rect.height as f32)));
+                    // B2 deliberately keeps Canvas' default butt cap; B3 can
+                    // thread the recorded lineCap through this seam.
+                    builder.move_to(point(left - half, top));
+                    builder.line_to(point(left + half, top));
+                    builder.line_to(point(left + half, bottom));
+                    builder.line_to(point(left - half, bottom));
                     builder.close();
+                } else if rect.height == 0.0 {
+                    builder.move_to(point(left, top - half));
+                    builder.line_to(point(right, top - half));
+                    builder.line_to(point(right, top + half));
+                    builder.line_to(point(left, top + half));
+                    builder.close();
+                } else {
+                    let join = match rect.style.line_join {
+                        crate::canvas::CanvasLineJoin::Miter
+                            if rect.style.miter_limit >= std::f64::consts::FRAC_1_SQRT_2 =>
+                        {
+                            crate::canvas::CanvasLineJoin::Miter
+                        }
+                        crate::canvas::CanvasLineJoin::Miter => {
+                            crate::canvas::CanvasLineJoin::Bevel
+                        }
+                        join => join,
+                    };
+                    match join {
+                        crate::canvas::CanvasLineJoin::Miter => {
+                            builder.move_to(point(left - half, top - half));
+                            builder.line_to(point(right + half, top - half));
+                            builder.line_to(point(right + half, bottom + half));
+                            builder.line_to(point(left - half, bottom + half));
+                        }
+                        crate::canvas::CanvasLineJoin::Bevel => {
+                            builder.move_to(point(left, top - half));
+                            builder.line_to(point(right, top - half));
+                            builder.line_to(point(right + half, top));
+                            builder.line_to(point(right + half, bottom));
+                            builder.line_to(point(right, bottom + half));
+                            builder.line_to(point(left, bottom + half));
+                            builder.line_to(point(left - half, bottom));
+                            builder.line_to(point(left - half, top));
+                        }
+                        crate::canvas::CanvasLineJoin::Round => {
+                            const KAPPA: f64 = 0.552_284_749_830_793_6;
+                            let control = half * KAPPA;
+                            builder.move_to(point(left, top - half));
+                            builder.line_to(point(right, top - half));
+                            builder.cubic_bezier_to(
+                                point(right + half, top),
+                                point(right + control, top - half),
+                                point(right + half, top - control),
+                            );
+                            builder.line_to(point(right + half, bottom));
+                            builder.cubic_bezier_to(
+                                point(right, bottom + half),
+                                point(right + half, bottom + control),
+                                point(right + control, bottom + half),
+                            );
+                            builder.line_to(point(left, bottom + half));
+                            builder.cubic_bezier_to(
+                                point(left - half, bottom),
+                                point(left - control, bottom + half),
+                                point(left - half, bottom + control),
+                            );
+                            builder.line_to(point(left - half, top));
+                            builder.cubic_bezier_to(
+                                point(left, top - half),
+                                point(left - half, top - control),
+                                point(left - control, top - half),
+                            );
+                        }
+                    }
+                    builder.close();
+
+                    if right - left > rect.style.line_width && bottom - top > rect.style.line_width
+                    {
+                        builder.move_to(point(left + half, top + half));
+                        builder.line_to(point(left + half, bottom - half));
+                        builder.line_to(point(right - half, bottom - half));
+                        builder.line_to(point(right - half, top + half));
+                        builder.close();
+                    }
                 }
                 match builder.build() {
                     Ok(path) => {
-                        let transformed = map_path(&path, |point| {
-                            layout_point(rect.transform.transform_point(
-                                rect.x + f64::from(f32::from(point.x)),
-                                rect.y + f64::from(f32::from(point.y)),
-                            ))
-                        });
-                        if let Some(path) = transformed.and_then(|path| {
+                        if let Some(path) =
                             subtract_clear_regions(path, &rect.clear_regions, &layout_point)
-                        }) {
+                        {
                             items.push(PreparedItem::Path {
                                 path,
                                 color: rect.style.color,
@@ -1000,7 +1038,7 @@ mod tests {
     }
 
     #[test]
-    fn stroke_rect_applies_large_world_translation_before_narrowing() {
+    fn stroke_rect_preserves_f64_dimensions_and_width_through_the_ctm() {
         let display_lists = crate::canvas::SharedDisplayLists::default();
         crate::canvas::replace_display_list(
             &display_lists,
@@ -1010,12 +1048,24 @@ mod tests {
                 crate::canvas::opcodes::STREAM_VERSION,
                 crate::canvas::opcodes::LINE_WIDTH,
                 1,
-                crate::canvas::opcodes::TRANSLATE,
-                2,
+                crate::canvas::opcodes::SET_TRANSFORM,
+                6,
                 crate::canvas::opcodes::STROKE_RECT,
                 4,
             ],
-            &[2.0, -16_777_216.0, 0.0, 16_777_217.0, 20.0, 10.0, 10.0],
+            &[
+                1e-8,
+                1e8,
+                0.0,
+                0.0,
+                1.0,
+                -1e8,
+                0.0,
+                0.0,
+                10.0,
+                1.000_000_2,
+                10.0,
+            ],
             &[],
         )
         .unwrap();
@@ -1023,8 +1073,14 @@ mod tests {
 
         let prepared = prepare(&list, test_bounds(), 320.0, 240.0);
         let path = prepared_path(&prepared);
-        assert_eq!(f32::from(path.bounds.origin.x), 0.0);
-        assert_eq!(f32::from(path.bounds.size.width), 12.0);
+        let rightmost = path
+            .vertices
+            .iter()
+            .map(|vertex| f32::from(vertex.xy_position.x))
+            .fold(f32::NEG_INFINITY, f32::max);
+        // The rectangle edge is x=20 after the CTM and its transformed
+        // half-stroke is 0.5. Narrowing 1.0000002 first produced x=23.84.
+        assert!((rightmost - 20.5).abs() < 0.01, "rightmost={rightmost}");
     }
 
     #[test]
