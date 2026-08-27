@@ -530,6 +530,15 @@ export const hostConfig = {
       setPointerCapture: () => rootContainerInstance.renderer.setPointerCapture?.(id),
       releasePointerCapture: () =>
         rootContainerInstance.renderer.releasePointerCapture?.(id),
+      getBounds: () => {
+        const getElementBounds = rootContainerInstance.renderer.getElementBounds
+        if (!getElementBounds) {
+          throw new Error("This GPUIX renderer does not support element measurement")
+        }
+        const bounds = getElementBounds.call(rootContainerInstance.renderer, id)
+        if (!bounds) return null
+        return { x: bounds[0]!, y: bounds[1]!, width: bounds[2]!, height: bounds[3]! }
+      },
       __applyCanvasCommands: (ops, operands, strings) => {
         if (instance.type !== "canvas") {
           throw new TypeError(
