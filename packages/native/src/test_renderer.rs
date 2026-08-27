@@ -231,8 +231,8 @@ pub struct TestGpuixRenderer {
     image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
-    /// Mouse-down origin for the current GPUI active-state sequence.
-    /// GPUI keeps `active` applied until mouse-up even if the pointer moves.
+    /// Mouse-down origin for the current GPUI active-state sequence. Retained
+    /// for the native test input path, which must mirror main's press lifetime.
     active_pointer_origin: Mutex<Option<(f64, f64)>>,
 }
 
@@ -1304,46 +1304,79 @@ impl TestGpuixRenderer {
         let element_bounds = crate::automation::get_bounds(id);
         let hover_group_bounds = hover_group_id.and_then(crate::automation::get_bounds);
         let active_pointer_origin = *self.active_pointer_origin.lock().unwrap();
-
-        let (pointer, focus, keyboard_input, transitioned_style) =
+        let (pointer, focus, keyboard_input, hovered_state, hover_within_state, active_state, transitioned_style, motion_style) =
             with_test_state(self.state_id, |cx, window, view| {
                 let view = view.clone();
                 cx.update_window(window, |_, window, app| {
-                    let mouse = window.mouse_position();
                     let reduce_motion = app.reduce_motion();
+                    let mouse = window.mouse_position();
                     let view = view.read(app);
                     let focus = view
                         .focus_handles
                         .get(&id)
                         .is_some_and(|handle| handle.is_focused(window));
                     let keyboard = window.last_input_was_keyboard();
+                    let hovered = view
+                        .interactive_style_states
+                        .get(&id)
+                        .map(|state| state.hovered);
+                    let hover_within = hover_group_id.and_then(|group_id| {
+                        view.interactive_style_states
+                            .get(&group_id)
+                            .map(|state| state.hovered)
+                    });
+                    let active = view
+                        .interactive_style_states
+                        .get(&id)
+                        .map(|state| state.active);
                     let transitioned_style = view
                         .transition_states
                         .get(&id)
                         .map(|state| state.frame(view.clock.now(), reduce_motion).style);
+                    let motion_style = view
+                        .motion_states
+                        .get(&id)
+                        .filter(|state| state.is_valid())
+                        .map(|state| state.frame(view.clock.now()).style);
                     (
                         (f64::from(f32::from(mouse.x)), f64::from(f32::from(mouse.y))),
                         focus,
                         keyboard,
+                        hovered,
+                        hover_within,
+                        active,
                         transitioned_style,
+                        motion_style,
                     )
                 })
                 .map_err(|error| Error::from_reason(error.to_string()))
             })?;
 
         let accepts_pointer = style.pointer_events.as_deref() != Some("none");
-        let hovered = accepts_pointer
-            && !keyboard_input
-            && element_bounds.is_some_and(|bounds| point_is_inside(bounds, pointer));
-        let hover_within = hover_group_accepts_pointer
-            && !keyboard_input
-            && hover_group_bounds.is_some_and(|bounds| point_is_inside(bounds, pointer));
-        let active = accepts_pointer
-            && active_pointer_origin.is_some_and(|origin| {
-                element_bounds.is_some_and(|bounds| point_is_inside(bounds, origin))
-            });
+        let hovered = hovered_state.unwrap_or(false);
+        let hover_within = hover_within_state.unwrap_or_else(|| {
+            hover_group_accepts_pointer
+                && !keyboard_input
+                && hover_group_bounds.is_some_and(|bounds| point_is_inside(bounds, pointer))
+        });
+        let active = active_state.unwrap_or_else(|| {
+            accepts_pointer
+                && active_pointer_origin.is_some_and(|origin| {
+                    element_bounds.is_some_and(|bounds| point_is_inside(bounds, origin))
+                })
+        });
 
-        let effective_style = transitioned_style.as_ref().unwrap_or(&style);
+        let layered_style = motion_style.map(|motion_style| {
+            let mut layered = transitioned_style
+                .clone()
+                .unwrap_or_else(|| (*style).clone());
+            motion_style.apply_to(&mut layered);
+            layered
+        });
+        let effective_style = layered_style
+            .as_ref()
+            .or(transitioned_style.as_ref())
+            .unwrap_or(&style);
         let mut resolved = style_object(effective_style)?;
         if focus {
             refine_style_object(&mut resolved, effective_style.focus.as_deref())?;

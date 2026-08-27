@@ -4214,6 +4214,11 @@ pub(crate) struct GpuixView {
     pub(crate) scroll_handles: HashMap<u64, gpui::ScrollHandle>,
     /// Native animation clocks keyed by retained element ID.
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
+    /// Hit-test state reported by GPUI's interactive-element callbacks.
+    ///
+    /// Test-only resolved-style reads use this instead of reconstructing hover
+    /// from automation bounds, which cannot account for occlusion or capture.
+    pub(crate) interactive_style_states: HashMap<u64, InteractiveStyleState>,
     /// CSS-like style transition tracks keyed by retained element ID.
     pub(crate) transition_states: HashMap<u64, crate::motion::StyleTransitionState>,
     /// Frame requests emitted while at least one style transition is active.
@@ -4234,6 +4239,34 @@ pub(crate) struct GpuixView {
     /// Resolved `highlight` state, keyed by the element that declared it.
     /// Empty in every app that does not use search.
     highlights: HashMap<u64, HighlightCacheEntry>,
+}
+
+/// The interaction state GPUI has actually delivered for one retained element.
+///
+/// These values are written only by GPUI callbacks, whose `Hitbox::is_hovered`
+/// checks use the same hit-test result as style painting.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct InteractiveStyleState {
+    pub hovered: bool,
+    pub active: bool,
+}
+
+impl InteractiveStyleState {
+    fn set_hovered(&mut self, hovered: bool) -> bool {
+        if self.hovered == hovered {
+            return false;
+        }
+        self.hovered = hovered;
+        true
+    }
+
+    fn set_active(&mut self, active: bool) -> bool {
+        if self.active == active {
+            return false;
+        }
+        self.active = active;
+        true
+    }
 }
 
 /// Two-level cache for one element's `highlight`.
@@ -4365,6 +4398,7 @@ impl GpuixView {
             custom_registry: CustomElementRegistry::with_defaults(),
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
+            interactive_style_states: HashMap::new(),
             transition_states: HashMap::new(),
             style_transition_frame_requests: 0,
             selection,
@@ -4409,9 +4443,15 @@ impl GpuixView {
         if self.pointer_router.borrow_mut().cancel() {
             window.release_pointer();
         }
-        self.transition_states
+        let interactive_changed = self
+            .interactive_style_states
             .values_mut()
-            .fold(false, |changed, state| state.set_active(false) || changed)
+            .fold(false, |changed, state| state.set_active(false) || changed);
+        let transition_changed = self
+            .transition_states
+            .values_mut()
+            .fold(false, |changed, state| state.set_active(false) || changed);
+        interactive_changed || transition_changed
     }
 
     fn observe_window_resize(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) {
@@ -4507,6 +4547,7 @@ impl GpuixView {
             virtual_lists: &mut self.virtual_lists,
             motion_states: &mut self.motion_states,
             transition_states: &mut self.transition_states,
+            interactive_style_states: &self.interactive_style_states,
             now,
             animation_active: &mut animation_active,
             style_transition_active: &mut style_transition_active,
@@ -4621,6 +4662,7 @@ pub(crate) struct BuildCtx<'a> {
     virtual_lists: &'a mut HashMap<u64, VirtualListEntry>,
     pub motion_states: &'a mut HashMap<u64, crate::motion::MotionState>,
     pub transition_states: &'a mut HashMap<u64, crate::motion::StyleTransitionState>,
+    pub interactive_style_states: &'a HashMap<u64, InteractiveStyleState>,
     pub now: web_time::Instant,
     pub animation_active: &'a mut bool,
     pub style_transition_active: &'a mut bool,
@@ -4658,6 +4700,9 @@ pub(crate) struct Inherited {
     pub current_color: gpui::Rgba,
     /// Nearest native hover group for descendant `hoverWithin` styles.
     pub hover_group: Option<gpui::SharedString>,
+    /// Retained ID for the same group. The string is for GPUI's group API;
+    /// this ID lets inherited currentColor follow the exact hit-test state.
+    pub hover_group_id: Option<u64>,
     /// The nearest ancestor's `highlight`, resolved. `None` in every app that
     /// does not use search. It carries the declaring element id, which is what
     /// a virtual-list row re-resolves against: that row is built after the root
@@ -4685,6 +4730,7 @@ impl Inherited {
             text_transform: TextTransform::None,
             current_color: gpui::rgba(0xe2e2e2ff),
             hover_group: None,
+            hover_group_id: None,
             highlight: None,
             font: None,
         }
@@ -4706,6 +4752,8 @@ impl Inherited {
         mut self,
         style: Option<&StyleDesc>,
         hover_group: Option<&str>,
+        hover_group_id: u64,
+        resolved_current_color: Option<gpui::Rgba>,
         font: InheritedFont,
     ) -> Self {
         if let Some(style) = style {
@@ -4737,6 +4785,10 @@ impl Inherited {
         }
         if let Some(hover_group) = hover_group {
             self.hover_group = Some(gpui::SharedString::from(hover_group.to_owned()));
+            self.hover_group_id = Some(hover_group_id);
+        }
+        if let Some(color) = resolved_current_color {
+            self.current_color = color;
         }
         self.font = Some(font);
         self
@@ -4756,6 +4808,51 @@ fn font_with_overrides(mut font: InheritedFont, style: Option<&StyleDesc>) -> In
         }
     }
     font
+}
+
+/// Resolve the inheritable colour from the same layered style that GPUI paints.
+///
+/// Custom SVGs rasterize `currentColor` during build, before GPUI applies its
+/// `hover`, `group_hover`, and `active` paint refinements. Carrying this one
+/// resolved value through `Inherited` keeps their raster source aligned with
+/// the parent div's painted text colour.
+fn resolved_current_color(
+    style: Option<&StyleDesc>,
+    focused: bool,
+    keyboard_input: bool,
+    hover_within: bool,
+    hovered: bool,
+    active: bool,
+) -> Option<gpui::Rgba> {
+    let style = style?;
+    let mut color = style
+        .color
+        .as_deref()
+        .and_then(crate::color::parse_color_rgba);
+    let mut refine = |refinement: Option<&StyleDesc>| {
+        if let Some(candidate) = refinement
+            .and_then(|style| style.color.as_deref())
+            .and_then(crate::color::parse_color_rgba)
+        {
+            color = Some(candidate);
+        }
+    };
+    if focused {
+        refine(style.focus.as_deref());
+    }
+    if focused && keyboard_input {
+        refine(style.focus_visible.as_deref());
+    }
+    if hover_within {
+        refine(style.hover_within.as_deref());
+    }
+    if hovered {
+        refine(style.hover.as_deref());
+    }
+    if active {
+        refine(style.active.as_deref());
+    }
+    color
 }
 
 fn json_usize(value: &serde_json::Value) -> Option<usize> {
@@ -5212,6 +5309,8 @@ impl gpui::Render for GpuixView {
             .retain(|id, _| tree.elements.contains_key(id));
         self.motion_states
             .retain(|id, _| tree.elements.contains_key(id));
+        self.interactive_style_states
+            .retain(|id, _| tree.elements.contains_key(id));
         self.transition_states.retain(|id, _| tree.is_attached(*id));
 
         // Build the element tree. custom_registry, focus_handles, and scroll_handles
@@ -5241,6 +5340,7 @@ impl gpui::Render for GpuixView {
                     virtual_lists: &mut self.virtual_lists,
                     motion_states: &mut self.motion_states,
                     transition_states: &mut self.transition_states,
+                    interactive_style_states: &self.interactive_style_states,
                     now,
                     animation_active: &mut animation_active,
                     style_transition_active: &mut style_transition_active,
@@ -5267,6 +5367,7 @@ impl gpui::Render for GpuixView {
             use gpui::prelude::*;
             let root = gpui::div()
                 .size_full()
+                .text_color(gpui::rgba(0xe2e2e2ff))
                 .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
                 .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx));
             with_window_menu_actions(root)
@@ -5408,7 +5509,26 @@ pub(crate) fn build_element(
     let resolved_style =
         layered_style.map(|style| resolve_length_expressions(style, window, &font));
     let style = resolved_style.as_ref();
-    ctx.inherited = parent_inherited.clone().descend(style, hover_group, font);
+    let focused = ctx
+        .focus_handles
+        .get(&id)
+        .is_some_and(|handle| handle.is_focused(window));
+    let interaction = ctx.interactive_style_states.get(&id).copied().unwrap_or_default();
+    let hover_within = parent_inherited
+        .hover_group_id
+        .and_then(|group_id| ctx.interactive_style_states.get(&group_id))
+        .is_some_and(|state| state.hovered);
+    let current_color = resolved_current_color(
+        style,
+        focused,
+        focused && window.last_input_was_keyboard(),
+        hover_within,
+        interaction.hovered,
+        interaction.active,
+    );
+    ctx.inherited = parent_inherited
+        .clone()
+        .descend(style, hover_group, id, current_color, font);
 
     // A `highlight` here replaces any ancestor's: the nearest declaration wins,
     // and `GroupList::collect` skips nested declarations so an ancestor never
@@ -5663,12 +5783,14 @@ pub(crate) fn build_div(
         style.is_some_and(|style| style.transition.is_some() && style.active.is_some());
     let element_id_str = format!("__gpuix_{}", element.id);
     let mut el = gpui::div().id(gpui::SharedString::from(element_id_str));
-
-    if let Some(group) = element
+    let hover_group = element
         .custom_props
         .get("hoverGroup")
-        .and_then(serde_json::Value::as_str)
-    {
+        .and_then(serde_json::Value::as_str);
+    let tracks_hover = style.is_some_and(|style| style.hover.is_some()) || hover_group.is_some();
+    let tracks_active = style.is_some_and(|style| style.active.is_some());
+
+    if let Some(group) = hover_group {
         el = el.group(gpui::SharedString::from(group.to_owned()));
     }
 
@@ -6002,18 +6124,29 @@ pub(crate) fn build_div(
         }
     }
 
+    if element.events.contains("mouseDown") && element.events.contains("mouseMove") {
+        el = el.capture_pointer();
+    }
+
     let has_enter = element.events.contains("mouseEnter");
     let has_leave = element.events.contains("mouseLeave");
-    if transition_hover || has_enter || has_leave {
+    if transition_hover || tracks_hover || has_enter || has_leave {
         let callback_enter = has_enter.then(|| ctx.event_callback.clone()).flatten();
         let callback_leave = has_leave.then(|| ctx.event_callback.clone()).flatten();
+        let id = element.id;
         el = el.on_hover(cx.listener(move |view, is_hovered: &bool, _window, cx| {
-            if transition_hover
+            let transition_changed = transition_hover
                 && view
                     .transition_states
                     .get_mut(&id)
-                    .is_some_and(|state| state.set_hovered(*is_hovered))
-            {
+                    .is_some_and(|state| state.set_hovered(*is_hovered));
+            let interactive_changed = tracks_hover
+                && view
+                    .interactive_style_states
+                    .entry(id)
+                    .or_default()
+                    .set_hovered(*is_hovered);
+            if transition_changed || interactive_changed {
                 cx.notify();
             }
             if *is_hovered {
@@ -6028,16 +6161,24 @@ pub(crate) fn build_div(
         }));
     }
 
-    if transition_active {
+    if transition_active || tracks_active {
+        let id = element.id;
         el = el
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(move |view, _event: &gpui::MouseDownEvent, _window, cx| {
-                    if view
-                        .transition_states
-                        .get_mut(&id)
-                        .is_some_and(|state| state.set_active(true))
-                    {
+                    let transition_changed = transition_active
+                        && view
+                            .transition_states
+                            .get_mut(&id)
+                            .is_some_and(|state| state.set_active(true));
+                    let interactive_changed = tracks_active
+                        && view
+                        .interactive_style_states
+                        .entry(id)
+                        .or_default()
+                        .set_active(true);
+                    if transition_changed || interactive_changed {
                         cx.notify();
                     }
                 }),
@@ -6045,11 +6186,18 @@ pub(crate) fn build_div(
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
-                    if view
-                        .transition_states
-                        .get_mut(&id)
-                        .is_some_and(|state| state.set_active(false))
-                    {
+                    let transition_changed = transition_active
+                        && view
+                            .transition_states
+                            .get_mut(&id)
+                            .is_some_and(|state| state.set_active(false));
+                    let interactive_changed = tracks_active
+                        && view
+                        .interactive_style_states
+                        .entry(id)
+                        .or_default()
+                        .set_active(false);
+                    if transition_changed || interactive_changed {
                         cx.notify();
                     }
                 }),
@@ -6057,19 +6205,22 @@ pub(crate) fn build_div(
             .on_mouse_up_out(
                 gpui::MouseButton::Left,
                 cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
-                    if view
-                        .transition_states
-                        .get_mut(&id)
-                        .is_some_and(|state| state.set_active(false))
-                    {
+                    let transition_changed = transition_active
+                        && view
+                            .transition_states
+                            .get_mut(&id)
+                            .is_some_and(|state| state.set_active(false));
+                    let interactive_changed = tracks_active
+                        && view
+                        .interactive_style_states
+                        .entry(id)
+                        .or_default()
+                        .set_active(false);
+                    if transition_changed || interactive_changed {
                         cx.notify();
                     }
                 }),
             );
-    }
-
-    if element.events.contains("mouseDown") && element.events.contains("mouseMove") {
-        el = el.capture_pointer();
     }
 
     // Text content — selectable, same as a <text> leaf.
