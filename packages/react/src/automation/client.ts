@@ -144,6 +144,7 @@ export interface TestAutomationRenderer {
     deltaY: number,
     options?: ScrollWheelInput
   ): void
+  getSynchronousScrollDrawCount?(): number
   simulateKeystrokes(keystrokes: string): void
   nativeSimulateKeystrokes(elementId: number, keystrokes: string): void
   nativeSimulateKeyDown(
@@ -268,6 +269,16 @@ export class InProcessBackend extends ValidatedAutomationBackend {
         options
       )
       return { ok: true as const }
+    },
+    getSynchronousScrollDrawCount: () => {
+      const getCount = this.renderer.getSynchronousScrollDrawCount
+      if (!getCount) {
+        throw new AutomationError(
+          "Unsupported",
+          "Synchronous scroll draw diagnostics are not supported by this renderer"
+        )
+      }
+      return { count: getCount.call(this.renderer) }
     },
     keystrokes: (params) => {
       if (params.elementId == null) {
@@ -823,6 +834,7 @@ export interface LiveAutomationRenderer {
     deltaY: number,
     options?: NativeScrollWheelOptions
   ): void
+  getSynchronousScrollDrawCount?(): number
   simulateKeystrokes?(keystrokes: string): void
   simulateKeyDown?(keystroke: string, isHeld?: boolean): void
   simulateKeyUp?(keystroke: string): void
@@ -852,6 +864,8 @@ export function liveRendererAsTest(
   }
   return {
     capabilities: renderer.capabilities?.bind(renderer),
+    getSynchronousScrollDrawCount:
+      renderer.getSynchronousScrollDrawCount?.bind(renderer),
     nativeSimulateClick(x, y, button, modifiers) {
       renderer.simulateClick(x, y, button, modifiers)
       afterInput()

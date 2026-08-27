@@ -11,7 +11,13 @@ import { fileURLToPath } from 'url'
 import React from 'react'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { render, resetRender } from '@gpuix/react'
-import { connectTest, launch } from '@gpuix/react/automation'
+import {
+  connectTest,
+  launch,
+  PROTOCOL_VERSION,
+  type App,
+  type ParamsOf,
+} from '@gpuix/react/automation'
 import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from '@gpuix/react/testing'
 import { ChatApp, SafeMdxContent, SafeMdxTranscript } from './chat'
 
@@ -22,14 +28,25 @@ beforeAll(() => {
   fs.mkdirSync(SHOTS, { recursive: true })
 })
 
+async function scrollWithoutSynchronousDraw(
+  app: App,
+  params: ParamsOf<'scrollWheel'>
+): Promise<void> {
+  const before = await app.call('getSynchronousScrollDrawCount', {})
+  await app.call('scrollWheel', params)
+  const after = await app.call('getSynchronousScrollDrawCount', {})
+  expect(after.count - before.count).toBe(0)
+}
+
 describeNative('chat example', () => {
   it(
-    'fills and submits the live composer',
+    'keeps live automation reads fresh without synchronous input draws',
     async () => {
+      const cwd = path.dirname(fileURLToPath(import.meta.url))
       const app = await launch({
         command: 'bun',
         args: ['chat.tsx'],
-        cwd: path.dirname(fileURLToPath(import.meta.url)),
+        cwd,
         env: { GPUIX_BACKGROUND: '1' },
       })
 
@@ -37,13 +54,77 @@ describeNative('chat example', () => {
         const composer = app.getByTestId('composer')
         await composer.waitFor({ timeoutMs: 30_000 })
         await composer.fill('hello gpuix')
+        // This raw painted-text read is deliberately the first read after the
+        // input mutation. It must draw its own fresh frame rather than relying
+        // on a preceding tree locator to do so.
+        expect((await app.call('getPaintedText', {})).text).toContain('hello gpuix')
         await composer.press('enter')
         await app.getByText('hello gpuix').waitFor()
       } finally {
         await app.close()
       }
+
+      if (process.platform !== 'darwin') return
+
+      const scrollApp = await launch({
+        command: 'bun',
+        args: ['live-scroll-wheel.tsx'],
+        cwd,
+        env: { GPUIX_BACKGROUND: '1' },
+      })
+      try {
+        const initialized = await scrollApp.call('initialize', {
+          protocolVersion: PROTOCOL_VERSION,
+          client: 'examples-vitest',
+        })
+        expect(initialized.capabilities).toEqual(
+          expect.arrayContaining(['input', 'screenshot', 'clock', 'tree'])
+        )
+
+        const target = await scrollApp.getByTestId('scroll-target').element()
+        const content = await scrollApp.getByTestId('scroll-content').element()
+        const before = await scrollApp.call('getBounds', { elementId: content.id })
+        expect(before.bounds).not.toBeNull()
+
+        await scrollApp.call('scrollTo', { elementId: target.id, x: 0, y: -120 })
+        // This raw bounds query is the first read after scrollTo. A stale
+        // rendered-frame registry returns the pre-scroll y coordinate here.
+        const after = await scrollApp.call('getBounds', { elementId: content.id })
+        expect(after.bounds).not.toBeNull()
+        expect(after.bounds!.y).toBeLessThan(before.bounds!.y - 100)
+
+        await scrollWithoutSynchronousDraw(scrollApp, {
+          x: 240,
+          y: 180,
+          deltaX: 0,
+          deltaY: -24,
+          phase: 'started',
+          deltaUnit: 'pixels',
+          modifiers: { alt: true },
+        })
+        await scrollWithoutSynchronousDraw(scrollApp, {
+          x: 240,
+          y: 180,
+          deltaX: 0,
+          deltaY: -2,
+          phase: 'moved',
+          deltaUnit: 'lines',
+          modifiers: { alt: true },
+        })
+        await scrollWithoutSynchronousDraw(scrollApp, {
+          x: 240,
+          y: 180,
+          deltaX: 0,
+          deltaY: -24,
+          phase: 'ended',
+          deltaUnit: 'pixels',
+          modifiers: { alt: true },
+        })
+      } finally {
+        await scrollApp.close()
+      }
     },
-    30_000
+    45_000
   )
 
   it('renders safe-mdx through GPUIX primitives', () => {

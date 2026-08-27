@@ -25,6 +25,7 @@ function fakeRenderer(): TestAutomationRenderer {
     nativeSimulateMouseUp() {},
     nativeSimulateMouseMove() {},
     nativeSimulateScrollWheel() {},
+    getSynchronousScrollDrawCount: () => 0,
     simulateKeystrokes() {},
     nativeSimulateKeystrokes() {},
     nativeSimulateKeyDown() {},
@@ -56,9 +57,12 @@ describe("automation stdio", () => {
   it("forwards platform scroll fields without advancing the renderer", async () => {
     const renderer = fakeRenderer()
     let received: unknown[] | undefined
+    let synchronousDraws = 0
     renderer.nativeSimulateScrollWheel = (...args) => {
       received = args
+      synchronousDraws += 1
     }
+    renderer.getSynchronousScrollDrawCount = () => synchronousDraws
     const app = await connectTest(renderer)
 
     await app.call("scrollWheel", {
@@ -78,6 +82,7 @@ describe("automation stdio", () => {
       -2,
       { phase: "started", deltaUnit: "lines", modifiers: { alt: true } },
     ])
+    expect(await app.call("getSynchronousScrollDrawCount", {})).toEqual({ count: 1 })
     await app.close()
   })
 
