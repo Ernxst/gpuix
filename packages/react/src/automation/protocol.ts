@@ -122,6 +122,11 @@ export const methods = {
     }),
     result: okSchema,
   },
+  /** macOS-only smoke seam. Posts a real NSEvent through the production window. */
+  appKitClick: {
+    params: pointSchema,
+    result: okSchema,
+  },
   mouseDown: {
     params: pointSchema.extend({
       button: buttonSchema,

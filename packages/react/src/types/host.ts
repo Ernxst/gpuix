@@ -1006,6 +1006,8 @@ export interface NativeRenderer {
   tickIdle?(): boolean
   /** Internal hook used by injected renderers to deliver non-element events. */
   setApplicationEventHandler?(handler: ((event: EventPayload) => void) | null): void
+  /** macOS automation seam: queue a physical AppKit left click at window coordinates. */
+  postAppKitClick?(x: number, y: number): void
 
   // ── Focus API ──────────────────────────────────────────────────
   focusElement?(elementId: number): void
