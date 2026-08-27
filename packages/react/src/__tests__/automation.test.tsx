@@ -180,9 +180,141 @@ describeNative("automation", () => {
         on_action: expect.arrayContaining(["Click", "Focus"]),
       },
     })
+    expect(button?.aria.on_action).not.toEqual(expect.arrayContaining(["Increment", "Decrement"]))
 
     renderer.nativeSimulateAccessibilityAction(button!.accesskit_id, "activate")
     expect(actions).toEqual(["activate"])
+  })
+
+  it("publishes explicit roles, states, descriptions, and values", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <div
+          role="checkbox"
+          ariaLabel="Include byproducts"
+          ariaDescription="Adds secondary outputs"
+          ariaChecked="mixed"
+          disabled
+        />
+        <h2 role="heading" ariaLabel="Production" ariaLevel={2} />
+        <a role="link" ariaLabel="Open recipe" ariaExpanded={false} ariaSelected />
+        <div
+          role="slider"
+          ariaLabel="Clock speed"
+          ariaValue="42 percent"
+          ariaValueMin={0}
+          ariaValueMax={100}
+          ariaValueNow={42}
+        />
+        <div role="spinbutton" ariaLabel="Machine count" ariaValueNow={8} />
+      </div>
+    )
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    const byLabel = (label: string) => nodes.find((node) => node.aria.label === label)?.aria
+
+    expect(byLabel("Include byproducts")).toMatchObject({
+      role: "CheckBox",
+      description: "Adds secondary outputs",
+      toggled: "Mixed",
+      disabled: true,
+    })
+    expect(byLabel("Production")).toMatchObject({ role: "Heading", level: 2 })
+    expect(byLabel("Open recipe")).toMatchObject({
+      role: "Link",
+      expanded: false,
+      selected: true,
+    })
+    expect(byLabel("Clock speed")).toMatchObject({
+      role: "Slider",
+      value: "42 percent",
+      min_numeric_value: 0,
+      max_numeric_value: 100,
+      numeric_value: 42,
+    })
+    expect(byLabel("Machine count")).toMatchObject({
+      role: "SpinButton",
+      numeric_value: 8,
+    })
+  })
+
+  it("dispatches value and focus actions and reflects semantic focus", () => {
+    const actions: string[] = []
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div
+        id="machine-count"
+        role="spinbutton"
+        ariaLabel="Machine count"
+        ariaValueNow={8}
+        tabIndex={0}
+        onAccessibilityAction={(event) => actions.push(event.accessibilityAction ?? "missing")}
+      />
+    )
+
+    const before = renderer.getAccessibilityTree()
+    const control = Object.values(before.nodes).find(
+      (node) => node.aria.label === "Machine count"
+    )!
+    expect(control.aria.on_action).toEqual(
+      expect.arrayContaining(["Increment", "Decrement", "Focus"])
+    )
+
+    renderer.nativeSimulateAccessibilityAction(control.accesskit_id, "increment")
+    renderer.nativeSimulateAccessibilityAction(control.accesskit_id, "decrement")
+    renderer.nativeSimulateAccessibilityAction(control.accesskit_id, "focus")
+    expect(actions).toEqual(["increment", "decrement", "focus"])
+
+    const focused = renderer.getAccessibilityTree()
+    const focusedEntry = Object.entries(focused.nodes).find(
+      ([, node]) => node.accesskit_id === control.accesskit_id
+    )
+    expect(focused.gpui_focus).toBe(focusedEntry?.[0])
+  })
+
+  it("keeps semantic IDs stable across reorder and removes stale nodes", () => {
+    const { render, renderer } = createTestRoot()
+    const list = (labels: string[]) => (
+      <div>
+        {labels.map((label) => (
+          <div key={label} role="button" ariaLabel={label} />
+        ))}
+      </div>
+    )
+    const semanticNodes = () =>
+      Object.entries(renderer.getAccessibilityTree().nodes).filter(([, node]) =>
+        ["Alpha", "Beta"].includes(node.aria.label ?? "")
+      )
+
+    render(list(["Alpha", "Beta"]))
+    const initial = new Map(
+      semanticNodes().map(([, node]) => [node.aria.label!, node.accesskit_id] as const)
+    )
+
+    render(list(["Beta", "Alpha"]))
+    const reorderedTree = renderer.getAccessibilityTree()
+    const reordered = new Map(
+      Object.values(reorderedTree.nodes)
+        .filter((node) => ["Alpha", "Beta"].includes(node.aria.label ?? ""))
+        .map((node) => [node.aria.label!, node.accesskit_id] as const)
+    )
+    expect(reordered).toEqual(initial)
+    const reorderedLabels = reorderedTree.nodes[reorderedTree.root!].children
+      ?.map((key) => reorderedTree.nodes[key]?.aria.label)
+      .filter((label): label is string => label === "Alpha" || label === "Beta")
+    expect(reorderedLabels).toEqual(["Beta", "Alpha"])
+
+    render(list(["Beta"]))
+    const removed = new Map(
+      semanticNodes().map(([, node]) => [node.aria.label!, node.accesskit_id] as const)
+    )
+    expect(removed).toEqual(new Map([["Beta", initial.get("Beta")!]]))
+    expect(Object.values(renderer.getAccessibilityTree().nodes)).not.toContainEqual(
+      expect.objectContaining({ accesskit_id: initial.get("Alpha") })
+    )
   })
 
   it("normalizes numeric and boolean data-testid props for lookup", () => {

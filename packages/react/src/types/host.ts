@@ -715,7 +715,14 @@ export interface HighlightMatch {
 }
 
 /** Explicit roles currently translated to GPUI's AccessKit tree. */
-export type AccessibilityRole = "button"
+export type AccessibilityRole =
+  | "button"
+  | "checkbox"
+  | "heading"
+  | "link"
+  | "slider"
+  | "spinbutton"
+  | "switch"
 
 /** AccessKit actions delivered through `onAccessibilityAction`. */
 export type AccessibilityAction = "activate" | "increment" | "decrement" | "focus"
@@ -743,6 +750,26 @@ export interface Props {
   role?: AccessibilityRole
   /** Accessible name announced for this semantic node. */
   ariaLabel?: string
+  /** Supplementary accessible description announced after the name, role, and value. */
+  ariaDescription?: string
+  /** Checked state for checkboxes and switches. */
+  ariaChecked?: boolean | "mixed"
+  /** Expanded state for controls that disclose another region. */
+  ariaExpanded?: boolean
+  /** Selected state for selectable semantic nodes. */
+  ariaSelected?: boolean
+  /** Human-readable value text for a value control. */
+  ariaValue?: string
+  /** Minimum numeric value for a value control. */
+  ariaValueMin?: number
+  /** Maximum numeric value for a value control. */
+  ariaValueMax?: number
+  /** Current numeric value for a value control. */
+  ariaValueNow?: number
+  /** One-based heading level. */
+  ariaLevel?: number
+  /** Whether assistive technology should report this control as unavailable. */
+  disabled?: boolean
   /** AccessKit action requested by assistive technology. */
   onAccessibilityAction?: (event: GpuixSyntheticEvent) => void
 

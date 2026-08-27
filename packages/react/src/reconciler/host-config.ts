@@ -351,6 +351,16 @@ const UNIVERSAL_PROPS = new Set([
   "hoverGroup",
   "role",
   "ariaLabel",
+  "ariaDescription",
+  "ariaChecked",
+  "ariaExpanded",
+  "ariaSelected",
+  "ariaValue",
+  "ariaValueMin",
+  "ariaValueMax",
+  "ariaValueNow",
+  "ariaLevel",
+  "disabled",
   // `highlight` is scoped by where it sits in the tree, so it has to reach a
   // plain `div`. Without it here, custom props are dropped for built-ins and
   // the prop silently never arrives in Rust.

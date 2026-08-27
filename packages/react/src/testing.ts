@@ -82,6 +82,16 @@ export interface AccessKitNodeSnapshot {
   aria: {
     role: string
     label?: string
+    description?: string
+    value?: string
+    selected?: boolean
+    expanded?: boolean
+    toggled?: "False" | "True" | "Mixed"
+    disabled?: true
+    numeric_value?: number
+    min_numeric_value?: number
+    max_numeric_value?: number
+    level?: number
     on_action?: string[]
   }
 }
