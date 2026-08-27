@@ -35,6 +35,9 @@ const DOC = [
   "See https://github.com/remorses/gpuix for more.",
 ].join("\n")
 
+const LF_FENCE = "```ts\nconst a = 1\nconst b = 2\n```"
+const CRLF_FENCE = LF_FENCE.replace(/\n/g, "\r\n")
+
 beforeAll(() => {
   fs.mkdirSync(SHOTS_DIR, { recursive: true })
 })
@@ -69,10 +72,20 @@ describe("<markdown>", () => {
 
   it("renders fenced code blocks one line at a time", () => {
     const { render, renderer } = createTestRoot()
-    render(<markdown source={"```ts\nconst a = 1\nconst b = 2\n```"} />)
+    render(<markdown source={LF_FENCE} />)
 
     // Language tag, then one entry per line, with no phantom trailing line.
     expect(renderer.getPaintedText()).toEqual(["ts", "const a = 1", "const b = 2"])
+  })
+
+  it("renders a CRLF fenced-code fixture identically to LF", () => {
+    const lf = createTestRoot()
+    lf.render(<markdown source={LF_FENCE} />)
+
+    const crlf = createTestRoot()
+    crlf.render(<markdown source={CRLF_FENCE} />)
+
+    expect(crlf.renderer.getPaintedText()).toEqual(lf.renderer.getPaintedText())
   })
 
   it("renders tables cell by cell", () => {
