@@ -2,26 +2,19 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui::{
-    canvas, px, DispatchPhase, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
-    Point, Styled,
+    canvas, px, DispatchPhase, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, Styled,
 };
 
 #[derive(Default)]
 pub(crate) struct PointerRouter {
     pressed_button: Option<MouseButton>,
-    pressed_origin: Option<Point<Pixels>>,
     capture_owner: Option<u64>,
 }
 
 impl PointerRouter {
-    fn begin(&mut self, button: MouseButton, origin: Point<Pixels>) {
+    fn begin(&mut self, button: MouseButton) {
         self.pressed_button = Some(button);
-        self.pressed_origin = Some(origin);
         self.capture_owner = None;
-    }
-
-    pub(crate) fn pressed_origin(&self) -> Option<Point<Pixels>> {
-        self.pressed_origin
     }
 
     pub(crate) fn capture(&mut self, owner: u64) -> bool {
@@ -45,14 +38,12 @@ impl PointerRouter {
             return false;
         }
         self.pressed_button = None;
-        self.pressed_origin = None;
         self.capture_owner = None;
         true
     }
 
     pub(crate) fn cancel(&mut self) -> bool {
         let had_sequence = self.pressed_button.take().is_some();
-        self.pressed_origin = None;
         let had_capture = self.capture_owner.take().is_some();
         had_sequence || had_capture
     }
@@ -78,7 +69,7 @@ pub(crate) fn pointer_router_frame(router: SharedPointerRouter) -> impl IntoElem
                     return;
                 }
                 window.release_pointer();
-                down_router.borrow_mut().begin(event.button, event.position);
+                down_router.borrow_mut().begin(event.button);
             });
 
             let up_router = router.clone();
@@ -103,7 +94,7 @@ mod tests {
         let mut router = PointerRouter::default();
         assert!(!router.capture(7));
 
-        router.begin(MouseButton::Left, gpui::point(px(0.), px(0.)));
+        router.begin(MouseButton::Left);
         assert!(router.capture(7));
         assert_eq!(router.owner(), Some(7));
         assert!(!router.finish(MouseButton::Right));
@@ -115,7 +106,7 @@ mod tests {
     #[test]
     fn explicit_release_only_releases_the_current_owner() {
         let mut router = PointerRouter::default();
-        router.begin(MouseButton::Left, gpui::point(px(0.), px(0.)));
+        router.begin(MouseButton::Left);
         router.capture(7);
 
         assert!(!router.release(8));
@@ -127,7 +118,7 @@ mod tests {
     #[test]
     fn cancellation_without_mouse_up_ends_the_pressed_sequence() {
         let mut router = PointerRouter::default();
-        router.begin(MouseButton::Left, gpui::point(px(0.), px(0.)));
+        router.begin(MouseButton::Left);
         router.capture(7);
 
         assert!(router.cancel());

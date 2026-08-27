@@ -1413,10 +1413,7 @@ impl CustomElement for SvgElement {
             return empty.into_any_element();
         };
 
-        let mut icon = gpui::svg()
-            .data(bytes)
-            .flex_none()
-            .text_color(ctx.current_color);
+        let mut icon = gpui::svg().data(bytes).flex_none();
         if let Some(style) = ctx.style {
             icon = crate::renderer::apply_styles(icon, style);
         }

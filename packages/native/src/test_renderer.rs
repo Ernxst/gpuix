@@ -152,13 +152,6 @@ fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
     }
 }
 
-fn point_is_inside(bounds: crate::automation::ElementBounds, point: (f64, f64)) -> bool {
-    point.0 >= bounds.x
-        && point.0 < bounds.x + bounds.width
-        && point.1 >= bounds.y
-        && point.1 < bounds.y + bounds.height
-}
-
 fn nearest_hover_group(tree: &RetainedTree, element_id: u64) -> Option<u64> {
     let mut current = Some(element_id);
     while let Some(id) = current {
@@ -231,9 +224,6 @@ pub struct TestGpuixRenderer {
     image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
-    /// Mouse-down origin for the current GPUI active-state sequence.
-    /// GPUI keeps `active` applied until mouse-up even if the pointer moves.
-    active_pointer_origin: Mutex<Option<(f64, f64)>>,
 }
 
 #[napi]
@@ -316,7 +306,6 @@ impl TestGpuixRenderer {
             image_network_policy,
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(Vec::new()),
-            active_pointer_origin: Mutex::new(None),
         })
     }
 
@@ -633,7 +622,6 @@ impl TestGpuixRenderer {
             );
             Ok(())
         });
-        *self.active_pointer_origin.lock().unwrap() = None;
         result
     }
 
@@ -795,9 +783,6 @@ impl TestGpuixRenderer {
             cx.run_until_parked();
             Ok(())
         });
-        if !active {
-            *self.active_pointer_origin.lock().unwrap() = None;
-        }
         result
     }
 
@@ -836,9 +821,6 @@ impl TestGpuixRenderer {
             );
             Ok(())
         });
-        if result.is_ok() {
-            *self.active_pointer_origin.lock().unwrap() = Some((x, y));
-        }
         result
     }
 
@@ -862,7 +844,6 @@ impl TestGpuixRenderer {
             );
             Ok(())
         });
-        *self.active_pointer_origin.lock().unwrap() = None;
         result
     }
 
@@ -1214,62 +1195,43 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_resolved_style(&self, id: f64) -> Result<Option<String>> {
         let id = to_element_id(id)?;
-        let (style, hover_group_id, hover_group_accepts_pointer) = {
+        let (style, hover_group_id) = {
             let tree = self.tree.lock().unwrap();
             let Some(element) = tree.elements.get(&id) else {
                 return Ok(None);
             };
             let hover_group_id = nearest_hover_group(&tree, id);
-            let hover_group_accepts_pointer = hover_group_id.is_some_and(|group_id| {
-                tree.elements
-                    .get(&group_id)
-                    .and_then(|group| group.style.as_ref())
-                    .and_then(|style| style.pointer_events.as_deref())
-                    != Some("none")
-            });
-            (
-                element.style.clone().unwrap_or_default(),
-                hover_group_id,
-                hover_group_accepts_pointer,
-            )
+            (element.style.clone().unwrap_or_default(), hover_group_id)
         };
 
         self.flush()?;
-        let element_bounds = crate::automation::get_bounds(id);
-        let hover_group_bounds = hover_group_id.and_then(crate::automation::get_bounds);
-        let active_pointer_origin = *self.active_pointer_origin.lock().unwrap();
-
-        let (pointer, focus, keyboard_input) =
+        let (focus, keyboard_input, hovered, hover_within, active) =
             with_test_state(self.state_id, |cx, window, view| {
                 let view = view.clone();
                 cx.update_window(window, |_, window, app| {
-                    let mouse = window.mouse_position();
+                    let view = view.read(app);
                     let focus = view
-                        .read(app)
                         .focus_handles
                         .get(&id)
                         .is_some_and(|handle| handle.is_focused(window));
                     let keyboard = window.last_input_was_keyboard();
-                    (
-                        (f64::from(f32::from(mouse.x)), f64::from(f32::from(mouse.y))),
-                        focus,
-                        keyboard,
-                    )
+                    let hovered = view
+                        .interactive_style_states
+                        .get(&id)
+                        .is_some_and(|state| state.hovered);
+                    let hover_within = hover_group_id.is_some_and(|group_id| {
+                        view.interactive_style_states
+                            .get(&group_id)
+                            .is_some_and(|state| state.hovered)
+                    });
+                    let active = view
+                        .interactive_style_states
+                        .get(&id)
+                        .is_some_and(|state| state.active);
+                    (focus, keyboard, hovered, hover_within, active)
                 })
                 .map_err(|error| Error::from_reason(error.to_string()))
             })?;
-
-        let accepts_pointer = style.pointer_events.as_deref() != Some("none");
-        let hovered = accepts_pointer
-            && !keyboard_input
-            && element_bounds.is_some_and(|bounds| point_is_inside(bounds, pointer));
-        let hover_within = hover_group_accepts_pointer
-            && !keyboard_input
-            && hover_group_bounds.is_some_and(|bounds| point_is_inside(bounds, pointer));
-        let active = accepts_pointer
-            && active_pointer_origin.is_some_and(|origin| {
-                element_bounds.is_some_and(|bounds| point_is_inside(bounds, origin))
-            });
 
         let mut resolved = style_object(&style)?;
         if focus {
