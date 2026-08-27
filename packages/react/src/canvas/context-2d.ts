@@ -3,6 +3,7 @@ import {
   CANVAS_STREAM_MAGIC,
   CANVAS_STREAM_VERSION,
 } from "./opcodes.js"
+import { serializeCanvasImageSource } from "./image.js"
 
 export interface CanvasRecorderTarget {
   /** Re-read on every diagnostic so prop updates keep the element identity current. */
@@ -387,48 +388,261 @@ class Float64OperandStream {
   }
 }
 
-const UNIMPLEMENTED_METHODS: Readonly<Record<string, string>> = {
-  clip: "arbitrary-path clipping is not in canvas stream version 1",
-  isPointInPath: "picking uses geometry-space hit testing; canvas readback is not available",
-  isPointInStroke: "picking uses geometry-space hit testing; canvas readback is not available",
-  createConicGradient: "conic gradients have no GPUI background primitive",
-  createLinearGradient: "gradient objects are not encoded by canvas stream version 1",
-  createPattern: "patterns have no GPUI background primitive",
-  createRadialGradient: "radial gradients have no GPUI background primitive",
-  createImageData: "the native canvas has no CPU pixel buffer",
-  getImageData: "the native canvas has no per-element readback",
-  putImageData: "the native canvas has no CPU pixel buffer",
-  roundRect: "roundRect is not in canvas stream version 1",
-  getContextAttributes: "context creation attributes are not exposed by the native renderer",
-  isContextLost: "context-loss reporting is not exposed by the native renderer",
-  reset: "reset is not in canvas stream version 1; redraw with the recorded clearRect path",
-  fillText: "canvas text arrives in phase D through GPUIX's text funnel",
-  measureText: "canvas text measurement arrives in phase D through GPUIX's text funnel",
-  strokeText: "strokeText is outside the accepted canvas campaign subset",
-  drawFocusIfNeeded: "DOM focus-ring painting has no native element equivalent",
+export type CanvasUnsupportedDisposition = "not-implemented" | "not-implementable"
+
+export interface CanvasUnsupportedMember {
+  member: string
+  kind: "method" | "property"
+  disposition: CanvasUnsupportedDisposition
+  reason: string
 }
 
-const UNIMPLEMENTED_PROPERTIES: Readonly<Record<string, string>> = {
-  canvas: "the GPUIX host instance is not an HTMLCanvasElement",
-  globalCompositeOperation: "only source-over compositing is supported",
-  filter: "canvas filters have no GPUI primitive",
-  imageSmoothingEnabled: "image sampling controls arrive with native image replay in phase C1",
-  imageSmoothingQuality: "image sampling controls arrive with native image replay in phase C1",
-  shadowBlur: "canvas shadows are not in canvas stream version 1",
-  shadowColor: "canvas shadows are not in canvas stream version 1",
-  shadowOffsetX: "canvas shadows are not in canvas stream version 1",
-  shadowOffsetY: "canvas shadows are not in canvas stream version 1",
-  direction: "canvas text state arrives in phase D",
-  font: "canvas text state arrives in phase D",
-  fontKerning: "canvas text state arrives in phase D",
-  fontStretch: "canvas text state arrives in phase D",
-  fontVariantCaps: "canvas text state arrives in phase D",
-  letterSpacing: "canvas text state arrives in phase D",
-  textAlign: "canvas text state arrives in phase D",
-  textBaseline: "canvas text state arrives in phase D",
-  textRendering: "canvas text state arrives in phase D",
-  wordSpacing: "canvas text state arrives in phase D",
-}
+/**
+ * Complete unsupported-member contract for the installed DOM Canvas 2D
+ * surface. `context-2d.test.ts` compares this table plus the implemented set
+ * with TypeScript's live `lib.dom.d.ts`, so a newly added browser member cannot
+ * silently return `undefined`.
+ */
+export const CANVAS_2D_UNSUPPORTED_MEMBERS = [
+  {
+    member: "clip",
+    kind: "method",
+    disposition: "not-implementable",
+    reason: "GPUI exposes rectangular and rounded content masks, not arbitrary path masks",
+  },
+  {
+    member: "isPointInPath",
+    kind: "method",
+    disposition: "not-implemented",
+    reason: "the consumer contract uses geometry-space hit testing outside the canvas",
+  },
+  {
+    member: "isPointInStroke",
+    kind: "method",
+    disposition: "not-implemented",
+    reason: "the consumer contract uses geometry-space hit testing outside the canvas",
+  },
+  {
+    member: "createConicGradient",
+    kind: "method",
+    disposition: "not-implementable",
+    reason: "GPUI has no conic-gradient background primitive",
+  },
+  {
+    member: "createLinearGradient",
+    kind: "method",
+    disposition: "not-implemented",
+    reason: "gradient objects and the GPUI stop limit are not encoded by canvas stream version 1",
+  },
+  {
+    member: "createPattern",
+    kind: "method",
+    disposition: "not-implementable",
+    reason: "GPUI has no repeating-image BackgroundTag",
+  },
+  {
+    member: "createRadialGradient",
+    kind: "method",
+    disposition: "not-implementable",
+    reason: "GPUI has no radial-gradient BackgroundTag",
+  },
+  {
+    member: "createImageData",
+    kind: "method",
+    disposition: "not-implementable",
+    reason: "the direct-GPU canvas deliberately has no CPU pixel buffer",
+  },
+  {
+    member: "getImageData",
+    kind: "method",
+    disposition: "not-implementable",
+    reason: "GPUI has no per-element GPU readback",
+  },
+  {
+    member: "putImageData",
+    kind: "method",
+    disposition: "not-implementable",
+    reason: "the direct-GPU canvas deliberately has no CPU pixel buffer",
+  },
+  {
+    member: "roundRect",
+    kind: "method",
+    disposition: "not-implemented",
+    reason: "roundRect is not encoded by canvas stream version 1",
+  },
+  {
+    member: "getContextAttributes",
+    kind: "method",
+    disposition: "not-implemented",
+    reason: "context creation attributes are not exposed by the native renderer",
+  },
+  {
+    member: "isContextLost",
+    kind: "method",
+    disposition: "not-implemented",
+    reason: "context-loss reporting is not exposed by the native renderer",
+  },
+  {
+    member: "reset",
+    kind: "method",
+    disposition: "not-implemented",
+    reason: "reset is not encoded by canvas stream version 1",
+  },
+  {
+    member: "fillText",
+    kind: "method",
+    disposition: "not-implemented",
+    reason: "canvas text is reserved for wave D through GPUIX's text funnel",
+  },
+  {
+    member: "measureText",
+    kind: "method",
+    disposition: "not-implemented",
+    reason: "canvas text measurement is reserved for wave D through GPUIX's text funnel",
+  },
+  {
+    member: "strokeText",
+    kind: "method",
+    disposition: "not-implemented",
+    reason: "strokeText is outside the accepted canvas campaign subset",
+  },
+  {
+    member: "drawFocusIfNeeded",
+    kind: "method",
+    disposition: "not-implementable",
+    reason: "DOM focus-ring painting has no native-element equivalent",
+  },
+  {
+    member: "canvas",
+    kind: "property",
+    disposition: "not-implementable",
+    reason: "the GPUIX host ref is not an HTMLCanvasElement",
+  },
+  {
+    member: "globalCompositeOperation",
+    kind: "property",
+    disposition: "not-implementable",
+    reason: "GPUI canvas primitives use a fixed source-over blend",
+  },
+  {
+    member: "filter",
+    kind: "property",
+    disposition: "not-implementable",
+    reason: "GPUI canvas primitives expose no filter pipeline",
+  },
+  {
+    member: "imageSmoothingEnabled",
+    kind: "property",
+    disposition: "not-implementable",
+    reason: "GPUI paint_image does not expose per-draw sampling controls",
+  },
+  {
+    member: "imageSmoothingQuality",
+    kind: "property",
+    disposition: "not-implementable",
+    reason: "GPUI paint_image does not expose per-draw sampling controls",
+  },
+  {
+    member: "lineDashOffset",
+    kind: "property",
+    disposition: "not-implementable",
+    reason: "GPUI's dash sampler always starts at offset zero",
+  },
+  {
+    member: "shadowBlur",
+    kind: "property",
+    disposition: "not-implementable",
+    reason: "GPUI canvas primitives expose no shadow primitive",
+  },
+  {
+    member: "shadowColor",
+    kind: "property",
+    disposition: "not-implementable",
+    reason: "GPUI canvas primitives expose no shadow primitive",
+  },
+  {
+    member: "shadowOffsetX",
+    kind: "property",
+    disposition: "not-implementable",
+    reason: "GPUI canvas primitives expose no shadow primitive",
+  },
+  {
+    member: "shadowOffsetY",
+    kind: "property",
+    disposition: "not-implementable",
+    reason: "GPUI canvas primitives expose no shadow primitive",
+  },
+  ...[
+    "direction",
+    "font",
+    "fontKerning",
+    "fontStretch",
+    "fontVariantCaps",
+    "letterSpacing",
+    "textAlign",
+    "textBaseline",
+    "textRendering",
+    "wordSpacing",
+  ].map((member) => ({
+    member,
+    kind: "property" as const,
+    disposition: "not-implemented" as const,
+    reason: "canvas text state is reserved for wave D through GPUIX's text funnel",
+  })),
+] as const satisfies readonly CanvasUnsupportedMember[]
+
+export const CANVAS_2D_IMPLEMENTED_MEMBERS = [
+  "globalAlpha",
+  "drawImage",
+  "beginPath",
+  "fill",
+  "stroke",
+  "fillStyle",
+  "strokeStyle",
+  "arc",
+  "arcTo",
+  "bezierCurveTo",
+  "closePath",
+  "ellipse",
+  "lineTo",
+  "moveTo",
+  "quadraticCurveTo",
+  "rect",
+  "lineCap",
+  "lineJoin",
+  "lineWidth",
+  "miterLimit",
+  "getLineDash",
+  "setLineDash",
+  "clearRect",
+  "fillRect",
+  "strokeRect",
+  "restore",
+  "save",
+  "getTransform",
+  "resetTransform",
+  "rotate",
+  "scale",
+  "setTransform",
+  "transform",
+  "translate",
+] as const
+
+export const CANVAS_ELEMENT_UNSUPPORTED_MEMBERS = [
+  {
+    member: "toDataURL",
+    kind: "method",
+    disposition: "not-implementable",
+    reason: "GPUI has no per-element GPU readback",
+  },
+] as const satisfies readonly CanvasUnsupportedMember[]
+
+const UNSUPPORTED_CONTEXT_BY_MEMBER = new Map<string, CanvasUnsupportedMember>(
+  CANVAS_2D_UNSUPPORTED_MEMBERS.map((member) => [member.member, member])
+)
+const UNSUPPORTED_ELEMENT_BY_MEMBER = new Map<string, CanvasUnsupportedMember>(
+  CANVAS_ELEMENT_UNSUPPORTED_MEMBERS.map((member) => [member.member, member])
+)
 
 export class Canvas2DNotImplementedError extends Error {
   constructor(message: string) {
@@ -445,8 +659,6 @@ class RecordingContext2D {
   private readonly warnedMembers = new Set<string>()
   private readonly unsupportedMethods = new Map<string, (...args: unknown[]) => undefined>()
   private readonly boundMethods = new Map<PropertyKey, (...args: never[]) => unknown>()
-  private readonly imageHandles = new WeakMap<object, string>()
-  private nextImageHandle = 1
   private state = initialDrawingState()
   private dirty = false
   private flushScheduled = false
@@ -456,14 +668,14 @@ class RecordingContext2D {
     this.ops.push(CANVAS_STREAM_MAGIC, CANVAS_STREAM_VERSION)
   }
 
-  unsupportedMethod(member: string, reason: string): (...args: unknown[]) => undefined {
-    let method = this.unsupportedMethods.get(member)
+  unsupportedMethod(spec: CanvasUnsupportedMember): (...args: unknown[]) => undefined {
+    let method = this.unsupportedMethods.get(spec.member)
     if (!method) {
       method = () => {
-        this.diagnose(member, reason)
+        this.diagnose(spec.member, spec.reason, spec.disposition)
         return undefined
       }
-      this.unsupportedMethods.set(member, method)
+      this.unsupportedMethods.set(spec.member, method)
     }
     return method
   }
@@ -477,13 +689,19 @@ class RecordingContext2D {
     return bound
   }
 
-  diagnose(member: string, reason: string): void {
+  diagnose(
+    member: string,
+    reason: string,
+    disposition: CanvasUnsupportedDisposition = "not-implemented",
+    interfaceName = "CanvasRenderingContext2D"
+  ): void {
+    const support = disposition === "not-implementable" ? "not implementable" : "not implemented"
     const message =
-      `${this.target.describeElement()} CanvasRenderingContext2D.${member} is not implemented ` +
-      `in canvas phase A2: ${reason}`
+      `${this.target.describeElement()} ${interfaceName}.${member} is ${support}: ${reason}`
     if (this.target.strict) throw new Canvas2DNotImplementedError(message)
-    if (this.warnedMembers.has(member)) return
-    this.warnedMembers.add(member)
+    const identity = `${interfaceName}.${member}`
+    if (this.warnedMembers.has(identity)) return
+    this.warnedMembers.add(identity)
     console.warn(message)
   }
 
@@ -653,6 +871,16 @@ class RecordingContext2D {
     this.append(CANVAS_OPCODES.globalAlpha, [number])
   }
 
+  get globalCompositeOperation(): GlobalCompositeOperation {
+    return "source-over"
+  }
+
+  set globalCompositeOperation(value: GlobalCompositeOperation) {
+    if (value === "source-over") return
+    const spec = UNSUPPORTED_CONTEXT_BY_MEMBER.get("globalCompositeOperation")!
+    this.diagnose(spec.member, spec.reason, spec.disposition)
+  }
+
   get lineCap(): CanvasLineCap {
     return this.state.lineCap
   }
@@ -703,8 +931,12 @@ class RecordingContext2D {
   set lineDashOffset(value: number) {
     const number = Number(value)
     if (!Number.isFinite(number)) return
-    this.state.lineDashOffset = number
-    this.append(CANVAS_OPCODES.lineDashOffset, [number])
+    if (number === 0) {
+      this.state.lineDashOffset = 0
+      return
+    }
+    const spec = UNSUPPORTED_CONTEXT_BY_MEMBER.get("lineDashOffset")!
+    this.diagnose(spec.member, spec.reason, spec.disposition)
   }
 
   fillRect(x: number, y: number, width: number, height: number): void {
@@ -852,39 +1084,26 @@ class RecordingContext2D {
     dh: number
   ): void
   drawImage(image: CanvasImageSource, ...values: number[]): void {
-    this.diagnose(
-      "drawImage",
-      "the v1 opcode can be recorded, but resolvable native image handles arrive in phase C1"
-    )
     if ((typeof image !== "object" && typeof image !== "function") || image === null) {
       throw new TypeError("Canvas drawImage requires an image source object")
     }
     const numbers = values.map(Number)
     if (!numbers.every(Number.isFinite)) return
-    const handle = this.imageHandle(image)
-    const handleSlot = this.strings.push(handle) - 1
+    const source = serializeCanvasImageSource(image)
+    const sourceSlot = this.strings.push(source) - 1
     if (numbers.length === 2) {
-      this.append(CANVAS_OPCODES.drawImage3, [handleSlot, ...numbers])
+      this.append(CANVAS_OPCODES.drawImage3, [sourceSlot, ...numbers])
       return
     }
     if (numbers.length === 4) {
-      this.append(CANVAS_OPCODES.drawImage5, [handleSlot, ...numbers])
+      this.append(CANVAS_OPCODES.drawImage5, [sourceSlot, ...numbers])
       return
     }
     if (numbers.length === 8) {
-      this.append(CANVAS_OPCODES.drawImage9, [handleSlot, ...numbers])
+      this.append(CANVAS_OPCODES.drawImage9, [sourceSlot, ...numbers])
       return
     }
     throw new TypeError(`Canvas drawImage expected 3, 5, or 9 arguments; received ${values.length + 1}`)
-  }
-
-  private imageHandle(image: object): string {
-    let handle = this.imageHandles.get(image)
-    if (!handle) {
-      handle = `phase-a2-image-${this.nextImageHandle++}`
-      this.imageHandles.set(image, handle)
-    }
-    return handle
   }
 
   private appendString(opcode: number, value: string): void {
@@ -945,11 +1164,14 @@ export function getOrCreateRecordingContext2D(
   const context = new Proxy(recorder, {
     get(target, property) {
       if (typeof property === "string") {
-        const methodReason = UNIMPLEMENTED_METHODS[property]
-        if (methodReason) return target.unsupportedMethod(property, methodReason)
-        const propertyReason = UNIMPLEMENTED_PROPERTIES[property]
-        if (propertyReason) {
-          target.diagnose(property, propertyReason)
+        const spec = UNSUPPORTED_CONTEXT_BY_MEMBER.get(property)
+        if (spec?.kind === "method") return target.unsupportedMethod(spec)
+        if (
+          spec?.kind === "property" &&
+          property !== "globalCompositeOperation" &&
+          property !== "lineDashOffset"
+        ) {
+          target.diagnose(spec.member, spec.reason, spec.disposition)
           return undefined
         }
       }
@@ -960,9 +1182,13 @@ export function getOrCreateRecordingContext2D(
     },
     set(target, property, value) {
       if (typeof property === "string") {
-        const reason = UNIMPLEMENTED_PROPERTIES[property]
-        if (reason) {
-          target.diagnose(property, reason)
+        const spec = UNSUPPORTED_CONTEXT_BY_MEMBER.get(property)
+        if (
+          spec?.kind === "property" &&
+          property !== "globalCompositeOperation" &&
+          property !== "lineDashOffset"
+        ) {
+          target.diagnose(spec.member, spec.reason, spec.disposition)
           return true
         }
       }
@@ -971,8 +1197,7 @@ export function getOrCreateRecordingContext2D(
     has(target, property) {
       return (
         Reflect.has(target, property) ||
-        (typeof property === "string" &&
-          (property in UNIMPLEMENTED_METHODS || property in UNIMPLEMENTED_PROPERTIES))
+        (typeof property === "string" && UNSUPPORTED_CONTEXT_BY_MEMBER.has(property))
       )
     },
   }) as unknown as CanvasRenderingContext2D
@@ -981,6 +1206,19 @@ export function getOrCreateRecordingContext2D(
   recordersByOwner.set(owner, recorder)
   recordersByContext.set(context, recorder)
   return context
+}
+
+/** Emit the element-level diagnostic for APIs such as `toDataURL`. */
+export function diagnoseUnsupportedCanvasElementMember(
+  owner: object,
+  target: CanvasRecorderTarget,
+  member: string
+): void {
+  const spec = UNSUPPORTED_ELEMENT_BY_MEMBER.get(member)
+  if (!spec) throw new TypeError(`Unknown unsupported canvas element member ${JSON.stringify(member)}`)
+  getOrCreateRecordingContext2D(owner, target)
+  const recorder = recorderRegistry().recordersByOwner.get(owner)!
+  recorder.diagnose(spec.member, spec.reason, spec.disposition, "HTMLCanvasElement")
 }
 
 /** Invalidate a host canvas recorder before its retained native element is destroyed. */

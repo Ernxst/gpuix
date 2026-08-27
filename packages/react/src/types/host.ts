@@ -1,4 +1,8 @@
-import type { EventPayload, MenuSpec } from "@gpuix/native"
+import type {
+  CanvasImageLoadState as NativeCanvasImageLoadState,
+  EventPayload,
+  MenuSpec,
+} from "@gpuix/native"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 
 /**
@@ -979,6 +983,10 @@ export interface NativeRenderer {
     operands: Float64Array,
     strings: readonly string[]
   ): void
+  /** Decode one canvas image source through this renderer's native image store. */
+  loadCanvasImage?(observerId: number, sourceJson: string): void
+  getCanvasImageLoadState?(observerId: number): CanvasImageLoadState | null
+  releaseCanvasImage?(observerId: number): void
   /** Stable platform and renderer feature read. Legacy probes remain available. */
   capabilities?(): RendererCapabilities
   /** Drop a buffered commit after JS-side contract validation fails. */
@@ -1138,6 +1146,8 @@ export interface DebugFrameOverlayStats {
   samples: number
 }
 
+export type CanvasImageLoadState = NativeCanvasImageLoadState
+
 export type EventHandlerMap = Map<
   number,
   Map<string, (event: GpuixSyntheticEvent) => void>
@@ -1195,11 +1205,13 @@ export interface CanvasPublicInstance extends PublicInstance {
     options?: CanvasRenderingContext2DSettings
   ): CanvasRenderingContext2D
   getContext(contextId: string, options?: unknown): CanvasRenderingContext2D | null
+  toDataURL(type?: string, quality?: unknown): string
 }
 
 // Internal host instance. The real element state lives in Rust's RetainedTree.
 export interface Instance extends PublicInstance {
   getContext?: CanvasPublicInstance["getContext"]
+  toDataURL?: CanvasPublicInstance["toDataURL"]
   __applyCanvasCommands(
     ops: Uint32Array,
     operands: Float64Array,

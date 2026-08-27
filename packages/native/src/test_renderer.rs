@@ -25,14 +25,17 @@ use crate::element_tree::EventPayload;
 use crate::renderer::{
     animation_frame_origin, animation_frame_timestamp_ms,
     apply_batch_to_tree_with_diagnostics, canvas_size, catch_gpui_initialization,
-    debug_frame_overlay_mode_name, debug_frame_overlay_stats_js, default_http_client,
+    canvas_image_load_state_js, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
+    default_http_client,
     dispatch_animation_frame_callback, dispatch_application_menu_action, drain_style_diagnostics,
     first_canvas_diagnostic_message, forget_canvas_diagnostics, fresh_canvas_diagnostics,
     has_application_menus, init_application_menu_support, install_application_menus,
-    parse_debug_frame_overlay_mode, parse_style_json, pending_custom_prop_diagnostic,
+    parse_canvas_image_source, parse_debug_frame_overlay_mode, parse_style_json,
+    pending_custom_prop_diagnostic,
     pending_style_diagnostics, set_application_menus, to_element_id, validate_canvas_target,
-    AnimationFrameCallback, DebugFrameOverlayStats, EventCallback, FrameTimestampOrigin,
-    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
+    AnimationFrameCallback, CanvasImageLoadState, DebugFrameOverlayStats, EventCallback,
+    FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic,
+    WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -700,6 +703,56 @@ impl TestGpuixRenderer {
         Ok(())
     }
 
+    #[napi]
+    pub fn load_canvas_image(&self, observer_id: f64, source_json: String) -> Result<()> {
+        let observer_id = to_element_id(observer_id)?;
+        let source = parse_canvas_image_source(source_json)?;
+        let policy = self.image_network_policy.clone();
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, move |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.canvas_image_store
+                        .observe(observer_id, source, policy, window, cx);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn get_canvas_image_load_state(
+        &self,
+        observer_id: f64,
+    ) -> Result<Option<CanvasImageLoadState>> {
+        let observer_id = to_element_id(observer_id)?;
+        with_test_state(self.state_id, |cx, _window, view| {
+            cx.run_until_parked();
+            let state = view.read_with(cx, |view, _cx| {
+                view.canvas_image_store.observer_state(observer_id)
+            });
+            Ok(canvas_image_load_state_js(state))
+        })
+    }
+
+    #[napi]
+    pub fn release_canvas_image(&self, observer_id: f64) -> Result<()> {
+        let observer_id = to_element_id(observer_id)?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, move |_, window, app| {
+                view.update(app, |view, _cx| {
+                    view.canvas_image_store
+                        .release_observer(observer_id, window);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            Ok(())
+        })
+    }
+
     /// Apply a batch of mutations in a single FFI call.
     /// Same format as GpuixRenderer::apply_batch (string op names).
     /// Returns accumulated destroyed IDs from all destroyElement ops.
@@ -789,6 +842,20 @@ impl TestGpuixRenderer {
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, app| window.draw(app).clear(app))
                 .map_err(|e| Error::from_reason(e.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })?;
+        self.surface_canvas_preparation_diagnostics()
+    }
+
+    /// Draw one platform-style pending frame without notifying the view first.
+    /// A clean window remains clean, so this only repaints work already
+    /// scheduled by production code such as an async image load completion.
+    #[napi]
+    pub fn draw_pending_frame(&self) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, |_, window, app| window.draw(app).clear(app))
+                .map_err(|error| Error::from_reason(error.to_string()))?;
             cx.run_until_parked();
             Ok(())
         })?;
@@ -1746,10 +1813,36 @@ impl TestGpuixRenderer {
     pub fn get_canvas_state(&self, id: f64) -> Result<Option<String>> {
         let id = to_element_id(id)?;
         self.flush()?;
+        self.canvas_state_json(id)
+    }
+
+    /// Read the last painted canvas counters without forcing a frame. This is
+    /// intentionally test-only so load-completion tests can prove `cx.notify()`
+    /// caused the repaint rather than their assertion doing so.
+    #[napi]
+    pub fn peek_canvas_state(&self, id: f64) -> Result<Option<String>> {
+        self.canvas_state_json(to_element_id(id)?)
+    }
+
+    fn canvas_state_json(&self, id: u64) -> Result<Option<String>> {
         let state = with_test_state(self.state_id, |cx, window, view| {
             let view = view.clone();
             cx.update_window(window, |_, _window, app| {
-                view.read(app).custom_registry.test_state(id)
+                let view = view.read(app);
+                let custom = view.custom_registry.test_state(id);
+                let images = view.canvas_image_store.test_state(id);
+                match (custom, images) {
+                    (None, None) => None,
+                    (Some(state), None) | (None, Some(state)) => Some(state),
+                    (Some(mut state), Some(images)) => {
+                        if let (Some(state), Some(images)) =
+                            (state.as_object_mut(), images.as_object())
+                        {
+                            state.extend(images.clone());
+                        }
+                        Some(state)
+                    }
+                }
             })
             .map_err(|error| Error::from_reason(error.to_string()))
         })?;

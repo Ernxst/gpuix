@@ -205,17 +205,43 @@ pub struct StrokePath {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct DrawImage {
+    pub source: crate::custom_elements::img::CanvasImageSource,
+    pub source_rect: Option<[f64; 4]>,
+    pub destination_rect: [f64; 4],
+    pub transform: CanvasTransform,
+    pub opacity: f32,
+    pub op_index: usize,
+    pub clear_regions: Vec<CanvasQuad>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum DisplayItem {
     FillRect(FillRect),
     FillPath(FillPath),
     StrokeRect(StrokeRect),
     StrokePath(StrokePath),
+    DrawImage(DrawImage),
 }
 
 #[derive(Clone, Debug)]
 pub struct DisplayList {
     pub revision: u64,
     pub items: Vec<DisplayItem>,
+}
+
+impl DisplayList {
+    pub(crate) fn image_sources(&self) -> Vec<crate::custom_elements::img::CanvasImageSource> {
+        let mut sources = FxHashMap::default();
+        for item in &self.items {
+            if let DisplayItem::DrawImage(image) = item {
+                sources
+                    .entry(image.source.key.clone())
+                    .or_insert_with(|| image.source.clone());
+            }
+        }
+        sources.into_values().collect()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -287,6 +313,14 @@ impl CanvasTransform {
         e: 0.0,
         f: 0.0,
     };
+
+    pub(crate) fn is_axis_aligned(self) -> bool {
+        self.b == 0.0 && self.c == 0.0
+    }
+
+    pub(crate) fn has_negative_axis_scale(self) -> bool {
+        self.a < 0.0 || self.d < 0.0
+    }
 
     #[cfg(test)]
     pub(crate) const fn from_components(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> Self {
@@ -747,6 +781,7 @@ impl DisplayItem {
             Self::FillPath(path) => &path.clear_regions,
             Self::StrokeRect(rect) => &rect.clear_regions,
             Self::StrokePath(path) => &path.clear_regions,
+            Self::DrawImage(image) => &image.clear_regions,
         }
     }
 
@@ -756,6 +791,7 @@ impl DisplayItem {
             Self::FillPath(path) => &mut path.clear_regions,
             Self::StrokeRect(rect) => &mut rect.clear_regions,
             Self::StrokePath(path) => &mut path.clear_regions,
+            Self::DrawImage(image) => &mut image.clear_regions,
         }
     }
 
@@ -828,6 +864,16 @@ impl DisplayItem {
                 );
                 !quad.iter().all(|point| quad_contains_point(&inner, *point))
             }
+            Self::DrawImage(image) => quads_intersect(
+                &rect_quad(
+                    image.transform,
+                    image.destination_rect[0],
+                    image.destination_rect[1],
+                    image.destination_rect[2],
+                    image.destination_rect[3],
+                ),
+                quad,
+            ),
         }
     }
 }
@@ -1553,6 +1599,104 @@ pub(crate) fn decode(
                     }
                 }
             }
+            opcodes::DRAW_IMAGE_3 | opcodes::DRAW_IMAGE_5 | opcodes::DRAW_IMAGE_9 => {
+                if !state.transform.is_axis_aligned() {
+                    diagnostics.push(CanvasDiagnostic {
+                        op_index,
+                        op_name: "drawImage".to_string(),
+                        reason: "R1: drawImage under a rotated or skewed CTM is not representable by GPUI PolychromeSprite; only axis-aligned translate/scale transforms are supported"
+                            .to_string(),
+                    });
+                    op_index += 1;
+                    continue;
+                }
+                if state.transform.has_negative_axis_scale() {
+                    diagnostics.push(CanvasDiagnostic {
+                        op_index,
+                        op_name: "drawImage".to_string(),
+                        reason: "R1: drawImage under a reflected CTM is not representable by GPUI PolychromeSprite; negative axis scales are unsupported"
+                            .to_string(),
+                    });
+                    op_index += 1;
+                    continue;
+                }
+
+                let source_slot = side_table_index(command_operands[0], op_index, 0)?;
+                let source_wire = &strings[source_slot];
+                let source_value = match serde_json::from_str::<serde_json::Value>(source_wire) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        diagnostics.push(CanvasDiagnostic {
+                            op_index,
+                            op_name: "drawImage".to_string(),
+                            reason: format!("image source is not valid JSON: {error}"),
+                        });
+                        op_index += 1;
+                        continue;
+                    }
+                };
+                let source = match crate::custom_elements::img::ImageSource::parse(&source_value) {
+                    Ok(source) => source,
+                    Err(reason) => {
+                        diagnostics.push(CanvasDiagnostic {
+                            op_index,
+                            op_name: "drawImage".to_string(),
+                            reason: format!("invalid image source: {reason}"),
+                        });
+                        op_index += 1;
+                        continue;
+                    }
+                };
+                let (source_rect, destination_rect) = match code {
+                    opcodes::DRAW_IMAGE_3 => (
+                        None,
+                        [command_operands[1], command_operands[2], f64::NAN, f64::NAN],
+                    ),
+                    opcodes::DRAW_IMAGE_5 => (
+                        None,
+                        [
+                            command_operands[1],
+                            command_operands[2],
+                            command_operands[3],
+                            command_operands[4],
+                        ],
+                    ),
+                    opcodes::DRAW_IMAGE_9 => (
+                        Some([
+                            command_operands[1],
+                            command_operands[2],
+                            command_operands[3],
+                            command_operands[4],
+                        ]),
+                        [
+                            command_operands[5],
+                            command_operands[6],
+                            command_operands[7],
+                            command_operands[8],
+                        ],
+                    ),
+                    _ => unreachable!(),
+                };
+                if destination_rect[2..].iter().any(|value| *value == 0.0)
+                    || source_rect.is_some_and(|rect| rect[2] == 0.0 || rect[3] == 0.0)
+                {
+                    op_index += 1;
+                    continue;
+                }
+                items.push(DisplayItem::DrawImage(DrawImage {
+                    source: crate::custom_elements::img::CanvasImageSource {
+                        key: source_wire.clone(),
+                        source,
+                    },
+                    source_rect,
+                    destination_rect,
+                    transform: state.transform,
+                    opacity: state.global_alpha as f32,
+                    op_index,
+                    clear_regions: Vec::new(),
+                }));
+                invalidates = true;
+            }
             _ => diagnostics.push(CanvasDiagnostic {
                 op_index,
                 op_name: spec.name.to_string(),
@@ -1744,6 +1888,37 @@ mod tests {
         replace_display_list(&store, 7, &ops, &operands, &["#2563eb".into()])
             .expect("valid replacement");
         assert_eq!(store.lock().unwrap().get(&7).unwrap().revision, 2);
+    }
+
+    #[test]
+    fn draw_image_retains_global_alpha_and_diagnoses_negative_axis_scale() {
+        let source = r#"{"kind":"path","path":"/tmp/canvas.png"}"#.to_string();
+        let (ops, operands) = stream(&[
+            (opcodes::GLOBAL_ALPHA, &[0.375]),
+            (opcodes::DRAW_IMAGE_5, &[0.0, 2.0, 3.0, 20.0, 10.0]),
+        ]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list(&store, 71, &ops, &operands, &[source.clone()])
+            .expect("valid image stream");
+
+        assert!(outcome.diagnostics.is_empty());
+        let list = store.lock().unwrap().get(&71).unwrap().clone();
+        let DisplayItem::DrawImage(image) = &list.items[0] else {
+            panic!("expected drawImage");
+        };
+        assert_eq!(image.opacity, 0.375);
+
+        let (ops, operands) = stream(&[
+            (opcodes::SCALE, &[-1.0, 1.0]),
+            (opcodes::DRAW_IMAGE_5, &[0.0, 2.0, 3.0, 20.0, 10.0]),
+        ]);
+        let outcome = replace_display_list(&store, 72, &ops, &operands, &[source])
+            .expect("well-formed reflected stream");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(outcome.diagnostics[0].op_name, "drawImage");
+        assert!(outcome.diagnostics[0].reason.contains("R1"));
+        assert!(outcome.diagnostics[0].reason.contains("negative axis scales"));
+        assert!(!outcome.invalidates);
     }
 
     #[test]

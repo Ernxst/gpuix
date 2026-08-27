@@ -30,6 +30,7 @@ import {
   VirtualListRowContractError,
 } from "../components/virtual-list-contract.js"
 import {
+  diagnoseUnsupportedCanvasElementMember,
   disposeRecordingContext2D,
   getOrCreateRecordingContext2D,
 } from "../canvas/context-2d.js"
@@ -563,15 +564,24 @@ export const hostConfig = {
       },
     }
     if (type === "canvas") {
+      const diagnosticTarget = {
+        describeElement: () => describeCanvas(instance),
+        strict: rootContainerInstance.strictStyles,
+        applyCanvasCommands: (ops: Uint32Array, operands: Float64Array, strings: readonly string[]) =>
+          instance.__applyCanvasCommands(ops, operands, strings),
+      }
       instance.getContext = ((contextId: string): CanvasRenderingContext2D | null => {
         if (contextId !== "2d") return null
-        return getOrCreateRecordingContext2D(instance, {
-          describeElement: () => describeCanvas(instance),
-          strict: rootContainerInstance.strictStyles,
-          applyCanvasCommands: (ops, operands, strings) =>
-            instance.__applyCanvasCommands(ops, operands, strings),
-        })
+        return getOrCreateRecordingContext2D(instance, diagnosticTarget)
       }) as NonNullable<Instance["getContext"]>
+      instance.toDataURL = (() => {
+        diagnoseUnsupportedCanvasElementMember(
+          instance,
+          diagnosticTarget,
+          "toDataURL"
+        )
+        return undefined as never
+      }) as NonNullable<Instance["toDataURL"]>
     }
     hostNodeStates.set(instance, {
       container: rootContainerInstance,

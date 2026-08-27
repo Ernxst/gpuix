@@ -25,6 +25,7 @@ import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
   CanvasPublicInstance,
+  CanvasImageLoadState,
   HighlightMatch,
   NativeRenderer,
   PublicInstance,
@@ -34,7 +35,12 @@ import type {
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
-import { flushRecordingContext2D } from "./canvas/context-2d.js"
+import {
+  disposeRecordingContext2D,
+  flushRecordingContext2D,
+  getOrCreateRecordingContext2D,
+} from "./canvas/context-2d.js"
+import { Image } from "./canvas/image.js"
 import {
   attachAnimationFrameSource,
   detachAnimationFrameSource,
@@ -80,7 +86,11 @@ interface NativeTestRendererApi extends NativeRenderer {
     operands: Float64Array,
     strings: readonly string[]
   ): void
+  loadCanvasImage(observerId: number, sourceJson: string): void
+  getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
+  releaseCanvasImage(observerId: number): void
   flush(): void
+  drawPendingFrame(): void
   advanceAsyncClock(deltaMs: number): void
   requestFrame(callback: (timestamp: number) => void): void
   setReducedMotion(enabled: boolean): void
@@ -119,6 +129,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getResolvedStyle(elementId: number): string | null
   getImageLoadState(elementId: number): string | null
   getCanvasState(elementId: number): string | null
+  peekCanvasState(elementId: number): string | null
   getAutomationTree(): string
   getElementBounds(elementId: number): number[] | null
   clockPause(): number
@@ -260,6 +271,45 @@ export interface ImageLoadState {
 export interface CanvasTestState {
   preparationCount: number
   tessellationCount: number
+  pathPrimitiveCount: number
+  pathVertexCount: number
+  maxPathVertexCount: number
+  pathBatchCount: number
+  imagePrimitiveCount: number
+  imageCount: number
+  loadedImageCount: number
+  paintedImageCount: number
+  atlasTileCount: number
+  releasedAtlasTileCount: number
+}
+
+export interface RecordedCanvasCommands {
+  ops: Uint32Array
+  operands: Float64Array
+  strings: readonly string[]
+}
+
+/** Record one independent browser-shaped Canvas 2D frame for perf tests. */
+export function recordCanvasCommands(
+  draw: (context: CanvasRenderingContext2D) => void
+): RecordedCanvasCommands {
+  const owner = {}
+  let recorded: RecordedCanvasCommands | undefined
+  const context = getOrCreateRecordingContext2D(owner, {
+    strict: true,
+    describeElement: () => '<canvas testId="recorded-frame">',
+    applyCanvasCommands: (ops, operands, strings) => {
+      recorded = { ops, operands, strings }
+    },
+  })
+  try {
+    draw(context)
+    flushRecordingContext2D(context)
+    if (!recorded) throw new Error("Canvas frame recorded no commands")
+    return recorded
+  } finally {
+    disposeRecordingContext2D(owner)
+  }
 }
 
 // ── TestRenderer ─────────────────────────────────────────────────────
@@ -366,6 +416,18 @@ export class TestRenderer implements NativeRenderer {
     this.native.applyCanvasCommands(id, ops, operands, strings)
   }
 
+  loadCanvasImage(observerId: number, sourceJson: string): void {
+    this.native.loadCanvasImage(observerId, sourceJson)
+  }
+
+  getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null {
+    return this.native.getCanvasImageLoadState(observerId)
+  }
+
+  releaseCanvasImage(observerId: number): void {
+    this.native.releaseCanvasImage(observerId)
+  }
+
   setMenus(menus: MenuSpec[]): void {
     this.native.setMenus(menus)
   }
@@ -404,6 +466,11 @@ export class TestRenderer implements NativeRenderer {
    *  build_element() → apply_styles() → layout). */
   flush(): void {
     this.native.flush()
+  }
+
+  /** Draw only work previously dirtied by native production code. */
+  drawPendingFrame(): void {
+    this.native.drawPendingFrame()
   }
 
   /** Advance GPUI timers and, when paused, the native animation frame clock. */
@@ -741,6 +808,12 @@ export class TestRenderer implements NativeRenderer {
   /** Read canvas preparation counters without relying on timing or screenshots. */
   getCanvasState(id: number): CanvasTestState | undefined {
     const json = this.native.getCanvasState(id)
+    return json == null ? undefined : JSON.parse(json)
+  }
+
+  /** Read last-painted canvas counters without forcing an offscreen frame. */
+  peekCanvasState(id: number): CanvasTestState | undefined {
+    const json = this.native.peekCanvasState(id)
     return json == null ? undefined : JSON.parse(json)
   }
 
@@ -1193,6 +1266,7 @@ export class CanvasComparisonSkippedError extends Error {
 }
 
 const canvasGoldenDirectory = fileURLToPath(new URL("../canvas-goldens", import.meta.url))
+const canvasFixtureDirectory = path.join(canvasGoldenDirectory, "__fixtures__")
 const canvasScreenshotDirectory = fileURLToPath(new URL("../screenshots", import.meta.url))
 const DEFAULT_CANVAS_MAX_CHANNEL_DELTA = 16
 
@@ -1291,6 +1365,7 @@ export function expectCanvasMatchesBrowser(
   const testRoot = createTestRoot({
     width: CANVAS_GOLDEN_WIDTH,
     height: CANVAS_GOLDEN_HEIGHT,
+    strictStyles: true,
   })
   const canvasRef = createRef<CanvasPublicInstance>()
 
@@ -1311,9 +1386,32 @@ export function expectCanvasMatchesBrowser(
     if (!canvas) throw new Error("The GPUIX <canvas> ref was not mounted")
     const context = canvas.getContext("2d")
     context.scale(CANVAS_GOLDEN_DPR, CANVAS_GOLDEN_DPR)
-    resolved.draw(context, CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT)
+    const images = (resolved.imageFixtures ?? []).map((fixture) => {
+      const image = new Image()
+      image.src = path.join(canvasFixtureDirectory, fixture)
+      return image
+    })
+    resolved.draw(context, CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT, images)
     flushRecordingContext2D(context)
     testRoot.renderer.flush()
+
+    if (images.length > 0) {
+      const element = testRoot.renderer.findByType("canvas")[0]!
+      let state = testRoot.renderer.getCanvasState(element.id)
+      const pause = new Int32Array(new SharedArrayBuffer(4))
+      for (let attempt = 0; attempt < 500; attempt += 1) {
+        if (state?.loadedImageCount === images.length) break
+        Atomics.wait(pause, 0, 0, 4)
+        testRoot.renderer.flush()
+        state = testRoot.renderer.getCanvasState(element.id)
+      }
+      if (state?.loadedImageCount !== images.length) {
+        throw new Error(
+          `Canvas scene ${JSON.stringify(resolved.name)} loaded ` +
+            `${state?.loadedImageCount ?? 0}/${images.length} image fixtures`
+        )
+      }
+    }
 
     const windowSize = testRoot.renderer.getWindowSize()
     if (windowSize.scaleFactor !== CANVAS_GOLDEN_DPR) {

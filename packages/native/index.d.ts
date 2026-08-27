@@ -55,6 +55,13 @@ export declare class GpuixRenderer {
    */
   applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
   /**
+   * Start or join one renderer-local canvas image load. The observer keeps
+   * the decoded entry alive until JavaScript changes or releases the source.
+   */
+  loadCanvasImage(observerId: number, sourceJson: string): void
+  getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
+  releaseCanvasImage(observerId: number): void
+  /**
    * Apply a batch of mutations in a single FFI call.
    *
    * Accepts a JSON array of mutation tuples. Each tuple is an array where
@@ -261,6 +268,9 @@ export declare class TestGpuixRenderer {
    * offscreen view without requiring a React commit.
    */
   applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  loadCanvasImage(observerId: number, sourceJson: string): void
+  getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
+  releaseCanvasImage(observerId: number): void
   /**
    * Apply a batch of mutations in a single FFI call.
    * Same format as GpuixRenderer::apply_batch (string op names).
@@ -280,6 +290,12 @@ export declare class TestGpuixRenderer {
    * hit testing requires elements to be laid out).
    */
   flush(): void
+  /**
+   * Draw one platform-style pending frame without notifying the view first.
+   * A clean window remains clean, so this only repaints work already
+   * scheduled by production code such as an async image load completion.
+   */
+  drawPendingFrame(): void
   /**
    * Queue one callback for the next manually advanced GPUI frame without
    * dirtying or synchronously drawing the offscreen window.
@@ -481,6 +497,12 @@ export declare class TestGpuixRenderer {
   getImageLoadState(id: number): string | null
   /** Return preparation counters for a live `<canvas>` element. */
   getCanvasState(id: number): string | null
+  /**
+   * Read the last painted canvas counters without forcing a frame. This is
+   * intentionally test-only so load-completion tests can prove `cx.notify()`
+   * caused the repaint rather than their assertion doing so.
+   */
+  peekCanvasState(id: number): string | null
   /** Tree JSON with last-paint bounds. Used by the automation locators. */
   getAutomationTree(): string
   /** Last painted bounds for an element, or null if it was not painted. */
@@ -505,6 +527,13 @@ export interface AutomationCapabilities {
   screenshotFormats: Array<"png">
   clock: boolean
   tree: boolean
+}
+
+export interface CanvasImageLoadState {
+  status: string
+  width?: number
+  height?: number
+  error?: string
 }
 
 /** Recorded draw times from the debug frame overlay. */

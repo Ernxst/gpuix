@@ -1,6 +1,11 @@
+import path from "node:path"
+
+import ts from "typescript"
 import { describe, expect, it, vi } from "vitest"
 
 import {
+  CANVAS_2D_IMPLEMENTED_MEMBERS,
+  CANVAS_2D_UNSUPPORTED_MEMBERS,
   Canvas2DNotImplementedError,
   flushRecordingContext2D,
   getOrCreateRecordingContext2D,
@@ -11,6 +16,13 @@ import {
   CANVAS_STREAM_MAGIC,
   CANVAS_STREAM_VERSION,
 } from "../canvas/opcodes.js"
+import { Image } from "../canvas/image.js"
+import {
+  CANVAS_GOLDEN_DPR,
+  CANVAS_GOLDEN_HEIGHT,
+  CANVAS_GOLDEN_WIDTH,
+  canvasScenes,
+} from "../canvas-scenes.js"
 
 type AppliedCommands = {
   ops: Uint32Array
@@ -45,6 +57,27 @@ function opcodeHeaders(ops: Uint32Array): Array<[number, number]> {
     headers.push([ops[index]!, ops[index + 1]!])
   }
   return headers
+}
+
+function installedCanvas2DMemberNames(): string[] {
+  const libDirectory = path.dirname(ts.getDefaultLibFilePath({}))
+  const libDomPath = path.join(libDirectory, "lib.dom.d.ts")
+  const program = ts.createProgram([libDomPath], {
+    target: ts.ScriptTarget.ES2022,
+    skipLibCheck: true,
+  })
+  const source = program.getSourceFile(libDomPath)
+  const declaration = source?.statements.find(
+    (statement): statement is ts.InterfaceDeclaration =>
+      ts.isInterfaceDeclaration(statement) && statement.name.text === "CanvasRenderingContext2D"
+  )
+  if (!declaration) throw new Error(`CanvasRenderingContext2D is absent from ${libDomPath}`)
+  return program
+    .getTypeChecker()
+    .getTypeAtLocation(declaration.name)
+    .getProperties()
+    .map((property) => property.name)
+    .sort()
 }
 
 describe("recording CanvasRenderingContext2D", () => {
@@ -127,10 +160,10 @@ describe("recording CanvasRenderingContext2D", () => {
     expect(applied[0]!.strings).toEqual(["#2563eb"])
   })
 
-  it("records every opcode-table member with its declared framing", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+  it("records every implemented opcode-table member with its declared framing", async () => {
     const { context, applied } = recording(false)
-    const image = {} as CanvasImageSource
+    const image = new Image()
+    image.src = "./fixture.png"
 
     context.save()
     context.restore()
@@ -148,7 +181,6 @@ describe("recording CanvasRenderingContext2D", () => {
     context.lineJoin = "bevel"
     context.miterLimit = 7
     context.setLineDash([3, 2])
-    context.lineDashOffset = 1
     context.fillRect(1, 2, 3, 4)
     context.strokeRect(5, 6, 7, 8)
     context.clearRect(9, 10, 11, 12)
@@ -170,16 +202,19 @@ describe("recording CanvasRenderingContext2D", () => {
 
     await Promise.resolve()
     const expectedArities = [
-      0, 0, 2, 2, 1, 6, 6, 0, 1, 1, 1, 1, 1, 1, 1, 2, 1, 4, 4, 4, 0, 2, 2, 6,
+      0, 0, 2, 2, 1, 6, 6, 0, 1, 1, 1, 1, 1, 1, 1, 2, 4, 4, 4, 0, 2, 2, 6,
       4, 6, 5, 8, 4, 0, 1, 0, 3, 5, 9,
     ]
     expect(opcodeHeaders(applied[0]!.ops)).toEqual(
-      Object.values(CANVAS_OPCODES).map((opcode, index) => [opcode, expectedArities[index]!])
+      Object.values(CANVAS_OPCODES)
+        .filter((opcode) => opcode !== CANVAS_OPCODES.lineDashOffset)
+        .map((opcode, index) => [opcode, expectedArities[index]!])
     )
-    expect(applied[0]!.strings.slice(-1)[0]).toBe("phase-a2-image-1")
-    expect(warn).toHaveBeenCalledTimes(1)
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("phase C1"))
-    warn.mockRestore()
+    expect(applied[0]!.strings.slice(-3)).toEqual([
+      '{"kind":"path","path":"./fixture.png"}',
+      '{"kind":"path","path":"./fixture.png"}',
+      '{"kind":"path","path":"./fixture.png"}',
+    ])
   })
 
   it("keeps transform and save/restore queries entirely in JS", () => {
@@ -189,6 +224,7 @@ describe("recording CanvasRenderingContext2D", () => {
     expect(context.strokeStyle).toBe("#000000")
     expect(context.lineWidth).toBe(1)
     expect(context.globalAlpha).toBe(1)
+    expect(context.globalCompositeOperation).toBe("source-over")
     expect(context.lineCap).toBe("butt")
     expect(context.lineJoin).toBe("miter")
     expect(context.miterLimit).toBe(10)
@@ -271,84 +307,168 @@ describe("recording CanvasRenderingContext2D", () => {
   })
 })
 
-type DiagnosticCase = {
-  member: string
-  invoke(context: CanvasRenderingContext2D): void
+type DiagnosticInvocation = (context: CanvasRenderingContext2D) => void
+
+const diagnosticInvocations: Record<string, DiagnosticInvocation> = {
+  clip: (context) => context.clip(),
+  isPointInPath: (context) => void context.isPointInPath(0, 0),
+  isPointInStroke: (context) => void context.isPointInStroke(0, 0),
+  createConicGradient: (context) => void context.createConicGradient(0, 0, 0),
+  createLinearGradient: (context) => void context.createLinearGradient(0, 0, 1, 1),
+  createPattern: (context) =>
+    void context.createPattern({} as CanvasImageSource, null),
+  createRadialGradient: (context) =>
+    void context.createRadialGradient(0, 0, 1, 1, 1, 2),
+  createImageData: (context) => void context.createImageData(1, 1),
+  getImageData: (context) => void context.getImageData(0, 0, 1, 1),
+  putImageData: (context) => context.putImageData({} as ImageData, 0, 0),
+  roundRect: (context) => context.roundRect(0, 0, 1, 1),
+  getContextAttributes: (context) => void context.getContextAttributes(),
+  isContextLost: (context) => void context.isContextLost(),
+  reset: (context) => context.reset(),
+  fillText: (context) => context.fillText("x", 0, 0),
+  measureText: (context) => void context.measureText("x"),
+  strokeText: (context) => context.strokeText("x", 0, 0),
+  drawFocusIfNeeded: (context) => context.drawFocusIfNeeded({} as Element),
+  canvas: (context) => void context.canvas,
+  globalCompositeOperation: (context) => {
+    context.globalCompositeOperation = "copy"
+  },
+  filter: (context) => {
+    context.filter = "blur(1px)"
+  },
+  imageSmoothingEnabled: (context) => {
+    context.imageSmoothingEnabled = false
+  },
+  imageSmoothingQuality: (context) => {
+    context.imageSmoothingQuality = "high"
+  },
+  lineDashOffset: (context) => {
+    context.lineDashOffset = 1
+  },
+  shadowBlur: (context) => {
+    context.shadowBlur = 2
+  },
+  shadowColor: (context) => {
+    context.shadowColor = "#000000"
+  },
+  shadowOffsetX: (context) => {
+    context.shadowOffsetX = 2
+  },
+  shadowOffsetY: (context) => {
+    context.shadowOffsetY = 2
+  },
+  direction: (context) => {
+    context.direction = "rtl"
+  },
+  font: (context) => {
+    context.font = "12px sans-serif"
+  },
+  fontKerning: (context) => {
+    context.fontKerning = "none"
+  },
+  fontStretch: (context) => {
+    context.fontStretch = "condensed"
+  },
+  fontVariantCaps: (context) => {
+    context.fontVariantCaps = "small-caps"
+  },
+  letterSpacing: (context) => {
+    context.letterSpacing = "1px"
+  },
+  textAlign: (context) => {
+    context.textAlign = "center"
+  },
+  textBaseline: (context) => {
+    context.textBaseline = "middle"
+  },
+  textRendering: (context) => {
+    context.textRendering = "optimizeLegibility"
+  },
+  wordSpacing: (context) => {
+    context.wordSpacing = "2px"
+  },
 }
 
-const unimplementedCases: DiagnosticCase[] = [
-  { member: "clip", invoke: (context) => context.clip() },
-  { member: "isPointInPath", invoke: (context) => void context.isPointInPath(0, 0) },
-  { member: "isPointInStroke", invoke: (context) => void context.isPointInStroke(0, 0) },
-  { member: "createConicGradient", invoke: (context) => void context.createConicGradient(0, 0, 0) },
-  { member: "createLinearGradient", invoke: (context) => void context.createLinearGradient(0, 0, 1, 1) },
-  { member: "createPattern", invoke: (context) => void context.createPattern({} as CanvasImageSource, null) },
-  { member: "createRadialGradient", invoke: (context) => void context.createRadialGradient(0, 0, 1, 1, 1, 2) },
-  { member: "createImageData", invoke: (context) => void context.createImageData(1, 1) },
-  { member: "getImageData", invoke: (context) => void context.getImageData(0, 0, 1, 1) },
-  { member: "putImageData", invoke: (context) => context.putImageData({} as ImageData, 0, 0) },
-  { member: "roundRect", invoke: (context) => context.roundRect(0, 0, 1, 1) },
-  { member: "getContextAttributes", invoke: (context) => void context.getContextAttributes() },
-  { member: "isContextLost", invoke: (context) => void context.isContextLost() },
-  { member: "reset", invoke: (context) => context.reset() },
-  { member: "fillText", invoke: (context) => context.fillText("x", 0, 0) },
-  { member: "measureText", invoke: (context) => void context.measureText("x") },
-  { member: "strokeText", invoke: (context) => context.strokeText("x", 0, 0) },
-  { member: "drawFocusIfNeeded", invoke: (context) => context.drawFocusIfNeeded({} as Element) },
-  { member: "canvas", invoke: (context) => void context.canvas },
-  { member: "globalCompositeOperation", invoke: (context) => { context.globalCompositeOperation = "copy" } },
-  { member: "filter", invoke: (context) => { context.filter = "blur(1px)" } },
-  { member: "imageSmoothingEnabled", invoke: (context) => { context.imageSmoothingEnabled = false } },
-  { member: "imageSmoothingQuality", invoke: (context) => { context.imageSmoothingQuality = "high" } },
-  { member: "shadowBlur", invoke: (context) => { context.shadowBlur = 2 } },
-  { member: "shadowColor", invoke: (context) => { context.shadowColor = "#000000" } },
-  { member: "shadowOffsetX", invoke: (context) => { context.shadowOffsetX = 2 } },
-  { member: "shadowOffsetY", invoke: (context) => { context.shadowOffsetY = 2 } },
-  { member: "direction", invoke: (context) => { context.direction = "rtl" } },
-  { member: "font", invoke: (context) => { context.font = "12px sans-serif" } },
-  { member: "fontKerning", invoke: (context) => { context.fontKerning = "none" } },
-  { member: "fontStretch", invoke: (context) => { context.fontStretch = "condensed" } },
-  { member: "fontVariantCaps", invoke: (context) => { context.fontVariantCaps = "small-caps" } },
-  { member: "letterSpacing", invoke: (context) => { context.letterSpacing = "1px" } },
-  { member: "textAlign", invoke: (context) => { context.textAlign = "center" } },
-  { member: "textBaseline", invoke: (context) => { context.textBaseline = "middle" } },
-  { member: "textRendering", invoke: (context) => { context.textRendering = "optimizeLegibility" } },
-  { member: "wordSpacing", invoke: (context) => { context.wordSpacing = "2px" } },
-]
-
 describe("CanvasRenderingContext2D unimplemented-member contract", () => {
-  it.each(unimplementedCases)("throws loudly for $member in strict mode", ({ member, invoke }) => {
-    const { context } = recording(true)
-    expect(() => invoke(context)).toThrowError(Canvas2DNotImplementedError)
-    expect(() => invoke(context)).toThrowError(
-      expect.objectContaining({
-        message: expect.stringContaining(`CanvasRenderingContext2D.${member}`),
-      })
-    )
+  it("partitions every installed DOM member into implemented or diagnosed", () => {
+    const unsupported = CANVAS_2D_UNSUPPORTED_MEMBERS.map(({ member }) => member).sort()
+    const implemented = [...CANVAS_2D_IMPLEMENTED_MEMBERS].sort()
+    const partition = [...implemented, ...unsupported].sort()
+
+    expect(new Set(unsupported).size).toBe(unsupported.length)
+    expect(new Set(implemented).size).toBe(implemented.length)
+    expect(new Set(partition).size).toBe(partition.length)
+    expect(partition).toEqual(installedCanvas2DMemberNames())
+    expect(Object.keys(diagnosticInvocations).sort()).toEqual(unsupported)
   })
+
+  it.each(CANVAS_2D_UNSUPPORTED_MEMBERS)(
+    "throws loudly for $member in strict mode",
+    ({ member, reason, disposition }) => {
+      const { context } = recording(true)
+      const invoke = diagnosticInvocations[member]!
+      const support = disposition === "not-implementable" ? "not implementable" : "not implemented"
+      expect(() => invoke(context)).toThrowError(Canvas2DNotImplementedError)
+      expect(() => invoke(context)).toThrowError(
+        expect.objectContaining({
+          message: expect.stringContaining(`CanvasRenderingContext2D.${member} is ${support}`),
+        })
+      )
+      expect(() => invoke(context)).toThrowError(
+        expect.objectContaining({ message: expect.stringContaining(reason) })
+      )
+    }
+  )
 
   it("warns once per element and member in compatibility mode", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const { context } = recording(false)
 
-    for (const diagnostic of unimplementedCases) {
-      diagnostic.invoke(context)
-      diagnostic.invoke(context)
+    for (const { member } of CANVAS_2D_UNSUPPORTED_MEMBERS) {
+      diagnosticInvocations[member]!(context)
+      diagnosticInvocations[member]!(context)
     }
 
-    expect(warn).toHaveBeenCalledTimes(unimplementedCases.length)
-    for (const diagnostic of unimplementedCases) {
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringMatching(
-          new RegExp(`unit-canvas.*CanvasRenderingContext2D\\.${diagnostic.member}.*canvas phase A2`)
-        )
+    expect(warn).toHaveBeenCalledTimes(CANVAS_2D_UNSUPPORTED_MEMBERS.length)
+    for (const { member, reason, disposition } of CANVAS_2D_UNSUPPORTED_MEMBERS) {
+      const messages = warn.mock.calls
+        .map(([message]) => String(message))
+        .filter((message) => message.includes(`CanvasRenderingContext2D.${member} `))
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toContain('<canvas testId="unit-canvas" elementId=17>')
+      expect(messages[0]).toContain(reason)
+      expect(messages[0]).toContain(
+        disposition === "not-implementable" ? "not implementable" : "not implemented"
       )
     }
     warn.mockRestore()
   })
 
-  it("throws the phase-C1 drawImage diagnostic before recording in strict mode", () => {
+  it("produces zero diagnostics across every equivalence scene", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      for (const scene of Object.values(canvasScenes)) {
+        const { context } = recording(false)
+        const images = (scene.imageFixtures ?? []).map((fixture) => {
+          const image = new Image()
+          image.src = fixture
+          return image
+        })
+        context.scale(CANVAS_GOLDEN_DPR, CANVAS_GOLDEN_DPR)
+        scene.draw(context, CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT, images)
+        flushRecordingContext2D(context)
+      }
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it("rejects image objects that did not come from the exported shim", () => {
     const { context } = recording(true)
-    expect(() => context.drawImage({} as CanvasImageSource, 0, 0)).toThrowError(/phase C1/)
+    expect(() => context.drawImage({} as CanvasImageSource, 0, 0)).toThrowError(
+      /expects an Image or ImageBitmap imported from @gpuix\/react/
+    )
   })
 })

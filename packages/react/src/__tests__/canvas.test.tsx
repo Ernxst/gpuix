@@ -1,10 +1,17 @@
+import { readFileSync } from "node:fs"
+import { createServer } from "node:http"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 import React, { createRef } from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import { __applyCanvasCommands } from "../canvas/commands.js"
-import { flushRecordingContext2D } from "../canvas/context-2d.js"
+import {
+  CANVAS_ELEMENT_UNSUPPORTED_MEMBERS,
+  flushRecordingContext2D,
+} from "../canvas/context-2d.js"
+import { createImageBitmap, Image } from "../canvas/image.js"
 import {
   CANVAS_OPCODES,
   CANVAS_STREAM_MAGIC,
@@ -27,6 +34,35 @@ import type { CanvasPublicInstance, PublicInstance } from "../types/host.js"
 import { SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+const canvasImageFixture = fileURLToPath(
+  new URL("../../canvas-goldens/__fixtures__/canvas-image-source.png", import.meta.url)
+)
+const corruptCanvasImageFixture = fileURLToPath(
+  new URL("../../canvas-goldens/__fixtures__/canvas-image-corrupt.png", import.meta.url)
+)
+
+async function waitForCanvasImages(
+  renderer: TestRenderer,
+  elementId: number,
+  expected: number
+) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    renderer.flush()
+    const state = renderer.getCanvasState(elementId)
+    if (
+      state?.loadedImageCount === expected &&
+      state.paintedImageCount === expected &&
+      state.atlasTileCount === expected
+    ) {
+      return state
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  throw new Error(
+    `Canvas ${elementId} did not paint ${expected} images: ` +
+      JSON.stringify(renderer.getCanvasState(elementId))
+  )
+}
 
 function fillRectStream(color: string, x = 0, y = 0, width = 80, height = 60) {
   return {
@@ -90,6 +126,302 @@ describeNative("retained canvas element", () => {
       testRoot.unmount()
     }
   })
+
+  it("diagnoses toDataURL once per element with the readback reason", () => {
+    const strict = createTestRoot({ width: 80, height: 60, strictStyles: true })
+    const compatibility = createTestRoot({ width: 80, height: 60, strictStyles: false })
+    const strictRef = createRef<CanvasPublicInstance>()
+    const compatibilityRef = createRef<CanvasPublicInstance>()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const spec = CANVAS_ELEMENT_UNSUPPORTED_MEMBERS[0]
+    try {
+      strict.render(<canvas ref={strictRef} testId="strict-data-url" width={80} height={60} />)
+      compatibility.render(
+        <canvas ref={compatibilityRef} testId="compat-data-url" width={80} height={60} />
+      )
+
+      expect(() => strictRef.current!.toDataURL()).toThrow(
+        new RegExp(`strict-data-url.*HTMLCanvasElement\\.toDataURL.*${spec.reason}`)
+      )
+      compatibilityRef.current!.toDataURL()
+      compatibilityRef.current!.toDataURL()
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(
+          new RegExp(`compat-data-url.*HTMLCanvasElement\\.toDataURL.*${spec.reason}`)
+        )
+      )
+    } finally {
+      warn.mockRestore()
+      strict.unmount()
+      compatibility.unmount()
+    }
+  })
+
+  it("exports Image and createImageBitmap without installing globals", async () => {
+    const testRoot = createTestRoot({ width: 120, height: 80 })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    const previousImage = Reflect.get(globalThis, "Image")
+    const onload = vi.fn()
+    try {
+      testRoot.render(<canvas ref={canvasRef} width={120} height={80} />)
+      const image = new Image(999, 777)
+      image.onload = onload
+      image.src = canvasImageFixture
+      const context = canvasRef.current!.getContext("2d")!
+      context.drawImage(image, 0, 0)
+      flushRecordingContext2D(context)
+
+      await image.decode()
+      const bitmap = await createImageBitmap(image)
+      expect(image.complete).toBe(true)
+      expect(image.naturalWidth).toBe(64)
+      expect(image.naturalHeight).toBe(48)
+      expect(onload).toHaveBeenCalledTimes(1)
+      expect(bitmap.width).toBe(64)
+      expect(bitmap.height).toBe(48)
+      expect(Reflect.get(globalThis, "Image")).toBe(previousImage)
+      bitmap.close()
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("rejects decode and drawImage after the native loader marks an image broken", async () => {
+    const testRoot = createTestRoot({ width: 120, height: 80 })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    const onload = vi.fn()
+    const onerror = vi.fn()
+    try {
+      testRoot.render(<canvas ref={canvasRef} width={120} height={80} />)
+      const image = new Image()
+      image.onload = onload
+      image.onerror = onerror
+      image.src = corruptCanvasImageFixture
+      const context = canvasRef.current!.getContext("2d")!
+      context.drawImage(image, 0, 0)
+      flushRecordingContext2D(context)
+
+      await expect(image.decode()).rejects.toMatchObject({ name: "EncodingError" })
+      expect(image.complete).toBe(true)
+      expect(image.naturalWidth).toBe(0)
+      expect(image.naturalHeight).toBe(0)
+      expect(onload).not.toHaveBeenCalled()
+      expect(onerror).toHaveBeenCalledTimes(1)
+      expect(() => context.drawImage(image, 0, 0)).toThrow(
+        expect.objectContaining({ name: "InvalidStateError" })
+      )
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("no-ops the cold frame and repaints from native load completion alone", async () => {
+    const fixture = readFileSync(canvasImageFixture)
+    let releaseResponse = (): void => {}
+    let markRequested = (): void => {}
+    const responseGate = new Promise<void>((resolve) => {
+      releaseResponse = resolve
+    })
+    const requested = new Promise<void>((resolve) => {
+      markRequested = resolve
+    })
+    const server = createServer(async (_request, response) => {
+      markRequested()
+      await responseGate
+      response.writeHead(200, { "content-type": "image/png" }).end(fixture)
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const address = server.address()
+    if (!address || typeof address === "string") throw new Error("Missing test server address")
+
+    const testRoot = createTestRoot({
+      width: 120,
+      height: 80,
+      allowPrivateNetworkImages: true,
+    })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(<canvas ref={canvasRef} width={120} height={80} />)
+      const image = new Image()
+      image.src = `http://127.0.0.1:${address.port}/delayed.png`
+      const context = canvasRef.current!.getContext("2d")!
+      context.drawImage(image, 0, 0)
+      flushRecordingContext2D(context)
+      testRoot.renderer.flush()
+      await requested
+
+      const id = canvasRef.current!.id
+      expect(testRoot.renderer.peekCanvasState(id)).toMatchObject({
+        imageCount: 1,
+        loadedImageCount: 0,
+        paintedImageCount: 0,
+        atlasTileCount: 0,
+      })
+
+      releaseResponse()
+      await image.decode()
+      testRoot.renderer.drawPendingFrame()
+      const repainted = testRoot.renderer.peekCanvasState(id)
+      expect(repainted).toMatchObject({
+        loadedImageCount: 1,
+        paintedImageCount: 1,
+        atlasTileCount: 1,
+      })
+    } finally {
+      releaseResponse()
+      testRoot.unmount()
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()))
+      })
+    }
+  })
+
+  it("raises R1 for drawImage under a rotated CTM", () => {
+    const testRoot = createTestRoot({ width: 120, height: 80, strictStyles: true })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="rotated-image-canvas" width={120} height={80} />
+      )
+      const image = new Image()
+      image.src = canvasImageFixture
+      const context = canvasRef.current!.getContext("2d")
+      context.rotate(0.2)
+      context.drawImage(image, 0, 0)
+      expect(() => flushRecordingContext2D(context)).toThrow(
+        /rotated-image-canvas.*drawImage.*R1.*rotated or skewed CTM/
+      )
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("raises R1 instead of silently unmirroring drawImage under negative scale", () => {
+    const testRoot = createTestRoot({ width: 120, height: 80, strictStyles: true })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="reflected-image-canvas" width={120} height={80} />
+      )
+      const image = new Image()
+      image.src = canvasImageFixture
+      const context = canvasRef.current!.getContext("2d")!
+      context.scale(-1, 1)
+      context.drawImage(image, -64, 0)
+      expect(() => flushRecordingContext2D(context)).toThrow(
+        /reflected-image-canvas.*drawImage.*R1.*negative axis scales/
+      )
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("replays drawImage globalAlpha through a translucent cached image", async () => {
+    const testRoot = createTestRoot({ width: 120, height: 80, strictStyles: true })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="alpha-image-canvas" width={120} height={80} />
+      )
+      const image = new Image()
+      image.src = canvasImageFixture
+      await image.decode()
+      const context = canvasRef.current!.getContext("2d")!
+      context.globalAlpha = 0.375
+      context.drawImage(image, 0, 0)
+      expect(() => flushRecordingContext2D(context)).not.toThrow()
+      testRoot.renderer.flush()
+
+      expect(testRoot.renderer.getCanvasState(canvasRef.current!.id)).toMatchObject({
+        loadedImageCount: 1,
+        paintedImageCount: 1,
+        atlasTileCount: 1,
+      })
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("paints 64 distinct image sources and drops every atlas tile on unmount", async () => {
+    const width = 256
+    const height = 192
+    const actualRenderer = new TestRenderer({ width, height })
+    const expectedRenderer = new TestRenderer({ width, height })
+    const actualRoot = createRoot(actualRenderer)
+    const expectedRoot = createRoot(expectedRenderer)
+    const actualRef = createRef<CanvasPublicInstance>()
+    const expectedRef = createRef<CanvasPublicInstance>()
+    const actualPath = path.join(SHOTS_DIR, "canvas-image-grid-64-actual.png")
+    const expectedPath = path.join(SHOTS_DIR, "canvas-image-grid-64-expected.png")
+
+    try {
+      flushSync(() =>
+        actualRoot.render(<canvas ref={actualRef} width={width} height={height} />)
+      )
+      flushSync(() =>
+        expectedRoot.render(<canvas ref={expectedRef} width={width} height={height} />)
+      )
+      actualRenderer.flush()
+      expectedRenderer.flush()
+
+      const actualContext = actualRef.current!.getContext("2d")
+      const expectedContext = expectedRef.current!.getContext("2d")
+      const shared = new Image()
+      shared.src = canvasImageFixture
+      for (let index = 0; index < 64; index += 1) {
+        const image = new Image()
+        const separator = canvasImageFixture.lastIndexOf("/")
+        image.src =
+          canvasImageFixture.slice(0, separator + 1) +
+          "./".repeat(index + 1) +
+          canvasImageFixture.slice(separator + 1)
+        const x = (index % 8) * 32
+        const y = Math.floor(index / 8) * 24
+        actualContext.drawImage(image, x, y, 32, 24)
+        expectedContext.drawImage(shared, x, y, 32, 24)
+      }
+      flushRecordingContext2D(actualContext)
+      flushRecordingContext2D(expectedContext)
+
+      const actualId = actualRef.current!.id
+      const expectedId = expectedRef.current!.id
+      const loaded = await waitForCanvasImages(actualRenderer, actualId, 64)
+      await waitForCanvasImages(expectedRenderer, expectedId, 1)
+      expect(loaded).toMatchObject({
+        imageCount: 64,
+        loadedImageCount: 64,
+        paintedImageCount: 64,
+        atlasTileCount: 64,
+        releasedAtlasTileCount: 0,
+      })
+
+      actualRenderer.captureScreenshot(actualPath)
+      expectedRenderer.captureScreenshot(expectedPath)
+      expect(actualRenderer.compareImages(expectedPath, actualPath, 0)).toEqual({
+        differingPixelRatio: 0,
+        maxChannelDelta: 0,
+        maxChannelDeltaOutsideGoldenContour: 0,
+        erodedGeometryMismatchRatio: 0,
+      })
+
+      flushSync(() => actualRoot.unmount())
+      actualRenderer.flush()
+      expect(actualRenderer.getCanvasState(actualId)).toMatchObject({
+        imageCount: 0,
+        loadedImageCount: 0,
+        atlasTileCount: 0,
+        releasedAtlasTileCount: 64,
+      })
+    } finally {
+      actualRoot.unmount()
+      expectedRoot.unmount()
+      actualRenderer.dispose()
+      expectedRenderer.dispose()
+    }
+  }, 20_000)
 
   it("does not retessellate an unchanged display list on a requested frame", () => {
     const testRoot = createTestRoot({ width: 120, height: 80 })

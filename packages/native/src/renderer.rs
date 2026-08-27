@@ -737,6 +737,50 @@ pub(crate) fn to_element_id(id: f64) -> Result<u64> {
     raw_element_id(id).map_err(Error::from_reason)
 }
 
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn parse_canvas_image_source(
+    source_json: String,
+) -> Result<crate::custom_elements::img::CanvasImageSource> {
+    let value: serde_json::Value = serde_json::from_str(&source_json)
+        .map_err(|error| Error::from_reason(format!("Invalid canvas image source JSON: {error}")))?;
+    let source = crate::custom_elements::img::ImageSource::parse(&value)
+        .map_err(|error| Error::from_reason(format!("Invalid canvas image source: {error}")))?;
+    Ok(crate::custom_elements::img::CanvasImageSource {
+        key: source_json,
+        source,
+    })
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn canvas_image_load_state_js(
+    state: Option<crate::custom_elements::img::CanvasImageLoadState>,
+) -> Option<CanvasImageLoadState> {
+    state.map(|state| match state {
+        crate::custom_elements::img::CanvasImageLoadState::Loading => CanvasImageLoadState {
+            status: "loading".to_string(),
+            width: None,
+            height: None,
+            error: None,
+        },
+        crate::custom_elements::img::CanvasImageLoadState::Loaded { width, height } => {
+            CanvasImageLoadState {
+                status: "loaded".to_string(),
+                width: Some(width as f64),
+                height: Some(height as f64),
+                error: None,
+            }
+        }
+        crate::custom_elements::img::CanvasImageLoadState::Error { message } => {
+            CanvasImageLoadState {
+                status: "error".to_string(),
+                width: None,
+                height: None,
+                error: Some(message),
+            }
+        }
+    })
+}
+
 thread_local! {
     #[cfg(target_os = "macos")]
     static MAC_PLATFORM: RefCell<Option<Rc<gpui_macos::MacPlatform>>> = const { RefCell::new(None) };
@@ -984,6 +1028,16 @@ enum ClockControl {
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum UiCommand {
     Invalidate,
+    ObserveCanvasImage {
+        observer_id: u64,
+        source: crate::custom_elements::img::CanvasImageSource,
+        policy: crate::custom_elements::img::ImageNetworkPolicy,
+    },
+    ReleaseCanvasImageObserver(u64),
+    GetCanvasImageLoadState {
+        observer_id: u64,
+        response: SyncSender<Option<CanvasImageLoadState>>,
+    },
     RequestFrame {
         callback: AnimationFrameCallback,
         timestamp_origin: FrameTimestampOrigin,
@@ -1086,6 +1140,30 @@ async fn run_ui_commands(
     while let Some(command) = commands.next().await {
         let result = match command {
             UiCommand::Invalidate => refresh_ui_window(window, cx),
+            UiCommand::ObserveCanvasImage {
+                observer_id,
+                source,
+                policy,
+            } => window.update(cx, move |view, window, cx| {
+                view.canvas_image_store
+                    .observe(observer_id, source, policy, window, cx);
+            }),
+            UiCommand::ReleaseCanvasImageObserver(observer_id) => {
+                window.update(cx, move |view, window, _cx| {
+                    view.canvas_image_store
+                        .release_observer(observer_id, window);
+                })
+            }
+            UiCommand::GetCanvasImageLoadState {
+                observer_id,
+                response,
+            } => window.update(cx, move |view, _window, _cx| {
+                response
+                    .send(canvas_image_load_state_js(
+                        view.canvas_image_store.observer_state(observer_id),
+                    ))
+                    .ok();
+            }),
             UiCommand::RequestFrame {
                 callback,
                 timestamp_origin,
@@ -2335,6 +2413,91 @@ impl GpuixRenderer {
         if outcome.invalidates {
             self.request_invalidate()?;
         }
+        Ok(())
+    }
+
+    /// Start or join one renderer-local canvas image load. The observer keeps
+    /// the decoded entry alive until JavaScript changes or releases the source.
+    #[napi]
+    pub fn load_canvas_image(&self, observer_id: f64, source_json: String) -> Result<()> {
+        let observer_id = to_element_id(observer_id)?;
+        let source = parse_canvas_image_source(source_json)?;
+        let policy = self.image_network_policy.clone();
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.canvas_image_store
+                .observe(observer_id, source, policy, window, cx);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ObserveCanvasImage {
+            observer_id,
+            source,
+            policy,
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "Canvas image loading is not supported by this renderer",
+        ))
+    }
+
+    #[napi]
+    pub fn get_canvas_image_load_state(
+        &self,
+        observer_id: f64,
+    ) -> Result<Option<CanvasImageLoadState>> {
+        let observer_id = to_element_id(observer_id)?;
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, _cx| {
+            canvas_image_load_state_js(view.canvas_image_store.observer_state(observer_id))
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetCanvasImageLoadState {
+                observer_id,
+                response,
+            })?;
+            return recv_ui_response(receiver, "the canvas image state query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Ok(None)
+    }
+
+    #[napi]
+    pub fn release_canvas_image(&self, observer_id: f64) -> Result<()> {
+        let observer_id = to_element_id(observer_id)?;
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, _cx| {
+            view.canvas_image_store
+                .release_observer(observer_id, window);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ReleaseCanvasImageObserver(observer_id));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
         Ok(())
     }
 
@@ -4789,6 +4952,7 @@ impl Drop for GpuixRenderer {
 pub(crate) struct GpuixView {
     pub(crate) tree: Arc<Mutex<RetainedTree>>,
     pub(crate) canvas_display_lists: SharedDisplayLists,
+    pub(crate) canvas_image_store: crate::custom_elements::img::SharedCanvasImageStore,
     pub(crate) event_callback: Option<EventCallback>,
     window_event_callback: WindowEventCallback,
     window_bounds_subscription: Option<gpui::Subscription>,
@@ -4991,6 +5155,7 @@ impl GpuixView {
         Self {
             tree,
             canvas_display_lists,
+            canvas_image_store: Default::default(),
             event_callback,
             window_event_callback,
             window_bounds_subscription: None,
@@ -5184,6 +5349,7 @@ impl GpuixView {
         let mut build_ctx = BuildCtx {
             tree: &tree,
             canvas_display_lists: &self.canvas_display_lists,
+            canvas_image_store: &self.canvas_image_store,
             event_callback: &callback,
             focus_handles: &self.focus_handles,
             scroll_handles: &mut self.scroll_handles,
@@ -5300,6 +5466,7 @@ impl GpuixView {
 pub(crate) struct BuildCtx<'a> {
     pub tree: &'a RetainedTree,
     pub canvas_display_lists: &'a SharedDisplayLists,
+    pub canvas_image_store: &'a crate::custom_elements::img::SharedCanvasImageStore,
     pub event_callback: &'a Option<EventCallback>,
     pub focus_handles: &'a HashMap<u64, gpui::FocusHandle>,
     pub scroll_handles: &'a mut HashMap<u64, gpui::ScrollHandle>,
@@ -5944,6 +6111,8 @@ impl gpui::Render for GpuixView {
         // Ensure custom element instances are destroyed when their IDs disappear.
         self.custom_registry
             .prune_missing(|id| tree.elements.contains_key(&id));
+        self.canvas_image_store
+            .prune_missing(|id| tree.elements.contains_key(&id), window);
 
         // Clean up scroll handles for destroyed elements (IDs removed from tree).
         // Scrollability-based cleanup (element still exists but style changed
@@ -5979,6 +6148,7 @@ impl gpui::Render for GpuixView {
                 let mut ctx = BuildCtx {
                     tree: &tree,
                     canvas_display_lists: &self.canvas_display_lists,
+                    canvas_image_store: &self.canvas_image_store,
                     event_callback: &callback,
                     focus_handles: &self.focus_handles,
                     scroll_handles: &mut self.scroll_handles,
@@ -6231,6 +6401,7 @@ pub(crate) fn build_element(
                 selection_wash: inherited.selection_wash,
                 current_color: inherited.current_color,
                 image_network_policy: ctx.image_network_policy,
+                canvas_image_store: ctx.canvas_image_store,
                 canvas_display_lists: ctx.canvas_display_lists,
                 highlight_set: inherited.highlight.clone(),
             };
@@ -8351,6 +8522,16 @@ pub struct DebugFrameOverlayStats {
     pub max_ms: Option<f64>,
     pub frames: f64,
     pub samples: f64,
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct CanvasImageLoadState {
+    pub status: String,
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
