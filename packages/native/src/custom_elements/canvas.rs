@@ -516,14 +516,6 @@ fn build_zero_length_stroke_cap(
         .map_err(|_| "zero-length cap tessellation failed")
 }
 
-fn dash_paints_subpath_origin(line_dash: &[f64]) -> bool {
-    line_dash
-        .iter()
-        .enumerate()
-        .find(|(_, length)| **length > 0.0)
-        .is_some_and(|(index, _)| index % 2 == 0)
-}
-
 fn append_transformed_triangles(
     output: &mut Option<gpui::Path<gpui::Pixels>>,
     local: &gpui::Path<gpui::Pixels>,
@@ -861,9 +853,6 @@ fn prepare_with_scale(
         for subpath in split_subpaths(&commands) {
             if uses_dash {
                 if let Some(point) = zero_length_subpath_point(&subpath) {
-                    if !dash_paints_subpath_origin(&style.line_dash) {
-                        continue;
-                    }
                     if let Some(local) =
                         build_zero_length_stroke_cap(point, style, stroke_tolerance).map_err(
                             |reason| crate::canvas::CanvasDiagnostic {
@@ -2373,32 +2362,42 @@ mod tests {
             );
         }
 
-        let starts_with_gap = prepare(
-            &crate::canvas::DisplayList {
-                revision: 1,
-                items: vec![DisplayItem::StrokePath(StrokePath {
-                    commands: vec![
-                        PathCommand::MoveTo(transformed),
-                        PathCommand::LineTo(transformed),
-                    ],
-                    style: StrokePathStyle {
-                        color: color(),
-                        line_width: 12.0,
-                        line_cap: CanvasLineCap::Round,
-                        line_join: CanvasLineJoin::Miter,
-                        miter_limit: 10.0,
-                        line_dash: vec![0.0, 8.0],
-                        transform,
-                    },
-                    op_index: 0,
-                    clear_regions: Vec::new(),
-                })],
-            },
-            test_bounds(),
-            320.0,
-            240.0,
+        let starts_with_zero_dash = |line_cap| {
+            prepare(
+                &crate::canvas::DisplayList {
+                    revision: 1,
+                    items: vec![DisplayItem::StrokePath(StrokePath {
+                        commands: vec![
+                            PathCommand::MoveTo(transformed),
+                            PathCommand::LineTo(transformed),
+                        ],
+                        style: StrokePathStyle {
+                            color: color(),
+                            line_width: 12.0,
+                            line_cap,
+                            line_join: CanvasLineJoin::Miter,
+                            miter_limit: 10.0,
+                            line_dash: vec![0.0, 8.0],
+                            transform,
+                        },
+                        op_index: 0,
+                        clear_regions: Vec::new(),
+                    })],
+                },
+                test_bounds(),
+                320.0,
+                240.0,
+            )
+        };
+        assert!(starts_with_zero_dash(CanvasLineCap::Butt).items.is_empty());
+        assert_eq!(
+            vertex_positions(prepared_path(&starts_with_zero_dash(CanvasLineCap::Round))),
+            round_vertices
         );
-        assert!(starts_with_gap.items.is_empty());
+        assert_eq!(
+            vertex_positions(prepared_path(&starts_with_zero_dash(CanvasLineCap::Square))),
+            square_vertices
+        );
     }
 
     #[test]
