@@ -36,6 +36,10 @@ import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
 import { flushRecordingContext2D } from "./canvas/context-2d.js"
 import {
+  attachAnimationFrameSource,
+  detachAnimationFrameSource,
+} from "./frame-clock.js"
+import {
   CANVAS_GOLDEN_DPR,
   CANVAS_GOLDEN_HEIGHT,
   CANVAS_GOLDEN_WIDTH,
@@ -74,6 +78,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   ): void
   flush(): void
   advanceAsyncClock(deltaMs: number): void
+  requestFrame(callback: (timestamp: number) => void): void
   setReducedMotion(enabled: boolean): void
   getStyleTransitionCount(): number
   getStyleTransitionFrameRequestCount(): number
@@ -253,6 +258,7 @@ export class TestRenderer implements NativeRenderer {
   private disposed = false
   private applicationEventHandler: ((event: EventPayload) => void) | null = null
   private windowEventHandler: ((event: EventPayload) => void) | null = null
+  private animationFrameRequestCount = 0
 
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
@@ -280,6 +286,7 @@ export class TestRenderer implements NativeRenderer {
   /** Release this renderer's offscreen window and native GPUI context. */
   dispose(): void {
     if (this.disposed) return
+    detachAnimationFrameSource(this)
     this.native.dispose()
     this.disposed = true
   }
@@ -390,7 +397,21 @@ export class TestRenderer implements NativeRenderer {
 
   /** Advance GPUI timers and, when paused, the native animation frame clock. */
   advanceAsyncClock(deltaMs: number): void {
+    if (!Number.isFinite(deltaMs) || deltaMs < 0) {
+      throw new Error("advanceAsyncClock delta must be a finite non-negative number")
+    }
     this.native.advanceAsyncClock(deltaMs)
+  }
+
+  /** Queue one native next-frame callback without dirtying the offscreen window. */
+  requestFrame(callback: (timestamp: number) => void): void {
+    this.animationFrameRequestCount += 1
+    this.native.requestFrame(callback)
+  }
+
+  /** Number of one-shot frame requests made through this test renderer. */
+  getAnimationFrameRequestCount(): number {
+    return this.animationFrameRequestCount
   }
 
   /** Override GPUI's reduced-motion policy for deterministic tests. */
@@ -1095,6 +1116,10 @@ export interface TestRootOptions extends TestWindowOptions {
  */
 export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   const renderer = new TestRenderer(options)
+  attachAnimationFrameSource({
+    owner: renderer,
+    request: (callback) => renderer.requestFrame(callback),
+  })
   renderer.setAllowPrivateNetworkImages(options.allowPrivateNetworkImages ?? false)
   const root = createRoot(renderer, { strictStyles: options.strictStyles })
   let unmounted = false

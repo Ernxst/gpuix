@@ -23,14 +23,16 @@ use gpui::AppContext as _;
 
 use crate::element_tree::EventPayload;
 use crate::renderer::{
+    animation_frame_origin, animation_frame_timestamp_ms,
     apply_batch_to_tree_with_diagnostics, catch_gpui_initialization, debug_frame_overlay_mode_name,
     debug_frame_overlay_stats_js, default_http_client, dispatch_application_menu_action,
-    drain_style_diagnostics, first_canvas_diagnostic_message, forget_canvas_diagnostics,
-    fresh_canvas_diagnostics, has_application_menus, init_application_menu_support,
-    install_application_menus, parse_debug_frame_overlay_mode, parse_style_json,
-    pending_custom_prop_diagnostic, pending_style_diagnostics, set_application_menus,
-    to_element_id, validate_canvas_target, DebugFrameOverlayStats, EventCallback,
-    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
+    dispatch_animation_frame_callback, drain_style_diagnostics, first_canvas_diagnostic_message,
+    forget_canvas_diagnostics, fresh_canvas_diagnostics, has_application_menus,
+    init_application_menu_support, install_application_menus, parse_debug_frame_overlay_mode,
+    parse_style_json, pending_custom_prop_diagnostic, pending_style_diagnostics,
+    set_application_menus, to_element_id, validate_canvas_target, AnimationFrameCallback,
+    DebugFrameOverlayStats, EventCallback, FrameTimestampOrigin, GpuixStyleDiagnostic,
+    GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -252,6 +254,7 @@ pub struct TestGpuixRenderer {
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
     canvas_diagnostic_members: Mutex<HashSet<(u64, String)>>,
+    animation_frame_timestamp_origin: FrameTimestampOrigin,
     /// Mouse-down origin for the current GPUI active-state sequence. Retained
     /// for the native test input path, which must mirror main's press lifetime.
     active_pointer_origin: Mutex<Option<(f64, f64)>>,
@@ -342,6 +345,7 @@ impl TestGpuixRenderer {
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(Vec::new()),
             canvas_diagnostic_members: Mutex::new(HashSet::new()),
+            animation_frame_timestamp_origin: Arc::new(Mutex::new(None)),
             active_pointer_origin: Mutex::new(None),
         })
     }
@@ -631,6 +635,32 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Queue one callback for the next manually advanced GPUI frame without
+    /// dirtying or synchronously drawing the offscreen window.
+    #[napi]
+    pub fn request_frame(
+        &self,
+        #[napi(ts_arg_type = "(timestamp: number) => void")] callback: AnimationFrameCallback,
+    ) -> Result<()> {
+        let timestamp_origin = self.animation_frame_timestamp_origin.clone();
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, move |_, window, app| {
+                let origin = animation_frame_origin(
+                    &timestamp_origin,
+                    app.background_executor().now(),
+                );
+                window.on_next_frame(move |_window, app| {
+                    dispatch_animation_frame_callback(
+                        callback,
+                        animation_frame_timestamp_ms(origin, app.background_executor().now()),
+                    );
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            Ok(())
+        })
+    }
+
     /// Advance GPUI's async executor clock so tests can deterministically fire
     /// timers such as bounded image retry/revalidation deadlines. When the
     /// renderer animation clock is paused, advance that clock by the same
@@ -645,7 +675,8 @@ impl TestGpuixRenderer {
         with_test_state(self.state_id, |cx, window, view| {
             cx.advance_clock(std::time::Duration::from_secs_f64(delta_ms / 1000.0));
             let view = view.clone();
-            cx.update_window(window, |_, _window, app| {
+            cx.update_window(window, |_, window, app| {
+                window.simulate_next_frame(app);
                 view.update(app, |view, cx| {
                     if view.clock.fast_forward_if_frozen_ms(delta_ms).is_some() {
                         cx.notify();

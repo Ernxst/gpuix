@@ -821,6 +821,10 @@ enum ClockControl {
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum UiCommand {
     Invalidate,
+    RequestFrame {
+        callback: AnimationFrameCallback,
+        timestamp_origin: FrameTimestampOrigin,
+    },
     SetMenus {
         menus: Vec<MenuSpec>,
         response: SyncSender<std::result::Result<(), String>>,
@@ -919,6 +923,21 @@ async fn run_ui_commands(
     while let Some(command) = commands.next().await {
         let result = match command {
             UiCommand::Invalidate => refresh_ui_window(window, cx),
+            UiCommand::RequestFrame {
+                callback,
+                timestamp_origin,
+            } => window.update(cx, move |_view, window, cx| {
+                let origin = animation_frame_origin(
+                    &timestamp_origin,
+                    cx.background_executor().now(),
+                );
+                window.on_next_frame(move |_window, cx| {
+                    dispatch_animation_frame_callback(
+                        callback,
+                        animation_frame_timestamp_ms(origin, cx.background_executor().now()),
+                    );
+                });
+            }),
             UiCommand::SetMenus { menus, response } => {
                 let result = cx.update(|cx| set_application_menus(cx, menus));
                 response.send(result.clone()).ok();
@@ -1313,8 +1332,50 @@ pub(crate) fn unsupported_capability(env: Env, capability: &str) -> Result<()> {
     Err(error.into_unknown(&env)?.into())
 }
 
-#[cfg(target_os = "macos")]
-type FrameRequestCallback = ThreadsafeFunction<(), Unknown<'static>, (), Status, false, false, 1>;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) type FrameRequestCallback =
+    ThreadsafeFunction<(), Unknown<'static>, (), Status, false, false, 1>;
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) type AnimationFrameCallback =
+    ThreadsafeFunction<f64, Unknown<'static>, f64, Status, false, false, 1>;
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) type FrameTimestampOrigin = Arc<Mutex<Option<web_time::Instant>>>;
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn animation_frame_origin(
+    timestamp_origin: &FrameTimestampOrigin,
+    now: web_time::Instant,
+) -> web_time::Instant {
+    let mut timestamp_origin = timestamp_origin
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *timestamp_origin.get_or_insert(now)
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn animation_frame_timestamp_ms(
+    timestamp_origin: web_time::Instant,
+    frame_time: web_time::Instant,
+) -> f64 {
+    frame_time
+        .saturating_duration_since(timestamp_origin)
+        .as_secs_f64()
+        * 1_000.0
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn dispatch_animation_frame_callback(
+    callback: AnimationFrameCallback,
+    timestamp: f64,
+) {
+    let _ = callback.call_with_return_value(
+        timestamp,
+        ThreadsafeFunctionCallMode::NonBlocking,
+        |_result, _env| Ok(()),
+    );
+}
 
 #[cfg(target_os = "macos")]
 struct PresentTimingCapture {
@@ -1333,6 +1394,7 @@ pub struct GpuixRenderer {
     tree: Arc<Mutex<RetainedTree>>,
     canvas_display_lists: SharedDisplayLists,
     lifecycle: Arc<Mutex<RendererLifecycle>>,
+    animation_frame_timestamp_origin: FrameTimestampOrigin,
     #[cfg(target_os = "macos")]
     frame_request_callback: Arc<Mutex<Option<Arc<FrameRequestCallback>>>>,
     #[cfg(target_os = "macos")]
@@ -1508,6 +1570,7 @@ impl GpuixRenderer {
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             canvas_display_lists: SharedDisplayLists::default(),
             lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
+            animation_frame_timestamp_origin: Arc::new(Mutex::new(None)),
             #[cfg(target_os = "macos")]
             frame_request_callback: Arc::new(Mutex::new(None)),
             #[cfg(target_os = "macos")]
@@ -2408,6 +2471,51 @@ impl GpuixRenderer {
         {
             let _ = callback;
             false
+        }
+    }
+
+    /// Queue one callback on GPUI's next display-paced frame. `on_next_frame`
+    /// creates frame demand without dirtying the window, so an otherwise idle
+    /// callback does not force a draw.
+    #[napi]
+    pub fn request_frame(
+        &self,
+        #[napi(ts_arg_type = "(timestamp: number) => void")] callback: AnimationFrameCallback,
+    ) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let timestamp_origin = self.animation_frame_timestamp_origin.clone();
+            return update_window_without_view(move |window, cx| {
+                let origin = animation_frame_origin(
+                    &timestamp_origin,
+                    cx.background_executor().now(),
+                );
+                window.on_next_frame(move |_window, cx| {
+                    dispatch_animation_frame_callback(
+                        callback,
+                        animation_frame_timestamp_ms(origin, cx.background_executor().now()),
+                    );
+                });
+            });
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::RequestFrame {
+            callback,
+            timestamp_origin: self.animation_frame_timestamp_origin.clone(),
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = callback;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support animation frames",
+            ))
         }
     }
 

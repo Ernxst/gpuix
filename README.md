@@ -419,6 +419,33 @@ function ResponsivePanel() {
 is device pixels per logical pixel, so multiply by it only when you need a
 device-pixel measurement.
 
+### Schedule animation frames
+
+Import the browser-shaped frame clock for canvas redraw loops, momentum, and
+easing. The same call site delegates to the browser's real frame clock in a web
+build and to GPUI's display-paced frame clock on desktop:
+
+```tsx
+import { cancelAnimationFrame, requestAnimationFrame } from '@gpuix/react'
+
+let frame = 0
+const redraw = (timestamp: number) => {
+  drawMap(timestamp)
+  frame = requestAnimationFrame(redraw)
+}
+
+frame = requestAnimationFrame(redraw)
+// cancelAnimationFrame(frame)
+```
+
+Callbacks are one-shot, receive a high-resolution millisecond timestamp sampled
+inside GPUI's native frame callback, and share one native frame request when
+queued together. The offscreen renderer supplies that timestamp from the same
+GPUI clock, so `advanceAsyncClock()` controls it deterministically. Requesting a
+callback creates frame demand without dirtying the window; drawing still happens
+only through the normal GPUI frame path. A hot remount drops callbacks owned by
+the previous tree.
+
 | Option | Values | Purpose |
 |---|---|---|
 | `titlebarTransparent` | boolean | Hide the native titlebar so the app draws chrome under the traffic lights |

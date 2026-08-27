@@ -8,6 +8,8 @@ export {
   resetRender,
   startFrameLoop,
 } from "./reconciler/renderer.js"
+export { cancelAnimationFrame, requestAnimationFrame } from "./frame-clock.js"
+export type { FrameRequestCallback } from "./frame-clock.js"
 export { GpuixContext, useGpuix, useGpuixRequired } from "./hooks/use-gpuix.js"
 export { useWindowInsets, useWindowSize } from "./hooks/use-window-size.js"
 export { findRanges, useTextSearch } from "./hooks/use-text-search.js"
