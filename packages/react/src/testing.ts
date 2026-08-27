@@ -34,7 +34,11 @@ import type {
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
-import { flushRecordingContext2D } from "./canvas/context-2d.js"
+import {
+  disposeRecordingContext2D,
+  flushRecordingContext2D,
+  getOrCreateRecordingContext2D,
+} from "./canvas/context-2d.js"
 import { Image } from "./canvas/image.js"
 import {
   attachAnimationFrameSource,
@@ -261,11 +265,45 @@ export interface ImageLoadState {
 export interface CanvasTestState {
   preparationCount: number
   tessellationCount: number
+  pathPrimitiveCount: number
+  pathVertexCount: number
+  maxPathVertexCount: number
+  pathBatchCount: number
+  imagePrimitiveCount: number
   imageCount: number
   loadedImageCount: number
   paintedImageCount: number
   atlasTileCount: number
   releasedAtlasTileCount: number
+}
+
+export interface RecordedCanvasCommands {
+  ops: Uint32Array
+  operands: Float64Array
+  strings: readonly string[]
+}
+
+/** Record one independent browser-shaped Canvas 2D frame for perf tests. */
+export function recordCanvasCommands(
+  draw: (context: CanvasRenderingContext2D) => void
+): RecordedCanvasCommands {
+  const owner = {}
+  let recorded: RecordedCanvasCommands | undefined
+  const context = getOrCreateRecordingContext2D(owner, {
+    strict: true,
+    describeElement: () => '<canvas testId="recorded-frame">',
+    applyCanvasCommands: (ops, operands, strings) => {
+      recorded = { ops, operands, strings }
+    },
+  })
+  try {
+    draw(context)
+    flushRecordingContext2D(context)
+    if (!recorded) throw new Error("Canvas frame recorded no commands")
+    return recorded
+  } finally {
+    disposeRecordingContext2D(owner)
+  }
 }
 
 // ── TestRenderer ─────────────────────────────────────────────────────

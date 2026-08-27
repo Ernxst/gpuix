@@ -75,6 +75,11 @@ struct PreparedCache {
 struct CanvasTestState {
     preparation_count: u64,
     tessellation_count: u64,
+    path_primitive_count: u64,
+    path_vertex_count: u64,
+    max_path_vertex_count: u64,
+    path_batch_count: u64,
+    image_primitive_count: u64,
 }
 
 pub struct CanvasElement {
@@ -1466,6 +1471,34 @@ impl CustomElement for CanvasElement {
                     let mut state = test_state.lock().unwrap();
                     state.preparation_count += 1;
                     state.tessellation_count += prepared.tessellations;
+                    #[cfg(any(test, feature = "test-support"))]
+                    {
+                        state.path_primitive_count = 0;
+                        state.path_vertex_count = 0;
+                        state.max_path_vertex_count = 0;
+                        state.path_batch_count = 0;
+                        state.image_primitive_count = 0;
+                        let mut previous_was_path = false;
+                        for item in &prepared.items {
+                            match item {
+                                PreparedItem::Path { path, .. } => {
+                                    state.path_primitive_count += 1;
+                                    state.path_vertex_count += path.vertices.len() as u64;
+                                    state.max_path_vertex_count =
+                                        state.max_path_vertex_count.max(path.vertices.len() as u64);
+                                    if !previous_was_path {
+                                        state.path_batch_count += 1;
+                                    }
+                                    previous_was_path = true;
+                                }
+                                PreparedItem::Image { .. } => {
+                                    state.image_primitive_count += 1;
+                                    previous_was_path = false;
+                                }
+                                PreparedItem::Quad(_) => previous_was_path = false,
+                            }
+                        }
+                    }
                 }
                 display_lists.report_preparation_diagnostics(id, &prepared.diagnostics);
                 *cache = Some(PreparedCache {
@@ -1559,6 +1592,11 @@ impl CustomElement for CanvasElement {
         Some(serde_json::json!({
             "preparationCount": state.preparation_count,
             "tessellationCount": state.tessellation_count,
+            "pathPrimitiveCount": state.path_primitive_count,
+            "pathVertexCount": state.path_vertex_count,
+            "maxPathVertexCount": state.max_path_vertex_count,
+            "pathBatchCount": state.path_batch_count,
+            "imagePrimitiveCount": state.image_primitive_count,
         }))
     }
 
