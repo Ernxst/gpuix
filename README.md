@@ -2192,7 +2192,7 @@ object with a `type`: `px`, `fr`, `auto`, `min-content`, `max-content`,
 }} />
 ```
 
-**Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accepts pixels (number) or percentages (string like `"100%"`)
+**Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accept pixels, percentages, `ch`, and `calc()` / `clamp()` expressions. `ch` uses the shaped advance of `0` in the resolved font.
 
 **Spacing:** `padding`, `paddingTop/Right/Bottom/Left`, `margin`, `marginTop/Right/Bottom/Left`
 
@@ -2320,7 +2320,7 @@ Limited relative-color forms can derive a new color from a base value:
 
 **Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` creates a native scrollable container with persistent scroll state
 
-**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textDecoration` (`"underline"` | `"line-through"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textDecoration` (`"underline"` | `"line-through"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A numeric `lineHeight` is the legacy pixel form; a unitless string such as `"1.4"` multiplies the resolved font size.
 
 `textWrap` accepts `"wrap"` and `"nowrap"`. `"balance"` and `"pretty"` are
 recognized but explicitly rejected with a strict-style diagnostic because GPUI
@@ -2393,14 +2393,10 @@ Anchors with an `href` join the native tab order automatically, so a plain link
 does not need an app-side `tabIndex` or `onKeyDown` adapter. Native text editors
 keep Space as text input instead of synthesizing a click.
 
-> **Note: `white-space: pre` is not supported.** GPUI's text system only has `normal` (wraps) and `nowrap` (single line). To preserve newlines like HTML `<pre>`, split your text on `\n` in React and render each line as a separate `<text>` element in a flex column:
+> **`whiteSpace: "pre"` preserves explicit newlines and repeated spaces without soft wrapping.** It remains one selectable `<text>` layout, including nested inline text runs, so copying and selection preserve the original string. Whitespace policy is layout-wide: put `pre` on the outer `<text>`; a nested inline run cannot switch it mid-sentence.
 >
 > ```tsx
-> <div style={{ display: 'flex', flexDirection: 'column', fontFamily: 'Menlo' }}>
->   {code.split('\n').map((line, i) => (
->     <text key={i} style={{ whiteSpace: 'nowrap' }}>{line}</text>
->   ))}
-> </div>
+> <text style={{ whiteSpace: 'pre', fontFamily: 'Menlo' }}>{code}</text>
 > ```
 
 > **Note: GPUI defaults text color to black, not white.** Unlike CSS, GPUI does not inherit `color` from parent elements. Every `<text>` element that doesn't set an explicit `color` style will render as black — invisible on dark backgrounds. Always set `color` on your text elements or on a parent `<div>` (which applies `text_color` to all children in that subtree via GPUI's `Styled` trait).

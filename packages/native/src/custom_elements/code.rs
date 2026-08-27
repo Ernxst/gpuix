@@ -127,8 +127,14 @@ fn typography(style: Option<&StyleDesc>, theme: &Theme, m: &Metrics) -> Typograp
         // A zero `codeTextSize` metric would divide by zero and hand Taffy an
         // infinity, which paints nothing at all, so guard the ratio.
         line_height: style
-            .and_then(|style| style.line_height)
-            .map(|height| height as f32)
+            .and_then(|style| style.line_height.as_ref())
+            .and_then(|height| match height {
+                crate::style::LineHeightValue::Pixels(height) => Some(*height as f32),
+                crate::style::LineHeightValue::Unitless(multiplier) => multiplier
+                    .parse::<f32>()
+                    .ok()
+                    .map(|multiplier| multiplier * text_size),
+            })
             .filter(|height| *height > 0.0)
             .unwrap_or_else(|| {
                 if m.code_text_size > 0.0 {
@@ -368,7 +374,7 @@ mod tests {
         let style = StyleDesc {
             font_family: Some("Fira Code".to_string()),
             font_size: Some(20.0),
-            line_height: Some(30.0),
+            line_height: Some(crate::style::LineHeightValue::Pixels(30.0)),
             color: Some("#ff0000".to_string()),
             ..Default::default()
         };
@@ -387,7 +393,7 @@ mod tests {
         let theme = Theme::dark();
         let style = StyleDesc {
             font_size: Some(0.0),
-            line_height: Some(0.0),
+            line_height: Some(crate::style::LineHeightValue::Pixels(0.0)),
             ..Default::default()
         };
         let resolved = typography(Some(&style), &theme, &theme.metrics);

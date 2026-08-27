@@ -79,6 +79,32 @@ describeNative("inline text runs", () => {
     expect(fs.statSync(shot).size).toBeGreaterThan(0)
   })
 
+  it("keeps a preformatted inline run as one selectable layout", () => {
+    const shot = path.join(SHOTS_DIR, "inline-text-preformatted.png")
+    const { render, renderer } = createTestRoot()
+    const content = "line  1\nline  2: ready"
+
+    render(
+      <div style={{ display: "flex", padding: 24, width: 420, backgroundColor: "#10131a" }}>
+        <text
+          testId="preformatted-inline"
+          style={{ whiteSpace: "pre", color: "#e6edf7", fontSize: 20, lineHeight: "1.4" }}
+        >
+          {"line  1\nline  "}
+          <text style={{ color: "#7dd3fc", fontWeight: 700 }}>2: ready</text>
+        </text>
+      </div>,
+    )
+
+    expect(renderer.getPaintedText()).toContain(content)
+    const [x, y, width, height] = boundsFor(renderer, "preformatted-inline")
+    expect(height).toBeGreaterThan(40)
+    expect(renderer.dragSelect(x + 1, y + 2, x + width + 10, y + height - 2)).toBe(content)
+
+    renderer.captureScreenshot(shot)
+    expect(fs.statSync(shot).size).toBeGreaterThan(0)
+  })
+
   it("selects continuously across run boundaries and soft wraps", () => {
     const { render, renderer } = createTestRoot()
     const sentence = "Alpha beta gamma delta epsilon zeta eta theta."

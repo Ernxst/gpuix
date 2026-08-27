@@ -2,10 +2,22 @@ import type { EventPayload, MenuSpec } from "@gpuix/native"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 
 /**
- * Native dimensions are pixels, percentages, `auto`, or numeric strings.
- * Keep this aligned with `DimensionValue::deserialize` in `packages/native/src/style.rs`.
+ * CSS-compatible lengths accepted by the native layout parser. The grammar is
+ * intentionally a literal union so unsupported units fail at the call site.
+ * Keep this aligned with `DimensionValue::deserialize` in
+ * `packages/native/src/style.rs`.
  */
-export type DimensionValue = number | "auto" | `${number}` | `${number}%`
+type LengthAtom = `${number}px` | `${number}%` | `${number}ch`
+type CalcExpression = `${LengthAtom} + ${LengthAtom}` | `${LengthAtom} - ${LengthAtom}`
+export type DimensionValue =
+  | number
+  | "auto"
+  | LengthAtom
+  | `calc(${CalcExpression})`
+  | `clamp(${LengthAtom}, ${LengthAtom}, ${LengthAtom})`
+
+/** A line-height is either an absolute length or a unitless font-size multiplier. */
+export type LineHeightValue = number | `${number}px` | `${number}`
 
 type CssColorFunctionName =
   | "rgb"
@@ -426,8 +438,8 @@ export interface StyleDesc {
   textDecoration?: "underline" | "line-through"
   textTransform?: "none" | "uppercase" | "lowercase"
   textAlign?: "left" | "start" | "center" | "right"
-  lineHeight?: number
-  whiteSpace?: "normal" | "nowrap"
+  lineHeight?: LineHeightValue
+  whiteSpace?: "normal" | "nowrap" | "pre"
   textWrap?: "wrap" | "nowrap"
   textOverflow?: "ellipsis" | "ellipsis-start"
   lineClamp?: number

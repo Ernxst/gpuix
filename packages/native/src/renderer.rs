@@ -4637,6 +4637,15 @@ pub(crate) struct Inherited {
     /// render returns, and on Windows and Linux the Node thread can edit text
     /// in between, so a stale range would paint over the wrong glyphs.
     pub highlight: Option<Arc<crate::text::HighlightContext>>,
+    /// Font state is retained separately from GPUI's build-time text stack so
+    /// `ch` sees the same inherited family, weight, and size as descendants.
+    font: Option<InheritedFont>,
+}
+
+#[derive(Clone)]
+struct InheritedFont {
+    font: gpui::Font,
+    size: gpui::Pixels,
 }
 
 impl Inherited {
@@ -4650,11 +4659,28 @@ impl Inherited {
             current_color: gpui::rgba(0xe2e2e2ff),
             hover_group: None,
             highlight: None,
+            font: None,
         }
     }
 
+    fn font_for(&self, style: Option<&StyleDesc>, window: &gpui::Window) -> InheritedFont {
+        let inherited = self.font.clone().unwrap_or_else(|| {
+            let text_style = window.text_style();
+            InheritedFont {
+                font: text_style.font(),
+                size: text_style.font_size.to_pixels(window.rem_size()),
+            }
+        });
+        font_with_overrides(inherited, style)
+    }
+
     /// Apply the inheritable parts of `style` for the subtree below it.
-    fn descend(mut self, style: Option<&StyleDesc>, hover_group: Option<&str>) -> Self {
+    fn descend(
+        mut self,
+        style: Option<&StyleDesc>,
+        hover_group: Option<&str>,
+        font: InheritedFont,
+    ) -> Self {
         if let Some(style) = style {
             match style.user_select.as_deref() {
                 Some("none") => self.selectable = false,
@@ -4685,8 +4711,24 @@ impl Inherited {
         if let Some(hover_group) = hover_group {
             self.hover_group = Some(gpui::SharedString::from(hover_group.to_owned()));
         }
+        self.font = Some(font);
         self
     }
+}
+
+fn font_with_overrides(mut font: InheritedFont, style: Option<&StyleDesc>) -> InheritedFont {
+    if let Some(style) = style {
+        if let Some(family) = &style.font_family {
+            font.font.family = gpui::SharedString::from(family.clone());
+        }
+        if let Some(weight) = &style.font_weight {
+            font.font.weight = parse_font_weight(weight);
+        }
+        if let Some(size) = style.font_size {
+            font.size = gpui::px(size as f32);
+        }
+    }
+    font
 }
 
 fn json_usize(value: &serde_json::Value) -> Option<usize> {
@@ -5273,8 +5315,7 @@ pub(crate) fn build_element(
         ctx.motion_states.remove(&id);
         None
     };
-    let style = animated_style.as_ref().or(element.style.as_deref());
-
+    let declared_style = animated_style.as_ref().or(element.style.as_deref());
     // Inheritable style resolves once here so both built-ins and custom
     // elements see the same cascade.
     let hover_group = element
@@ -5282,7 +5323,14 @@ pub(crate) fn build_element(
         .get("hoverGroup")
         .and_then(serde_json::Value::as_str);
     let parent_inherited = ctx.inherited.clone();
-    ctx.inherited = parent_inherited.clone().descend(style, hover_group);
+    let font = parent_inherited.font_for(declared_style, window);
+    // Percentage terms stay deferred through GPUI/Taffy, where the layout
+    // algorithm supplies the containing block's content size. Only `ch` is
+    // reduced here, using the inherited font chain above.
+    let resolved_style =
+        declared_style.map(|style| resolve_length_expressions(style, window, &font));
+    let style = resolved_style.as_ref();
+    ctx.inherited = parent_inherited.clone().descend(style, hover_group, font);
 
     // A `highlight` here replaces any ancestor's: the nearest declaration wins,
     // and `GroupList::collect` skips nested declarations so an ancestor never
@@ -5314,7 +5362,7 @@ pub(crate) fn build_element(
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
-            build_virtual_list(element, ctx, window, cx)
+            build_virtual_list(element, style, ctx, window, cx)
         }
 
         // Polymorphic dispatch for all custom elements.
@@ -5352,6 +5400,7 @@ pub(crate) fn build_element(
 
 fn build_virtual_list(
     element: &crate::retained_tree::RetainedElement,
+    style: Option<&StyleDesc>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -5475,7 +5524,7 @@ fn build_virtual_list(
     });
     let mut list =
         gpui::list(list_state, render_item).with_sizing_behavior(gpui::ListSizingBehavior::Auto);
-    if let Some(style) = element.style.as_deref() {
+    if let Some(style) = style {
         list = apply_styles(list, style);
     }
     list.into_any_element()
@@ -6062,20 +6111,146 @@ fn selection_start_flag(style: Option<&StyleDesc>) -> Option<bool> {
 // ── Style application ────────────────────────────────────────────────
 
 pub(crate) fn apply_width<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
-    match dim {
-        crate::style::DimensionValue::Pixels(v) => el.w(gpui::px(*v as f32)),
-        crate::style::DimensionValue::Percentage(v) if *v >= 0.999 => el.w_full(),
-        crate::style::DimensionValue::Percentage(v) => el.w(gpui::relative(*v as f32)),
-        crate::style::DimensionValue::Auto => el,
-    }
+    let mut el = el;
+    el.style().size.width = Some(dimension_to_length(dim));
+    el
 }
 
 pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
-    match dim {
-        crate::style::DimensionValue::Pixels(v) => el.h(gpui::px(*v as f32)),
-        crate::style::DimensionValue::Percentage(v) if *v >= 0.999 => el.h_full(),
-        crate::style::DimensionValue::Percentage(v) => el.h(gpui::relative(*v as f32)),
-        crate::style::DimensionValue::Auto => el,
+    let mut el = el;
+    el.style().size.height = Some(dimension_to_length(dim));
+    el
+}
+
+fn dimension_to_calc(value: &crate::style::DimensionValue) -> gpui::CalcLength {
+    use crate::style::{CalcOperator, DimensionValue};
+    match value {
+        DimensionValue::Pixels(value) | DimensionValue::Ch(value) => {
+            gpui::CalcLength::absolute(gpui::px(*value as f32))
+        }
+        DimensionValue::Percentage(value) => gpui::CalcLength::relative(*value as f32),
+        DimensionValue::Calc {
+            left,
+            operator,
+            right,
+            ..
+        } => match operator {
+            CalcOperator::Add => {
+                gpui::CalcLength::add(dimension_to_calc(left), dimension_to_calc(right))
+            }
+            CalcOperator::Subtract => {
+                gpui::CalcLength::subtract(dimension_to_calc(left), dimension_to_calc(right))
+            }
+        },
+        DimensionValue::Clamp {
+            min,
+            preferred,
+            max,
+            ..
+        } => gpui::CalcLength::clamp(
+            dimension_to_calc(min),
+            dimension_to_calc(preferred),
+            dimension_to_calc(max),
+        ),
+        DimensionValue::Auto => unreachable!("auto cannot be part of a calc expression"),
+    }
+}
+
+fn dimension_to_length(value: &crate::style::DimensionValue) -> gpui::Length {
+    use crate::style::DimensionValue;
+    match value {
+        DimensionValue::Pixels(value) | DimensionValue::Ch(value) => gpui::px(*value as f32).into(),
+        DimensionValue::Percentage(value) => gpui::relative(*value as f32).into(),
+        DimensionValue::Calc { .. } | DimensionValue::Clamp { .. } => {
+            gpui::Length::Calc(dimension_to_calc(value))
+        }
+        DimensionValue::Auto => gpui::Length::Auto,
+    }
+}
+
+/// Resolve the font-relative part of a length before handing percentages to
+/// GPUI/Taffy. Taffy supplies the containing-block basis at layout time.
+fn resolve_length_expressions(
+    style: &StyleDesc,
+    window: &gpui::Window,
+    font: &InheritedFont,
+) -> StyleDesc {
+    let mut resolved = style.clone();
+    let font_id = window.text_system().resolve_font(&font.font);
+    let ch = f64::from(f32::from(
+        window
+            .text_system()
+            .ch_advance(font_id, font.size)
+            .unwrap_or(font.size * 0.5),
+    ));
+
+    resolved.width = resolve_dimension(style.width.as_ref(), ch);
+    resolved.min_width = resolve_dimension(style.min_width.as_ref(), ch);
+    resolved.max_width = resolve_dimension(style.max_width.as_ref(), ch);
+    resolved.height = resolve_dimension(style.height.as_ref(), ch);
+    resolved.min_height = resolve_dimension(style.min_height.as_ref(), ch);
+    resolved.max_height = resolve_dimension(style.max_height.as_ref(), ch);
+    // State refinements go through the same expression resolver. Without this
+    // a typed `hover: { width: "24ch" }` could reach StyleRefinement and be
+    // ignored by its old pixels-only helpers.
+    resolved.hover = style.hover.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
+    resolved.hover_within = style.hover_within.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
+    resolved.active = style.active.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
+    resolved.focus = style.focus.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
+    resolved.focus_visible = style.focus_visible.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
+    resolved
+}
+
+fn resolve_dimension(
+    value: Option<&crate::style::DimensionValue>,
+    ch: f64,
+) -> Option<crate::style::DimensionValue> {
+    let value = value?;
+    match value {
+        crate::style::DimensionValue::Percentage(_)
+        | crate::style::DimensionValue::Pixels(_)
+        | crate::style::DimensionValue::Auto => Some(value.clone()),
+        crate::style::DimensionValue::Ch(value) => {
+            Some(crate::style::DimensionValue::Pixels(value * ch))
+        }
+        crate::style::DimensionValue::Calc {
+            source,
+            left,
+            operator,
+            right,
+        } => Some(crate::style::DimensionValue::Calc {
+            source: source.clone(),
+            left: Box::new(resolve_dimension(Some(left), ch)?),
+            operator: *operator,
+            right: Box::new(resolve_dimension(Some(right), ch)?),
+        }),
+        crate::style::DimensionValue::Clamp {
+            source,
+            min,
+            preferred,
+            max,
+            ..
+        } => Some(crate::style::DimensionValue::Clamp {
+            source: source.clone(),
+            min: Box::new(resolve_dimension(Some(min), ch)?),
+            preferred: Box::new(resolve_dimension(Some(preferred), ch)?),
+            max: Box::new(resolve_dimension(Some(max), ch)?),
+        }),
     }
 }
 
@@ -6265,32 +6440,16 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         el = apply_height(el, h);
     }
     if let Some(ref min_w) = style.min_width {
-        match min_w {
-            crate::style::DimensionValue::Pixels(v) => el = el.min_w(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => el = el.min_w(gpui::relative(*v as f32)),
-            crate::style::DimensionValue::Auto => {}
-        }
+        el.style().min_size.width = Some(dimension_to_length(min_w));
     }
     if let Some(ref min_h) = style.min_height {
-        match min_h {
-            crate::style::DimensionValue::Pixels(v) => el = el.min_h(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => el = el.min_h(gpui::relative(*v as f32)),
-            crate::style::DimensionValue::Auto => {}
-        }
+        el.style().min_size.height = Some(dimension_to_length(min_h));
     }
     if let Some(ref max_w) = style.max_width {
-        match max_w {
-            crate::style::DimensionValue::Pixels(v) => el = el.max_w(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => el = el.max_w(gpui::relative(*v as f32)),
-            crate::style::DimensionValue::Auto => {}
-        }
+        el.style().max_size.width = Some(dimension_to_length(max_w));
     }
     if let Some(ref max_h) = style.max_height {
-        match max_h {
-            crate::style::DimensionValue::Pixels(v) => el = el.max_h(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => el = el.max_h(gpui::relative(*v as f32)),
-            crate::style::DimensionValue::Auto => {}
-        }
+        el.style().max_size.height = Some(dimension_to_length(max_h));
     }
     if let Some(p) = style.padding {
         el = el.p(gpui::px(p as f32));
@@ -6383,6 +6542,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.white_space.as_deref() {
         Some("nowrap") => el = el.whitespace_nowrap(),
         Some("normal") => el = el.whitespace_normal(),
+        Some("pre") => el = el.whitespace_pre(),
         _ => {}
     }
     match style.text_wrap.as_deref() {
@@ -6402,9 +6562,17 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     }
     // `line_height` was accepted by the style type but never applied, so
     // multi-line text always used gpui's default leading.
-    if let Some(line_height) = style.line_height {
-        if line_height > 0.0 {
-            el = el.line_height(gpui::px(line_height as f32));
+    if let Some(line_height) = style.line_height.as_ref() {
+        match line_height {
+            crate::style::LineHeightValue::Pixels(value) if *value > 0.0 => {
+                el = el.line_height(gpui::px(*value as f32))
+            }
+            crate::style::LineHeightValue::Unitless(value) => {
+                if let Ok(value) = value.parse::<f32>() {
+                    el = el.line_height(gpui::relative(value));
+                }
+            }
+            _ => {}
         }
     }
     if let Some(radius) = style.border_radius {
