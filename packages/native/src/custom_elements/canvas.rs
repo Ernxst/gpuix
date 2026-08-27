@@ -375,6 +375,10 @@ fn prepare(
                 }
             }
             crate::canvas::DisplayItem::StrokeRect(rect) => {
+                if rect.width == 0.0 && rect.height == 0.0 {
+                    continue;
+                }
+                let is_segment = rect.width == 0.0 || rect.height == 0.0;
                 let join = match rect.style.line_join {
                     crate::canvas::CanvasLineJoin::Miter => lyon::path::LineJoin::Miter,
                     crate::canvas::CanvasLineJoin::Round => lyon::path::LineJoin::Round,
@@ -386,29 +390,29 @@ fn prepare(
                     .with_miter_limit(rect.style.miter_limit.max(1.0) as f32);
                 let mut builder = gpui::PathBuilder::stroke(gpui::px(rect.style.line_width as f32))
                     .with_style(gpui::PathStyle::Stroke(options));
-                builder.move_to(gpui::point(
-                    gpui::px(rect.x as f32),
-                    gpui::px(rect.y as f32),
-                ));
-                builder.line_to(gpui::point(
-                    gpui::px((rect.x + rect.width) as f32),
-                    gpui::px(rect.y as f32),
-                ));
-                builder.line_to(gpui::point(
-                    gpui::px((rect.x + rect.width) as f32),
-                    gpui::px((rect.y + rect.height) as f32),
-                ));
-                builder.line_to(gpui::point(
-                    gpui::px(rect.x as f32),
-                    gpui::px((rect.y + rect.height) as f32),
-                ));
-                builder.close();
+                builder.move_to(gpui::point(gpui::px(0.0), gpui::px(0.0)));
+                if rect.width == 0.0 {
+                    // A one-axis-degenerate strokeRect is one open segment.
+                    // B2 deliberately keeps StrokeOptions' default butt cap;
+                    // B3 can thread the recorded lineCap through this seam.
+                    builder.line_to(gpui::point(gpui::px(0.0), gpui::px(rect.height as f32)));
+                } else if rect.height == 0.0 {
+                    builder.line_to(gpui::point(gpui::px(rect.width as f32), gpui::px(0.0)));
+                } else {
+                    builder.line_to(gpui::point(gpui::px(rect.width as f32), gpui::px(0.0)));
+                    builder.line_to(gpui::point(
+                        gpui::px(rect.width as f32),
+                        gpui::px(rect.height as f32),
+                    ));
+                    builder.line_to(gpui::point(gpui::px(0.0), gpui::px(rect.height as f32)));
+                    builder.close();
+                }
                 match builder.build() {
                     Ok(path) => {
                         let transformed = map_path(&path, |point| {
                             layout_point(rect.transform.transform_point(
-                                f64::from(f32::from(point.x)),
-                                f64::from(f32::from(point.y)),
+                                rect.x + f64::from(f32::from(point.x)),
+                                rect.y + f64::from(f32::from(point.y)),
                             ))
                         });
                         if let Some(path) = transformed.and_then(|path| {
@@ -423,7 +427,11 @@ fn prepare(
                     Err(error) => diagnostics.push(path_build_diagnostic(
                         rect.op_index,
                         "strokeRect",
-                        "closed rectangle stroke",
+                        if is_segment {
+                            "open rectangle segment stroke"
+                        } else {
+                            "closed rectangle stroke"
+                        },
                         &error,
                     )),
                 }
@@ -989,6 +997,63 @@ mod tests {
         assert_ne!(miter.vertices.len(), bevel.vertices.len());
         assert_eq!(f32::from(miter.bounds.origin.x), 15.0);
         assert_eq!(f32::from(miter.bounds.origin.y), 15.0);
+    }
+
+    #[test]
+    fn stroke_rect_applies_large_world_translation_before_narrowing() {
+        let display_lists = crate::canvas::SharedDisplayLists::default();
+        crate::canvas::replace_display_list(
+            &display_lists,
+            1,
+            &[
+                crate::canvas::opcodes::STREAM_MAGIC,
+                crate::canvas::opcodes::STREAM_VERSION,
+                crate::canvas::opcodes::LINE_WIDTH,
+                1,
+                crate::canvas::opcodes::TRANSLATE,
+                2,
+                crate::canvas::opcodes::STROKE_RECT,
+                4,
+            ],
+            &[2.0, -16_777_216.0, 0.0, 16_777_217.0, 20.0, 10.0, 10.0],
+            &[],
+        )
+        .unwrap();
+        let list = display_lists.lock().unwrap().get(&1).unwrap().clone();
+
+        let prepared = prepare(&list, test_bounds(), 320.0, 240.0);
+        let path = prepared_path(&prepared);
+        assert_eq!(f32::from(path.bounds.origin.x), 0.0);
+        assert_eq!(f32::from(path.bounds.size.width), 12.0);
+    }
+
+    #[test]
+    fn one_axis_degenerate_stroke_rect_is_one_butt_capped_segment() {
+        let list = crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::StrokeRect(StrokeRect {
+                x: 20.0,
+                y: 20.0,
+                width: 0.0,
+                height: 40.0,
+                transform: CanvasTransform::IDENTITY,
+                style: StrokeStyle {
+                    color: color(),
+                    line_width: 10.0,
+                    line_join: CanvasLineJoin::Miter,
+                    miter_limit: 10.0,
+                },
+                op_index: 0,
+                clear_regions: Vec::new(),
+            })],
+        };
+
+        let prepared = prepare(&list, test_bounds(), 320.0, 240.0);
+        let path = prepared_path(&prepared);
+        assert_eq!(f32::from(path.bounds.origin.x), 15.0);
+        assert_eq!(f32::from(path.bounds.origin.y), 20.0);
+        assert_eq!(f32::from(path.bounds.size.width), 10.0);
+        assert_eq!(f32::from(path.bounds.size.height), 40.0);
     }
 
     #[test]

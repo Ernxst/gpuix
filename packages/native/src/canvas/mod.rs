@@ -421,6 +421,29 @@ impl DisplayItem {
             Self::FillPath(path) => path_intersects_quad(&path.commands, quad),
             Self::StrokeRect(rect) => {
                 let half_width = rect.style.line_width * 0.5;
+                if rect.width == 0.0 && rect.height == 0.0 {
+                    return false;
+                }
+                if rect.width == 0.0 {
+                    let stroke = rect_quad(
+                        rect.transform,
+                        rect.x - half_width,
+                        rect.y.min(rect.y + rect.height),
+                        rect.style.line_width,
+                        rect.height.abs(),
+                    );
+                    return quads_intersect(&stroke, quad);
+                }
+                if rect.height == 0.0 {
+                    let stroke = rect_quad(
+                        rect.transform,
+                        rect.x.min(rect.x + rect.width),
+                        rect.y - half_width,
+                        rect.width.abs(),
+                        rect.style.line_width,
+                    );
+                    return quads_intersect(&stroke, quad);
+                }
                 let left = rect.x.min(rect.x + rect.width);
                 let right = rect.x.max(rect.x + rect.width);
                 let top = rect.y.min(rect.y + rect.height);
@@ -756,6 +779,11 @@ pub(crate) fn decode(
                     let y = command_operands[1];
                     let width = command_operands[2];
                     let height = command_operands[3];
+                    if width == 0.0 && height == 0.0 {
+                        // The common loop tail normally advances this index.
+                        op_index += 1;
+                        continue;
+                    }
                     let left = x.min(x + width);
                     let right = x.max(x + width);
                     let top = y.min(y + height);
@@ -1339,6 +1367,33 @@ mod tests {
         assert_eq!(restored.style.line_join, CanvasLineJoin::Miter);
         assert_eq!(restored.style.miter_limit, 10.0);
         assert!((restored.style.color.a - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn degenerate_stroke_rects_keep_browser_shape_and_clear_classification() {
+        let (ops, operands) = stream(&[
+            (opcodes::STROKE_RECT, &[10.0, 10.0, 0.0, 0.0]),
+            (opcodes::CLEAR_RECT, &[9.0, 9.0, 2.0, 2.0]),
+        ]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list(&store, 23, &ops, &operands, &[]).unwrap();
+
+        assert!(!outcome.invalidates);
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(outcome.diagnostics[0].op_index, 1);
+        assert_eq!(outcome.diagnostics[0].op_name, "clearRect");
+        assert!(outcome.diagnostics[0].reason.contains("punch through"));
+        assert!(!store.lock().unwrap().contains_key(&23));
+
+        let (ops, operands) = stream(&[(opcodes::STROKE_RECT, &[10.0, 10.0, 0.0, 20.0])]);
+        let outcome = replace_display_list(&store, 24, &ops, &operands, &[]).unwrap();
+        assert!(outcome.invalidates);
+        let list = store.lock().unwrap().get(&24).unwrap().clone();
+        let DisplayItem::StrokeRect(segment) = &list.items[0] else {
+            panic!("expected a retained stroke segment");
+        };
+        assert_eq!(segment.width, 0.0);
+        assert_eq!(segment.height, 20.0);
     }
 
     #[test]
