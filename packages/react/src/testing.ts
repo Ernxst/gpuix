@@ -10,8 +10,11 @@
 /// the React event registry via handleGpuixEvent.
 
 import { createRequire } from "node:module"
+import { existsSync, mkdirSync } from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 
-import type { ReactNode } from "react"
+import { createElement, type ReactNode } from "react"
 import type { EventPayload, MenuSpec } from "@gpuix/native"
 import {
   normalizeScrollWheelOptions,
@@ -29,12 +32,32 @@ import type {
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
+import {
+  CANVAS_GOLDEN_DPR,
+  CANVAS_GOLDEN_HEIGHT,
+  CANVAS_GOLDEN_WIDTH,
+  canvasScenes,
+  type CanvasScene,
+  type CanvasSceneName,
+} from "./canvas-scenes.js"
+export {
+  CANVAS_GOLDEN_DPR,
+  CANVAS_GOLDEN_HEIGHT,
+  CANVAS_GOLDEN_WIDTH,
+  canvasScenes,
+} from "./canvas-scenes.js"
+export type { CanvasScene, CanvasSceneDraw, CanvasSceneName } from "./canvas-scenes.js"
 export {
   applyMacCpuThrottleFromEnv,
   MAC_CPU_THROTTLES,
   readMacCpuThrottle,
 } from "./cpu-throttle.js"
 export type { MacCpuThrottle } from "./cpu-throttle.js"
+
+export interface ImageComparisonResult {
+  differingPixelRatio: number
+  maxChannelDelta: number
+}
 
 interface NativeTestRendererApi extends NativeRenderer {
   dispose(): void
@@ -106,6 +129,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   setAllowPrivateNetworkImages(enabled: boolean): void
   drainStyleDiagnostics(): StyleDiagnostic[]
   captureScreenshot(path: string): void
+  compareImages(pathA: string, pathB: string, tolerance: number): ImageComparisonResult
   simulateResize(width: number, height: number): void
 }
 
@@ -827,6 +851,11 @@ export class TestRenderer implements NativeRenderer {
     this.native.captureScreenshot(path)
   }
 
+  /** Decode two PNGs natively and compare their RGBA pixels. */
+  compareImages(pathA: string, pathB: string, tolerance: number): ImageComparisonResult {
+    return this.native.compareImages(pathA, pathB, tolerance)
+  }
+
   getWindowSize(): { width: number; height: number; scaleFactor: number } {
     return this.native.getWindowSize!()
   }
@@ -1071,5 +1100,159 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
     renderer,
     render,
     unmount,
+  }
+}
+
+export interface CanvasComparisonOptions {
+  /** Maximum allowed delta for each RGBA channel. Defaults to 2. */
+  tolerance?: number
+  /** Maximum fraction of pixels outside the channel tolerance. Defaults to 1%. */
+  differingPixelBudget?: number
+  /** Override the committed browser golden path. */
+  goldenPath?: string
+  /** Override where the native screenshot is written for inspection. */
+  actualPath?: string
+  /**
+   * Adapts an unavailable prerequisite to the active test runner. With Vitest,
+   * pass `(message) => context.skip(message)`. Without one, the helper throws
+   * CanvasComparisonSkippedError so an unavailable gate is never silent.
+   */
+  skip?: (message: string) => void
+}
+
+/** Loud fallback when a caller did not provide its test runner's skip hook. */
+export class CanvasComparisonSkippedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "CanvasComparisonSkippedError"
+  }
+}
+
+const canvasGoldenDirectory = fileURLToPath(new URL("../canvas-goldens", import.meta.url))
+const canvasScreenshotDirectory = fileURLToPath(new URL("../screenshots", import.meta.url))
+
+function resolveCanvasScene(scene: CanvasScene | CanvasSceneName): CanvasScene {
+  return typeof scene === "string" ? canvasScenes[scene] : scene
+}
+
+/** Absolute path to a scene's committed Chromium golden. */
+export function canvasGoldenPath(scene: CanvasScene | CanvasSceneName): string {
+  const resolved = resolveCanvasScene(scene)
+  if (!/^[a-z0-9-]+$/.test(resolved.name)) {
+    throw new Error(
+      `Canvas scene name must contain only lowercase letters, digits, and dashes: ${resolved.name}`
+    )
+  }
+  return path.join(canvasGoldenDirectory, `${resolved.name}.png`)
+}
+
+function skipCanvasComparison(
+  reason: string,
+  skip: CanvasComparisonOptions["skip"]
+): undefined {
+  const message = `Canvas comparison skipped: ${reason}`
+  if (skip) {
+    skip(message)
+    return undefined
+  }
+  throw new CanvasComparisonSkippedError(message)
+}
+
+/**
+ * Render one standard Canvas 2D scene through GPUIX and compare it with the
+ * committed Chromium PNG. This gate intentionally requires a local macOS GPU.
+ */
+export function expectCanvasMatchesBrowser(
+  scene: CanvasScene | CanvasSceneName,
+  options: CanvasComparisonOptions = {}
+): ImageComparisonResult | undefined {
+  const resolved = resolveCanvasScene(scene)
+  const tolerance = options.tolerance ?? 2
+  const differingPixelBudget = options.differingPixelBudget ?? 0.01
+
+  if (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 255) {
+    throw new RangeError(
+      `Canvas comparison tolerance must be an integer from 0 through 255, got ${tolerance}`
+    )
+  }
+  if (differingPixelBudget < 0 || differingPixelBudget > 1) {
+    throw new RangeError(
+      `Canvas differing-pixel budget must be between 0 and 1, got ${differingPixelBudget}`
+    )
+  }
+
+  if (process.platform !== "darwin" || process.env.CI) {
+    return skipCanvasComparison(
+      "the browser-equivalence gate runs only on a local macOS host because GPU capture is VM-hostile",
+      options.skip
+    )
+  }
+
+  const goldenPath = options.goldenPath ?? canvasGoldenPath(resolved)
+  if (!existsSync(goldenPath)) {
+    return skipCanvasComparison(
+      `browser golden is absent at ${goldenPath}; regenerate it with \`bun run canvas:goldens\``,
+      options.skip
+    )
+  }
+
+  if (!isNativeTestRendererAvailable()) {
+    return skipCanvasComparison(
+      `the native test renderer is unavailable: ${nativeTestRendererLoadError?.message ?? "unknown error"}`,
+      options.skip
+    )
+  }
+
+  const testRoot = createTestRoot({
+    width: CANVAS_GOLDEN_WIDTH,
+    height: CANVAS_GOLDEN_HEIGHT,
+  })
+
+  try {
+    testRoot.render(
+      createElement("canvas", {
+        testId: `canvas-equivalence-${resolved.name}`,
+        width: CANVAS_GOLDEN_WIDTH,
+        height: CANVAS_GOLDEN_HEIGHT,
+        draw: resolved.draw,
+        style: { width: CANVAS_GOLDEN_WIDTH, height: CANVAS_GOLDEN_HEIGHT },
+      })
+    )
+
+    const canvas = testRoot.renderer.findByType("canvas")[0]
+    const bounds = canvas ? testRoot.renderer.getElementBounds(canvas.id) : null
+    if (!canvas || !bounds) {
+      return skipCanvasComparison(
+        "the GPUIX canvas element is unavailable (phase A1/A2 has not supplied a painted canvas)",
+        options.skip
+      )
+    }
+
+    const windowSize = testRoot.renderer.getWindowSize()
+    if (windowSize.scaleFactor !== CANVAS_GOLDEN_DPR) {
+      throw new Error(
+        `Canvas golden DPR mismatch: expected ${CANVAS_GOLDEN_DPR}, native test renderer reported ${windowSize.scaleFactor}`
+      )
+    }
+
+    const actualPath =
+      options.actualPath ?? path.join(canvasScreenshotDirectory, `canvas-${resolved.name}.png`)
+    mkdirSync(path.dirname(actualPath), { recursive: true })
+    testRoot.renderer.captureScreenshot(actualPath)
+
+    const comparison = testRoot.renderer.compareImages(goldenPath, actualPath, tolerance)
+    if (comparison.differingPixelRatio > differingPixelBudget) {
+      throw new Error(
+        `Canvas scene ${JSON.stringify(resolved.name)} differs from Chromium: ` +
+          `${(comparison.differingPixelRatio * 100).toFixed(3)}% pixels exceed the ` +
+          `per-channel tolerance ${tolerance} (budget ${(differingPixelBudget * 100).toFixed(3)}%, ` +
+          `max channel delta ${comparison.maxChannelDelta}). ` +
+          `Expected ${goldenPath}; actual ${actualPath}.`
+      )
+    }
+
+    return comparison
+  } finally {
+    testRoot.unmount()
   }
 }

@@ -2861,6 +2861,17 @@ diff to every commit. The curated set the README links to lives in
 bun scripts/screenshots.ts
 ```
 
+Canvas equivalence uses committed Chromium goldens at a fixed 320×240 logical
+size and 2× device-pixel ratio. Playwright is needed only to regenerate them;
+the Vitest comparison path uses the native PNG decoder and does not load it.
+
+```bash
+bun run canvas:goldens
+```
+
+The equivalence suite is a local-macOS gate. Push CI is Linux-only and GPU
+capture is not treated as reliable in virtual machines.
+
 ## Developing the Rust side
 
 JS remount is covered above. There is **no hot reload for the native half**,
