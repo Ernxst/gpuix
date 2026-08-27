@@ -1008,6 +1008,204 @@ describeNative("events", () => {
   })
 
   describe("hover events", () => {
+    it("fires mouseEnter and mouseLeave on a bare anchor", () => {
+      const enter = vi.fn()
+      const leave = vi.fn()
+
+      testRoot.render(
+        <a
+          href="/factory"
+          hoverGroup="anchor"
+          testId="anchor-events"
+          onMouseEnter={enter}
+          onMouseLeave={leave}
+          style={{ width: 200, height: 100 }}
+        >
+          <span
+            testId="anchor-painted-child"
+            style={{ minHeight: 36, padding: 8, backgroundColor: "#1f272d" }}
+          >
+            <text
+              testId="anchor-hover-within"
+              style={{
+                color: "#334155",
+                hoverWithin: { color: "#f59e0b" },
+              }}
+            >
+              Factory
+            </text>
+          </span>
+        </a>
+      )
+
+      const anchor = testRoot.renderer.findByTestId("anchor-events")!
+      const paintedChild = testRoot.renderer.findByTestId("anchor-painted-child")!
+      const hoverWithin = testRoot.renderer.findByTestId("anchor-hover-within")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(paintedChild.id)!
+
+      expect(anchor.events).toEqual(new Set(["mouseEnter", "mouseLeave"]))
+
+      testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      expect(enter).toHaveBeenCalledOnce()
+      expect(testRoot.renderer.getResolvedStyle(hoverWithin.id)).toMatchObject({
+        color: "#f59e0b",
+      })
+
+      testRoot.renderer.nativeSimulateMouseMove(500, 500)
+      expect(leave).toHaveBeenCalledOnce()
+    })
+
+    it("delivers ancestor hover handlers through painted descendants", () => {
+      const opaqueParentEnter = vi.fn()
+      const opaqueParentLeave = vi.fn()
+      const opaqueChildEnter = vi.fn()
+      const opaqueChildLeave = vi.fn()
+      const lowAlphaEnter = vi.fn()
+      const lowAlphaLeave = vi.fn()
+      const grandchildEnter = vi.fn()
+      const grandchildLeave = vi.fn()
+      const order: string[] = []
+
+      testRoot.render(
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <a
+            testId="opaque-anchor"
+            onMouseEnter={() => {
+              order.push("opaque-parent-enter")
+              opaqueParentEnter()
+            }}
+            onMouseLeave={() => {
+              order.push("opaque-parent-leave")
+              opaqueParentLeave()
+            }}
+            style={{ width: 240, height: 52 }}
+          >
+            <span
+              testId="opaque-painted-child"
+              onMouseEnter={() => {
+                order.push("opaque-child-enter")
+                opaqueChildEnter()
+              }}
+              onMouseLeave={() => {
+                order.push("opaque-child-leave")
+                opaqueChildLeave()
+              }}
+              style={{ minHeight: 36, padding: 8, backgroundColor: "#1f272d" }}
+            >
+              opaque background
+            </span>
+          </a>
+          <a
+            testId="low-alpha-anchor"
+            onMouseEnter={lowAlphaEnter}
+            onMouseLeave={lowAlphaLeave}
+            style={{ width: 240, height: 52 }}
+          >
+            <span
+              testId="low-alpha-painted-child"
+              style={{ minHeight: 36, padding: 8, backgroundColor: "rgba(31, 39, 45, 0.04)" }}
+            >
+              low alpha background
+            </span>
+          </a>
+          <a
+            testId="grandchild-anchor"
+            onMouseEnter={grandchildEnter}
+            onMouseLeave={grandchildLeave}
+            style={{ width: 240, height: 52 }}
+          >
+            <span style={{ minHeight: 36, padding: 8 }}>
+              <span
+                testId="grandchild-painted-child"
+                style={{ minHeight: 20, padding: 4, backgroundColor: "#1f272d" }}
+              >
+                grandchild background
+              </span>
+            </span>
+          </a>
+        </div>
+      )
+
+      const moveTo = (testId: string) => {
+        const element = testRoot.renderer.findByTestId(testId)!
+        const [x, y, width, height] = testRoot.renderer.getElementBounds(element.id)!
+        testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      }
+
+      moveTo("opaque-painted-child")
+      testRoot.renderer.nativeSimulateMouseMove(700, 700)
+      expect(order).toEqual([
+        "opaque-parent-enter",
+        "opaque-child-enter",
+        "opaque-child-leave",
+        "opaque-parent-leave",
+      ])
+      expect(opaqueParentEnter).toHaveBeenCalledOnce()
+      expect(opaqueParentLeave).toHaveBeenCalledOnce()
+      expect(opaqueChildEnter).toHaveBeenCalledOnce()
+      expect(opaqueChildLeave).toHaveBeenCalledOnce()
+
+      moveTo("low-alpha-painted-child")
+      testRoot.renderer.nativeSimulateMouseMove(700, 700)
+      expect(lowAlphaEnter).toHaveBeenCalledOnce()
+      expect(lowAlphaLeave).toHaveBeenCalledOnce()
+
+      moveTo("grandchild-painted-child")
+      testRoot.renderer.nativeSimulateMouseMove(700, 700)
+      expect(grandchildEnter).toHaveBeenCalledOnce()
+      expect(grandchildLeave).toHaveBeenCalledOnce()
+    })
+
+    it("keeps common ancestors hovered while moving between painted siblings", () => {
+      const events: string[] = []
+
+      testRoot.render(
+        <div
+          testId="sibling-parent"
+          onMouseEnter={() => events.push("parent-enter")}
+          onMouseLeave={() => events.push("parent-leave")}
+          style={{ display: "flex", width: 240, height: 52 }}
+        >
+          <span
+            testId="left-painted-sibling"
+            onMouseEnter={() => events.push("left-enter")}
+            onMouseLeave={() => events.push("left-leave")}
+            style={{ flexGrow: 1, backgroundColor: "#1f272d" }}
+          >
+            left
+          </span>
+          <span
+            testId="right-painted-sibling"
+            onMouseEnter={() => events.push("right-enter")}
+            onMouseLeave={() => events.push("right-leave")}
+            style={{ flexGrow: 1, backgroundColor: "#334155" }}
+          >
+            right
+          </span>
+        </div>
+      )
+
+      const moveTo = (testId: string) => {
+        const element = testRoot.renderer.findByTestId(testId)!
+        const [x, y, width, height] = testRoot.renderer.getElementBounds(element.id)!
+        testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      }
+
+      moveTo("left-painted-sibling")
+      moveTo("right-painted-sibling")
+      expect(events).toEqual(["parent-enter", "left-enter", "left-leave", "right-enter"])
+
+      testRoot.renderer.nativeSimulateMouseMove(700, 700)
+      expect(events).toEqual([
+        "parent-enter",
+        "left-enter",
+        "left-leave",
+        "right-enter",
+        "right-leave",
+        "parent-leave",
+      ])
+    })
+
     it("should handle mouseEnter and mouseLeave via mouse move", () => {
       function HoverBox() {
         const [hovered, setHovered] = useState(false)

@@ -1,7 +1,7 @@
 import path from "node:path"
 
 import React from "react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
@@ -57,55 +57,98 @@ describeNative("native style transitions", () => {
     }
   })
 
-  it("snaps custom elements and virtual lists without retaining or requesting frames", () => {
+  it("interpolates img width and opacity on the paused frame clock", () => {
     const root = createTestRoot()
-    const targets = (expanded: boolean) => (
-      <div>
-        <img
-          style={{
-            width: expanded ? 200 : 100,
-            height: 40,
-            transition: {
-              properties: ["width"],
-              durationMs: 100,
-              easing: "linear",
-            },
-          }}
-        />
-        <virtual-list
-          itemCount={0}
-          style={{
-            width: expanded ? 240 : 120,
-            height: 40,
-            transition: {
-              properties: ["width"],
-              durationMs: 100,
-              easing: "linear",
-            },
-          }}
-        />
-      </div>
+    const image = (expanded: boolean) => (
+      <img
+        testId="transitioning-image"
+        style={{
+          width: expanded ? 200 : 100,
+          height: expanded ? 80 : 40,
+          opacity: expanded ? 0.8 : 0.2,
+          borderRadius: expanded ? 24 : 8,
+          transition: {
+            properties: ["width", "height", "opacity", "borderRadius"],
+            durationMs: 100,
+            easing: "linear",
+          },
+        }}
+      />
     )
 
     try {
       root.renderer.clockPause()
-      root.render(targets(false))
-      const image = root.renderer.findByType("img")[0]!
-      const virtualList = root.renderer.findByType("virtual-list")[0]!
-      expect(root.renderer.getStyleTransitionCount()).toBe(0)
-      expect(root.renderer.getStyleTransitionFrameRequestCount()).toBe(0)
+      root.render(image(false))
+      const target = root.renderer.findByTestId("transitioning-image")!
 
-      root.render(targets(true))
-      expect(root.renderer.getResolvedStyle(image.id)?.width).toBe(200)
-      expect(root.renderer.getResolvedStyle(virtualList.id)?.width).toBe(240)
-      expect(root.renderer.getStyleTransitionCount()).toBe(0)
-      expect(root.renderer.getStyleTransitionFrameRequestCount()).toBe(0)
+      root.render(image(true))
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        width: 100,
+        height: 40,
+        opacity: 0.2,
+        borderTopLeftRadius: 8,
+      })
 
       root.renderer.advanceAsyncClock(50)
-      expect(root.renderer.getResolvedStyle(image.id)?.width).toBe(200)
-      expect(root.renderer.getResolvedStyle(virtualList.id)?.width).toBe(240)
-      expect(root.renderer.getStyleTransitionFrameRequestCount()).toBe(0)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        width: 150,
+        height: 60,
+        opacity: 0.5,
+        borderTopLeftRadius: 16,
+      })
+
+      root.renderer.advanceAsyncClock(50)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        width: 200,
+        height: 80,
+        opacity: 0.8,
+        borderTopLeftRadius: 24,
+      })
     } finally {
+      root.unmount()
+    }
+  })
+
+  it("warns once for unsupported transition declarations in non-strict roots", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const root = createTestRoot({ strictStyles: false })
+
+    try {
+      root.render(
+        <virtual-list
+          itemCount={0}
+          testId="inert-transition"
+          style={{
+            transition: {
+              properties: ["opacity"],
+              durationMs: 100,
+              delayMs: 0,
+              easing: "linear",
+            },
+          }}
+        />
+      )
+      root.render(
+        <virtual-list
+          itemCount={0}
+          testId="inert-transition"
+          style={{
+            transition: {
+              properties: ["opacity"],
+              durationMs: 200,
+              delayMs: 0,
+              easing: "linear",
+            },
+          }}
+        />
+      )
+
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('<virtual-list testId="inert-transition">')
+      )
+    } finally {
+      warn.mockRestore()
       root.unmount()
     }
   })
@@ -261,6 +304,37 @@ describeNative("native style transitions", () => {
       root.render(<div />)
       expect(root.renderer.getStyleTransitionCount()).toBe(0)
     } finally {
+      root.unmount()
+    }
+  })
+
+  it("throws for unsupported transition declarations in strict roots", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const root = createTestRoot({ strictStyles: true })
+
+    try {
+      root.render(
+        <virtual-list
+          itemCount={0}
+          style={{
+            transition: {
+              properties: ["opacity"],
+              durationMs: 100,
+              delayMs: 0,
+              easing: "linear",
+            },
+          }}
+        />
+      )
+
+      expect(error.mock.calls.flat()).toContainEqual(
+        expect.objectContaining({
+          name: "UnsupportedStyleTransitionError",
+          message: expect.stringContaining("<virtual-list> does not support style.transition"),
+        })
+      )
+    } finally {
+      error.mockRestore()
       root.unmount()
     }
   })

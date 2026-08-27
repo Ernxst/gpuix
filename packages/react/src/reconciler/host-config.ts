@@ -300,6 +300,43 @@ const DIV_ALIASES = new Set([
 
 // Built-in element types that don't use custom props.
 const BUILT_IN_TYPES = new Set(["div", "text", ...DIV_ALIASES])
+const STYLE_TRANSITION_TYPES = new Set(["div", "text", "img"])
+const warnedUnsupportedStyleTransitions = new WeakSet<Instance>()
+
+class UnsupportedStyleTransitionError extends Error {
+  override name = "UnsupportedStyleTransitionError"
+}
+
+function supportsStyleTransitions(type: ElementType): boolean {
+  return STYLE_TRANSITION_TYPES.has(type) || DIV_ALIASES.has(type)
+}
+
+function diagnoseUnsupportedStyleTransition(
+  instance: Instance,
+  container: Container,
+  props: Props
+): void {
+  if (props.style?.transition == null || supportsStyleTransitions(instance.type)) return
+
+  const identity = [
+    props.testId === undefined ? undefined : `testId=${JSON.stringify(props.testId)}`,
+    props["data-testid"] === undefined
+      ? undefined
+      : `data-testid=${JSON.stringify(props["data-testid"])}`,
+    props.id === undefined ? undefined : `id=${JSON.stringify(props.id)}`,
+  ]
+    .filter((attribute): attribute is string => attribute !== undefined)
+    .join(" ")
+  const subject = identity.length === 0 ? `<${instance.type}>` : `<${instance.type} ${identity}>`
+  const message =
+    `[gpuix] ${subject} does not support style.transition. ` +
+    "Style transitions are available on <div>, <text>, and <img>."
+
+  if (container.strictStyles) throw new UnsupportedStyleTransitionError(message)
+  if (warnedUnsupportedStyleTransitions.has(instance)) return
+  warnedUnsupportedStyleTransitions.add(instance)
+  console.warn(message)
+}
 
 // Props that reach Rust on EVERY element type, including div and text.
 // Custom props are otherwise skipped for built-ins.
@@ -493,6 +530,15 @@ export const hostConfig = {
       setPointerCapture: () => rootContainerInstance.renderer.setPointerCapture?.(id),
       releasePointerCapture: () =>
         rootContainerInstance.renderer.releasePointerCapture?.(id),
+      getBounds: () => {
+        const getElementBounds = rootContainerInstance.renderer.getElementBounds
+        if (!getElementBounds) {
+          throw new Error("This GPUIX renderer does not support element measurement")
+        }
+        const bounds = getElementBounds.call(rootContainerInstance.renderer, id)
+        if (!bounds) return null
+        return { x: bounds[0]!, y: bounds[1]!, width: bounds[2]!, height: bounds[3]! }
+      },
       __applyCanvasCommands: (ops, operands, strings) => {
         if (instance.type !== "canvas") {
           throw new TypeError(
@@ -532,6 +578,7 @@ export const hostConfig = {
       children: [],
       mounted: false,
     })
+    diagnoseUnsupportedStyleTransition(instance, rootContainerInstance, props)
     return instance
   },
 
@@ -664,6 +711,7 @@ export const hostConfig = {
     _internalInstanceHandle: unknown
   ): void {
     const container = containerFor(instance)
+    diagnoseUnsupportedStyleTransition(instance, container, newProps)
     // Always resend style — per-element JSON is small, and this avoids
     // bugs from same-reference mutations or style removal.
     container.renderer.setStyle(instance.id, newProps.style ?? {})

@@ -1036,6 +1036,13 @@ export interface NativeRenderer {
    *  is asserted without a screenshot. */
   getPaintedHighlights?(): HighlightMatch[]
 
+  /**
+   * Read one element's current layout bounds. This is a rendered-state read
+   * boundary: implementations draw/flush the committed tree before returning
+   * the last-painted bounds, so it is safe to call after a React commit.
+   */
+  getElementBounds?(elementId: number): readonly number[] | null
+
   // ── Window API ─────────────────────────────────────────────────
   /** Whether the native window is active and receiving key events. */
   isActive?(): boolean
@@ -1146,8 +1153,18 @@ export interface Container {
   ids: ElementIdAllocator
   eventHandlers: EventHandlerMap
   eventTargets: Map<number, Instance>
+  /** The last hover target path reported by native hit testing. */
+  hoverPath: Instance[]
   preventedKeyboardActivations: Map<number, string>
   strictStyles: boolean
+}
+
+/** Bounds in logical window coordinates, relative to the window's content origin. */
+export interface ElementBounds {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 // Public instance exposed via refs. Type-specific interfaces deepen this seam
@@ -1160,6 +1177,13 @@ export interface PublicInstance {
   releasePointerCapture(): void
   parentId: number | null
   getAttribute(name: string): string | null
+  /**
+   * Returns the current layout bounds in logical window coordinates, relative
+   * to the window's content origin. This forces the committed tree through a
+   * rendered-state read before returning; it is not a cached React layout.
+   * Returns null when the element has no painted bounds.
+   */
+  getBounds(): ElementBounds | null
 }
 
 export interface CanvasPublicInstance extends PublicInstance {
