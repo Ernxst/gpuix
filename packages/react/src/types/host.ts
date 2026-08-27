@@ -953,6 +953,7 @@ export interface AnchoredProps extends Props {
 
 /** Canvas bitmap coordinates. Layout can independently resize the element. */
 export interface CanvasProps extends Props {
+  ref?: React.Ref<CanvasPublicInstance>
   width?: number
   height?: number
 }
@@ -1144,10 +1145,11 @@ export interface Container {
   eventHandlers: EventHandlerMap
   eventTargets: Map<number, Instance>
   preventedKeyboardActivations: Map<number, string>
+  strictStyles: boolean
 }
 
-// Public instance exposed via refs. Type-specific APIs are added deliberately;
-// phase A1 does not expose CanvasRenderingContext2D yet.
+// Public instance exposed via refs. Type-specific interfaces deepen this seam
+// without putting browser-only methods on every native element.
 export interface PublicInstance {
   id: number
   type: ElementType
@@ -1158,8 +1160,18 @@ export interface PublicInstance {
   getAttribute(name: string): string | null
 }
 
+export interface CanvasPublicInstance extends PublicInstance {
+  type: "canvas"
+  getContext(
+    contextId: "2d",
+    options?: CanvasRenderingContext2DSettings
+  ): CanvasRenderingContext2D
+  getContext(contextId: string, options?: unknown): CanvasRenderingContext2D | null
+}
+
 // Internal host instance. The real element state lives in Rust's RetainedTree.
 export interface Instance extends PublicInstance {
+  getContext?: CanvasPublicInstance["getContext"]
   __applyCanvasCommands(
     ops: Uint32Array,
     operands: Float64Array,

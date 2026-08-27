@@ -29,6 +29,7 @@ import {
   DEFAULT_VIRTUAL_LIST_ESTIMATED_ITEM_HEIGHT,
   VirtualListRowContractError,
 } from "../components/virtual-list-contract.js"
+import { getOrCreateRecordingContext2D } from "../canvas/context-2d.js"
 
 let currentUpdatePriority = NoEventPriority
 
@@ -61,6 +62,21 @@ function containerFor(node: HostNode): Container {
 
 function rendererFor(node: HostNode): NativeRenderer {
   return containerFor(node).renderer
+}
+
+function describeCanvas(instance: Instance): string {
+  const props = instance.props as Props & Record<string, unknown>
+  const identity = [
+    props.testId === undefined ? undefined : `testId=${JSON.stringify(props.testId)}`,
+    props["data-testid"] === undefined
+      ? undefined
+      : `data-testid=${JSON.stringify(props["data-testid"])}`,
+    props.id === undefined ? undefined : `id=${JSON.stringify(props.id)}`,
+    `elementId=${instance.id}`,
+  ]
+    .filter((attribute): attribute is string => attribute !== undefined)
+    .join(" ")
+  return `<canvas ${identity}>`
 }
 
 function nextId(container: Container): number {
@@ -494,6 +510,17 @@ export const hostConfig = {
         if (value === true) return ""
         return typeof value === "string" || typeof value === "number" ? String(value) : null
       },
+    }
+    if (type === "canvas") {
+      instance.getContext = ((contextId: string): CanvasRenderingContext2D | null => {
+        if (contextId !== "2d") return null
+        return getOrCreateRecordingContext2D(instance, {
+          describeElement: () => describeCanvas(instance),
+          strict: rootContainerInstance.strictStyles,
+          applyCanvasCommands: (ops, operands, strings) =>
+            instance.__applyCanvasCommands(ops, operands, strings),
+        })
+      }) as NonNullable<Instance["getContext"]>
     }
     hostNodeStates.set(instance, {
       container: rootContainerInstance,

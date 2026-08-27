@@ -9,7 +9,7 @@ import {
 } from "../canvas/opcodes.js"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
-import type { PublicInstance } from "../types/host.js"
+import type { CanvasPublicInstance, PublicInstance } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -60,15 +60,29 @@ describeNative("retained canvas element", () => {
     }
   })
 
-  it("keeps getContext absent in A1 and reports unimplemented opcodes with identity", () => {
+  it("memoises getContext(\"2d\") per canvas and rejects other context ids", () => {
+    const testRoot = createTestRoot({ width: 120, height: 80 })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="context-canvas" width={120} height={80} />
+      )
+      const first = canvasRef.current?.getContext("2d")
+      expect(first).toBeDefined()
+      expect(canvasRef.current?.getContext("2d")).toBe(first)
+      expect(canvasRef.current?.getContext("webgl")).toBeNull()
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("keeps the low-level hook for decoder diagnostics with element identity", () => {
     const testRoot = createTestRoot({ width: 120, height: 80 })
     const canvasRef = createRef<PublicInstance>()
     try {
       testRoot.render(
         <canvas ref={canvasRef} testId="diagnostic-canvas" width={120} height={80} />
       )
-      expect("getContext" in (canvasRef.current as object)).toBe(false)
-
       __applyCanvasCommands(
         canvasRef,
         new Uint32Array([

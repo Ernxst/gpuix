@@ -24,6 +24,7 @@ import {
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
+  CanvasPublicInstance,
   HighlightMatch,
   NativeRenderer,
   PublicInstance,
@@ -33,12 +34,7 @@ import type {
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
-import { __applyCanvasCommands } from "./canvas/commands.js"
-import {
-  CANVAS_OPCODES,
-  CANVAS_STREAM_MAGIC,
-  CANVAS_STREAM_VERSION,
-} from "./canvas/opcodes.js"
+import { flushRecordingContext2D } from "./canvas/context-2d.js"
 import {
   CANVAS_GOLDEN_DPR,
   CANVAS_GOLDEN_HEIGHT,
@@ -1083,6 +1079,8 @@ export interface TestRoot {
 export interface TestRootOptions extends TestWindowOptions {
   /** Opt in to loopback/private URL images for local fixture servers. */
   allowPrivateNetworkImages?: boolean
+  /** Match render()'s strict diagnostic mode. Defaults to the active runtime policy. */
+  strictStyles?: boolean
 }
 
 /**
@@ -1098,7 +1096,7 @@ export interface TestRootOptions extends TestWindowOptions {
 export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   const renderer = new TestRenderer(options)
   renderer.setAllowPrivateNetworkImages(options.allowPrivateNetworkImages ?? false)
-  const root = createRoot(renderer)
+  const root = createRoot(renderer, { strictStyles: options.strictStyles })
   let unmounted = false
 
   const render = (node: ReactNode): void => {
@@ -1182,47 +1180,6 @@ function skipCanvasComparison(
   throw new CanvasComparisonSkippedError(message)
 }
 
-function encodeA1FillRectScene(scene: CanvasScene): {
-  ops: Uint32Array
-  operands: Float64Array
-  strings: string[]
-} {
-  const ops = [CANVAS_STREAM_MAGIC, CANVAS_STREAM_VERSION]
-  const operands: number[] = []
-  const strings: string[] = []
-  let fillStyle = "#000000"
-  const push = (opcode: number, values: readonly number[]) => {
-    ops.push(opcode, values.length)
-    operands.push(...values)
-  }
-  const context = {
-    get fillStyle() {
-      return fillStyle
-    },
-    set fillStyle(value: string | CanvasGradient | CanvasPattern) {
-      if (typeof value !== "string") {
-        throw new TypeError("Phase A1 accepts string fillStyle values only")
-      }
-      fillStyle = value
-      const stringIndex = strings.push(value) - 1
-      push(CANVAS_OPCODES.fillStyle, [stringIndex])
-    },
-    fillRect(x: number, y: number, width: number, height: number) {
-      push(CANVAS_OPCODES.fillRect, [x, y, width, height])
-    },
-  }
-  scene.draw(
-    context as Pick<CanvasRenderingContext2D, "fillStyle" | "fillRect"> as CanvasRenderingContext2D,
-    CANVAS_GOLDEN_WIDTH,
-    CANVAS_GOLDEN_HEIGHT
-  )
-  return {
-    ops: new Uint32Array(ops),
-    operands: new Float64Array(operands),
-    strings,
-  }
-}
-
 /**
  * Render one standard Canvas 2D scene through GPUIX and compare it with the
  * committed Chromium PNG. This gate intentionally requires a local macOS GPU.
@@ -1283,7 +1240,7 @@ export function expectCanvasMatchesBrowser(
 
   if (resolved.name !== "fill-rect-grid") {
     return skipCanvasComparison(
-      `canvas phase A1 implements fillStyle + fillRect only; scene ${JSON.stringify(resolved.name)} remains queued for a later phase`,
+      `native replay for scene ${JSON.stringify(resolved.name)} remains queued for canvas phase B; A1 replays fillStyle + fillRect only`,
       options.skip
     )
   }
@@ -1299,7 +1256,7 @@ export function expectCanvasMatchesBrowser(
     width: CANVAS_GOLDEN_WIDTH,
     height: CANVAS_GOLDEN_HEIGHT,
   })
-  const canvasRef = createRef<PublicInstance>()
+  const canvasRef = createRef<CanvasPublicInstance>()
 
   try {
     testRoot.render(
@@ -1310,8 +1267,11 @@ export function expectCanvasMatchesBrowser(
       })
     )
 
-    const encoded = encodeA1FillRectScene(resolved)
-    __applyCanvasCommands(canvasRef, encoded.ops, encoded.operands, encoded.strings)
+    const canvas = canvasRef.current
+    if (!canvas) throw new Error("The GPUIX <canvas> ref was not mounted")
+    const context = canvas.getContext("2d")
+    resolved.draw(context, CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT)
+    flushRecordingContext2D(context)
     testRoot.renderer.flush()
 
     const windowSize = testRoot.renderer.getWindowSize()
