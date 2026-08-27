@@ -7857,7 +7857,10 @@ pub struct WindowOptions {
 #[derive(Debug, Clone)]
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
 pub struct RendererCapabilities {
-    #[napi(ts_type = "\"macos\" | \"windows\" | \"linux\" | \"freebsd\" | \"browser\" | \"unknown\"")]
+    #[cfg_attr(
+        not(all(target_arch = "wasm32", target_os = "unknown")),
+        napi(ts_type = "\"macos\" | \"windows\" | \"linux\" | \"freebsd\" | \"browser\" | \"unknown\"")
+    )]
     pub platform: String,
     pub frame_clock: FrameClockCapabilities,
     pub window: WindowCapabilities,
@@ -7869,7 +7872,10 @@ pub struct RendererCapabilities {
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
 pub struct FrameClockCapabilities {
     /// The source currently driving frame work for this renderer.
-    #[napi(ts_type = "\"display-link\" | \"timer\" | \"raf\" | \"manual\"")]
+    #[cfg_attr(
+        not(all(target_arch = "wasm32", target_os = "unknown")),
+        napi(ts_type = "\"display-link\" | \"timer\" | \"raf\" | \"manual\"")
+    )]
     pub kind: String,
     pub requires_tick: bool,
     /// Whether `setFrameRequestHandler()` can switch this renderer to an
@@ -7905,11 +7911,17 @@ pub struct AutomationCapabilities {
     pub drag: bool,
     pub scroll_wheel: bool,
     /// `native` injects through GPUI; `browser` uses the browser IME mirror.
-    #[napi(ts_type = "\"native\" | \"browser\"")]
+    #[cfg_attr(
+        not(all(target_arch = "wasm32", target_os = "unknown")),
+        napi(ts_type = "\"native\" | \"browser\"")
+    )]
     pub keyboard: String,
     pub screenshot: bool,
     /// Screenshot file formats currently accepted by `captureScreenshot()`.
-    #[napi(ts_type = "Array<\"png\">")]
+    #[cfg_attr(
+        not(all(target_arch = "wasm32", target_os = "unknown")),
+        napi(ts_type = "Array<\"png\">")
+    )]
     pub screenshot_formats: Vec<String>,
     pub clock: bool,
     pub tree: bool,
