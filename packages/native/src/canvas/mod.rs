@@ -210,6 +210,7 @@ pub struct DrawImage {
     pub source_rect: Option<[f64; 4]>,
     pub destination_rect: [f64; 4],
     pub transform: CanvasTransform,
+    pub opacity: f32,
     pub op_index: usize,
     pub clear_regions: Vec<CanvasQuad>,
 }
@@ -315,6 +316,10 @@ impl CanvasTransform {
 
     pub(crate) fn is_axis_aligned(self) -> bool {
         self.b == 0.0 && self.c == 0.0
+    }
+
+    pub(crate) fn has_negative_axis_scale(self) -> bool {
+        self.a < 0.0 || self.d < 0.0
     }
 
     #[cfg(test)]
@@ -1605,11 +1610,11 @@ pub(crate) fn decode(
                     op_index += 1;
                     continue;
                 }
-                if state.global_alpha != 1.0 {
+                if state.transform.has_negative_axis_scale() {
                     diagnostics.push(CanvasDiagnostic {
                         op_index,
                         op_name: "drawImage".to_string(),
-                        reason: "drawImage with globalAlpha other than 1 cannot be replayed without a per-sprite opacity primitive"
+                        reason: "R1: drawImage under a reflected CTM is not representable by GPUI PolychromeSprite; negative axis scales are unsupported"
                             .to_string(),
                     });
                     op_index += 1;
@@ -1686,6 +1691,7 @@ pub(crate) fn decode(
                     source_rect,
                     destination_rect,
                     transform: state.transform,
+                    opacity: state.global_alpha as f32,
                     op_index,
                     clear_regions: Vec::new(),
                 }));
@@ -1882,6 +1888,37 @@ mod tests {
         replace_display_list(&store, 7, &ops, &operands, &["#2563eb".into()])
             .expect("valid replacement");
         assert_eq!(store.lock().unwrap().get(&7).unwrap().revision, 2);
+    }
+
+    #[test]
+    fn draw_image_retains_global_alpha_and_diagnoses_negative_axis_scale() {
+        let source = r#"{"kind":"path","path":"/tmp/canvas.png"}"#.to_string();
+        let (ops, operands) = stream(&[
+            (opcodes::GLOBAL_ALPHA, &[0.375]),
+            (opcodes::DRAW_IMAGE_5, &[0.0, 2.0, 3.0, 20.0, 10.0]),
+        ]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list(&store, 71, &ops, &operands, &[source.clone()])
+            .expect("valid image stream");
+
+        assert!(outcome.diagnostics.is_empty());
+        let list = store.lock().unwrap().get(&71).unwrap().clone();
+        let DisplayItem::DrawImage(image) = &list.items[0] else {
+            panic!("expected drawImage");
+        };
+        assert_eq!(image.opacity, 0.375);
+
+        let (ops, operands) = stream(&[
+            (opcodes::SCALE, &[-1.0, 1.0]),
+            (opcodes::DRAW_IMAGE_5, &[0.0, 2.0, 3.0, 20.0, 10.0]),
+        ]);
+        let outcome = replace_display_list(&store, 72, &ops, &operands, &[source])
+            .expect("well-formed reflected stream");
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(outcome.diagnostics[0].op_name, "drawImage");
+        assert!(outcome.diagnostics[0].reason.contains("R1"));
+        assert!(outcome.diagnostics[0].reason.contains("negative axis scales"));
+        assert!(!outcome.invalidates);
     }
 
     #[test]

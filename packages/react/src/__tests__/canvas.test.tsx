@@ -298,6 +298,53 @@ describeNative("retained canvas element", () => {
     }
   })
 
+  it("raises R1 instead of silently unmirroring drawImage under negative scale", () => {
+    const testRoot = createTestRoot({ width: 120, height: 80, strictStyles: true })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="reflected-image-canvas" width={120} height={80} />
+      )
+      const image = new Image()
+      image.src = canvasImageFixture
+      const context = canvasRef.current!.getContext("2d")!
+      context.scale(-1, 1)
+      context.drawImage(image, -64, 0)
+      expect(() => flushRecordingContext2D(context)).toThrow(
+        /reflected-image-canvas.*drawImage.*R1.*negative axis scales/
+      )
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("replays drawImage globalAlpha through a translucent cached image", async () => {
+    const testRoot = createTestRoot({ width: 120, height: 80, strictStyles: true })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="alpha-image-canvas" width={120} height={80} />
+      )
+      const image = new Image()
+      image.src = canvasImageFixture
+      await image.decode()
+      const context = canvasRef.current!.getContext("2d")!
+      context.globalAlpha = 0.375
+      context.drawImage(image, 0, 0)
+      expect(() => flushRecordingContext2D(context)).not.toThrow()
+      testRoot.renderer.flush()
+
+      expect(testRoot.renderer.getCanvasState(canvasRef.current!.id)).toMatchObject({
+        loadedImageCount: 1,
+        paintedImageCount: 1,
+        atlasTileCount: 1,
+      })
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
   it("paints 64 distinct image sources and drops every atlas tile on unmount", async () => {
     const width = 256
     const height = 192

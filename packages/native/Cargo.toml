@@ -26,6 +26,7 @@ rustc-hash = "2"
 # Use the GPUI fork checked out in the zed submodule.
 # Wasm cannot use the desktop gpui_platform features.
 gpui = { path = "../../zed/crates/gpui", default-features = false, features = ["profiler"] }
+image = { version = "0.25.1", default-features = false }
 lyon = "1"
 thiserror = "2"
 pulldown-cmark = { version = "0.12", default-features = false }

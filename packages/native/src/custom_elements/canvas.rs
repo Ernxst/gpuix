@@ -1075,7 +1075,9 @@ fn prepare_with_scale(
                 Err(diagnostic) => diagnostics.push(diagnostic),
             },
             crate::canvas::DisplayItem::DrawImage(image) => {
-                let Some(data) = image_store.loaded(&image.source.key) else {
+                let Some(data) = image_store
+                    .loaded_with_opacity(&image.source.key, image.opacity)
+                else {
                     continue;
                 };
                 if data.frame_count() == 0 {

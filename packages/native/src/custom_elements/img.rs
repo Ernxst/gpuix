@@ -1059,9 +1059,48 @@ struct CanvasImageEntry {
     users: HashSet<u64>,
     observers: HashSet<u64>,
     result: Option<ImageLoadResult>,
+    opacity_variants: HashMap<u8, Arc<gpui::RenderImage>>,
     loading: bool,
     reload_due: bool,
     retry_attempt: u32,
+}
+
+impl CanvasImageEntry {
+    fn take_loaded_images(&mut self) -> Vec<Arc<gpui::RenderImage>> {
+        let mut images: Vec<_> = self
+            .opacity_variants
+            .drain()
+            .map(|(_, image)| image)
+            .collect();
+        if let Some(Ok(image)) = self.result.take() {
+            images.push(image);
+        }
+        images
+    }
+}
+
+fn render_image_with_opacity(
+    image: &gpui::RenderImage,
+    opacity: u8,
+) -> Option<gpui::RenderImage> {
+    let mut frames = Vec::with_capacity(image.frame_count());
+    for frame_index in 0..image.frame_count() {
+        let size = image.size(frame_index);
+        let width = u32::try_from(size.width.0).ok()?;
+        let height = u32::try_from(size.height.0).ok()?;
+        let mut bytes = image.as_bytes(frame_index)?.to_vec();
+        for pixel in bytes.chunks_exact_mut(4) {
+            pixel[3] = ((u16::from(pixel[3]) * u16::from(opacity) + 127) / 255) as u8;
+        }
+        let buffer = image::RgbaImage::from_raw(width, height, bytes)?;
+        frames.push(image::Frame::from_parts(
+            buffer,
+            0,
+            0,
+            image.delay(frame_index),
+        ));
+    }
+    Some(gpui::RenderImage::new(frames))
 }
 
 #[derive(Clone, Default)]
@@ -1104,15 +1143,24 @@ impl SharedCanvasImageStore {
         self.state.lock().unwrap().revision
     }
 
-    pub(crate) fn loaded(&self, key: &str) -> Option<Arc<gpui::RenderImage>> {
-        self.state
-            .lock()
-            .unwrap()
-            .entries
-            .get(key)
-            .and_then(|entry| entry.result.as_ref())
-            .and_then(|result| result.as_ref().ok())
-            .cloned()
+    pub(crate) fn loaded_with_opacity(
+        &self,
+        key: &str,
+        opacity: f32,
+    ) -> Option<Arc<gpui::RenderImage>> {
+        let opacity = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let mut state = self.state.lock().unwrap();
+        let entry = state.entries.get_mut(key)?;
+        let image = entry.result.as_ref()?.as_ref().ok()?.clone();
+        if opacity == u8::MAX {
+            return Some(image);
+        }
+        if let Some(variant) = entry.opacity_variants.get(&opacity) {
+            return Some(variant.clone());
+        }
+        let variant = Arc::new(render_image_with_opacity(&image, opacity)?);
+        entry.opacity_variants.insert(opacity, variant.clone());
+        Some(variant)
     }
 
     pub(crate) fn observe(
@@ -1177,9 +1225,13 @@ impl SharedCanvasImageStore {
                 return;
             }
             state.revision = state.revision.saturating_add(1);
-            state.entries.remove(&key).and_then(|entry| entry.result)
+            state
+                .entries
+                .remove(&key)
+                .map(|mut entry| entry.take_loaded_images())
+                .unwrap_or_default()
         };
-        if let Some(Ok(image)) = release {
+        for image in release {
             let _ = window.drop_image(image);
         }
     }
@@ -1220,10 +1272,8 @@ impl SharedCanvasImageStore {
                     entry.users.is_empty() && entry.observers.is_empty()
                 })
                 {
-                    if let Some(Ok(image)) =
-                        state.entries.remove(&key).and_then(|entry| entry.result)
-                    {
-                        dropped.push(image);
+                    if let Some(mut entry) = state.entries.remove(&key) {
+                        dropped.extend(entry.take_loaded_images());
                     }
                     state.revision = state.revision.saturating_add(1);
                 }
@@ -1234,9 +1284,7 @@ impl SharedCanvasImageStore {
                 entry.source.get_or_insert_with(|| source.clone());
                 entry.users.insert(element_id);
                 if !entry.loading && (entry.result.is_none() || entry.reload_due) {
-                    if let Some(Ok(image)) = entry.result.take() {
-                        dropped.push(image);
-                    }
+                    dropped.extend(entry.take_loaded_images());
                     entry.reload_due = false;
                     entry.loading = true;
                     load.push((key.clone(), entry.source.clone().unwrap()));
@@ -1353,10 +1401,13 @@ impl SharedCanvasImageStore {
                     state.test_stats.entry(*user).or_default().loaded_count = 0;
                 }
                 if empty {
-                    if let Some(Ok(image)) =
-                        state.entries.remove(&key).and_then(|entry| entry.result)
-                    {
-                        releases.push((removed_users, image));
+                    if let Some(mut entry) = state.entries.remove(&key) {
+                        releases.extend(
+                            entry
+                                .take_loaded_images()
+                                .into_iter()
+                                .map(|image| (removed_users.clone(), image)),
+                        );
                     }
                     state.revision = state.revision.saturating_add(1);
                 }
@@ -1820,6 +1871,22 @@ impl CustomElement for SvgElement {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn canvas_image_opacity_scales_alpha_without_changing_bgra_channels() {
+        let buffer = image::RgbaImage::from_raw(1, 1, vec![11, 22, 33, 200]).unwrap();
+        let image = gpui::RenderImage::new(vec![image::Frame::from_parts(
+            buffer,
+            0,
+            0,
+            image::Delay::from_numer_denom_ms(17, 1),
+        )]);
+
+        let translucent = render_image_with_opacity(&image, 128).unwrap();
+        assert_eq!(translucent.as_bytes(0), Some([11, 22, 33, 100].as_slice()));
+        assert_eq!(translucent.size(0), image.size(0));
+        assert_eq!(translucent.delay(0), image.delay(0));
+    }
 
     #[test]
     fn parses_each_source_kind_and_rejects_invalid_or_oversized_data() {
