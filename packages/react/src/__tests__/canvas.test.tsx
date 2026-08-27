@@ -397,10 +397,14 @@ describeNative("retained canvas element", () => {
       expect(comparer.renderer.compareImages(fullActual, fullExpected, 0)).toEqual({
         differingPixelRatio: 0,
         maxChannelDelta: 0,
+        maxChannelDeltaOutsideGoldenContour: 0,
+        erodedGeometryMismatchRatio: 0,
       })
       expect(comparer.renderer.compareImages(partialActual, partialExpected, 0)).toEqual({
         differingPixelRatio: 0,
         maxChannelDelta: 0,
+        maxChannelDeltaOutsideGoldenContour: 0,
+        erodedGeometryMismatchRatio: 0,
       })
     } finally {
       comparer.unmount()
@@ -463,6 +467,8 @@ describeNative("retained canvas element", () => {
       expect(scaled.renderer.compareImages(logicalPath, scaledPath, 0)).toEqual({
         differingPixelRatio: 0,
         maxChannelDelta: 0,
+        maxChannelDeltaOutsideGoldenContour: 0,
+        erodedGeometryMismatchRatio: 0,
       })
     } finally {
       logical.unmount()
