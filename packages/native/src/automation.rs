@@ -28,7 +28,20 @@ use web_time::Instant;
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
 pub struct ScrollWheelOptions {
+    #[cfg_attr(
+        not(all(target_arch = "wasm32", target_os = "unknown")),
+        napi(ts_type = "\"started\" | \"moved\" | \"ended\" | \"cancelled\"")
+    )]
     pub phase: Option<String>,
+    #[cfg_attr(
+        not(all(target_arch = "wasm32", target_os = "unknown")),
+        napi(ts_type = "\"started\" | \"moved\" | \"ended\" | \"cancelled\"")
+    )]
+    pub momentum_phase: Option<String>,
+    #[cfg_attr(
+        not(all(target_arch = "wasm32", target_os = "unknown")),
+        napi(ts_type = "\"pixels\" | \"lines\"")
+    )]
     pub delta_unit: Option<String>,
     pub modifiers: Option<ScrollWheelModifiers>,
 }
@@ -414,12 +427,24 @@ pub fn scroll_wheel_event(
         "cancelled" => TouchPhase::Cancelled,
         phase => return Err(format!("Unknown scroll-wheel phase: {phase}")),
     };
+    let momentum_phase = options
+        .momentum_phase
+        .as_deref()
+        .map(|phase| match phase {
+            "started" => Ok(TouchPhase::Started),
+            "moved" => Ok(TouchPhase::Moved),
+            "ended" => Ok(TouchPhase::Ended),
+            "cancelled" => Ok(TouchPhase::Cancelled),
+            phase => Err(format!("Unknown scroll-wheel momentum phase: {phase}")),
+        })
+        .transpose()?;
 
     Ok(ScrollWheelEvent {
         position: point(px(x as f32), px(y as f32)),
         delta,
         modifiers: options.modifiers.map(Modifiers::from).unwrap_or_default(),
         touch_phase,
+        momentum_phase,
     })
 }
 
@@ -467,6 +492,7 @@ mod tests {
             16.0,
             Some(ScrollWheelOptions {
                 phase: Some("started".into()),
+                momentum_phase: Some("moved".into()),
                 delta_unit: Some("lines".into()),
                 modifiers: Some(ScrollWheelModifiers {
                     shift: Some(true),
@@ -482,6 +508,7 @@ mod tests {
         assert_eq!(f32::from(event.position.x), 12.5);
         assert_eq!(f32::from(event.position.y), 34.25);
         assert!(matches!(event.touch_phase, TouchPhase::Started));
+        assert!(matches!(event.momentum_phase, Some(TouchPhase::Moved)));
         let ScrollDelta::Lines(delta) = event.delta else {
             panic!("automation scroll must preserve a line delta")
         };

@@ -404,19 +404,25 @@ only the rows GPUI requests. Never capture the root render's tree guard or
 `<diff>` still owns its parsed Rust data because one native diff node is much
 cheaper than retaining one React node per line.
 
-## Nested scrolling is not supported
+## Nested scrolling consumes from the inside out
 
-Never put a scroll container inside another scroll container. That includes
-`overflow: "scroll"`, `<virtual-list>`, and `<diff>` (`gpui::list()` always
-takes the wheel). GPUI delivers the same wheel event to both hitboxes. The
-inner list steals the gesture. Nested scroll looks broken and there is no
-GPUI API to turn list scroll off.
+`overflow: "scroll"`, `<virtual-list>`, and scrolling `<diff>` may be nested.
+The innermost hit scroller clamps the wheel delta to its remaining range and
+leaves the residual for the next scrollable ancestor in the same dispatch. A
+non-scrollable inner viewport consumes nothing. Reversing direction lets it
+consume again.
 
-Keep **one** scroll parent. Long inner content must grow with that parent, or
-collapse behind an expandable (file header, first N lines, Show more). `<diff>`
-defaults to flow layout. Pass `scroll` plus a bounded height only for a
-dedicated viewer. Do not give `<diff>` a bounded height inside a parent
-scroller just so it can virtualize.
+Do not stop propagation merely because an inner scroller saw the wheel, and do
+not add an overlay to coordinate nested scrolling. GPUI's div and list handlers
+own partial consumption. They notify only when their own offset changes, so the
+handoff must not add an implicit draw or an extra frame request.
+
+Precise trackpad gestures share GPUI's `OngoingScroll` intent recognizer across
+the whole nested route. Phased streams do not time out between samples, a
+sufficiently strong direction change can switch the selected axis, and macOS
+momentum continues the finger gesture until momentum ends. The 28ms fallback
+delimits only moved-only platforms. A two-axis `overflow: "scroll"` remains
+concurrent by explicit style policy.
 
 `overflow-x: scroll` is allowed inside a vertical scroller. GPUI remaps a
 vertical wheel onto overflow-x unless `restrict_scroll_to_axis()` is set.
@@ -1264,7 +1270,7 @@ If remorses says OK, follow the rest of this file and these rules.
 
 - Add a `.changeset/*.md` file for every user-facing fix or feature. Put `Fixes #N` on its own line when the work closes an issue
 - Run the package test scripts: `packages/react` then build `@gpuix/react`, then `examples`
-- Keep one scroll parent. Nested scrolling is not supported
+- Keep nested scrollers bounded and cover inner consumption, boundary handoff, and reversal
 - Send every painted string through `crate::text`. Never `div().child(some_string)`
 - Put layout numbers on `Theme::metrics`, not new Rust constants
 

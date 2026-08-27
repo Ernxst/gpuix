@@ -16,6 +16,21 @@ async function scrollWithoutSynchronousDraw(
   }
 }
 
+function assertOffset(
+  label: string,
+  offset: number[] | null,
+  expectedX: number,
+  expectedY: number
+): void {
+  if (
+    !offset ||
+    Math.abs(offset[0] - expectedX) > 0.01 ||
+    Math.abs(offset[1] - expectedY) > 0.01
+  ) {
+    throw new Error(`Expected ${label} offset ${expectedX},${expectedY}; received ${offset}`)
+  }
+}
+
 try {
   const target = await app.getByTestId("scroll-target").element()
   await scrollWithoutSynchronousDraw({
@@ -54,6 +69,62 @@ try {
   if (!offset || offset[1] >= 0) {
     throw new Error(`Expected a negative vertical scroll offset, received ${offset}`)
   }
+
+  const parent = await app.getByTestId("nested-scroll-parent").element()
+  const inner = await app.getByTestId("nested-scroll-list").element()
+  const { bounds } = await app.call("getBounds", { elementId: parent.id })
+  if (!bounds) throw new Error("Expected painted bounds for nested scroll parent")
+  const nestedX = bounds.x + 160
+
+  await scrollWithoutSynchronousDraw({
+    x: nestedX,
+    y: bounds.y + 60,
+    deltaX: 0,
+    deltaY: -340,
+    phase: "started",
+    deltaUnit: "pixels",
+  })
+  assertOffset(
+    "nested inner at boundary",
+    (await app.call("getScrollOffset", { elementId: inner.id })).offset,
+    0,
+    -280
+  )
+  assertOffset(
+    "nested parent after residual",
+    (await app.call("getScrollOffset", { elementId: parent.id })).offset,
+    0,
+    -60
+  )
+
+  await scrollWithoutSynchronousDraw({
+    x: nestedX,
+    y: bounds.y + 30,
+    deltaX: 0,
+    deltaY: 40,
+    phase: "moved",
+    deltaUnit: "pixels",
+  })
+  assertOffset(
+    "nested inner after reversal",
+    (await app.call("getScrollOffset", { elementId: inner.id })).offset,
+    0,
+    -240
+  )
+  assertOffset(
+    "nested parent after reversal",
+    (await app.call("getScrollOffset", { elementId: parent.id })).offset,
+    0,
+    -60
+  )
+  await scrollWithoutSynchronousDraw({
+    x: nestedX,
+    y: bounds.y + 30,
+    deltaX: 0,
+    deltaY: 0,
+    phase: "ended",
+    deltaUnit: "pixels",
+  })
   console.log("live scroll-wheel automation passed")
 } finally {
   await app.close()

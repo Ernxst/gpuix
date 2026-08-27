@@ -8,6 +8,8 @@ import React, { useState } from "react"
 import { render } from "@gpuix/react"
 import type { EventPayload } from "@gpuix/native"
 
+const nestedRows = Array.from({ length: 10 }, (_, index) => index)
+
 function LiveScrollWheel() {
   const [lastWheel, setLastWheel] = useState("none")
 
@@ -19,7 +21,7 @@ function LiveScrollWheel() {
         gap: 12,
         padding: 24,
         width: 480,
-        height: 360,
+        height: 700,
         backgroundColor: "#171717",
       }}
     >
@@ -29,7 +31,7 @@ function LiveScrollWheel() {
       </text>
       <div
         testId="scroll-target"
-        style={{ flex: 1, overflow: "scroll", backgroundColor: "#262626", padding: 12 }}
+        style={{ height: 220, overflow: "scroll", backgroundColor: "#262626", padding: 12 }}
         onScroll={(event: EventPayload) =>
           setLastWheel(
             `${event.touchPhase ?? "unknown"}: ${event.deltaX ?? 0}, ${event.deltaY ?? 0}; alt=${event.modifiers?.alt ?? false}`
@@ -42,8 +44,53 @@ function LiveScrollWheel() {
           </text>
         </div>
       </div>
+      <text style={{ color: "#f5f5f5", fontSize: 18 }}>Nested residual routing</text>
+      <div
+        testId="nested-scroll-parent"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          width: 320,
+          height: 240,
+          flexShrink: 0,
+          overflowY: "scroll",
+          backgroundColor: "#10131a",
+        }}
+      >
+        <virtual-list
+          testId="nested-scroll-list"
+          itemCount={nestedRows.length}
+          windowStart={0}
+          estimatedItemHeight={40}
+          style={{ width: 320, height: 120, flexShrink: 0 }}
+        >
+          {nestedRows.map((row) => (
+            <div
+              key={row}
+              style={{
+                width: 320,
+                height: 40,
+                flexShrink: 0,
+                backgroundColor: row % 2 === 0 ? "#27324a" : "#35415d",
+              }}
+            >
+              <text style={{ color: "#ffffff" }}>Row {row}</text>
+            </div>
+          ))}
+        </virtual-list>
+        <div
+          style={{
+            width: 320,
+            height: 400,
+            flexShrink: 0,
+            backgroundColor: "#713f51",
+          }}
+        >
+          <text style={{ color: "#ffffff" }}>Parent tail</text>
+        </div>
+      </div>
     </div>
   )
 }
 
-render(<LiveScrollWheel />, { title: "GPUIX live scroll wheel", width: 528, height: 408 })
+render(<LiveScrollWheel />, { title: "GPUIX live scroll wheel", width: 528, height: 748 })

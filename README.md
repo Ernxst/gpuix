@@ -935,36 +935,19 @@ Containers with `overflow: "scroll"` become natively scrollable. GPUI handles sc
 Plain scroll containers still build every child. Use `<virtual-list>` below when the collection can grow large.
 
 > [!IMPORTANT]
-> **Nested scrolling is not supported.** One parent may scroll. An inner
-> `overflow: "scroll"`, `<virtual-list>`, or `<diff>` must not. GPUI gives both
-> hitboxes the same wheel event, so the inner list steals the gesture.
+> **Nested scrolling routes from the inside out.** An inner
+> `overflow: "scroll"`, `<virtual-list>`, or scrolling `<diff>` consumes the
+> wheel while it has range in that direction. At its boundary, the unused
+> delta moves the parent in the same event. A child with no scroll range does
+> not steal the wheel.
 >
-> Keep long inner content in that parent. Collapse it behind an **expandable**
-> (preview plus Show more) instead of giving the child its own viewport.
+> Precise trackpad gestures keep one selected axis during boundary handoff,
+> including through macOS momentum. A strong direction change can switch that
+> axis, and reversing scroll direction gives the inner scroller control again.
 >
-> Horizontal overflow is the exception. `overflowX: "scroll"` on a wide child
-> (a code row, a table) does not steal the vertical wheel. GPUIX lays that
-> scroller out as a flex viewport with `minWidth: 0`. The wide child must not
-> shrink: set `flexShrink: 0` or a definite width. Swipe on **X** to pan.
-> A vertical wheel stays on the parent.
-
-```tsx
-function Expandable({
-  preview,
-  children,
-}: {
-  preview: React.ReactNode
-  children: React.ReactNode
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {open ? children : preview}
-      {!open && <div onClick={() => setOpen(true)}>Show more</div>}
-    </div>
-  )
-}
-```
+> Give every nested scroller a bounded height or flex space. Horizontal
+> overflow on a wide child still needs `flexShrink: 0` or a definite width;
+> swipe on **X** to pan while a vertical gesture stays with the parent.
 
 ```tsx
 function ScrollableList() {
@@ -1167,7 +1150,7 @@ Direct host usage also defaults `estimatedItemHeight` to `48`. Pass
 `estimatedItemHeight={null}` only when content-discovery sizing is intentional;
 unvisited rows then contribute no estimate to the initial scroll extent.
 
-A row can contain nested `<div>`, `<text>`, `<markdown>`, `<code>`, `<diff>`, `<input>`, and `<textarea>` elements. Focusable rows stay active when they move offscreen, so keyboard input and native editor state are preserved. Those children must not scroll. Nested scrolling is not supported; see [Scrolling](#scrolling).
+A row can contain nested `<div>`, `<text>`, `<markdown>`, `<code>`, `<diff>`, `<input>`, and `<textarea>` elements. Focusable rows stay active when they move offscreen, so keyboard input and native editor state are preserved. A bounded child scroller consumes its range first and then hands residual wheel delta back to the list; see [Scrolling](#scrolling).
 
 ### Chat tail behavior
 

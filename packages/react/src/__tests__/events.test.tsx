@@ -2555,22 +2555,113 @@ describeNative("events", () => {
       expect(afterScrollOffset![1]).toBeLessThan(0) // scrolled down
     })
 
-    it("does not remap a vertical wheel onto overflow-x", () => {
-      function NestedAxisScroll() {
+    it("routes a phased wheel from a nested virtual list into its parent", () => {
+      const rows = Array.from({ length: 10 }, (_, index) => index)
+
+      function NestedVirtualScroller() {
         return (
-          <div style={{ width: 240, height: 120, overflowY: "scroll" }}>
-            <div style={{ width: 240, height: 80, overflowX: "scroll" }}>
-              <div style={{ width: 800, height: 80 }}>
-                <text>wide row</text>
-              </div>
-            </div>
-            <div style={{ height: 400 }}>
-              <text>below</text>
+          <div
+            testId="nested-scroll-parent"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              width: 320,
+              height: 240,
+              overflowY: "scroll",
+              backgroundColor: "#10131a",
+            }}
+          >
+            <virtual-list
+              testId="nested-scroll-list"
+              itemCount={rows.length}
+              windowStart={0}
+              estimatedItemHeight={40}
+              style={{ width: 320, height: 120, flexShrink: 0 }}
+            >
+              {rows.map((row) => (
+                <div
+                  key={row}
+                  style={{
+                    width: 320,
+                    height: 40,
+                    flexShrink: 0,
+                    backgroundColor: row % 2 === 0 ? "#27324a" : "#35415d",
+                  }}
+                >
+                  <text style={{ color: "#ffffff" }}>Row {row}</text>
+                </div>
+              ))}
+            </virtual-list>
+            <div
+              style={{
+                width: 320,
+                height: 400,
+                flexShrink: 0,
+                backgroundColor: "#713f51",
+              }}
+            >
+              <text style={{ color: "#ffffff" }}>Parent tail</text>
             </div>
           </div>
         )
       }
 
+      testRoot.render(<NestedVirtualScroller />)
+
+      const parent = testRoot.renderer.findByTestId("nested-scroll-parent")!
+      const inner = testRoot.renderer.findByTestId("nested-scroll-list")!
+      const beforePath = `${SHOTS_DIR}/nested-scroll-before.png`
+      const boundaryPath = `${SHOTS_DIR}/nested-scroll-boundary.png`
+      const reversedPath = `${SHOTS_DIR}/nested-scroll-reversed.png`
+      for (const path of [beforePath, boundaryPath, reversedPath]) {
+        if (fs.existsSync(path)) fs.unlinkSync(path)
+      }
+
+      testRoot.renderer.captureScreenshot(beforePath)
+      testRoot.renderer.nativeSimulateScrollWheel(160, 60, 0, -340, {
+        phase: "started",
+        deltaUnit: "pixels",
+      })
+
+      expect(testRoot.renderer.getScrollOffset(inner.id)?.[1]).toBeCloseTo(-280)
+      expect(testRoot.renderer.getScrollOffset(parent.id)?.[1]).toBeCloseTo(-60)
+      testRoot.renderer.flush()
+      testRoot.renderer.captureScreenshot(boundaryPath)
+
+      testRoot.renderer.nativeSimulateScrollWheel(160, 30, 0, 40, {
+        phase: "moved",
+        deltaUnit: "pixels",
+      })
+
+      expect(testRoot.renderer.getScrollOffset(inner.id)?.[1]).toBeCloseTo(-240)
+      expect(testRoot.renderer.getScrollOffset(parent.id)?.[1]).toBeCloseTo(-60)
+      testRoot.renderer.flush()
+      testRoot.renderer.captureScreenshot(reversedPath)
+      testRoot.renderer.nativeSimulateScrollWheel(160, 30, 0, 0, {
+        phase: "ended",
+        deltaUnit: "pixels",
+      })
+
+      expectScreenshotsDiffer(beforePath, boundaryPath)
+      expectScreenshotsDiffer(boundaryPath, reversedPath)
+    })
+
+    function NestedAxisScroll() {
+      return (
+        <div style={{ width: 240, height: 120, overflowY: "scroll" }}>
+          <div style={{ width: 240, height: 80, overflowX: "scroll" }}>
+            <div style={{ width: 800, height: 80 }}>
+              <text>wide row</text>
+            </div>
+          </div>
+          <div style={{ height: 400 }}>
+            <text>below</text>
+          </div>
+        </div>
+      )
+    }
+
+    it("does not remap a vertical wheel onto overflow-x", () => {
       testRoot.render(<NestedAxisScroll />)
 
       const parent = testRoot.renderer
@@ -2590,6 +2681,69 @@ describeNative("events", () => {
       expect(parentOffset).not.toBeNull()
       expect(parentOffset![1]).toBeLessThan(0)
       expect(innerOffset).toEqual([0, 0])
+    })
+
+    it("switches a phased nested gesture after a strong direction change", () => {
+      testRoot.render(<NestedAxisScroll />)
+
+      const parent = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflowY === "scroll")!
+      const inner = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflowX === "scroll")!
+
+      testRoot.renderer.nativeSimulateScrollWheel(80, 40, -40, -5, {
+        phase: "started",
+        deltaUnit: "pixels",
+      })
+      expect(testRoot.renderer.getScrollOffset(inner.id)?.[0]).toBeCloseTo(-40)
+      expect(testRoot.renderer.getScrollOffset(parent.id)?.[1]).toBeCloseTo(0)
+
+      testRoot.renderer.nativeSimulateScrollWheel(80, 40, -5, -40, {
+        phase: "moved",
+        deltaUnit: "pixels",
+      })
+      expect(testRoot.renderer.getScrollOffset(inner.id)?.[0]).toBeCloseTo(-40)
+      expect(testRoot.renderer.getScrollOffset(parent.id)?.[1]).toBeCloseTo(-40)
+    })
+
+    it("continues the finger axis into nested scroll momentum", () => {
+      testRoot.render(<NestedAxisScroll />)
+
+      const parent = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflowY === "scroll")!
+      const inner = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflowX === "scroll")!
+
+      testRoot.renderer.nativeSimulateScrollWheel(80, 40, -40, -5, {
+        phase: "started",
+        deltaUnit: "pixels",
+      })
+      testRoot.renderer.nativeSimulateScrollWheel(80, 40, 0, 0, {
+        phase: "ended",
+        deltaUnit: "pixels",
+      })
+      testRoot.renderer.nativeSimulateScrollWheel(80, 40, -7, -10, {
+        momentumPhase: "started",
+        deltaUnit: "pixels",
+      })
+
+      expect(testRoot.renderer.getScrollOffset(inner.id)?.[0]).toBeCloseTo(-47)
+      expect(testRoot.renderer.getScrollOffset(parent.id)?.[1]).toBeCloseTo(0)
+
+      testRoot.renderer.nativeSimulateScrollWheel(80, 40, 0, 0, {
+        momentumPhase: "ended",
+        deltaUnit: "pixels",
+      })
+      testRoot.renderer.nativeSimulateScrollWheel(80, 40, 0, -20, {
+        phase: "started",
+        deltaUnit: "pixels",
+      })
+      expect(testRoot.renderer.getScrollOffset(inner.id)?.[0]).toBeCloseTo(-47)
+      expect(testRoot.renderer.getScrollOffset(parent.id)?.[1]).toBeCloseTo(-20)
     })
 
     it("pans overflow-x when the child is wider than the viewport", () => {

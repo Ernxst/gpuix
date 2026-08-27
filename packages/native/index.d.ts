@@ -752,8 +752,9 @@ export interface ScrollWheelModifiers {
  * identical events.
  */
 export interface ScrollWheelOptions {
-  phase?: string
-  deltaUnit?: string
+  phase?: "started" | "moved" | "ended" | "cancelled"
+  momentumPhase?: "started" | "moved" | "ended" | "cancelled"
+  deltaUnit?: "pixels" | "lines"
   modifiers?: ScrollWheelModifiers
 }
 
