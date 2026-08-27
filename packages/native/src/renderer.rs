@@ -4588,6 +4588,12 @@ pub(crate) struct GpuixView {
     /// Test-only resolved-style reads use this instead of reconstructing hover
     /// from automation bounds, which cannot account for occlusion or capture.
     pub(crate) interactive_style_states: HashMap<u64, InteractiveStyleState>,
+    /// The painted element currently winning hover hit testing. Native records
+    /// it once per mouse event; the React bridge expands its ancestry into DOM
+    /// mouseenter/mouseleave transitions.
+    hover_target: Option<u64>,
+    reported_hover_target: Option<u64>,
+    hover_target_dispatch_pending: bool,
     /// CSS-like style transition tracks keyed by retained element ID.
     pub(crate) transition_states: HashMap<u64, crate::motion::StyleTransitionState>,
     /// Frame requests emitted while at least one style transition is active.
@@ -4770,6 +4776,9 @@ impl GpuixView {
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
             interactive_style_states: HashMap::new(),
+            hover_target: None,
+            reported_hover_target: None,
+            hover_target_dispatch_pending: false,
             transition_states: HashMap::new(),
             style_transition_frame_requests: 0,
             selection,
@@ -4780,6 +4789,44 @@ impl GpuixView {
             clock: crate::automation::AutomationClock::new(),
             highlights: HashMap::new(),
         }
+    }
+
+    fn update_hover_target(
+        &mut self,
+        id: u64,
+        is_hovered: bool,
+        window: &gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if is_hovered {
+            let keep_more_specific_target = self.hover_target.is_some_and(|target| {
+                is_hover_target_descendant(&self.tree.lock().unwrap(), target, id)
+            });
+            if !keep_more_specific_target {
+                self.hover_target = Some(id);
+            }
+        } else if self.hover_target == Some(id) {
+            self.hover_target = None;
+        }
+
+        if self.hover_target_dispatch_pending {
+            return;
+        }
+        self.hover_target_dispatch_pending = true;
+        cx.defer_in(window, |view, _window, _cx| {
+            view.hover_target_dispatch_pending = false;
+            if view.hover_target == view.reported_hover_target {
+                return;
+            }
+
+            let event_id = view.hover_target.or(view.reported_hover_target);
+            view.reported_hover_target = view.hover_target;
+            if let Some(event_id) = event_id {
+                emit_event_full(&view.event_callback, event_id, "hoverTarget", |payload| {
+                    payload.hovered = Some(view.hover_target.is_some());
+                });
+            }
+        });
     }
 
     pub(crate) fn set_pointer_capture(
@@ -5798,7 +5845,7 @@ pub(crate) fn build_element(
     };
 
     let declared_style = element.style.as_deref();
-    let supports_style_transitions = matches!(element.element_type.as_str(), "div" | "text");
+    let supports_style_transitions = matches!(element.element_type.as_str(), "div" | "text" | "img");
     let transitioned_style = if supports_style_transitions {
         if let Some(style) = declared_style.filter(|style| style.transition.is_some()) {
             let focused = ctx
@@ -6143,6 +6190,36 @@ fn has_interactive_behavior(
         || scrolls
 }
 
+fn tracks_mouse_hover_events(
+    element: &crate::retained_tree::RetainedElement,
+    tree: &RetainedTree,
+) -> bool {
+    let mut current = Some(element.id);
+    while let Some(id) = current {
+        let Some(current_element) = tree.elements.get(&id) else {
+            return false;
+        };
+        if current_element.events.contains("mouseEnter")
+            || current_element.events.contains("mouseLeave")
+        {
+            return true;
+        }
+        current = current_element.parent;
+    }
+    false
+}
+
+fn is_hover_target_descendant(tree: &RetainedTree, descendant: u64, ancestor: u64) -> bool {
+    let mut current = Some(descendant);
+    while let Some(id) = current {
+        if id == ancestor {
+            return true;
+        }
+        current = tree.elements.get(&id).and_then(|element| element.parent);
+    }
+    false
+}
+
 pub(crate) fn build_div(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
@@ -6164,6 +6241,7 @@ pub(crate) fn build_div(
         .and_then(serde_json::Value::as_str);
     let tracks_hover = style.is_some_and(|style| style.hover.is_some()) || hover_group.is_some();
     let tracks_active = style.is_some_and(|style| style.active.is_some());
+    let tracks_mouse_hover = tracks_mouse_hover_events(element, ctx.tree);
 
     if let Some(group) = hover_group {
         el = el.group(gpui::SharedString::from(group.to_owned()));
@@ -6503,13 +6581,9 @@ pub(crate) fn build_div(
         el = el.capture_pointer();
     }
 
-    let has_enter = element.events.contains("mouseEnter");
-    let has_leave = element.events.contains("mouseLeave");
-    if transition_hover || tracks_hover || has_enter || has_leave {
-        let callback_enter = has_enter.then(|| ctx.event_callback.clone()).flatten();
-        let callback_leave = has_leave.then(|| ctx.event_callback.clone()).flatten();
+    if transition_hover || tracks_hover || tracks_mouse_hover {
         let id = element.id;
-        el = el.on_hover(cx.listener(move |view, is_hovered: &bool, _window, cx| {
+        el = el.on_hover(cx.listener(move |view, is_hovered: &bool, window, cx| {
             let transition_changed = transition_hover
                 && view
                     .transition_states
@@ -6524,14 +6598,8 @@ pub(crate) fn build_div(
             if transition_changed || interactive_changed {
                 cx.notify();
             }
-            if *is_hovered {
-                emit_event_full(&callback_enter, id, "mouseEnter", |payload| {
-                    payload.hovered = Some(true);
-                });
-            } else {
-                emit_event_full(&callback_leave, id, "mouseLeave", |payload| {
-                    payload.hovered = Some(false);
-                });
+            if tracks_mouse_hover {
+                view.update_hover_target(id, *is_hovered, window, cx);
             }
         }));
     }

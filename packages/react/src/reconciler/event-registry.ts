@@ -32,8 +32,6 @@ function eventRegistrySlot(): EventRegistrySlot {
 }
 
 const NON_BUBBLING_EVENTS = new Set([
-  "mouseEnter",
-  "mouseLeave",
   "mouseDownOutside",
   "toggleFile",
   "showMore",
@@ -68,6 +66,63 @@ function eventPath(container: Container, target: Instance): Instance[] {
   }
 
   return path
+}
+
+/**
+ * Native hover hit testing reports one painted element. DOM mouseenter and
+ * mouseleave instead describe the change between the old and new ancestry:
+ * leave the old branch from inside out, then enter the new branch from outside
+ * in. This keeps a painted descendant from hiding its listeners' ancestors.
+ */
+function dispatchHoverTransition(
+  container: Container,
+  payload: EventPayload,
+  renderer: NativeRenderer
+): GpuixEventDispatchResult {
+  const nextTarget = payload.hovered ? container.eventTargets.get(payload.elementId) : undefined
+  const previousPath = container.hoverPath
+  const nextPath = nextTarget ? eventPath(container, nextTarget) : []
+
+  let shared = 0
+  while (
+    shared < previousPath.length &&
+    shared < nextPath.length &&
+    previousPath[previousPath.length - 1 - shared]?.id === nextPath[nextPath.length - 1 - shared]?.id
+  ) {
+    shared += 1
+  }
+
+  const leaving = previousPath.slice(0, previousPath.length - shared)
+  const entering = nextPath.slice(0, nextPath.length - shared).reverse()
+  container.hoverPath = nextPath
+
+  for (const target of leaving) {
+    dispatchHoverEvent(container, payload, target, "mouseLeave", renderer)
+  }
+  for (const target of entering) {
+    dispatchHoverEvent(container, payload, target, "mouseEnter", renderer)
+  }
+
+  return { defaultPrevented: false, propagationStopped: false }
+}
+
+function dispatchHoverEvent(
+  container: Container,
+  payload: EventPayload,
+  target: Instance,
+  eventType: "mouseEnter" | "mouseLeave",
+  renderer: NativeRenderer
+): void {
+  const handler = container.eventHandlers.get(target.id)?.get(eventType)
+  if (!handler) return
+
+  const controller = createGpuixSyntheticEvent(
+    { ...payload, elementId: target.id, eventType, hovered: eventType === "mouseEnter" },
+    target,
+    renderer
+  )
+  controller.setCurrentTarget(target, 2)
+  handler(controller.event)
 }
 
 function activationKey(payload: EventPayload): string | null {
@@ -128,6 +183,10 @@ export function handleGpuixEvent(
 ): GpuixEventDispatchResult {
   const container = eventRegistrySlot().containersByRenderer.get(renderer)
   if (!container) return { defaultPrevented: false, propagationStopped: false }
+
+  if (payload.eventType === "hoverTarget") {
+    return dispatchHoverTransition(container, payload, renderer)
+  }
 
   if (shouldSuppressKeyboardClick(container, payload)) {
     return { defaultPrevented: true, propagationStopped: false }
