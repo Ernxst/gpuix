@@ -415,6 +415,14 @@ export declare class TestGpuixRenderer {
    */
   captureScreenshot(path: string): void
   /**
+   * Compare two PNG screenshots using an absolute tolerance for each RGBA channel.
+   *
+   * Future D1/fillText scenes will not be deterministic across browser and native due to
+   * font selection, shaping, and antialiasing. Transparent scenes will require an explicit
+   * straight-alpha comparison policy; the current committed scenes intentionally remain opaque.
+   */
+  compareImages(pathA: string, pathB: string, tolerance: number): ImageComparisonResult
+  /**
    * Return and clear all collected events since the last drain.
    * Events are collected synchronously — no event loop queuing.
    */
@@ -659,6 +667,11 @@ export interface HighlightRect {
 export interface ImageCapabilities {
   /** `setAllowPrivateNetworkImages()` is available. */
   privateNetwork: boolean
+}
+
+export interface ImageComparisonResult {
+  differingPixelRatio: number
+  maxChannelDelta: number
 }
 
 /**

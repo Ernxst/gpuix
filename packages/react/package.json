@@ -49,6 +49,7 @@
   },
   "files": [
     "dist",
+    "canvas-goldens",
     "jsx-runtime.js",
     "jsx-runtime.d.ts",
     "jsx-dev-runtime.js",
