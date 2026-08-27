@@ -438,11 +438,13 @@ frame = requestAnimationFrame(redraw)
 // cancelAnimationFrame(frame)
 ```
 
-Callbacks are one-shot, receive a high-resolution millisecond timestamp, and
-share one native frame request when queued together. Requesting a callback
-creates frame demand without dirtying the window; drawing still happens only
-through the normal GPUI frame path. A hot remount drops callbacks owned by the
-previous tree.
+Callbacks are one-shot, receive a high-resolution millisecond timestamp sampled
+inside GPUI's native frame callback, and share one native frame request when
+queued together. The offscreen renderer supplies that timestamp from the same
+GPUI clock, so `advanceAsyncClock()` controls it deterministically. Requesting a
+callback creates frame demand without dirtying the window; drawing still happens
+only through the normal GPUI frame path. A hot remount drops callbacks owned by
+the previous tree.
 
 | Option | Values | Purpose |
 |---|---|---|

@@ -24,7 +24,93 @@ async function waitForLength(values: unknown[], length: number): Promise<void> {
   }
 }
 
+async function settleFrameRequest(): Promise<void> {
+  await Promise.resolve()
+}
+
 describe("requestAnimationFrame", () => {
+  it("keeps the frame pump alive when one callback throws", async () => {
+    root = createTestRoot()
+    root.render(<text>callback errors</text>)
+    const reported = vi.fn()
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.stubGlobal("reportError", reported)
+    const callbacks: string[] = []
+
+    requestAnimationFrame(() => {
+      throw new Error("frame callback failed")
+    })
+    requestAnimationFrame(() => {
+      callbacks.push("sibling")
+      requestAnimationFrame(() => callbacks.push("next"))
+    })
+
+    await settleFrameRequest()
+    root.renderer.advanceAsyncClock(FRAME_MS)
+    await waitForLength(callbacks, 1)
+    await settleFrameRequest()
+    root.renderer.advanceAsyncClock(FRAME_MS)
+    await waitForLength(callbacks, 2)
+
+    expect(callbacks).toEqual(["sibling", "next"])
+    expect(reported).not.toHaveBeenCalled()
+    expect(consoleError).toHaveBeenCalledWith(
+      "[gpuix] animation frame callback failed",
+      expect.objectContaining({ message: "frame callback failed" })
+    )
+  })
+
+  it("queues callbacks registered before a desktop render host attaches", async () => {
+    const timestamps: number[] = []
+    const id = requestAnimationFrame((timestamp) => timestamps.push(timestamp))
+
+    expect(id).toEqual(expect.any(Number))
+    root = createTestRoot()
+    root.render(<text>late host</text>)
+    await settleFrameRequest()
+    root.renderer.advanceAsyncClock(FRAME_MS)
+    await waitForLength(timestamps, 1)
+
+    expect(timestamps[0]).toBeCloseTo(FRAME_MS, 5)
+  })
+
+  it("does not issue a native frame token when the final callback is cancelled", async () => {
+    root = createTestRoot()
+    root.render(<text>cancelled demand</text>)
+    const callbacks: string[] = []
+    const requestsBefore = root.renderer.getAnimationFrameRequestCount()
+
+    const cancelled = requestAnimationFrame(() => callbacks.push("cancelled"))
+    cancelAnimationFrame(cancelled)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    expect(root.renderer.getAnimationFrameRequestCount()).toBe(requestsBefore)
+
+    const cancelledInFlight = requestAnimationFrame(() => callbacks.push("in-flight"))
+    await settleFrameRequest()
+    expect(root.renderer.getAnimationFrameRequestCount()).toBe(requestsBefore + 1)
+    cancelAnimationFrame(cancelledInFlight)
+
+    requestAnimationFrame(() => callbacks.push("next"))
+    await settleFrameRequest()
+    expect(root.renderer.getAnimationFrameRequestCount()).toBe(requestsBefore + 2)
+    root.renderer.advanceAsyncClock(FRAME_MS)
+    await waitForLength(callbacks, 1)
+    expect(callbacks).toEqual(["next"])
+  })
+
+  it("receives its deterministic timestamp from the native frame callback", async () => {
+    root = createTestRoot()
+    root.render(<text>native timestamp</text>)
+    const timestamps: number[] = []
+
+    root.renderer.requestFrame((timestamp) => timestamps.push(timestamp))
+    root.renderer.advanceAsyncClock(7)
+    await waitForLength(timestamps, 1)
+
+    expect(timestamps[0]).toBeCloseTo(7, 8)
+  })
+
   it("coalesces callbacks onto one native request and supports cancellation", async () => {
     root = createTestRoot()
     root.render(<text>frame clock</text>)
@@ -45,16 +131,16 @@ describe("requestAnimationFrame", () => {
     expect(first).toEqual(expect.any(Number))
     expect(second).toEqual(expect.any(Number))
     expect(new Set([cancelled, first, second]).size).toBe(3)
+    await settleFrameRequest()
     expect(root.renderer.getAnimationFrameRequestCount()).toBe(1)
     expect(root.renderer.getDebugFrameOverlayStats().frames).toBe(framesBefore)
 
     root.renderer.advanceAsyncClock(FRAME_MS)
     await waitForLength(callbacks, 2)
 
-    expect(callbacks).toEqual([
-      ["first", FRAME_MS],
-      ["second", FRAME_MS],
-    ])
+    expect(callbacks.map(([name]) => name)).toEqual(["first", "second"])
+    expect(callbacks[0]![1]).toBeCloseTo(FRAME_MS, 5)
+    expect(callbacks[1]![1]).toBe(callbacks[0]![1])
   })
 
   it("runs a continuous loop at the deterministic 60 Hz test cadence", async () => {
@@ -69,17 +155,18 @@ describe("requestAnimationFrame", () => {
     requestAnimationFrame(frame)
 
     for (let index = 1; index <= 6; index += 1) {
+      await settleFrameRequest()
       root.renderer.advanceAsyncClock(FRAME_MS)
       await waitForLength(timestamps, index)
     }
 
     expect(timestamps).toHaveLength(6)
     for (let index = 0; index < timestamps.length; index += 1) {
-      expect(timestamps[index]).toBeCloseTo(FRAME_MS * (index + 1), 8)
+      expect(timestamps[index]).toBeCloseTo(FRAME_MS * (index + 1), 5)
     }
     const offeredHz = ((timestamps.length - 1) * 1000) /
       (timestamps.at(-1)! - timestamps[0]!)
-    expect(offeredHz).toBeCloseTo(60, 8)
+    expect(offeredHz).toBeCloseTo(60, 5)
     expect(root.renderer.getAnimationFrameRequestCount()).toBe(6)
   })
 

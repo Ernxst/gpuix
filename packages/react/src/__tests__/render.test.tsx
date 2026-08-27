@@ -57,6 +57,7 @@ if (slot.__hotEvals === 1) {
   console.log("HOT_STALE_EVENT_QUEUED")
 } else {
   requestAnimationFrame(() => console.log("HOT_FRAME", ${JSON.stringify(label)}))
+  await Promise.resolve()
   renderer.advanceAsyncClock(1000 / 60)
   renderer.dispatchNativeEvents()
   console.log("HOT_STALE_EVENT_DROPPED", slot.__hotClicks)

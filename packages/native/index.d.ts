@@ -106,7 +106,7 @@ export declare class GpuixRenderer {
    * creates frame demand without dirtying the window, so an otherwise idle
    * callback does not force a draw.
    */
-  requestFrame(callback: () => void): void
+  requestFrame(callback: (timestamp: number) => void): void
   /** Whether this native window is active and receiving key events. */
   isActive(): boolean
   /** Bring the native window and application to the foreground. */
@@ -269,7 +269,7 @@ export declare class TestGpuixRenderer {
    * Queue one callback for the next manually advanced GPUI frame without
    * dirtying or synchronously drawing the offscreen window.
    */
-  requestFrame(callback: () => void): void
+  requestFrame(callback: (timestamp: number) => void): void
   /**
    * Advance GPUI's async executor clock so tests can deterministically fire
    * timers such as bounded image retry/revalidation deadlines. When the

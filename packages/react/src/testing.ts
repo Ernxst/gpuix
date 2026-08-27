@@ -70,7 +70,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   applyBatch(json: string): number[]
   flush(): void
   advanceAsyncClock(deltaMs: number): void
-  requestFrame(callback: () => void): void
+  requestFrame(callback: (timestamp: number) => void): void
   setReducedMotion(enabled: boolean): void
   getStyleTransitionCount(): number
   getStyleTransitionFrameRequestCount(): number
@@ -251,7 +251,6 @@ export class TestRenderer implements NativeRenderer {
   private applicationEventHandler: ((event: EventPayload) => void) | null = null
   private windowEventHandler: ((event: EventPayload) => void) | null = null
   private animationFrameRequestCount = 0
-  private animationFrameTimestamp = 0
 
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
@@ -384,19 +383,13 @@ export class TestRenderer implements NativeRenderer {
     if (!Number.isFinite(deltaMs) || deltaMs < 0) {
       throw new Error("advanceAsyncClock delta must be a finite non-negative number")
     }
-    this.animationFrameTimestamp += deltaMs
     this.native.advanceAsyncClock(deltaMs)
   }
 
   /** Queue one native next-frame callback without dirtying the offscreen window. */
-  requestFrame(callback: () => void): void {
+  requestFrame(callback: (timestamp: number) => void): void {
     this.animationFrameRequestCount += 1
     this.native.requestFrame(callback)
-  }
-
-  /** High-resolution deterministic timestamp for requestAnimationFrame tests. */
-  getAnimationFrameTimestamp(): number {
-    return this.animationFrameTimestamp
   }
 
   /** Number of one-shot frame requests made through this test renderer. */
@@ -1107,7 +1100,6 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   attachAnimationFrameSource({
     owner: renderer,
     request: (callback) => renderer.requestFrame(callback),
-    now: () => renderer.getAnimationFrameTimestamp(),
   })
   renderer.setAllowPrivateNetworkImages(options.allowPrivateNetworkImages ?? false)
   const root = createRoot(renderer)

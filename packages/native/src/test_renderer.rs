@@ -23,14 +23,15 @@ use gpui::AppContext as _;
 
 use crate::element_tree::EventPayload;
 use crate::renderer::{
+    animation_frame_origin, animation_frame_timestamp_ms,
     apply_batch_to_tree_with_diagnostics, catch_gpui_initialization, debug_frame_overlay_mode_name,
     debug_frame_overlay_stats_js, default_http_client, dispatch_application_menu_action,
-    dispatch_frame_request_callback, drain_style_diagnostics, has_application_menus,
+    dispatch_animation_frame_callback, drain_style_diagnostics, has_application_menus,
     init_application_menu_support, install_application_menus, parse_debug_frame_overlay_mode,
     parse_style_json, pending_custom_prop_diagnostic, pending_style_diagnostics,
-    set_application_menus, to_element_id, DebugFrameOverlayStats, EventCallback,
-    FrameRequestCallback, GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic,
-    WindowSize,
+    set_application_menus, to_element_id, AnimationFrameCallback, DebugFrameOverlayStats,
+    EventCallback, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView, MenuSpec,
+    PendingStyleDiagnostic, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -250,6 +251,7 @@ pub struct TestGpuixRenderer {
     image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
+    animation_frame_timestamp_origin: FrameTimestampOrigin,
     /// Mouse-down origin for the current GPUI active-state sequence. Retained
     /// for the native test input path, which must mirror main's press lifetime.
     active_pointer_origin: Mutex<Option<(f64, f64)>>,
@@ -335,6 +337,7 @@ impl TestGpuixRenderer {
             image_network_policy,
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(Vec::new()),
+            animation_frame_timestamp_origin: Arc::new(Mutex::new(None)),
             active_pointer_origin: Mutex::new(None),
         })
     }
@@ -578,12 +581,20 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn request_frame(
         &self,
-        #[napi(ts_arg_type = "() => void")] callback: FrameRequestCallback,
+        #[napi(ts_arg_type = "(timestamp: number) => void")] callback: AnimationFrameCallback,
     ) -> Result<()> {
+        let timestamp_origin = self.animation_frame_timestamp_origin.clone();
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.update_window(window, |_, window, _app| {
-                window.on_next_frame(move |_window, _app| {
-                    dispatch_frame_request_callback(callback);
+            cx.update_window(window, move |_, window, app| {
+                let origin = animation_frame_origin(
+                    &timestamp_origin,
+                    app.background_executor().now(),
+                );
+                window.on_next_frame(move |_window, app| {
+                    dispatch_animation_frame_callback(
+                        callback,
+                        animation_frame_timestamp_ms(origin, app.background_executor().now()),
+                    );
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;

@@ -444,7 +444,6 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     attachAnimationFrameSource({
       owner: host,
       request: requestFrame,
-      now: () => host.getAnimationFrameTimestamp?.() ?? performance.now(),
     })
   } else if (typeof browserFrameSource !== "function") {
     throw new Error("The GPUIX renderer does not provide a display-paced frame clock")
