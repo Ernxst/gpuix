@@ -191,6 +191,92 @@ pub(crate) fn first_canvas_diagnostic_message(
         .map(|diagnostic| style_diagnostic_context(&diagnostic, tree).0)
 }
 
+pub(crate) fn take_canvas_preparation_diagnostics(
+    display_lists: &SharedDisplayLists,
+    strict: bool,
+    tree: &Mutex<RetainedTree>,
+    seen: &Mutex<HashSet<(u64, String)>>,
+) -> std::result::Result<Vec<PendingStyleDiagnostic>, String> {
+    let diagnostics = display_lists.take_preparation_diagnostics();
+    if diagnostics.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if strict {
+        let first = &diagnostics[0];
+        let tree = tree.lock().unwrap();
+        return Err(first_canvas_diagnostic_message(
+            &tree,
+            first.element_id,
+            &[first.diagnostic.clone()],
+        )
+        .expect("one canvas preparation diagnostic has a first item"));
+    }
+
+    let mut pending = Vec::new();
+    for diagnostic in diagnostics {
+        pending.extend(fresh_canvas_diagnostics(
+            diagnostic.element_id,
+            vec![diagnostic.diagnostic],
+            seen,
+        ));
+    }
+    Ok(pending)
+}
+
+#[cfg(test)]
+mod canvas_preparation_diagnostic_tests {
+    use super::*;
+
+    fn diagnostic() -> CanvasDiagnostic {
+        CanvasDiagnostic {
+            op_index: 4,
+            op_name: "fill".to_string(),
+            reason: "path preparation failed".to_string(),
+        }
+    }
+
+    fn tree() -> Mutex<RetainedTree> {
+        let mut tree = RetainedTree::new();
+        tree.create_element(7, "canvas".to_string());
+        Mutex::new(tree)
+    }
+
+    #[test]
+    fn strict_preparation_diagnostic_is_returned_as_the_canvas_error() {
+        let display_lists = SharedDisplayLists::default();
+        display_lists.report_preparation_diagnostics(7, &[diagnostic()]);
+
+        let error = take_canvas_preparation_diagnostics(
+            &display_lists,
+            true,
+            &tree(),
+            &Mutex::new(HashSet::new()),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("Invalid canvas command on <canvas>"));
+        assert!(error.contains("property \"fill\""));
+        assert!(error.contains("path preparation failed"));
+    }
+
+    #[test]
+    fn non_strict_preparation_diagnostic_uses_member_deduplication() {
+        let display_lists = SharedDisplayLists::default();
+        let seen = Mutex::new(HashSet::new());
+        display_lists.report_preparation_diagnostics(7, &[diagnostic(), diagnostic()]);
+
+        let first = take_canvas_preparation_diagnostics(&display_lists, false, &tree(), &seen)
+            .expect("non-strict diagnostics do not throw");
+        assert_eq!(first.len(), 1);
+
+        display_lists.report_preparation_diagnostics(7, &[diagnostic()]);
+        let repeated = take_canvas_preparation_diagnostics(&display_lists, false, &tree(), &seen)
+            .expect("non-strict diagnostics do not throw");
+        assert!(repeated.is_empty());
+    }
+}
+
 fn style_diagnostic_context(
     diagnostic: &PendingStyleDiagnostic,
     tree: &RetainedTree,
@@ -1554,6 +1640,18 @@ impl GpuixRenderer {
         ))
     }
 
+    fn surface_canvas_preparation_diagnostics(&self) -> Result<()> {
+        let pending = take_canvas_preparation_diagnostics(
+            &self.canvas_display_lists,
+            self.strict_styles.load(Ordering::Relaxed),
+            &self.tree,
+            &self.canvas_diagnostic_members,
+        )
+        .map_err(Error::from_reason)?;
+        self.style_diagnostics.lock().unwrap().extend(pending);
+        Ok(())
+    }
+
     #[napi(constructor)]
     pub fn new(event_callback: Option<ThreadsafeFunction<EventPayload>>) -> Self {
         let _ = env_logger::try_init();
@@ -2047,6 +2145,10 @@ impl GpuixRenderer {
     /// Drain rejected style fields after a commit, once element type and testId are known.
     #[napi]
     pub fn drain_style_diagnostics(&self) -> Vec<GpuixStyleDiagnostic> {
+        if !self.strict_styles.load(Ordering::Relaxed) {
+            self.surface_canvas_preparation_diagnostics()
+                .expect("non-strict canvas preparation diagnostics cannot throw");
+        }
         drain_style_diagnostics(&self.style_diagnostics, &self.tree)
     }
 
@@ -2123,6 +2225,7 @@ impl GpuixRenderer {
         operands: Float64Array,
         strings: Vec<String>,
     ) -> Result<()> {
+        self.surface_canvas_preparation_diagnostics()?;
         let id = to_element_id(id)?;
         let tree = self.tree.lock().unwrap();
         validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
@@ -2404,14 +2507,18 @@ impl GpuixRenderer {
     /// A pending display-link token is dispatched immediately before this pump.
     #[napi]
     pub fn tick(&self) -> Result<bool> {
-        self.pump_native_event_loop(true)
+        let running = self.pump_native_event_loop(true)?;
+        self.surface_canvas_preparation_diagnostics()?;
+        Ok(running)
     }
 
     /// Pump idle platform work without dispatching a pending frame token.
     /// This keeps input and application lifecycle events responsive between frames.
     #[napi]
     pub fn tick_idle(&self) -> Result<bool> {
-        self.pump_native_event_loop(false)
+        let running = self.pump_native_event_loop(false)?;
+        self.surface_canvas_preparation_diagnostics()?;
+        Ok(running)
     }
 
     #[napi]
@@ -3872,6 +3979,22 @@ pub struct WebGpuixRenderer {
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 #[wasm_bindgen::prelude::wasm_bindgen(js_class = GpuixRenderer)]
 impl WebGpuixRenderer {
+    fn surface_canvas_preparation_diagnostics(&self) -> Result<(), wasm_bindgen::JsValue> {
+        let pending = take_canvas_preparation_diagnostics(
+            &self.canvas_display_lists,
+            self.strict_styles.load(Ordering::Relaxed),
+            &self.tree,
+            &self.canvas_diagnostic_members,
+        )
+        .map_err(|message| wasm_bindgen::JsValue::from_str(&message))?;
+        let tree = self.tree.lock().unwrap();
+        for diagnostic in pending {
+            let message = style_diagnostic_context(&diagnostic, &tree).0;
+            web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
+        }
+        Ok(())
+    }
+
     #[wasm_bindgen::prelude::wasm_bindgen(constructor)]
     pub fn new(event_callback: js_sys::Function) -> Self {
         let window_event_callback = Rc::new(RefCell::new(None));
@@ -4110,6 +4233,7 @@ impl WebGpuixRenderer {
         operands: js_sys::Float64Array,
         strings: js_sys::Array,
     ) -> Result<(), wasm_bindgen::JsValue> {
+        self.surface_canvas_preparation_diagnostics()?;
         let id = web_element_id(id)?;
         let tree = self.tree.lock().unwrap();
         validate_canvas_target(&tree, id)

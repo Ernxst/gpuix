@@ -450,6 +450,10 @@ impl TestGpuixRenderer {
 
     #[napi]
     pub fn drain_style_diagnostics(&self) -> Vec<GpuixStyleDiagnostic> {
+        if !self.strict_styles.load(Ordering::Relaxed) {
+            self.surface_canvas_preparation_diagnostics()
+                .expect("non-strict canvas preparation diagnostics cannot throw");
+        }
         drain_style_diagnostics(&self.style_diagnostics, &self.tree)
     }
 
@@ -523,6 +527,7 @@ impl TestGpuixRenderer {
         operands: Float64Array,
         strings: Vec<String>,
     ) -> Result<()> {
+        self.surface_canvas_preparation_diagnostics()?;
         let id = to_element_id(id)?;
         let tree = self.tree.lock().unwrap();
         validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
@@ -620,6 +625,18 @@ impl TestGpuixRenderer {
         })
     }
 
+    fn surface_canvas_preparation_diagnostics(&self) -> Result<()> {
+        let pending = crate::renderer::take_canvas_preparation_diagnostics(
+            &self.canvas_display_lists,
+            self.strict_styles.load(Ordering::Relaxed),
+            &self.tree,
+            &self.canvas_diagnostic_members,
+        )
+        .map_err(Error::from_reason)?;
+        self.style_diagnostics.lock().unwrap().extend(pending);
+        Ok(())
+    }
+
     /// Notify the view entity and run GPUI until parked.
     /// This triggers GpuixView::render() → build_element() → GPUI layout.
     /// Must be called after mutations and before simulating events (GPUI's
@@ -632,7 +649,8 @@ impl TestGpuixRenderer {
                 .map_err(|e| Error::from_reason(e.to_string()))?;
             cx.run_until_parked();
             Ok(())
-        })
+        })?;
+        self.surface_canvas_preparation_diagnostics()
     }
 
     /// Queue one callback for the next manually advanced GPUI frame without

@@ -208,6 +208,58 @@ describeNative("retained canvas element", () => {
     }
   })
 
+  it("throws transformed fillRect preparation diagnostics at the strict command boundary", () => {
+    const testRoot = createTestRoot({ width: 120, height: 80, strictStyles: true })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="overflow-canvas" width={120} height={80} />
+      )
+      const context = canvasRef.current!.getContext("2d")!
+      context.transform(Number.MAX_VALUE, 0, 0, 1, 0, 0)
+      context.fillRect(2, 0, 1, 1)
+
+      expect(() => flushRecordingContext2D(context)).toThrow(
+        /overflow-canvas.*fillRect.*finite/
+      )
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("warns once when a nonzero fill exceeds the safe B1 preparation cap", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ width: 180, height: 120, strictStyles: false })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="complex-path-canvas" width={180} height={120} />
+      )
+      const context = canvasRef.current!.getContext("2d")!
+      context.beginPath()
+      context.moveTo(0, 0)
+      for (let index = 0; index < 129; index++) {
+        context.lineTo(index, index % 2)
+      }
+      context.fill()
+      flushRecordingContext2D(context)
+
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(/complex-path-canvas.*fill.*128 line segments/)
+      )
+
+      context.fill()
+      flushRecordingContext2D(context)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      warn.mockRestore()
+      testRoot.unmount()
+    }
+  })
+
   it("makes the standard DPR backing-store scale visually identical to logical sizing", () => {
     const logical = createTestRoot({
       width: CANVAS_GOLDEN_WIDTH,

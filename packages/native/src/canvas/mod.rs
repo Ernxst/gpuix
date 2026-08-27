@@ -3,11 +3,62 @@
 pub mod opcodes;
 
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LockResult, Mutex, MutexGuard};
 
 use rustc_hash::FxHashMap;
 
-pub type SharedDisplayLists = Arc<Mutex<FxHashMap<u64, Arc<DisplayList>>>>;
+type DisplayLists = FxHashMap<u64, Arc<DisplayList>>;
+
+#[derive(Clone, Debug)]
+pub(crate) struct CanvasPreparationDiagnostic {
+    pub element_id: u64,
+    pub diagnostic: CanvasDiagnostic,
+}
+
+/// Display lists and the diagnostics produced while preparing them share a
+/// lifetime so a GPUI paint closure can report back to the owning renderer.
+/// Preparation remains at paint time because its tolerance depends on layout
+/// and device scale; decoding it eagerly would tessellate every path twice.
+#[derive(Clone, Default)]
+pub struct SharedDisplayLists {
+    lists: Arc<Mutex<DisplayLists>>,
+    preparation_diagnostics: Arc<Mutex<Vec<CanvasPreparationDiagnostic>>>,
+}
+
+impl SharedDisplayLists {
+    pub(crate) fn lock(&self) -> LockResult<MutexGuard<'_, DisplayLists>> {
+        self.lists.lock()
+    }
+
+    pub(crate) fn report_preparation_diagnostics(
+        &self,
+        element_id: u64,
+        diagnostics: &[CanvasDiagnostic],
+    ) {
+        self.preparation_diagnostics
+            .lock()
+            .unwrap()
+            .extend(
+                diagnostics
+                    .iter()
+                    .cloned()
+                    .map(|diagnostic| CanvasPreparationDiagnostic {
+                        element_id,
+                        diagnostic,
+                    }),
+            );
+    }
+
+    pub(crate) fn take_preparation_diagnostics(&self) -> Vec<CanvasPreparationDiagnostic> {
+        std::mem::take(&mut *self.preparation_diagnostics.lock().unwrap())
+    }
+}
+
+/// The B1 path surface is deliberately bounded below GPUI's `u16` path-index
+/// ceiling. With line-only input this also leaves room for vertices introduced
+/// while resolving intersections. B3 can replace this conservative admission
+/// limit when it adds explicit, scale-aware tessellation policy.
+const MAX_B1_FILL_SEGMENTS: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CanvasPoint {
@@ -131,6 +182,34 @@ impl Transform2D {
             y: self.b * x + self.d * y + self.f,
         }
     }
+}
+
+fn point_preparation_problem(point: CanvasPoint) -> Option<&'static str> {
+    let x = point.x as f32;
+    let y = point.y as f32;
+    (!point.x.is_finite() || !point.y.is_finite() || !x.is_finite() || !y.is_finite())
+        .then_some("transformed geometry must remain finite in GPUI coordinates")
+}
+
+fn path_preparation_problem(commands: &[PathCommand]) -> Option<String> {
+    for point in commands.iter().filter_map(|command| match command {
+        PathCommand::MoveTo(point) | PathCommand::LineTo(point) => Some(*point),
+        PathCommand::ClosePath => None,
+    }) {
+        if let Some(reason) = point_preparation_problem(point) {
+            return Some(reason.to_string());
+        }
+    }
+
+    let segment_count = commands
+        .iter()
+        .filter(|command| matches!(command, PathCommand::LineTo(_)))
+        .count();
+    (segment_count > MAX_B1_FILL_SEGMENTS).then(|| {
+        format!(
+            "canvas phase B1 safely prepares at most {MAX_B1_FILL_SEGMENTS} line segments per nonzero fill; got {segment_count}"
+        )
+    })
 }
 
 fn malformed(op_index: usize, reason: impl Into<String>) -> DecodeError {
@@ -349,17 +428,29 @@ pub(crate) fn decode(
                     let y = command_operands[1];
                     let width = command_operands[2];
                     let height = command_operands[3];
-                    items.push(DisplayItem::FillRect(FillRect {
-                        points: [
-                            state.transform.transform_point(x, y),
-                            state.transform.transform_point(x + width, y),
-                            state.transform.transform_point(x + width, y + height),
-                            state.transform.transform_point(x, y + height),
-                        ],
-                        color: state.fill_style,
-                        op_index,
-                    }));
-                    invalidates = true;
+                    let points = [
+                        state.transform.transform_point(x, y),
+                        state.transform.transform_point(x + width, y),
+                        state.transform.transform_point(x + width, y + height),
+                        state.transform.transform_point(x, y + height),
+                    ];
+                    if let Some(reason) = points
+                        .iter()
+                        .find_map(|point| point_preparation_problem(*point))
+                    {
+                        diagnostics.push(CanvasDiagnostic {
+                            op_index,
+                            op_name: spec.name.to_string(),
+                            reason: reason.to_string(),
+                        });
+                    } else {
+                        items.push(DisplayItem::FillRect(FillRect {
+                            points,
+                            color: state.fill_style,
+                            op_index,
+                        }));
+                        invalidates = true;
+                    }
                 }
                 // Browser Canvas treats non-finite rectangle arguments as a no-op.
             }
@@ -401,12 +492,20 @@ pub(crate) fn decode(
                         .iter()
                         .any(|command| matches!(command, PathCommand::LineTo(_)))
                     {
-                        items.push(DisplayItem::FillPath(FillPath {
-                            commands: current_path.clone(),
-                            color: state.fill_style,
-                            op_index,
-                        }));
-                        invalidates = true;
+                        if let Some(reason) = path_preparation_problem(&current_path) {
+                            diagnostics.push(CanvasDiagnostic {
+                                op_index,
+                                op_name: spec.name.to_string(),
+                                reason,
+                            });
+                        } else {
+                            items.push(DisplayItem::FillPath(FillPath {
+                                commands: current_path.clone(),
+                                color: state.fill_style,
+                                op_index,
+                            }));
+                            invalidates = true;
+                        }
                     }
                 }
                 1.0 => diagnostics.push(CanvasDiagnostic {
@@ -508,6 +607,14 @@ pub fn remove_display_lists(display_lists: &SharedDisplayLists, element_ids: &[u
     let mut lists = display_lists.lock().unwrap();
     for id in element_ids {
         lists.remove(id);
+    }
+    drop(lists);
+    if !element_ids.is_empty() {
+        display_lists
+            .preparation_diagnostics
+            .lock()
+            .unwrap()
+            .retain(|diagnostic| !element_ids.contains(&diagnostic.element_id));
     }
 }
 
@@ -711,6 +818,47 @@ mod tests {
                 PathCommand::ClosePath,
             ]
         );
+    }
+
+    #[test]
+    fn non_finite_transformed_fill_rect_is_a_named_diagnostic() {
+        let (ops, operands) = stream(&[
+            (opcodes::TRANSFORM, &[f64::MAX, 0.0, 0.0, 1.0, 0.0, 0.0]),
+            (opcodes::FILL_RECT, &[2.0, 0.0, 1.0, 1.0]),
+        ]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list(&store, 15, &ops, &operands, &[]).unwrap();
+
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(outcome.diagnostics[0].op_name, "fillRect");
+        assert!(outcome.diagnostics[0].reason.contains("finite"));
+        assert!(!outcome.invalidates);
+        assert!(!store.lock().unwrap().contains_key(&15));
+    }
+
+    #[test]
+    fn path_too_complex_for_safe_b1_preparation_is_a_named_diagnostic() {
+        let mut commands = vec![
+            (opcodes::BEGIN_PATH, vec![]),
+            (opcodes::MOVE_TO, vec![0.0, 0.0]),
+        ];
+        for index in 0..129 {
+            commands.push((opcodes::LINE_TO, vec![index as f64, (index % 2) as f64]));
+        }
+        commands.push((opcodes::FILL, vec![0.0]));
+        let borrowed = commands
+            .iter()
+            .map(|(opcode, operands)| (*opcode, operands.as_slice()))
+            .collect::<Vec<_>>();
+        let (ops, operands) = stream(&borrowed);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list(&store, 16, &ops, &operands, &[]).unwrap();
+
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(outcome.diagnostics[0].op_name, "fill");
+        assert!(outcome.diagnostics[0].reason.contains("128"));
+        assert!(!outcome.invalidates);
+        assert!(!store.lock().unwrap().contains_key(&16));
     }
 
     #[test]

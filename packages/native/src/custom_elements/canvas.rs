@@ -456,14 +456,7 @@ impl CustomElement for CanvasElement {
                     },
                     |list| prepare(list, bounds, width, height),
                 ));
-                for diagnostic in &prepared.diagnostics {
-                    log::error!(
-                        "<canvas> element {id} {} op[{}]: {}",
-                        diagnostic.op_name,
-                        diagnostic.op_index,
-                        diagnostic.reason
-                    );
-                }
+                display_lists.report_preparation_diagnostics(id, &prepared.diagnostics);
                 *cache = Some(PreparedCache {
                     key,
                     list: prepared.clone(),
