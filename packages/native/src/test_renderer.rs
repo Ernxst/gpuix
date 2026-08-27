@@ -25,11 +25,12 @@ use crate::element_tree::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree_with_diagnostics, catch_gpui_initialization, debug_frame_overlay_mode_name,
     debug_frame_overlay_stats_js, default_http_client, dispatch_application_menu_action,
-    drain_style_diagnostics, has_application_menus, init_application_menu_support,
-    install_application_menus, parse_debug_frame_overlay_mode, parse_style_json,
-    pending_custom_prop_diagnostic, pending_style_diagnostics, set_application_menus,
-    to_element_id, DebugFrameOverlayStats, EventCallback, GpuixStyleDiagnostic, GpuixView,
-    MenuSpec, PendingStyleDiagnostic, WindowSize,
+    dispatch_frame_request_callback, drain_style_diagnostics, has_application_menus,
+    init_application_menu_support, install_application_menus, parse_debug_frame_overlay_mode,
+    parse_style_json, pending_custom_prop_diagnostic, pending_style_diagnostics,
+    set_application_menus, to_element_id, DebugFrameOverlayStats, EventCallback,
+    FrameRequestCallback, GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic,
+    WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -572,6 +573,24 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Queue one callback for the next manually advanced GPUI frame without
+    /// dirtying or synchronously drawing the offscreen window.
+    #[napi]
+    pub fn request_frame(
+        &self,
+        #[napi(ts_arg_type = "() => void")] callback: FrameRequestCallback,
+    ) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, |_, window, _app| {
+                window.on_next_frame(move |_window, _app| {
+                    dispatch_frame_request_callback(callback);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            Ok(())
+        })
+    }
+
     /// Advance GPUI's async executor clock so tests can deterministically fire
     /// timers such as bounded image retry/revalidation deadlines. When the
     /// renderer animation clock is paused, advance that clock by the same
@@ -586,7 +605,8 @@ impl TestGpuixRenderer {
         with_test_state(self.state_id, |cx, window, view| {
             cx.advance_clock(std::time::Duration::from_secs_f64(delta_ms / 1000.0));
             let view = view.clone();
-            cx.update_window(window, |_, _window, app| {
+            cx.update_window(window, |_, window, app| {
+                window.simulate_next_frame(app);
                 view.update(app, |view, cx| {
                     if view.clock.fast_forward_if_frozen_ms(delta_ms).is_some() {
                         cx.notify();

@@ -5,6 +5,10 @@ import { createRoot, flushSync, type Root } from "./reconciler.js"
 import type { DebugFrameOverlayMode, NativeRenderer } from "../types/host.js"
 import { handleGpuixEvent } from "./event-registry.js"
 import {
+  attachAnimationFrameSource,
+  detachAnimationFrameSource,
+} from "../frame-clock.js"
+import {
   App as AutomationApp,
   browserRendererAsTest,
   InProcessBackend,
@@ -263,6 +267,7 @@ export function resetRender(): void {
   const slot = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
   removeProcessTerminationGuards(slot)
   slot?.loop?.stop()
+  if (slot?.renderer) detachAnimationFrameSource(slot.renderer)
   slot?.renderer?.setApplicationEventHandler?.(null)
   slot?.root?.unmount()
   const automation = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
@@ -303,6 +308,7 @@ function terminateRenderSlot(
 
   slot.loop?.stop()
   slot.loop = undefined
+  if (slot.renderer) detachAnimationFrameSource(slot.renderer)
   removeProcessTerminationGuards(slot)
   let clean = true
 
@@ -431,6 +437,17 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
   const host = slot.renderer
   if (!host) {
     throw new Error("GPUIX renderer is not initialized")
+  }
+  const browserFrameSource = Reflect.get(globalThis, "requestAnimationFrame")
+  if (host.requestFrame) {
+    const requestFrame = host.requestFrame.bind(host)
+    attachAnimationFrameSource({
+      owner: host,
+      request: requestFrame,
+      now: () => host.getAnimationFrameTimestamp?.() ?? performance.now(),
+    })
+  } else if (typeof browserFrameSource !== "function") {
+    throw new Error("The GPUIX renderer does not provide a display-paced frame clock")
   }
   host.setApplicationEventHandler?.((event) => dispatchApplicationEvent(slot, event))
   if (menus !== undefined && (injected || remount)) {

@@ -27,6 +27,7 @@ function hotAppSource(label: string): string {
 import React from "react"
 import { TestRenderer } from ${JSON.stringify(join(srcDir, "testing.ts"))}
 import { render } from ${JSON.stringify(join(srcDir, "reconciler/renderer.ts"))}
+import { requestAnimationFrame } from ${JSON.stringify(join(srcDir, "frame-clock.ts"))}
 
 const slot = globalThis
 slot.__hotEvals = (slot.__hotEvals ?? 0) + 1
@@ -50,10 +51,13 @@ render(
 )
 renderer.flush()
 if (slot.__hotEvals === 1) {
+  requestAnimationFrame(() => console.log("HOT_FRAME", ${JSON.stringify(label)}))
   renderer.nativeSimulateClick(10, 10)
   renderer.native.simulateClick(10, 10)
   console.log("HOT_STALE_EVENT_QUEUED")
 } else {
+  requestAnimationFrame(() => console.log("HOT_FRAME", ${JSON.stringify(label)}))
+  renderer.advanceAsyncClock(1000 / 60)
   renderer.dispatchNativeEvents()
   console.log("HOT_STALE_EVENT_DROPPED", slot.__hotClicks)
   renderer.nativeSimulateClick(10, 10)
@@ -598,6 +602,8 @@ describeNative("render()", () => {
       await output.wait("HOT_SAME_RENDERER true", 1000)
       await output.wait("HOT_STALE_EVENT_DROPPED 1", 1000)
       await output.wait("HOT_CLICK world 2", 1000)
+      const hotOutput = await output.wait("HOT_FRAME world", 1000)
+      expect(hotOutput).not.toContain("HOT_FRAME hello")
     } finally {
       child.kill("SIGTERM")
       try {

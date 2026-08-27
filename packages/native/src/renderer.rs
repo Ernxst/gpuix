@@ -754,6 +754,7 @@ enum ClockControl {
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum UiCommand {
     Invalidate,
+    RequestFrame(FrameRequestCallback),
     SetMenus {
         menus: Vec<MenuSpec>,
         response: SyncSender<std::result::Result<(), String>>,
@@ -852,6 +853,9 @@ async fn run_ui_commands(
     while let Some(command) = commands.next().await {
         let result = match command {
             UiCommand::Invalidate => refresh_ui_window(window, cx),
+            UiCommand::RequestFrame(callback) => window.update(cx, move |_view, window, _cx| {
+                window.on_next_frame(move |_window, _cx| dispatch_frame_request_callback(callback));
+            }),
             UiCommand::SetMenus { menus, response } => {
                 let result = cx.update(|cx| set_application_menus(cx, menus));
                 response.send(result.clone()).ok();
@@ -1246,8 +1250,18 @@ pub(crate) fn unsupported_capability(env: Env, capability: &str) -> Result<()> {
     Err(error.into_unknown(&env)?.into())
 }
 
-#[cfg(target_os = "macos")]
-type FrameRequestCallback = ThreadsafeFunction<(), Unknown<'static>, (), Status, false, false, 1>;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) type FrameRequestCallback =
+    ThreadsafeFunction<(), Unknown<'static>, (), Status, false, false, 1>;
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn dispatch_frame_request_callback(callback: FrameRequestCallback) {
+    let _ = callback.call_with_return_value(
+        (),
+        ThreadsafeFunctionCallMode::NonBlocking,
+        |_result, _env| Ok(()),
+    );
+}
 
 #[cfg(target_os = "macos")]
 struct PresentTimingCapture {
@@ -2286,6 +2300,38 @@ impl GpuixRenderer {
         {
             let _ = callback;
             false
+        }
+    }
+
+    /// Queue one callback on GPUI's next display-paced frame. `on_next_frame`
+    /// creates frame demand without dirtying the window, so an otherwise idle
+    /// callback does not force a draw.
+    #[napi]
+    pub fn request_frame(
+        &self,
+        #[napi(ts_arg_type = "() => void")] callback: FrameRequestCallback,
+    ) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, _cx| {
+            window.on_next_frame(move |_window, _cx| {
+                dispatch_frame_request_callback(callback);
+            });
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::RequestFrame(callback));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = callback;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support animation frames",
+            ))
         }
     }
 
