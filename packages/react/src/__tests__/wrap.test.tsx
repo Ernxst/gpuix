@@ -322,23 +322,15 @@ describeNative("test window size", () => {
     expect(() => createTestRoot({ width: 1e300 })).toThrow(/finite/)
   })
 
-  /// Windows opens every offscreen test window at the display size and ignores
-  /// the requested one, so `createTestRoot({ width })` has no effect there:
-  /// 1280x800, 640x480 and 640-only all came back 1024 wide on the runner.
-  /// Skipped rather than relaxed, because relaxing would let the option stay
-  /// broken on the one platform where it already is.
-  /// https://github.com/remorses/gpuix/issues/21
-  const itSizes = process.platform === "win32" ? it.skip : it
-
   // Half of a window the platform already granted, so no display can clamp it
   // and the assertion holds on any monitor.
-  itSizes("honours a custom window size", () => {
+  it("honours a custom window size", () => {
     const base = sized({}).window
     const want = { width: Math.round(base.width / 2), height: Math.round(base.height / 2) }
     expect(sized(want).full).toMatchObject(want)
   })
 
-  itSizes("keeps the default for the dimension that is omitted", () => {
+  it("keeps the default for the dimension that is omitted", () => {
     const base = sized({}).window
     const width = Math.round(base.width / 2)
     expect(sized({ width }).full).toMatchObject({ width, height: base.height })
@@ -348,7 +340,7 @@ describeNative("test window size", () => {
   /// window is narrow enough to fall under the cap. In a window at or above the
   /// cap both states resolve to the cap, so the wrap width never moves and a
   /// reflow cost is invisible.
-  itSizes("only re-wraps a capped column once the window falls under the cap", () => {
+  it("only re-wraps a capped column once the window falls under the cap", () => {
     const base = sized({}).window
     const cap = Math.round(base.width / 2)
 

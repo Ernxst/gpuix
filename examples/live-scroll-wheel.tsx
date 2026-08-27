@@ -37,7 +37,9 @@ function LiveScrollWheel() {
         }
       >
         <div style={{ height: 960 }}>
-          <text style={{ color: "#d4d4d4" }}>Wheel input moves this live native scroll area.</text>
+          <text testId="scroll-content" style={{ color: "#d4d4d4" }}>
+            Wheel input moves this live native scroll area.
+          </text>
         </div>
       </div>
     </div>
