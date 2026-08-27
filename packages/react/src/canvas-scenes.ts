@@ -160,6 +160,13 @@ export const canvasScenes = {
       context.lineJoin = "round"
       context.strokeStyle = "#0f766e"
       context.stroke()
+
+      context.beginPath()
+      context.ellipse(35, 28, 24, 13, 0.35, 0.2, Math.PI * 1.1)
+      context.setLineDash([])
+      context.lineWidth = 1.25
+      context.strokeStyle = "#7c3aed"
+      context.stroke()
       context.restore()
     },
   },

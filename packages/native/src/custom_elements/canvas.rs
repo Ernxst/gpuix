@@ -243,6 +243,302 @@ fn subtract_clear_regions(
     Some(path)
 }
 
+fn ellipse_point_and_derivative(
+    arc: crate::canvas::EllipseArc,
+    angle: f64,
+) -> (crate::canvas::CanvasPoint, crate::canvas::CanvasPoint) {
+    let (sin_rotation, cos_rotation) = arc.rotation.sin_cos();
+    let (sin_angle, cos_angle) = angle.sin_cos();
+    (
+        crate::canvas::CanvasPoint {
+            x: arc.center.x + arc.radius_x * cos_angle * cos_rotation
+                - arc.radius_y * sin_angle * sin_rotation,
+            y: arc.center.y
+                + arc.radius_x * cos_angle * sin_rotation
+                + arc.radius_y * sin_angle * cos_rotation,
+        },
+        crate::canvas::CanvasPoint {
+            x: -arc.radius_x * sin_angle * cos_rotation - arc.radius_y * cos_angle * sin_rotation,
+            y: -arc.radius_x * sin_angle * sin_rotation + arc.radius_y * cos_angle * cos_rotation,
+        },
+    )
+}
+
+fn append_adaptive_arc(
+    output: &mut Vec<crate::canvas::PathCommand>,
+    arc: crate::canvas::EllipseArc,
+    layout_scale_x: f64,
+    layout_scale_y: f64,
+    device_scale: f64,
+) {
+    const TARGET_DEVICE_TOLERANCE: f64 = 0.25;
+    let transform_scale = arc
+        .transform
+        .max_scale_after_output_scale(layout_scale_x * device_scale, layout_scale_y * device_scale);
+    let device_radius = arc.radius_x.abs().max(arc.radius_y.abs()) * transform_scale;
+    let maximum_sweep = if device_radius <= TARGET_DEVICE_TOLERANCE {
+        std::f64::consts::FRAC_PI_2
+    } else {
+        // `4 asin(sqrt(error / (2r)))` is the stable form of
+        // `2 acos(1 - error / r)` when the transformed radius is large.
+        let chord_limit = 4.0
+            * (TARGET_DEVICE_TOLERANCE / (2.0 * device_radius))
+                .sqrt()
+                .clamp(0.0, 1.0)
+                .asin();
+        chord_limit.min(std::f64::consts::FRAC_PI_2)
+    };
+    let segment_count = ((arc.sweep.abs() / maximum_sweep.max(1e-6)).ceil() as usize)
+        .min(usize::from(u16::MAX) + 1);
+    let segment_sweep = arc.sweep / segment_count.max(1) as f64;
+
+    for segment in 0..segment_count.max(1) {
+        let from_angle = arc.start_angle + segment_sweep * segment as f64;
+        let to_angle = from_angle + segment_sweep;
+        let alpha = (4.0 / 3.0) * (segment_sweep / 4.0).tan();
+        let (from, from_derivative) = ellipse_point_and_derivative(arc, from_angle);
+        let (to, to_derivative) = ellipse_point_and_derivative(arc, to_angle);
+        output.push(crate::canvas::PathCommand::CubicTo {
+            control_a: arc.transform.transform_point(
+                from.x + alpha * from_derivative.x,
+                from.y + alpha * from_derivative.y,
+            ),
+            control_b: arc.transform.transform_point(
+                to.x - alpha * to_derivative.x,
+                to.y - alpha * to_derivative.y,
+            ),
+            to: arc.transform.transform_point(to.x, to.y),
+        });
+    }
+}
+
+fn expand_arcs(
+    commands: &[crate::canvas::PathCommand],
+    layout_scale_x: f64,
+    layout_scale_y: f64,
+    device_scale: f64,
+) -> Vec<crate::canvas::PathCommand> {
+    let mut expanded = Vec::with_capacity(commands.len());
+    for command in commands {
+        match command {
+            crate::canvas::PathCommand::Ellipse(arc) => append_adaptive_arc(
+                &mut expanded,
+                *arc,
+                layout_scale_x,
+                layout_scale_y,
+                device_scale,
+            ),
+            command => expanded.push(command.clone()),
+        }
+    }
+    expanded
+}
+
+fn map_commands_to_stroke_space(
+    commands: &[crate::canvas::PathCommand],
+    transform: crate::canvas::CanvasTransform,
+) -> Option<Vec<crate::canvas::PathCommand>> {
+    let map = |point| transform.inverse_transform_point(point);
+    commands
+        .iter()
+        .map(|command| {
+            Some(match command {
+                crate::canvas::PathCommand::MoveTo(point) => {
+                    crate::canvas::PathCommand::MoveTo(map(*point)?)
+                }
+                crate::canvas::PathCommand::LineTo(point) => {
+                    crate::canvas::PathCommand::LineTo(map(*point)?)
+                }
+                crate::canvas::PathCommand::CubicTo {
+                    control_a,
+                    control_b,
+                    to,
+                } => crate::canvas::PathCommand::CubicTo {
+                    control_a: map(*control_a)?,
+                    control_b: map(*control_b)?,
+                    to: map(*to)?,
+                },
+                crate::canvas::PathCommand::QuadraticTo { control, to } => {
+                    crate::canvas::PathCommand::QuadraticTo {
+                        control: map(*control)?,
+                        to: map(*to)?,
+                    }
+                }
+                crate::canvas::PathCommand::Ellipse(_) => unreachable!("arcs expand first"),
+                crate::canvas::PathCommand::ClosePath => crate::canvas::PathCommand::ClosePath,
+            })
+        })
+        .collect()
+}
+
+fn split_subpaths(commands: &[crate::canvas::PathCommand]) -> Vec<&[crate::canvas::PathCommand]> {
+    let mut starts = commands
+        .iter()
+        .enumerate()
+        .filter_map(|(index, command)| {
+            matches!(command, crate::canvas::PathCommand::MoveTo(_)).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    starts.push(commands.len());
+    starts
+        .windows(2)
+        .filter_map(|window| {
+            let subpath = &commands[window[0]..window[1]];
+            (subpath.len() > 1).then_some(subpath)
+        })
+        .collect()
+}
+
+fn append_transformed_triangles(
+    output: &mut Option<gpui::Path<gpui::Pixels>>,
+    local: &gpui::Path<gpui::Pixels>,
+    transform: crate::canvas::CanvasTransform,
+    layout_point: &impl Fn(crate::canvas::CanvasPoint) -> gpui::Point<gpui::Pixels>,
+) -> Result<(), &'static str> {
+    let current_len = output.as_ref().map_or(0, |path| path.vertices.len());
+    if current_len + local.vertices.len() > usize::from(u16::MAX) {
+        return Err("combined subpaths exceed GPUI's u16 path vertex limit");
+    }
+    for triangle in local.vertices.chunks_exact(3) {
+        let map_vertex = |vertex: &gpui::PathVertex<gpui::Pixels>| {
+            let point = vertex.xy_position;
+            layout_point(
+                transform
+                    .transform_point(f64::from(f32::from(point.x)), f64::from(f32::from(point.y))),
+            )
+        };
+        let mapped = [
+            map_vertex(&triangle[0]),
+            map_vertex(&triangle[1]),
+            map_vertex(&triangle[2]),
+        ];
+        let path = output.get_or_insert_with(|| gpui::Path::new(mapped[0]));
+        path.push_triangle(
+            (mapped[0], mapped[1], mapped[2]),
+            (
+                triangle[0].st_position,
+                triangle[1].st_position,
+                triangle[2].st_position,
+            ),
+        );
+    }
+    Ok(())
+}
+
+fn build_solid_stroke_rect(
+    rect: &crate::canvas::StrokeRect,
+    tolerance: f32,
+    layout_point: &impl Fn(crate::canvas::CanvasPoint) -> gpui::Point<gpui::Pixels>,
+) -> Result<Option<gpui::Path<gpui::Pixels>>, crate::canvas::CanvasDiagnostic> {
+    let is_segment = rect.width == 0.0 || rect.height == 0.0;
+    let options = gpui::FillOptions::default()
+        .with_fill_rule(gpui::FillRule::NonZero)
+        .with_tolerance(tolerance);
+    let mut builder = gpui::PathBuilder::fill().with_style(gpui::PathStyle::Fill(options));
+    let point = |x, y| layout_point(rect.transform.transform_point(x, y));
+    let half = rect.style.line_width * 0.5;
+    let left = rect.x.min(rect.x + rect.width);
+    let right = rect.x.max(rect.x + rect.width);
+    let top = rect.y.min(rect.y + rect.height);
+    let bottom = rect.y.max(rect.y + rect.height);
+
+    if rect.width == 0.0 {
+        builder.move_to(point(left - half, top));
+        builder.line_to(point(left + half, top));
+        builder.line_to(point(left + half, bottom));
+        builder.line_to(point(left - half, bottom));
+        builder.close();
+    } else if rect.height == 0.0 {
+        builder.move_to(point(left, top - half));
+        builder.line_to(point(right, top - half));
+        builder.line_to(point(right, top + half));
+        builder.line_to(point(left, top + half));
+        builder.close();
+    } else {
+        let join = match rect.style.line_join {
+            crate::canvas::CanvasLineJoin::Miter
+                if rect.style.miter_limit >= std::f64::consts::SQRT_2 =>
+            {
+                crate::canvas::CanvasLineJoin::Miter
+            }
+            crate::canvas::CanvasLineJoin::Miter => crate::canvas::CanvasLineJoin::Bevel,
+            join => join,
+        };
+        match join {
+            crate::canvas::CanvasLineJoin::Miter => {
+                builder.move_to(point(left - half, top - half));
+                builder.line_to(point(right + half, top - half));
+                builder.line_to(point(right + half, bottom + half));
+                builder.line_to(point(left - half, bottom + half));
+            }
+            crate::canvas::CanvasLineJoin::Bevel => {
+                builder.move_to(point(left, top - half));
+                builder.line_to(point(right, top - half));
+                builder.line_to(point(right + half, top));
+                builder.line_to(point(right + half, bottom));
+                builder.line_to(point(right, bottom + half));
+                builder.line_to(point(left, bottom + half));
+                builder.line_to(point(left - half, bottom));
+                builder.line_to(point(left - half, top));
+            }
+            crate::canvas::CanvasLineJoin::Round => {
+                const KAPPA: f64 = 0.552_284_749_830_793_6;
+                let control = half * KAPPA;
+                builder.move_to(point(left, top - half));
+                builder.line_to(point(right, top - half));
+                builder.cubic_bezier_to(
+                    point(right + half, top),
+                    point(right + control, top - half),
+                    point(right + half, top - control),
+                );
+                builder.line_to(point(right + half, bottom));
+                builder.cubic_bezier_to(
+                    point(right, bottom + half),
+                    point(right + half, bottom + control),
+                    point(right + control, bottom + half),
+                );
+                builder.line_to(point(left, bottom + half));
+                builder.cubic_bezier_to(
+                    point(left - half, bottom),
+                    point(left - control, bottom + half),
+                    point(left - half, bottom + control),
+                );
+                builder.line_to(point(left - half, top));
+                builder.cubic_bezier_to(
+                    point(left, top - half),
+                    point(left - half, top - control),
+                    point(left - control, top - half),
+                );
+            }
+        }
+        builder.close();
+
+        if right - left > rect.style.line_width && bottom - top > rect.style.line_width {
+            builder.move_to(point(left + half, top + half));
+            builder.line_to(point(left + half, bottom - half));
+            builder.line_to(point(right - half, bottom - half));
+            builder.line_to(point(right - half, top + half));
+            builder.close();
+        }
+    }
+
+    builder
+        .build()
+        .map(|path| subtract_clear_regions(path, &rect.clear_regions, layout_point))
+        .map_err(|error| {
+            path_build_diagnostic(
+                rect.op_index,
+                "strokeRect",
+                if is_segment {
+                    "open rectangle segment stroke"
+                } else {
+                    "closed rectangle stroke"
+                },
+                &error,
+            )
+        })
+}
+
 fn prepare_with_scale(
     list: &crate::canvas::DisplayList,
     bounds: gpui::Bounds<gpui::Pixels>,
@@ -264,10 +560,9 @@ fn prepare_with_scale(
     let mut items = Vec::with_capacity(list.items.len());
     let mut diagnostics = Vec::new();
     let tessellations = Cell::new(0u64);
-    // The path is already expressed in layout coordinates, including the
-    // command-time CTM and canvas-to-layout scale. Converting a fixed quarter
-    // device-pixel target back through only the remaining window scale keeps
-    // the tessellator's screen-space error stable at every zoom level.
+    // Fill commands are expressed in layout coordinates before they reach
+    // GPUI. Converting a quarter device pixel through the window scale keeps
+    // the remaining curve tessellation error stable across DPR changes.
     let tolerance = (0.25 / device_scale.max(0.000_1)).max(0.000_1);
 
     let layout_point = |point: crate::canvas::CanvasPoint| {
@@ -295,10 +590,45 @@ fn prepare_with_scale(
                 crate::canvas::PathCommand::QuadraticTo { control, to } => {
                     builder.curve_to(layout_point(*to), layout_point(*control))
                 }
+                crate::canvas::PathCommand::Ellipse(_) => {
+                    unreachable!("arcs expand before GPUI path construction")
+                }
                 crate::canvas::PathCommand::ClosePath => builder.close(),
             }
         }
     };
+    let append_local_commands =
+        |builder: &mut gpui::PathBuilder, commands: &[crate::canvas::PathCommand]| {
+            let local_point = |point: crate::canvas::CanvasPoint| {
+                gpui::point(gpui::px(point.x as f32), gpui::px(point.y as f32))
+            };
+            for command in commands {
+                match command {
+                    crate::canvas::PathCommand::MoveTo(point) => {
+                        builder.move_to(local_point(*point))
+                    }
+                    crate::canvas::PathCommand::LineTo(point) => {
+                        builder.line_to(local_point(*point))
+                    }
+                    crate::canvas::PathCommand::CubicTo {
+                        control_a,
+                        control_b,
+                        to,
+                    } => builder.cubic_bezier_to(
+                        local_point(*to),
+                        local_point(*control_a),
+                        local_point(*control_b),
+                    ),
+                    crate::canvas::PathCommand::QuadraticTo { control, to } => {
+                        builder.curve_to(local_point(*to), local_point(*control))
+                    }
+                    crate::canvas::PathCommand::Ellipse(_) => {
+                        unreachable!("arcs expand before GPUI path construction")
+                    }
+                    crate::canvas::PathCommand::ClosePath => builder.close(),
+                }
+            }
+        };
 
     let build_fill_path =
         |op_index: usize,
@@ -315,7 +645,8 @@ fn prepare_with_scale(
                 .with_fill_rule(fill_rule)
                 .with_tolerance(tolerance);
             let mut builder = gpui::PathBuilder::fill().with_style(gpui::PathStyle::Fill(options));
-            append_commands(&mut builder, commands);
+            let commands = expand_arcs(commands, scale_x, scale_y, f64::from(device_scale));
+            append_commands(&mut builder, &commands);
             tessellations.set(tessellations.get() + 1);
             builder
                 .build()
@@ -323,48 +654,84 @@ fn prepare_with_scale(
                 .map_err(|error| path_build_diagnostic(op_index, op_name, "fill", &error))
         };
 
-    let build_stroke_path =
-        |op_index: usize,
-         op_name: &'static str,
-         commands: &[crate::canvas::PathCommand],
-         style: &crate::canvas::StrokePathStyle,
-         clear_regions: &[crate::canvas::CanvasQuad]|
-         -> Result<Option<gpui::Path<gpui::Pixels>>, crate::canvas::CanvasDiagnostic> {
-            let layout_scale = scale_x.abs().max(scale_y.abs());
-            let stroke_scale = style.transform_scale * layout_scale;
-            let cap = match style.line_cap {
-                crate::canvas::CanvasLineCap::Butt => lyon::path::LineCap::Butt,
-                crate::canvas::CanvasLineCap::Round => lyon::path::LineCap::Round,
-                crate::canvas::CanvasLineCap::Square => lyon::path::LineCap::Square,
-            };
-            let join = match style.line_join {
-                crate::canvas::CanvasLineJoin::Miter => lyon::path::LineJoin::Miter,
-                crate::canvas::CanvasLineJoin::Round => lyon::path::LineJoin::Round,
-                crate::canvas::CanvasLineJoin::Bevel => lyon::path::LineJoin::Bevel,
-            };
-            let options = gpui::StrokeOptions::default()
-                .with_line_width((style.line_width * stroke_scale) as f32)
-                .with_line_cap(cap)
-                .with_line_join(join)
-                .with_miter_limit(style.miter_limit.max(1.0) as f32)
-                .with_tolerance(tolerance);
+    let build_stroke_path = |op_index: usize,
+                             op_name: &'static str,
+                             commands: &[crate::canvas::PathCommand],
+                             style: &crate::canvas::StrokePathStyle,
+                             clear_regions: &[crate::canvas::CanvasQuad]|
+     -> Result<
+        Option<gpui::Path<gpui::Pixels>>,
+        crate::canvas::CanvasDiagnostic,
+    > {
+        let cap = match style.line_cap {
+            crate::canvas::CanvasLineCap::Butt => lyon::path::LineCap::Butt,
+            crate::canvas::CanvasLineCap::Round => lyon::path::LineCap::Round,
+            crate::canvas::CanvasLineCap::Square => lyon::path::LineCap::Square,
+        };
+        let canvas_miter_limit = style.miter_limit;
+        let lyon_miter_limit = canvas_miter_limit * 0.5;
+        let join = match style.line_join {
+            crate::canvas::CanvasLineJoin::Miter if lyon_miter_limit < 1.0 => {
+                lyon::path::LineJoin::Bevel
+            }
+            crate::canvas::CanvasLineJoin::Miter => lyon::path::LineJoin::Miter,
+            crate::canvas::CanvasLineJoin::Round => lyon::path::LineJoin::Round,
+            crate::canvas::CanvasLineJoin::Bevel => lyon::path::LineJoin::Bevel,
+        };
+        let stroke_device_scale = style.transform.max_scale_after_output_scale(
+            scale_x * f64::from(device_scale),
+            scale_y * f64::from(device_scale),
+        );
+        if stroke_device_scale == 0.0 {
+            tessellations.set(tessellations.get() + 1);
+            return Ok(None);
+        }
+        let stroke_tolerance = (0.25 / stroke_device_scale).max(0.000_1) as f32;
+        let options = gpui::StrokeOptions::default()
+            .with_line_width(style.line_width as f32)
+            .with_line_cap(cap)
+            .with_line_join(join)
+            .with_miter_limit(lyon_miter_limit.max(1.0) as f32)
+            .with_tolerance(stroke_tolerance);
+        let commands = expand_arcs(commands, scale_x, scale_y, f64::from(device_scale));
+        tessellations.set(tessellations.get() + 1);
+        if commands.len() > usize::from(u16::MAX) {
+            return Err(crate::canvas::CanvasDiagnostic {
+                    op_index,
+                    op_name: op_name.to_string(),
+                    reason: "GPUI PathBuilder failed to build stroke geometry: path commands exceed GPUI's u16 path vertex limit"
+                        .to_string(),
+                });
+        }
+        let Some(commands) = map_commands_to_stroke_space(&commands, style.transform) else {
+            return Ok(None);
+        };
+        let dash = style
+            .line_dash
+            .iter()
+            .map(|segment| gpui::px(*segment as f32))
+            .collect::<Vec<_>>();
+        let uses_dash = style.line_dash.iter().any(|segment| *segment > 0.0);
+        let mut combined = None;
+        for subpath in split_subpaths(&commands) {
             let mut builder = gpui::PathBuilder::stroke(gpui::px(1.0))
                 .with_style(gpui::PathStyle::Stroke(options));
-            if style.line_dash.iter().any(|segment| *segment > 0.0) {
-                let dash = style
-                    .line_dash
-                    .iter()
-                    .map(|segment| gpui::px((*segment * stroke_scale) as f32))
-                    .collect::<Vec<_>>();
+            if uses_dash {
                 builder = builder.dash_array(&dash);
             }
-            append_commands(&mut builder, commands);
-            tessellations.set(tessellations.get() + 1);
-            builder
+            append_local_commands(&mut builder, subpath);
+            let local = builder
                 .build()
-                .map(|path| subtract_clear_regions(path, clear_regions, &layout_point))
-                .map_err(|error| path_build_diagnostic(op_index, op_name, "stroke", &error))
-        };
+                .map_err(|error| path_build_diagnostic(op_index, op_name, "stroke", &error))?;
+            append_transformed_triangles(&mut combined, &local, style.transform, &layout_point)
+                .map_err(|reason| crate::canvas::CanvasDiagnostic {
+                    op_index,
+                    op_name: op_name.to_string(),
+                    reason: format!("GPUI PathBuilder failed to build stroke geometry: {reason}"),
+                })?;
+        }
+        Ok(combined.and_then(|path| subtract_clear_regions(path, clear_regions, &layout_point)))
+    };
 
     for item in &list.items {
         match item {
@@ -450,6 +817,22 @@ fn prepare_with_scale(
                 if rect.width == 0.0 && rect.height == 0.0 {
                     continue;
                 }
+                let is_segment = rect.width == 0.0 || rect.height == 0.0;
+                let solid = !rect.style.line_dash.iter().any(|segment| *segment > 0.0);
+                if solid
+                    && (!is_segment || rect.style.line_cap == crate::canvas::CanvasLineCap::Butt)
+                {
+                    tessellations.set(tessellations.get() + 1);
+                    match build_solid_stroke_rect(rect, tolerance, &layout_point) {
+                        Ok(Some(path)) => items.push(PreparedItem::Path {
+                            path,
+                            color: rect.style.color,
+                        }),
+                        Ok(None) => {}
+                        Err(diagnostic) => diagnostics.push(diagnostic),
+                    }
+                    continue;
+                }
                 let points = crate::canvas::CanvasQuad::from([
                     rect.transform.transform_point(rect.x, rect.y),
                     rect.transform.transform_point(rect.x + rect.width, rect.y),
@@ -469,21 +852,14 @@ fn prepare_with_scale(
                     );
                     commands.push(crate::canvas::PathCommand::ClosePath);
                 }
-                let line_join = if rect.style.line_join == crate::canvas::CanvasLineJoin::Miter
-                    && rect.style.miter_limit < std::f64::consts::SQRT_2
-                {
-                    crate::canvas::CanvasLineJoin::Bevel
-                } else {
-                    rect.style.line_join
-                };
                 let style = crate::canvas::StrokePathStyle {
                     color: rect.style.color,
                     line_width: rect.style.line_width,
                     line_cap: rect.style.line_cap,
-                    line_join,
+                    line_join: rect.style.line_join,
                     miter_limit: rect.style.miter_limit,
                     line_dash: rect.style.line_dash.clone(),
-                    transform_scale: rect.style.transform_scale,
+                    transform: rect.style.transform,
                 };
                 match build_stroke_path(
                     rect.op_index,
@@ -878,7 +1254,8 @@ mod tests {
     use super::*;
     use crate::canvas::{
         CanvasFillRule, CanvasLineCap, CanvasLineJoin, CanvasPoint, CanvasTransform, DisplayItem,
-        FillPath, FillRect, PathCommand, StrokePath, StrokePathStyle, StrokeRect, StrokeStyle,
+        EllipseArc, FillPath, FillRect, PathCommand, StrokePath, StrokePathStyle, StrokeRect,
+        StrokeStyle,
     };
 
     fn color() -> gpui::Rgba {
@@ -904,6 +1281,18 @@ mod tests {
             panic!("expected a prepared path");
         };
         path
+    }
+
+    fn vertex_positions(path: &gpui::Path<gpui::Pixels>) -> Vec<(u32, u32)> {
+        path.vertices
+            .iter()
+            .map(|vertex| {
+                (
+                    f32::from(vertex.xy_position.x).to_bits(),
+                    f32::from(vertex.xy_position.y).to_bits(),
+                )
+            })
+            .collect()
     }
 
     #[test]
@@ -982,6 +1371,46 @@ mod tests {
         for (logical, dpr_scaled) in logical.vertices.iter().zip(&dpr_scaled.vertices) {
             assert_eq!(logical.xy_position, dpr_scaled.xy_position);
         }
+    }
+
+    #[test]
+    fn dpr_scaled_stroke_geometry_maps_to_the_same_logical_gpui_path() {
+        let path = |scale: f64| crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::StrokePath(StrokePath {
+                commands: vec![
+                    PathCommand::MoveTo(CanvasPoint {
+                        x: 24.0 * scale,
+                        y: 18.0 * scale,
+                    }),
+                    PathCommand::LineTo(CanvasPoint {
+                        x: 116.0 * scale,
+                        y: 70.0 * scale,
+                    }),
+                ],
+                style: StrokePathStyle {
+                    color: color(),
+                    line_width: 7.0,
+                    line_cap: CanvasLineCap::Round,
+                    line_join: CanvasLineJoin::Round,
+                    miter_limit: 10.0,
+                    line_dash: vec![14.0, 8.0],
+                    transform: CanvasTransform::from_components(scale, 0.0, 0.0, scale, 0.0, 0.0),
+                },
+                op_index: 0,
+                clear_regions: Vec::new(),
+            })],
+        };
+        let logical = prepare(&path(1.0), test_bounds(), 320.0, 240.0);
+        let dpr_scaled = prepare(&path(2.0), test_bounds(), 640.0, 480.0);
+        assert_eq!(
+            prepared_path(&logical).bounds,
+            prepared_path(&dpr_scaled).bounds
+        );
+        assert_eq!(
+            vertex_positions(prepared_path(&logical)),
+            vertex_positions(prepared_path(&dpr_scaled))
+        );
     }
 
     #[test]
@@ -1094,7 +1523,7 @@ mod tests {
                     line_join,
                     miter_limit,
                     line_dash: Vec::new(),
-                    transform_scale: 1.0,
+                    transform: CanvasTransform::IDENTITY,
                 },
                 op_index: 0,
                 clear_regions: Vec::new(),
@@ -1123,20 +1552,216 @@ mod tests {
         let bevel = prepared_path(&bevel);
 
         assert_ne!(miter.vertices.len(), bevel.vertices.len());
-        let positions = |path: &gpui::Path<gpui::Pixels>| {
-            path.vertices
-                .iter()
-                .map(|vertex| {
-                    (
-                        f32::from(vertex.xy_position.x).to_bits(),
-                        f32::from(vertex.xy_position.y).to_bits(),
-                    )
-                })
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(positions(low_miter), positions(bevel));
+        assert_eq!(vertex_positions(low_miter), vertex_positions(bevel));
         assert_eq!(f32::from(miter.bounds.origin.x), 15.0);
         assert_eq!(f32::from(miter.bounds.origin.y), 15.0);
+    }
+
+    #[test]
+    fn nonuniform_stroke_keeps_local_width_and_affines_round_caps() {
+        let transform = CanvasTransform::from_components(4.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+        let list = crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::StrokePath(StrokePath {
+                commands: vec![
+                    PathCommand::MoveTo(CanvasPoint { x: 40.0, y: 20.0 }),
+                    PathCommand::LineTo(CanvasPoint { x: 200.0, y: 20.0 }),
+                ],
+                style: StrokePathStyle {
+                    color: color(),
+                    line_width: 2.0,
+                    line_cap: CanvasLineCap::Round,
+                    line_join: CanvasLineJoin::Round,
+                    miter_limit: 10.0,
+                    line_dash: Vec::new(),
+                    transform,
+                },
+                op_index: 0,
+                clear_regions: Vec::new(),
+            })],
+        };
+
+        let prepared = prepare(&list, test_bounds(), 320.0, 240.0);
+        let path = prepared_path(&prepared);
+        assert!((f32::from(path.bounds.origin.x) - 36.0).abs() < 0.01);
+        assert!((f32::from(path.bounds.origin.y) - 19.0).abs() < 0.01);
+        assert!((f32::from(path.bounds.size.width) - 168.0).abs() < 0.01);
+        assert!((f32::from(path.bounds.size.height) - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn dash_phase_restarts_for_each_subpath_and_zero_dash_is_solid() {
+        let style = |line_dash| StrokePathStyle {
+            color: color(),
+            line_width: 2.0,
+            line_cap: CanvasLineCap::Butt,
+            line_join: CanvasLineJoin::Miter,
+            miter_limit: 10.0,
+            line_dash,
+            transform: CanvasTransform::IDENTITY,
+        };
+        let first = vec![
+            PathCommand::MoveTo(CanvasPoint { x: 0.0, y: 10.0 }),
+            PathCommand::LineTo(CanvasPoint { x: 15.0, y: 10.0 }),
+        ];
+        let second = vec![
+            PathCommand::MoveTo(CanvasPoint { x: 0.0, y: 30.0 }),
+            PathCommand::LineTo(CanvasPoint { x: 15.0, y: 30.0 }),
+        ];
+        let combined = crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::StrokePath(StrokePath {
+                commands: first.iter().chain(&second).cloned().collect(),
+                style: style(vec![10.0, 10.0]),
+                op_index: 0,
+                clear_regions: Vec::new(),
+            })],
+        };
+        let separate = crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![
+                DisplayItem::StrokePath(StrokePath {
+                    commands: first.clone(),
+                    style: style(vec![10.0, 10.0]),
+                    op_index: 0,
+                    clear_regions: Vec::new(),
+                }),
+                DisplayItem::StrokePath(StrokePath {
+                    commands: second,
+                    style: style(vec![10.0, 10.0]),
+                    op_index: 1,
+                    clear_regions: Vec::new(),
+                }),
+            ],
+        };
+
+        let combined = prepare(&combined, test_bounds(), 320.0, 240.0);
+        let separate = prepare(&separate, test_bounds(), 320.0, 240.0);
+        let separate_positions = separate
+            .items
+            .iter()
+            .flat_map(|item| match item {
+                PreparedItem::Path { path, .. } => vertex_positions(path),
+                PreparedItem::Quad(_) => panic!("expected only paths"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            vertex_positions(prepared_path(&combined)),
+            separate_positions
+        );
+        assert_eq!(combined.tessellations, 1);
+        assert_eq!(separate.tessellations, 2);
+
+        let solid = |line_dash| crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::StrokePath(StrokePath {
+                commands: first.clone(),
+                style: style(line_dash),
+                op_index: 0,
+                clear_regions: Vec::new(),
+            })],
+        };
+        let empty = prepare(&solid(Vec::new()), test_bounds(), 320.0, 240.0);
+        let zeros = prepare(&solid(vec![0.0, 0.0]), test_bounds(), 320.0, 240.0);
+        assert_eq!(
+            vertex_positions(prepared_path(&empty)),
+            vertex_positions(prepared_path(&zeros))
+        );
+    }
+
+    #[test]
+    fn adaptive_arc_subdivision_tracks_full_device_transform() {
+        let arc = EllipseArc {
+            center: CanvasPoint { x: 0.0, y: 0.0 },
+            radius_x: 10.0,
+            radius_y: 6.0,
+            rotation: 0.25,
+            start_angle: 0.0,
+            sweep: std::f64::consts::TAU,
+            transform: CanvasTransform::IDENTITY,
+        };
+        let commands = vec![
+            PathCommand::MoveTo(arc.start_point()),
+            PathCommand::Ellipse(arc),
+        ];
+        let one_x = expand_arcs(&commands, 1.0, 1.0, 1.0);
+        let hundred_x = expand_arcs(&commands, 100.0, 100.0, 1.0);
+        assert!(hundred_x.len() > one_x.len());
+        assert!(one_x
+            .iter()
+            .skip(1)
+            .all(|command| matches!(command, PathCommand::CubicTo { .. })));
+
+        let list = crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::StrokePath(StrokePath {
+                commands,
+                style: StrokePathStyle {
+                    color: color(),
+                    line_width: 1.0,
+                    line_cap: CanvasLineCap::Butt,
+                    line_join: CanvasLineJoin::Miter,
+                    miter_limit: 10.0,
+                    line_dash: Vec::new(),
+                    transform: CanvasTransform::IDENTITY,
+                },
+                op_index: 0,
+                clear_regions: Vec::new(),
+            })],
+        };
+        assert_eq!(prepare(&list, test_bounds(), 320.0, 240.0).tessellations, 1);
+    }
+
+    #[test]
+    fn canvas_miter_limit_is_converted_to_lyons_ratio() {
+        let make = |line_join, miter_limit| crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::StrokePath(StrokePath {
+                commands: vec![
+                    PathCommand::MoveTo(CanvasPoint { x: 20.0, y: 60.0 }),
+                    PathCommand::LineTo(CanvasPoint { x: 20.0, y: 20.0 }),
+                    PathCommand::LineTo(CanvasPoint { x: 60.0, y: 20.0 }),
+                ],
+                style: StrokePathStyle {
+                    color: color(),
+                    line_width: 10.0,
+                    line_cap: CanvasLineCap::Butt,
+                    line_join,
+                    miter_limit,
+                    line_dash: Vec::new(),
+                    transform: CanvasTransform::IDENTITY,
+                },
+                op_index: 0,
+                clear_regions: Vec::new(),
+            })],
+        };
+        let miter = prepare(
+            &make(CanvasLineJoin::Miter, 10.0),
+            test_bounds(),
+            320.0,
+            240.0,
+        );
+        let low_miter = prepare(
+            &make(CanvasLineJoin::Miter, 1.0),
+            test_bounds(),
+            320.0,
+            240.0,
+        );
+        let bevel = prepare(
+            &make(CanvasLineJoin::Bevel, 10.0),
+            test_bounds(),
+            320.0,
+            240.0,
+        );
+
+        assert_eq!(
+            vertex_positions(prepared_path(&low_miter)),
+            vertex_positions(prepared_path(&bevel))
+        );
+        assert_ne!(
+            vertex_positions(prepared_path(&miter)),
+            vertex_positions(prepared_path(&bevel))
+        );
     }
 
     #[test]
@@ -1202,7 +1827,7 @@ mod tests {
                     line_join: CanvasLineJoin::Miter,
                     miter_limit: 10.0,
                     line_dash: Vec::new(),
-                    transform_scale: 1.0,
+                    transform: CanvasTransform::IDENTITY,
                 },
                 op_index: 0,
                 clear_regions: Vec::new(),
@@ -1293,7 +1918,7 @@ mod tests {
                     line_join: CanvasLineJoin::Miter,
                     miter_limit: 10.0,
                     line_dash: Vec::new(),
-                    transform_scale: 1.0,
+                    transform: CanvasTransform::IDENTITY,
                 },
                 op_index: 7,
                 clear_regions: Vec::new(),

@@ -72,6 +72,39 @@ pub struct CanvasPoint {
 
 pub type CanvasQuad = [CanvasPoint; 4];
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EllipseArc {
+    pub center: CanvasPoint,
+    pub radius_x: f64,
+    pub radius_y: f64,
+    pub rotation: f64,
+    pub start_angle: f64,
+    pub sweep: f64,
+    pub transform: CanvasTransform,
+}
+
+impl EllipseArc {
+    pub(crate) fn point_at(self, angle: f64) -> CanvasPoint {
+        let (sin_rotation, cos_rotation) = self.rotation.sin_cos();
+        let (sin_angle, cos_angle) = angle.sin_cos();
+        self.transform.transform_point(
+            self.center.x + self.radius_x * cos_angle * cos_rotation
+                - self.radius_y * sin_angle * sin_rotation,
+            self.center.y
+                + self.radius_x * cos_angle * sin_rotation
+                + self.radius_y * sin_angle * cos_rotation,
+        )
+    }
+
+    pub(crate) fn start_point(self) -> CanvasPoint {
+        self.point_at(self.start_angle)
+    }
+
+    pub(crate) fn end_point(self) -> CanvasPoint {
+        self.point_at(self.start_angle + self.sweep)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct FillRect {
     /// Rectangle corners after applying the current transformation matrix.
@@ -94,6 +127,7 @@ pub enum PathCommand {
         control: CanvasPoint,
         to: CanvasPoint,
     },
+    Ellipse(EllipseArc),
     ClosePath,
 }
 
@@ -136,7 +170,7 @@ pub struct StrokeStyle {
     pub line_join: CanvasLineJoin,
     pub miter_limit: f64,
     pub line_dash: Vec<f64>,
-    pub transform_scale: f64,
+    pub transform: CanvasTransform,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -159,7 +193,7 @@ pub struct StrokePathStyle {
     pub line_join: CanvasLineJoin,
     pub miter_limit: f64,
     pub line_dash: Vec<f64>,
-    pub transform_scale: f64,
+    pub transform: CanvasTransform,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -254,6 +288,11 @@ impl CanvasTransform {
         f: 0.0,
     };
 
+    #[cfg(test)]
+    pub(crate) const fn from_components(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> Self {
+        Self { a, b, c, d, e, f }
+    }
+
     fn multiply(self, right: Self) -> Self {
         Self {
             a: self.a * right.a + self.c * right.b,
@@ -272,7 +311,7 @@ impl CanvasTransform {
         }
     }
 
-    fn inverse_transform_point(self, point: CanvasPoint) -> Option<CanvasPoint> {
+    pub(crate) fn inverse_transform_point(self, point: CanvasPoint) -> Option<CanvasPoint> {
         let determinant = self.a * self.d - self.b * self.c;
         if !determinant.is_finite() || determinant.abs() <= f64::EPSILON {
             return None;
@@ -285,10 +324,14 @@ impl CanvasTransform {
         })
     }
 
-    fn max_scale(self) -> f64 {
-        let xx = self.a * self.a + self.b * self.b;
-        let yy = self.c * self.c + self.d * self.d;
-        let xy = self.a * self.c + self.b * self.d;
+    pub(crate) fn max_scale_after_output_scale(self, scale_x: f64, scale_y: f64) -> f64 {
+        let a = self.a * scale_x;
+        let b = self.b * scale_y;
+        let c = self.c * scale_x;
+        let d = self.d * scale_y;
+        let xx = a * a + b * b;
+        let yy = c * c + d * d;
+        let xy = a * c + b * d;
         let discriminant = ((xx - yy) * (xx - yy) + 4.0 * xy * xy).sqrt();
         ((xx + yy + discriminant) * 0.5).sqrt()
     }
@@ -314,6 +357,9 @@ fn path_preparation_problem(commands: &[PathCommand]) -> Option<String> {
                 .or_else(|| problem(*control_b))
                 .or_else(|| problem(*to)),
             PathCommand::QuadraticTo { control, to } => problem(*control).or_else(|| problem(*to)),
+            PathCommand::Ellipse(arc) => problem(arc.start_point())
+                .or_else(|| problem(arc.end_point()))
+                .or_else(|| problem(arc.point_at(arc.start_angle + arc.sweep * 0.5))),
             PathCommand::ClosePath => None,
         };
         if reason.is_some() {
@@ -325,30 +371,6 @@ fn path_preparation_problem(commands: &[PathCommand]) -> Option<String> {
 
 fn same_point(left: CanvasPoint, right: CanvasPoint) -> bool {
     (left.x - right.x).abs() <= f64::EPSILON && (left.y - right.y).abs() <= f64::EPSILON
-}
-
-fn ellipse_point(
-    center: CanvasPoint,
-    radius_x: f64,
-    radius_y: f64,
-    rotation: f64,
-    angle: f64,
-) -> CanvasPoint {
-    let (sin_rotation, cos_rotation) = rotation.sin_cos();
-    let (sin_angle, cos_angle) = angle.sin_cos();
-    CanvasPoint {
-        x: center.x + radius_x * cos_angle * cos_rotation - radius_y * sin_angle * sin_rotation,
-        y: center.y + radius_x * cos_angle * sin_rotation + radius_y * sin_angle * cos_rotation,
-    }
-}
-
-fn ellipse_derivative(radius_x: f64, radius_y: f64, rotation: f64, angle: f64) -> CanvasPoint {
-    let (sin_rotation, cos_rotation) = rotation.sin_cos();
-    let (sin_angle, cos_angle) = angle.sin_cos();
-    CanvasPoint {
-        x: -radius_x * sin_angle * cos_rotation - radius_y * cos_angle * sin_rotation,
-        y: -radius_x * sin_angle * sin_rotation + radius_y * cos_angle * cos_rotation,
-    }
 }
 
 fn normalized_arc_sweep(start: f64, end: f64, counterclockwise: bool) -> f64 {
@@ -387,10 +409,17 @@ fn append_ellipse(
     end: f64,
     counterclockwise: bool,
 ) {
-    let start_point = transform.transform_point(
-        ellipse_point(center, radius_x, radius_y, rotation, start).x,
-        ellipse_point(center, radius_x, radius_y, rotation, start).y,
-    );
+    let sweep = normalized_arc_sweep(start, end, counterclockwise);
+    let arc = EllipseArc {
+        center,
+        radius_x,
+        radius_y,
+        rotation,
+        start_angle: start,
+        sweep,
+        transform,
+    };
+    let start_point = arc.start_point();
     match *current_point {
         Some(point) if !same_point(point, start_point) => {
             commands.push(PathCommand::LineTo(start_point))
@@ -403,43 +432,21 @@ fn append_ellipse(
     }
     *current_point = Some(start_point);
 
-    let sweep = normalized_arc_sweep(start, end, counterclockwise);
     if sweep == 0.0 || radius_x == 0.0 || radius_y == 0.0 {
         return;
     }
-    let segment_count = (sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize;
-    let segment_sweep = sweep / segment_count as f64;
-    for segment in 0..segment_count {
-        let from_angle = start + segment_sweep * segment as f64;
-        let to_angle = from_angle + segment_sweep;
-        let alpha = (4.0 / 3.0) * (segment_sweep / 4.0).tan();
-        let from = ellipse_point(center, radius_x, radius_y, rotation, from_angle);
-        let to = ellipse_point(center, radius_x, radius_y, rotation, to_angle);
-        let from_derivative = ellipse_derivative(radius_x, radius_y, rotation, from_angle);
-        let to_derivative = ellipse_derivative(radius_x, radius_y, rotation, to_angle);
-        let control_a = transform.transform_point(
-            from.x + alpha * from_derivative.x,
-            from.y + alpha * from_derivative.y,
-        );
-        let control_b = transform.transform_point(
-            to.x - alpha * to_derivative.x,
-            to.y - alpha * to_derivative.y,
-        );
-        let to = transform.transform_point(to.x, to.y);
-        commands.push(PathCommand::CubicTo {
-            control_a,
-            control_b,
-            to,
-        });
-        *current_point = Some(to);
-    }
+    commands.push(PathCommand::Ellipse(arc));
+    *current_point = Some(arc.end_point());
 }
 
 fn path_has_segments(commands: &[PathCommand]) -> bool {
     commands.iter().any(|command| {
         matches!(
             command,
-            PathCommand::LineTo(_) | PathCommand::CubicTo { .. } | PathCommand::QuadraticTo { .. }
+            PathCommand::LineTo(_)
+                | PathCommand::CubicTo { .. }
+                | PathCommand::QuadraticTo { .. }
+                | PathCommand::Ellipse(_)
         )
     })
 }
@@ -525,6 +532,7 @@ fn path_subpaths(commands: &[PathCommand]) -> Vec<Vec<CanvasPoint>> {
             PathCommand::LineTo(point)
             | PathCommand::CubicTo { to: point, .. }
             | PathCommand::QuadraticTo { to: point, .. } => current.push(*point),
+            PathCommand::Ellipse(arc) => current.push(arc.end_point()),
             PathCommand::ClosePath => {
                 if current.len() > 1 {
                     subpaths.push(std::mem::take(&mut current));
@@ -606,6 +614,33 @@ fn path_control_bounds(commands: &[PathCommand]) -> Option<(f64, f64, f64, f64)>
                 include(*control);
                 include(*to);
             }
+            PathCommand::Ellipse(arc) => {
+                let (sin_rotation, cos_rotation) = arc.rotation.sin_cos();
+                let x_extent = arc.radius_x.abs() * cos_rotation.abs()
+                    + arc.radius_y.abs() * sin_rotation.abs();
+                let y_extent = arc.radius_x.abs() * sin_rotation.abs()
+                    + arc.radius_y.abs() * cos_rotation.abs();
+                for point in [
+                    CanvasPoint {
+                        x: arc.center.x - x_extent,
+                        y: arc.center.y - y_extent,
+                    },
+                    CanvasPoint {
+                        x: arc.center.x + x_extent,
+                        y: arc.center.y - y_extent,
+                    },
+                    CanvasPoint {
+                        x: arc.center.x - x_extent,
+                        y: arc.center.y + y_extent,
+                    },
+                    CanvasPoint {
+                        x: arc.center.x + x_extent,
+                        y: arc.center.y + y_extent,
+                    },
+                ] {
+                    include(arc.transform.transform_point(point.x, point.y));
+                }
+            }
             PathCommand::ClosePath => {}
         }
     }
@@ -640,7 +675,8 @@ fn stroke_path_intersects_quad(path: &StrokePath, quad: &CanvasQuad) -> bool {
     let Some(bounds) = path_control_bounds(&path.commands) else {
         return false;
     };
-    let half_width = path.style.line_width * path.style.transform_scale * 0.5;
+    let half_width =
+        path.style.line_width * path.style.transform.max_scale_after_output_scale(1.0, 1.0) * 0.5;
     bounds_intersect_quad(bounds, half_width, quad)
 }
 
@@ -1115,7 +1151,7 @@ pub(crate) fn decode(
                                 line_join: state.line_join,
                                 miter_limit: state.miter_limit,
                                 line_dash: state.line_dash.clone(),
-                                transform_scale: state.transform.max_scale(),
+                                transform: state.transform,
                             },
                             op_index,
                             clear_regions: Vec::new(),
@@ -1448,7 +1484,7 @@ pub(crate) fn decode(
                                 line_join: state.line_join,
                                 miter_limit: state.miter_limit,
                                 line_dash: state.line_dash.clone(),
-                                transform_scale: state.transform.max_scale(),
+                                transform: state.transform,
                             },
                             op_index,
                             clear_regions: Vec::new(),
@@ -2221,6 +2257,10 @@ mod tests {
             .commands
             .iter()
             .any(|command| matches!(command, PathCommand::QuadraticTo { .. })));
+        assert!(path
+            .commands
+            .iter()
+            .any(|command| matches!(command, PathCommand::Ellipse(_))));
         assert!(path
             .commands
             .iter()
