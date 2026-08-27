@@ -1,12 +1,21 @@
+import path from "node:path"
+
 import React, { createRef } from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import { __applyCanvasCommands } from "../canvas/commands.js"
+import { flushRecordingContext2D } from "../canvas/context-2d.js"
 import {
   CANVAS_OPCODES,
   CANVAS_STREAM_MAGIC,
   CANVAS_STREAM_VERSION,
 } from "../canvas/opcodes.js"
+import {
+  CANVAS_GOLDEN_DPR,
+  CANVAS_GOLDEN_HEIGHT,
+  CANVAS_GOLDEN_WIDTH,
+  canvasScenes,
+} from "../canvas-scenes.js"
 import { createRoot, flushSync } from "../reconciler/reconciler.js"
 import {
   createTestRoot,
@@ -15,6 +24,7 @@ import {
 } from "../testing.js"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { CanvasPublicInstance, PublicInstance } from "../types/host.js"
+import { SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -94,13 +104,13 @@ describeNative("retained canvas element", () => {
           new Uint32Array([
             CANVAS_STREAM_MAGIC,
             CANVAS_STREAM_VERSION,
-            CANVAS_OPCODES.translate,
-            2,
+            CANVAS_OPCODES.strokeRect,
+            4,
           ]),
-          new Float64Array([4, 8]),
+          new Float64Array([0, 0, 4, 8]),
           []
         )
-      ).toThrow(/translate.*not implemented in canvas phase A1/)
+      ).toThrow(/strokeRect.*not implemented in canvas phase B1/)
       expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
     } finally {
       testRoot.unmount()
@@ -116,10 +126,10 @@ describeNative("retained canvas element", () => {
       ops: new Uint32Array([
         CANVAS_STREAM_MAGIC,
         CANVAS_STREAM_VERSION,
-        CANVAS_OPCODES.translate,
-        2,
+        CANVAS_OPCODES.strokeRect,
+        4,
       ]),
-      operands: new Float64Array([4, 8]),
+      operands: new Float64Array([0, 0, 4, 8]),
     }
     try {
       testRoot.render(
@@ -136,7 +146,7 @@ describeNative("retained canvas element", () => {
 
       __applyCanvasCommands(canvasRef, unsupported.ops, unsupported.operands, [])
       expect(warn).toHaveBeenCalledTimes(1)
-      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/warning-canvas.*translate/))
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/warning-canvas.*strokeRect/))
 
       __applyCanvasCommands(canvasRef, unsupported.ops, unsupported.operands, [])
       __applyCanvasCommands(
@@ -147,7 +157,7 @@ describeNative("retained canvas element", () => {
       )
       expect(warn).toHaveBeenCalledTimes(2)
       expect(warn).toHaveBeenLastCalledWith(
-        expect.stringMatching(/second-warning-canvas.*translate/)
+        expect.stringMatching(/second-warning-canvas.*strokeRect/)
       )
       testRoot.render(
         <div>
@@ -165,6 +175,99 @@ describeNative("retained canvas element", () => {
     } finally {
       warn.mockRestore()
       testRoot.unmount()
+    }
+  })
+
+  it("accepts composed transforms and minimum nonzero paths in strict mode", () => {
+    const testRoot = createTestRoot({ width: 180, height: 120, strictStyles: true })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(<canvas ref={canvasRef} width={180} height={120} />)
+      const context = canvasRef.current!.getContext("2d")
+      context.save()
+      context.translate(18, 12)
+      context.scale(1.5, 1.25)
+      context.rotate(0.2)
+      context.transform(1, 0.1, 0.2, 1, 3, 4)
+      context.fillRect(0, 0, 40, 28)
+      context.beginPath()
+      context.moveTo(8, 62)
+      context.lineTo(42, 34)
+      context.lineTo(76, 62)
+      context.closePath()
+      context.fill()
+      context.restore()
+      context.setTransform(1, 0, 0, 1, 4, 6)
+      context.resetTransform()
+
+      expect(() => flushRecordingContext2D(context)).not.toThrow()
+      testRoot.renderer.flush()
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("makes the standard DPR backing-store scale visually identical to logical sizing", () => {
+    const logical = createTestRoot({
+      width: CANVAS_GOLDEN_WIDTH,
+      height: CANVAS_GOLDEN_HEIGHT,
+    })
+    const scaled = createTestRoot({
+      width: CANVAS_GOLDEN_WIDTH,
+      height: CANVAS_GOLDEN_HEIGHT,
+    })
+    const logicalRef = createRef<CanvasPublicInstance>()
+    const scaledRef = createRef<CanvasPublicInstance>()
+    const logicalPath = path.join(SHOTS_DIR, "canvas-b1-logical.png")
+    const scaledPath = path.join(SHOTS_DIR, "canvas-b1-standard-dpr.png")
+
+    try {
+      logical.render(
+        <canvas
+          ref={logicalRef}
+          width={CANVAS_GOLDEN_WIDTH}
+          height={CANVAS_GOLDEN_HEIGHT}
+        />
+      )
+      scaled.render(
+        <canvas
+          ref={scaledRef}
+          width={CANVAS_GOLDEN_WIDTH * CANVAS_GOLDEN_DPR}
+          height={CANVAS_GOLDEN_HEIGHT * CANVAS_GOLDEN_DPR}
+          style={{ width: CANVAS_GOLDEN_WIDTH, height: CANVAS_GOLDEN_HEIGHT }}
+        />
+      )
+
+      const logicalContext = logicalRef.current!.getContext("2d")
+      canvasScenes["translate-scale"].draw(
+        logicalContext,
+        CANVAS_GOLDEN_WIDTH,
+        CANVAS_GOLDEN_HEIGHT
+      )
+      flushRecordingContext2D(logicalContext)
+
+      const scaledContext = scaledRef.current!.getContext("2d")
+      scaledContext.scale(CANVAS_GOLDEN_DPR, CANVAS_GOLDEN_DPR)
+      canvasScenes["translate-scale"].draw(
+        scaledContext,
+        CANVAS_GOLDEN_WIDTH,
+        CANVAS_GOLDEN_HEIGHT
+      )
+      flushRecordingContext2D(scaledContext)
+
+      logical.renderer.flush()
+      scaled.renderer.flush()
+      logical.renderer.captureScreenshot(logicalPath)
+      scaled.renderer.captureScreenshot(scaledPath)
+
+      expect(scaled.renderer.compareImages(logicalPath, scaledPath, 0)).toEqual({
+        differingPixelRatio: 0,
+        maxChannelDelta: 0,
+      })
+    } finally {
+      logical.unmount()
+      scaled.unmount()
     }
   })
 

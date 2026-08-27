@@ -39,7 +39,17 @@ impl CacheKey {
 
 #[derive(Clone)]
 struct PreparedDisplayList {
-    quads: Vec<gpui::PaintQuad>,
+    items: Vec<PreparedItem>,
+    diagnostics: Vec<crate::canvas::CanvasDiagnostic>,
+}
+
+#[derive(Clone)]
+enum PreparedItem {
+    Quad(gpui::PaintQuad),
+    Path {
+        path: gpui::Path<gpui::Pixels>,
+        color: gpui::Rgba,
+    },
 }
 
 struct PreparedCache {
@@ -104,40 +114,121 @@ fn prepare(
     height: f64,
 ) -> PreparedDisplayList {
     if width == 0.0 || height == 0.0 {
-        return PreparedDisplayList { quads: Vec::new() };
+        return PreparedDisplayList {
+            items: Vec::new(),
+            diagnostics: Vec::new(),
+        };
     }
     let scale_x = f64::from(f32::from(bounds.size.width)) / width;
     let scale_y = f64::from(f32::from(bounds.size.height)) / height;
     let origin_x = f64::from(f32::from(bounds.origin.x));
     let origin_y = f64::from(f32::from(bounds.origin.y));
-    let mut quads = Vec::with_capacity(list.items.len());
+    let mut items = Vec::with_capacity(list.items.len());
+    let mut diagnostics = Vec::new();
+
+    let layout_point = |point: crate::canvas::CanvasPoint| {
+        gpui::point(
+            gpui::px((origin_x + point.x * scale_x) as f32),
+            gpui::px((origin_y + point.y * scale_y) as f32),
+        )
+    };
+
+    let build_path = |op_index: usize,
+                      op_name: &'static str,
+                      commands: &[crate::canvas::PathCommand],
+                      color: gpui::Rgba|
+     -> Result<PreparedItem, crate::canvas::CanvasDiagnostic> {
+        let options = gpui::FillOptions::default().with_fill_rule(gpui::FillRule::NonZero);
+        let mut builder = gpui::PathBuilder::fill().with_style(gpui::PathStyle::Fill(options));
+        for command in commands {
+            match command {
+                crate::canvas::PathCommand::MoveTo(point) => builder.move_to(layout_point(*point)),
+                crate::canvas::PathCommand::LineTo(point) => builder.line_to(layout_point(*point)),
+                crate::canvas::PathCommand::ClosePath => builder.close(),
+            }
+        }
+        builder
+            .build()
+            .map(|path| PreparedItem::Path { path, color })
+            .map_err(|error| path_build_diagnostic(op_index, op_name, &error))
+    };
 
     for item in &list.items {
         match item {
             crate::canvas::DisplayItem::FillRect(rect) => {
-                let x1 = rect.x.min(rect.x + rect.width);
-                let x2 = rect.x.max(rect.x + rect.width);
-                let y1 = rect.y.min(rect.y + rect.height);
-                let y2 = rect.y.max(rect.y + rect.height);
-                let quad_bounds = gpui::bounds(
-                    gpui::point(
-                        gpui::px((origin_x + x1 * scale_x) as f32),
-                        gpui::px((origin_y + y1 * scale_y) as f32),
-                    ),
-                    gpui::size(
-                        gpui::px(((x2 - x1) * scale_x) as f32),
-                        gpui::px(((y2 - y1) * scale_y) as f32),
-                    ),
-                )
-                .intersect(&bounds);
-                if !quad_bounds.is_empty() {
-                    quads.push(gpui::fill(quad_bounds, rect.color));
+                let [top_left, top_right, bottom_right, bottom_left] = rect.points;
+                let axis_aligned = top_left.y == top_right.y
+                    && top_right.x == bottom_right.x
+                    && bottom_right.y == bottom_left.y
+                    && bottom_left.x == top_left.x;
+                if axis_aligned {
+                    let x1 = rect
+                        .points
+                        .iter()
+                        .map(|point| point.x)
+                        .fold(f64::INFINITY, f64::min);
+                    let x2 = rect
+                        .points
+                        .iter()
+                        .map(|point| point.x)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    let y1 = rect
+                        .points
+                        .iter()
+                        .map(|point| point.y)
+                        .fold(f64::INFINITY, f64::min);
+                    let y2 = rect
+                        .points
+                        .iter()
+                        .map(|point| point.y)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    let quad_bounds = gpui::bounds(
+                        layout_point(crate::canvas::CanvasPoint { x: x1, y: y1 }),
+                        gpui::size(
+                            gpui::px(((x2 - x1) * scale_x) as f32),
+                            gpui::px(((y2 - y1) * scale_y) as f32),
+                        ),
+                    )
+                    .intersect(&bounds);
+                    if !quad_bounds.is_empty() {
+                        items.push(PreparedItem::Quad(gpui::fill(quad_bounds, rect.color)));
+                    }
+                } else {
+                    let commands = [
+                        crate::canvas::PathCommand::MoveTo(top_left),
+                        crate::canvas::PathCommand::LineTo(top_right),
+                        crate::canvas::PathCommand::LineTo(bottom_right),
+                        crate::canvas::PathCommand::LineTo(bottom_left),
+                        crate::canvas::PathCommand::ClosePath,
+                    ];
+                    match build_path(rect.op_index, "fillRect", &commands, rect.color) {
+                        Ok(path) => items.push(path),
+                        Err(diagnostic) => diagnostics.push(diagnostic),
+                    }
+                }
+            }
+            crate::canvas::DisplayItem::FillPath(path) => {
+                match build_path(path.op_index, "fill", &path.commands, path.color) {
+                    Ok(path) => items.push(path),
+                    Err(diagnostic) => diagnostics.push(diagnostic),
                 }
             }
         }
     }
 
-    PreparedDisplayList { quads }
+    PreparedDisplayList { items, diagnostics }
+}
+
+fn path_build_diagnostic(
+    op_index: usize,
+    op_name: &str,
+    error: &dyn std::fmt::Display,
+) -> crate::canvas::CanvasDiagnostic {
+    crate::canvas::CanvasDiagnostic {
+        op_index,
+        op_name: op_name.to_string(),
+        reason: format!("GPUI PathBuilder failed to build nonzero fill geometry: {error}"),
+    }
 }
 
 impl CanvasElement {
@@ -358,12 +449,21 @@ impl CustomElement for CanvasElement {
                 if let Some(cached) = cache.as_ref().filter(|cached| cached.key == key) {
                     return cached.list.clone();
                 }
-                let prepared = Arc::new(
-                    list.as_deref()
-                        .map_or(PreparedDisplayList { quads: Vec::new() }, |list| {
-                            prepare(list, bounds, width, height)
-                        }),
-                );
+                let prepared = Arc::new(list.as_deref().map_or(
+                    PreparedDisplayList {
+                        items: Vec::new(),
+                        diagnostics: Vec::new(),
+                    },
+                    |list| prepare(list, bounds, width, height),
+                ));
+                for diagnostic in &prepared.diagnostics {
+                    log::error!(
+                        "<canvas> element {id} {} op[{}]: {}",
+                        diagnostic.op_name,
+                        diagnostic.op_index,
+                        diagnostic.reason
+                    );
+                }
                 *cache = Some(PreparedCache {
                     key,
                     list: prepared.clone(),
@@ -371,12 +471,18 @@ impl CustomElement for CanvasElement {
                 prepared
             },
             move |_bounds, prepared, window, _cx| {
-                for quad in &prepared.quads {
-                    window.paint_quad(quad.clone());
+                for item in &prepared.items {
+                    match item {
+                        PreparedItem::Quad(quad) => window.paint_quad(quad.clone()),
+                        PreparedItem::Path { path, color } => {
+                            window.paint_path(path.clone(), *color)
+                        }
+                    }
                 }
             },
         )
-        .size_full();
+        .size_full()
+        .overflow_hidden();
 
         let element_id = gpui::SharedString::from(format!("__gpuix_{}", ctx.id));
         let mut root = gpui::div()
@@ -440,5 +546,160 @@ impl CustomElementFactory for CanvasFactory {
 
     fn create(&self, _id: u64) -> Box<dyn CustomElement> {
         Box::new(CanvasElement::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::canvas::{CanvasPoint, DisplayItem, FillPath, FillRect, PathCommand};
+
+    fn color() -> gpui::Rgba {
+        crate::color::parse_color_rgba("#2563eb").unwrap()
+    }
+
+    fn test_bounds() -> gpui::Bounds<gpui::Pixels> {
+        gpui::bounds(
+            gpui::point(gpui::px(0.0), gpui::px(0.0)),
+            gpui::size(gpui::px(320.0), gpui::px(240.0)),
+        )
+    }
+
+    fn prepared_quad(list: &PreparedDisplayList) -> &gpui::PaintQuad {
+        let PreparedItem::Quad(quad) = &list.items[0] else {
+            panic!("expected a prepared quad");
+        };
+        quad
+    }
+
+    fn prepared_path(list: &PreparedDisplayList) -> &gpui::Path<gpui::Pixels> {
+        let PreparedItem::Path { path, .. } = &list.items[0] else {
+            panic!("expected a prepared path");
+        };
+        path
+    }
+
+    #[test]
+    fn dpr_scaled_backing_geometry_maps_to_the_same_layout_geometry() {
+        let logical = crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::FillRect(FillRect {
+                points: [
+                    CanvasPoint { x: 24.0, y: 18.0 },
+                    CanvasPoint { x: 80.0, y: 18.0 },
+                    CanvasPoint { x: 80.0, y: 58.0 },
+                    CanvasPoint { x: 24.0, y: 58.0 },
+                ],
+                color: color(),
+                op_index: 0,
+            })],
+        };
+        let dpr_scaled = crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::FillRect(FillRect {
+                points: [
+                    CanvasPoint { x: 48.0, y: 36.0 },
+                    CanvasPoint { x: 160.0, y: 36.0 },
+                    CanvasPoint { x: 160.0, y: 116.0 },
+                    CanvasPoint { x: 48.0, y: 116.0 },
+                ],
+                color: color(),
+                op_index: 0,
+            })],
+        };
+
+        let logical = prepare(&logical, test_bounds(), 320.0, 240.0);
+        let dpr_scaled = prepare(&dpr_scaled, test_bounds(), 640.0, 480.0);
+
+        assert_eq!(
+            prepared_quad(&logical).bounds,
+            prepared_quad(&dpr_scaled).bounds
+        );
+    }
+
+    #[test]
+    fn dpr_scaled_path_geometry_maps_to_the_same_logical_gpui_path() {
+        let path = |scale: f64| crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::FillPath(FillPath {
+                commands: vec![
+                    PathCommand::MoveTo(CanvasPoint {
+                        x: 12.0 * scale,
+                        y: 18.0 * scale,
+                    }),
+                    PathCommand::LineTo(CanvasPoint {
+                        x: 64.0 * scale,
+                        y: 70.0 * scale,
+                    }),
+                    PathCommand::LineTo(CanvasPoint {
+                        x: 116.0 * scale,
+                        y: 18.0 * scale,
+                    }),
+                    PathCommand::ClosePath,
+                ],
+                color: color(),
+                op_index: 4,
+            })],
+        };
+        let logical = prepare(&path(1.0), test_bounds(), 320.0, 240.0);
+        let dpr_scaled = prepare(&path(2.0), test_bounds(), 640.0, 480.0);
+        let logical = prepared_path(&logical);
+        let dpr_scaled = prepared_path(&dpr_scaled);
+
+        assert_eq!(logical.bounds, dpr_scaled.bounds);
+        assert_eq!(logical.vertices.len(), dpr_scaled.vertices.len());
+        for (logical, dpr_scaled) in logical.vertices.iter().zip(&dpr_scaled.vertices) {
+            assert_eq!(logical.xy_position, dpr_scaled.xy_position);
+        }
+    }
+
+    #[test]
+    fn rotated_and_skewed_rectangles_are_tessellated_as_paths_not_quads() {
+        let list = crate::canvas::DisplayList {
+            revision: 1,
+            items: vec![DisplayItem::FillRect(FillRect {
+                points: [
+                    CanvasPoint { x: 40.0, y: 20.0 },
+                    CanvasPoint { x: 92.0, y: 42.0 },
+                    CanvasPoint { x: 78.0, y: 84.0 },
+                    CanvasPoint { x: 26.0, y: 62.0 },
+                ],
+                color: color(),
+                op_index: 7,
+            })],
+        };
+
+        let prepared = prepare(&list, test_bounds(), 320.0, 240.0);
+        assert!(matches!(prepared.items[0], PreparedItem::Path { .. }));
+        assert!(prepared.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn cache_key_keeps_revision_bounds_and_device_scale() {
+        let bounds = test_bounds();
+        let baseline = CacheKey::new(3, bounds, 2.0);
+
+        assert_ne!(baseline, CacheKey::new(4, bounds, 2.0));
+        assert_ne!(baseline, CacheKey::new(3, bounds, 1.0));
+        assert_ne!(
+            baseline,
+            CacheKey::new(
+                3,
+                gpui::bounds(gpui::point(gpui::px(1.0), gpui::px(0.0)), bounds.size,),
+                2.0,
+            )
+        );
+    }
+
+    #[test]
+    fn path_build_failures_keep_the_operation_name_and_a_loud_reason() {
+        let diagnostic = path_build_diagnostic(9, "fillRect", &"vertex limit exceeded");
+
+        assert_eq!(diagnostic.op_index, 9);
+        assert_eq!(diagnostic.op_name, "fillRect");
+        assert_eq!(
+            diagnostic.reason,
+            "GPUI PathBuilder failed to build nonzero fill geometry: vertex limit exceeded"
+        );
     }
 }

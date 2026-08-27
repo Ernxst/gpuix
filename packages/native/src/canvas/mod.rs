@@ -9,18 +9,40 @@ use rustc_hash::FxHashMap;
 
 pub type SharedDisplayLists = Arc<Mutex<FxHashMap<u64, Arc<DisplayList>>>>;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct FillRect {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CanvasPoint {
     pub x: f64,
     pub y: f64,
-    pub width: f64,
-    pub height: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FillRect {
+    /// Rectangle corners after applying the current transformation matrix.
+    pub points: [CanvasPoint; 4],
     pub color: gpui::Rgba,
+    pub op_index: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PathCommand {
+    MoveTo(CanvasPoint),
+    LineTo(CanvasPoint),
+    ClosePath,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FillPath {
+    /// Path coordinates are transformed when the path command is replayed,
+    /// matching Canvas 2D's current-path semantics.
+    pub commands: Vec<PathCommand>,
+    pub color: gpui::Rgba,
+    pub op_index: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DisplayItem {
     FillRect(FillRect),
+    FillPath(FillPath),
 }
 
 #[derive(Clone, Debug)]
@@ -69,6 +91,46 @@ pub(crate) struct CanvasApplyOutcome {
 #[derive(Clone)]
 struct ReplayState {
     fill_style: gpui::Rgba,
+    transform: Transform2D,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Transform2D {
+    a: f64,
+    b: f64,
+    c: f64,
+    d: f64,
+    e: f64,
+    f: f64,
+}
+
+impl Transform2D {
+    const IDENTITY: Self = Self {
+        a: 1.0,
+        b: 0.0,
+        c: 0.0,
+        d: 1.0,
+        e: 0.0,
+        f: 0.0,
+    };
+
+    fn multiply(self, right: Self) -> Self {
+        Self {
+            a: self.a * right.a + self.c * right.b,
+            b: self.b * right.a + self.d * right.b,
+            c: self.a * right.c + self.c * right.d,
+            d: self.b * right.c + self.d * right.d,
+            e: self.a * right.e + self.c * right.f + self.e,
+            f: self.b * right.e + self.d * right.f + self.f,
+        }
+    }
+
+    fn transform_point(self, x: f64, y: f64) -> CanvasPoint {
+        CanvasPoint {
+            x: self.a * x + self.c * y + self.e,
+            y: self.b * x + self.d * y + self.f,
+        }
+    }
 }
 
 fn malformed(op_index: usize, reason: impl Into<String>) -> DecodeError {
@@ -125,8 +187,11 @@ pub(crate) fn decode(
     let mut op_index = 0usize;
     let mut state = ReplayState {
         fill_style: crate::color::parse_color_rgba("#000000").expect("black is valid"),
+        transform: Transform2D::IDENTITY,
     };
     let mut stack = Vec::new();
+    let mut current_path = Vec::new();
+    let mut has_current_subpath = false;
     let mut items = Vec::new();
     let mut diagnostics = Vec::new();
     let mut invalidates = false;
@@ -209,6 +274,62 @@ pub(crate) fn decode(
                 }
                 // Canvas restore() on an empty stack is an observable no-op.
             }
+            opcodes::TRANSLATE => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    state.transform = state.transform.multiply(Transform2D {
+                        e: command_operands[0],
+                        f: command_operands[1],
+                        ..Transform2D::IDENTITY
+                    });
+                }
+            }
+            opcodes::SCALE => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    state.transform = state.transform.multiply(Transform2D {
+                        a: command_operands[0],
+                        d: command_operands[1],
+                        ..Transform2D::IDENTITY
+                    });
+                }
+            }
+            opcodes::ROTATE => {
+                if command_operands[0].is_finite() {
+                    let (sin, cos) = command_operands[0].sin_cos();
+                    state.transform = state.transform.multiply(Transform2D {
+                        a: cos,
+                        b: sin,
+                        c: -sin,
+                        d: cos,
+                        e: 0.0,
+                        f: 0.0,
+                    });
+                }
+            }
+            opcodes::TRANSFORM => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    state.transform = state.transform.multiply(Transform2D {
+                        a: command_operands[0],
+                        b: command_operands[1],
+                        c: command_operands[2],
+                        d: command_operands[3],
+                        e: command_operands[4],
+                        f: command_operands[5],
+                    });
+                }
+            }
+            opcodes::SET_TRANSFORM => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    state.transform = Transform2D {
+                        a: command_operands[0],
+                        b: command_operands[1],
+                        c: command_operands[2],
+                        d: command_operands[3],
+                        e: command_operands[4],
+                        f: command_operands[5],
+                    };
+                }
+            }
+            opcodes::RESET_TRANSFORM => state.transform = Transform2D::IDENTITY,
             opcodes::FILL_STYLE => {
                 let index = side_table_index(command_operands[0], op_index, 0)?;
                 let value = &strings[index];
@@ -224,21 +345,87 @@ pub(crate) fn decode(
             }
             opcodes::FILL_RECT => {
                 if command_operands.iter().all(|value| value.is_finite()) {
+                    let x = command_operands[0];
+                    let y = command_operands[1];
+                    let width = command_operands[2];
+                    let height = command_operands[3];
                     items.push(DisplayItem::FillRect(FillRect {
-                        x: command_operands[0],
-                        y: command_operands[1],
-                        width: command_operands[2],
-                        height: command_operands[3],
+                        points: [
+                            state.transform.transform_point(x, y),
+                            state.transform.transform_point(x + width, y),
+                            state.transform.transform_point(x + width, y + height),
+                            state.transform.transform_point(x, y + height),
+                        ],
                         color: state.fill_style,
+                        op_index,
                     }));
                     invalidates = true;
                 }
                 // Browser Canvas treats non-finite rectangle arguments as a no-op.
             }
+            opcodes::BEGIN_PATH => {
+                current_path.clear();
+                has_current_subpath = false;
+            }
+            opcodes::MOVE_TO => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    current_path.push(PathCommand::MoveTo(
+                        state
+                            .transform
+                            .transform_point(command_operands[0], command_operands[1]),
+                    ));
+                    has_current_subpath = true;
+                }
+            }
+            opcodes::LINE_TO => {
+                if command_operands.iter().all(|value| value.is_finite()) {
+                    let point = state
+                        .transform
+                        .transform_point(command_operands[0], command_operands[1]);
+                    if has_current_subpath {
+                        current_path.push(PathCommand::LineTo(point));
+                    } else {
+                        current_path.push(PathCommand::MoveTo(point));
+                        has_current_subpath = true;
+                    }
+                }
+            }
+            opcodes::CLOSE_PATH => {
+                if has_current_subpath {
+                    current_path.push(PathCommand::ClosePath);
+                }
+            }
+            opcodes::FILL => match command_operands[0] {
+                0.0 => {
+                    if current_path
+                        .iter()
+                        .any(|command| matches!(command, PathCommand::LineTo(_)))
+                    {
+                        items.push(DisplayItem::FillPath(FillPath {
+                            commands: current_path.clone(),
+                            color: state.fill_style,
+                            op_index,
+                        }));
+                        invalidates = true;
+                    }
+                }
+                1.0 => diagnostics.push(CanvasDiagnostic {
+                    op_index,
+                    op_name: spec.name.to_string(),
+                    reason: "evenodd fills remain in canvas phase B3; phase B1 implements nonzero fills only"
+                        .to_string(),
+                }),
+                value => {
+                    return Err(malformed(
+                        op_index,
+                        format!("fill rule must be 0 (nonzero) or 1 (evenodd), got {value}"),
+                    ));
+                }
+            },
             _ => diagnostics.push(CanvasDiagnostic {
                 op_index,
                 op_name: spec.name.to_string(),
-                reason: "recognized by stream version 1 but not implemented in canvas phase A1"
+                reason: "recognized by stream version 1 but not implemented in canvas phase B1"
                     .to_string(),
             }),
         }
@@ -328,6 +515,18 @@ pub fn remove_display_lists(display_lists: &SharedDisplayLists, element_ids: &[u
 mod tests {
     use super::*;
 
+    fn assert_point(point: CanvasPoint, expected: (f64, f64)) {
+        assert!((point.x - expected.0).abs() < 1e-9, "x: {point:?}");
+        assert!((point.y - expected.1).abs() < 1e-9, "y: {point:?}");
+    }
+
+    fn fill_rect(item: &DisplayItem) -> &FillRect {
+        let DisplayItem::FillRect(rect) = item else {
+            panic!("expected fillRect, got {item:?}");
+        };
+        rect
+    }
+
     fn stream(commands: &[(u32, &[f64])]) -> (Vec<u32>, Vec<f64>) {
         let mut ops = vec![opcodes::STREAM_MAGIC, opcodes::STREAM_VERSION];
         let mut operands = Vec::new();
@@ -352,10 +551,15 @@ mod tests {
         assert!(outcome.invalidates);
         let list = store.lock().unwrap().get(&7).unwrap().clone();
         assert_eq!(list.revision, 1);
-        let DisplayItem::FillRect(rect) = &list.items[0];
+        let rect = fill_rect(&list.items[0]);
         assert_eq!(
-            (rect.x, rect.y, rect.width, rect.height),
-            (12.0, 18.0, 40.0, 24.0)
+            rect.points,
+            [
+                CanvasPoint { x: 12.0, y: 18.0 },
+                CanvasPoint { x: 52.0, y: 18.0 },
+                CanvasPoint { x: 52.0, y: 42.0 },
+                CanvasPoint { x: 12.0, y: 42.0 },
+            ]
         );
         assert_eq!(
             u32::from(rect.color),
@@ -390,8 +594,8 @@ mod tests {
         assert!(outcome.diagnostics.is_empty());
         let list = store.lock().unwrap().get(&8).unwrap().clone();
         assert_eq!(list.items.len(), 2);
-        let DisplayItem::FillRect(first) = &list.items[0];
-        let DisplayItem::FillRect(second) = &list.items[1];
+        let first = fill_rect(&list.items[0]);
+        let second = fill_rect(&list.items[1]);
         assert_eq!(
             u32::from(first.color),
             u32::from(crate::color::parse_color_rgba("#2563eb").unwrap())
@@ -400,6 +604,131 @@ mod tests {
             u32::from(second.color),
             u32::from(crate::color::parse_color_rgba("#ef4444").unwrap())
         );
+    }
+
+    #[test]
+    fn decoder_composes_every_transform_and_restores_the_saved_ctm() {
+        let (ops, operands) = stream(&[
+            (opcodes::TRANSLATE, &[10.0, 20.0]),
+            (opcodes::SCALE, &[2.0, 3.0]),
+            (opcodes::FILL_RECT, &[1.0, 2.0, 4.0, 5.0]),
+            (opcodes::SAVE, &[]),
+            (opcodes::ROTATE, &[std::f64::consts::FRAC_PI_2]),
+            (opcodes::FILL_RECT, &[1.0, 0.0, 2.0, 1.0]),
+            (opcodes::RESTORE, &[]),
+            (opcodes::TRANSFORM, &[1.0, 0.5, 0.25, 1.0, 4.0, 5.0]),
+            (opcodes::FILL_RECT, &[0.0, 0.0, 2.0, 2.0]),
+            (opcodes::SET_TRANSFORM, &[1.0, 0.0, 0.5, 1.0, 7.0, 8.0]),
+            (opcodes::FILL_RECT, &[0.0, 0.0, 2.0, 2.0]),
+            (opcodes::RESET_TRANSFORM, &[]),
+            (opcodes::FILL_RECT, &[3.0, 4.0, 2.0, 1.0]),
+        ]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list(&store, 12, &ops, &operands, &[]).unwrap();
+
+        assert!(outcome.diagnostics.is_empty());
+        let list = store.lock().unwrap().get(&12).unwrap().clone();
+        assert_eq!(list.items.len(), 5);
+
+        let composed = fill_rect(&list.items[0]);
+        assert_eq!(
+            composed.points,
+            [
+                CanvasPoint { x: 12.0, y: 26.0 },
+                CanvasPoint { x: 20.0, y: 26.0 },
+                CanvasPoint { x: 20.0, y: 41.0 },
+                CanvasPoint { x: 12.0, y: 41.0 },
+            ]
+        );
+
+        let rotated = fill_rect(&list.items[1]);
+        assert_point(rotated.points[0], (10.0, 23.0));
+        assert_point(rotated.points[1], (10.0, 29.0));
+        assert_point(rotated.points[2], (8.0, 29.0));
+        assert_point(rotated.points[3], (8.0, 23.0));
+
+        let transformed = fill_rect(&list.items[2]);
+        assert_eq!(
+            transformed.points,
+            [
+                CanvasPoint { x: 18.0, y: 35.0 },
+                CanvasPoint { x: 22.0, y: 38.0 },
+                CanvasPoint { x: 23.0, y: 44.0 },
+                CanvasPoint { x: 19.0, y: 41.0 },
+            ]
+        );
+
+        let set = fill_rect(&list.items[3]);
+        assert_eq!(
+            set.points,
+            [
+                CanvasPoint { x: 7.0, y: 8.0 },
+                CanvasPoint { x: 9.0, y: 8.0 },
+                CanvasPoint { x: 10.0, y: 10.0 },
+                CanvasPoint { x: 8.0, y: 10.0 },
+            ]
+        );
+
+        let reset = fill_rect(&list.items[4]);
+        assert_eq!(
+            reset.points,
+            [
+                CanvasPoint { x: 3.0, y: 4.0 },
+                CanvasPoint { x: 5.0, y: 4.0 },
+                CanvasPoint { x: 5.0, y: 5.0 },
+                CanvasPoint { x: 3.0, y: 5.0 },
+            ]
+        );
+    }
+
+    #[test]
+    fn decoder_bakes_the_ctm_when_path_points_are_added_and_fills_nonzero() {
+        let (ops, operands) = stream(&[
+            (opcodes::BEGIN_PATH, &[]),
+            (opcodes::TRANSLATE, &[10.0, 20.0]),
+            (opcodes::MOVE_TO, &[1.0, 2.0]),
+            (opcodes::SCALE, &[2.0, 3.0]),
+            (opcodes::LINE_TO, &[4.0, 5.0]),
+            (opcodes::LINE_TO, &[8.0, 5.0]),
+            (opcodes::CLOSE_PATH, &[]),
+            (opcodes::RESET_TRANSFORM, &[]),
+            (opcodes::FILL, &[0.0]),
+        ]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list(&store, 13, &ops, &operands, &[]).unwrap();
+
+        assert!(outcome.diagnostics.is_empty());
+        let list = store.lock().unwrap().get(&13).unwrap().clone();
+        let DisplayItem::FillPath(path) = &list.items[0] else {
+            panic!("expected a filled path");
+        };
+        assert_eq!(
+            path.commands,
+            vec![
+                PathCommand::MoveTo(CanvasPoint { x: 11.0, y: 22.0 }),
+                PathCommand::LineTo(CanvasPoint { x: 18.0, y: 35.0 }),
+                PathCommand::LineTo(CanvasPoint { x: 26.0, y: 35.0 }),
+                PathCommand::ClosePath,
+            ]
+        );
+    }
+
+    #[test]
+    fn evenodd_fill_remains_a_named_phase_b3_diagnostic() {
+        let (ops, operands) = stream(&[
+            (opcodes::BEGIN_PATH, &[]),
+            (opcodes::MOVE_TO, &[0.0, 0.0]),
+            (opcodes::LINE_TO, &[10.0, 0.0]),
+            (opcodes::LINE_TO, &[0.0, 10.0]),
+            (opcodes::FILL, &[1.0]),
+        ]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list(&store, 14, &ops, &operands, &[]).unwrap();
+
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(outcome.diagnostics[0].op_name, "fill");
+        assert!(outcome.diagnostics[0].reason.contains("phase B3"));
+        assert!(!outcome.invalidates);
     }
 
     #[test]
@@ -418,8 +747,7 @@ mod tests {
     #[test]
     fn trailing_restore_on_an_empty_stack_does_not_bump_the_display_list() {
         let store = SharedDisplayLists::default();
-        let (first_ops, first_operands) =
-            stream(&[(opcodes::FILL_RECT, &[0.0, 0.0, 10.0, 10.0])]);
+        let (first_ops, first_operands) = stream(&[(opcodes::FILL_RECT, &[0.0, 0.0, 10.0, 10.0])]);
         replace_display_list(&store, 11, &first_ops, &first_operands, &[])
             .expect("initial drawing is valid");
 
@@ -438,13 +766,13 @@ mod tests {
     #[test]
     fn known_and_unknown_unimplemented_opcodes_decode_with_diagnostics() {
         let (ops, operands) = stream(&[
-            (opcodes::TRANSLATE, &[4.0, 8.0]),
+            (opcodes::STROKE_RECT, &[0.0, 0.0, 4.0, 8.0]),
             (0xffff, &[1.0, 2.0, 3.0]),
         ]);
         let store = SharedDisplayLists::default();
         let outcome = replace_display_list(&store, 9, &ops, &operands, &[]).unwrap();
         assert_eq!(outcome.diagnostics.len(), 2);
-        assert_eq!(outcome.diagnostics[0].op_name, "translate");
+        assert_eq!(outcome.diagnostics[0].op_name, "strokeRect");
         assert_eq!(outcome.diagnostics[1].op_name, "unknown(0x0000ffff)");
         assert!(!outcome.invalidates);
         assert!(!store.lock().unwrap().contains_key(&9));

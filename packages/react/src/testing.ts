@@ -1263,9 +1263,9 @@ export function expectCanvasMatchesBrowser(
     )
   }
 
-  if (resolved.name !== "fill-rect-grid") {
+  if (resolved.name !== "fill-rect-grid" && resolved.name !== "translate-scale") {
     return skipCanvasComparison(
-      `native replay for scene ${JSON.stringify(resolved.name)} remains queued for canvas phase B; A1 replays fillStyle + fillRect only`,
+      `native replay for scene ${JSON.stringify(resolved.name)} remains queued for a later canvas phase; B1 replays transforms, fillRect, and minimum nonzero paths`,
       options.skip
     )
   }
@@ -1287,14 +1287,19 @@ export function expectCanvasMatchesBrowser(
     testRoot.render(
       createElement("canvas", {
         ref: canvasRef,
-        width: CANVAS_GOLDEN_WIDTH,
-        height: CANVAS_GOLDEN_HEIGHT,
+        width: CANVAS_GOLDEN_WIDTH * CANVAS_GOLDEN_DPR,
+        height: CANVAS_GOLDEN_HEIGHT * CANVAS_GOLDEN_DPR,
+        style: {
+          width: CANVAS_GOLDEN_WIDTH,
+          height: CANVAS_GOLDEN_HEIGHT,
+        },
       })
     )
 
     const canvas = canvasRef.current
     if (!canvas) throw new Error("The GPUIX <canvas> ref was not mounted")
     const context = canvas.getContext("2d")
+    context.scale(CANVAS_GOLDEN_DPR, CANVAS_GOLDEN_DPR)
     resolved.draw(context, CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT)
     flushRecordingContext2D(context)
     testRoot.renderer.flush()
