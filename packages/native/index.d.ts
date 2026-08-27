@@ -290,12 +290,7 @@ export declare class TestGpuixRenderer {
    * hit testing requires elements to be laid out).
    */
   flush(): void
-  /**
-   * Build and read GPUI's real AccessKit tree for the current retained tree.
-   *
-   * The explicit draw is the read boundary: callers never observe a tree
-   * from before the latest committed React mutations.
-   */
+  /** Read GPUI's real AccessKit tree from the last explicit draw. */
   getAccessibilityTree(): string
   /** Dispatch one requested action through GPUI's production AccessKit route. */
   simulateAccessibilityAction(accesskitId: string, action: "activate" | "increment" | "decrement" | "focus"): void
@@ -683,7 +678,7 @@ export interface EventPayload {
    * AccessKit action requested by assistive technology.
    * Populated for: accessibilityAction.
    */
-  accessibilityAction?: "activate" | "increment" | "decrement" | "focus"
+  accessibilityAction?: "increment" | "decrement" | "focus"
   modifiers?: EventModifiers
 }
 

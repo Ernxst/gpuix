@@ -123,7 +123,7 @@ pub struct EventPayload {
     /// Populated for: accessibilityAction.
     #[cfg_attr(
         not(all(target_arch = "wasm32", target_os = "unknown")),
-        napi(ts_type = "\"activate\" | \"increment\" | \"decrement\" | \"focus\"")
+        napi(ts_type = "\"increment\" | \"decrement\" | \"focus\"")
     )]
     pub accessibility_action: Option<String>,
 

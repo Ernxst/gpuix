@@ -12,7 +12,7 @@ import {
 } from "../automation/index.js"
 import { createRenderer } from "../reconciler/renderer.js"
 import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing.js"
-import type { RendererCapabilities } from "../types/host.js"
+import type { GpuixSyntheticEvent, RendererCapabilities } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -156,7 +156,7 @@ describeNative("automation", () => {
     expect(renderer.findByTestId("null")).toBeUndefined()
   })
 
-  it("publishes a labelled button and dispatches AccessKit activate once", () => {
+  it("publishes a labelled button and dispatches AccessKit activate as one click", () => {
     const actions: string[] = []
     const { render, renderer } = createTestRoot()
 
@@ -165,6 +165,8 @@ describeNative("automation", () => {
         id="save"
         role="button"
         ariaLabel="Save factory"
+        style={{ width: 120, height: 50 }}
+        onClick={() => actions.push("click")}
         onAccessibilityAction={(event) => actions.push(event.accessibilityAction ?? "missing")}
       />
     )
@@ -183,7 +185,152 @@ describeNative("automation", () => {
     expect(button?.aria.on_action).not.toEqual(expect.arrayContaining(["Increment", "Decrement"]))
 
     renderer.nativeSimulateAccessibilityAction(button!.accesskit_id, "activate")
-    expect(actions).toEqual(["activate"])
+    expect(actions).toEqual(["click"])
+  })
+
+  it("routes AccessKit activate through the same click pipeline with or without an action handler", () => {
+    const { render, renderer } = createTestRoot()
+    const trace: string[] = []
+    const record = (name: string, event: GpuixSyntheticEvent) => {
+      trace.push(`${name}:${event.eventPhase}:${event.target.id}:${event.currentTarget.id}`)
+      if (name === "target-bubble") event.preventDefault()
+    }
+    const app = (withActionHandler: boolean) => (
+      <div
+        testId="activation-parent"
+        style={{ width: 240, height: 100 }}
+        onClickCapture={(event) => record("parent-capture", event)}
+        onClick={(event) => record("parent-bubble", event)}
+      >
+        <button
+          testId="activation-target"
+          role="button"
+          ariaLabel="Run"
+          style={{ width: 120, height: 50 }}
+          onClickCapture={(event) => record("target-capture", event)}
+          onClick={(event) => record("target-bubble", event)}
+          {...(withActionHandler
+            ? { onAccessibilityAction: () => trace.push("accessibility-action") }
+            : {})}
+        />
+      </div>
+    )
+
+    render(app(false))
+    const withoutHandlerNode = Object.values(renderer.getAccessibilityTree().nodes).find(
+      (node) => node.aria.label === "Run"
+    )!
+    renderer.nativeSimulateAccessibilityAction(withoutHandlerNode.accesskit_id, "activate")
+    const withoutHandler = [...trace]
+
+    trace.length = 0
+    render(app(true))
+    const withHandlerNode = Object.values(renderer.getAccessibilityTree().nodes).find(
+      (node) => node.aria.label === "Run"
+    )!
+    renderer.nativeSimulateAccessibilityAction(withHandlerNode.accesskit_id, "activate")
+
+    expect(trace).toEqual(withoutHandler)
+    expect(trace.map((entry) => entry.split(":")[0])).toEqual([
+      "parent-capture",
+      "target-capture",
+      "target-bubble",
+      "parent-bubble",
+    ])
+  })
+
+  it.each([
+    ["disabled", { disabled: true }],
+    ["ariaDisabled", { ariaDisabled: true }],
+  ] as const)("refuses pointer, keyboard, and AccessKit activation when %s", (_name, state) => {
+    const seen: string[] = []
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ width: 240, height: 100 }}>
+        <button
+          {...(state as Record<string, boolean>)}
+          testId="disabled-control"
+          role="button"
+          ariaLabel="Unavailable"
+          tabIndex={0}
+          style={{ width: 120, height: 50 }}
+          onClick={() => seen.push("click")}
+          onAccessibilityAction={(event) =>
+            seen.push(`a11y:${event.accessibilityAction ?? "missing"}`)
+          }
+        >
+          <text>Unavailable</text>
+        </button>
+      </div>
+    )
+
+    const element = renderer.findByTestId("disabled-control")!
+    const tree = renderer.getAccessibilityTree()
+    const node = Object.values(tree.nodes).find((candidate) => candidate.aria.label === "Unavailable")!
+    expect(node.aria.disabled).toBe(true)
+    expect(tree.frame?.tab_stop_count).toBe(_name === "ariaDisabled" ? 1 : 0)
+    expect(node.aria.on_action ?? []).not.toContain("Click")
+    if (_name === "ariaDisabled") {
+      expect(node.aria.on_action ?? []).toContain("Focus")
+    } else {
+      expect(node.aria.on_action ?? []).not.toContain("Focus")
+    }
+
+    renderer.nativeSimulateClick(20, 20)
+    renderer.nativeSimulateKeystrokes(element.id, "enter")
+    renderer.nativeSimulateAccessibilityAction(node.accesskit_id, "activate")
+
+    expect(seen).toEqual([])
+  })
+
+  it("publishes semantics on text, input, and img hosts", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <text role="heading" ariaLabel="Search heading" ariaLevel={2}>
+          Search
+        </text>
+        <input role="textbox" ariaLabel="Recipe search" />
+        <img role="img" ariaLabel="Recipe preview" />
+      </div>
+    )
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    const byLabel = (label: string) => nodes.find((node) => node.aria.label === label)
+    expect(byLabel("Search heading")).toMatchObject({
+      aria: { role: "Heading", label: "Search heading", level: 2 },
+    })
+    expect(byLabel("Recipe search")).toMatchObject({
+      aria: { role: "TextInput", label: "Recipe search" },
+    })
+    expect(byLabel("Recipe preview")).toMatchObject({
+      aria: { role: "Image", label: "Recipe preview" },
+    })
+  })
+
+  it("keeps accessibility reads and actions on the last explicit draw", () => {
+    const clicks: string[] = []
+    const { render, renderer } = createTestRoot()
+    render(
+      <button
+        role="button"
+        ariaLabel="Snapshot"
+        style={{ width: 120, height: 50 }}
+        onClick={() => clicks.push("click")}
+      />
+    )
+
+    const first = renderer.getAccessibilityTree()
+    const node = Object.values(first.nodes).find((candidate) => candidate.aria.label === "Snapshot")!
+    const frameNumber = first.frame?.frame_number
+    const readFrameNumber = () => renderer.getAccessibilityTree().frame?.frame_number
+    expect(readFrameNumber()).toBe(frameNumber)
+
+    renderer.nativeSimulateAccessibilityAction(node.accesskit_id, "activate")
+    expect(clicks).toEqual(["click"])
+    expect(readFrameNumber()).toBe(frameNumber)
   })
 
   it("publishes explicit roles, states, descriptions, and values", () => {
@@ -199,7 +346,8 @@ describeNative("automation", () => {
           disabled
         />
         <h2 role="heading" ariaLabel="Production" ariaLevel={2} />
-        <a role="link" ariaLabel="Open recipe" ariaExpanded={false} ariaSelected />
+        <a role="link" ariaLabel="Open recipe" ariaExpanded={false} />
+        <div role="option" ariaLabel="Turbo motor" ariaSelected />
         <div
           role="slider"
           ariaLabel="Clock speed"
@@ -225,8 +373,8 @@ describeNative("automation", () => {
     expect(byLabel("Open recipe")).toMatchObject({
       role: "Link",
       expanded: false,
-      selected: true,
     })
+    expect(byLabel("Turbo motor")).toMatchObject({ role: "ListBoxOption", selected: true })
     expect(byLabel("Clock speed")).toMatchObject({
       role: "Slider",
       value: "42 percent",
@@ -268,6 +416,7 @@ describeNative("automation", () => {
     renderer.nativeSimulateAccessibilityAction(control.accesskit_id, "focus")
     expect(actions).toEqual(["increment", "decrement", "focus"])
 
+    renderer.flush()
     const focused = renderer.getAccessibilityTree()
     const focusedEntry = Object.entries(focused.nodes).find(
       ([, node]) => node.accesskit_id === control.accesskit_id
@@ -315,6 +464,24 @@ describeNative("automation", () => {
     expect(Object.values(renderer.getAccessibilityTree().nodes)).not.toContainEqual(
       expect.objectContaining({ accesskit_id: initial.get("Alpha") })
     )
+  })
+
+  it("suppresses an ariaHidden subtree from AccessKit without hiding its pixels", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div>
+        <div ariaHidden>
+          <div role="button" ariaLabel="Decorative action" />
+        </div>
+        <div role="button" ariaLabel="Visible action" />
+      </div>
+    )
+
+    const labels = Object.values(renderer.getAccessibilityTree().nodes).map(
+      (node) => node.aria.label
+    )
+    expect(labels).toContain("Visible action")
+    expect(labels).not.toContain("Decorative action")
   })
 
   it("normalizes numeric and boolean data-testid props for lookup", () => {

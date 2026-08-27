@@ -100,6 +100,15 @@ export interface AccessKitTreeSnapshot {
   root: string | null
   gpui_focus: string | null
   active_descendant_focus: string | null
+  frame?: {
+    rendered_at: string
+    frame_number: number
+    window_title?: string | null
+    node_count: number
+    tab_stop_count: number
+    viewport_size: { width: number; height: number }
+    scale_factor: number
+  }
   nodes: Record<string, AccessKitNodeSnapshot>
 }
 
@@ -661,7 +670,6 @@ export class TestRenderer implements NativeRenderer {
   ): void {
     this.native.simulateAccessibilityAction(accesskitId, action)
     this.dispatchNativeEvents()
-    this.native.flush()
   }
 
   /** Dispatch an installed application-menu action through GPUI. */
@@ -897,7 +905,7 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getAutomationTree()
   }
 
-  /** Read GPUI's last explicitly drawn AccessKit tree, never a retained-tree reconstruction. */
+  /** Read GPUI's last explicitly drawn AccessKit tree without drawing. */
   getAccessibilityTree(): AccessKitTreeSnapshot {
     return JSON.parse(this.native.getAccessibilityTree())
   }

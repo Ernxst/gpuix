@@ -31,7 +31,7 @@ use crate::renderer::{
     first_canvas_diagnostic_message, forget_canvas_diagnostics, fresh_canvas_diagnostics,
     has_application_menus, init_application_menu_support, install_application_menus,
     parse_canvas_image_source, parse_debug_frame_overlay_mode, parse_style_json,
-    pending_custom_prop_diagnostic,
+    pending_accessibility_diagnostics, pending_custom_prop_diagnostic,
     pending_style_diagnostics, set_application_menus, to_element_id, validate_canvas_target,
     AnimationFrameCallback, CanvasImageLoadState, DebugFrameOverlayStats, EventCallback,
     FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic,
@@ -469,6 +469,14 @@ impl TestGpuixRenderer {
         // Convert typed WindowHandle<GpuixView> to AnyWindowHandle for simulation methods.
         let window: gpui::AnyWindowHandle = window_handle.into();
 
+        // Test accessibility is a renderer capability, not a getter side
+        // effect. Every explicit draw can now produce the snapshot that later
+        // reads and action injection consume without drawing hidden frames.
+        cx.update_window(window, |_, window, _app| {
+            window.set_a11y_active_for_test(true);
+        })
+        .map_err(|error| Error::from_reason(error.to_string()))?;
+
         // Store !Send types on the JS main thread.
         TEST_STATES.with(|cell| {
             cell.borrow_mut()
@@ -630,12 +638,18 @@ impl TestGpuixRenderer {
             .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
         let diagnostic = pending_custom_prop_diagnostic(&tree, id, &key, &value);
+        let accessibility_changed = crate::accessibility::is_accessibility_prop(&key);
         tree.set_custom_prop(id, key, value);
+        let accessibility_diagnostics = accessibility_changed
+            .then(|| pending_accessibility_diagnostics(&tree, id))
+            .unwrap_or_default();
         drop(tree);
         if self.strict_styles.load(Ordering::Relaxed) {
+            let mut pending = self.style_diagnostics.lock().unwrap();
             if let Some(diagnostic) = diagnostic {
-                self.style_diagnostics.lock().unwrap().push(diagnostic);
+                pending.push(diagnostic);
             }
+            pending.extend(accessibility_diagnostics);
         }
         Ok(())
     }
@@ -848,20 +862,9 @@ impl TestGpuixRenderer {
         self.surface_canvas_preparation_diagnostics()
     }
 
-    /// Build and read GPUI's real AccessKit tree for the current retained tree.
-    ///
-    /// The explicit draw is the read boundary: callers never observe a tree
-    /// from before the latest committed React mutations.
+    /// Read GPUI's real AccessKit tree from the last explicit draw.
     #[napi]
     pub fn get_accessibility_tree(&self) -> Result<String> {
-        with_test_state(self.state_id, |cx, window, _view| {
-            cx.update_window(window, |_, window, _app| {
-                window.set_a11y_active_for_test(true);
-            })
-            .map_err(|error| Error::from_reason(error.to_string()))?;
-            Ok(())
-        })?;
-        self.flush()?;
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, _app| {
                 window.debug_a11y_tree_json().ok_or_else(|| {
@@ -895,9 +898,8 @@ impl TestGpuixRenderer {
             }
         };
 
-        // Drawing first installs the per-frame action listeners and guarantees
-        // the requested node id belongs to the current tree.
-        self.get_accessibility_tree()?;
+        // The last explicit draw owns both the tree and its per-frame action
+        // listeners. Injection never advances that rendered-state boundary.
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, app| {
                 window.simulate_a11y_action_for_test(

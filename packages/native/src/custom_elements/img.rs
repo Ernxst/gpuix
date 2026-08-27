@@ -1585,6 +1585,30 @@ impl ImgElement {
     }
 }
 
+fn accessible_image_root(ctx: &CustomRenderContext, child: gpui::AnyElement) -> gpui::AnyElement {
+    use gpui::prelude::*;
+
+    let native_disabled =
+        crate::accessibility::is_native_disabled(ctx.retained_element) || ctx.accessibility_hidden;
+    let mut root = gpui::div()
+        .id(gpui::SharedString::from(format!("__gpuix_{}", ctx.id)))
+        .relative()
+        .child(crate::automation::bounds_tracker(ctx.id, None));
+    if !native_disabled {
+        if let Some(handle) = ctx.focus_handle {
+            root = root.track_focus(handle);
+        }
+    }
+    root = crate::accessibility::apply(
+        root,
+        ctx.retained_element,
+        ctx.event_callback,
+        ctx.focus_handle,
+        ctx.accessibility_hidden,
+    );
+    root.child(child).into_any_element()
+}
+
 impl CustomElement for ImgElement {
     fn render(
         &mut self,
@@ -1599,7 +1623,7 @@ impl CustomElement for ImgElement {
             if let Some(style) = ctx.style {
                 fallback = crate::renderer::apply_styles(fallback, style);
             }
-            return fallback.into_any_element();
+            return accessible_image_root(&ctx, fallback.into_any_element());
         }
 
         let Some(source) = self.source.clone() else {
@@ -1607,7 +1631,7 @@ impl CustomElement for ImgElement {
             if let Some(style) = ctx.style {
                 fallback = crate::renderer::apply_styles(fallback, style);
             }
-            return fallback.into_any_element();
+            return accessible_image_root(&ctx, fallback.into_any_element());
         };
 
         let request = ImageRequest {
@@ -1693,11 +1717,7 @@ impl CustomElement for ImgElement {
         // a relative wrapper just as the other native custom elements do.
         // The image keeps its own styles, preserving intrinsic sizing and
         // object-fit behaviour while the wrapper tracks the same layout box.
-        gpui::div()
-            .relative()
-            .child(crate::automation::bounds_tracker(ctx.id, None))
-            .child(el)
-            .into_any_element()
+        accessible_image_root(&ctx, el.into_any_element())
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {

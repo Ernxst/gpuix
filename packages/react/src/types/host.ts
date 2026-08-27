@@ -719,13 +719,16 @@ export type AccessibilityRole =
   | "button"
   | "checkbox"
   | "heading"
+  | "img"
   | "link"
+  | "option"
   | "slider"
   | "spinbutton"
   | "switch"
+  | "textbox"
 
 /** AccessKit actions delivered through `onAccessibilityAction`. */
-export type AccessibilityAction = "activate" | "increment" | "decrement" | "focus"
+export type AccessibilityAction = "increment" | "decrement" | "focus"
 
 // Props passed to elements.
 // Element IDs are auto-generated numeric IDs (not user-settable).
@@ -768,9 +771,13 @@ export interface Props {
   ariaValueNow?: number
   /** One-based heading level. */
   ariaLevel?: number
-  /** Whether assistive technology should report this control as unavailable. */
+  /** Native disabled state: unavailable, non-activating, and removed from tab order. */
   disabled?: boolean
-  /** AccessKit action requested by assistive technology. */
+  /** Unavailable and non-activating, but intentionally retained in tab order. */
+  ariaDisabled?: boolean
+  /** Exclude this element and its descendants from the accessibility tree. */
+  ariaHidden?: boolean
+  /** Value or focus action requested by assistive technology. Activate uses onClick. */
   onAccessibilityAction?: (event: GpuixSyntheticEvent) => void
 
   /** Establishes a native hover group for descendant `style.hoverWithin` states. */
