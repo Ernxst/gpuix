@@ -1008,6 +1008,47 @@ describeNative("events", () => {
   })
 
   describe("hover events", () => {
+    it("fires mouseEnter and mouseLeave on a bare anchor", () => {
+      const enter = vi.fn()
+      const leave = vi.fn()
+
+      testRoot.render(
+        <a
+          href="/factory"
+          hoverGroup="anchor"
+          testId="anchor-events"
+          onMouseEnter={enter}
+          onMouseLeave={leave}
+          style={{ width: 200, height: 100 }}
+        >
+          <text
+            testId="anchor-hover-within"
+            style={{
+              color: "#334155",
+              hoverWithin: { color: "#f59e0b" },
+            }}
+          >
+            Factory
+          </text>
+        </a>
+      )
+
+      const anchor = testRoot.renderer.findByTestId("anchor-events")!
+      const hoverWithin = testRoot.renderer.findByTestId("anchor-hover-within")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(anchor.id)!
+
+      expect(anchor.events).toEqual(new Set(["mouseEnter", "mouseLeave"]))
+
+      testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      expect(enter).toHaveBeenCalledOnce()
+      expect(testRoot.renderer.getResolvedStyle(hoverWithin.id)).toMatchObject({
+        color: "#f59e0b",
+      })
+
+      testRoot.renderer.nativeSimulateMouseMove(500, 500)
+      expect(leave).toHaveBeenCalledOnce()
+    })
+
     it("should handle mouseEnter and mouseLeave via mouse move", () => {
       function HoverBox() {
         const [hovered, setHovered] = useState(false)
