@@ -22,6 +22,14 @@ use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use napi_derive::napi;
+#[cfg(target_os = "macos")]
+use cocoa::{
+    appkit::{NSApplication, NSEvent, NSEventModifierFlags, NSEventType},
+    base::{id, nil, NO},
+    foundation::{NSInteger, NSPoint, NSRect},
+};
+#[cfg(target_os = "macos")]
+use objc::{class, msg_send, sel, sel_impl};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 #[cfg(any(target_os = "macos", target_family = "wasm"))]
@@ -858,6 +866,56 @@ fn draw_window_for_automation_read() -> Result<()> {
         // the platform never services its pending frame request.
         window.draw(cx).clear(cx);
     })
+}
+
+/// Queue a real AppKit mouse click. This is deliberately distinct from the
+/// deterministic `simulate_click` test helper: live smoke tests need to cover
+/// the NSEvent → GPUI platform ingress before the renderer's callback bridge.
+#[cfg(target_os = "macos")]
+// cocoa's Objective-C message macros still probe its removed cargo-clippy cfg.
+#[allow(unexpected_cfgs)]
+fn post_appkit_click(x: f64, y: f64) -> Result<()> {
+    unsafe {
+        let app: id = msg_send![class!(NSApplication), sharedApplication];
+        let mut window: id = msg_send![app, keyWindow];
+        if window == nil {
+            window = msg_send![app, mainWindow];
+        }
+        if window == nil {
+            let windows: id = msg_send![app, windows];
+            let count: usize = msg_send![windows, count];
+            if count > 0 {
+                window = msg_send![windows, objectAtIndex: 0usize];
+            }
+        }
+        if window == nil {
+            return Err(Error::from_reason("No AppKit window is available for click automation"));
+        }
+
+        let content_view: id = msg_send![window, contentView];
+        let bounds: NSRect = msg_send![content_view, bounds];
+        let window_number: NSInteger = msg_send![window, windowNumber];
+        let location = NSPoint::new(x, bounds.size.height - y);
+        for event_type in [NSEventType::NSLeftMouseDown, NSEventType::NSLeftMouseUp] {
+            let event = <id as NSEvent>::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure_(
+                nil,
+                event_type,
+                location,
+                NSEventModifierFlags::empty(),
+                0.0,
+                window_number,
+                nil,
+                0,
+                1,
+                1.0,
+            );
+            if event == nil {
+                return Err(Error::from_reason("Failed to create an AppKit click event"));
+            }
+            app.postEvent_atStart_(event, NO);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -3350,6 +3408,20 @@ impl GpuixRenderer {
             Err(Error::from_reason(
                 "The production GPUIX renderer does not support this operating system",
             ))
+        }
+    }
+
+    /// macOS-only automation seam that posts NSEvents through the production
+    /// AppKit → GPUI event path instead of calling the direct test dispatcher.
+    #[napi(js_name = "postAppKitClick")]
+    pub fn post_appkit_click(&self, x: f64, y: f64) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return post_appkit_click(x, y);
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (x, y);
+            Err(Error::from_reason("AppKit click automation is only available on macOS"))
         }
     }
 
@@ -6362,6 +6434,41 @@ fn tracks_mouse_hover_events(
     false
 }
 
+fn tracks_pointer_event(
+    element: &crate::retained_tree::RetainedElement,
+    tree: &RetainedTree,
+    event_type: &str,
+) -> bool {
+    let mut current = Some(element.id);
+    while let Some(id) = current {
+        let Some(current_element) = tree.elements.get(&id) else {
+            return false;
+        };
+        if current_element.events.contains(event_type) {
+            return true;
+        }
+        current = current_element.parent;
+    }
+    false
+}
+
+fn captures_pointer_in_ancestry(
+    element: &crate::retained_tree::RetainedElement,
+    tree: &RetainedTree,
+) -> bool {
+    let mut current = Some(element.id);
+    while let Some(id) = current {
+        let Some(current_element) = tree.elements.get(&id) else {
+            return false;
+        };
+        if current_element.events.contains("mouseDown") && current_element.events.contains("mouseMove") {
+            return true;
+        }
+        current = current_element.parent;
+    }
+    false
+}
+
 fn is_hover_target_descendant(tree: &RetainedTree, descendant: u64, ancestor: u64) -> bool {
     let mut current = Some(descendant);
     while let Some(id) = current {
@@ -6534,119 +6641,19 @@ pub(crate) fn build_div(
             // ── Click ────────────────────────────────────────────
             // Primary button only, like the DOM. Right and middle clicks go to
             // `onAuxClick`, and `onMouseDown` sees every button.
-            "click" => {
-                el = el.on_click(move |click_event, _window, cx| {
-                    if !activates_on_space
-                        && matches!(
-                            click_event,
-                            gpui::ClickEvent::Keyboard(event)
-                                if event.button == gpui::KeyboardButton::Space
-                        )
-                    {
-                        return;
-                    }
-                    let stop_native_propagation =
-                        !matches!(click_event, gpui::ClickEvent::Keyboard(_));
-                    emit_event_full(&callback, id, "click", |p| {
-                        let (x, y) = point_to_xy(click_event.position());
-                        p.x = Some(x);
-                        p.y = Some(y);
-                        p.modifiers = Some(click_event.modifiers().into());
-                        p.click_count = Some(click_event.click_count() as u32);
-                        p.is_right_click = Some(click_event.is_right_click());
-                        p.button = Some(match click_event {
-                            gpui::ClickEvent::Mouse(event) => {
-                                mouse_button_to_u32(event.down.button)
-                            }
-                            gpui::ClickEvent::Keyboard(_) | gpui::ClickEvent::Touch(_) => 0,
-                        });
-                        p.input_source = Some(
-                            match click_event {
-                                gpui::ClickEvent::Mouse(_) => "mouse",
-                                gpui::ClickEvent::Keyboard(_) => "keyboard",
-                                gpui::ClickEvent::Touch(_) => "touch",
-                            }
-                            .to_string(),
-                        );
-                    });
-                    if stop_native_propagation {
-                        // React owns propagation from this native target onward. A keyboard
-                        // click fires within key-up dispatch, so it must leave propagation
-                        // active for this element's key-up listener to run afterward.
-                        cx.stop_propagation();
-                    }
-                });
-            }
+            "click" => {}
 
             // ── Aux click (non-primary), like the DOM `auxclick` ──
-            "auxClick" => {
-                el = el.on_aux_click(move |click_event, _window, _cx| {
-                    emit_event_full(&callback, id, "auxClick", |p| {
-                        let (x, y) = point_to_xy(click_event.position());
-                        p.x = Some(x);
-                        p.y = Some(y);
-                        p.modifiers = Some(click_event.modifiers().into());
-                        p.click_count = Some(click_event.click_count() as u32);
-                        p.is_right_click = Some(click_event.is_right_click());
-                    });
-                });
-            }
+            "auxClick" => {}
 
             // ── Mouse down (all buttons) ─────────────────────────
-            "mouseDown" => {
-                // Wire all three buttons so JS gets right-click, middle-click, etc.
-                for &button in &[
-                    gpui::MouseButton::Left,
-                    gpui::MouseButton::Middle,
-                    gpui::MouseButton::Right,
-                ] {
-                    let callback = callback.clone();
-                    el = el.on_mouse_down(button, move |mouse_event, _window, _cx| {
-                        emit_event_full(&callback, id, "mouseDown", |p| {
-                            let (x, y) = point_to_xy(mouse_event.position);
-                            p.x = Some(x);
-                            p.y = Some(y);
-                            p.button = Some(mouse_button_to_u32(mouse_event.button));
-                            p.click_count = Some(mouse_event.click_count as u32);
-                            p.modifiers = Some(mouse_event.modifiers.into());
-                        });
-                    });
-                }
-            }
+            "mouseDown" => {}
 
             // ── Mouse up (all buttons) ───────────────────────────
-            "mouseUp" => {
-                for &button in &[
-                    gpui::MouseButton::Left,
-                    gpui::MouseButton::Middle,
-                    gpui::MouseButton::Right,
-                ] {
-                    let callback = callback.clone();
-                    el = el.on_mouse_up(button, move |mouse_event, _window, _cx| {
-                        emit_event_full(&callback, id, "mouseUp", |p| {
-                            let (x, y) = point_to_xy(mouse_event.position);
-                            p.x = Some(x);
-                            p.y = Some(y);
-                            p.button = Some(mouse_button_to_u32(mouse_event.button));
-                            p.click_count = Some(mouse_event.click_count as u32);
-                            p.modifiers = Some(mouse_event.modifiers.into());
-                        });
-                    });
-                }
-            }
+            "mouseUp" => {}
 
             // ── Mouse move ───────────────────────────────────────
-            "mouseMove" => {
-                el = el.on_mouse_move(move |mouse_event, _window, _cx| {
-                    emit_event_full(&callback, id, "mouseMove", |p| {
-                        let (x, y) = point_to_xy(mouse_event.position);
-                        p.x = Some(x);
-                        p.y = Some(y);
-                        p.modifiers = Some(mouse_event.modifiers.into());
-                        p.pressed_button = mouse_event.pressed_button.map(mouse_button_to_u32);
-                    });
-                });
-            }
+            "mouseMove" => {}
 
             // ── Hover (mouseEnter + mouseLeave) ──────────────────
             // One combined listener below owns React enter/leave events and
@@ -6730,7 +6737,127 @@ pub(crate) fn build_div(
         }
     }
 
-    if element.events.contains("mouseDown") && element.events.contains("mouseMove") {
+    // Every painted descendant of a pointer listener becomes a native source.
+    // GPUI's hit test picks the deepest source; React then performs the normal
+    // capture/target/bubble walk from that source to the listener's ancestor.
+    // This preserves an interactive child's target identity while allowing an
+    // inert background-painted child to reach an ancestor listener.
+    if tracks_pointer_event(element, ctx.tree, "click") {
+        let callback = ctx.event_callback.clone();
+        let id = element.id;
+        el = el.on_click(move |click_event, _window, cx| {
+            if !activates_on_space
+                && matches!(
+                    click_event,
+                    gpui::ClickEvent::Keyboard(event)
+                        if event.button == gpui::KeyboardButton::Space
+                )
+            {
+                return;
+            }
+            let stop_native_propagation = !matches!(click_event, gpui::ClickEvent::Keyboard(_));
+            emit_event_full(&callback, id, "click", |p| {
+                let (x, y) = point_to_xy(click_event.position());
+                p.x = Some(x);
+                p.y = Some(y);
+                p.modifiers = Some(click_event.modifiers().into());
+                p.click_count = Some(click_event.click_count() as u32);
+                p.is_right_click = Some(click_event.is_right_click());
+                p.button = Some(match click_event {
+                    gpui::ClickEvent::Mouse(event) => mouse_button_to_u32(event.down.button),
+                    gpui::ClickEvent::Keyboard(_) | gpui::ClickEvent::Touch(_) => 0,
+                });
+                p.input_source = Some(
+                    match click_event {
+                        gpui::ClickEvent::Mouse(_) => "mouse",
+                        gpui::ClickEvent::Keyboard(_) => "keyboard",
+                        gpui::ClickEvent::Touch(_) => "touch",
+                    }
+                    .to_string(),
+                );
+            });
+            if stop_native_propagation {
+                cx.stop_propagation();
+            }
+        });
+    }
+
+    if tracks_pointer_event(element, ctx.tree, "auxClick") {
+        let callback = ctx.event_callback.clone();
+        let id = element.id;
+        el = el.on_aux_click(move |click_event, _window, cx| {
+            emit_event_full(&callback, id, "auxClick", |p| {
+                let (x, y) = point_to_xy(click_event.position());
+                p.x = Some(x);
+                p.y = Some(y);
+                p.modifiers = Some(click_event.modifiers().into());
+                p.click_count = Some(click_event.click_count() as u32);
+                p.is_right_click = Some(click_event.is_right_click());
+            });
+            cx.stop_propagation();
+        });
+    }
+
+    if tracks_pointer_event(element, ctx.tree, "mouseDown") {
+        for &button in &[
+            gpui::MouseButton::Left,
+            gpui::MouseButton::Middle,
+            gpui::MouseButton::Right,
+        ] {
+            let callback = ctx.event_callback.clone();
+            let id = element.id;
+            el = el.on_mouse_down(button, move |mouse_event, _window, cx| {
+                emit_event_full(&callback, id, "mouseDown", |p| {
+                    let (x, y) = point_to_xy(mouse_event.position);
+                    p.x = Some(x);
+                    p.y = Some(y);
+                    p.button = Some(mouse_button_to_u32(mouse_event.button));
+                    p.click_count = Some(mouse_event.click_count as u32);
+                    p.modifiers = Some(mouse_event.modifiers.into());
+                });
+                cx.stop_propagation();
+            });
+        }
+    }
+
+    if tracks_pointer_event(element, ctx.tree, "mouseUp") {
+        for &button in &[
+            gpui::MouseButton::Left,
+            gpui::MouseButton::Middle,
+            gpui::MouseButton::Right,
+        ] {
+            let callback = ctx.event_callback.clone();
+            let id = element.id;
+            el = el.on_mouse_up(button, move |mouse_event, _window, cx| {
+                emit_event_full(&callback, id, "mouseUp", |p| {
+                    let (x, y) = point_to_xy(mouse_event.position);
+                    p.x = Some(x);
+                    p.y = Some(y);
+                    p.button = Some(mouse_button_to_u32(mouse_event.button));
+                    p.click_count = Some(mouse_event.click_count as u32);
+                    p.modifiers = Some(mouse_event.modifiers.into());
+                });
+                cx.stop_propagation();
+            });
+        }
+    }
+
+    if tracks_pointer_event(element, ctx.tree, "mouseMove") {
+        let callback = ctx.event_callback.clone();
+        let id = element.id;
+        el = el.on_mouse_move(move |mouse_event, _window, cx| {
+            emit_event_full(&callback, id, "mouseMove", |p| {
+                let (x, y) = point_to_xy(mouse_event.position);
+                p.x = Some(x);
+                p.y = Some(y);
+                p.modifiers = Some(mouse_event.modifiers.into());
+                p.pressed_button = mouse_event.pressed_button.map(mouse_button_to_u32);
+            });
+            cx.stop_propagation();
+        });
+    }
+
+    if captures_pointer_in_ancestry(element, ctx.tree) {
         el = el.capture_pointer();
     }
 

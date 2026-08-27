@@ -11,6 +11,7 @@
     "test:perf": "vitest run chat.perf.test.tsx timeline.perf.test.tsx",
     "native-text": "bun --hot native-text.tsx",
     "live-scroll-wheel:smoke": "bun live-scroll-wheel.smoke.ts",
+    "live-click:smoke": "bun live-click.smoke.ts",
     "chat": "bun --hot chat.tsx",
     "timeline": "bun --hot timeline.tsx",
     "compile": "bun compile-chat.ts",

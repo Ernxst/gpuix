@@ -120,6 +120,7 @@ export interface TestAutomationRenderer {
     button?: number,
     modifiers?: string
   ): void
+  postAppKitClick?(x: number, y: number): void
   nativeSimulateMouseDown(
     x: number,
     y: number,
@@ -224,6 +225,13 @@ export class InProcessBackend extends ValidatedAutomationBackend {
         params.button,
         params.modifiers
       )
+      return { ok: true as const }
+    },
+    appKitClick: (params) => {
+      if (!this.renderer.postAppKitClick) {
+        throw new AutomationError("Unsupported", "AppKit click ingress is not supported by this renderer")
+      }
+      this.renderer.postAppKitClick(params.x, params.y)
       return { ok: true as const }
     },
     mouseDown: (params) => {
@@ -815,6 +823,7 @@ export class App {
 export interface LiveAutomationRenderer {
   capabilities?(): RendererCapabilities
   simulateClick(x: number, y: number, button?: number, modifiers?: string): void
+  postAppKitClick?(x: number, y: number): void
   simulateMouseDown(
     x: number,
     y: number,
@@ -869,6 +878,13 @@ export function liveRendererAsTest(
       renderer.getSynchronousScrollDrawCount?.bind(renderer),
     nativeSimulateClick(x, y, button, modifiers) {
       renderer.simulateClick(x, y, button, modifiers)
+      afterInput()
+    },
+    postAppKitClick(x, y) {
+      if (!renderer.postAppKitClick) {
+        throw new AutomationError("Unsupported", "AppKit click ingress is not supported by this renderer")
+      }
+      renderer.postAppKitClick(x, y)
       afterInput()
     },
     nativeSimulateMouseDown(x, y, button, modifiers) {
