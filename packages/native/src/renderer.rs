@@ -5845,7 +5845,7 @@ pub(crate) fn build_element(
     };
 
     let declared_style = element.style.as_deref();
-    let supports_style_transitions = matches!(element.element_type.as_str(), "div" | "text");
+    let supports_style_transitions = matches!(element.element_type.as_str(), "div" | "text" | "img");
     let transitioned_style = if supports_style_transitions {
         if let Some(style) = declared_style.filter(|style| style.transition.is_some()) {
             let focused = ctx
