@@ -788,9 +788,6 @@ enum UiCommand {
     GetAutomationBounds {
         response: SyncSender<HashMap<u64, crate::automation::ElementBounds>>,
     },
-    GetWindowSize {
-        response: SyncSender<WindowSize>,
-    },
     GetElementBounds {
         id: u64,
         response: SyncSender<Option<crate::automation::ElementBounds>>,
@@ -846,28 +843,18 @@ async fn run_ui_commands(
             UiCommand::Invalidate => refresh_ui_window(window, cx),
             UiCommand::SetMenus { menus, response } => {
                 let result = cx.update(|cx| set_application_menus(cx, menus));
-                let response_value = result
-                    .as_ref()
-                    .map(|value| value.clone())
-                    .map_err(|error| error.to_string())
-                    .and_then(|value| value);
-                response.send(response_value).ok();
-                result.and_then(|value| value.map_err(anyhow::Error::msg))
+                response.send(result.clone()).ok();
+                result.map_err(anyhow::Error::msg)
             }
             UiCommand::DispatchMenuAction { id, response } => {
                 let result = cx.update(|cx| dispatch_application_menu_action(cx, &id));
-                let response_value = result
-                    .as_ref()
-                    .map(|value| value.clone())
-                    .map_err(|error| error.to_string())
-                    .and_then(|value| value);
-                response.send(response_value).ok();
-                result.and_then(|value| value.map_err(anyhow::Error::msg))
+                response.send(result.clone()).ok();
+                result.map_err(anyhow::Error::msg)
             }
             UiCommand::Quit { response } => {
-                let result = cx.update(|cx| cx.quit());
+                cx.update(|cx| cx.quit());
                 response.send(()).ok();
-                result
+                Ok(())
             }
             UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
                 view.window_title = title;
@@ -981,17 +968,6 @@ async fn run_ui_commands(
                     });
                 response.send(offset).ok();
                 Ok(())
-            }
-            UiCommand::GetWindowSize { response } => {
-                window.update(cx, move |_view, window, _cx| {
-                    let size = window.viewport_size();
-                    response
-                        .send(WindowSize {
-                            width: f32::from(size.width) as f64,
-                            height: f32::from(size.height) as f64,
-                        })
-                        .ok();
-                })
             }
             UiCommand::GetAutomationBounds { response } => {
                 window.update(cx, move |_view, window, cx| {
@@ -1110,7 +1086,7 @@ async fn run_ui_commands(
                         )
                         .map_err(Error::from_reason),
                     })
-                    .and_then(|result| result.map_err(|error| anyhow::anyhow!(error.reason)));
+                    .and_then(|result| result.map_err(|error| anyhow::anyhow!("{}", error.reason)));
                 response
                     .send(
                         result
@@ -2150,7 +2126,7 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
-            let _ = after_precheck;
+            let _ = (dispatch_frame_request, after_precheck);
             return Ok(true);
         }
 
@@ -2180,27 +2156,6 @@ impl GpuixRenderer {
     #[napi]
     pub fn tick_idle(&self) -> Result<bool> {
         self.pump_native_event_loop(false)
-    }
-
-    /// Test seam for a native frame callback that arrives after tickIdle's
-    /// outstanding-work precheck. The callback is queued from a background
-    /// thread while the embedded AppKit pump owns the JavaScript thread.
-    #[cfg(all(target_os = "macos", feature = "test-support"))]
-    #[napi]
-    pub fn test_idle_pump_frame_request_race(
-        &self,
-        callback: FrameRequestCallback,
-    ) -> Result<bool> {
-        self.pump_native_event_loop_after_precheck(false, move || {
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(2));
-                let _ = callback.call_with_return_value(
-                    (),
-                    ThreadsafeFunctionCallMode::NonBlocking,
-                    |_result, _env| Ok(()),
-                );
-            });
-        })
     }
 
     #[napi]
@@ -3219,6 +3174,30 @@ impl GpuixRenderer {
                 "captureScreenshot needs a test-support build on macOS or Windows",
             ))
         }
+    }
+}
+
+#[cfg(all(target_os = "macos", feature = "test-support"))]
+#[napi]
+impl GpuixRenderer {
+    /// Test seam for a native frame callback that arrives after tickIdle's
+    /// outstanding-work precheck. The callback is queued from a background
+    /// thread while the embedded AppKit pump owns the JavaScript thread.
+    #[napi]
+    pub fn test_idle_pump_frame_request_race(
+        &self,
+        callback: FrameRequestCallback,
+    ) -> Result<bool> {
+        self.pump_native_event_loop_after_precheck(false, move || {
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                let _ = callback.call_with_return_value(
+                    (),
+                    ThreadsafeFunctionCallMode::NonBlocking,
+                    |_result, _env| Ok(()),
+                );
+            });
+        })
     }
 }
 
