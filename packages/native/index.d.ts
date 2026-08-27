@@ -412,6 +412,8 @@ export declare class TestGpuixRenderer {
    * Supported on macOS through Metal and Windows through DirectX.
    */
   captureScreenshot(path: string): void
+  /** Compare two PNG screenshots using an absolute tolerance for each RGBA channel. */
+  compareImages(pathA: string, pathB: string, tolerance: number): ImageComparisonResult
   /**
    * Return and clear all collected events since the last drain.
    * Events are collected synchronously — no event loop queuing.
@@ -657,6 +659,11 @@ export interface HighlightRect {
 export interface ImageCapabilities {
   /** `setAllowPrivateNetworkImages()` is available. */
   privateNetwork: boolean
+}
+
+export interface ImageComparisonResult {
+  differingPixelRatio: number
+  maxChannelDelta: number
 }
 
 /**

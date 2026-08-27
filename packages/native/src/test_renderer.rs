@@ -205,7 +205,22 @@ fn refine_style_object(
     Ok(())
 }
 
+fn decode_png_for_comparison(path: &str) -> Result<Arc<gpui::RenderImage>> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| Error::from_reason(format!("Failed to read PNG {path}: {error}")))?;
+    gpui::Image::from_bytes(gpui::ImageFormat::Png, bytes)
+        .to_image_data(gpui::SvgRenderer::new(Arc::new(())))
+        .map_err(|error| Error::from_reason(format!("Failed to decode PNG {path}: {error}")))
+}
+
 // ── TestGpuixRenderer ────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct ImageComparisonResult {
+    pub differing_pixel_ratio: f64,
+    pub max_channel_delta: u32,
+}
 
 /// GPU-backed GPUI test renderer. Uses VisualTestAppContext with the native
 /// Metal or DirectX renderer and TestDispatcher for deterministic scheduling.
@@ -1191,6 +1206,64 @@ impl TestGpuixRenderer {
                 .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {}", e)))?;
 
             Ok(())
+        })
+    }
+
+    /// Compare two PNG screenshots using an absolute tolerance for each RGBA channel.
+    #[napi]
+    pub fn compare_images(
+        &self,
+        path_a: String,
+        path_b: String,
+        tolerance: u32,
+    ) -> Result<ImageComparisonResult> {
+        let tolerance = u8::try_from(tolerance).map_err(|_| {
+            Error::from_reason(format!(
+                "Image comparison tolerance must be between 0 and 255, got {tolerance}"
+            ))
+        })?;
+        let image_a = decode_png_for_comparison(&path_a)?;
+        let image_b = decode_png_for_comparison(&path_b)?;
+        let size_a = image_a.size(0);
+        let size_b = image_b.size(0);
+
+        if size_a != size_b {
+            return Err(Error::from_reason(format!(
+                "Image dimensions differ: {path_a} is {}x{}, {path_b} is {}x{}",
+                u32::from(size_a.width),
+                u32::from(size_a.height),
+                u32::from(size_b.width),
+                u32::from(size_b.height),
+            )));
+        }
+
+        let pixels_a = image_a
+            .as_bytes(0)
+            .ok_or_else(|| Error::from_reason(format!("Decoded PNG has no frame: {path_a}")))?;
+        let pixels_b = image_b
+            .as_bytes(0)
+            .ok_or_else(|| Error::from_reason(format!("Decoded PNG has no frame: {path_b}")))?;
+        let pixel_count = pixels_a.len() / 4;
+        let mut differing_pixels = 0usize;
+        let mut max_channel_delta = 0u8;
+
+        for (pixel_a, pixel_b) in pixels_a.chunks_exact(4).zip(pixels_b.chunks_exact(4)) {
+            let mut pixel_differs = false;
+            for (&channel_a, &channel_b) in pixel_a.iter().zip(pixel_b) {
+                let delta = channel_a.abs_diff(channel_b);
+                max_channel_delta = max_channel_delta.max(delta);
+                pixel_differs |= delta > tolerance;
+            }
+            differing_pixels += usize::from(pixel_differs);
+        }
+
+        Ok(ImageComparisonResult {
+            differing_pixel_ratio: if pixel_count == 0 {
+                0.0
+            } else {
+                differing_pixels as f64 / pixel_count as f64
+            },
+            max_channel_delta: u32::from(max_channel_delta),
         })
     }
 
