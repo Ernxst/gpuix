@@ -4717,6 +4717,7 @@ impl Drop for GpuixRenderer {
 pub(crate) struct GpuixView {
     pub(crate) tree: Arc<Mutex<RetainedTree>>,
     pub(crate) canvas_display_lists: SharedDisplayLists,
+    pub(crate) canvas_image_store: crate::custom_elements::img::SharedCanvasImageStore,
     pub(crate) event_callback: Option<EventCallback>,
     window_event_callback: WindowEventCallback,
     window_bounds_subscription: Option<gpui::Subscription>,
@@ -4919,6 +4920,7 @@ impl GpuixView {
         Self {
             tree,
             canvas_display_lists,
+            canvas_image_store: Default::default(),
             event_callback,
             window_event_callback,
             window_bounds_subscription: None,
@@ -5112,6 +5114,7 @@ impl GpuixView {
         let mut build_ctx = BuildCtx {
             tree: &tree,
             canvas_display_lists: &self.canvas_display_lists,
+            canvas_image_store: &self.canvas_image_store,
             event_callback: &callback,
             focus_handles: &self.focus_handles,
             scroll_handles: &mut self.scroll_handles,
@@ -5228,6 +5231,7 @@ impl GpuixView {
 pub(crate) struct BuildCtx<'a> {
     pub tree: &'a RetainedTree,
     pub canvas_display_lists: &'a SharedDisplayLists,
+    pub canvas_image_store: &'a crate::custom_elements::img::SharedCanvasImageStore,
     pub event_callback: &'a Option<EventCallback>,
     pub focus_handles: &'a HashMap<u64, gpui::FocusHandle>,
     pub scroll_handles: &'a mut HashMap<u64, gpui::ScrollHandle>,
@@ -5872,6 +5876,8 @@ impl gpui::Render for GpuixView {
         // Ensure custom element instances are destroyed when their IDs disappear.
         self.custom_registry
             .prune_missing(|id| tree.elements.contains_key(&id));
+        self.canvas_image_store
+            .prune_missing(|id| tree.elements.contains_key(&id), window);
 
         // Clean up scroll handles for destroyed elements (IDs removed from tree).
         // Scrollability-based cleanup (element still exists but style changed
@@ -5907,6 +5913,7 @@ impl gpui::Render for GpuixView {
                 let mut ctx = BuildCtx {
                     tree: &tree,
                     canvas_display_lists: &self.canvas_display_lists,
+                    canvas_image_store: &self.canvas_image_store,
                     event_callback: &callback,
                     focus_handles: &self.focus_handles,
                     scroll_handles: &mut self.scroll_handles,
@@ -6159,6 +6166,7 @@ pub(crate) fn build_element(
                 selection_wash: inherited.selection_wash,
                 current_color: inherited.current_color,
                 image_network_policy: ctx.image_network_policy,
+                canvas_image_store: ctx.canvas_image_store,
                 canvas_display_lists: ctx.canvas_display_lists,
                 highlight_set: inherited.highlight.clone(),
             };

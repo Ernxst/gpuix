@@ -3,6 +3,7 @@ import {
   CANVAS_STREAM_MAGIC,
   CANVAS_STREAM_VERSION,
 } from "./opcodes.js"
+import { serializeCanvasImageSource } from "./image.js"
 
 export interface CanvasRecorderTarget {
   /** Re-read on every diagnostic so prop updates keep the element identity current. */
@@ -445,8 +446,6 @@ class RecordingContext2D {
   private readonly warnedMembers = new Set<string>()
   private readonly unsupportedMethods = new Map<string, (...args: unknown[]) => undefined>()
   private readonly boundMethods = new Map<PropertyKey, (...args: never[]) => unknown>()
-  private readonly imageHandles = new WeakMap<object, string>()
-  private nextImageHandle = 1
   private state = initialDrawingState()
   private dirty = false
   private flushScheduled = false
@@ -852,39 +851,26 @@ class RecordingContext2D {
     dh: number
   ): void
   drawImage(image: CanvasImageSource, ...values: number[]): void {
-    this.diagnose(
-      "drawImage",
-      "the v1 opcode can be recorded, but resolvable native image handles arrive in phase C1"
-    )
     if ((typeof image !== "object" && typeof image !== "function") || image === null) {
       throw new TypeError("Canvas drawImage requires an image source object")
     }
     const numbers = values.map(Number)
     if (!numbers.every(Number.isFinite)) return
-    const handle = this.imageHandle(image)
-    const handleSlot = this.strings.push(handle) - 1
+    const source = serializeCanvasImageSource(image)
+    const sourceSlot = this.strings.push(source) - 1
     if (numbers.length === 2) {
-      this.append(CANVAS_OPCODES.drawImage3, [handleSlot, ...numbers])
+      this.append(CANVAS_OPCODES.drawImage3, [sourceSlot, ...numbers])
       return
     }
     if (numbers.length === 4) {
-      this.append(CANVAS_OPCODES.drawImage5, [handleSlot, ...numbers])
+      this.append(CANVAS_OPCODES.drawImage5, [sourceSlot, ...numbers])
       return
     }
     if (numbers.length === 8) {
-      this.append(CANVAS_OPCODES.drawImage9, [handleSlot, ...numbers])
+      this.append(CANVAS_OPCODES.drawImage9, [sourceSlot, ...numbers])
       return
     }
     throw new TypeError(`Canvas drawImage expected 3, 5, or 9 arguments; received ${values.length + 1}`)
-  }
-
-  private imageHandle(image: object): string {
-    let handle = this.imageHandles.get(image)
-    if (!handle) {
-      handle = `phase-a2-image-${this.nextImageHandle++}`
-      this.imageHandles.set(image, handle)
-    }
-    return handle
   }
 
   private appendString(opcode: number, value: string): void {

@@ -1749,7 +1749,21 @@ impl TestGpuixRenderer {
         let state = with_test_state(self.state_id, |cx, window, view| {
             let view = view.clone();
             cx.update_window(window, |_, _window, app| {
-                view.read(app).custom_registry.test_state(id)
+                let view = view.read(app);
+                let custom = view.custom_registry.test_state(id);
+                let images = view.canvas_image_store.test_state(id);
+                match (custom, images) {
+                    (None, None) => None,
+                    (Some(state), None) | (None, Some(state)) => Some(state),
+                    (Some(mut state), Some(images)) => {
+                        if let (Some(state), Some(images)) =
+                            (state.as_object_mut(), images.as_object())
+                        {
+                            state.extend(images.clone());
+                        }
+                        Some(state)
+                    }
+                }
             })
             .map_err(|error| Error::from_reason(error.to_string()))
         })?;

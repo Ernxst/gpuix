@@ -18,6 +18,7 @@ struct CanvasGeometry {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CacheKey {
     revision: u64,
+    image_revision: u64,
     origin_x: u32,
     origin_y: u32,
     layout_width: u32,
@@ -26,9 +27,15 @@ struct CacheKey {
 }
 
 impl CacheKey {
-    fn new(revision: u64, bounds: gpui::Bounds<gpui::Pixels>, scale_factor: f32) -> Self {
+    fn new(
+        revision: u64,
+        image_revision: u64,
+        bounds: gpui::Bounds<gpui::Pixels>,
+        scale_factor: f32,
+    ) -> Self {
         Self {
             revision,
+            image_revision,
             origin_x: f32::from(bounds.origin.x).to_bits(),
             origin_y: f32::from(bounds.origin.y).to_bits(),
             layout_width: f32::from(bounds.size.width).to_bits(),
@@ -51,6 +58,11 @@ enum PreparedItem {
     Path {
         path: gpui::Path<gpui::Pixels>,
         color: gpui::Rgba,
+    },
+    Image {
+        bounds: gpui::Bounds<gpui::Pixels>,
+        image_bounds: gpui::Bounds<gpui::Pixels>,
+        data: Arc<gpui::RenderImage>,
     },
 }
 
@@ -668,6 +680,7 @@ fn build_solid_stroke_rect(
 
 fn prepare_with_scale(
     list: &crate::canvas::DisplayList,
+    image_store: &crate::custom_elements::img::SharedCanvasImageStore,
     bounds: gpui::Bounds<gpui::Pixels>,
     width: f64,
     height: f64,
@@ -1056,6 +1069,104 @@ fn prepare_with_scale(
                 Ok(None) => {}
                 Err(diagnostic) => diagnostics.push(diagnostic),
             },
+            crate::canvas::DisplayItem::DrawImage(image) => {
+                let Some(data) = image_store.loaded(&image.source.key) else {
+                    continue;
+                };
+                if data.frame_count() == 0 {
+                    continue;
+                }
+                let intrinsic = data.size(0);
+                let intrinsic_width = f64::from(intrinsic.width.0);
+                let intrinsic_height = f64::from(intrinsic.height.0);
+                if intrinsic_width <= 0.0 || intrinsic_height <= 0.0 {
+                    continue;
+                }
+
+                let mut source =
+                    image
+                        .source_rect
+                        .unwrap_or([0.0, 0.0, intrinsic_width, intrinsic_height]);
+                if source[2] < 0.0 {
+                    source[0] += source[2];
+                    source[2] = -source[2];
+                }
+                if source[3] < 0.0 {
+                    source[1] += source[3];
+                    source[3] = -source[3];
+                }
+                if source[2] == 0.0 || source[3] == 0.0 {
+                    continue;
+                }
+
+                let mut destination = image.destination_rect;
+                if destination[2].is_nan() {
+                    destination[2] = intrinsic_width;
+                    destination[3] = intrinsic_height;
+                }
+                if destination[2] < 0.0 {
+                    destination[0] += destination[2];
+                    destination[2] = -destination[2];
+                }
+                if destination[3] < 0.0 {
+                    destination[1] += destination[3];
+                    destination[3] = -destination[3];
+                }
+                if destination[2] == 0.0 || destination[3] == 0.0 {
+                    continue;
+                }
+
+                let image_scale_x = destination[2] / source[2];
+                let image_scale_y = destination[3] / source[3];
+                let full_image = [
+                    destination[0] - source[0] * image_scale_x,
+                    destination[1] - source[1] * image_scale_y,
+                    intrinsic_width * image_scale_x,
+                    intrinsic_height * image_scale_y,
+                ];
+                let transformed_rect = |rect: [f64; 4]| {
+                    let start = image.transform.transform_point(rect[0], rect[1]);
+                    let end = image
+                        .transform
+                        .transform_point(rect[0] + rect[2], rect[1] + rect[3]);
+                    [
+                        start.x.min(end.x),
+                        start.y.min(end.y),
+                        (end.x - start.x).abs(),
+                        (end.y - start.y).abs(),
+                    ]
+                };
+                let destination = transformed_rect(destination);
+                let full_image = transformed_rect(full_image);
+                let image_bounds = gpui::bounds(
+                    layout_point(crate::canvas::CanvasPoint {
+                        x: full_image[0],
+                        y: full_image[1],
+                    }),
+                    gpui::size(
+                        gpui::px((full_image[2] * scale_x) as f32),
+                        gpui::px((full_image[3] * scale_y) as f32),
+                    ),
+                );
+                let destination_bounds = gpui::bounds(
+                    layout_point(crate::canvas::CanvasPoint {
+                        x: destination[0],
+                        y: destination[1],
+                    }),
+                    gpui::size(
+                        gpui::px((destination[2] * scale_x) as f32),
+                        gpui::px((destination[3] * scale_y) as f32),
+                    ),
+                )
+                .intersect(&bounds);
+                if !destination_bounds.is_empty() {
+                    items.push(PreparedItem::Image {
+                        bounds: destination_bounds,
+                        image_bounds,
+                        data,
+                    });
+                }
+            }
         }
     }
 
@@ -1073,7 +1184,14 @@ fn prepare(
     width: f64,
     height: f64,
 ) -> PreparedDisplayList {
-    prepare_with_scale(list, bounds, width, height, 1.0)
+    prepare_with_scale(
+        list,
+        &crate::custom_elements::img::SharedCanvasImageStore::default(),
+        bounds,
+        width,
+        height,
+        1.0,
+    )
 }
 
 fn path_build_diagnostic(
@@ -1284,16 +1402,30 @@ impl CustomElement for CanvasElement {
     fn render(
         &mut self,
         ctx: CustomRenderContext,
-        _window: &mut gpui::Window,
-        _cx: &mut gpui::Context<crate::renderer::GpuixView>,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement {
         let width = self.width;
         let height = self.height;
+        let id = ctx.id;
+        let retained_list = ctx.canvas_display_lists.lock().unwrap().get(&id).cloned();
+        let image_sources = retained_list
+            .as_deref()
+            .map(crate::canvas::DisplayList::image_sources)
+            .unwrap_or_default();
+        ctx.canvas_image_store.sync_element(
+            id,
+            &image_sources,
+            ctx.image_network_policy.clone(),
+            window,
+            cx,
+        );
         let geometry = self.geometry.clone();
         let prepared_cache = self.prepared.clone();
         let test_state = self.test_state.clone();
         let display_lists = ctx.canvas_display_lists.clone();
-        let id = ctx.id;
+        let image_store = ctx.canvas_image_store.clone();
+        let paint_image_store = ctx.canvas_image_store.clone();
         let drawing = gpui::canvas(
             move |bounds, window, _cx| {
                 *geometry.lock().unwrap() = Some(CanvasGeometry {
@@ -1303,7 +1435,12 @@ impl CustomElement for CanvasElement {
                 });
                 let list = display_lists.lock().unwrap().get(&id).cloned();
                 let revision = list.as_ref().map_or(0, |list| list.revision);
-                let key = CacheKey::new(revision, bounds, window.scale_factor());
+                let key = CacheKey::new(
+                    revision,
+                    image_store.revision(),
+                    bounds,
+                    window.scale_factor(),
+                );
                 let mut cache = prepared_cache.lock().unwrap();
                 if let Some(cached) = cache.as_ref().filter(|cached| cached.key == key) {
                     return cached.list.clone();
@@ -1314,7 +1451,16 @@ impl CustomElement for CanvasElement {
                         diagnostics: Vec::new(),
                         tessellations: 0,
                     },
-                    |list| prepare_with_scale(list, bounds, width, height, window.scale_factor()),
+                    |list| {
+                        prepare_with_scale(
+                            list,
+                            &image_store,
+                            bounds,
+                            width,
+                            height,
+                            window.scale_factor(),
+                        )
+                    },
                 ));
                 {
                     let mut state = test_state.lock().unwrap();
@@ -1334,6 +1480,25 @@ impl CustomElement for CanvasElement {
                         PreparedItem::Quad(quad) => window.paint_quad(quad.clone()),
                         PreparedItem::Path { path, color } => {
                             window.paint_path(path.clone(), *color)
+                        }
+                        PreparedItem::Image {
+                            bounds,
+                            image_bounds,
+                            data,
+                        } => {
+                            if window
+                                .paint_image(
+                                    *bounds,
+                                    *image_bounds,
+                                    Default::default(),
+                                    data.clone(),
+                                    0,
+                                    false,
+                                )
+                                .is_ok()
+                            {
+                                paint_image_store.record_painted(id, data, window);
+                            }
                         }
                     }
                 }
@@ -1507,6 +1672,7 @@ mod tests {
             .flat_map(|item| match item {
                 PreparedItem::Path { path, .. } => vertex_positions(path),
                 PreparedItem::Quad(_) => panic!("expected only paths"),
+                PreparedItem::Image { .. } => panic!("expected only paths"),
             })
             .collect::<Vec<_>>();
         assert_eq!(
@@ -2417,14 +2583,16 @@ mod tests {
     #[test]
     fn cache_key_keeps_revision_bounds_and_device_scale() {
         let bounds = test_bounds();
-        let baseline = CacheKey::new(3, bounds, 2.0);
+        let baseline = CacheKey::new(3, 7, bounds, 2.0);
 
-        assert_ne!(baseline, CacheKey::new(4, bounds, 2.0));
-        assert_ne!(baseline, CacheKey::new(3, bounds, 1.0));
+        assert_ne!(baseline, CacheKey::new(4, 7, bounds, 2.0));
+        assert_ne!(baseline, CacheKey::new(3, 8, bounds, 2.0));
+        assert_ne!(baseline, CacheKey::new(3, 7, bounds, 1.0));
         assert_ne!(
             baseline,
             CacheKey::new(
                 3,
+                7,
                 gpui::bounds(gpui::point(gpui::px(1.0), gpui::px(0.0)), bounds.size,),
                 2.0,
             )
@@ -2465,8 +2633,9 @@ mod tests {
                 clear_regions: Vec::new(),
             })],
         };
-        let one_x = prepare_with_scale(&list, test_bounds(), 320.0, 240.0, 1.0);
-        let four_x = prepare_with_scale(&list, test_bounds(), 320.0, 240.0, 4.0);
+        let store = crate::custom_elements::img::SharedCanvasImageStore::default();
+        let one_x = prepare_with_scale(&list, &store, test_bounds(), 320.0, 240.0, 1.0);
+        let four_x = prepare_with_scale(&list, &store, test_bounds(), 320.0, 240.0, 4.0);
         assert!(prepared_path(&four_x).vertices.len() > prepared_path(&one_x).vertices.len());
     }
 

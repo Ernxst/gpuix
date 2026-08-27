@@ -11,6 +11,7 @@ import {
   CANVAS_STREAM_MAGIC,
   CANVAS_STREAM_VERSION,
 } from "../canvas/opcodes.js"
+import { Image } from "../canvas/image.js"
 
 type AppliedCommands = {
   ops: Uint32Array
@@ -128,9 +129,9 @@ describe("recording CanvasRenderingContext2D", () => {
   })
 
   it("records every opcode-table member with its declared framing", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const { context, applied } = recording(false)
-    const image = {} as CanvasImageSource
+    const image = new Image()
+    image.src = "./fixture.png"
 
     context.save()
     context.restore()
@@ -176,10 +177,11 @@ describe("recording CanvasRenderingContext2D", () => {
     expect(opcodeHeaders(applied[0]!.ops)).toEqual(
       Object.values(CANVAS_OPCODES).map((opcode, index) => [opcode, expectedArities[index]!])
     )
-    expect(applied[0]!.strings.slice(-1)[0]).toBe("phase-a2-image-1")
-    expect(warn).toHaveBeenCalledTimes(1)
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("phase C1"))
-    warn.mockRestore()
+    expect(applied[0]!.strings.slice(-3)).toEqual([
+      '{"kind":"path","path":"./fixture.png"}',
+      '{"kind":"path","path":"./fixture.png"}',
+      '{"kind":"path","path":"./fixture.png"}',
+    ])
   })
 
   it("keeps transform and save/restore queries entirely in JS", () => {
@@ -347,8 +349,10 @@ describe("CanvasRenderingContext2D unimplemented-member contract", () => {
     warn.mockRestore()
   })
 
-  it("throws the phase-C1 drawImage diagnostic before recording in strict mode", () => {
+  it("rejects image objects that did not come from the exported shim", () => {
     const { context } = recording(true)
-    expect(() => context.drawImage({} as CanvasImageSource, 0, 0)).toThrowError(/phase C1/)
+    expect(() => context.drawImage({} as CanvasImageSource, 0, 0)).toThrowError(
+      /expects an Image or ImageBitmap imported from @gpuix\/react/
+    )
   })
 })

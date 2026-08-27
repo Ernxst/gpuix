@@ -1,6 +1,7 @@
 // GPUIX React - React bindings for GPUI
 export { createRoot, flushSync } from "./reconciler/index.js"
 export { __applyCanvasCommands } from "./canvas/commands.js"
+export { createImageBitmap, Image } from "./canvas/image.js"
 export {
   createRenderer,
   enableAutomation,

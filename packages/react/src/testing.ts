@@ -35,6 +35,7 @@ import type {
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
 import { flushRecordingContext2D } from "./canvas/context-2d.js"
+import { Image } from "./canvas/image.js"
 import {
   attachAnimationFrameSource,
   detachAnimationFrameSource,
@@ -260,6 +261,11 @@ export interface ImageLoadState {
 export interface CanvasTestState {
   preparationCount: number
   tessellationCount: number
+  imageCount: number
+  loadedImageCount: number
+  paintedImageCount: number
+  atlasTileCount: number
+  releasedAtlasTileCount: number
 }
 
 // ── TestRenderer ─────────────────────────────────────────────────────
@@ -1193,6 +1199,7 @@ export class CanvasComparisonSkippedError extends Error {
 }
 
 const canvasGoldenDirectory = fileURLToPath(new URL("../canvas-goldens", import.meta.url))
+const canvasFixtureDirectory = path.join(canvasGoldenDirectory, "__fixtures__")
 const canvasScreenshotDirectory = fileURLToPath(new URL("../screenshots", import.meta.url))
 const DEFAULT_CANVAS_MAX_CHANNEL_DELTA = 16
 
@@ -1311,9 +1318,32 @@ export function expectCanvasMatchesBrowser(
     if (!canvas) throw new Error("The GPUIX <canvas> ref was not mounted")
     const context = canvas.getContext("2d")
     context.scale(CANVAS_GOLDEN_DPR, CANVAS_GOLDEN_DPR)
-    resolved.draw(context, CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT)
+    const images = (resolved.imageFixtures ?? []).map((fixture) => {
+      const image = new Image()
+      image.src = path.join(canvasFixtureDirectory, fixture)
+      return image
+    })
+    resolved.draw(context, CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT, images)
     flushRecordingContext2D(context)
     testRoot.renderer.flush()
+
+    if (images.length > 0) {
+      const element = testRoot.renderer.findByType("canvas")[0]!
+      let state = testRoot.renderer.getCanvasState(element.id)
+      const pause = new Int32Array(new SharedArrayBuffer(4))
+      for (let attempt = 0; attempt < 500; attempt += 1) {
+        if (state?.loadedImageCount === images.length) break
+        Atomics.wait(pause, 0, 0, 4)
+        testRoot.renderer.flush()
+        state = testRoot.renderer.getCanvasState(element.id)
+      }
+      if (state?.loadedImageCount !== images.length) {
+        throw new Error(
+          `Canvas scene ${JSON.stringify(resolved.name)} loaded ` +
+            `${state?.loadedImageCount ?? 0}/${images.length} image fixtures`
+        )
+      }
+    }
 
     const windowSize = testRoot.renderer.getWindowSize()
     if (windowSize.scaleFactor !== CANVAS_GOLDEN_DPR) {

@@ -1,10 +1,12 @@
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 import React, { createRef } from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import { __applyCanvasCommands } from "../canvas/commands.js"
 import { flushRecordingContext2D } from "../canvas/context-2d.js"
+import { createImageBitmap, Image } from "../canvas/image.js"
 import {
   CANVAS_OPCODES,
   CANVAS_STREAM_MAGIC,
@@ -27,6 +29,32 @@ import type { CanvasPublicInstance, PublicInstance } from "../types/host.js"
 import { SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+const canvasImageFixture = fileURLToPath(
+  new URL("../../canvas-goldens/__fixtures__/canvas-image-source.png", import.meta.url)
+)
+
+async function waitForCanvasImages(
+  renderer: TestRenderer,
+  elementId: number,
+  expected: number
+) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    renderer.flush()
+    const state = renderer.getCanvasState(elementId)
+    if (
+      state?.loadedImageCount === expected &&
+      state.paintedImageCount === expected &&
+      state.atlasTileCount === expected
+    ) {
+      return state
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  throw new Error(
+    `Canvas ${elementId} did not paint ${expected} images: ` +
+      JSON.stringify(renderer.getCanvasState(elementId))
+  )
+}
 
 function fillRectStream(color: string, x = 0, y = 0, width = 80, height = 60) {
   return {
@@ -90,6 +118,121 @@ describeNative("retained canvas element", () => {
       testRoot.unmount()
     }
   })
+
+  it("exports Image and createImageBitmap without installing globals", async () => {
+    const previousImage = Reflect.get(globalThis, "Image")
+    const onload = vi.fn()
+    const image = new Image(64, 48)
+    image.onload = onload
+    image.src = canvasImageFixture
+
+    await image.decode()
+    const bitmap = await createImageBitmap(image)
+    expect(image.complete).toBe(true)
+    expect(onload).toHaveBeenCalledTimes(1)
+    expect(bitmap.width).toBe(64)
+    expect(bitmap.height).toBe(48)
+    expect(Reflect.get(globalThis, "Image")).toBe(previousImage)
+    bitmap.close()
+  })
+
+  it("raises R1 for drawImage under a rotated CTM", () => {
+    const testRoot = createTestRoot({ width: 120, height: 80, strictStyles: true })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <canvas ref={canvasRef} testId="rotated-image-canvas" width={120} height={80} />
+      )
+      const image = new Image()
+      image.src = canvasImageFixture
+      const context = canvasRef.current!.getContext("2d")
+      context.rotate(0.2)
+      context.drawImage(image, 0, 0)
+      expect(() => flushRecordingContext2D(context)).toThrow(
+        /rotated-image-canvas.*drawImage.*R1.*rotated or skewed CTM/
+      )
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("paints 64 distinct image sources and drops every atlas tile on unmount", async () => {
+    const width = 256
+    const height = 192
+    const actualRenderer = new TestRenderer({ width, height })
+    const expectedRenderer = new TestRenderer({ width, height })
+    const actualRoot = createRoot(actualRenderer)
+    const expectedRoot = createRoot(expectedRenderer)
+    const actualRef = createRef<CanvasPublicInstance>()
+    const expectedRef = createRef<CanvasPublicInstance>()
+    const actualPath = path.join(SHOTS_DIR, "canvas-image-grid-64-actual.png")
+    const expectedPath = path.join(SHOTS_DIR, "canvas-image-grid-64-expected.png")
+
+    try {
+      flushSync(() =>
+        actualRoot.render(<canvas ref={actualRef} width={width} height={height} />)
+      )
+      flushSync(() =>
+        expectedRoot.render(<canvas ref={expectedRef} width={width} height={height} />)
+      )
+      actualRenderer.flush()
+      expectedRenderer.flush()
+
+      const actualContext = actualRef.current!.getContext("2d")
+      const expectedContext = expectedRef.current!.getContext("2d")
+      const shared = new Image()
+      shared.src = canvasImageFixture
+      for (let index = 0; index < 64; index += 1) {
+        const image = new Image()
+        const separator = canvasImageFixture.lastIndexOf("/")
+        image.src =
+          canvasImageFixture.slice(0, separator + 1) +
+          "./".repeat(index + 1) +
+          canvasImageFixture.slice(separator + 1)
+        const x = (index % 8) * 32
+        const y = Math.floor(index / 8) * 24
+        actualContext.drawImage(image, x, y, 32, 24)
+        expectedContext.drawImage(shared, x, y, 32, 24)
+      }
+      flushRecordingContext2D(actualContext)
+      flushRecordingContext2D(expectedContext)
+
+      const actualId = actualRef.current!.id
+      const expectedId = expectedRef.current!.id
+      const loaded = await waitForCanvasImages(actualRenderer, actualId, 64)
+      await waitForCanvasImages(expectedRenderer, expectedId, 1)
+      expect(loaded).toMatchObject({
+        imageCount: 64,
+        loadedImageCount: 64,
+        paintedImageCount: 64,
+        atlasTileCount: 64,
+        releasedAtlasTileCount: 0,
+      })
+
+      actualRenderer.captureScreenshot(actualPath)
+      expectedRenderer.captureScreenshot(expectedPath)
+      expect(actualRenderer.compareImages(expectedPath, actualPath, 0)).toEqual({
+        differingPixelRatio: 0,
+        maxChannelDelta: 0,
+        maxChannelDeltaOutsideGoldenContour: 0,
+        erodedGeometryMismatchRatio: 0,
+      })
+
+      flushSync(() => actualRoot.unmount())
+      actualRenderer.flush()
+      expect(actualRenderer.getCanvasState(actualId)).toMatchObject({
+        imageCount: 0,
+        loadedImageCount: 0,
+        atlasTileCount: 0,
+        releasedAtlasTileCount: 64,
+      })
+    } finally {
+      actualRoot.unmount()
+      expectedRoot.unmount()
+      actualRenderer.dispose()
+      expectedRenderer.dispose()
+    }
+  }, 20_000)
 
   it("does not retessellate an unchanged display list on a requested frame", () => {
     const testRoot = createTestRoot({ width: 120, height: 80 })

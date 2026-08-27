@@ -5,7 +5,7 @@
 /// HTTP(S) strings are URLs and every other string is a path. Every source
 /// becomes bounded bytes before GPUI decodes it. `<svg>` remains the lightweight
 /// monochrome icon element.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -193,7 +193,7 @@ impl ImgObjectFit {
 }
 
 #[derive(Clone, Debug)]
-enum ImageSource {
+pub(crate) enum ImageSource {
     Path(String),
     Url(String),
     Data { mime_type: String, bytes: Arc<[u8]> },
@@ -257,7 +257,7 @@ enum WireImageSource {
 }
 
 impl ImageSource {
-    fn parse(value: &serde_json::Value) -> Result<Self, String> {
+    pub(crate) fn parse(value: &serde_json::Value) -> Result<Self, String> {
         if let Some(source) = value.as_str() {
             return if source.starts_with("http://") || source.starts_with("https://") {
                 parse_image_url(source)?;
@@ -298,7 +298,7 @@ impl ImageSource {
         }
     }
 
-    fn label(&self) -> String {
+    pub(crate) fn label(&self) -> String {
         match self {
             Self::Path(path) => format!("path {path:?}"),
             Self::Url(url) => format!("URL {:?}", redacted_url(url)),
@@ -1039,6 +1039,306 @@ async fn load_image(
     gpui::Image::from_bytes(format, loaded.bytes.to_vec())
         .to_image_data(svg_renderer)
         .map_err(|error| gpui::ImageCacheError::Other(Arc::new(error)))
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CanvasImageSource {
+    pub key: String,
+    pub source: ImageSource,
+}
+
+impl PartialEq for CanvasImageSource {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
+#[derive(Default)]
+struct CanvasImageEntry {
+    source: Option<ImageSource>,
+    users: HashSet<u64>,
+    result: Option<ImageLoadResult>,
+    loading: bool,
+    reload_due: bool,
+    retry_attempt: u32,
+}
+
+#[derive(Clone, Default)]
+struct CanvasImageTestStats {
+    source_count: usize,
+    loaded_count: usize,
+    painted_ids: HashSet<gpui::ImageId>,
+    atlas_ids: HashSet<gpui::ImageId>,
+    released_atlas_tiles: usize,
+}
+
+#[derive(Default)]
+struct CanvasImageStore {
+    entries: HashMap<String, CanvasImageEntry>,
+    revision: u64,
+    test_stats: HashMap<u64, CanvasImageTestStats>,
+}
+
+/// Renderer-local image cache for retained canvas display lists.
+///
+/// Entries are keyed by the serialised source rather than a JS object handle,
+/// so two canvases drawing the same URL/path/data source share one decode and
+/// one `RenderImage`. The last user explicitly evicts the image from GPUI's
+/// window atlas instead of waiting for the renderer to disappear.
+#[derive(Clone, Default)]
+pub(crate) struct SharedCanvasImageStore {
+    state: Arc<Mutex<CanvasImageStore>>,
+}
+
+impl SharedCanvasImageStore {
+    pub(crate) fn revision(&self) -> u64 {
+        self.state.lock().unwrap().revision
+    }
+
+    pub(crate) fn loaded(&self, key: &str) -> Option<Arc<gpui::RenderImage>> {
+        self.state
+            .lock()
+            .unwrap()
+            .entries
+            .get(key)
+            .and_then(|entry| entry.result.as_ref())
+            .and_then(|result| result.as_ref().ok())
+            .cloned()
+    }
+
+    pub(crate) fn sync_element(
+        &self,
+        element_id: u64,
+        sources: &[CanvasImageSource],
+        policy: ImageNetworkPolicy,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
+    ) {
+        let desired: HashMap<_, _> = sources
+            .iter()
+            .cloned()
+            .map(|source| (source.key.clone(), source.source))
+            .collect();
+        let mut dropped = Vec::new();
+        let mut load = Vec::new();
+
+        {
+            let mut state = self.state.lock().unwrap();
+            let current: Vec<String> = state
+                .entries
+                .iter()
+                .filter(|(_, entry)| entry.users.contains(&element_id))
+                .map(|(key, _)| key.clone())
+                .collect();
+
+            for key in current {
+                if desired.contains_key(&key) {
+                    continue;
+                }
+                if let Some(entry) = state.entries.get_mut(&key) {
+                    entry.users.remove(&element_id);
+                }
+                if state
+                    .entries
+                    .get(&key)
+                    .is_some_and(|entry| entry.users.is_empty())
+                {
+                    if let Some(Ok(image)) =
+                        state.entries.remove(&key).and_then(|entry| entry.result)
+                    {
+                        dropped.push(image);
+                    }
+                    state.revision = state.revision.saturating_add(1);
+                }
+            }
+
+            for (key, source) in &desired {
+                let entry = state.entries.entry(key.clone()).or_default();
+                entry.source.get_or_insert_with(|| source.clone());
+                entry.users.insert(element_id);
+                if !entry.loading && (entry.result.is_none() || entry.reload_due) {
+                    if let Some(Ok(image)) = entry.result.take() {
+                        dropped.push(image);
+                    }
+                    entry.reload_due = false;
+                    entry.loading = true;
+                    load.push((key.clone(), entry.source.clone().unwrap()));
+                }
+            }
+
+            let loaded_count = desired
+                .keys()
+                .filter(|key| {
+                    state
+                        .entries
+                        .get(*key)
+                        .is_some_and(|entry| matches!(entry.result, Some(Ok(_))))
+                })
+                .count();
+            let stats = state.test_stats.entry(element_id).or_default();
+            stats.source_count = desired.len();
+            stats.loaded_count = loaded_count;
+        }
+
+        for image in dropped {
+            self.drop_image_for(element_id, image, window);
+        }
+        for (key, source) in load {
+            self.start_load(key, source, policy.clone(), cx);
+        }
+    }
+
+    fn start_load(
+        &self,
+        key: String,
+        source: ImageSource,
+        policy: ImageNetworkPolicy,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
+    ) {
+        let client = policy.client(cx.http_client());
+        let svg_renderer = cx.svg_renderer();
+        let background = cx.background_executor().spawn(load_image(
+            ImageRequest {
+                source,
+                current_color: None,
+            },
+            client,
+            svg_renderer,
+            policy,
+        ));
+        let store = self.clone();
+        cx.spawn(async move |view, cx| {
+            let result = background.await;
+            let delay = {
+                let mut state = store.state.lock().unwrap();
+                let Some(entry) = state.entries.get_mut(&key) else {
+                    return;
+                };
+                entry.loading = false;
+                let delay = if result.is_err() {
+                    let multiplier = 1u32 << entry.retry_attempt.min(5);
+                    entry.retry_attempt = entry.retry_attempt.saturating_add(1);
+                    (URL_FAILURE_RETRY_MIN * multiplier).min(URL_FAILURE_RETRY_MAX)
+                } else {
+                    entry.retry_attempt = 0;
+                    URL_SUCCESS_TTL
+                };
+                entry.result = Some(result);
+                let users = entry.users.iter().copied().collect::<Vec<_>>();
+                let loaded = entry.result.as_ref().is_some_and(Result::is_ok);
+                for user in users {
+                    state.test_stats.entry(user).or_default().loaded_count = usize::from(loaded);
+                }
+                state.revision = state.revision.saturating_add(1);
+                delay
+            };
+            let _ = view.update(cx, |_view, cx| cx.notify());
+            cx.background_executor().timer(delay).await;
+            {
+                let mut state = store.state.lock().unwrap();
+                if let Some(entry) = state.entries.get_mut(&key) {
+                    entry.reload_due = true;
+                }
+            }
+            let _ = view.update(cx, |_view, cx| cx.notify());
+        })
+        .detach();
+    }
+
+    pub(crate) fn prune_missing(
+        &self,
+        mut is_live: impl FnMut(u64) -> bool,
+        window: &mut gpui::Window,
+    ) {
+        let mut releases = Vec::new();
+        {
+            let mut state = self.state.lock().unwrap();
+            let keys = state.entries.keys().cloned().collect::<Vec<_>>();
+            for key in keys {
+                let (removed_users, empty) = {
+                    let Some(entry) = state.entries.get_mut(&key) else {
+                        continue;
+                    };
+                    let removed_users = entry
+                        .users
+                        .iter()
+                        .copied()
+                        .filter(|user| !is_live(*user))
+                        .collect::<Vec<_>>();
+                    for user in &removed_users {
+                        entry.users.remove(user);
+                    }
+                    let empty = entry.users.is_empty();
+                    (removed_users, empty)
+                };
+                for user in &removed_users {
+                    state.test_stats.entry(*user).or_default().source_count = 0;
+                    state.test_stats.entry(*user).or_default().loaded_count = 0;
+                }
+                if empty {
+                    if let Some(Ok(image)) =
+                        state.entries.remove(&key).and_then(|entry| entry.result)
+                    {
+                        releases.push((removed_users, image));
+                    }
+                    state.revision = state.revision.saturating_add(1);
+                }
+            }
+        }
+        for (users, image) in releases {
+            if users.is_empty() {
+                let _ = window.drop_image(image);
+                continue;
+            }
+            for user in users {
+                self.drop_image_for(user, image.clone(), window);
+            }
+        }
+    }
+
+    fn drop_image_for(
+        &self,
+        _element_id: u64,
+        image: Arc<gpui::RenderImage>,
+        window: &mut gpui::Window,
+    ) {
+        #[cfg(any(test, feature = "test-support"))]
+        let image_id = image.id;
+        let _ = window.drop_image(image);
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            let mut state = self.state.lock().unwrap();
+            let stats = state.test_stats.entry(_element_id).or_default();
+            if stats.atlas_ids.remove(&image_id) {
+                stats.released_atlas_tiles += 1;
+            }
+        }
+    }
+
+    pub(crate) fn record_painted(
+        &self,
+        element_id: u64,
+        image: &Arc<gpui::RenderImage>,
+        _window: &gpui::Window,
+    ) {
+        let mut state = self.state.lock().unwrap();
+        let stats = state.test_stats.entry(element_id).or_default();
+        stats.painted_ids.insert(image.id);
+        #[cfg(any(test, feature = "test-support"))]
+        stats.atlas_ids.insert(image.id);
+    }
+
+    pub(crate) fn test_state(&self, element_id: u64) -> Option<serde_json::Value> {
+        let state = self.state.lock().unwrap();
+        let stats = state.test_stats.get(&element_id)?;
+        Some(serde_json::json!({
+            "imageCount": stats.source_count,
+            "loadedImageCount": stats.loaded_count,
+            "paintedImageCount": stats.painted_ids.len(),
+            "atlasTileCount": stats.atlas_ids.len(),
+            "releasedAtlasTileCount": stats.released_atlas_tiles,
+        }))
+    }
 }
 
 pub struct ImgElement {

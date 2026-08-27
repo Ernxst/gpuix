@@ -10,13 +10,17 @@ export const CANVAS_GOLDEN_DPR = 2
 export type CanvasSceneDraw = (
   context: CanvasRenderingContext2D,
   width: number,
-  height: number
+  height: number,
+  images?: readonly CanvasImageSource[]
 ) => void
 
 export interface CanvasScene {
   name: string
   draw: CanvasSceneDraw
+  imageFixtures?: readonly string[]
 }
+
+export const CANVAS_IMAGE_FIXTURE_NAME = "canvas-image-source.png"
 
 /**
  * Browser-standard Canvas 2D scenes used by the native equivalence gate.
@@ -168,6 +172,44 @@ export const canvasScenes = {
       context.strokeStyle = "#7c3aed"
       context.stroke()
       context.restore()
+    },
+  },
+
+  "image-whole": {
+    name: "image-whole",
+    imageFixtures: [CANVAS_IMAGE_FIXTURE_NAME],
+    draw: function imageWhole(context, width, height, images) {
+      context.fillStyle = "#e2e8f0"
+      context.fillRect(0, 0, width, height)
+      context.drawImage(images![0]!, 128, 96)
+    },
+  },
+
+  "image-scaled": {
+    name: "image-scaled",
+    imageFixtures: [CANVAS_IMAGE_FIXTURE_NAME],
+    draw: function imageScaled(context, width, height, images) {
+      const background = "#0f172a"
+      context.fillStyle = background
+      context.fillRect(0, 0, width, height)
+      context.drawImage(images![0]!, 32, 24, 256, 192)
+      // Compare the scaled content rather than the samplers' different
+      // out-of-bounds edge extension.
+      context.fillStyle = background
+      context.fillRect(32, 24, 256, 2)
+      context.fillRect(32, 214, 256, 2)
+      context.fillRect(32, 24, 2, 192)
+      context.fillRect(286, 24, 2, 192)
+    },
+  },
+
+  "image-source-crop": {
+    name: "image-source-crop",
+    imageFixtures: [CANVAS_IMAGE_FIXTURE_NAME],
+    draw: function imageSourceCrop(context, width, height, images) {
+      context.fillStyle = "#f8fafc"
+      context.fillRect(0, 0, width, height)
+      context.drawImage(images![0]!, 16, 8, 32, 32, 48, 32, 224, 176)
     },
   },
 } satisfies Record<string, CanvasScene>
