@@ -256,6 +256,11 @@ export declare class TestGpuixRenderer {
    * offscreen renderer so lifecycle tests can prove unmounted tracks leave.
    */
   getStyleTransitionCount(): number
+  /**
+   * Number of GPUI frame requests emitted by active style transitions since
+   * this offscreen renderer was created. Imperative motion is not counted.
+   */
+  getStyleTransitionFrameRequestCount(): number
   getWindowSize(): WindowSize
   /** Simulate a native window resize through GPUI's bounds observer. */
   simulateResize(width: number, height: number): void

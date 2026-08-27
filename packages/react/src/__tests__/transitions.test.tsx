@@ -53,6 +53,59 @@ describeNative("native style transitions", () => {
     }
   })
 
+  it("snaps custom elements and virtual lists without retaining or requesting frames", () => {
+    const root = createTestRoot()
+    const targets = (expanded: boolean) => (
+      <div>
+        <img
+          style={{
+            width: expanded ? 200 : 100,
+            height: 40,
+            transition: {
+              properties: ["width"],
+              durationMs: 100,
+              easing: "linear",
+            },
+          }}
+        />
+        <virtual-list
+          itemCount={0}
+          style={{
+            width: expanded ? 240 : 120,
+            height: 40,
+            transition: {
+              properties: ["width"],
+              durationMs: 100,
+              easing: "linear",
+            },
+          }}
+        />
+      </div>
+    )
+
+    try {
+      root.renderer.clockPause()
+      root.render(targets(false))
+      const image = root.renderer.findByType("img")[0]!
+      const virtualList = root.renderer.findByType("virtual-list")[0]!
+      expect(root.renderer.getStyleTransitionCount()).toBe(0)
+      expect(root.renderer.getStyleTransitionFrameRequestCount()).toBe(0)
+
+      root.render(targets(true))
+      expect(root.renderer.getResolvedStyle(image.id)?.width).toBe(200)
+      expect(root.renderer.getResolvedStyle(virtualList.id)?.width).toBe(240)
+      expect(root.renderer.getStyleTransitionCount()).toBe(0)
+      expect(root.renderer.getStyleTransitionFrameRequestCount()).toBe(0)
+
+      root.renderer.advanceAsyncClock(50)
+      expect(root.renderer.getResolvedStyle(image.id)?.width).toBe(200)
+      expect(root.renderer.getResolvedStyle(virtualList.id)?.width).toBe(240)
+      expect(root.renderer.getStyleTransitionFrameRequestCount()).toBe(0)
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("interpolates hover, active, and focus refinements on the paused frame clock", () => {
     const root = createTestRoot()
     const beforePath = path.join(SHOTS_DIR, "transition-hover-before.png")
@@ -114,14 +167,14 @@ describeNative("native style transitions", () => {
       expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
         width: 120,
         opacity: 0.2,
-        borderRadius: 8,
+        borderTopLeftRadius: 8,
       })
 
       root.renderer.advanceAsyncClock(50)
       expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
         width: 150,
         opacity: 0.5,
-        borderRadius: 18,
+        borderTopLeftRadius: 18,
       })
       root.renderer.captureScreenshot(middlePath)
 
@@ -129,7 +182,7 @@ describeNative("native style transitions", () => {
       expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
         width: 180,
         opacity: 0.8,
-        borderRadius: 28,
+        borderTopLeftRadius: 28,
       })
       root.renderer.captureScreenshot(afterPath)
       expectScreenshotsDiffer(beforePath, middlePath)

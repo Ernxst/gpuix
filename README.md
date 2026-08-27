@@ -710,6 +710,10 @@ function HoverCard() {
 The same declaration animates React-driven changes to those fields. An
 interrupted transition retargets from its current painted value. Unlisted
 fields update immediately, and removing the element discards its native track.
+Transitions currently run on the built-in `<div>` and `<text>` hosts. Native
+custom elements and `<virtual-list>` keep their declared snap semantics: they
+apply the target immediately and create neither a retained track nor frame
+requests.
 
 | Group | Transition properties |
 |---|---|
@@ -725,6 +729,14 @@ four-number cubic-bezier tuple. Pixel lengths interpolate with pixels and
 percentages with percentages. Incompatible endpoints such as `auto` to pixels
 snap to the new value. Malformed transition objects are rejected as a whole
 through the strict style-diagnostic channel.
+
+Radius shorthand and corner longhands are resolved to four painted corners
+before interpolation, so either form can override the other without a stale
+longhand masking the animated value. Colour endpoints are parsed into GPUI's
+clipped, gamma-encoded sRGB channels. Interpolation linearly blends
+premultiplied RGB and alpha, then unpremultiplies the result; a zero-alpha
+result keeps the destination RGB. Consequently, the exact midpoint from
+transparent to white is white at 50% alpha, not grey at 50% alpha.
 
 Set the renderer option `reducedMotion: true` to make transitions finish on
 their target immediately. GPUI exposes reduced motion as application policy,

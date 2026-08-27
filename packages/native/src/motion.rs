@@ -65,12 +65,27 @@ impl TransitionValue {
                 Self::Dimension(DimensionValue::Percentage(from)),
                 Self::Dimension(DimensionValue::Percentage(to)),
             ) => Self::Dimension(DimensionValue::Percentage(number(*from, *to))),
-            (Self::Color(from), Self::Color(to)) => Self::Color([
-                from[0] + (to[0] - from[0]) * progress as f32,
-                from[1] + (to[1] - from[1]) * progress as f32,
-                from[2] + (to[2] - from[2]) * progress as f32,
-                from[3] + (to[3] - from[3]) * progress as f32,
-            ]),
+            (Self::Color(from), Self::Color(to)) => {
+                let progress = progress as f32;
+                let alpha = from[3] + (to[3] - from[3]) * progress;
+                let mut color = [0.0; 4];
+                for channel in 0..3 {
+                    let from_premultiplied = from[channel] * from[3];
+                    let to_premultiplied = to[channel] * to[3];
+                    let premultiplied =
+                        from_premultiplied + (to_premultiplied - from_premultiplied) * progress;
+                    color[channel] = if alpha > f32::EPSILON {
+                        premultiplied / alpha
+                    } else {
+                        // A fully transparent result has no visible RGB. Keep
+                        // the destination channels so a later retarget does not
+                        // revive arbitrary colour from the transparent source.
+                        to[channel]
+                    };
+                }
+                color[3] = alpha;
+                Self::Color(color)
+            }
             _ => target.clone(),
         }
     }
@@ -127,9 +142,18 @@ struct TransitionValues(Vec<(TransitionProperty, Option<TransitionValue>)>);
 
 impl TransitionValues {
     fn from_style(style: &StyleDesc, transition: &StyleTransition) -> Self {
+        let properties = canonical_transition_properties(transition);
+        let canonical_style = properties
+            .iter()
+            .any(|property| is_corner_radius(*property))
+            .then(|| {
+                let mut style = style.clone();
+                canonicalize_base_radii(&mut style);
+                style
+            });
+        let style = canonical_style.as_ref().unwrap_or(style);
         Self(
-            transition
-                .properties
+            properties
                 .iter()
                 .copied()
                 .map(|property| (property, TransitionValue::from_style(style, property)))
@@ -222,7 +246,18 @@ impl StyleTransitionState {
         let target = TransitionValues::from_style(&target_style, &transition);
 
         if target != self.target || transition != self.transition {
-            let visible = self.values(now);
+            // Resolve the whole painted style before adopting the new property
+            // list. A property added to that list must start at the value it
+            // was already painting, not at its new target.
+            let visible_style = self.frame(now, false).style;
+            let visible_style = resolve_transition_properties(
+                &visible_style,
+                state,
+                self.hovered,
+                self.active,
+                &transition,
+            );
+            let visible = TransitionValues::from_style(&visible_style, &transition);
             self.from = visible.interpolate(&target, 0.0);
             self.target = target;
             self.started = now;
@@ -287,22 +322,73 @@ impl StyleTransitionState {
         self.active = active;
         true
     }
+}
 
-    fn values(&self, now: Instant) -> TransitionValues {
-        let delay = milliseconds(self.transition.delay_ms);
-        let duration = milliseconds(self.transition.duration_ms);
-        let elapsed = now.saturating_duration_since(self.started);
-        let raw = if elapsed < delay {
-            0.0
-        } else if duration.is_zero() {
-            1.0
+const CORNER_RADIUS_PROPERTIES: [TransitionProperty; 4] = [
+    TransitionProperty::BorderTopLeftRadius,
+    TransitionProperty::BorderTopRightRadius,
+    TransitionProperty::BorderBottomLeftRadius,
+    TransitionProperty::BorderBottomRightRadius,
+];
+
+fn is_corner_radius(property: TransitionProperty) -> bool {
+    CORNER_RADIUS_PROPERTIES.contains(&property)
+}
+
+fn canonical_transition_properties(transition: &StyleTransition) -> Vec<TransitionProperty> {
+    let mut properties = Vec::with_capacity(transition.properties.len() + 3);
+    for property in transition.properties.iter().copied() {
+        let expanded: &[TransitionProperty] = if property == TransitionProperty::BorderRadius {
+            &CORNER_RADIUS_PROPERTIES
         } else {
-            elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
+            std::slice::from_ref(&property)
         };
-        self.from.interpolate(
-            &self.target,
-            transition_ease(raw.clamp(0.0, 1.0), &self.transition.easing),
-        )
+        for property in expanded.iter().copied() {
+            if !properties.contains(&property) {
+                properties.push(property);
+            }
+        }
+    }
+    properties
+}
+
+/// Resolve the shorthand/longhand cascade into the four values GPUI paints.
+/// Missing base corners are GPUI's zero-radius default; missing refinement
+/// corners remain absent because a refinement only overrides what it declares.
+fn canonicalize_base_radii(style: &mut StyleDesc) {
+    let shorthand = style.border_radius.take().unwrap_or(0.0);
+    style.border_top_left_radius = Some(style.border_top_left_radius.unwrap_or(shorthand));
+    style.border_top_right_radius = Some(style.border_top_right_radius.unwrap_or(shorthand));
+    style.border_bottom_left_radius = Some(style.border_bottom_left_radius.unwrap_or(shorthand));
+    style.border_bottom_right_radius = Some(style.border_bottom_right_radius.unwrap_or(shorthand));
+}
+
+fn canonicalize_refinement_radii(style: &mut StyleDesc) {
+    let Some(shorthand) = style.border_radius.take() else {
+        return;
+    };
+    style.border_top_left_radius.get_or_insert(shorthand);
+    style.border_top_right_radius.get_or_insert(shorthand);
+    style.border_bottom_left_radius.get_or_insert(shorthand);
+    style.border_bottom_right_radius.get_or_insert(shorthand);
+}
+
+fn canonicalize_transition_radii(style: &mut StyleDesc) {
+    canonicalize_base_radii(style);
+    if let Some(refinement) = style.focus.as_deref_mut() {
+        canonicalize_refinement_radii(refinement);
+    }
+    if let Some(refinement) = style.focus_visible.as_deref_mut() {
+        canonicalize_refinement_radii(refinement);
+    }
+    if let Some(refinement) = style.hover.as_deref_mut() {
+        canonicalize_refinement_radii(refinement);
+    }
+    if let Some(refinement) = style.hover_within.as_deref_mut() {
+        canonicalize_refinement_radii(refinement);
+    }
+    if let Some(refinement) = style.active.as_deref_mut() {
+        canonicalize_refinement_radii(refinement);
     }
 }
 
@@ -312,23 +398,41 @@ fn resolve_transition_target(
     hovered: bool,
     active: bool,
 ) -> StyleDesc {
-    let mut resolved = style.clone();
     let Some(transition) = style.transition.as_ref() else {
-        return resolved;
+        return style.clone();
     };
+    resolve_transition_properties(style, state, hovered, active, transition)
+}
 
-    for property in transition.properties.iter().copied() {
+fn resolve_transition_properties(
+    style: &StyleDesc,
+    state: StyleState,
+    hovered: bool,
+    active: bool,
+    transition: &StyleTransition,
+) -> StyleDesc {
+    let properties = canonical_transition_properties(transition);
+    let mut declared = style.clone();
+    if properties
+        .iter()
+        .any(|property| is_corner_radius(*property))
+    {
+        canonicalize_transition_radii(&mut declared);
+    }
+    let mut resolved = declared.clone();
+
+    for property in properties {
         if state.focused {
-            refine_transition_property(&mut resolved, style.focus.as_deref(), property);
+            refine_transition_property(&mut resolved, declared.focus.as_deref(), property);
         }
         if state.focus_visible {
-            refine_transition_property(&mut resolved, style.focus_visible.as_deref(), property);
+            refine_transition_property(&mut resolved, declared.focus_visible.as_deref(), property);
         }
         if hovered {
-            refine_transition_property(&mut resolved, style.hover.as_deref(), property);
+            refine_transition_property(&mut resolved, declared.hover.as_deref(), property);
         }
         if active {
-            refine_transition_property(&mut resolved, style.active.as_deref(), property);
+            refine_transition_property(&mut resolved, declared.active.as_deref(), property);
         }
 
         if let Some(refinement) = resolved.focus.as_deref_mut() {
@@ -772,7 +876,9 @@ mod tests {
         assert_eq!(middle.style.opacity, Some(0.5));
         assert_eq!(middle.style.width, Some(DimensionValue::Pixels(150.0)));
         assert_eq!(middle.style.top, Some(10.0));
-        assert_eq!(middle.style.border_radius, Some(8.0));
+        assert_eq!(middle.style.border_radius, None);
+        assert_eq!(middle.style.border_top_left_radius, Some(8.0));
+        assert_eq!(middle.style.border_top_right_radius, Some(8.0));
         assert_eq!(
             TransitionValue::from_style(&middle.style, TransitionProperty::BackgroundColor),
             Some(TransitionValue::Color([0.5, 0.5, 0.5, 1.0]))
@@ -893,6 +999,115 @@ mod tests {
                 .style
                 .opacity,
             Some(0.5)
+        );
+    }
+
+    #[test]
+    fn style_transition_canonicalizes_radius_shorthand_and_longhands_both_ways() {
+        let started = Instant::now();
+        let shorthand_target = style(serde_json::json!({
+            "borderTopLeftRadius": 10,
+            "hover": { "borderRadius": 20 },
+            "transition": {
+                "properties": ["borderRadius"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        let mut state =
+            StyleTransitionState::new(&shorthand_target, StyleState::default(), started);
+        state.set_hovered(true);
+        state.sync(&shorthand_target, StyleState::default(), started, false);
+        let midpoint = state.frame(started + Duration::from_millis(50), false);
+        assert_eq!(midpoint.style.border_radius, None);
+        assert_eq!(midpoint.style.border_top_left_radius, Some(15.0));
+        assert_eq!(midpoint.style.border_top_right_radius, Some(10.0));
+        assert_eq!(midpoint.style.border_bottom_left_radius, Some(10.0));
+        assert_eq!(midpoint.style.border_bottom_right_radius, Some(10.0));
+
+        let longhand_target = style(serde_json::json!({
+            "borderRadius": 10,
+            "hover": { "borderTopLeftRadius": 20 },
+            "transition": {
+                "properties": ["borderTopLeftRadius"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        let mut state = StyleTransitionState::new(&longhand_target, StyleState::default(), started);
+        state.set_hovered(true);
+        state.sync(&longhand_target, StyleState::default(), started, false);
+        let midpoint = state.frame(started + Duration::from_millis(50), false);
+        assert_eq!(midpoint.style.border_radius, None);
+        assert_eq!(midpoint.style.border_top_left_radius, Some(15.0));
+        assert_eq!(midpoint.style.border_top_right_radius, Some(10.0));
+        assert_eq!(midpoint.style.border_bottom_left_radius, Some(10.0));
+        assert_eq!(midpoint.style.border_bottom_right_radius, Some(10.0));
+    }
+
+    #[test]
+    fn adding_a_transition_property_starts_from_its_painted_value() {
+        let started = Instant::now();
+        let initial = style(serde_json::json!({
+            "opacity": 0,
+            "width": 100,
+            "hover": { "opacity": 1, "width": 150 },
+            "transition": {
+                "properties": ["opacity"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        let mut state = StyleTransitionState::new(&initial, StyleState::default(), started);
+        state.set_hovered(true);
+        state.sync(&initial, StyleState::default(), started, false);
+
+        let retargeted_at = started + Duration::from_millis(50);
+        let second_target = style(serde_json::json!({
+            "opacity": 0,
+            "width": 100,
+            "hover": { "opacity": 1, "width": 250 },
+            "transition": {
+                "properties": ["opacity", "width"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        state.sync(&second_target, StyleState::default(), retargeted_at, false);
+
+        assert_eq!(
+            state.frame(retargeted_at, false).style.width,
+            Some(DimensionValue::Pixels(150.0))
+        );
+        assert_eq!(
+            state
+                .frame(retargeted_at + Duration::from_millis(50), false)
+                .style
+                .width,
+            Some(DimensionValue::Pixels(200.0))
+        );
+    }
+
+    #[test]
+    fn transparent_to_white_uses_a_premultiplied_alpha_midpoint() {
+        let started = Instant::now();
+        let style = style(serde_json::json!({
+            "backgroundColor": "transparent",
+            "hover": { "backgroundColor": "#ffffff" },
+            "transition": {
+                "properties": ["backgroundColor"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), started);
+        state.set_hovered(true);
+        state.sync(&style, StyleState::default(), started, false);
+
+        let midpoint = state.frame(started + Duration::from_millis(50), false);
+        assert_eq!(
+            TransitionValue::from_style(&midpoint.style, TransitionProperty::BackgroundColor),
+            Some(TransitionValue::Color([1.0, 1.0, 1.0, 0.5]))
         );
     }
 

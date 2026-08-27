@@ -601,6 +601,19 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Number of GPUI frame requests emitted by active style transitions since
+    /// this offscreen renderer was created. Imperative motion is not counted.
+    #[napi]
+    pub fn get_style_transition_frame_request_count(&self) -> Result<u32> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.read(app).style_transition_frame_requests
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
     #[napi]
     pub fn get_window_size(&self) -> Result<WindowSize> {
         with_test_state(self.state_id, |cx, window, _view| {

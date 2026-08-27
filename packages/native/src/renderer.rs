@@ -4169,6 +4169,10 @@ pub(crate) struct GpuixView {
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
     /// CSS-like style transition tracks keyed by retained element ID.
     pub(crate) transition_states: HashMap<u64, crate::motion::StyleTransitionState>,
+    /// Frame requests emitted while at least one style transition is active.
+    /// Kept separately from imperative motion so offscreen tests can prove a
+    /// snapping element never enters the transition frame loop.
+    pub(crate) style_transition_frame_requests: u32,
     /// Live text selection, shared with the paint closures and the napi methods.
     pub(crate) selection: SharedSelection,
     pub(crate) image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
@@ -4315,6 +4319,7 @@ impl GpuixView {
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
             transition_states: HashMap::new(),
+            style_transition_frame_requests: 0,
             selection,
             image_network_policy,
             pointer_router: Default::default(),
@@ -4418,6 +4423,7 @@ impl GpuixView {
         let callback = self.event_callback.clone();
         let now = self.clock.now();
         let mut animation_active = false;
+        let mut style_transition_active = false;
         let reduce_motion = cx.reduce_motion();
         let mut highlight_events = Vec::new();
 
@@ -4456,6 +4462,7 @@ impl GpuixView {
             transition_states: &mut self.transition_states,
             now,
             animation_active: &mut animation_active,
+            style_transition_active: &mut style_transition_active,
             reduce_motion,
             selection: self.selection.clone(),
             image_network_policy: &self.image_network_policy,
@@ -4465,6 +4472,10 @@ impl GpuixView {
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
+        if style_transition_active {
+            self.style_transition_frame_requests =
+                self.style_transition_frame_requests.saturating_add(1);
+        }
         if animation_active {
             window.request_animation_frame();
         }
@@ -4565,6 +4576,7 @@ pub(crate) struct BuildCtx<'a> {
     pub transition_states: &'a mut HashMap<u64, crate::motion::StyleTransitionState>,
     pub now: web_time::Instant,
     pub animation_active: &'a mut bool,
+    pub style_transition_active: &'a mut bool,
     pub reduce_motion: bool,
     pub selection: SharedSelection,
     pub image_network_policy: &'a crate::custom_elements::img::ImageNetworkPolicy,
@@ -5118,6 +5130,7 @@ impl gpui::Render for GpuixView {
         let theme = Theme::dark();
         let now = self.clock.now();
         let mut animation_active = false;
+        let mut style_transition_active = false;
         let reduce_motion = cx.reduce_motion();
         // Pruned by DECLARATION, not existence: an element that drops its
         // `highlight` prop keeps living, and its cached group list holds a copy
@@ -5141,6 +5154,7 @@ impl gpui::Render for GpuixView {
                     transition_states: &mut self.transition_states,
                     now,
                     animation_active: &mut animation_active,
+                    style_transition_active: &mut style_transition_active,
                     reduce_motion,
                     selection: self.selection.clone(),
                     image_network_policy: &self.image_network_policy,
@@ -5193,6 +5207,10 @@ impl gpui::Render for GpuixView {
             }
         });
 
+        if style_transition_active {
+            self.style_transition_frame_requests =
+                self.style_transition_frame_requests.saturating_add(1);
+        }
         if animation_active {
             window.request_animation_frame();
         }
@@ -5216,7 +5234,8 @@ pub(crate) fn build_element(
     };
 
     let declared_style = element.style.as_deref();
-    let transitioned_style =
+    let supports_style_transitions = matches!(element.element_type.as_str(), "div" | "text");
+    let transitioned_style = if supports_style_transitions {
         if let Some(style) = declared_style.filter(|style| style.transition.is_some()) {
             let focused = ctx
                 .focus_handles
@@ -5232,11 +5251,18 @@ pub(crate) fn build_element(
             state.sync(style, focus_state, ctx.now, ctx.reduce_motion);
             let frame = state.frame(ctx.now, ctx.reduce_motion);
             *ctx.animation_active |= frame.active;
+            *ctx.style_transition_active |= frame.active;
             Some(frame.style)
         } else {
             ctx.transition_states.remove(&id);
             None
-        };
+        }
+    } else {
+        // Custom renderers and virtual lists own their styling semantics. They
+        // receive the declared target immediately and never retain a track.
+        ctx.transition_states.remove(&id);
+        None
+    };
 
     let motion_style = if let Some(source) = element.custom_props.get("motion") {
         let state = match ctx.motion_states.entry(id) {

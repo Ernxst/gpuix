@@ -42,6 +42,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   advanceAsyncClock(deltaMs: number): void
   setReducedMotion(enabled: boolean): void
   getStyleTransitionCount(): number
+  getStyleTransitionFrameRequestCount(): number
   drainEvents(): EventPayload[]
   setMenus(menus: MenuSpec[]): void
   simulateMenuAction(id: string): void
@@ -351,6 +352,11 @@ export class TestRenderer implements NativeRenderer {
   /** Number of transition tracks retained by the offscreen native view. */
   getStyleTransitionCount(): number {
     return this.native.getStyleTransitionCount()
+  }
+
+  /** Number of GPUI frames requested by retained style transitions. */
+  getStyleTransitionFrameRequestCount(): number {
+    return this.native.getStyleTransitionFrameRequestCount()
   }
 
   /** Drain events collected by the native GPUI event handlers. */
