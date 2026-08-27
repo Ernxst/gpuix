@@ -29,6 +29,11 @@ export declare class GpuixRenderer {
    * by default outside production builds.
    */
   setStrictStyles(enabled: boolean): void
+  /**
+   * Opt in to loopback and private-network URL image sources.
+   * Link-local and cloud-metadata addresses remain blocked.
+   */
+  setAllowPrivateNetworkImages(enabled: boolean): void
   /** Drain rejected style fields after a commit, once element type and testId are known. */
   drainStyleDiagnostics(): Array<GpuixStyleDiagnostic>
   setText(id: number, content: string): void
@@ -83,13 +88,12 @@ export declare class GpuixRenderer {
    * This keeps input and application lifecycle events responsive between frames.
    */
   tickIdle(): boolean
-  /**
-   * Test seam for a native frame callback that arrives after tickIdle's
-   * outstanding-work precheck. The callback is queued from a background
-   * thread while the embedded AppKit pump owns the JavaScript thread.
-   */
-  testIdlePumpFrameRequestRace(callback: FrameRequestCallback): boolean
   isInitialized(): boolean
+  /**
+   * Stable platform and renderer feature read. Keep individual methods for
+   * backwards compatibility; new callers should branch on this object.
+   */
+  capabilities(): RendererCapabilities
   /** Whether JavaScript must drive the native event loop with tick(). */
   requiresTick(): boolean
   /**
@@ -169,6 +173,12 @@ export declare class GpuixRenderer {
   clockFastForward(deltaMs: number): number
   clockResume(): number
   captureScreenshot(path: string): void
+  /**
+   * Test seam for a native frame callback that arrives after tickIdle's
+   * outstanding-work precheck. The callback is queued from a background
+   * thread while the embedded AppKit pump owns the JavaScript thread.
+   */
+  testIdlePumpFrameRequestRace(callback: FrameRequestCallback): boolean
 }
 
 /**
@@ -193,6 +203,11 @@ export declare class TestGpuixRenderer {
    * Further interaction attempts fail instead of being routed to another root.
    */
   dispose(): void
+  /**
+   * The same capability contract as a live renderer, scoped to this
+   * offscreen GPU-backed window.
+   */
+  capabilities(): RendererCapabilities
   createElement(id: number, elementType: string): void
   /**
    * Destroy an element and all descendants. Returns destroyed IDs
@@ -313,6 +328,8 @@ export declare class TestGpuixRenderer {
   simulateWindowDeactivation(): void
   /** Whether the offscreen native window is active and receiving key events. */
   isActive(): boolean
+  /** An offscreen test window cannot request foreground activation. */
+  activateWindow(): void
   /**
    * Simulate a mouse down event at the given window coordinates.
    * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
@@ -434,6 +451,20 @@ export declare class TestGpuixRenderer {
   clockResume(): number
   /** Get the root element ID, or null if no root is set. */
   getRootId(): number | null
+}
+
+export interface AutomationCapabilities {
+  click: boolean
+  hover: boolean
+  drag: boolean
+  scrollWheel: boolean
+  /** `native` injects through GPUI; `browser` uses the browser IME mirror. */
+  keyboard: "native" | "browser"
+  screenshot: boolean
+  /** Screenshot file formats currently accepted by `captureScreenshot()`. */
+  screenshotFormats: Array<"png">
+  clock: boolean
+  tree: boolean
 }
 
 /** Recorded draw times from the debug frame overlay. */
@@ -573,6 +604,17 @@ export interface EventPayload {
   modifiers?: EventModifiers
 }
 
+export interface FrameClockCapabilities {
+  /** The source currently driving frame work for this renderer. */
+  kind: "display-link" | "timer" | "raf" | "manual"
+  requiresTick: boolean
+  /**
+   * Whether `setFrameRequestHandler()` can switch this renderer to an
+   * external frame source.
+   */
+  externalFrame: boolean
+}
+
 export interface GpuixStyleDiagnostic {
   message: string
   elementId: number
@@ -612,6 +654,11 @@ export interface HighlightRect {
   height: number
 }
 
+export interface ImageCapabilities {
+  /** `setAllowPrivateNetworkImages()` is available. */
+  privateNetwork: boolean
+}
+
 /**
  * A cross-platform application menu item.
  *
@@ -640,6 +687,20 @@ export interface MenuSpec {
   disabled?: boolean
 }
 
+/**
+ * Features offered by one renderer instance on its current platform.
+ *
+ * Each `true` capability corresponds to a callable renderer method. Calls
+ * outside the advertised surface reject with `UnsupportedCapabilityError`.
+ */
+export interface RendererCapabilities {
+  platform: "macos" | "windows" | "linux" | "freebsd" | "browser" | "unknown"
+  frameClock: FrameClockCapabilities
+  window: WindowCapabilities
+  images: ImageCapabilities
+  automation: AutomationCapabilities
+}
+
 export interface ScrollWheelModifiers {
   shift?: boolean
   ctrl?: boolean
@@ -658,6 +719,17 @@ export interface ScrollWheelOptions {
   phase?: string
   deltaUnit?: string
   modifiers?: ScrollWheelModifiers
+}
+
+export interface WindowCapabilities {
+  /** `isActive()` is available for this renderer/window. */
+  activation: boolean
+  /** `activateWindow()` can request foreground activation. */
+  activate: boolean
+  /** Native/browser resize notifications are available. */
+  resize: boolean
+  /** GPUIX currently owns one window per renderer process. */
+  multiple: boolean
 }
 
 export interface WindowInsets {

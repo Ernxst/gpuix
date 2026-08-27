@@ -788,9 +788,6 @@ enum UiCommand {
     GetAutomationBounds {
         response: SyncSender<HashMap<u64, crate::automation::ElementBounds>>,
     },
-    GetWindowSize {
-        response: SyncSender<WindowSize>,
-    },
     GetElementBounds {
         id: u64,
         response: SyncSender<Option<crate::automation::ElementBounds>>,
@@ -846,28 +843,18 @@ async fn run_ui_commands(
             UiCommand::Invalidate => refresh_ui_window(window, cx),
             UiCommand::SetMenus { menus, response } => {
                 let result = cx.update(|cx| set_application_menus(cx, menus));
-                let response_value = result
-                    .as_ref()
-                    .map(|value| value.clone())
-                    .map_err(|error| error.to_string())
-                    .and_then(|value| value);
-                response.send(response_value).ok();
-                result.and_then(|value| value.map_err(anyhow::Error::msg))
+                response.send(result.clone()).ok();
+                result.map_err(anyhow::Error::msg)
             }
             UiCommand::DispatchMenuAction { id, response } => {
                 let result = cx.update(|cx| dispatch_application_menu_action(cx, &id));
-                let response_value = result
-                    .as_ref()
-                    .map(|value| value.clone())
-                    .map_err(|error| error.to_string())
-                    .and_then(|value| value);
-                response.send(response_value).ok();
-                result.and_then(|value| value.map_err(anyhow::Error::msg))
+                response.send(result.clone()).ok();
+                result.map_err(anyhow::Error::msg)
             }
             UiCommand::Quit { response } => {
-                let result = cx.update(|cx| cx.quit());
+                cx.update(|cx| cx.quit());
                 response.send(()).ok();
-                result
+                Ok(())
             }
             UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
                 view.window_title = title;
@@ -981,17 +968,6 @@ async fn run_ui_commands(
                     });
                 response.send(offset).ok();
                 Ok(())
-            }
-            UiCommand::GetWindowSize { response } => {
-                window.update(cx, move |_view, window, _cx| {
-                    let size = window.viewport_size();
-                    response
-                        .send(WindowSize {
-                            width: f32::from(size.width) as f64,
-                            height: f32::from(size.height) as f64,
-                        })
-                        .ok();
-                })
             }
             UiCommand::GetAutomationBounds { response } => {
                 window.update(cx, move |_view, window, cx| {
@@ -1110,7 +1086,7 @@ async fn run_ui_commands(
                         )
                         .map_err(Error::from_reason),
                     })
-                    .and_then(|result| result.map_err(|error| anyhow::anyhow!(error.reason)));
+                    .and_then(|result| result.map_err(|error| anyhow::anyhow!("{}", error.reason)));
                 response
                     .send(
                         result
@@ -1231,6 +1207,35 @@ enum RendererLifecycle {
 }
 
 #[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActiveFrameClockKind {
+    DisplayLink,
+    Timer,
+}
+
+#[cfg(target_os = "macos")]
+impl ActiveFrameClockKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::DisplayLink => "display-link",
+            Self::Timer => "timer",
+        }
+    }
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn unsupported_capability(env: Env, capability: &str) -> Result<()> {
+    let mut error = env.create_error(Error::new(
+        Status::GenericFailure,
+        format!("{capability} is not supported by this renderer"),
+    ))?;
+    error.set_named_property("name", "UnsupportedCapabilityError")?;
+    error.set_named_property("code", "ERR_GPUX_UNSUPPORTED_CAPABILITY")?;
+    error.set_named_property("capability", capability)?;
+    Err(error.into_unknown(&env)?.into())
+}
+
+#[cfg(target_os = "macos")]
 type FrameRequestCallback = ThreadsafeFunction<(), Unknown<'static>, (), Status, false, false, 1>;
 
 #[cfg(target_os = "macos")]
@@ -1252,6 +1257,8 @@ pub struct GpuixRenderer {
     #[cfg(target_os = "macos")]
     frame_request_callback: Arc<Mutex<Option<Arc<FrameRequestCallback>>>>,
     #[cfg(target_os = "macos")]
+    active_frame_clock_kind: Arc<Mutex<ActiveFrameClockKind>>,
+    #[cfg(target_os = "macos")]
     frame_request_outstanding: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     pending_frame_request: Arc<Mutex<Option<gpui_macos::FrameRequest>>>,
@@ -1270,6 +1277,18 @@ pub struct GpuixRenderer {
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[napi]
 impl GpuixRenderer {
+    fn active_frame_clock_kind(&self) -> &'static str {
+        #[cfg(target_os = "macos")]
+        return self
+            .active_frame_clock_kind
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_str();
+
+        #[cfg(not(target_os = "macos"))]
+        "timer"
+    }
+
     fn event_callback_for_view(&self) -> Option<EventCallback> {
         self.event_callback.lock().unwrap().clone().map(|tsf| {
             Arc::new(move |payload: EventPayload| {
@@ -1408,6 +1427,8 @@ impl GpuixRenderer {
             lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
             #[cfg(target_os = "macos")]
             frame_request_callback: Arc::new(Mutex::new(None)),
+            #[cfg(target_os = "macos")]
+            active_frame_clock_kind: Arc::new(Mutex::new(ActiveFrameClockKind::Timer)),
             #[cfg(target_os = "macos")]
             frame_request_outstanding: Arc::new(AtomicBool::new(false)),
             #[cfg(target_os = "macos")]
@@ -1860,6 +1881,13 @@ impl GpuixRenderer {
         }
     }
 
+    /// Opt in to loopback and private-network URL image sources.
+    /// Link-local and cloud-metadata addresses remain blocked.
+    #[napi]
+    pub fn set_allow_private_network_images(&self, enabled: bool) {
+        self.image_network_policy.set_allow_private(enabled);
+    }
+
     /// Drain rejected style fields after a commit, once element type and testId are known.
     #[napi]
     pub fn drain_style_diagnostics(&self) -> Vec<GpuixStyleDiagnostic> {
@@ -2154,7 +2182,7 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
-            let _ = after_precheck;
+            let _ = (dispatch_frame_request, after_precheck);
             return Ok(true);
         }
 
@@ -2186,30 +2214,16 @@ impl GpuixRenderer {
         self.pump_native_event_loop(false)
     }
 
-    /// Test seam for a native frame callback that arrives after tickIdle's
-    /// outstanding-work precheck. The callback is queued from a background
-    /// thread while the embedded AppKit pump owns the JavaScript thread.
-    #[cfg(all(target_os = "macos", feature = "test-support"))]
-    #[napi]
-    pub fn test_idle_pump_frame_request_race(
-        &self,
-        callback: FrameRequestCallback,
-    ) -> Result<bool> {
-        self.pump_native_event_loop_after_precheck(false, move || {
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(2));
-                let _ = callback.call_with_return_value(
-                    (),
-                    ThreadsafeFunctionCallMode::NonBlocking,
-                    |_result, _env| Ok(()),
-                );
-            });
-        })
-    }
-
     #[napi]
     pub fn is_initialized(&self) -> bool {
         *self.lifecycle.lock().unwrap() == RendererLifecycle::Running
+    }
+
+    /// Stable platform and renderer feature read. Keep individual methods for
+    /// backwards compatibility; new callers should branch on this object.
+    #[napi]
+    pub fn capabilities(&self) -> RendererCapabilities {
+        renderer_capabilities(self.active_frame_clock_kind())
     }
 
     /// Whether JavaScript must drive the native event loop with tick().
@@ -2242,6 +2256,14 @@ impl GpuixRenderer {
                     frame_request.dispatch();
                 }
             }
+            *self
+                .active_frame_clock_kind
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = if unregistering {
+                ActiveFrameClockKind::Timer
+            } else {
+                ActiveFrameClockKind::DisplayLink
+            };
             return true;
         }
 
@@ -2254,7 +2276,7 @@ impl GpuixRenderer {
 
     /// Whether this native window is active and receiving key events.
     #[napi]
-    pub fn is_active(&self) -> Result<bool> {
+    pub fn is_active(&self, _env: Env) -> Result<bool> {
         #[cfg(target_os = "macos")]
         return update_window(|_view, window, _cx| window.is_window_active());
 
@@ -2271,12 +2293,12 @@ impl GpuixRenderer {
             target_os = "linux",
             target_os = "freebsd"
         )))]
-        Err(Error::from_reason("Unsupported operating system"))
+        unsupported_capability(_env, "window.activation")
     }
 
     /// Bring the native window and application to the foreground.
     #[napi]
-    pub fn activate_window(&self) -> Result<()> {
+    pub fn activate_window(&self, _env: Env) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
             GPUI_APP.with(|app| {
@@ -2291,9 +2313,7 @@ impl GpuixRenderer {
         }
 
         #[cfg(not(target_os = "macos"))]
-        Err(Error::from_reason(
-            "Window activation is only available on macOS",
-        ))
+        unsupported_capability(_env, "window.activate")
     }
 
     #[napi]
@@ -3191,7 +3211,7 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn capture_screenshot(&self, path: String) -> Result<()> {
+    pub fn capture_screenshot(&self, _env: Env, path: String) -> Result<()> {
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         {
             let image = update_window(move |_view, window, cx| {
@@ -3219,10 +3239,32 @@ impl GpuixRenderer {
         )))]
         {
             let _ = path;
-            Err(Error::from_reason(
-                "captureScreenshot needs a test-support build on macOS or Windows",
-            ))
+            unsupported_capability(_env, "automation.screenshot")
         }
+    }
+}
+
+#[cfg(all(target_os = "macos", feature = "test-support"))]
+#[napi]
+impl GpuixRenderer {
+    /// Test seam for a native frame callback that arrives after tickIdle's
+    /// outstanding-work precheck. The callback is queued from a background
+    /// thread while the embedded AppKit pump owns the JavaScript thread.
+    #[napi]
+    pub fn test_idle_pump_frame_request_race(
+        &self,
+        callback: FrameRequestCallback,
+    ) -> Result<bool> {
+        self.pump_native_event_loop_after_precheck(false, move || {
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                let _ = callback.call_with_return_value(
+                    (),
+                    ThreadsafeFunctionCallMode::NonBlocking,
+                    |_result, _env| Ok(()),
+                );
+            });
+        })
     }
 }
 
@@ -3750,6 +3792,11 @@ impl WebGpuixRenderer {
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = isInitialized)]
     pub fn is_initialized(&self) -> bool {
         WEB_APP.with(|app| app.borrow().is_some())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = capabilities)]
+    pub fn capabilities(&self) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        web_renderer_capabilities()
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = requiresTick)]
@@ -4617,6 +4664,15 @@ pub(crate) struct Inherited {
     /// render returns, and on Windows and Linux the Node thread can edit text
     /// in between, so a stale range would paint over the wrong glyphs.
     pub highlight: Option<Arc<crate::text::HighlightContext>>,
+    /// Font state is retained separately from GPUI's build-time text stack so
+    /// `ch` sees the same inherited family, weight, and size as descendants.
+    font: Option<InheritedFont>,
+}
+
+#[derive(Clone)]
+struct InheritedFont {
+    font: gpui::Font,
+    size: gpui::Pixels,
 }
 
 impl Inherited {
@@ -4630,11 +4686,28 @@ impl Inherited {
             current_color: gpui::rgba(0xe2e2e2ff),
             hover_group: None,
             highlight: None,
+            font: None,
         }
     }
 
+    fn font_for(&self, style: Option<&StyleDesc>, window: &gpui::Window) -> InheritedFont {
+        let inherited = self.font.clone().unwrap_or_else(|| {
+            let text_style = window.text_style();
+            InheritedFont {
+                font: text_style.font(),
+                size: text_style.font_size.to_pixels(window.rem_size()),
+            }
+        });
+        font_with_overrides(inherited, style)
+    }
+
     /// Apply the inheritable parts of `style` for the subtree below it.
-    fn descend(mut self, style: Option<&StyleDesc>, hover_group: Option<&str>) -> Self {
+    fn descend(
+        mut self,
+        style: Option<&StyleDesc>,
+        hover_group: Option<&str>,
+        font: InheritedFont,
+    ) -> Self {
         if let Some(style) = style {
             match style.user_select.as_deref() {
                 Some("none") => self.selectable = false,
@@ -4665,8 +4738,24 @@ impl Inherited {
         if let Some(hover_group) = hover_group {
             self.hover_group = Some(gpui::SharedString::from(hover_group.to_owned()));
         }
+        self.font = Some(font);
         self
     }
+}
+
+fn font_with_overrides(mut font: InheritedFont, style: Option<&StyleDesc>) -> InheritedFont {
+    if let Some(style) = style {
+        if let Some(family) = &style.font_family {
+            font.font.family = gpui::SharedString::from(family.clone());
+        }
+        if let Some(weight) = &style.font_weight {
+            font.font.weight = parse_font_weight(weight);
+        }
+        if let Some(size) = style.font_size {
+            font.size = gpui::px(size as f32);
+        }
+    }
+    font
 }
 
 fn json_usize(value: &serde_json::Value) -> Option<usize> {
@@ -5297,7 +5386,10 @@ pub(crate) fn build_element(
         ctx.motion_states.remove(&id);
         None
     };
-    let style = motion_style
+    // Resolve expressions against the exact style this frame will paint. Motion
+    // and style transitions both retain a copy-on-write frame style, while an
+    // unanimated element may still borrow its declared `Arc<StyleDesc>`.
+    let layered_style = motion_style
         .as_ref()
         .or(transitioned_style.as_ref())
         .or(declared_style);
@@ -5309,7 +5401,14 @@ pub(crate) fn build_element(
         .get("hoverGroup")
         .and_then(serde_json::Value::as_str);
     let parent_inherited = ctx.inherited.clone();
-    ctx.inherited = parent_inherited.clone().descend(style, hover_group);
+    let font = parent_inherited.font_for(layered_style, window);
+    // Percentage terms stay deferred through GPUI/Taffy, where the layout
+    // algorithm supplies the containing block's content size. Only `ch` is
+    // reduced here, using the inherited font chain above.
+    let resolved_style =
+        layered_style.map(|style| resolve_length_expressions(style, window, &font));
+    let style = resolved_style.as_ref();
+    ctx.inherited = parent_inherited.clone().descend(style, hover_group, font);
 
     // A `highlight` here replaces any ancestor's: the nearest declaration wins,
     // and `GroupList::collect` skips nested declarations so an ancestor never
@@ -5341,7 +5440,7 @@ pub(crate) fn build_element(
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
-            build_virtual_list(element, ctx, window, cx)
+            build_virtual_list(element, style, ctx, window, cx)
         }
 
         // Polymorphic dispatch for all custom elements.
@@ -5379,6 +5478,7 @@ pub(crate) fn build_element(
 
 fn build_virtual_list(
     element: &crate::retained_tree::RetainedElement,
+    style: Option<&StyleDesc>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -5502,7 +5602,7 @@ fn build_virtual_list(
     });
     let mut list =
         gpui::list(list_state, render_item).with_sizing_behavior(gpui::ListSizingBehavior::Auto);
-    if let Some(style) = element.style.as_deref() {
+    if let Some(style) = style {
         list = apply_styles(list, style);
     }
     list.into_any_element()
@@ -6130,20 +6230,146 @@ fn selection_start_flag(style: Option<&StyleDesc>) -> Option<bool> {
 // ── Style application ────────────────────────────────────────────────
 
 pub(crate) fn apply_width<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
-    match dim {
-        crate::style::DimensionValue::Pixels(v) => el.w(gpui::px(*v as f32)),
-        crate::style::DimensionValue::Percentage(v) if *v >= 0.999 => el.w_full(),
-        crate::style::DimensionValue::Percentage(v) => el.w(gpui::relative(*v as f32)),
-        crate::style::DimensionValue::Auto => el,
-    }
+    let mut el = el;
+    el.style().size.width = Some(dimension_to_length(dim));
+    el
 }
 
 pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
-    match dim {
-        crate::style::DimensionValue::Pixels(v) => el.h(gpui::px(*v as f32)),
-        crate::style::DimensionValue::Percentage(v) if *v >= 0.999 => el.h_full(),
-        crate::style::DimensionValue::Percentage(v) => el.h(gpui::relative(*v as f32)),
-        crate::style::DimensionValue::Auto => el,
+    let mut el = el;
+    el.style().size.height = Some(dimension_to_length(dim));
+    el
+}
+
+fn dimension_to_calc(value: &crate::style::DimensionValue) -> gpui::CalcLength {
+    use crate::style::{CalcOperator, DimensionValue};
+    match value {
+        DimensionValue::Pixels(value) | DimensionValue::Ch(value) => {
+            gpui::CalcLength::absolute(gpui::px(*value as f32))
+        }
+        DimensionValue::Percentage(value) => gpui::CalcLength::relative(*value as f32),
+        DimensionValue::Calc {
+            left,
+            operator,
+            right,
+            ..
+        } => match operator {
+            CalcOperator::Add => {
+                gpui::CalcLength::add(dimension_to_calc(left), dimension_to_calc(right))
+            }
+            CalcOperator::Subtract => {
+                gpui::CalcLength::subtract(dimension_to_calc(left), dimension_to_calc(right))
+            }
+        },
+        DimensionValue::Clamp {
+            min,
+            preferred,
+            max,
+            ..
+        } => gpui::CalcLength::clamp(
+            dimension_to_calc(min),
+            dimension_to_calc(preferred),
+            dimension_to_calc(max),
+        ),
+        DimensionValue::Auto => unreachable!("auto cannot be part of a calc expression"),
+    }
+}
+
+fn dimension_to_length(value: &crate::style::DimensionValue) -> gpui::Length {
+    use crate::style::DimensionValue;
+    match value {
+        DimensionValue::Pixels(value) | DimensionValue::Ch(value) => gpui::px(*value as f32).into(),
+        DimensionValue::Percentage(value) => gpui::relative(*value as f32).into(),
+        DimensionValue::Calc { .. } | DimensionValue::Clamp { .. } => {
+            gpui::Length::Calc(dimension_to_calc(value))
+        }
+        DimensionValue::Auto => gpui::Length::Auto,
+    }
+}
+
+/// Resolve the font-relative part of a length before handing percentages to
+/// GPUI/Taffy. Taffy supplies the containing-block basis at layout time.
+fn resolve_length_expressions(
+    style: &StyleDesc,
+    window: &gpui::Window,
+    font: &InheritedFont,
+) -> StyleDesc {
+    let mut resolved = style.clone();
+    let font_id = window.text_system().resolve_font(&font.font);
+    let ch = f64::from(f32::from(
+        window
+            .text_system()
+            .ch_advance(font_id, font.size)
+            .unwrap_or(font.size * 0.5),
+    ));
+
+    resolved.width = resolve_dimension(style.width.as_ref(), ch);
+    resolved.min_width = resolve_dimension(style.min_width.as_ref(), ch);
+    resolved.max_width = resolve_dimension(style.max_width.as_ref(), ch);
+    resolved.height = resolve_dimension(style.height.as_ref(), ch);
+    resolved.min_height = resolve_dimension(style.min_height.as_ref(), ch);
+    resolved.max_height = resolve_dimension(style.max_height.as_ref(), ch);
+    // State refinements go through the same expression resolver. Without this
+    // a typed `hover: { width: "24ch" }` could reach StyleRefinement and be
+    // ignored by its old pixels-only helpers.
+    resolved.hover = style.hover.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
+    resolved.hover_within = style.hover_within.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
+    resolved.active = style.active.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
+    resolved.focus = style.focus.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
+    resolved.focus_visible = style.focus_visible.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
+    resolved
+}
+
+fn resolve_dimension(
+    value: Option<&crate::style::DimensionValue>,
+    ch: f64,
+) -> Option<crate::style::DimensionValue> {
+    let value = value?;
+    match value {
+        crate::style::DimensionValue::Percentage(_)
+        | crate::style::DimensionValue::Pixels(_)
+        | crate::style::DimensionValue::Auto => Some(value.clone()),
+        crate::style::DimensionValue::Ch(value) => {
+            Some(crate::style::DimensionValue::Pixels(value * ch))
+        }
+        crate::style::DimensionValue::Calc {
+            source,
+            left,
+            operator,
+            right,
+        } => Some(crate::style::DimensionValue::Calc {
+            source: source.clone(),
+            left: Box::new(resolve_dimension(Some(left), ch)?),
+            operator: *operator,
+            right: Box::new(resolve_dimension(Some(right), ch)?),
+        }),
+        crate::style::DimensionValue::Clamp {
+            source,
+            min,
+            preferred,
+            max,
+            ..
+        } => Some(crate::style::DimensionValue::Clamp {
+            source: source.clone(),
+            min: Box::new(resolve_dimension(Some(min), ch)?),
+            preferred: Box::new(resolve_dimension(Some(preferred), ch)?),
+            max: Box::new(resolve_dimension(Some(max), ch)?),
+        }),
     }
 }
 
@@ -6333,32 +6559,16 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         el = apply_height(el, h);
     }
     if let Some(ref min_w) = style.min_width {
-        match min_w {
-            crate::style::DimensionValue::Pixels(v) => el = el.min_w(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => el = el.min_w(gpui::relative(*v as f32)),
-            crate::style::DimensionValue::Auto => {}
-        }
+        el.style().min_size.width = Some(dimension_to_length(min_w));
     }
     if let Some(ref min_h) = style.min_height {
-        match min_h {
-            crate::style::DimensionValue::Pixels(v) => el = el.min_h(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => el = el.min_h(gpui::relative(*v as f32)),
-            crate::style::DimensionValue::Auto => {}
-        }
+        el.style().min_size.height = Some(dimension_to_length(min_h));
     }
     if let Some(ref max_w) = style.max_width {
-        match max_w {
-            crate::style::DimensionValue::Pixels(v) => el = el.max_w(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => el = el.max_w(gpui::relative(*v as f32)),
-            crate::style::DimensionValue::Auto => {}
-        }
+        el.style().max_size.width = Some(dimension_to_length(max_w));
     }
     if let Some(ref max_h) = style.max_height {
-        match max_h {
-            crate::style::DimensionValue::Pixels(v) => el = el.max_h(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => el = el.max_h(gpui::relative(*v as f32)),
-            crate::style::DimensionValue::Auto => {}
-        }
+        el.style().max_size.height = Some(dimension_to_length(max_h));
     }
     if let Some(p) = style.padding {
         el = el.p(gpui::px(p as f32));
@@ -6451,6 +6661,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.white_space.as_deref() {
         Some("nowrap") => el = el.whitespace_nowrap(),
         Some("normal") => el = el.whitespace_normal(),
+        Some("pre") => el = el.whitespace_pre(),
         _ => {}
     }
     match style.text_wrap.as_deref() {
@@ -6470,9 +6681,17 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     }
     // `line_height` was accepted by the style type but never applied, so
     // multi-line text always used gpui's default leading.
-    if let Some(line_height) = style.line_height {
-        if line_height > 0.0 {
-            el = el.line_height(gpui::px(line_height as f32));
+    if let Some(line_height) = style.line_height.as_ref() {
+        match line_height {
+            crate::style::LineHeightValue::Pixels(value) if *value > 0.0 => {
+                el = el.line_height(gpui::px(*value as f32))
+            }
+            crate::style::LineHeightValue::Unitless(value) => {
+                if let Ok(value) = value.parse::<f32>() {
+                    el = el.line_height(gpui::relative(value));
+                }
+            }
+            _ => {}
         }
     }
     if let Some(radius) = style.border_radius {
@@ -7288,6 +7507,179 @@ pub struct WindowOptions {
     /// Allow URL-backed images to connect to loopback and private networks.
     /// Link-local and cloud-metadata ranges remain blocked.
     pub allow_private_network_images: Option<bool>,
+}
+
+/// Features offered by one renderer instance on its current platform.
+///
+/// Each `true` capability corresponds to a callable renderer method. Calls
+/// outside the advertised surface reject with `UnsupportedCapabilityError`.
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct RendererCapabilities {
+    #[napi(ts_type = "\"macos\" | \"windows\" | \"linux\" | \"freebsd\" | \"browser\" | \"unknown\"")]
+    pub platform: String,
+    pub frame_clock: FrameClockCapabilities,
+    pub window: WindowCapabilities,
+    pub images: ImageCapabilities,
+    pub automation: AutomationCapabilities,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct FrameClockCapabilities {
+    /// The source currently driving frame work for this renderer.
+    #[napi(ts_type = "\"display-link\" | \"timer\" | \"raf\" | \"manual\"")]
+    pub kind: String,
+    pub requires_tick: bool,
+    /// Whether `setFrameRequestHandler()` can switch this renderer to an
+    /// external frame source.
+    pub external_frame: bool,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct WindowCapabilities {
+    /// `isActive()` is available for this renderer/window.
+    pub activation: bool,
+    /// `activateWindow()` can request foreground activation.
+    pub activate: bool,
+    /// Native/browser resize notifications are available.
+    pub resize: bool,
+    /// GPUIX currently owns one window per renderer process.
+    pub multiple: bool,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct ImageCapabilities {
+    /// `setAllowPrivateNetworkImages()` is available.
+    pub private_network: bool,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct AutomationCapabilities {
+    pub click: bool,
+    pub hover: bool,
+    pub drag: bool,
+    pub scroll_wheel: bool,
+    /// `native` injects through GPUI; `browser` uses the browser IME mirror.
+    #[napi(ts_type = "\"native\" | \"browser\"")]
+    pub keyboard: String,
+    pub screenshot: bool,
+    /// Screenshot file formats currently accepted by `captureScreenshot()`.
+    #[napi(ts_type = "Array<\"png\">")]
+    pub screenshot_formats: Vec<String>,
+    pub clock: bool,
+    pub tree: bool,
+}
+
+pub(crate) fn renderer_capabilities(frame_clock_kind: &str) -> RendererCapabilities {
+    let (platform, requires_tick, activate, screenshot) = if cfg!(target_os = "macos") {
+        ("macos", true, true, cfg!(feature = "test-support"))
+    } else if cfg!(target_os = "windows") {
+        ("windows", false, false, cfg!(feature = "test-support"))
+    } else if cfg!(target_os = "linux") {
+        ("linux", false, false, false)
+    } else if cfg!(target_os = "freebsd") {
+        ("freebsd", false, false, false)
+    } else {
+        ("unknown", false, false, false)
+    };
+
+    RendererCapabilities {
+        platform: platform.to_string(),
+        frame_clock: FrameClockCapabilities {
+            kind: frame_clock_kind.to_owned(),
+            requires_tick,
+            external_frame: cfg!(target_os = "macos"),
+        },
+        window: WindowCapabilities {
+            activation: matches!(platform, "macos" | "windows" | "linux" | "freebsd"),
+            activate,
+            resize: matches!(platform, "macos" | "windows" | "linux" | "freebsd"),
+            multiple: false,
+        },
+        images: ImageCapabilities {
+            private_network: true,
+        },
+        automation: AutomationCapabilities {
+            click: true,
+            hover: true,
+            drag: true,
+            scroll_wheel: true,
+            keyboard: "native".to_string(),
+            screenshot,
+            screenshot_formats: if screenshot {
+                vec!["png".to_string()]
+            } else {
+                Vec::new()
+            },
+            clock: true,
+            tree: true,
+        },
+    }
+}
+
+pub(crate) fn test_renderer_capabilities() -> RendererCapabilities {
+    let mut capabilities = renderer_capabilities("manual");
+    capabilities.frame_clock.requires_tick = false;
+    capabilities.frame_clock.external_frame = false;
+    capabilities.window.activate = false;
+    capabilities
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn web_renderer_capabilities() -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    let capabilities = js_sys::Object::new();
+    let frame_clock = js_sys::Object::new();
+    let window = js_sys::Object::new();
+    let images = js_sys::Object::new();
+    let automation = js_sys::Object::new();
+
+    for (key, value) in [
+        ("platform", wasm_bindgen::JsValue::from_str("browser")),
+        ("frameClock", frame_clock.clone().into()),
+        ("window", window.clone().into()),
+        ("images", images.clone().into()),
+        ("automation", automation.clone().into()),
+    ] {
+        js_sys::Reflect::set(&capabilities, &key.into(), &value)?;
+    }
+    for (key, value) in [
+        ("kind", wasm_bindgen::JsValue::from_str("raf")),
+        ("requiresTick", wasm_bindgen::JsValue::FALSE),
+        ("externalFrame", wasm_bindgen::JsValue::FALSE),
+    ] {
+        js_sys::Reflect::set(&frame_clock, &key.into(), &value)?;
+    }
+    for (key, value) in [
+        ("activation", wasm_bindgen::JsValue::FALSE),
+        ("activate", wasm_bindgen::JsValue::FALSE),
+        ("resize", wasm_bindgen::JsValue::TRUE),
+        ("multiple", wasm_bindgen::JsValue::FALSE),
+    ] {
+        js_sys::Reflect::set(&window, &key.into(), &value)?;
+    }
+    js_sys::Reflect::set(
+        &images,
+        &"privateNetwork".into(),
+        &wasm_bindgen::JsValue::FALSE,
+    )?;
+    for (key, value) in [
+        ("click", wasm_bindgen::JsValue::TRUE),
+        ("hover", wasm_bindgen::JsValue::TRUE),
+        ("drag", wasm_bindgen::JsValue::TRUE),
+        ("scrollWheel", wasm_bindgen::JsValue::TRUE),
+        ("keyboard", wasm_bindgen::JsValue::from_str("browser")),
+        ("screenshot", wasm_bindgen::JsValue::FALSE),
+        ("screenshotFormats", js_sys::Array::new().into()),
+        ("clock", wasm_bindgen::JsValue::TRUE),
+        ("tree", wasm_bindgen::JsValue::TRUE),
+    ] {
+        js_sys::Reflect::set(&automation, &key.into(), &value)?;
+    }
+    Ok(capabilities.into())
 }
 
 impl Default for WindowOptions {

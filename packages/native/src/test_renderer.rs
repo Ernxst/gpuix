@@ -327,6 +327,13 @@ impl TestGpuixRenderer {
         dispose_test_state(self.state_id);
     }
 
+    /// The same capability contract as a live renderer, scoped to this
+    /// offscreen GPU-backed window.
+    #[napi]
+    pub fn capabilities(&self) -> crate::renderer::RendererCapabilities {
+        crate::renderer::test_renderer_capabilities()
+    }
+
     // ── Mutation API (same interface as GpuixRenderer) ────────────────
 
     #[napi]
@@ -867,6 +874,12 @@ impl TestGpuixRenderer {
             cx.update_window(window, |_, window, _app| window.is_window_active())
                 .map_err(|error| Error::from_reason(error.to_string()))
         })
+    }
+
+    /// An offscreen test window cannot request foreground activation.
+    #[napi]
+    pub fn activate_window(&self, env: Env) -> Result<()> {
+        crate::renderer::unsupported_capability(env, "window.activate")
     }
 
     /// Simulate a mouse down event at the given window coordinates.

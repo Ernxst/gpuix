@@ -106,6 +106,8 @@ export type {
   MotionTransition,
   NativeRenderer,
   StyleTransition,
+  RendererCapabilities,
+  UnsupportedCapabilityError,
   StyleDiagnostic,
   NativeWindowInsets,
   StyleDesc,
