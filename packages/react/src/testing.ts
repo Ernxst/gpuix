@@ -14,7 +14,7 @@ import { existsSync, mkdirSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { createElement, type ReactNode } from "react"
+import { createElement, createRef, type ReactNode } from "react"
 import type { EventPayload, MenuSpec } from "@gpuix/native"
 import {
   normalizeScrollWheelOptions,
@@ -26,6 +26,7 @@ import type {
   DebugFrameOverlayStats,
   HighlightMatch,
   NativeRenderer,
+  PublicInstance,
   RendererCapabilities,
   StyleDesc,
   StyleDiagnostic,
@@ -1108,6 +1109,8 @@ export interface CanvasComparisonOptions {
   tolerance?: number
   /** Maximum fraction of pixels outside the channel tolerance. Defaults to 1%. */
   differingPixelBudget?: number
+  /** Maximum delta allowed in any channel, regardless of affected area. Defaults to 16. */
+  maxChannelDelta?: number
   /** Override the committed browser golden path. */
   goldenPath?: string
   /** Override where the native screenshot is written for inspection. */
@@ -1126,6 +1129,10 @@ export class CanvasComparisonSkippedError extends Error {
     super(message)
     this.name = "CanvasComparisonSkippedError"
   }
+}
+
+type CanvasPublicInstance = PublicInstance & {
+  getContext?: (contextId: "2d") => CanvasRenderingContext2D | null
 }
 
 const canvasGoldenDirectory = fileURLToPath(new URL("../canvas-goldens", import.meta.url))
@@ -1169,13 +1176,33 @@ export function expectCanvasMatchesBrowser(
   const resolved = resolveCanvasScene(scene)
   const tolerance = options.tolerance ?? 2
   const differingPixelBudget = options.differingPixelBudget ?? 0.01
+  const maxChannelDelta = options.maxChannelDelta ?? 16
 
-  if (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 255) {
+  if (
+    !Number.isFinite(tolerance) ||
+    !Number.isInteger(tolerance) ||
+    tolerance < 0 ||
+    tolerance > 255
+  ) {
     throw new RangeError(
       `Canvas comparison tolerance must be an integer from 0 through 255, got ${tolerance}`
     )
   }
-  if (differingPixelBudget < 0 || differingPixelBudget > 1) {
+  if (
+    !Number.isFinite(maxChannelDelta) ||
+    !Number.isInteger(maxChannelDelta) ||
+    maxChannelDelta < 0 ||
+    maxChannelDelta > 255
+  ) {
+    throw new RangeError(
+      `Canvas maximum channel delta must be an integer from 0 through 255, got ${maxChannelDelta}`
+    )
+  }
+  if (
+    !Number.isFinite(differingPixelBudget) ||
+    differingPixelBudget < 0 ||
+    differingPixelBudget > 1
+  ) {
     throw new RangeError(
       `Canvas differing-pixel budget must be between 0 and 1, got ${differingPixelBudget}`
     )
@@ -1207,26 +1234,35 @@ export function expectCanvasMatchesBrowser(
     width: CANVAS_GOLDEN_WIDTH,
     height: CANVAS_GOLDEN_HEIGHT,
   })
+  const canvasRef = createRef<CanvasPublicInstance>()
 
   try {
     testRoot.render(
       createElement("canvas", {
-        testId: `canvas-equivalence-${resolved.name}`,
+        ref: canvasRef,
         width: CANVAS_GOLDEN_WIDTH,
         height: CANVAS_GOLDEN_HEIGHT,
-        draw: resolved.draw,
-        style: { width: CANVAS_GOLDEN_WIDTH, height: CANVAS_GOLDEN_HEIGHT },
       })
     )
 
-    const canvas = testRoot.renderer.findByType("canvas")[0]
-    const bounds = canvas ? testRoot.renderer.getElementBounds(canvas.id) : null
-    if (!canvas || !bounds) {
+    const canvas = canvasRef.current
+    if (!canvas || typeof canvas.getContext !== "function") {
       return skipCanvasComparison(
-        "the GPUIX canvas element is unavailable (phase A1/A2 has not supplied a painted canvas)",
+        'the GPUIX <canvas> ref does not expose getContext("2d") (phase A1/A2 has not landed)',
         options.skip
       )
     }
+
+    const context = canvas.getContext("2d")
+    if (!context) {
+      return skipCanvasComparison(
+        'the GPUIX <canvas> ref returned no context for getContext("2d")',
+        options.skip
+      )
+    }
+
+    resolved.draw(context, CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT)
+    testRoot.renderer.flush()
 
     const windowSize = testRoot.renderer.getWindowSize()
     if (windowSize.scaleFactor !== CANVAS_GOLDEN_DPR) {
@@ -1241,12 +1277,15 @@ export function expectCanvasMatchesBrowser(
     testRoot.renderer.captureScreenshot(actualPath)
 
     const comparison = testRoot.renderer.compareImages(goldenPath, actualPath, tolerance)
-    if (comparison.differingPixelRatio > differingPixelBudget) {
+    if (
+      comparison.differingPixelRatio > differingPixelBudget ||
+      comparison.maxChannelDelta > maxChannelDelta
+    ) {
       throw new Error(
         `Canvas scene ${JSON.stringify(resolved.name)} differs from Chromium: ` +
           `${(comparison.differingPixelRatio * 100).toFixed(3)}% pixels exceed the ` +
           `per-channel tolerance ${tolerance} (budget ${(differingPixelBudget * 100).toFixed(3)}%, ` +
-          `max channel delta ${comparison.maxChannelDelta}). ` +
+          `max channel delta ${comparison.maxChannelDelta}, ceiling ${maxChannelDelta}). ` +
           `Expected ${goldenPath}; actual ${actualPath}.`
       )
     }

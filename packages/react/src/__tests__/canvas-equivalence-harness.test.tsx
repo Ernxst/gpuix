@@ -3,17 +3,22 @@
  * VM-hostile to make this browser-equivalence gate reliable in hosted CI.
  */
 
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { describe, expect, test, vi } from "vitest"
 
 import {
+  CanvasComparisonSkippedError,
+  type CanvasComparisonOptions,
   canvasGoldenPath,
   canvasScenes,
   createTestRoot,
   expectCanvasMatchesBrowser,
   isNativeTestRendererAvailable,
+  TestRenderer,
 } from "../testing.js"
 
 const isLocalMac = process.platform === "darwin" && !process.env.CI
@@ -45,37 +50,86 @@ describeLocalMac("canvas browser-equivalence harness", () => {
       const comparison = testRoot.renderer.compareImages(golden, perturbed, 0)
       expect(comparison.differingPixelRatio).toBeGreaterThan(0)
       expect(comparison.maxChannelDelta).toBeGreaterThan(0)
-      expect(
-        testRoot.renderer.compareImages(golden, perturbed, 255).differingPixelRatio
-      ).toBe(0)
+      expect(testRoot.renderer.compareImages(golden, perturbed, 255)).toEqual({
+        differingPixelRatio: 0,
+        maxChannelDelta: 250,
+      })
     } finally {
       testRoot.unmount()
     }
   })
 
-  test("skips loudly when the committed golden is absent", () => {
-    const skip = vi.fn()
-    const result = expectCanvasMatchesBrowser("fill-rect-grid", {
-      goldenPath: path.join(fixturesDirectory, "intentionally-absent.png"),
-      skip,
+  test("rejects a small but gross perturbation through the public helper", () => {
+    const tempDirectory = mkdtempSync(path.join(tmpdir(), "gpuix-canvas-equivalence-"))
+    const actualPath = path.join(tempDirectory, "actual.png")
+    const perturbed = path.join(fixturesDirectory, "fill-rect-grid-perturbed.png")
+    const previousGetContext = Object.getOwnPropertyDescriptor(Object.prototype, "getContext")
+    Object.defineProperty(Object.prototype, "getContext", {
+      configurable: true,
+      value(this: { type?: string }, contextId: string) {
+        if (this.type !== "canvas" || contextId !== "2d") return null
+        return { fillStyle: "", fillRect: vi.fn() } as unknown as CanvasRenderingContext2D
+      },
     })
+    const captureScreenshot = vi
+      .spyOn(TestRenderer.prototype, "captureScreenshot")
+      .mockImplementation((outputPath) => copyFileSync(perturbed, outputPath))
 
-    expect(result).toBeUndefined()
-    expect(skip).toHaveBeenCalledExactlyOnceWith(
-      expect.stringMatching(
-        /Canvas comparison skipped: browser golden is absent.*bun run canvas:goldens/
+    try {
+      expect(() =>
+        expectCanvasMatchesBrowser("fill-rect-grid", {
+          actualPath,
+        })
+      ).toThrowError(/max channel delta 250, ceiling 16/)
+    } finally {
+      captureScreenshot.mockRestore()
+      if (previousGetContext) {
+        Object.defineProperty(Object.prototype, "getContext", previousGetContext)
+      } else {
+        Reflect.deleteProperty(Object.prototype, "getContext")
+      }
+      rmSync(tempDirectory, { recursive: true, force: true })
+    }
+  })
+
+  test.each(
+    [
+      ["NaN tolerance", { tolerance: Number.NaN }, /tolerance.*NaN/],
+      ["infinite tolerance", { tolerance: Number.POSITIVE_INFINITY }, /tolerance.*Infinity/],
+      ["NaN differing-pixel budget", { differingPixelBudget: Number.NaN }, /budget.*NaN/],
+      [
+        "infinite differing-pixel budget",
+        { differingPixelBudget: Number.POSITIVE_INFINITY },
+        /budget.*Infinity/,
+      ],
+      ["NaN maximum channel delta", { maxChannelDelta: Number.NaN }, /delta.*NaN/],
+    ] satisfies Array<[string, CanvasComparisonOptions, RegExp]>
+  )(
+    "rejects non-finite threshold: %s",
+    (_name, options, message) => {
+      expect(() => expectCanvasMatchesBrowser("fill-rect-grid", options)).toThrowError(message)
+    }
+  )
+
+  test("throws loudly when an unavailable prerequisite has no skip callback", () => {
+    expect(() =>
+      expectCanvasMatchesBrowser("fill-rect-grid", {
+        goldenPath: path.join(fixturesDirectory, "intentionally-absent.png"),
+      })
+    ).toThrowError(
+      new CanvasComparisonSkippedError(
+        "Canvas comparison skipped: browser golden is absent at " +
+          `${path.join(fixturesDirectory, "intentionally-absent.png")}; ` +
+          "regenerate it with `bun run canvas:goldens`"
       )
     )
   })
 
-  test("skips loudly until the native canvas element lands", () => {
-    const skip = vi.fn()
-    const result = expectCanvasMatchesBrowser(canvasScenes["fill-rect-grid"], { skip })
-
-    expect(result).toBeUndefined()
-    expect(skip).toHaveBeenCalledExactlyOnceWith(
-      "Canvas comparison skipped: the GPUIX canvas element is unavailable " +
-        "(phase A1/A2 has not supplied a painted canvas)"
-    )
-  })
+  for (const scene of Object.values(canvasScenes)) {
+    test(`matches Chromium for ${scene.name}`, (context) => {
+      expectCanvasMatchesBrowser(scene, {
+        skip: (message) => context.skip(message),
+      })
+    })
+  }
 })
