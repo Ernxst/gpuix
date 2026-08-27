@@ -29,7 +29,11 @@ import {
   DEFAULT_VIRTUAL_LIST_ESTIMATED_ITEM_HEIGHT,
   VirtualListRowContractError,
 } from "../components/virtual-list-contract.js"
-import { getOrCreateRecordingContext2D } from "../canvas/context-2d.js"
+import {
+  disposeRecordingContext2D,
+  getOrCreateRecordingContext2D,
+} from "../canvas/context-2d.js"
+import { reportStyleDiagnostics } from "./batch-renderer.js"
 
 let currentUpdatePriority = NoEventPriority
 
@@ -500,6 +504,7 @@ export const hostConfig = {
           throw new Error("This GPUIX renderer does not support retained canvas commands")
         }
         apply.call(rootContainerInstance.renderer, id, ops, operands, strings)
+        reportStyleDiagnostics(rootContainerInstance.renderer)
       },
       parentId: null,
       getAttribute(name): string | null {
@@ -564,6 +569,7 @@ export const hostConfig = {
   ): void {},
 
   removeChildFromContainer(parent: Container, child: Instance): void {
+    disposeRecordingContext2D(child)
     const destroyed = parent.renderer.destroyElement(child.id)
     for (const id of destroyed) {
       unregisterEventHandlers(parent.eventHandlers, id)
@@ -744,6 +750,7 @@ export const hostConfig = {
   },
 
   detachDeletedInstance(instance: Instance): void {
+    disposeRecordingContext2D(instance)
     const container = containerFor(instance)
     const destroyed = container.renderer.destroyElement(instance.id)
     for (const id of destroyed) {

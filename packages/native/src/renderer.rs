@@ -144,6 +144,53 @@ pub(crate) fn pending_canvas_diagnostics(
         })
 }
 
+pub(crate) fn validate_canvas_target(
+    tree: &RetainedTree,
+    element_id: u64,
+) -> std::result::Result<(), String> {
+    let Some(element) = tree.elements.get(&element_id) else {
+        return Err(format!(
+            "Cannot apply canvas commands to missing element {element_id}"
+        ));
+    };
+    if element.element_type != "canvas" {
+        return Err(format!(
+            "Cannot apply canvas commands to element {element_id}: <{}> is not a <canvas>",
+            element.element_type
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn fresh_canvas_diagnostics(
+    element_id: u64,
+    diagnostics: Vec<CanvasDiagnostic>,
+    seen: &Mutex<HashSet<(u64, String)>>,
+) -> Vec<PendingStyleDiagnostic> {
+    let mut seen = seen.lock().unwrap();
+    pending_canvas_diagnostics(element_id, diagnostics)
+        .filter(|diagnostic| seen.insert((element_id, diagnostic.problem.property.clone())))
+        .collect()
+}
+
+pub(crate) fn forget_canvas_diagnostics(seen: &Mutex<HashSet<(u64, String)>>, element_ids: &[u64]) {
+    if element_ids.is_empty() {
+        return;
+    }
+    let ids: HashSet<u64> = element_ids.iter().copied().collect();
+    seen.lock().unwrap().retain(|(id, _)| !ids.contains(id));
+}
+
+pub(crate) fn first_canvas_diagnostic_message(
+    tree: &RetainedTree,
+    element_id: u64,
+    diagnostics: &[CanvasDiagnostic],
+) -> Option<String> {
+    pending_canvas_diagnostics(element_id, diagnostics.to_vec())
+        .next()
+        .map(|diagnostic| style_diagnostic_context(&diagnostic, tree).0)
+}
+
 fn style_diagnostic_context(
     diagnostic: &PendingStyleDiagnostic,
     tree: &RetainedTree,
@@ -1304,6 +1351,7 @@ pub struct GpuixRenderer {
     image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
+    canvas_diagnostic_members: Mutex<HashSet<(u64, String)>>,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     ui_commands: Mutex<Option<mpsc::UnboundedSender<UiCommand>>>,
 }
@@ -1476,6 +1524,7 @@ impl GpuixRenderer {
             image_network_policy: crate::custom_elements::img::ImageNetworkPolicy::default(),
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(Vec::new()),
+            canvas_diagnostic_members: Mutex::new(HashSet::new()),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
         }
@@ -1864,6 +1913,7 @@ impl GpuixRenderer {
         let destroyed = tree.destroy_element(id);
         drop(tree);
         crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed);
+        forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed);
         Ok(destroyed.iter().map(|&id| id as f64).collect())
     }
 
@@ -2011,21 +2061,33 @@ impl GpuixRenderer {
         strings: Vec<String>,
     ) -> Result<()> {
         let id = to_element_id(id)?;
-        let diagnostics = crate::canvas::replace_display_list(
-            &self.canvas_display_lists,
-            id,
-            ops.as_ref(),
-            operands.as_ref(),
-            &strings,
-        )
-        .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
-        if self.strict_styles.load(Ordering::Relaxed) {
+        let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
+        let decoded = crate::canvas::decode(ops.as_ref(), operands.as_ref(), &strings)
+            .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
+        let strict = self.strict_styles.load(Ordering::Relaxed);
+        if strict && !decoded.diagnostics.is_empty() {
+            let message = first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics)
+                .expect("non-empty canvas diagnostics has a first item");
+            return Err(Error::from_reason(message));
+        }
+        let outcome =
+            crate::canvas::install_decoded_display_list(&self.canvas_display_lists, id, decoded);
+        drop(tree);
+        if !strict {
             self.style_diagnostics
                 .lock()
                 .unwrap()
-                .extend(pending_canvas_diagnostics(id, diagnostics));
+                .extend(fresh_canvas_diagnostics(
+                    id,
+                    outcome.diagnostics,
+                    &self.canvas_diagnostic_members,
+                ));
         }
-        self.request_invalidate()
+        if outcome.invalidates {
+            self.request_invalidate()?;
+        }
+        Ok(())
     }
 
     /// Apply a batch of mutations in a single FFI call.
@@ -2070,6 +2132,7 @@ impl GpuixRenderer {
         let destroyed_canvas_ids: Vec<u64> =
             outcome.destroyed_ids.iter().map(|id| *id as u64).collect();
         crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed_canvas_ids);
+        forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed_canvas_ids);
         self.request_invalidate()?;
         Ok(outcome.destroyed_ids)
     }
@@ -3695,6 +3758,7 @@ pub struct WebGpuixRenderer {
     window_event_callback: WindowEventCallback,
     window_resize_listener: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::Event)>,
     strict_styles: AtomicBool,
+    canvas_diagnostic_members: Mutex<HashSet<(u64, String)>>,
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -3731,6 +3795,7 @@ impl WebGpuixRenderer {
             window_event_callback,
             window_resize_listener,
             strict_styles: AtomicBool::new(true),
+            canvas_diagnostic_members: Mutex::new(HashSet::new()),
         }
     }
 
@@ -3768,6 +3833,7 @@ impl WebGpuixRenderer {
             .collect::<Vec<_>>();
         let destroyed_canvas_ids: Vec<u64> = destroyed.iter().map(|id| *id as u64).collect();
         crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed_canvas_ids);
+        forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed_canvas_ids);
         Ok(web_number_array(destroyed.into_iter().map(|id| id as f64)))
     }
 
@@ -3918,6 +3984,7 @@ impl WebGpuixRenderer {
         drop(tree);
         let destroyed_canvas_ids: Vec<u64> = destroyed.iter().map(|id| *id as u64).collect();
         crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed_canvas_ids);
+        forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed_canvas_ids);
         notify_web();
         Ok(web_number_array(destroyed))
     }
@@ -3936,6 +4003,9 @@ impl WebGpuixRenderer {
         strings: js_sys::Array,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(id)?;
+        let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id)
+            .map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
         let mut op_values = vec![0; ops.length() as usize];
         ops.copy_to(&mut op_values);
         let mut operand_values = vec![0.0; operands.length() as usize];
@@ -3951,24 +4021,30 @@ impl WebGpuixRenderer {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let diagnostics = crate::canvas::replace_display_list(
-            &self.canvas_display_lists,
-            id,
-            &op_values,
-            &operand_values,
-            &strings,
-        )
-        .map_err(|error| {
-            wasm_bindgen::JsValue::from_str(&format!("<canvas> element {id}: {error}"))
-        })?;
-        if self.strict_styles.load(Ordering::Relaxed) {
-            let tree = self.tree.lock().unwrap();
-            for diagnostic in pending_canvas_diagnostics(id, diagnostics) {
-                let (message, _, _, _, _) = style_diagnostic_context(&diagnostic, &tree);
+        let decoded =
+            crate::canvas::decode(&op_values, &operand_values, &strings).map_err(|error| {
+                wasm_bindgen::JsValue::from_str(&format!("<canvas> element {id}: {error}"))
+            })?;
+        let strict = self.strict_styles.load(Ordering::Relaxed);
+        if strict && !decoded.diagnostics.is_empty() {
+            let message = first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics)
+                .expect("non-empty canvas diagnostics has a first item");
+            return Err(wasm_bindgen::JsValue::from_str(&message));
+        }
+        let outcome =
+            crate::canvas::install_decoded_display_list(&self.canvas_display_lists, id, decoded);
+        if !strict {
+            for diagnostic in
+                fresh_canvas_diagnostics(id, outcome.diagnostics, &self.canvas_diagnostic_members)
+            {
+                let message = style_diagnostic_context(&diagnostic, &tree).0;
                 web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
             }
         }
-        notify_web();
+        drop(tree);
+        if outcome.invalidates {
+            notify_web();
+        }
         Ok(())
     }
 

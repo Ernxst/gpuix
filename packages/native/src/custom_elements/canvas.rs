@@ -378,7 +378,7 @@ impl CustomElement for CanvasElement {
         )
         .size_full();
 
-        let element_id = gpui::SharedString::from(format!("__gpuix_canvas_{}", ctx.id));
+        let element_id = gpui::SharedString::from(format!("__gpuix_{}", ctx.id));
         let mut root = gpui::div()
             .id(element_id)
             .relative()

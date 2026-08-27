@@ -12,7 +12,7 @@
 /// VisualTestAppContext is !Send, so it is stored in thread-local state.
 /// All napi calls happen on the JS main thread.
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -25,10 +25,11 @@ use crate::element_tree::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree_with_diagnostics, catch_gpui_initialization, debug_frame_overlay_mode_name,
     debug_frame_overlay_stats_js, default_http_client, dispatch_application_menu_action,
-    drain_style_diagnostics, has_application_menus, init_application_menu_support,
+    drain_style_diagnostics, first_canvas_diagnostic_message, forget_canvas_diagnostics,
+    fresh_canvas_diagnostics, has_application_menus, init_application_menu_support,
     install_application_menus, parse_debug_frame_overlay_mode, parse_style_json,
-    pending_canvas_diagnostics, pending_custom_prop_diagnostic, pending_style_diagnostics,
-    set_application_menus, to_element_id, DebugFrameOverlayStats, EventCallback,
+    pending_custom_prop_diagnostic, pending_style_diagnostics, set_application_menus,
+    to_element_id, validate_canvas_target, DebugFrameOverlayStats, EventCallback,
     GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
@@ -250,6 +251,7 @@ pub struct TestGpuixRenderer {
     image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
+    canvas_diagnostic_members: Mutex<HashSet<(u64, String)>>,
     /// Mouse-down origin for the current GPUI active-state sequence. Retained
     /// for the native test input path, which must mirror main's press lifetime.
     active_pointer_origin: Mutex<Option<(f64, f64)>>,
@@ -339,6 +341,7 @@ impl TestGpuixRenderer {
             image_network_policy,
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(Vec::new()),
+            canvas_diagnostic_members: Mutex::new(HashSet::new()),
             active_pointer_origin: Mutex::new(None),
         })
     }
@@ -373,6 +376,7 @@ impl TestGpuixRenderer {
         let id = to_element_id(id)?;
         let destroyed = self.tree.lock().unwrap().destroy_element(id);
         crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed);
+        forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed);
         Ok(destroyed.iter().map(|&id| id as f64).collect())
     }
 
@@ -516,21 +520,33 @@ impl TestGpuixRenderer {
         strings: Vec<String>,
     ) -> Result<()> {
         let id = to_element_id(id)?;
-        let diagnostics = crate::canvas::replace_display_list(
-            &self.canvas_display_lists,
-            id,
-            ops.as_ref(),
-            operands.as_ref(),
-            &strings,
-        )
-        .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
-        if self.strict_styles.load(Ordering::Relaxed) {
+        let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
+        let decoded = crate::canvas::decode(ops.as_ref(), operands.as_ref(), &strings)
+            .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
+        let strict = self.strict_styles.load(Ordering::Relaxed);
+        if strict && !decoded.diagnostics.is_empty() {
+            let message = first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics)
+                .expect("non-empty canvas diagnostics has a first item");
+            return Err(Error::from_reason(message));
+        }
+        let outcome =
+            crate::canvas::install_decoded_display_list(&self.canvas_display_lists, id, decoded);
+        drop(tree);
+        if !strict {
             self.style_diagnostics
                 .lock()
                 .unwrap()
-                .extend(pending_canvas_diagnostics(id, diagnostics));
+                .extend(fresh_canvas_diagnostics(
+                    id,
+                    outcome.diagnostics,
+                    &self.canvas_diagnostic_members,
+                ));
         }
-        self.request_invalidate()
+        if outcome.invalidates {
+            self.request_invalidate()?;
+        }
+        Ok(())
     }
 
     /// Apply a batch of mutations in a single FFI call.
@@ -553,6 +569,7 @@ impl TestGpuixRenderer {
         let destroyed_canvas_ids: Vec<u64> =
             outcome.destroyed_ids.iter().map(|id| *id as u64).collect();
         crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed_canvas_ids);
+        forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed_canvas_ids);
         Ok(outcome.destroyed_ids)
     }
 

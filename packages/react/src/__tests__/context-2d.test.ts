@@ -230,6 +230,15 @@ describe("recording CanvasRenderingContext2D", () => {
     expect(context.getTransform().isIdentity).toBe(true)
   })
 
+  it("does not record or flush restore on an empty state stack", async () => {
+    const { context, applied } = recording()
+
+    context.restore()
+    await Promise.resolve()
+
+    expect(applied).toEqual([])
+  })
+
   it("memoises by canvas and batches each synchronous redraw into one revision", async () => {
     const first = recording()
     const same = getOrCreateRecordingContext2D(first.owner, {

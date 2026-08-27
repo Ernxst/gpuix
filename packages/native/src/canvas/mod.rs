@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap;
 
 pub type SharedDisplayLists = Arc<Mutex<FxHashMap<u64, Arc<DisplayList>>>>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FillRect {
     pub x: f64,
     pub y: f64,
@@ -18,7 +18,7 @@ pub struct FillRect {
     pub color: gpui::Rgba,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DisplayItem {
     FillRect(FillRect),
 }
@@ -53,9 +53,22 @@ impl fmt::Display for DecodeError {
 
 impl std::error::Error for DecodeError {}
 
-struct DecodedDisplayList {
+pub(crate) struct DecodedDisplayList {
     items: Vec<DisplayItem>,
-    diagnostics: Vec<CanvasDiagnostic>,
+    pub(crate) diagnostics: Vec<CanvasDiagnostic>,
+    invalidates: bool,
+    ignored_empty_restore: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct CanvasApplyOutcome {
+    pub diagnostics: Vec<CanvasDiagnostic>,
+    pub invalidates: bool,
+}
+
+#[derive(Clone)]
+struct ReplayState {
+    fill_style: gpui::Rgba,
 }
 
 fn malformed(op_index: usize, reason: impl Into<String>) -> DecodeError {
@@ -79,7 +92,7 @@ fn side_table_index(
     Ok(value as usize)
 }
 
-fn decode(
+pub(crate) fn decode(
     ops: &[u32],
     operands: &[f64],
     strings: &[String],
@@ -110,9 +123,14 @@ fn decode(
     let mut op_cursor = 2usize;
     let mut operand_cursor = 0usize;
     let mut op_index = 0usize;
-    let mut fill_style = crate::color::parse_color_rgba("#000000").expect("black is valid");
+    let mut state = ReplayState {
+        fill_style: crate::color::parse_color_rgba("#000000").expect("black is valid"),
+    };
+    let mut stack = Vec::new();
     let mut items = Vec::new();
     let mut diagnostics = Vec::new();
+    let mut invalidates = false;
+    let mut ignored_empty_restore = false;
 
     while op_cursor < ops.len() {
         if ops.len() - op_cursor < 2 {
@@ -182,11 +200,20 @@ fn decode(
         }
 
         match code {
+            opcodes::SAVE => stack.push(state.clone()),
+            opcodes::RESTORE => {
+                if let Some(restored) = stack.pop() {
+                    state = restored;
+                } else {
+                    ignored_empty_restore = true;
+                }
+                // Canvas restore() on an empty stack is an observable no-op.
+            }
             opcodes::FILL_STYLE => {
                 let index = side_table_index(command_operands[0], op_index, 0)?;
                 let value = &strings[index];
                 if let Some(color) = crate::color::parse_color_rgba(value) {
-                    fill_style = color;
+                    state.fill_style = color;
                 } else {
                     diagnostics.push(CanvasDiagnostic {
                         op_index,
@@ -202,8 +229,9 @@ fn decode(
                         y: command_operands[1],
                         width: command_operands[2],
                         height: command_operands[3],
-                        color: fill_style,
+                        color: state.fill_style,
                     }));
+                    invalidates = true;
                 }
                 // Browser Canvas treats non-finite rectangle arguments as a no-op.
             }
@@ -228,29 +256,65 @@ fn decode(
         ));
     }
 
-    Ok(DecodedDisplayList { items, diagnostics })
+    Ok(DecodedDisplayList {
+        items,
+        diagnostics,
+        invalidates,
+        ignored_empty_restore,
+    })
 }
 
+pub(crate) fn install_decoded_display_list(
+    display_lists: &SharedDisplayLists,
+    element_id: u64,
+    decoded: DecodedDisplayList,
+) -> CanvasApplyOutcome {
+    let DecodedDisplayList {
+        items,
+        diagnostics,
+        invalidates,
+        ignored_empty_restore,
+    } = decoded;
+    if !invalidates {
+        return CanvasApplyOutcome {
+            diagnostics,
+            invalidates: false,
+        };
+    }
+    let mut lists = display_lists.lock().unwrap();
+    if ignored_empty_restore
+        && lists
+            .get(&element_id)
+            .is_some_and(|list| list.items == items)
+    {
+        return CanvasApplyOutcome {
+            diagnostics,
+            invalidates: false,
+        };
+    }
+    let revision = lists
+        .get(&element_id)
+        .map_or(1, |list| list.revision.saturating_add(1));
+    lists.insert(element_id, Arc::new(DisplayList { revision, items }));
+    CanvasApplyOutcome {
+        diagnostics,
+        invalidates: true,
+    }
+}
+
+#[cfg(test)]
 pub fn replace_display_list(
     display_lists: &SharedDisplayLists,
     element_id: u64,
     ops: &[u32],
     operands: &[f64],
     strings: &[String],
-) -> Result<Vec<CanvasDiagnostic>, DecodeError> {
-    let decoded = decode(ops, operands, strings)?;
-    let mut lists = display_lists.lock().unwrap();
-    let revision = lists
-        .get(&element_id)
-        .map_or(1, |list| list.revision.saturating_add(1));
-    lists.insert(
+) -> Result<CanvasApplyOutcome, DecodeError> {
+    Ok(install_decoded_display_list(
+        display_lists,
         element_id,
-        Arc::new(DisplayList {
-            revision,
-            items: decoded.items,
-        }),
-    );
-    Ok(decoded.diagnostics)
+        decode(ops, operands, strings)?,
+    ))
 }
 
 pub fn remove_display_lists(display_lists: &SharedDisplayLists, element_ids: &[u64]) {
@@ -281,10 +345,11 @@ mod tests {
             (opcodes::FILL_RECT, &[12.0, 18.0, 40.0, 24.0]),
         ]);
         let store = SharedDisplayLists::default();
-        let diagnostics = replace_display_list(&store, 7, &ops, &operands, &["#2563eb".into()])
+        let outcome = replace_display_list(&store, 7, &ops, &operands, &["#2563eb".into()])
             .expect("valid stream");
 
-        assert!(diagnostics.is_empty());
+        assert!(outcome.diagnostics.is_empty());
+        assert!(outcome.invalidates);
         let list = store.lock().unwrap().get(&7).unwrap().clone();
         assert_eq!(list.revision, 1);
         let DisplayItem::FillRect(rect) = &list.items[0];
@@ -303,17 +368,86 @@ mod tests {
     }
 
     #[test]
+    fn decoder_replays_the_fill_style_save_restore_stack() {
+        let (ops, operands) = stream(&[
+            (opcodes::FILL_STYLE, &[0.0]),
+            (opcodes::SAVE, &[]),
+            (opcodes::FILL_STYLE, &[1.0]),
+            (opcodes::FILL_RECT, &[0.0, 0.0, 10.0, 10.0]),
+            (opcodes::RESTORE, &[]),
+            (opcodes::FILL_RECT, &[10.0, 0.0, 10.0, 10.0]),
+        ]);
+        let store = SharedDisplayLists::default();
+        let outcome = replace_display_list(
+            &store,
+            8,
+            &ops,
+            &operands,
+            &["#ef4444".into(), "#2563eb".into()],
+        )
+        .expect("valid stream");
+
+        assert!(outcome.diagnostics.is_empty());
+        let list = store.lock().unwrap().get(&8).unwrap().clone();
+        assert_eq!(list.items.len(), 2);
+        let DisplayItem::FillRect(first) = &list.items[0];
+        let DisplayItem::FillRect(second) = &list.items[1];
+        assert_eq!(
+            u32::from(first.color),
+            u32::from(crate::color::parse_color_rgba("#2563eb").unwrap())
+        );
+        assert_eq!(
+            u32::from(second.color),
+            u32::from(crate::color::parse_color_rgba("#ef4444").unwrap())
+        );
+    }
+
+    #[test]
+    fn restore_on_an_empty_stack_is_not_a_diagnostic() {
+        let (ops, operands) = stream(&[(opcodes::RESTORE, &[])]);
+        let store = SharedDisplayLists::default();
+
+        let outcome = replace_display_list(&store, 10, &ops, &operands, &[])
+            .expect("restore on an empty stack is valid");
+
+        assert!(outcome.diagnostics.is_empty());
+        assert!(!outcome.invalidates);
+        assert!(!store.lock().unwrap().contains_key(&10));
+    }
+
+    #[test]
+    fn trailing_restore_on_an_empty_stack_does_not_bump_the_display_list() {
+        let store = SharedDisplayLists::default();
+        let (first_ops, first_operands) =
+            stream(&[(opcodes::FILL_RECT, &[0.0, 0.0, 10.0, 10.0])]);
+        replace_display_list(&store, 11, &first_ops, &first_operands, &[])
+            .expect("initial drawing is valid");
+
+        let (restored_ops, restored_operands) = stream(&[
+            (opcodes::FILL_RECT, &[0.0, 0.0, 10.0, 10.0]),
+            (opcodes::RESTORE, &[]),
+        ]);
+        let outcome = replace_display_list(&store, 11, &restored_ops, &restored_operands, &[])
+            .expect("restore on an empty stack is valid");
+
+        assert!(outcome.diagnostics.is_empty());
+        assert!(!outcome.invalidates);
+        assert_eq!(store.lock().unwrap().get(&11).unwrap().revision, 1);
+    }
+
+    #[test]
     fn known_and_unknown_unimplemented_opcodes_decode_with_diagnostics() {
         let (ops, operands) = stream(&[
             (opcodes::TRANSLATE, &[4.0, 8.0]),
             (0xffff, &[1.0, 2.0, 3.0]),
         ]);
         let store = SharedDisplayLists::default();
-        let diagnostics = replace_display_list(&store, 9, &ops, &operands, &[]).unwrap();
-        assert_eq!(diagnostics.len(), 2);
-        assert_eq!(diagnostics[0].op_name, "translate");
-        assert_eq!(diagnostics[1].op_name, "unknown(0x0000ffff)");
-        assert!(store.lock().unwrap().contains_key(&9));
+        let outcome = replace_display_list(&store, 9, &ops, &operands, &[]).unwrap();
+        assert_eq!(outcome.diagnostics.len(), 2);
+        assert_eq!(outcome.diagnostics[0].op_name, "translate");
+        assert_eq!(outcome.diagnostics[1].op_name, "unknown(0x0000ffff)");
+        assert!(!outcome.invalidates);
+        assert!(!store.lock().unwrap().contains_key(&9));
     }
 
     #[test]

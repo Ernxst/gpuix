@@ -35,7 +35,7 @@ import { containerForRenderer, unregisterEventHandlers } from "./event-registry.
 
 export type MutationTuple = (number | string | boolean | object | null)[]
 
-function reportStyleDiagnostics(renderer: NativeRenderer): void {
+export function reportStyleDiagnostics(renderer: NativeRenderer): void {
   for (const diagnostic of renderer.drainStyleDiagnostics?.() ?? []) {
     console.warn(diagnostic.message)
   }

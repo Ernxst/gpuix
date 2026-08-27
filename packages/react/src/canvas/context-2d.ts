@@ -450,6 +450,7 @@ class RecordingContext2D {
   private state = initialDrawingState()
   private dirty = false
   private flushScheduled = false
+  private disposed = false
 
   constructor(private readonly target: CanvasRecorderTarget) {
     this.ops.push(CANVAS_STREAM_MAGIC, CANVAS_STREAM_VERSION)
@@ -488,7 +489,7 @@ class RecordingContext2D {
 
   flush(): void {
     this.flushScheduled = false
-    if (!this.dirty) return
+    if (this.disposed || !this.dirty) return
     this.dirty = false
     this.target.applyCanvasCommands(
       this.ops.snapshot(),
@@ -504,8 +505,15 @@ class RecordingContext2D {
 
   restore(): void {
     const restored = this.stack.pop()
-    if (restored) this.state = restored
+    if (!restored) return
+    this.state = restored
     this.append(CANVAS_OPCODES.restore)
+  }
+
+  dispose(): void {
+    this.disposed = true
+    this.dirty = false
+    this.flushScheduled = false
   }
 
   translate(x: number, y: number): void {
@@ -891,6 +899,7 @@ class RecordingContext2D {
   }
 
   private append(opcode: number, values: readonly number[] = []): void {
+    if (this.disposed) return
     this.ops.push(opcode, values.length)
     this.operands.push(values)
     this.dirty = true
@@ -900,14 +909,35 @@ class RecordingContext2D {
   }
 }
 
-const contextsByOwner = new WeakMap<object, CanvasRenderingContext2D>()
-const recordersByContext = new WeakMap<object, RecordingContext2D>()
+const CANVAS_RECORDER_REGISTRY_KEY = "__gpuixCanvasRecorderRegistry"
+
+type CanvasRecorderRegistry = {
+  contextsByOwner: WeakMap<object, CanvasRenderingContext2D>
+  recordersByOwner: WeakMap<object, RecordingContext2D>
+  recordersByContext: WeakMap<object, RecordingContext2D>
+}
+
+function recorderRegistry(): CanvasRecorderRegistry {
+  const existing = Reflect.get(globalThis, CANVAS_RECORDER_REGISTRY_KEY) as
+    | CanvasRecorderRegistry
+    | undefined
+  if (existing) return existing
+
+  const created: CanvasRecorderRegistry = {
+    contextsByOwner: new WeakMap(),
+    recordersByOwner: new WeakMap(),
+    recordersByContext: new WeakMap(),
+  }
+  Reflect.set(globalThis, CANVAS_RECORDER_REGISTRY_KEY, created)
+  return created
+}
 
 /** Create the browser-shaped context once for a host canvas instance. */
 export function getOrCreateRecordingContext2D(
   owner: object,
   target: CanvasRecorderTarget
 ): CanvasRenderingContext2D {
+  const { contextsByOwner, recordersByOwner, recordersByContext } = recorderRegistry()
   const existing = contextsByOwner.get(owner)
   if (existing) return existing
 
@@ -948,12 +978,26 @@ export function getOrCreateRecordingContext2D(
   }) as unknown as CanvasRenderingContext2D
 
   contextsByOwner.set(owner, context)
+  recordersByOwner.set(owner, recorder)
   recordersByContext.set(context, recorder)
   return context
 }
 
+/** Invalidate a host canvas recorder before its retained native element is destroyed. */
+export function disposeRecordingContext2D(owner: object): void {
+  const { contextsByOwner, recordersByOwner, recordersByContext } = recorderRegistry()
+  const recorder = recordersByOwner.get(owner)
+  if (!recorder) return
+  recorder.dispose()
+  const context = contextsByOwner.get(owner)
+  if (context) recordersByContext.delete(context)
+  contextsByOwner.delete(owner)
+  recordersByOwner.delete(owner)
+}
+
 /** Test/equivalence seam: synchronously drain the already-recorded microtask batch. */
 export function flushRecordingContext2D(context: CanvasRenderingContext2D): void {
+  const { recordersByContext } = recorderRegistry()
   const recorder = recordersByContext.get(context)
   if (!recorder) throw new TypeError("Expected a GPUIX recording CanvasRenderingContext2D")
   recorder.flush()
