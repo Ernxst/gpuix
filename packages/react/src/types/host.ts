@@ -1146,6 +1146,8 @@ export interface Container {
   ids: ElementIdAllocator
   eventHandlers: EventHandlerMap
   eventTargets: Map<number, Instance>
+  /** The last hover target path reported by native hit testing. */
+  hoverPath: Instance[]
   preventedKeyboardActivations: Map<number, string>
   strictStyles: boolean
 }
