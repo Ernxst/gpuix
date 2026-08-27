@@ -45,9 +45,6 @@ function App() {
         tabIndex={0}
         style={controlStyle}
         onClick={() => setStatus("Save factory activated")}
-        onAccessibilityAction={(event) => {
-          if (event.accessibilityAction === "activate") setStatus("Save factory activated")
-        }}
       >
         <text>Save factory</text>
       </button>
@@ -60,9 +57,6 @@ function App() {
         tabIndex={0}
         style={controlStyle}
         onClick={toggleIncluded}
-        onAccessibilityAction={(event) => {
-          if (event.accessibilityAction === "activate") toggleIncluded()
-        }}
       >
         <text>{`Include byproducts: ${included ? "checked" : "not checked"}`}</text>
       </div>
@@ -96,16 +90,11 @@ function App() {
         tabIndex={0}
         style={controlStyle}
         onClick={() => setStatus("Recipe library activated")}
-        onAccessibilityAction={(event) => {
-          if (event.accessibilityAction === "activate") {
-            setStatus("Recipe library activated")
-          }
-        }}
       >
         <text>Open recipe library</text>
       </a>
 
-      <div ariaLabel={status} style={{ color: "#a6adc8" }}>
+      <div style={{ color: "#a6adc8" }}>
         <text>{status}</text>
       </div>
     </main>
