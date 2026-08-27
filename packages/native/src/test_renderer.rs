@@ -81,7 +81,10 @@ impl Drop for VisualTestState {
         // Err only means the window is already gone, which is the state this
         // is trying to reach.
         self.cx
-            .update_window(self.window, |_, window, _| window.refresh())
+            .update_window(self.window, |_, window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            })
             .ok();
         self.cx.run_until_parked();
     }
@@ -547,6 +550,8 @@ impl TestGpuixRenderer {
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
+            cx.update_window(window, |_, window, app| window.draw(app).clear(app))
+                .map_err(|e| Error::from_reason(e.to_string()))?;
             cx.run_until_parked();
             Ok(())
         })
@@ -574,6 +579,8 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.update_window(window, |_, window, app| window.draw(app).clear(app))
+                .map_err(|error| Error::from_reason(error.to_string()))?;
             cx.run_until_parked();
             Ok(())
         })

@@ -418,6 +418,10 @@ impl RetainedTree {
     }
 
     pub fn set_text(&mut self, id: u64, content: String) {
+        // Canonicalize CRLF once as text enters the retained tree, before paint,
+        // selection, clipboard and automation read it. A lone `\r` remains
+        // content: classic Mac line endings are deliberately out of scope.
+        let content = content.replace("\r\n", "\n");
         let mut changed = false;
         if let Some(element) = self.elements.get_mut(&id) {
             if element.content.as_ref() != Some(&content) {
@@ -981,5 +985,15 @@ mod tests {
         let after = tree.elements[&1].subtree_revision;
         tree.set_text(3, "changed".to_string());
         assert_eq!(tree.elements[&1].subtree_revision, after);
+    }
+
+    #[test]
+    fn set_text_normalizes_crlf_but_preserves_lone_carriage_returns() {
+        let mut tree = tree_with_child();
+        tree.set_text(3, "one\r\ntwo\rthree".to_string());
+        assert_eq!(
+            tree.elements[&3].content.as_deref(),
+            Some("one\ntwo\rthree")
+        );
     }
 }

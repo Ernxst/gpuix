@@ -27,6 +27,8 @@ use std::collections::{HashMap, HashSet};
 #[cfg(any(target_os = "macos", target_family = "wasm"))]
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(all(target_os = "macos", feature = "test-support"))]
+use std::sync::atomic::AtomicU64;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -678,6 +680,15 @@ fn update_window_without_view<R>(
 }
 
 #[cfg(target_os = "macos")]
+fn draw_window_for_automation_read() -> Result<()> {
+    update_window_without_view(|window, cx| {
+        // Automation reads must be fresh even when the window is occluded and
+        // the platform never services its pending frame request.
+        window.draw(cx).clear(cx);
+    })
+}
+
+#[cfg(target_os = "macos")]
 fn invalidate_window() -> Result<()> {
     update_window(|_view, window, cx| {
         cx.notify();
@@ -1264,6 +1275,8 @@ pub struct GpuixRenderer {
     pending_frame_request: Arc<Mutex<Option<gpui_macos::FrameRequest>>>,
     #[cfg(target_os = "macos")]
     present_timing_capture: Mutex<Option<PresentTimingCapture>>,
+    #[cfg(all(target_os = "macos", feature = "test-support"))]
+    synchronous_scroll_draw_count: AtomicU64,
     /// Shared with GpuixView so napi methods can read the live selection
     /// without an App context. Paint and napi calls can use different threads.
     selection: SharedSelection,
@@ -1435,6 +1448,8 @@ impl GpuixRenderer {
             pending_frame_request: Arc::new(Mutex::new(None)),
             #[cfg(target_os = "macos")]
             present_timing_capture: Mutex::new(None),
+            #[cfg(all(target_os = "macos", feature = "test-support"))]
+            synchronous_scroll_draw_count: AtomicU64::new(0),
             selection: SharedSelection::default(),
             image_network_policy: crate::custom_elements::img::ImageNetworkPolicy::default(),
             strict_styles: AtomicBool::new(true),
@@ -2814,6 +2829,8 @@ impl GpuixRenderer {
     #[napi]
     pub fn get_automation_tree(&self) -> Result<String> {
         self.request_invalidate()?;
+        #[cfg(target_os = "macos")]
+        draw_window_for_automation_read()?;
         let bounds = self.automation_bounds()?;
         let tree = self.tree.lock().unwrap();
         let json = tree.to_automation_json(&bounds);
@@ -2824,6 +2841,8 @@ impl GpuixRenderer {
     #[napi]
     pub fn get_element_bounds(&self, id: f64) -> Result<Option<Vec<f64>>> {
         let id = to_element_id(id)?;
+        #[cfg(target_os = "macos")]
+        draw_window_for_automation_read()?;
         Ok(self
             .element_bounds(id)?
             .map(|bounds| vec![bounds.x, bounds.y, bounds.width, bounds.height]))
@@ -2840,8 +2859,10 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn get_painted_text(&self) -> Vec<String> {
-        crate::text::painted_text()
+    pub fn get_painted_text(&self) -> Result<Vec<String>> {
+        #[cfg(target_os = "macos")]
+        draw_window_for_automation_read()?;
+        Ok(crate::text::painted_text())
     }
 
     /// Every highlight wash painted in the last frame, in paint order.
@@ -2849,11 +2870,15 @@ impl GpuixRenderer {
     /// A quad is invisible to `getPaintedText()`, so this is the only way to
     /// assert on `highlight` without a screenshot.
     #[napi]
-    pub fn get_painted_highlights(&self) -> Vec<crate::element_tree::HighlightMatch> {
-        crate::text::painted_highlights()
+    pub fn get_painted_highlights(
+        &self,
+    ) -> Result<Vec<crate::element_tree::HighlightMatch>> {
+        #[cfg(target_os = "macos")]
+        draw_window_for_automation_read()?;
+        Ok(crate::text::painted_highlights()
             .into_iter()
             .map(Into::into)
-            .collect()
+            .collect())
     }
 
     /// Simulate space-separated keystrokes through the focused element's input pipeline.
@@ -3091,7 +3116,39 @@ impl GpuixRenderer {
         delta_y: f64,
         options: Option<crate::automation::ScrollWheelOptions>,
     ) -> Result<()> {
-        #[cfg(target_os = "macos")]
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            let window_id = GPUI_WINDOW.with(|window| {
+                window
+                    .borrow()
+                    .as_ref()
+                    .map(|window| window.window_id())
+                    .ok_or_else(|| Error::from_reason("Window not initialized"))
+            })?;
+            let mut collector = gpui::FrameTimingCollector::default();
+            let disable_trace_when_done = gpui::set_trace_enabled(true);
+            let result = update_window(move |_view, window, cx| {
+                crate::automation::dispatch_scroll_wheel(
+                    window, cx, x, y, delta_x, delta_y, options,
+                )
+                .map_err(Error::from_reason)
+            });
+            let synchronous_draws = collector
+                .collect_unseen()
+                .into_iter()
+                .filter(|event| {
+                    matches!(event, gpui::FrameEvent::Draw(timing) if timing.window_id == window_id)
+                })
+                .count() as u64;
+            if disable_trace_when_done {
+                gpui::set_trace_enabled(false);
+            }
+            self.synchronous_scroll_draw_count
+                .fetch_add(synchronous_draws, Ordering::Relaxed);
+            return result?;
+        }
+
+        #[cfg(all(target_os = "macos", not(feature = "test-support")))]
         return update_window(move |_view, window, cx| {
             crate::automation::dispatch_scroll_wheel(window, cx, x, y, delta_x, delta_y, options)
                 .map_err(Error::from_reason)
@@ -3118,6 +3175,18 @@ impl GpuixRenderer {
                 "The production GPUIX renderer does not support this operating system",
             ))
         }
+    }
+
+    /// Draws completed inline while live automation dispatched scroll input.
+    #[napi]
+    pub fn get_synchronous_scroll_draw_count(&self) -> Result<f64> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        return Ok(self.synchronous_scroll_draw_count.load(Ordering::Relaxed) as f64);
+
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        Err(Error::from_reason(
+            "Synchronous scroll draw diagnostics require macOS test-support",
+        ))
     }
 
     #[napi]
@@ -3217,6 +3286,7 @@ impl GpuixRenderer {
             let image = update_window(move |_view, window, cx| {
                 cx.notify();
                 window.refresh();
+                window.draw(cx).clear(cx);
                 window.render_to_image()
             })?
             .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {}", e)))?;

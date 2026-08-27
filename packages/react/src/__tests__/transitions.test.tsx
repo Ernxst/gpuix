@@ -38,7 +38,11 @@ describeNative("native style transitions", () => {
         width: 100,
         opacity: 0.2,
       })
+      const framesBeforeAdvance = root.renderer.getDebugFrameOverlayStats().frames
       root.renderer.advanceAsyncClock(50)
+      expect(root.renderer.getDebugFrameOverlayStats().frames).toBe(
+        framesBeforeAdvance + 1
+      )
       expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
         width: 150,
         opacity: 0.5,

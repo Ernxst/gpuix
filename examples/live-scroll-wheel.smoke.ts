@@ -1,10 +1,24 @@
-import { launch } from "@gpuix/react/automation"
+import { launch, type ParamsOf } from "@gpuix/react/automation"
 
 const app = await launch({ command: "bun", args: ["live-scroll-wheel.tsx"] })
 
+async function scrollWithoutSynchronousDraw(
+  params: ParamsOf<"scrollWheel">
+): Promise<void> {
+  const before = await app.call("getSynchronousScrollDrawCount", {})
+  await app.call("scrollWheel", params)
+  const after = await app.call("getSynchronousScrollDrawCount", {})
+  const synchronousDraws = after.count - before.count
+  if (synchronousDraws !== 0) {
+    throw new Error(
+      `Expected zero synchronous draws for one live scroll event, received ${synchronousDraws}`
+    )
+  }
+}
+
 try {
   const target = await app.getByTestId("scroll-target").element()
-  await app.call("scrollWheel", {
+  await scrollWithoutSynchronousDraw({
     x: 240,
     y: 180,
     deltaX: 0,
@@ -15,7 +29,7 @@ try {
   })
   await app.getByText("Last wheel: started: 0, -24; alt=true").waitFor()
   await new Promise((resolve) => setTimeout(resolve, 16))
-  await app.call("scrollWheel", {
+  await scrollWithoutSynchronousDraw({
     x: 240,
     y: 180,
     deltaX: 0,
@@ -26,7 +40,7 @@ try {
   })
   await app.getByText("Last wheel: moved: 0, -40; alt=true").waitFor()
   await new Promise((resolve) => setTimeout(resolve, 16))
-  await app.call("scrollWheel", {
+  await scrollWithoutSynchronousDraw({
     x: 240,
     y: 180,
     deltaX: 0,
