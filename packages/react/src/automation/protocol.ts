@@ -162,6 +162,10 @@ export const methods = {
     }),
     result: okSchema,
   },
+  getSynchronousScrollDrawCount: {
+    params: z.object({}),
+    result: z.object({ count: z.number().int().nonnegative() }),
+  },
   keystrokes: {
     params: z.object({
       keys: z.string(),

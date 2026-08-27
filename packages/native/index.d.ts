@@ -168,6 +168,8 @@ export declare class GpuixRenderer {
    * The options preserve gesture phase, line/pixel units, and modifiers.
    */
   simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, options?: ScrollWheelOptions | undefined | null): void
+  /** Draws completed inline while live automation dispatched scroll input. */
+  getSynchronousScrollDrawCount(): number
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
