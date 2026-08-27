@@ -1,6 +1,6 @@
 {
   "name": "@gpuix/react",
-  "version": "0.5.1-fork.6",
+  "version": "0.5.1-fork.7",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -71,7 +71,8 @@
     "typecheck": "tsc --noEmit && tsc --project tsconfig.test.json",
     "dev": "tsc --watch",
     "test": "bun run build && vitest run",
-    "test:watch": "bun run build && vitest"
+    "test:watch": "bun run build && vitest",
+    "prepack": "bun run build"
   },
   "dependencies": {
     "@gpuix/native": "workspace:^",

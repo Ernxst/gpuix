@@ -540,6 +540,95 @@ describeNative("events", () => {
       expect(targetClick.mock.calls[0]![0].isPropagationStopped()).toBe(true)
     })
 
+    it("bubbles a click from a background-painted child to its anchor", () => {
+      const click = vi.fn()
+      testRoot.render(
+        <a onClick={click} style={{ width: 240, height: 100 }}>
+          <span
+            testId="painted-click-child"
+            style={{ width: 160, height: 60, backgroundColor: "#273449" }}
+          >
+            Factory
+          </span>
+        </a>
+      )
+
+      const child = testRoot.renderer.findByTestId("painted-click-child")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
+
+      expect(click).toHaveBeenCalledOnce()
+      expect(click.mock.calls[0]![0].target.id).toBe(child.id)
+    })
+
+    it("bubbles a click from a painted grandchild to its anchor", () => {
+      const click = vi.fn()
+      testRoot.render(
+        <a onClick={click} style={{ width: 240, height: 100 }}>
+          <span style={{ width: 180, height: 70 }}>
+            <span
+              testId="painted-click-grandchild"
+              style={{ width: 140, height: 50, backgroundColor: "#273449" }}
+            >
+              Factory
+            </span>
+          </span>
+        </a>
+      )
+
+      const grandchild = testRoot.renderer.findByTestId("painted-click-grandchild")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(grandchild.id)!
+      testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
+
+      expect(click).toHaveBeenCalledOnce()
+      expect(click.mock.calls[0]![0].target.id).toBe(grandchild.id)
+    })
+
+    it("keeps an interactive painted descendant as the click target", () => {
+      const anchorClick = vi.fn()
+      const buttonClick = vi.fn((event: GpuixSyntheticEvent) => event.stopPropagation())
+      testRoot.render(
+        <a onClick={anchorClick} style={{ width: 240, height: 100 }}>
+          <button
+            testId="interactive-painted-click-child"
+            onClick={buttonClick}
+            style={{ width: 160, height: 60, backgroundColor: "#273449" }}
+          >
+            Factory
+          </button>
+        </a>
+      )
+
+      const button = testRoot.renderer.findByTestId("interactive-painted-click-child")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(button.id)!
+      testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
+
+      expect(buttonClick).toHaveBeenCalledOnce()
+      expect(buttonClick.mock.calls[0]![0].target.id).toBe(button.id)
+      expect(anchorClick).not.toHaveBeenCalled()
+    })
+
+    it("keeps transparent descendants clickable through their anchor", () => {
+      const click = vi.fn()
+      testRoot.render(
+        <a onClick={click} style={{ width: 240, height: 100 }}>
+          <span
+            testId="transparent-click-child"
+            style={{ width: 160, height: 60, backgroundColor: "rgba(39, 52, 73, 0)" }}
+          >
+            Factory
+          </span>
+        </a>
+      )
+
+      const child = testRoot.renderer.findByTestId("transparent-click-child")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
+
+      expect(click).toHaveBeenCalledOnce()
+      expect(click.mock.calls[0]![0].target.id).toBe(child.id)
+    })
+
     it("runs an unadapted TanStack createLink handler through the synthetic surface", () => {
       vi.stubGlobal("window", { origin: "http://localhost" })
       type NativeAnchorProps = Props & {
@@ -715,7 +804,9 @@ describeNative("events", () => {
           onClick={() => navigate("/factory")}
           style={{ width: 180, height: 50 }}
         >
-          Factory
+          <span style={{ width: 140, height: 40, backgroundColor: "#273449" }}>
+            Factory
+          </span>
         </a>
       )
 
@@ -1897,6 +1988,35 @@ describeNative("events", () => {
       testRoot.renderer.nativeSimulateMouseDown(10, 10, 1)
       expect(receivedEvents[2].button).toBe(1)
     })
+
+    it("bubbles mouse down and up from a background-painted child", () => {
+      const down = vi.fn()
+      const up = vi.fn()
+      testRoot.render(
+        <a
+          onMouseDown={down}
+          onMouseUp={up}
+          style={{ width: 240, height: 100 }}
+        >
+          <span
+            testId="painted-press-child"
+            style={{ width: 160, height: 60, backgroundColor: "#273449" }}
+          >
+            Factory
+          </span>
+        </a>
+      )
+
+      const child = testRoot.renderer.findByTestId("painted-press-child")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      testRoot.renderer.nativeSimulateMouseDown(x + width / 2, y + height / 2)
+      testRoot.renderer.nativeSimulateMouseUp(x + width / 2, y + height / 2)
+
+      expect(down).toHaveBeenCalledOnce()
+      expect(up).toHaveBeenCalledOnce()
+      expect(down.mock.calls[0]![0].target.id).toBe(child.id)
+      expect(up.mock.calls[0]![0].target.id).toBe(child.id)
+    })
   })
 
   describe("mouseMove events", () => {
@@ -1923,6 +2043,27 @@ describeNative("events", () => {
       expect(moveEvent!.eventType).toBe("mouseMove")
       expect(moveEvent!.x).toBe(50)
       expect(moveEvent!.y).toBe(75)
+    })
+
+    it("bubbles mouse move from a background-painted child", () => {
+      const move = vi.fn()
+      testRoot.render(
+        <a onMouseMove={move} style={{ width: 240, height: 100 }}>
+          <span
+            testId="painted-move-child"
+            style={{ width: 160, height: 60, backgroundColor: "#273449" }}
+          >
+            Factory
+          </span>
+        </a>
+      )
+
+      const child = testRoot.renderer.findByTestId("painted-move-child")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+
+      expect(move).toHaveBeenCalledOnce()
+      expect(move.mock.calls[0]![0].target.id).toBe(child.id)
     })
 
     it("should receive pressedButton during drag", () => {

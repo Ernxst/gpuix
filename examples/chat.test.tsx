@@ -123,6 +123,26 @@ describeNative('chat example', () => {
       } finally {
         await scrollApp.close()
       }
+
+      const clickApp = await launch({
+        command: 'bun',
+        args: ['live-click.tsx'],
+        cwd,
+        env: { GPUIX_BACKGROUND: '1' },
+      })
+      try {
+        const child = await clickApp.getByTestId('appkit-click-painted-child').element()
+        const { bounds } = await clickApp.call('getBounds', { elementId: child.id })
+        expect(bounds).not.toBeNull()
+
+        await clickApp.call('appKitClick', {
+          x: bounds!.x + bounds!.width / 2,
+          y: bounds!.y + bounds!.height / 2,
+        })
+        await clickApp.getByText('AppKit clicks: 1').waitFor({ timeoutMs: 10_000 })
+      } finally {
+        await clickApp.close()
+      }
     },
     45_000
   )

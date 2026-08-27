@@ -72,6 +72,8 @@ web-sys = { version = "0.3", features = ["Event", "EventTarget", "Navigator", "W
 [target.'cfg(target_os = "macos")'.dependencies]
 core-text = "=21.0.0"
 core-graphics = "=0.24.0"
+cocoa = "=0.26.0"
+objc = "0.2"
 # Production uses the embedded AppKit loop; tests use the native Metal renderer.
 gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, features = ["font-kit"] }
 

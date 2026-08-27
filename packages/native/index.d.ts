@@ -178,6 +178,11 @@ export declare class GpuixRenderer {
   simulateKeyUp(keystroke: string): void
   /** `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt". */
   simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  /**
+   * macOS-only automation seam that posts NSEvents through the production
+   * AppKit → GPUI event path instead of calling the direct test dispatcher.
+   */
+  postAppKitClick(x: number, y: number): void
   simulateMouseDown(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
   simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
   simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null, modifiers?: string | undefined | null): void

@@ -2603,6 +2603,7 @@ name = "gpuix-native"
 version = "0.5.1-fork.1"
 dependencies = [
  "anyhow",
+ "cocoa 0.26.0",
  "core-graphics 0.24.0",
  "core-text",
  "csscolorparser",
@@ -2618,6 +2619,7 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "objc",
  "parking_lot",
  "pulldown-cmark",
  "reqwest_client",
