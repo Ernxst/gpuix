@@ -189,6 +189,19 @@ impl AutomationClock {
         now.saturating_duration_since(inner.origin).as_secs_f64() * 1000.0
     }
 
+    /// Advance only when a test has explicitly paused or set the animation
+    /// clock. This lets the combined async-clock helper drive timers and
+    /// animation frames without unexpectedly freezing a live renderer.
+    pub fn fast_forward_if_frozen_ms(&self, delta_ms: f64) -> Option<f64> {
+        let mut inner = self.inner.lock().unwrap();
+        let ClockMode::Frozen { now } = inner.mode else {
+            return None;
+        };
+        let now = now + duration_ms(delta_ms);
+        inner.mode = ClockMode::Frozen { now };
+        Some(now.saturating_duration_since(inner.origin).as_secs_f64() * 1000.0)
+    }
+
     pub fn resume(&self) -> f64 {
         let mut inner = self.inner.lock().unwrap();
         let elapsed = current_instant(&inner).saturating_duration_since(inner.origin);

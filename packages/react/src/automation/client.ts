@@ -20,6 +20,7 @@ import {
   type ResultOf,
   type TreeNode,
 } from "./protocol.js"
+import type { RendererCapabilities } from "../types/host.js"
 
 function importNodeModule<T>(specifier: string): Promise<T> {
   return import(specifier)
@@ -111,6 +112,7 @@ abstract class ValidatedAutomationBackend implements AutomationBackend {
 }
 
 export interface TestAutomationRenderer {
+  capabilities?(): RendererCapabilities
   nativeSimulateClick(
     x: number,
     y: number,
@@ -191,9 +193,20 @@ export class InProcessBackend extends ValidatedAutomationBackend {
     initialize: () => ({
       protocolVersion: PROTOCOL_VERSION,
       pid: typeof process === "undefined" ? 0 : process.pid,
-      capabilities: typeof window !== "undefined"
-        ? ["input", "clock", "tree"]
-        : ["input", "screenshot", "clock", "tree"],
+      capabilities: (() => {
+        const capabilities = this.renderer.capabilities?.()
+        if (!capabilities) {
+          return typeof window !== "undefined"
+            ? ["input", "clock", "tree"]
+            : ["input", "screenshot", "clock", "tree"]
+        }
+        const result: Array<"input" | "screenshot" | "clock" | "tree"> = []
+        if (capabilities.automation.click) result.push("input")
+        if (capabilities.automation.screenshotFormats.length > 0) result.push("screenshot")
+        if (capabilities.automation.clock) result.push("clock")
+        if (capabilities.automation.tree) result.push("tree")
+        return result
+      })(),
       window: (() => {
         return {
           width: typeof window === "undefined" ? 800 : window.innerWidth,
@@ -788,6 +801,7 @@ export class App {
 }
 
 export interface LiveAutomationRenderer {
+  capabilities?(): RendererCapabilities
   simulateClick(x: number, y: number, button?: number, modifiers?: string): void
   simulateMouseDown(
     x: number,
@@ -837,6 +851,7 @@ export function liveRendererAsTest(
     renderer.tick?.()
   }
   return {
+    capabilities: renderer.capabilities?.bind(renderer),
     nativeSimulateClick(x, y, button, modifiers) {
       renderer.simulateClick(x, y, button, modifiers)
       afterInput()
@@ -854,10 +869,11 @@ export function liveRendererAsTest(
       afterInput()
     },
     nativeSimulateScrollWheel(x, y, deltaX, deltaY, options) {
-      if (!renderer.simulateScrollWheel) {
+      const capabilities = renderer.capabilities?.()
+      if (capabilities ? !capabilities.automation.scrollWheel : !renderer.simulateScrollWheel) {
         throw new AutomationError("Unsupported", "scrollWheel is not supported by this live renderer")
       }
-      renderer.simulateScrollWheel(
+      renderer.simulateScrollWheel!(
         x,
         y,
         deltaX,
@@ -907,13 +923,18 @@ export function liveRendererAsTest(
     getSelectedText: () => renderer.getSelectedText(),
     clearSelection: () => renderer.clearSelection(),
     captureScreenshot(file) {
-      if (!renderer.captureScreenshot) {
+      const capabilities = renderer.capabilities?.()
+      if (
+        capabilities
+          ? !capabilities.automation.screenshotFormats.includes("png")
+          : !renderer.captureScreenshot
+      ) {
         throw new AutomationError(
           "Unsupported",
           "Browser screenshots must use the controlling browser automation client"
         )
       }
-      renderer.captureScreenshot(file)
+      renderer.captureScreenshot!(file)
     },
     getAutomationTree: () => renderer.getAutomationTree(),
     getElementBounds: (id) => renderer.getElementBounds(id),

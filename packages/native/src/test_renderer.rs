@@ -152,6 +152,13 @@ fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
     }
 }
 
+fn point_is_inside(bounds: crate::automation::ElementBounds, point: (f64, f64)) -> bool {
+    point.0 >= bounds.x
+        && point.0 < bounds.x + bounds.width
+        && point.1 >= bounds.y
+        && point.1 < bounds.y + bounds.height
+}
+
 fn nearest_hover_group(tree: &RetainedTree, element_id: u64) -> Option<u64> {
     let mut current = Some(element_id);
     while let Some(id) = current {
@@ -224,6 +231,9 @@ pub struct TestGpuixRenderer {
     image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
+    /// Mouse-down origin for the current GPUI active-state sequence. Retained
+    /// for the native test input path, which must mirror main's press lifetime.
+    active_pointer_origin: Mutex<Option<(f64, f64)>>,
 }
 
 #[napi]
@@ -306,6 +316,7 @@ impl TestGpuixRenderer {
             image_network_policy,
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(Vec::new()),
+            active_pointer_origin: Mutex::new(None),
         })
     }
 
@@ -314,6 +325,13 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn dispose(&self) {
         dispose_test_state(self.state_id);
+    }
+
+    /// The same capability contract as a live renderer, scoped to this
+    /// offscreen GPU-backed window.
+    #[napi]
+    pub fn capabilities(&self) -> crate::renderer::RendererCapabilities {
+        crate::renderer::test_renderer_capabilities()
     }
 
     // ── Mutation API (same interface as GpuixRenderer) ────────────────
@@ -535,7 +553,9 @@ impl TestGpuixRenderer {
     }
 
     /// Advance GPUI's async executor clock so tests can deterministically fire
-    /// timers such as bounded image retry/revalidation deadlines.
+    /// timers such as bounded image retry/revalidation deadlines. When the
+    /// renderer animation clock is paused, advance that clock by the same
+    /// amount and render the resulting transition frame as well.
     #[napi]
     pub fn advance_async_clock(&self, delta_ms: f64) -> Result<()> {
         if !delta_ms.is_finite() || delta_ms < 0.0 {
@@ -543,10 +563,61 @@ impl TestGpuixRenderer {
                 "advanceAsyncClock delta must be a finite non-negative number",
             ));
         }
-        with_test_state(self.state_id, |cx, _window, _view| {
+        with_test_state(self.state_id, |cx, window, view| {
             cx.advance_clock(std::time::Duration::from_secs_f64(delta_ms / 1000.0));
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, cx| {
+                    if view.clock.fast_forward_if_frozen_ms(delta_ms).is_some() {
+                        cx.notify();
+                    }
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
             cx.run_until_parked();
             Ok(())
+        })
+    }
+
+    /// Override GPUI's reduced-motion policy for deterministic tests.
+    #[napi]
+    pub fn set_reduced_motion(&self, enabled: bool) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                app.set_reduce_motion(enabled);
+                view.update(app, |_, cx| cx.notify());
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// Number of retained style-transition tracks. Exposed only by the
+    /// offscreen renderer so lifecycle tests can prove unmounted tracks leave.
+    #[napi]
+    pub fn get_style_transition_count(&self) -> Result<u32> {
+        self.flush()?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                u32::try_from(view.read(app).transition_states.len()).unwrap_or(u32::MAX)
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
+    /// Number of GPUI frame requests emitted by active style transitions since
+    /// this offscreen renderer was created. Imperative motion is not counted.
+    #[napi]
+    pub fn get_style_transition_frame_request_count(&self) -> Result<u32> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.read(app).style_transition_frame_requests
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
         })
     }
 
@@ -622,6 +693,7 @@ impl TestGpuixRenderer {
             );
             Ok(())
         });
+        *self.active_pointer_origin.lock().unwrap() = None;
         result
     }
 
@@ -783,6 +855,9 @@ impl TestGpuixRenderer {
             cx.run_until_parked();
             Ok(())
         });
+        if !active {
+            *self.active_pointer_origin.lock().unwrap() = None;
+        }
         result
     }
 
@@ -799,6 +874,12 @@ impl TestGpuixRenderer {
             cx.update_window(window, |_, window, _app| window.is_window_active())
                 .map_err(|error| Error::from_reason(error.to_string()))
         })
+    }
+
+    /// An offscreen test window cannot request foreground activation.
+    #[napi]
+    pub fn activate_window(&self, env: Env) -> Result<()> {
+        crate::renderer::unsupported_capability(env, "window.activate")
     }
 
     /// Simulate a mouse down event at the given window coordinates.
@@ -821,6 +902,9 @@ impl TestGpuixRenderer {
             );
             Ok(())
         });
+        if result.is_ok() {
+            *self.active_pointer_origin.lock().unwrap() = Some((x, y));
+        }
         result
     }
 
@@ -844,6 +928,7 @@ impl TestGpuixRenderer {
             );
             Ok(())
         });
+        *self.active_pointer_origin.lock().unwrap() = None;
         result
     }
 
@@ -1195,20 +1280,36 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_resolved_style(&self, id: f64) -> Result<Option<String>> {
         let id = to_element_id(id)?;
-        let (style, hover_group_id) = {
+        let (style, hover_group_id, hover_group_accepts_pointer) = {
             let tree = self.tree.lock().unwrap();
             let Some(element) = tree.elements.get(&id) else {
                 return Ok(None);
             };
             let hover_group_id = nearest_hover_group(&tree, id);
-            (element.style.clone().unwrap_or_default(), hover_group_id)
+            let hover_group_accepts_pointer = hover_group_id.is_some_and(|group_id| {
+                tree.elements
+                    .get(&group_id)
+                    .and_then(|group| group.style.as_ref())
+                    .and_then(|style| style.pointer_events.as_deref())
+                    != Some("none")
+            });
+            (
+                element.style.clone().unwrap_or_default(),
+                hover_group_id,
+                hover_group_accepts_pointer,
+            )
         };
 
         self.flush()?;
-        let (focus, keyboard_input, hovered, hover_within, active) =
+        let element_bounds = crate::automation::get_bounds(id);
+        let hover_group_bounds = hover_group_id.and_then(crate::automation::get_bounds);
+        let active_pointer_origin = *self.active_pointer_origin.lock().unwrap();
+        let (pointer, focus, keyboard_input, hovered_state, hover_within_state, active_state, transitioned_style, motion_style) =
             with_test_state(self.state_id, |cx, window, view| {
                 let view = view.clone();
                 cx.update_window(window, |_, window, app| {
+                    let reduce_motion = app.reduce_motion();
+                    let mouse = window.mouse_position();
                     let view = view.read(app);
                     let focus = view
                         .focus_handles
@@ -1218,36 +1319,79 @@ impl TestGpuixRenderer {
                     let hovered = view
                         .interactive_style_states
                         .get(&id)
-                        .is_some_and(|state| state.hovered);
-                    let hover_within = hover_group_id.is_some_and(|group_id| {
+                        .map(|state| state.hovered);
+                    let hover_within = hover_group_id.and_then(|group_id| {
                         view.interactive_style_states
                             .get(&group_id)
-                            .is_some_and(|state| state.hovered)
+                            .map(|state| state.hovered)
                     });
                     let active = view
                         .interactive_style_states
                         .get(&id)
-                        .is_some_and(|state| state.active);
-                    (focus, keyboard, hovered, hover_within, active)
+                        .map(|state| state.active);
+                    let transitioned_style = view
+                        .transition_states
+                        .get(&id)
+                        .map(|state| state.frame(view.clock.now(), reduce_motion).style);
+                    let motion_style = view
+                        .motion_states
+                        .get(&id)
+                        .filter(|state| state.is_valid())
+                        .map(|state| state.frame(view.clock.now()).style);
+                    (
+                        (f64::from(f32::from(mouse.x)), f64::from(f32::from(mouse.y))),
+                        focus,
+                        keyboard,
+                        hovered,
+                        hover_within,
+                        active,
+                        transitioned_style,
+                        motion_style,
+                    )
                 })
                 .map_err(|error| Error::from_reason(error.to_string()))
             })?;
 
-        let mut resolved = style_object(&style)?;
+        let accepts_pointer = style.pointer_events.as_deref() != Some("none");
+        let hovered = hovered_state.unwrap_or(false);
+        let hover_within = hover_within_state.unwrap_or_else(|| {
+            hover_group_accepts_pointer
+                && !keyboard_input
+                && hover_group_bounds.is_some_and(|bounds| point_is_inside(bounds, pointer))
+        });
+        let active = active_state.unwrap_or_else(|| {
+            accepts_pointer
+                && active_pointer_origin.is_some_and(|origin| {
+                    element_bounds.is_some_and(|bounds| point_is_inside(bounds, origin))
+                })
+        });
+
+        let layered_style = motion_style.map(|motion_style| {
+            let mut layered = transitioned_style
+                .clone()
+                .unwrap_or_else(|| (*style).clone());
+            motion_style.apply_to(&mut layered);
+            layered
+        });
+        let effective_style = layered_style
+            .as_ref()
+            .or(transitioned_style.as_ref())
+            .unwrap_or(&style);
+        let mut resolved = style_object(effective_style)?;
         if focus {
-            refine_style_object(&mut resolved, style.focus.as_deref())?;
+            refine_style_object(&mut resolved, effective_style.focus.as_deref())?;
         }
         if focus && keyboard_input {
-            refine_style_object(&mut resolved, style.focus_visible.as_deref())?;
+            refine_style_object(&mut resolved, effective_style.focus_visible.as_deref())?;
         }
         if hover_within {
-            refine_style_object(&mut resolved, style.hover_within.as_deref())?;
+            refine_style_object(&mut resolved, effective_style.hover_within.as_deref())?;
         }
         if hovered {
-            refine_style_object(&mut resolved, style.hover.as_deref())?;
+            refine_style_object(&mut resolved, effective_style.hover.as_deref())?;
         }
         if active {
-            refine_style_object(&mut resolved, style.active.as_deref())?;
+            refine_style_object(&mut resolved, effective_style.active.as_deref())?;
         }
 
         serde_json::to_string(&resolved)

@@ -154,6 +154,104 @@ function HoverWithinSiblingProbe({
 }
 
 describe("style props reach the renderer", () => {
+  it("resolves ch, calc, and clamp dimensions on the GPU", () => {
+    const shot = path.join(SHOTS_DIR, "expressive-lengths.png")
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ display: "flex", flexDirection: "column", width: "100%", padding: 20, gap: 16 }}>
+        <div testId="ch-length" style={{ width: "24ch", height: 30, fontSize: 20, backgroundColor: "#7c86ff" }} />
+        <div testId="calc-length" style={{ width: "calc(100% - 4ch)", height: 30, fontSize: 20, backgroundColor: "#38bdf8" }} />
+        <div testId="clamp-length" style={{ width: "clamp(240px, 70%, 960px)", height: 30, backgroundColor: "#f59e0b" }} />
+      </div>,
+    )
+
+    const ch = boundsFor(renderer, "ch-length")
+    const calc = boundsFor(renderer, "calc-length")
+    const clamp = boundsFor(renderer, "clamp-length")
+    expect(ch[2]).toBeGreaterThan(100)
+    expect(calc[2]).toBeGreaterThan(ch[2])
+    expect(clamp[2]).toBeGreaterThan(ch[2])
+
+    renderer.captureScreenshot(shot)
+    expect(fs.statSync(shot).size).toBeGreaterThan(0)
+  })
+
+  it("resolves percentage expressions from the containing block and ch from inherited text", () => {
+    const shot = path.join(SHOTS_DIR, "expressive-lengths-containing-block.png")
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ width: "100%", backgroundColor: "#101010" }}>
+        <div testId="containing-block" style={{ width: 400, fontSize: 24 }}>
+          <div
+            testId="containing-block-calc"
+            style={{ width: "calc(50% + 20px)", height: 30, backgroundColor: "#38bdf8" }}
+          />
+          <div
+            testId="inherited-ch"
+            style={{ width: "10ch", height: 30, backgroundColor: "#7c86ff" }}
+          />
+          <div
+            testId="local-ch"
+            style={{ width: "10ch", height: 30, fontSize: 12, backgroundColor: "#f59e0b" }}
+          />
+        </div>
+      </div>,
+    )
+
+    expect(boundsFor(renderer, "containing-block")[2]).toBeCloseTo(400, 0)
+    // The test window's root reserves a 10px inset on each side, so Taffy
+    // gives this nested 400px box a resolved 380px content basis: 50% + 20px.
+    // A viewport resolver changes this value when the window is resized.
+    expect(boundsFor(renderer, "containing-block-calc")[2]).toBeCloseTo(
+      210,
+      0,
+    )
+    expect(boundsFor(renderer, "inherited-ch")[2]).toBeGreaterThan(
+      boundsFor(renderer, "local-ch")[2],
+    )
+
+    renderer.simulateResize(800, 600)
+    expect(boundsFor(renderer, "containing-block-calc")[2]).toBeCloseTo(
+      210,
+      0,
+    )
+
+    renderer.captureScreenshot(shot)
+    expect(fs.statSync(shot).size).toBeGreaterThan(0)
+  })
+
+  it("applies ch expressions in hover refinements instead of dropping them", () => {
+    const idle = path.join(SHOTS_DIR, "expressive-length-hover-idle.png")
+    const hovered = path.join(SHOTS_DIR, "expressive-length-hovered.png")
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ width: 400, height: 100, fontSize: 20, backgroundColor: "#101010" }}>
+        <div
+          testId="hover-length"
+          style={{
+            width: 80,
+            height: 40,
+            backgroundColor: "#38bdf8",
+            hover: { width: "24ch", backgroundColor: "#f59e0b" },
+          }}
+        />
+      </div>,
+    )
+
+    const before = boundsFor(renderer, "hover-length")
+    renderer.nativeSimulateMouseMove(10, 10)
+    const after = boundsFor(renderer, "hover-length")
+    expect(after[2]).toBeGreaterThan(before[2])
+    renderer.nativeSimulateMouseMove(350, 80)
+    renderer.captureScreenshot(idle)
+    renderer.nativeSimulateMouseMove(10, 10)
+    renderer.captureScreenshot(hovered)
+    expectScreenshotsDiffer(idle, hovered)
+  })
+
   it("applies padding to a <text> node", () => {
     // `<text>` used to apply a text-only subset of the style set, so every
     // layout prop on it was dropped.

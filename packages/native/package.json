@@ -1,6 +1,6 @@
 {
   "name": "@gpuix/native",
-  "version": "0.5.1-fork.1",
+  "version": "0.5.1-fork.2",
   "license": "Apache-2.0",
   "main": "index.js",
   "types": "index.d.ts",
@@ -40,6 +40,7 @@
     "index.d.ts",
     "browser.mjs",
     "wasm",
+    "*.node",
     "LICENSE"
   ]
 }

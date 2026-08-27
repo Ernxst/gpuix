@@ -426,6 +426,7 @@ device-pixel measurement.
 | `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. The chat example uses `(16, 17)` |
 | `transparent` | boolean | Same as `windowBackground: "transparent"` when that option is unset |
 | `appName` | string | Name inside the macOS `Hide X` and `Quit X` items. Defaults to `title` |
+| `reducedMotion` | boolean | Force GPUI's reduced-motion policy. Style transitions snap to their target |
 Call it again after a save and it remounts the tree on the same window.
 
 ### The macOS menu bar
@@ -654,12 +655,126 @@ clipboard, keyboard, and IME implementations. The embedded macOS run-loop
 extension comes from the pinned GPUIX fork. CI runs the full React and example
 test suites through DirectX on Windows.
 
+### Renderer capabilities
+
+Use one stable read to choose platform-specific paths instead of probing
+individual methods:
+
+```ts
+const capabilities = renderer.capabilities()
+
+if (capabilities.automation.screenshotFormats.includes('png')) {
+  renderer.captureScreenshot('/tmp/frame.png')
+}
+if (capabilities.window.activation) {
+  console.log(renderer.isActive())
+}
+```
+
+`capabilities` includes `platform`; the **active** `frameClock` source
+(`display-link`, `timer`, `raf`, or deterministic `manual`); and whether an
+external frame source can be selected through `frameClock.externalFrame`.
+It also describes window activation/resize/multi-window support,
+private-network image opt-in, and live automation (hover, drag, scroll-wheel,
+keyboard, screenshots, clock, and tree). Screenshot formats are listed in
+`automation.screenshotFormats`; `captureScreenshot()` is typed when `png` is
+listed. `images.privateNetwork` means
+`setAllowPrivateNetworkImages(enabled)` is available on that renderer (the
+same policy can also be set at creation with `allowPrivateNetworkImages`).
+
+Existing probes such as `requiresTick()`, `isActive()`, and
+`captureScreenshot()` remain supported for compatibility. A call that is not
+supported by its renderer fails with `UnsupportedCapabilityError`, whose
+`code` is `ERR_GPUX_UNSUPPORTED_CAPABILITY` and whose `capability` identifies
+the unavailable feature.
+
 > [!IMPORTANT]
 > On macOS, never drive `tick()` from a `setImmediate` loop. That spins at tens of thousands of
 > ticks per second and burns **73% CPU on a completely idle app**, versus **1%** when
 > paced.
 
 ## Native animations
+
+GPUIX has two native animation surfaces. A style `transition` animates ordinary
+style changes and native `hover`, `active`, `focus`, and `focusVisible`
+refinements. `motion.div` is the imperative target-animation surface. Both
+retain their interpolation state in Rust and request frames from GPUI's native
+display-link clock; neither uses JavaScript timers.
+
+### Transition style changes
+
+Declare exactly which properties may interpolate. The transition lives on the
+base style, while a state refinement supplies the next target:
+
+```tsx
+function HoverCard() {
+  return (
+    <div
+      tabIndex={0}
+      style={{
+        width: 180,
+        opacity: 0.72,
+        backgroundColor: '#313244',
+        borderRadius: 12,
+        hover: {
+          width: 196,
+          opacity: 1,
+          backgroundColor: '#45475a',
+          borderRadius: 18,
+        },
+        focusVisible: { outlineColor: '#89b4fa' },
+        transition: {
+          properties: [
+            'width',
+            'opacity',
+            'backgroundColor',
+            'borderRadius',
+            'outlineColor',
+          ],
+          durationMs: 160,
+          easing: 'easeOut',
+        },
+      }}
+    />
+  )
+}
+```
+
+The same declaration animates React-driven changes to those fields. An
+interrupted transition retargets from its current painted value. Unlisted
+fields update immediately, and removing the element discards its native track.
+Transitions currently run on the built-in `<div>` and `<text>` hosts. Native
+custom elements and `<virtual-list>` keep their declared snap semantics: they
+apply the target immediately and create neither a retained track nor frame
+requests.
+
+| Group | Transition properties |
+|---|---|
+| Alpha | `opacity` |
+| Colour | `backgroundColor`, `color`, `borderColor`, `outlineColor` |
+| Size | `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` |
+| Inset | `top`, `right`, `bottom`, `left` |
+| Radius | `borderRadius` and the four corner-radius fields |
+
+`durationMs` is required and uses milliseconds; `delayMs` defaults to `0`.
+`easing` accepts `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut`, or a
+four-number cubic-bezier tuple. Pixel lengths interpolate with pixels and
+percentages with percentages. Incompatible endpoints such as `auto` to pixels
+snap to the new value. Malformed transition objects are rejected as a whole
+through the strict style-diagnostic channel.
+
+Radius shorthand and corner longhands are resolved to four painted corners
+before interpolation, so either form can override the other without a stale
+longhand masking the animated value. Colour endpoints are parsed into GPUI's
+clipped, gamma-encoded sRGB channels. Interpolation linearly blends
+premultiplied RGB and alpha, then unpremultiplies the result; a zero-alpha
+result keeps the destination RGB. Consequently, the exact midpoint from
+transparent to white is white at 50% alpha, not grey at 50% alpha.
+
+Set the renderer option `reducedMotion: true` to make transitions finish on
+their target immediately. GPUI exposes reduced motion as application policy,
+but its current desktop platforms do not populate that policy from the OS, so
+an app that mirrors the system preference must pass its resolved setting.
 
 Use **`motion.div`** to animate from an initial style to a target style. React
 sends the target once. Rust calculates intermediate values and requests GPUI
@@ -2159,7 +2274,7 @@ object with a `type`: `px`, `fr`, `auto`, `min-content`, `max-content`,
 }} />
 ```
 
-**Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accepts pixels (number) or percentages (string like `"100%"`)
+**Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accept pixels, percentages, `ch`, and `calc()` / `clamp()` expressions. `ch` uses the shaped advance of `0` in the resolved font.
 
 **Spacing:** `padding`, `paddingTop/Right/Bottom/Left`, `margin`, `marginTop/Right/Bottom/Left`
 
@@ -2287,7 +2402,7 @@ Limited relative-color forms can derive a new color from a base value:
 
 **Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` creates a native scrollable container with persistent scroll state
 
-**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textDecoration` (`"underline"` | `"line-through"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textDecoration` (`"underline"` | `"line-through"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A numeric `lineHeight` is the legacy pixel form; a unitless string such as `"1.4"` multiplies the resolved font size.
 
 `textWrap` accepts `"wrap"` and `"nowrap"`. `"balance"` and `"pretty"` are
 recognized but explicitly rejected with a strict-style diagnostic because GPUI
@@ -2360,14 +2475,10 @@ Anchors with an `href` join the native tab order automatically, so a plain link
 does not need an app-side `tabIndex` or `onKeyDown` adapter. Native text editors
 keep Space as text input instead of synthesizing a click.
 
-> **Note: `white-space: pre` is not supported.** GPUI's text system only has `normal` (wraps) and `nowrap` (single line). To preserve newlines like HTML `<pre>`, split your text on `\n` in React and render each line as a separate `<text>` element in a flex column:
+> **`whiteSpace: "pre"` preserves explicit newlines and repeated spaces without soft wrapping.** It remains one selectable `<text>` layout, including nested inline text runs, so copying and selection preserve the original string. Whitespace policy is layout-wide: put `pre` on the outer `<text>`; a nested inline run cannot switch it mid-sentence.
 >
 > ```tsx
-> <div style={{ display: 'flex', flexDirection: 'column', fontFamily: 'Menlo' }}>
->   {code.split('\n').map((line, i) => (
->     <text key={i} style={{ whiteSpace: 'nowrap' }}>{line}</text>
->   ))}
-> </div>
+> <text style={{ whiteSpace: 'pre', fontFamily: 'Menlo' }}>{code}</text>
 > ```
 
 > **Note: GPUI defaults text color to black, not white.** Unlike CSS, GPUI does not inherit `color` from parent elements. Every `<text>` element that doesn't set an explicit `color` style will render as black — invisible on dark backgrounds. Always set `color` on your text elements or on a parent `<div>` (which applies `text_color` to all children in that subtree via GPUI's `Styled` trait).

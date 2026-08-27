@@ -23,6 +23,7 @@ import type {
   DebugFrameOverlayStats,
   HighlightMatch,
   NativeRenderer,
+  RendererCapabilities,
   StyleDesc,
   StyleDiagnostic,
 } from "./types/host.js"
@@ -37,9 +38,13 @@ export type { MacCpuThrottle } from "./cpu-throttle.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
   dispose(): void
+  capabilities(): RendererCapabilities
   applyBatch(json: string): number[]
   flush(): void
   advanceAsyncClock(deltaMs: number): void
+  setReducedMotion(enabled: boolean): void
+  getStyleTransitionCount(): number
+  getStyleTransitionFrameRequestCount(): number
   drainEvents(): EventPayload[]
   setMenus(menus: MenuSpec[]): void
   simulateMenuAction(id: string): void
@@ -50,6 +55,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   releasePointerCapture(elementId: number): void
   simulateWindowActivation(active: boolean): void
   simulateWindowDeactivation(): void
+  activateWindow(): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
   simulateClick(x: number, y: number, button?: number, modifiers?: string): void
@@ -245,6 +251,10 @@ export class TestRenderer implements NativeRenderer {
     this.disposed = true
   }
 
+  capabilities(): RendererCapabilities {
+    return this.native.capabilities()
+  }
+
   // ── NativeRenderer interface (all mutations delegate to native) ──
 
   createElement(id: number, elementType: string): void {
@@ -336,9 +346,24 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
-  /** Advance timers owned by GPUI's async executor without sleeping. */
+  /** Advance GPUI timers and, when paused, the native animation frame clock. */
   advanceAsyncClock(deltaMs: number): void {
     this.native.advanceAsyncClock(deltaMs)
+  }
+
+  /** Override GPUI's reduced-motion policy for deterministic tests. */
+  setReducedMotion(enabled: boolean): void {
+    this.native.setReducedMotion(enabled)
+  }
+
+  /** Number of transition tracks retained by the offscreen native view. */
+  getStyleTransitionCount(): number {
+    return this.native.getStyleTransitionCount()
+  }
+
+  /** Number of GPUI frames requested by retained style transitions. */
+  getStyleTransitionFrameRequestCount(): number {
+    return this.native.getStyleTransitionFrameRequestCount()
   }
 
   /** Drain events collected by the native GPUI event handlers. */
@@ -808,6 +833,10 @@ export class TestRenderer implements NativeRenderer {
 
   isActive(): boolean {
     return this.native.isActive!()
+  }
+
+  activateWindow(): void {
+    this.native.activateWindow()
   }
 
   simulateResize(width: number, height: number): void {

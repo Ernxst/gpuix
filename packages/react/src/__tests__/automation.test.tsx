@@ -5,8 +5,14 @@ import os from "os"
 import path from "path"
 import React, { useState } from "react"
 import { describe, expect, it } from "vitest"
-import { connectTest } from "../automation/index.js"
-import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
+import {
+  browserRendererAsTest,
+  connectTest,
+  type LiveAutomationRenderer,
+} from "../automation/index.js"
+import { createRenderer } from "../reconciler/renderer.js"
+import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing.js"
+import type { RendererCapabilities } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -26,6 +32,70 @@ function Counter() {
 }
 
 describeNative("automation", () => {
+  it("reads the active live native frame clock", () => {
+    const renderer = createRenderer()
+    const platform = process.platform === "darwin" ? "macos" : "windows"
+
+    expect(renderer.capabilities()).toMatchObject({
+      platform,
+      frameClock:
+        platform === "macos"
+          ? { kind: "timer", requiresTick: true, externalFrame: true }
+          : { kind: "timer", requiresTick: false, externalFrame: false },
+      window: { activation: true, activate: platform === "macos", resize: true, multiple: false },
+      images: { privateNetwork: true },
+      automation: {
+        click: true,
+        hover: true,
+        drag: true,
+        scrollWheel: true,
+        keyboard: "native",
+        screenshot: true,
+        screenshotFormats: ["png"],
+        clock: true,
+        tree: true,
+      },
+    })
+
+    if (platform === "macos") {
+      expect(renderer.setFrameRequestHandler(() => {})).toBe(true)
+      expect(renderer.capabilities().frameClock.kind).toBe("display-link")
+      renderer.setFrameRequestHandler(null)
+      expect(renderer.capabilities().frameClock.kind).toBe("timer")
+    }
+  })
+
+  it("reads offscreen renderer capabilities separately from the display clock", () => {
+    const renderer = new TestRenderer()
+    try {
+      expect(renderer.capabilities()).toMatchObject({
+        platform: process.platform === "darwin" ? "macos" : "windows",
+        frameClock: { kind: "manual", requiresTick: false, externalFrame: false },
+        window: { activation: true, activate: false, resize: true, multiple: false },
+        images: { privateNetwork: true },
+        automation: {
+          hover: true,
+          drag: true,
+          scrollWheel: true,
+          screenshot: true,
+          screenshotFormats: ["png"],
+        },
+      })
+      try {
+        renderer.activateWindow()
+        throw new Error("Expected offscreen activation to be unsupported")
+      } catch (error) {
+        expect(error).toMatchObject({
+          name: "UnsupportedCapabilityError",
+          code: "ERR_GPUX_UNSUPPORTED_CAPABILITY",
+          capability: "window.activate",
+        })
+      }
+    } finally {
+      renderer.dispose()
+    }
+  })
+
   it("preserves identity attributes for native automation and synthetic events", async () => {
     const attributes: Array<string | null> = []
     const { render, renderer } = createTestRoot()
@@ -302,6 +372,60 @@ describeNative("automation", () => {
     // The textarea is laid out under the input, so its box must start lower.
     expect(multi!.y).toBeGreaterThan(single!.y)
 
+    await app.close()
+  })
+})
+
+describe("browser renderer capability adapter", () => {
+  it("retains browser capabilities and omits unsupported screenshots from automation", async () => {
+    const capabilities: RendererCapabilities = {
+      platform: "browser",
+      frameClock: { kind: "raf", requiresTick: false, externalFrame: false },
+      window: { activation: false, activate: false, resize: true, multiple: false },
+      images: { privateNetwork: false },
+      automation: {
+        click: true,
+        hover: true,
+        drag: true,
+        scrollWheel: true,
+        keyboard: "browser",
+        screenshot: false,
+        screenshotFormats: [],
+        clock: true,
+        tree: true,
+      },
+    }
+    const renderer: LiveAutomationRenderer = {
+      capabilities: () => capabilities,
+      simulateClick() {},
+      simulateMouseDown() {},
+      simulateMouseUp() {},
+      simulateMouseMove() {},
+      simulateScrollWheel() {},
+      focusElement() {},
+      blur() {},
+      scrollTo() {},
+      getScrollOffset: () => null,
+      getAllText: () => [],
+      getPaintedText: () => [],
+      getSelectedText: () => null,
+      clearSelection() {},
+      getAutomationTree: () => "{}",
+      getElementBounds: () => null,
+      clockPause: () => 0,
+      clockSet: (nowMs) => nowMs,
+      clockFastForward: (deltaMs) => deltaMs,
+      clockResume: () => 0,
+    }
+    const adapter = browserRendererAsTest(renderer)
+    expect(adapter.capabilities?.()).toEqual(capabilities)
+
+    const app = await connectTest(adapter)
+    const initialized = await app.call("initialize", {
+      protocolVersion: 1,
+      client: "browser-capability-test",
+    })
+    expect(initialized.capabilities).toEqual(["input", "clock", "tree"])
     await app.close()
   })
 })

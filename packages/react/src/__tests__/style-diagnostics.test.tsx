@@ -62,6 +62,26 @@ describeNative("style diagnostics", () => {
     expect(diagnostics[0].message).toContain('"uppercase"')
   })
 
+  it("reports an invalid length expression with element, property, value, and parse position", () => {
+    const renderer = new TestRenderer()
+    renderer.createElement(44, "div")
+    renderer.setCustomProp(44, "testId", JSON.stringify("fluid-panel"))
+    renderer.setStyle(44, JSON.stringify({ width: "calc(100% - 2rem)", height: 40 }))
+    renderer.setRoot(44)
+
+    expect(renderer.getElement(44)?.style).toMatchObject({ height: 40 })
+    const [diagnostic] = renderer.drainStyleDiagnostics()
+    expect(diagnostic).toMatchObject({
+      elementId: 44,
+      elementType: "div",
+      testId: "fluid-panel",
+      property: "width",
+      value: '"calc(100% - 2rem)"',
+    })
+    expect(diagnostic!.message).toContain('<div testId="fluid-panel">')
+    expect(diagnostic!.message).toContain("byte")
+  })
+
   it("reports an unknown batched style after later identity metadata is applied", () => {
     const renderer = new TestRenderer()
     renderer.applyBatch(
@@ -137,6 +157,32 @@ describeNative("style diagnostics", () => {
       value: '"fr"',
     })
     expect(diagnostics[0].message).toContain('<div testId="ledger-grid">')
+  })
+
+  it("rejects a malformed transition as one descriptor with precise paths", () => {
+    const renderer = new TestRenderer()
+    renderer.createElement(83, "div")
+    renderer.setCustomProp(83, "testId", JSON.stringify("animated-card"))
+    renderer.setStyle(
+      83,
+      JSON.stringify({
+        opacity: 0.4,
+        transition: {
+          properties: ["opacity", "display"],
+          durationMs: -100,
+        },
+      })
+    )
+    renderer.setRoot(83)
+
+    expect(renderer.getElement(83)?.style).toMatchObject({ opacity: 0.4 })
+    expect(renderer.getElement(83)?.style).not.toHaveProperty("transition")
+    expect(
+      renderer.drainStyleDiagnostics().map(({ property, testId }) => ({ property, testId }))
+    ).toEqual([
+      { property: "transition.properties[1]", testId: "animated-card" },
+      { property: "transition.durationMs", testId: "animated-card" },
+    ])
   })
 
   it("keeps deterministic field dropping when strict diagnostics are disabled", () => {

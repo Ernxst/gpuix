@@ -2,10 +2,22 @@ import type { EventPayload, MenuSpec } from "@gpuix/native"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 
 /**
- * Native dimensions are pixels, percentages, `auto`, or numeric strings.
- * Keep this aligned with `DimensionValue::deserialize` in `packages/native/src/style.rs`.
+ * CSS-compatible lengths accepted by the native layout parser. The grammar is
+ * intentionally a literal union so unsupported units fail at the call site.
+ * Keep this aligned with `DimensionValue::deserialize` in
+ * `packages/native/src/style.rs`.
  */
-export type DimensionValue = number | "auto" | `${number}` | `${number}%`
+type LengthAtom = `${number}px` | `${number}%` | `${number}ch`
+type CalcExpression = `${LengthAtom} + ${LengthAtom}` | `${LengthAtom} - ${LengthAtom}`
+export type DimensionValue =
+  | number
+  | "auto"
+  | LengthAtom
+  | `calc(${CalcExpression})`
+  | `clamp(${LengthAtom}, ${LengthAtom}, ${LengthAtom})`
+
+/** A line-height is either an absolute length or a unitless font-size multiplier. */
+export type LineHeightValue = number | `${number}px` | `${number}`
 
 type CssColorFunctionName =
   | "rgb"
@@ -266,6 +278,35 @@ export interface MotionProps {
   transition?: MotionTransition
 }
 
+export type TransitionProperty =
+  | "opacity"
+  | "backgroundColor"
+  | "color"
+  | "borderColor"
+  | "outlineColor"
+  | "width"
+  | "height"
+  | "minWidth"
+  | "minHeight"
+  | "maxWidth"
+  | "maxHeight"
+  | "top"
+  | "right"
+  | "bottom"
+  | "left"
+  | "borderRadius"
+  | "borderTopLeftRadius"
+  | "borderTopRightRadius"
+  | "borderBottomLeftRadius"
+  | "borderBottomRightRadius"
+
+export interface StyleTransition {
+  properties: TransitionProperty[]
+  durationMs: number
+  delayMs?: number
+  easing?: MotionEase
+}
+
 /**
  * CSS `cursor` keywords GPUI can paint. An unlisted keyword is ignored, like
  * every other invalid style value.
@@ -350,7 +391,13 @@ export type GridTrack =
 
 export type GridTemplate = number | GridTrack[]
 
-type NativeStateStyleKey = "hover" | "hoverWithin" | "active" | "focus" | "focusVisible"
+type NativeStateStyleKey =
+  | "transition"
+  | "hover"
+  | "hoverWithin"
+  | "active"
+  | "focus"
+  | "focusVisible"
 type NativeStateStyle = Omit<StyleDesc, NativeStateStyleKey>
 
 export interface StyleDesc {
@@ -426,8 +473,8 @@ export interface StyleDesc {
   textDecoration?: "underline" | "line-through"
   textTransform?: "none" | "uppercase" | "lowercase"
   textAlign?: "left" | "start" | "center" | "right"
-  lineHeight?: number
-  whiteSpace?: "normal" | "nowrap"
+  lineHeight?: LineHeightValue
+  whiteSpace?: "normal" | "nowrap" | "pre"
   textWrap?: "wrap" | "nowrap"
   textOverflow?: "ellipsis" | "ellipsis-start"
   lineClamp?: number
@@ -447,6 +494,9 @@ export interface StyleDesc {
   userSelect?: "text" | "none" | "auto"
   /** Selection wash colour for this subtree. Defaults to the theme accent at 35%. */
   selectionColor?: GpuixColor
+
+  /** Native, interruptible interpolation for the named properties. */
+  transition?: StyleTransition
 
   // Native state styles — applied by GPUI without a JS round trip.
   // Nesting is one level deep: a state style cannot contain another state style.
@@ -915,6 +965,8 @@ export interface NativeRenderer {
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   setRoot(id: number): void
   commitMutations(): void
+  /** Stable platform and renderer feature read. Legacy probes remain available. */
+  capabilities?(): RendererCapabilities
   /** Drop a buffered commit after JS-side contract validation fails. */
   discardMutations?(): void
   setCustomProp(id: number, key: string, valueJson: string | object | number | boolean | null): void
@@ -923,11 +975,15 @@ export interface NativeRenderer {
   setStrictStyles?(enabled: boolean): void
   /** Opt in to loopback/private URL images. Link-local and metadata ranges stay blocked. */
   setAllowPrivateNetworkImages?(enabled: boolean): void
+  /** Capture a frame in a capability-advertised image format. */
+  captureScreenshot?(path: string): void
   drainStyleDiagnostics?(): StyleDiagnostic[]
 
   // ── Application lifecycle ──────────────────────────────────────
   setMenus?(menus: MenuSpec[]): void
   quit?(): void
+  requiresTick?(): boolean
+  tick?(): boolean
   /** Install a coalesced native frame source. Returns false when timers must drive ticks. */
   setFrameRequestHandler?(handler: (() => void) | null): boolean
   /** Pump idle platform work without releasing a pending display-link frame token. */
@@ -967,6 +1023,8 @@ export interface NativeRenderer {
   // ── Window API ─────────────────────────────────────────────────
   /** Whether the native window is active and receiving key events. */
   isActive?(): boolean
+  /** Request foreground activation when `capabilities().window.activate` is true. */
+  activateWindow?(): void
   /** Reads the live logical window dimensions and device-pixel scale factor. */
   getWindowSize?(): { width: number; height: number; scaleFactor: number }
   /** Internal transport for renderer-global native window events. */
@@ -994,6 +1052,44 @@ export interface StyleDiagnostic {
 }
 
 export type DebugFrameOverlayMode = "hidden" | "minimal" | "full"
+
+export interface UnsupportedCapabilityError extends Error {
+  name: "UnsupportedCapabilityError"
+  code: "ERR_GPUX_UNSUPPORTED_CAPABILITY"
+  capability: string
+}
+
+/** Features offered by one renderer instance on its current platform. */
+export interface RendererCapabilities {
+  platform: "macos" | "windows" | "linux" | "freebsd" | "browser" | "unknown"
+  frameClock: {
+    /** The source actively driving frames now, not a platform default. */
+    kind: "display-link" | "timer" | "raf" | "manual"
+    requiresTick: boolean
+    /** `setFrameRequestHandler()` can select an external frame source. */
+    externalFrame: boolean
+  }
+  window: {
+    activation: boolean
+    activate: boolean
+    resize: boolean
+    multiple: boolean
+  }
+  images: {
+    privateNetwork: boolean
+  }
+  automation: {
+    click: boolean
+    hover: boolean
+    drag: boolean
+    scrollWheel: boolean
+    keyboard: "native" | "browser"
+    screenshot: boolean
+    screenshotFormats: Array<"png">
+    clock: boolean
+    tree: boolean
+  }
+}
 
 export interface EdgeInsets {
   top: number

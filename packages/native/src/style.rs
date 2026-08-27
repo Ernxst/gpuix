@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashSet;
 
 const MAX_LINEAR_GRADIENT_STOPS: usize = 8;
 
@@ -78,13 +79,110 @@ pub enum BackgroundValue {
     Image(BackgroundImageValue),
 }
 
-/// A dimension value that can be a number (pixels) or a string (percentage, auto, etc.)
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(untagged)]
+/// A validated native length. Expressions stay parsed in the retained style so
+/// rendering never has to re-accept an arbitrary CSS string.
+#[derive(Debug, Clone, PartialEq)]
 pub enum DimensionValue {
     Pixels(f64),
     Percentage(f64), // 0.0 to 1.0
+    Ch(f64),
+    Calc {
+        source: String,
+        left: Box<DimensionValue>,
+        operator: CalcOperator,
+        right: Box<DimensionValue>,
+    },
+    Clamp {
+        source: String,
+        min: Box<DimensionValue>,
+        preferred: Box<DimensionValue>,
+        max: Box<DimensionValue>,
+    },
     Auto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TransitionProperty {
+    Opacity,
+    BackgroundColor,
+    Color,
+    BorderColor,
+    OutlineColor,
+    Width,
+    Height,
+    MinWidth,
+    MinHeight,
+    MaxWidth,
+    MaxHeight,
+    Top,
+    Right,
+    Bottom,
+    Left,
+    BorderRadius,
+    BorderTopLeftRadius,
+    BorderTopRightRadius,
+    BorderBottomLeftRadius,
+    BorderBottomRightRadius,
+}
+
+impl TransitionProperty {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "opacity" => Self::Opacity,
+            "backgroundColor" => Self::BackgroundColor,
+            "color" => Self::Color,
+            "borderColor" => Self::BorderColor,
+            "outlineColor" => Self::OutlineColor,
+            "width" => Self::Width,
+            "height" => Self::Height,
+            "minWidth" => Self::MinWidth,
+            "minHeight" => Self::MinHeight,
+            "maxWidth" => Self::MaxWidth,
+            "maxHeight" => Self::MaxHeight,
+            "top" => Self::Top,
+            "right" => Self::Right,
+            "bottom" => Self::Bottom,
+            "left" => Self::Left,
+            "borderRadius" => Self::BorderRadius,
+            "borderTopLeftRadius" => Self::BorderTopLeftRadius,
+            "borderTopRightRadius" => Self::BorderTopRightRadius,
+            "borderBottomLeftRadius" => Self::BorderBottomLeftRadius,
+            "borderBottomRightRadius" => Self::BorderBottomRightRadius,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TransitionEasing {
+    Name(String),
+    CubicBezier([f64; 4]),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StyleTransition {
+    pub(crate) properties: Vec<TransitionProperty>,
+    pub(crate) duration_ms: f64,
+    pub(crate) delay_ms: f64,
+    pub(crate) easing: TransitionEasing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CalcOperator {
+    Add,
+    Subtract,
+}
+
+/// CSS treats an unadorned line-height as a multiplier, while a pixel length
+/// is absolute. A JSON number remains the backwards-compatible pixel shorthand.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum LineHeightValue {
+    Pixels(f64),
+    Unitless(String),
 }
 
 /// One serializable CSS Grid track. Track lists deliberately use tagged objects
@@ -159,7 +257,7 @@ impl<'de> Deserialize<'de> for DimensionValue {
             type Value = DimensionValue;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a number, a percentage string, or 'auto'")
+                formatter.write_str("a number, px, %, ch, calc(), clamp(), or 'auto'")
             }
 
             fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
@@ -187,24 +285,172 @@ impl<'de> Deserialize<'de> for DimensionValue {
             where
                 E: de::Error,
             {
-                if value == "auto" {
-                    return Ok(DimensionValue::Auto);
-                }
-                if let Some(percentage) = value.strip_suffix('%') {
-                    return percentage
-                        .parse::<f64>()
-                        .map(|number| DimensionValue::Percentage(number / 100.0))
-                        .map_err(|_| de::Error::custom(format!("invalid percentage: {value}")));
-                }
-                value
-                    .parse::<f64>()
-                    .map(DimensionValue::Pixels)
-                    .map_err(|_| de::Error::custom(format!("invalid dimension: {value}")))
+                parse_dimension(value).map_err(de::Error::custom)
             }
         }
 
         deserializer.deserialize_any(DimensionVisitor)
     }
+}
+
+impl Serialize for DimensionValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Pixels(value) => serializer.serialize_f64(*value),
+            // Retained-tree inspection has historically exposed percentages as
+            // their normalized fraction (for example, "100%" as a fraction).
+            // Preserve that public diagnostic/test representation.
+            Self::Percentage(value) => serializer.serialize_f64(*value),
+            Self::Ch(value) => serializer.serialize_str(&format!("{value}ch")),
+            Self::Calc { source, .. } | Self::Clamp { source, .. } => {
+                serializer.serialize_str(source)
+            }
+            Self::Auto => serializer.serialize_str("auto"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LineHeightValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+
+        struct LineHeightVisitor;
+        impl<'de> Visitor<'de> for LineHeightVisitor {
+            type Value = LineHeightValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a positive pixel number, px length, or unitless multiplier")
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LineHeightValue::Pixels(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LineHeightValue::Pixels(value as f64))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LineHeightValue::Pixels(value as f64))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if let Some(pixels) = value.strip_suffix("px") {
+                    return pixels
+                        .parse::<f64>()
+                        .map(LineHeightValue::Pixels)
+                        .map_err(|_| de::Error::custom("invalid px lineHeight at byte 0"));
+                }
+                match value.parse::<f64>() {
+                    Ok(number) if number.is_finite() => {
+                        Ok(LineHeightValue::Unitless(value.to_owned()))
+                    }
+                    _ => Err(de::Error::custom("invalid unitless lineHeight at byte 0")),
+                }
+            }
+        }
+        deserializer.deserialize_any(LineHeightVisitor)
+    }
+}
+
+fn parse_dimension(value: &str) -> Result<DimensionValue, String> {
+    // Keep this compact, canonical grammar in lockstep with the literal types
+    // in packages/react/src/types/host.ts. JSON numbers remain pixels; strings
+    // must name their unit, and calc has exactly one spaced binary operator.
+    let value = value.trim();
+    if value == "auto" {
+        return Ok(DimensionValue::Auto);
+    }
+    if let Some(inner) = value
+        .strip_prefix("calc(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        let (index, operator) = find_calc_operator(inner).ok_or_else(|| {
+            "invalid calc() at byte 5: expected `length + length` or `length - length`".to_string()
+        })?;
+        let left = parse_length_atom(&inner[..index])
+            .map_err(|error| format!("invalid calc() at byte 5: {error}"))?;
+        let right = parse_length_atom(&inner[index + 3..])
+            .map_err(|error| format!("invalid calc() at byte {}: {error}", index + 8))?;
+        return Ok(DimensionValue::Calc {
+            source: value.to_owned(),
+            left: Box::new(left),
+            operator,
+            right: Box::new(right),
+        });
+    }
+    if let Some(inner) = value
+        .strip_prefix("clamp(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        let parts: Vec<_> = inner.split(", ").collect();
+        if parts.len() != 3 {
+            return Err("invalid clamp() at byte 6: expected three comma-separated lengths".into());
+        }
+        let parse = |part: &str| parse_length_atom(part).map(Box::new);
+        let min = parse(parts[0]).map_err(|error| format!("invalid clamp() at byte 6: {error}"))?;
+        let preferred = parse(parts[1])
+            .map_err(|error| format!("invalid clamp() at byte {}: {error}", parts[0].len() + 7))?;
+        let max = parse(parts[2]).map_err(|error| {
+            format!(
+                "invalid clamp() at byte {}: {error}",
+                parts[0].len() + parts[1].len() + 8
+            )
+        })?;
+        return Ok(DimensionValue::Clamp {
+            source: value.to_owned(),
+            min,
+            preferred,
+            max,
+        });
+    }
+    parse_length_atom(value)
+}
+
+fn parse_length_atom(value: &str) -> Result<DimensionValue, String> {
+    let parse = |number: &str, unit: &str| match number.parse::<f64>() {
+        Ok(value) if value.is_finite() => Ok(value),
+        _ => Err(format!("invalid {unit} length at byte 0")),
+    };
+    if let Some(number) = value.strip_suffix("px") {
+        return parse(number, "px").map(DimensionValue::Pixels);
+    }
+    if let Some(number) = value.strip_suffix('%') {
+        return parse(number, "%").map(|value| DimensionValue::Percentage(value / 100.0));
+    }
+    if let Some(number) = value.strip_suffix("ch") {
+        return parse(number, "ch").map(DimensionValue::Ch);
+    }
+    Err("invalid length at byte 0: expected a number with px, %, or ch".into())
+}
+
+fn find_calc_operator(value: &str) -> Option<(usize, CalcOperator)> {
+    value
+        .find(" + ")
+        .map(|index| (index, CalcOperator::Add))
+        .or_else(|| {
+            value
+                .find(" - ")
+                .map(|index| (index, CalcOperator::Subtract))
+        })
 }
 
 /// Style description retained by the native renderer.
@@ -284,7 +530,7 @@ pub struct StyleDesc {
     pub text_decoration: Option<String>,
     pub text_transform: Option<String>,
     pub text_align: Option<String>,
-    pub line_height: Option<f64>,
+    pub line_height: Option<LineHeightValue>,
     pub white_space: Option<String>,
     pub text_wrap: Option<String>,
     pub text_overflow: Option<String>,
@@ -298,6 +544,8 @@ pub struct StyleDesc {
     pub pointer_events: Option<String>,
     pub user_select: Option<String>,
     pub selection_color: Option<String>,
+
+    pub transition: Option<StyleTransition>,
 
     pub hover: Option<Box<StyleDesc>>,
     pub hover_within: Option<Box<StyleDesc>>,
@@ -716,6 +964,157 @@ fn parse_nested_style(
     Some(Box::new(nested.style))
 }
 
+fn parse_transition(
+    value: &serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<StyleTransition> {
+    let Some(object) = value.as_object() else {
+        reject(
+            problems,
+            "transition",
+            value,
+            "expected a transition object",
+        );
+        return None;
+    };
+
+    let mut valid = true;
+    for (key, value) in object {
+        if !matches!(
+            key.as_str(),
+            "properties" | "durationMs" | "delayMs" | "easing"
+        ) {
+            reject(
+                problems,
+                format!("transition.{key}"),
+                value,
+                "unsupported transition field",
+            );
+            valid = false;
+        }
+    }
+
+    let mut properties = Vec::new();
+    let mut seen = HashSet::new();
+    match object
+        .get("properties")
+        .and_then(serde_json::Value::as_array)
+    {
+        Some(values) if values.is_empty() => {
+            reject(
+                problems,
+                "transition.properties",
+                object.get("properties").unwrap(),
+                "expected at least one transition property",
+            );
+            valid = false;
+        }
+        Some(values) => {
+            for (index, value) in values.iter().enumerate() {
+                let path = format!("transition.properties[{index}]");
+                let Some(name) = value.as_str() else {
+                    reject(problems, path, value, "expected a property name");
+                    valid = false;
+                    continue;
+                };
+                let Some(property) = TransitionProperty::from_name(name) else {
+                    reject(problems, path, value, "property is not transitionable");
+                    valid = false;
+                    continue;
+                };
+                if !seen.insert(property) {
+                    reject(problems, path, value, "duplicate transition property");
+                    valid = false;
+                    continue;
+                }
+                properties.push(property);
+            }
+        }
+        None => {
+            reject(
+                problems,
+                "transition.properties",
+                object.get("properties").unwrap_or(&serde_json::Value::Null),
+                "expected an array of transitionable property names",
+            );
+            valid = false;
+        }
+    }
+
+    let duration_ms = match object.get("durationMs").and_then(serde_json::Value::as_f64) {
+        Some(value) if valid_transition_milliseconds(value) => value,
+        _ => {
+            reject(
+                problems,
+                "transition.durationMs",
+                object.get("durationMs").unwrap_or(&serde_json::Value::Null),
+                "expected a supported finite non-negative number of milliseconds",
+            );
+            valid = false;
+            0.0
+        }
+    };
+    let delay_ms = match object.get("delayMs") {
+        None => 0.0,
+        Some(value) => match value.as_f64() {
+            Some(value) if valid_transition_milliseconds(value) => value,
+            _ => {
+                reject(
+                    problems,
+                    "transition.delayMs",
+                    value,
+                    "expected a supported finite non-negative number of milliseconds",
+                );
+                valid = false;
+                0.0
+            }
+        },
+    };
+    let easing = match object.get("easing") {
+        None => TransitionEasing::Name("ease".to_string()),
+        Some(value) => match serde_json::from_value::<TransitionEasing>(value.clone()) {
+            Ok(TransitionEasing::Name(name))
+                if matches!(
+                    name.as_str(),
+                    "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut"
+                ) =>
+            {
+                TransitionEasing::Name(name)
+            }
+            Ok(TransitionEasing::CubicBezier(curve))
+                if curve.iter().all(|value| value.is_finite())
+                    && (0.0..=1.0).contains(&curve[0])
+                    && (0.0..=1.0).contains(&curve[2]) =>
+            {
+                TransitionEasing::CubicBezier(curve)
+            }
+            _ => {
+                reject(
+                    problems,
+                    "transition.easing",
+                    value,
+                    "expected linear, ease, easeIn, easeOut, easeInOut, or a cubic-bezier tuple with x values from 0 through 1",
+                );
+                valid = false;
+                TransitionEasing::Name("ease".to_string())
+            }
+        },
+    };
+
+    valid.then_some(StyleTransition {
+        properties,
+        duration_ms,
+        delay_ms,
+        easing,
+    })
+}
+
+fn valid_transition_milliseconds(value: f64) -> bool {
+    value.is_finite()
+        && value >= 0.0
+        && std::time::Duration::try_from_secs_f64(value / 1000.0).is_ok()
+}
+
 /// Parse one style object field-by-field. A malformed field is omitted while valid
 /// siblings survive, so one bad value can never abort a React commit.
 pub fn parse_style_value(value: &serde_json::Value) -> ParsedStyle {
@@ -787,6 +1186,19 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
     }
 
     'fields: for (key, value) in object {
+        if key == "transition" {
+            if prefix.is_empty() {
+                parsed.style.transition = parse_transition(value, &mut parsed.problems);
+            } else {
+                reject(
+                    &mut parsed.problems,
+                    property!("transition"),
+                    value,
+                    "nested transitions are not supported; declare transition on the base style",
+                );
+            }
+            continue;
+        }
         enum_field!(key, value, "display", display, ["flex", "grid"]);
         enum_field!(key, value, "visibility", visibility, ["visible", "hidden"]);
         enum_field!(
@@ -1076,8 +1488,18 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             text_align,
             ["left", "start", "center", "right"]
         );
-        number_field!(key, value, "lineHeight", line_height);
-        enum_field!(key, value, "whiteSpace", white_space, ["normal", "nowrap"]);
+        if key == "lineHeight" {
+            parsed.style.line_height =
+                decode(&property!("lineHeight"), value, &mut parsed.problems);
+            continue;
+        }
+        enum_field!(
+            key,
+            value,
+            "whiteSpace",
+            white_space,
+            ["normal", "nowrap", "pre"]
+        );
         if key == "textWrap" {
             let property = property!("textWrap");
             let wrap = decode::<String>(&property, value, &mut parsed.problems);
@@ -1245,12 +1667,27 @@ fn validate_ranges(parsed: &mut ParsedStyle, prefix: &str) {
         |value| value <= 0.0,
         "expected a positive number"
     );
-    reject_if!(
-        line_height,
-        "lineHeight",
-        |value| value <= 0.0,
-        "expected a positive number"
-    );
+    if let Some(line_height) = parsed.style.line_height.as_ref() {
+        let value = match line_height {
+            LineHeightValue::Pixels(value) => *value,
+            LineHeightValue::Unitless(value) => value.parse::<f64>().unwrap_or(f64::NAN),
+        };
+        if !(value > 0.0 && value.is_finite()) {
+            let value = serde_json::to_value(line_height).unwrap();
+            parsed.style.line_height = None;
+            let property = if prefix.is_empty() {
+                "lineHeight".to_string()
+            } else {
+                format!("{prefix}.lineHeight")
+            };
+            reject(
+                &mut parsed.problems,
+                property,
+                &value,
+                "expected a positive pixel length or unitless multiplier",
+            );
+        }
+    }
     reject_if!(
         line_clamp,
         "lineClamp",
@@ -1518,6 +1955,67 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn parses_expressive_dimensions_once_with_their_css_source() {
+        let parsed = parse_style_value(&json!({
+            "width": "calc(100% - 4ch)",
+            "minWidth": "24ch",
+            "maxWidth": "clamp(240px, 70%, 960px)",
+            "lineHeight": "1.4",
+        }));
+
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert!(matches!(
+            parsed.style.width,
+            Some(DimensionValue::Calc { .. })
+        ));
+        assert!(matches!(
+            parsed.style.min_width,
+            Some(DimensionValue::Ch(24.0))
+        ));
+        assert!(matches!(
+            parsed.style.max_width,
+            Some(DimensionValue::Clamp { .. })
+        ));
+        assert_eq!(
+            parsed.style.line_height,
+            Some(LineHeightValue::Unitless("1.4".into()))
+        );
+        assert_eq!(
+            serde_json::to_value(parsed.style).unwrap()["width"],
+            "calc(100% - 4ch)"
+        );
+    }
+
+    #[test]
+    fn reports_expression_parse_positions_without_dropping_valid_siblings() {
+        let parsed = parse_style_value(&json!({
+            "width": "calc(100% - 2rem)",
+            "height": 40,
+        }));
+
+        assert_eq!(parsed.style.height, Some(DimensionValue::Pixels(40.0)));
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "width");
+        assert_eq!(parsed.problems[0].value, "\"calc(100% - 2rem)\"");
+        assert!(parsed.problems[0].reason.contains("byte"));
+    }
+
+    #[test]
+    fn keeps_the_length_grammar_in_lockstep_with_the_literal_types() {
+        for value in [
+            "12",
+            "calc(24ch)",
+            "calc(100%-4ch)",
+            "calc(calc(100% - 4ch) + 2px)",
+        ] {
+            let parsed = parse_style_value(&json!({ "width": value, "height": 40 }));
+            assert_eq!(parsed.style.height, Some(DimensionValue::Pixels(40.0)));
+            assert_eq!(parsed.problems.len(), 1, "{value}");
+            assert_eq!(parsed.problems[0].property, "width", "{value}");
+        }
+    }
+
+    #[test]
     fn pointer_hit_testing_follows_interaction_and_explicit_overrides() {
         let passive = StyleDesc::default();
         assert!(!should_occlude(Some(&passive), false));
@@ -1553,6 +2051,51 @@ mod tests {
         assert_eq!(parsed.problems[0].value, "\"auto\"");
         assert_eq!(parsed.problems[1].property, "textTranform");
         assert_eq!(parsed.problems[2].property, "hover.opacity");
+    }
+
+    #[test]
+    fn malformed_transition_specs_are_rejected_as_a_whole() {
+        let parsed = parse_style_value(&json!({
+            "opacity": 0.5,
+            "transition": {
+                "properties": ["opacity", "display", "opacity"],
+                "durationMs": -1,
+                "easing": [2, 0, 0, 1],
+                "duration": 100
+            }
+        }));
+
+        assert_eq!(parsed.style.opacity, Some(0.5));
+        assert_eq!(parsed.style.transition, None);
+        let properties = parsed
+            .problems
+            .iter()
+            .map(|problem| problem.property.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            properties,
+            [
+                "transition.duration",
+                "transition.properties[1]",
+                "transition.properties[2]",
+                "transition.durationMs",
+                "transition.easing"
+            ]
+        );
+
+        let nested = parse_style_value(&json!({
+            "hover": {
+                "transition": { "properties": ["opacity"], "durationMs": 100 }
+            }
+        }));
+        assert_eq!(nested.problems[0].property, "hover.transition");
+        assert!(nested.style.hover.unwrap().transition.is_none());
+
+        let oversized = parse_style_value(&json!({
+            "transition": { "properties": ["opacity"], "durationMs": 1e300 }
+        }));
+        assert_eq!(oversized.style.transition, None);
+        assert_eq!(oversized.problems[0].property, "transition.durationMs");
     }
 
     #[test]
@@ -1825,6 +2368,12 @@ mod tests {
             "pointerEvents": "auto",
             "userSelect": "text",
             "selectionColor": "red",
+            "transition": {
+                "properties": ["opacity", "backgroundColor", "width"],
+                "durationMs": 140,
+                "delayMs": 20,
+                "easing": "ease"
+            },
             "hover": { "color": "blue" },
             "hoverWithin": { "backgroundColor": "magenta" },
             "active": { "color": "green" },

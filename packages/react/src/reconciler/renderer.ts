@@ -83,10 +83,11 @@ export function enableAutomation(renderer: LiveAutomationRenderer): void {
 
 export function startFrameLoop(
   renderer: Pick<GpuixRenderer, "requiresTick" | "tick"> &
-    Partial<Pick<GpuixRenderer, "quit" | "setFrameRequestHandler" | "tickIdle">>,
+    Partial<Pick<GpuixRenderer, "quit" | "setFrameRequestHandler" | "tickIdle" | "capabilities">>,
   options: FrameLoopOptions = {}
 ): FrameLoop {
-  if (!renderer.requiresTick()) {
+  const capabilities = renderer.capabilities?.()
+  if (capabilities ? !capabilities.frameClock.requiresTick : !renderer.requiresTick()) {
     return { stop: () => {} }
   }
 
@@ -168,7 +169,9 @@ export function startFrameLoop(
     scheduleTimer(() => drive(nativeFrameSource ? "idle" : "timer"), wait)
   }
 
-  if (renderer.setFrameRequestHandler && renderer.tickIdle) {
+  const canUseExternalFrame =
+    capabilities === undefined || capabilities.frameClock.externalFrame
+  if (canUseExternalFrame && renderer.setFrameRequestHandler && renderer.tickIdle) {
     try {
       nativeFrameSource = renderer.setFrameRequestHandler(() => drive("native"))
     } catch (error) {
