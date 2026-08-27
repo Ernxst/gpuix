@@ -1443,6 +1443,57 @@ Adding `onKeyDown`, `onKeyUp`, `onFocus`, or `onBlur` creates a persistent focus
 handle. Add `tabIndex` as well when the element must be reachable with Tab.
 Removing `tabIndex` removes the element from the tab order.
 
+## Native accessibility
+
+Semantic host elements feed GPUI's AccessKit tree directly. Roles are always
+explicit: GPUIX does not infer a role from JSX aliases such as `<button>` or
+`<h2>`, so custom controls and shared JSX have the same predictable contract.
+
+```tsx
+<button
+  role="button"
+  ariaLabel="Save factory"
+  tabIndex={0}
+  onClick={save}
+  onAccessibilityAction={(event) => {
+    if (event.accessibilityAction === 'activate') save()
+  }}
+>
+  <text>Save</text>
+</button>
+```
+
+The initial role set is `button`, `checkbox`, `heading`, `link`, `slider`,
+`spinbutton`, and `switch`. These props map without inference to their GPUI /
+AccessKit equivalents:
+
+| React prop | Native meaning |
+|---|---|
+| `ariaLabel`, `ariaDescription` | Accessible name and supplementary description |
+| `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
+| `ariaExpanded`, `ariaSelected`, `disabled` | Boolean semantic states |
+| `ariaValue` | Human-readable value text |
+| `ariaValueMin`, `ariaValueMax`, `ariaValueNow` | Numeric value range and current value |
+| `ariaLevel` | One-based heading level |
+
+`onAccessibilityAction` reports `activate`, `increment`, `decrement`, or
+`focus`. Buttons, checkboxes, links, and switches expose Activate; sliders and
+spin buttons expose Increment and Decrement. Focus is routed through the same
+persistent `FocusHandle` used by keyboard navigation. The application remains
+responsible for applying the requested state change.
+
+Semantic nodes use GPUIX's stable retained element identity for their AccessKit
+node ID. The author `id` remains platform-visible metadata and is not the node
+identity source, so keyed React reorders preserve IDs and unmounts remove the
+old node.
+
+GPU-backed tests can inspect GPUI's real last-drawn AccessKit tree with
+`renderer.getAccessibilityTree()` and inject platform requests with
+`renderer.nativeSimulateAccessibilityAction(accesskitId, action)`. These are
+explicit draw-boundary reads, not a parallel reconstruction from React props.
+See [the platform accessibility smoke guide](./docs/accessibility-smoke.md) for
+the manual OS and screen-reader checks that snapshots cannot prove.
+
 ## Headless controls
 
 The built-in controls are **unstyled primitives**, not a fixed component

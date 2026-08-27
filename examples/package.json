@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "accessibility": "bun --hot accessibility.tsx",
     "counter": "bun --hot counter.tsx",
     "diff": "bun --hot diff.tsx",
     "frame-pacing:smoke": "bun frame-pacing.smoke.ts",
