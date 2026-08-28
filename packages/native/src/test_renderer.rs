@@ -76,7 +76,7 @@ impl Drop for VisualTestState {
         self.cx.update(|cx| {
             view.update(cx, |view, cx| {
                 if let Ok(mut tree) = view.tree.lock() {
-                    tree.root_id = None;
+                    tree.set_root(None);
                 }
                 view.custom_registry.destroy_all();
                 view.focus_subscriptions.clear();
@@ -635,7 +635,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn set_root(&self, id: f64) -> Result<()> {
         let id = to_element_id(id)?;
-        self.tree.lock().unwrap().root_id = Some(id);
+        self.tree.lock().unwrap().set_root(Some(id));
         Ok(())
     }
 

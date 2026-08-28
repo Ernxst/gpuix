@@ -266,6 +266,17 @@ impl RetainedTree {
             .insert(id, RetainedElement::new(id, element_type, revision));
     }
 
+    /// Set the root selected by `appendChildToContainer`.
+    ///
+    /// The root determines the whole serialized tree, so it needs a revision
+    /// even though there is no element subtree to invalidate.
+    pub fn set_root(&mut self, root_id: Option<u64>) {
+        if self.root_id != root_id {
+            self.root_id = root_id;
+            self.take_revision();
+        }
+    }
+
     fn take_revision(&mut self) -> u64 {
         let revision = self.next_revision;
         self.next_revision = self.next_revision.wrapping_add(1).max(1);
@@ -318,7 +329,7 @@ impl RetainedTree {
         let mut destroyed = Vec::new();
         self.destroy_element_recursive(id, &mut destroyed);
         if self.root_id == Some(id) {
-            self.root_id = None;
+            self.set_root(None);
         }
         if let Some(parent_id) = parent_id {
             self.mark_changed(parent_id);
@@ -435,12 +446,16 @@ impl RetainedTree {
     }
 
     pub fn set_event_listener(&mut self, id: u64, event_type: String, has_handler: bool) {
+        let mut changed = false;
         if let Some(element) = self.elements.get_mut(&id) {
-            if has_handler {
-                element.events.insert(event_type);
+            changed = if has_handler {
+                element.events.insert(event_type)
             } else {
-                element.events.remove(&event_type);
-            }
+                element.events.remove(&event_type)
+            };
+        }
+        if changed {
+            self.mark_render_changed(id);
         }
     }
 
@@ -461,18 +476,18 @@ impl RetainedTree {
             // `autoFocus` applies to every element type, so it is lifted out of
             // the custom-prop map that only custom elements read.
             if key == "autoFocus" {
-                element.auto_focus = value.as_bool().unwrap_or(false);
-                return;
-            }
-            if key == "testId" {
-                element.test_id = value.as_str().map(str::to_string);
-                return;
-            }
-            if key == "id" {
-                element.author_id = value.as_str().map(str::to_string);
-                return;
-            }
-            if key == "data-testid" {
+                let auto_focus = value.as_bool().unwrap_or(false);
+                changed = element.auto_focus != auto_focus;
+                element.auto_focus = auto_focus;
+            } else if key == "testId" {
+                let test_id = value.as_str().map(str::to_string);
+                changed = element.test_id != test_id;
+                element.test_id = test_id;
+            } else if key == "id" {
+                let author_id = value.as_str().map(str::to_string);
+                changed = element.author_id != author_id;
+                element.author_id = author_id;
+            } else if key == "data-testid" {
                 let normalized = match value {
                     serde_json::Value::Null => None,
                     serde_json::Value::String(value) => Some(value),
@@ -728,10 +743,15 @@ mod tests {
     #[test]
     fn destroying_the_root_clears_it() {
         let mut tree = tree_with_child();
-        tree.root_id = Some(1);
+        tree.set_root(Some(1));
+        let before = tree.next_revision;
         tree.destroy_element(1);
         assert_eq!(tree.root_id, None);
         assert!(tree.elements.is_empty());
+        assert!(
+            tree.next_revision > before,
+            "destroying the root must advance next_revision"
+        );
     }
 
     #[test]
@@ -740,7 +760,7 @@ mod tests {
         tree.create_element(1, "div".to_string());
         tree.create_element(2, "div".to_string());
         tree.create_element(3, "div".to_string());
-        tree.root_id = Some(1);
+        tree.set_root(Some(1));
         tree.append_child(1, 2);
         tree.append_child(2, 3);
 
@@ -749,6 +769,46 @@ mod tests {
         assert!(!tree.is_attached(2));
         assert!(!tree.is_attached(3));
         assert!(tree.elements.contains_key(&3));
+    }
+
+    #[test]
+    fn snapshot_mutations_advance_next_revision() {
+        let mut tree = RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+
+        let mut assert_advanced = |mutation: &str, mutate: &mut dyn FnMut(&mut RetainedTree)| {
+            let before = tree.next_revision;
+            mutate(&mut tree);
+            assert!(
+                tree.next_revision > before,
+                "{mutation} must advance next_revision"
+            );
+        };
+
+        assert_advanced("adding an event listener", &mut |tree| {
+            tree.set_event_listener(1, "click".to_string(), true)
+        });
+        assert_advanced("removing an event listener", &mut |tree| {
+            tree.set_event_listener(1, "click".to_string(), false)
+        });
+        assert_advanced("setting autoFocus", &mut |tree| {
+            tree.set_custom_prop(1, "autoFocus".to_string(), serde_json::json!(true))
+        });
+        assert_advanced("setting testId", &mut |tree| {
+            tree.set_custom_prop(1, "testId".to_string(), serde_json::json!("test-id"))
+        });
+        assert_advanced("setting id", &mut |tree| {
+            tree.set_custom_prop(1, "id".to_string(), serde_json::json!("author-id"))
+        });
+        assert_advanced("setting data-testid", &mut |tree| {
+            tree.set_custom_prop(
+                1,
+                "data-testid".to_string(),
+                serde_json::json!("data-test-id"),
+            )
+        });
+        assert_advanced("setting the root", &mut |tree| tree.set_root(Some(1)));
+        assert_advanced("clearing the root", &mut |tree| tree.set_root(None));
     }
 
     /// The whole point of `search_revision`: `highlight` is a custom prop, so
@@ -859,7 +919,7 @@ mod tests {
     fn destroying_the_tree_releases_its_styles() {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
-        tree.root_id = Some(1);
+        tree.set_root(Some(1));
 
         let wide = STYLE_SWEEP_FLOOR * 4;
         for index in 0..wide {
