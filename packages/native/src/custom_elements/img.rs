@@ -1618,7 +1618,7 @@ impl CustomElement for ImgElement {
             let fallback = Self::fallback(format!("img: invalid src: {error}")).id(
                 gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)),
             );
-            let fallback = super::custom_surface(fallback, &ctx);
+            let fallback = super::custom_surface(fallback, &ctx, cx);
             return apply_image_accessibility(&ctx, fallback).into_any_element();
         }
 
@@ -1627,7 +1627,7 @@ impl CustomElement for ImgElement {
                 "__gpuix_img_{}",
                 ctx.id
             )));
-            let fallback = super::custom_surface(fallback, &ctx);
+            let fallback = super::custom_surface(fallback, &ctx, cx);
             return apply_image_accessibility(&ctx, fallback).into_any_element();
         };
 
@@ -1712,7 +1712,7 @@ impl CustomElement for ImgElement {
         }
 
         let el = apply_image_accessibility(&ctx, el);
-        let el = super::wire_standard_events(el, &ctx);
+        let el = super::wire_standard_events(el, &ctx, cx);
         crate::automation::track_own_bounds(el, ctx.id).into_any_element()
     }
 
@@ -1840,7 +1840,7 @@ impl CustomElement for SvgElement {
         &mut self,
         ctx: CustomRenderContext,
         _window: &mut gpui::Window,
-        _cx: &mut gpui::Context<crate::renderer::GpuixView>,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
@@ -1851,7 +1851,7 @@ impl CustomElement for SvgElement {
         };
         let element_id = gpui::SharedString::from(format!("__gpuix_svg_{}", ctx.id));
         let Some(bytes) = bytes else {
-            let empty = super::custom_surface(gpui::div().id(element_id), &ctx);
+            let empty = super::custom_surface(gpui::div().id(element_id), &ctx, cx);
             return empty.into_any_element();
         };
 
@@ -1863,7 +1863,7 @@ impl CustomElement for SvgElement {
         if let Some(style) = ctx.style {
             icon = crate::renderer::apply_interactive_styles(icon, style);
         }
-        let icon = super::wire_standard_events(icon, &ctx);
+        let icon = super::wire_standard_events(icon, &ctx, cx);
         crate::automation::track_own_bounds(icon, ctx.id).into_any_element()
     }
 

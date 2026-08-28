@@ -843,7 +843,7 @@ the unavailable feature.
 ## Native animations
 
 GPUIX has two native animation surfaces. A style `transition` animates ordinary
-style changes and native `hover`, `active`, `focus`, and `focusVisible`
+style changes and native `hover`, `hoverWithin`, `active`, `focus`, and `focusVisible`
 refinements. `motion.div` is the imperative target-animation surface. Both
 retain their interpolation state in Rust and request frames from GPUI's native
 display-link clock; neither uses JavaScript timers.
@@ -890,18 +890,28 @@ function HoverCard() {
 The same declaration animates React-driven changes to those fields. An
 interrupted transition retargets from its current painted value. Unlisted
 fields update immediately, and removing the element discards its native track.
-Transitions currently run on the built-in `<div>` and `<text>` hosts. Native
-custom elements and `<virtual-list>` keep their declared snap semantics: they
-apply the target immediately and create neither a retained track nor frame
-requests.
+Transitions run on the built-in `<div>` and `<text>` hosts and on the styled
+outer container of `<img>`, `<canvas>`, `<code>`, `<diff>`, `<input>`,
+`<textarea>`, `<markdown>`, and `<anchored>`. `<virtual-list>` keeps its declared
+snap semantics and creates neither a retained track nor frame requests.
 
-| Group | Transition properties |
-|---|---|
-| Alpha | `opacity` |
-| Colour | `backgroundColor`, `color`, `borderColor`, `outlineColor` |
-| Size | `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` |
-| Inset | `top`, `right`, `bottom`, `left` |
-| Radius | `borderRadius` and the four corner-radius fields |
+| Group | Transition properties | Surface |
+|---|---|---|
+| Alpha | `opacity` | Hosts and custom outer containers |
+| Box colour | `backgroundColor`, `borderColor`, `outlineColor` | Hosts and custom outer containers |
+| Text colour | `color` | `<div>` and `<text>` only |
+| Size | `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` | Hosts and custom outer containers |
+| Inset | `top`, `right`, `bottom`, `left` | Hosts and custom outer containers |
+| Radius | `borderRadius` and the four corner-radius fields | Hosts and custom outer containers |
+
+A custom transition never targets element-owned painting: canvas display-list
+colours, syntax-highlight runs and gutters, diff rows, editor text, markdown
+runs, and image contents remain under their adapter or content API. Declaring
+`color` as a custom transition property is therefore diagnosed instead of
+returning an interpolated resolved value while those pixels stay unchanged.
+Custom elements also do not paint `hoverWithin`; put that state and transition
+on a `<div>` or `<text>` wrapper. Strict roots reject both declarations, while
+compatibility roots warn once per element.
 
 `durationMs` is required and uses milliseconds; `delayMs` defaults to `0`.
 `easing` accepts `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut`, or a

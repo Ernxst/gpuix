@@ -5409,7 +5409,7 @@ impl GpuixView {
         }
     }
 
-    fn update_hover_target(
+    pub(crate) fn update_hover_target(
         &mut self,
         id: u64,
         is_hovered: bool,
@@ -6508,7 +6508,28 @@ pub(crate) fn build_element(
     };
 
     let declared_style = element.style.as_deref();
-    let supports_style_transitions = matches!(element.element_type.as_str(), "div" | "text" | "img");
+    let parent_inherited = ctx.inherited.clone();
+    // Only host containers install GPUI's group_hover refinement. Custom
+    // surfaces still deliberately exclude hoverWithin painting, so a retained
+    // transition must not introduce that separate capability by accident.
+    let hover_within = matches!(element.element_type.as_str(), "div" | "text")
+        && parent_inherited
+            .hover_group_id
+            .and_then(|group_id| ctx.interactive_style_states.get(&group_id))
+            .is_some_and(|state| state.hovered);
+    let supports_style_transitions = matches!(
+        element.element_type.as_str(),
+        "div"
+            | "text"
+            | "img"
+            | "canvas"
+            | "code"
+            | "diff"
+            | "input"
+            | "textarea"
+            | "markdown"
+            | "anchored"
+    );
     let transitioned_style = if supports_style_transitions {
         if let Some(style) = declared_style.filter(|style| style.transition.is_some()) {
             let focused = ctx
@@ -6520,9 +6541,15 @@ pub(crate) fn build_element(
                 focus_visible: focused && window.last_input_was_keyboard(),
             };
             let state = ctx.transition_states.entry(id).or_insert_with(|| {
-                crate::motion::StyleTransitionState::new(style, focus_state, ctx.now)
+                crate::motion::StyleTransitionState::new(style, focus_state, hover_within, ctx.now)
             });
-            state.sync(style, focus_state, ctx.now, ctx.reduce_motion);
+            state.sync(
+                style,
+                focus_state,
+                hover_within,
+                ctx.now,
+                ctx.reduce_motion,
+            );
             let frame = state.frame(ctx.now, ctx.reduce_motion);
             *ctx.animation_active |= frame.active;
             *ctx.style_transition_active |= frame.active;
@@ -6532,8 +6559,8 @@ pub(crate) fn build_element(
             None
         }
     } else {
-        // Custom renderers and virtual lists own their styling semantics. They
-        // receive the declared target immediately and never retain a track.
+        // Virtual lists and custom renderers outside the supported surface
+        // family receive the declared target immediately and retain no track.
         ctx.transition_states.remove(&id);
         None
     };
@@ -6585,7 +6612,6 @@ pub(crate) fn build_element(
         .custom_props
         .get("hoverGroup")
         .and_then(serde_json::Value::as_str);
-    let parent_inherited = ctx.inherited.clone();
     let font = parent_inherited.font_for(layered_style, window);
     // Percentage terms stay deferred through GPUI/Taffy, where the layout
     // algorithm supplies the containing block's content size. Only `ch` is
@@ -6598,10 +6624,6 @@ pub(crate) fn build_element(
         .get(&id)
         .is_some_and(|handle| handle.is_focused(window));
     let interaction = ctx.interactive_style_states.get(&id).copied().unwrap_or_default();
-    let hover_within = parent_inherited
-        .hover_group_id
-        .and_then(|group_id| ctx.interactive_style_states.get(&group_id))
-        .is_some_and(|state| state.hovered);
     let current_color = resolved_current_color(
         style,
         focused,
@@ -6662,6 +6684,7 @@ pub(crate) fn build_element(
                 id,
                 retained_element: element,
                 events: &element.events,
+                tracks_mouse_hover: tracks_mouse_hover_events(element, ctx.tree),
                 event_callback: ctx.event_callback,
                 focus_handle: ctx.focus_handles.get(&id),
                 style,

@@ -213,8 +213,13 @@ pub(crate) struct StyleTransitionState {
 }
 
 impl StyleTransitionState {
-    pub(crate) fn new(style: &StyleDesc, state: StyleState, now: Instant) -> Self {
-        let target_style = resolve_transition_target(style, state, false, false);
+    pub(crate) fn new(
+        style: &StyleDesc,
+        state: StyleState,
+        hover_within: bool,
+        now: Instant,
+    ) -> Self {
+        let target_style = resolve_transition_target(style, state, hover_within, false, false);
         let transition = style
             .transition
             .clone()
@@ -235,10 +240,12 @@ impl StyleTransitionState {
         &mut self,
         style: &StyleDesc,
         state: StyleState,
+        hover_within: bool,
         now: Instant,
         reduce_motion: bool,
     ) {
-        let target_style = resolve_transition_target(style, state, self.hovered, self.active);
+        let target_style =
+            resolve_transition_target(style, state, hover_within, self.hovered, self.active);
         let transition = style
             .transition
             .clone()
@@ -253,6 +260,7 @@ impl StyleTransitionState {
             let visible_style = resolve_transition_properties(
                 &visible_style,
                 state,
+                hover_within,
                 self.hovered,
                 self.active,
                 &transition,
@@ -395,18 +403,20 @@ fn canonicalize_transition_radii(style: &mut StyleDesc) {
 fn resolve_transition_target(
     style: &StyleDesc,
     state: StyleState,
+    hover_within: bool,
     hovered: bool,
     active: bool,
 ) -> StyleDesc {
     let Some(transition) = style.transition.as_ref() else {
         return style.clone();
     };
-    resolve_transition_properties(style, state, hovered, active, transition)
+    resolve_transition_properties(style, state, hover_within, hovered, active, transition)
 }
 
 fn resolve_transition_properties(
     style: &StyleDesc,
     state: StyleState,
+    hover_within: bool,
     hovered: bool,
     active: bool,
     transition: &StyleTransition,
@@ -428,6 +438,9 @@ fn resolve_transition_properties(
         if state.focus_visible {
             refine_transition_property(&mut resolved, declared.focus_visible.as_deref(), property);
         }
+        if hover_within {
+            refine_transition_property(&mut resolved, declared.hover_within.as_deref(), property);
+        }
         if hovered {
             refine_transition_property(&mut resolved, declared.hover.as_deref(), property);
         }
@@ -439,6 +452,9 @@ fn resolve_transition_properties(
             clear_transition_property(refinement, property);
         }
         if let Some(refinement) = resolved.focus_visible.as_deref_mut() {
+            clear_transition_property(refinement, property);
+        }
+        if let Some(refinement) = resolved.hover_within.as_deref_mut() {
             clear_transition_property(refinement, property);
         }
         if let Some(refinement) = resolved.hover.as_deref_mut() {
@@ -885,9 +901,10 @@ mod tests {
                 "easing": "linear"
             }
         }));
-        let mut state = StyleTransitionState::new(&style, StyleState::default(), started);
+        let mut state =
+            StyleTransitionState::new(&style, StyleState::default(), false, started);
         assert!(state.set_hovered(true));
-        state.sync(&style, StyleState::default(), started, false);
+        state.sync(&style, StyleState::default(), false, started, false);
 
         let middle_at = started + Duration::from_millis(50);
         let middle = state.frame(middle_at, false);
@@ -904,7 +921,7 @@ mod tests {
         assert!(middle.active);
 
         assert!(state.set_hovered(false));
-        state.sync(&style, StyleState::default(), middle_at, false);
+        state.sync(&style, StyleState::default(), false, middle_at, false);
         assert_eq!(state.frame(middle_at, false).style.opacity, Some(0.5));
         assert_eq!(
             state
@@ -922,6 +939,7 @@ mod tests {
             "opacity": 0.0,
             "focus": { "opacity": 0.2 },
             "focusVisible": { "opacity": 0.4 },
+            "hoverWithin": { "opacity": 0.5 },
             "hover": { "opacity": 0.6 },
             "active": { "opacity": 1.0 },
             "transition": {
@@ -934,15 +952,54 @@ mod tests {
             focused: true,
             focus_visible: true,
         };
-        let mut state = StyleTransitionState::new(&style, focus, now);
-        assert_eq!(state.frame(now, false).style.opacity, Some(0.4));
+        let mut state = StyleTransitionState::new(&style, focus, true, now);
+        assert_eq!(state.frame(now, false).style.opacity, Some(0.5));
 
         state.set_hovered(true);
         state.set_active(true);
-        state.sync(&style, focus, now, true);
+        state.sync(&style, focus, true, now, true);
         let reduced = state.frame(now, true);
         assert_eq!(reduced.style.opacity, Some(1.0));
         assert!(!reduced.active);
+    }
+
+    #[test]
+    fn hover_within_transition_refines_at_the_shared_precedence_and_clears_the_track() {
+        let style = style(serde_json::json!({
+            "opacity": 0.0,
+            "focus": { "opacity": 0.2 },
+            "focusVisible": { "opacity": 0.4 },
+            "hoverWithin": { "opacity": 0.5 },
+            "hover": { "opacity": 0.6 },
+            "active": { "opacity": 1.0 },
+            "transition": {
+                "properties": ["opacity"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        let transition = style.transition.as_ref().unwrap();
+        let focus = StyleState {
+            focused: true,
+            focus_visible: true,
+        };
+
+        let hover_within =
+            resolve_transition_properties(&style, focus, true, false, false, transition);
+        assert_eq!(hover_within.opacity, Some(0.5));
+        assert_eq!(
+            hover_within
+                .hover_within
+                .as_deref()
+                .and_then(|style| style.opacity),
+            None
+        );
+
+        let hovered =
+            resolve_transition_properties(&style, focus, true, true, false, transition);
+        assert_eq!(hovered.opacity, Some(0.6));
+        let active = resolve_transition_properties(&style, focus, true, true, true, transition);
+        assert_eq!(active.opacity, Some(1.0));
     }
 
     #[test]
@@ -957,9 +1014,9 @@ mod tests {
                 "easing": "linear"
             }
         }));
-        let mut state = StyleTransitionState::new(&style, StyleState::default(), now);
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), false, now);
         state.set_hovered(true);
-        state.sync(&style, StyleState::default(), now, false);
+        state.sync(&style, StyleState::default(), false, now, false);
 
         assert_eq!(
             state
@@ -978,9 +1035,9 @@ mod tests {
             "hover": { "opacity": 1.0 },
             "transition": { "properties": ["opacity"], "durationMs": 0 }
         }));
-        let mut state = StyleTransitionState::new(&style, StyleState::default(), now);
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), false, now);
         state.set_hovered(true);
-        state.sync(&style, StyleState::default(), now, false);
+        state.sync(&style, StyleState::default(), false, now, false);
 
         let frame = state.frame(now, false);
         assert_eq!(frame.style.opacity, Some(1.0));
@@ -1000,9 +1057,9 @@ mod tests {
                 "easing": "linear"
             }
         }));
-        let mut state = StyleTransitionState::new(&style, StyleState::default(), now);
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), false, now);
         state.set_hovered(true);
-        state.sync(&style, StyleState::default(), now, false);
+        state.sync(&style, StyleState::default(), false, now, false);
 
         assert_eq!(
             state
@@ -1033,9 +1090,15 @@ mod tests {
             }
         }));
         let mut state =
-            StyleTransitionState::new(&shorthand_target, StyleState::default(), started);
+            StyleTransitionState::new(&shorthand_target, StyleState::default(), false, started);
         state.set_hovered(true);
-        state.sync(&shorthand_target, StyleState::default(), started, false);
+        state.sync(
+            &shorthand_target,
+            StyleState::default(),
+            false,
+            started,
+            false,
+        );
         let midpoint = state.frame(started + Duration::from_millis(50), false);
         assert_eq!(midpoint.style.border_radius, None);
         assert_eq!(midpoint.style.border_top_left_radius, Some(15.0));
@@ -1052,9 +1115,16 @@ mod tests {
                 "easing": "linear"
             }
         }));
-        let mut state = StyleTransitionState::new(&longhand_target, StyleState::default(), started);
+        let mut state =
+            StyleTransitionState::new(&longhand_target, StyleState::default(), false, started);
         state.set_hovered(true);
-        state.sync(&longhand_target, StyleState::default(), started, false);
+        state.sync(
+            &longhand_target,
+            StyleState::default(),
+            false,
+            started,
+            false,
+        );
         let midpoint = state.frame(started + Duration::from_millis(50), false);
         assert_eq!(midpoint.style.border_radius, None);
         assert_eq!(midpoint.style.border_top_left_radius, Some(15.0));
@@ -1076,9 +1146,10 @@ mod tests {
                 "easing": "linear"
             }
         }));
-        let mut state = StyleTransitionState::new(&initial, StyleState::default(), started);
+        let mut state =
+            StyleTransitionState::new(&initial, StyleState::default(), false, started);
         state.set_hovered(true);
-        state.sync(&initial, StyleState::default(), started, false);
+        state.sync(&initial, StyleState::default(), false, started, false);
 
         let retargeted_at = started + Duration::from_millis(50);
         let second_target = style(serde_json::json!({
@@ -1091,7 +1162,13 @@ mod tests {
                 "easing": "linear"
             }
         }));
-        state.sync(&second_target, StyleState::default(), retargeted_at, false);
+        state.sync(
+            &second_target,
+            StyleState::default(),
+            false,
+            retargeted_at,
+            false,
+        );
 
         assert_eq!(
             state.frame(retargeted_at, false).style.width,
@@ -1118,9 +1195,10 @@ mod tests {
                 "easing": "linear"
             }
         }));
-        let mut state = StyleTransitionState::new(&style, StyleState::default(), started);
+        let mut state =
+            StyleTransitionState::new(&style, StyleState::default(), false, started);
         state.set_hovered(true);
-        state.sync(&style, StyleState::default(), started, false);
+        state.sync(&style, StyleState::default(), false, started, false);
 
         let midpoint = state.frame(started + Duration::from_millis(50), false);
         assert_eq!(

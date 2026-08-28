@@ -1281,6 +1281,85 @@ describeNative("events", () => {
       expect(grandchildLeave).toHaveBeenCalledOnce()
     })
 
+    it("delivers one ancestor hover edge around a transitioning custom surface", () => {
+      const events: string[] = []
+
+      testRoot.render(
+        <div
+          onMouseEnter={() => events.push("parent-enter")}
+          onMouseLeave={() => events.push("parent-leave")}
+          style={{ width: 260, height: 120, padding: 12 }}
+        >
+          <code
+            code="const hover = true"
+            testId="transition-hover-code"
+            onMouseEnter={() => events.push("child-enter")}
+            onMouseLeave={() => events.push("child-leave")}
+            style={{
+              width: 220,
+              height: 80,
+              opacity: 0.5,
+              hover: { opacity: 1 },
+              transition: { properties: ["opacity"], durationMs: 100 },
+            }}
+          />
+        </div>
+      )
+
+      const child = testRoot.renderer.findByTestId("transition-hover-code")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      expect(events).toEqual(["parent-enter", "child-enter"])
+
+      testRoot.renderer.nativeSimulateMouseMove(700, 700)
+      expect(events).toEqual([
+        "parent-enter",
+        "child-enter",
+        "child-leave",
+        "parent-leave",
+      ])
+    })
+
+    it("delivers one ancestor hover edge around a transitioning canvas", () => {
+      const events: string[] = []
+
+      testRoot.render(
+        <div
+          onMouseEnter={() => events.push("parent-enter")}
+          onMouseLeave={() => events.push("parent-leave")}
+          style={{ width: 260, height: 120, padding: 12 }}
+        >
+          <canvas
+            width={220}
+            height={80}
+            testId="transition-hover-canvas"
+            onMouseEnter={() => events.push("child-enter")}
+            onMouseLeave={() => events.push("child-leave")}
+            style={{
+              width: 220,
+              height: 80,
+              opacity: 0.5,
+              hover: { opacity: 1 },
+              transition: { properties: ["opacity"], durationMs: 100 },
+            }}
+          />
+        </div>
+      )
+
+      const child = testRoot.renderer.findByTestId("transition-hover-canvas")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      expect(events).toEqual(["parent-enter", "child-enter"])
+
+      testRoot.renderer.nativeSimulateMouseMove(700, 700)
+      expect(events).toEqual([
+        "parent-enter",
+        "child-enter",
+        "child-leave",
+        "parent-leave",
+      ])
+    })
+
     it("keeps common ancestors hovered while moving between painted siblings", () => {
       const events: string[] = []
 
