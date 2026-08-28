@@ -749,7 +749,7 @@ export interface Props {
   [key: `data-${string}`]: string | number | boolean | undefined
 
   // ── Accessibility ───────────────────────────────────────────────
-  /** Explicit native accessibility role. No role is inferred from JSX aliases. */
+  /** Explicit native accessibility role. `<button>` and `<a>` infer `button` and `link` when omitted. */
   role?: AccessibilityRole
   /** Accessible name announced for this semantic node. */
   ariaLabel?: string

@@ -4,7 +4,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import React, { useState } from "react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   browserRendererAsTest,
   connectTest,
@@ -156,21 +156,21 @@ describeNative("automation", () => {
     expect(renderer.findByTestId("null")).toBeUndefined()
   })
 
-  it("publishes a labelled button and dispatches AccessKit activate as one click", () => {
+  it("synthesizes button semantics, focus, and activation without author role or tabIndex", () => {
     const actions: string[] = []
-    const { render, renderer } = createTestRoot()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const { render, renderer } = createTestRoot({ strictStyles: false })
 
     render(
       <button
         id="save"
-        role="button"
         ariaLabel="Save factory"
         style={{ width: 120, height: 50 }}
         onClick={() => actions.push("click")}
-        onAccessibilityAction={(event) => actions.push(event.accessibilityAction ?? "missing")}
       />
     )
 
+    const element = renderer.findByElementId("save")!
     const tree = renderer.getAccessibilityTree()
     const button = Object.values(tree.nodes).find(
       (node) => node.aria.role === "Button" && node.aria.label === "Save factory"
@@ -183,9 +183,60 @@ describeNative("automation", () => {
       },
     })
     expect(button?.aria.on_action).not.toEqual(expect.arrayContaining(["Increment", "Decrement"]))
+    expect(tree.frame?.tab_stop_count).toBe(1)
+
+    renderer.nativeSimulateClick(60, 25)
+    expect(actions).toEqual(["click"])
+
+    renderer.focusElement(element.id)
+    renderer.nativeSimulateKeystrokes(element.id, "enter")
+    expect(actions).toEqual(["click", "click"])
+
+    renderer.nativeSimulateKeystrokes(element.id, "space")
+    expect(actions).toEqual(["click", "click", "click"])
 
     renderer.nativeSimulateAccessibilityAction(button!.accesskit_id, "activate")
-    expect(actions).toEqual(["click"])
+    expect(actions).toEqual(["click", "click", "click", "click"])
+
+    render(
+      <div>
+        <button role="checkbox" ariaChecked={false} ariaLabel="Explicit checkbox role" />
+        <button
+          {...({ accessibilityRole: "checkbox" } as Record<string, string>)}
+          ariaLabel="Unsupported role spelling"
+        />
+      </div>
+    )
+    const roleTree = renderer.getAccessibilityTree()
+    const explicitRole = Object.values(roleTree.nodes).find(
+      (node) => node.aria.label === "Explicit checkbox role"
+    )!
+    const unsupportedSpelling = Object.values(roleTree.nodes).find(
+      (node) => node.aria.label === "Unsupported role spelling"
+    )!
+    expect(explicitRole.aria.role).toBe("CheckBox")
+    expect(unsupportedSpelling.aria.role).toBe("Button")
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/<button> does not support accessibilityRole\. Use role instead\./)
+    )
+
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const strict = createTestRoot({ strictStyles: true })
+    strict.render(
+      <button
+        {...({ accessibilityRole: "checkbox" } as Record<string, string>)}
+        ariaLabel="Strict unsupported role spelling"
+      />
+    )
+    expect(error.mock.calls.flat()).toContainEqual(
+      expect.objectContaining({
+        name: "UnsupportedAccessibilityRolePropError",
+        message: expect.stringContaining("Use role instead."),
+      })
+    )
+    strict.unmount()
+    error.mockRestore()
+    warn.mockRestore()
   })
 
   it("routes AccessKit activate through the same click pipeline with or without an action handler", () => {
@@ -244,6 +295,7 @@ describeNative("automation", () => {
     ["ariaDisabled", { ariaDisabled: true }],
   ] as const)("refuses pointer, keyboard, and AccessKit activation when %s", (_name, state) => {
     const seen: string[] = []
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const { render, renderer } = createTestRoot()
 
     render(
@@ -251,9 +303,7 @@ describeNative("automation", () => {
         <button
           {...(state as Record<string, boolean>)}
           testId="disabled-control"
-          role="button"
           ariaLabel="Unavailable"
-          tabIndex={0}
           style={{ width: 120, height: 50 }}
           onClick={() => seen.push("click")}
           onAccessibilityAction={(event) =>
@@ -268,6 +318,7 @@ describeNative("automation", () => {
     const element = renderer.findByTestId("disabled-control")!
     const tree = renderer.getAccessibilityTree()
     const node = Object.values(tree.nodes).find((candidate) => candidate.aria.label === "Unavailable")!
+    expect(node.aria.role).toBe("Button")
     expect(node.aria.disabled).toBe(true)
     expect(tree.frame?.tab_stop_count).toBe(_name === "ariaDisabled" ? 1 : 0)
     expect(node.aria.on_action ?? []).not.toContain("Click")
@@ -282,6 +333,7 @@ describeNative("automation", () => {
     renderer.nativeSimulateAccessibilityAction(node.accesskit_id, "activate")
 
     expect(seen).toEqual([])
+    expect(warn.mock.calls.flat().join("\n")).not.toContain("requires an explicit supported role")
   })
 
   it("publishes semantics on text, input, and img hosts", () => {

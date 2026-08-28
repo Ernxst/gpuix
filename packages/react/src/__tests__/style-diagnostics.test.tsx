@@ -228,6 +228,45 @@ describeNative("style diagnostics", () => {
     expect(renderer.drainStyleDiagnostics()).toEqual([])
   })
 
+  it.each([
+    ["string", "chip focused"],
+    ["array", [{ backgroundColor: "red" }]],
+    ["function", () => ({ backgroundColor: "red" })],
+    ["number", 42],
+  ] as const)("rejects a %s style prop loudly on mount and update", (_kind, style) => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const strictCreate = createTestRoot({ strictStyles: true })
+    strictCreate.render(<div testId="invalid-style" style={style as unknown as StyleDesc} />)
+
+    const strictUpdate = createTestRoot({ strictStyles: true })
+    strictUpdate.render(<div testId="invalid-style" style={{ width: 10 }} />)
+    strictUpdate.render(<div testId="invalid-style" style={style as unknown as StyleDesc} />)
+
+    expect(error.mock.calls.flat()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "InvalidStylePropError",
+          message: expect.stringContaining("<div testId=\"invalid-style\">"),
+        }),
+      ])
+    )
+    strictCreate.unmount()
+    strictUpdate.unmount()
+    error.mockRestore()
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const compatibility = createTestRoot({ strictStyles: false })
+    compatibility.render(<div testId="invalid-style" style={{ width: 10 }} />)
+    compatibility.render(<div testId="invalid-style" style={style as unknown as StyleDesc} />)
+    compatibility.render(<div testId="invalid-style" style={style as unknown as StyleDesc} />)
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/<div testId="invalid-style">.*style accepts a plain style object only/)
+    )
+    compatibility.unmount()
+  })
+
   it("validates outline and focus-visible fields with their full property paths", () => {
     const renderer = new TestRenderer()
     renderer.createElement(101, "div")

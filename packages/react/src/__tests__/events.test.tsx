@@ -769,12 +769,11 @@ describeNative("events", () => {
       expect(router.history.location.pathname).toBe("/factory")
     })
 
-    it("routes pointer click and focused Space through the same click handler", () => {
+    it("routes pointer click and focused Space through the same implicit button handler", () => {
       const click = vi.fn()
       testRoot.render(
         <button
           autoFocus
-          tabIndex={0}
           testId="space-activation"
           onClick={click}
           style={{ width: 180, height: 50 }}
@@ -811,6 +810,11 @@ describeNative("events", () => {
       )
 
       const anchor = testRoot.renderer.findByTestId("anchor-activation")!
+      const tree = testRoot.renderer.getAccessibilityTree()
+      expect(Object.values(tree.nodes)).toContainEqual(
+        expect.objectContaining({ aria: expect.objectContaining({ role: "Link" }) })
+      )
+      expect(tree.frame?.tab_stop_count).toBe(1)
       testRoot.renderer.focusElement(anchor.id)
 
       testRoot.renderer.simulateKeystrokes("space")
@@ -877,6 +881,36 @@ describeNative("events", () => {
   })
 
   describe("focus state styles", () => {
+    it("keeps implicit buttons visually primitive and applies focusVisible from keyboard focus", () => {
+      const testRoot = createTestRoot()
+      const style = {
+        width: 180,
+        height: 60,
+        backgroundColor: "#334155",
+        focusVisible: { outlineColor: "#67e8f9", outlineWidth: 4, outlineOffset: 5 },
+      }
+      testRoot.render(
+        <div style={{ display: "flex", gap: 20 }}>
+          <div autoFocus tabIndex={0} style={{ width: 1, height: 1 }} />
+          <button testId="implicit-focus-button" style={style} />
+          <div testId="primitive-div" style={style} />
+        </div>
+      )
+
+      const button = testRoot.renderer.findByTestId("implicit-focus-button")!
+      const div = testRoot.renderer.findByTestId("primitive-div")!
+      expect(testRoot.renderer.getResolvedStyle(button.id)).toEqual(
+        testRoot.renderer.getResolvedStyle(div.id)
+      )
+
+      testRoot.renderer.simulateKeystrokes("tab")
+      expect(testRoot.renderer.getResolvedStyle(button.id)).toMatchObject({
+        outlineColor: "#67e8f9",
+        outlineWidth: 4,
+        outlineOffset: 5,
+      })
+    })
+
     const focusProbe = (
       staticFocused = false,
       keyboardSentinel = false,

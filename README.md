@@ -1590,15 +1590,14 @@ Removing `tabIndex` removes the element from the tab order.
 
 ## Native accessibility
 
-Semantic host elements feed GPUI's AccessKit tree directly. Roles are always
-explicit: GPUIX does not infer a role from JSX aliases such as `<button>` or
-`<h2>`, so custom controls and shared JSX have the same predictable contract.
+Semantic host elements feed GPUI's AccessKit tree directly. `<button>` infers
+the `button` role and `<a>` infers the `link` role; other JSX aliases do not
+infer roles. An explicit `role` still defines custom controls or overrides an
+alias. These aliases add semantics and focus behavior, but no visual defaults.
 
 ```tsx
 <button
-  role="button"
   ariaLabel="Save factory"
-  tabIndex={0}
   onClick={save}
 >
   <text>Save</text>
@@ -1606,12 +1605,12 @@ explicit: GPUIX does not infer a role from JSX aliases such as `<button>` or
 ```
 
 The role set is `button`, `checkbox`, `heading`, `img`, `link`, `option`,
-`slider`, `spinbutton`, `switch`, and `textbox`. These props map without
-inference to their GPUI / AccessKit equivalents:
+`slider`, `spinbutton`, `switch`, and `textbox`. Explicit role and state props
+map directly to their GPUI / AccessKit equivalents:
 
 | React prop | Native meaning |
 |---|---|
-| `ariaLabel`, `ariaDescription` | Accessible name and supplementary description; requires an explicit supported `role` |
+| `ariaLabel`, `ariaDescription` | Accessible name and supplementary description; requires a supported explicit or inferred role |
 | `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
 | `ariaExpanded`, `ariaSelected` | Boolean semantic states |
 | `ariaValue` | Human-readable value text |
@@ -2699,11 +2698,12 @@ Nesting is one level deep. A state style cannot contain `hover`, `active`,
 
 ### Keyboard activation
 
-A focused, clickable non-text element dispatches its existing `onClick` handler
-for Enter or Space, using the same native click path as pointer activation.
-Anchors with an `href` join the native tab order automatically, so a plain link
-does not need an app-side `tabIndex` or `onKeyDown` adapter. Native text editors
-keep Space as text input instead of synthesizing a click.
+A `<button>` is automatically reachable with Tab and dispatches its existing
+`onClick` handler for Enter or Space, using the same native click path as
+pointer activation. An `<a>` joins the native tab order only when it has an
+`href`; an anchor without `href` needs an explicit `tabIndex` to be reached with
+Tab. Native text editors keep Space as text input instead of synthesizing a
+click.
 
 > **`whiteSpace: "pre"` preserves explicit newlines and repeated spaces without soft wrapping.** It remains one selectable `<text>` layout, including nested inline text runs, so copying and selection preserve the original string. Whitespace policy is layout-wide: put `pre` on the outer `<text>`; a nested inline run cannot switch it mid-sentence.
 
