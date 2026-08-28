@@ -107,6 +107,14 @@ describeNative("TestRenderer query cache", () => {
       const fresh = root.renderer.getElement(first.id)
       expect(fresh).toEqual(first)
       expect(fresh).not.toBe(first)
+
+      // The shared snapshot is frozen: consumer mutation fails loudly instead
+      // of corrupting later queries.
+      expect(Object.isFrozen(first)).toBe(true)
+      expect(Object.isFrozen(first.children)).toBe(true)
+      expect(() => {
+        ;(first as { text: string | null }).text = "mutated"
+      }).toThrow(TypeError)
     } finally {
       root.unmount()
     }
@@ -201,9 +209,13 @@ describeNative("TestRenderer query cache", () => {
       expectInvalidation("applyBatch", () =>
         renderer.applyBatch(JSON.stringify([["setText", textId, "batched"]]))
       )
+      // Disposal clears the native retained tree, so it must also drop the
+      // snapshot — a cached map would keep serving the dead tree.
+      expectInvalidation("dispose", () => renderer.dispose())
 
       expect(new Set(exercised)).toEqual(
         new Set([
+          "dispose",
           "createElement",
           "destroyElement",
           "appendChild",

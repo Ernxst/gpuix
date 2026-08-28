@@ -394,6 +394,9 @@ export class TestRenderer implements NativeRenderer {
     detachAnimationFrameSource(this)
     this.native.dispose()
     this.disposed = true
+    // Native disposal clears the retained tree; a cached snapshot would keep
+    // serving the dead tree from queries made after disposal.
+    this.invalidateElementMap()
   }
 
   capabilities(): RendererCapabilities {
@@ -846,6 +849,16 @@ export class TestRenderer implements NativeRenderer {
       }
     }
     walk(json, null)
+    // The snapshot is shared across queries until the next mutation, so freeze
+    // it: a consumer test mutating a returned TestElement would otherwise
+    // silently corrupt every later static-tree query instead of failing loudly.
+    for (const element of map.values()) {
+      Object.freeze(element.style)
+      Object.freeze(element.events)
+      Object.freeze(element.children)
+      if (element.customProps) Object.freeze(element.customProps)
+      Object.freeze(element)
+    }
     this.elementMap = map
     return map
   }
