@@ -666,8 +666,16 @@ impl MotionState {
         self.valid
     }
 
-    pub(crate) fn sync(&mut self, source: &serde_json::Value, now: Instant) -> Result<(), String> {
+    pub(crate) fn sync(
+        &mut self,
+        source: &serde_json::Value,
+        now: Instant,
+        reduce_motion: bool,
+    ) -> Result<(), String> {
         if self.source == *source {
+            if reduce_motion {
+                self.from = self.target;
+            }
             return Ok(());
         }
 
@@ -680,7 +688,7 @@ impl MotionState {
             }
         };
         self.from = if self.valid {
-            self.frame(now).style
+            self.frame(now, reduce_motion).style
         } else {
             match description.initial {
                 Some(MotionInitial::Style(style)) => style,
@@ -693,10 +701,20 @@ impl MotionState {
         self.started = now;
         self.source = source.clone();
         self.valid = true;
+        if reduce_motion {
+            self.from = self.target;
+        }
         Ok(())
     }
 
-    pub(crate) fn frame(&self, now: Instant) -> MotionFrame {
+    pub(crate) fn frame(&self, now: Instant, reduce_motion: bool) -> MotionFrame {
+        if reduce_motion {
+            return MotionFrame {
+                style: self.target,
+                active: false,
+            };
+        }
+
         let delay = seconds(self.transition.delay);
         let duration = seconds(self.transition.duration);
         let elapsed = now.saturating_duration_since(self.started);
@@ -1121,7 +1139,7 @@ mod tests {
         });
         let mut state = MotionState::new(&initial, started).unwrap();
 
-        let middle = state.frame(started + Duration::from_millis(500));
+        let middle = state.frame(started + Duration::from_millis(500), false);
         assert_eq!(middle.style.width, Some(50.0));
         assert!(middle.active);
 
@@ -1131,11 +1149,11 @@ mod tests {
             "transition": { "duration": 1.0, "ease": "linear" }
         });
         let reversed_at = started + Duration::from_millis(500);
-        state.sync(&reversed, reversed_at).unwrap();
-        assert_eq!(state.frame(reversed_at).style.width, Some(50.0));
+        state.sync(&reversed, reversed_at, false).unwrap();
+        assert_eq!(state.frame(reversed_at, false).style.width, Some(50.0));
         assert_eq!(
             state
-                .frame(reversed_at + Duration::from_millis(500))
+                .frame(reversed_at + Duration::from_millis(500), false)
                 .style
                 .width,
             Some(25.0)
@@ -1150,7 +1168,9 @@ mod tests {
             "animate": { "width": 260.0 },
             "transition": { "duration": 0.2 }
         });
-        let frame = MotionState::new(&description, now).unwrap().frame(now);
+        let frame = MotionState::new(&description, now)
+            .unwrap()
+            .frame(now, false);
 
         assert_eq!(frame.style.width, Some(260.0));
         assert!(!frame.active);
@@ -1178,9 +1198,42 @@ mod tests {
             "transition": { "duration": 0.2, "ease": "linear" }
         });
         let state = MotionState::new(&description, started).unwrap();
-        let frame = state.frame(started + Duration::from_millis(200));
+        let frame = state.frame(started + Duration::from_millis(200), false);
 
         assert_eq!(frame.style.width, Some(100.0));
         assert!(!frame.active);
+    }
+
+    #[test]
+    fn reduced_motion_interrupts_without_resurrecting_motion() {
+        let started = Instant::now();
+        let initial = serde_json::json!({
+            "initial": { "width": 0.0 },
+            "animate": { "width": 100.0 },
+            "transition": { "duration": 1.0, "ease": "linear" }
+        });
+        let mut state = MotionState::new(&initial, started).unwrap();
+
+        let midpoint = started + Duration::from_millis(500);
+        assert_eq!(state.frame(midpoint, false).style.width, Some(50.0));
+
+        state.sync(&initial, midpoint, true).unwrap();
+        let reduced = state.frame(midpoint, true);
+        assert_eq!(reduced.style.width, Some(100.0));
+        assert!(!reduced.active);
+
+        let after_preference_is_disabled = state.frame(midpoint, false);
+        assert_eq!(after_preference_is_disabled.style.width, Some(100.0));
+        assert!(!after_preference_is_disabled.active);
+
+        let next_target = serde_json::json!({
+            "initial": false,
+            "animate": { "width": 200.0 },
+            "transition": { "duration": 1.0, "ease": "linear" }
+        });
+        state.sync(&next_target, midpoint, false).unwrap();
+        let next_midpoint = state.frame(midpoint + Duration::from_millis(500), false);
+        assert_eq!(next_midpoint.style.width, Some(150.0));
+        assert!(next_midpoint.active);
     }
 }

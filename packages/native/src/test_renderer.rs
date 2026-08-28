@@ -1829,7 +1829,7 @@ impl TestGpuixRenderer {
                         .motion_states
                         .get(&id)
                         .filter(|state| state.is_valid())
-                        .map(|state| state.frame(view.clock.now()).style);
+                        .map(|state| state.frame(view.clock.now(), reduce_motion).style);
                     (
                         (f64::from(f32::from(mouse.x)), f64::from(f32::from(mouse.y))),
                         focus,

@@ -1974,6 +1974,7 @@ impl GpuixRenderer {
 
     #[cfg(target_os = "macos")]
     fn init_macos_inner(&self, options: Option<WindowOptions>) -> Result<()> {
+        let reduced_motion_override = options.as_ref().and_then(|options| options.reduced_motion);
         let options = options.unwrap_or_default();
 
         {
@@ -1995,7 +1996,6 @@ impl GpuixRenderer {
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
         let app_name = options.app_name.clone().unwrap_or_else(|| title.clone());
         let menus = options.menus.clone();
-        let reduced_motion = options.reduced_motion.unwrap_or(false);
         // `focus: false` must also skip `cx.activate`: the window flag only
         // decides key status inside the app, activation is what steals focus.
         let activate = options.focus.unwrap_or(true);
@@ -2073,7 +2073,16 @@ impl GpuixRenderer {
             .with_http_client(default_http_client())
             .with_quit_mode(gpui::QuitMode::LastWindowClosed);
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
+            let reduced_motion = effective_reduced_motion(reduced_motion_override, || {
+                Some(cx.should_reduce_motion())
+            });
             cx.set_reduce_motion(reduced_motion);
+            if reduced_motion_override.is_none() {
+                cx.on_reduce_motion_change(|cx| {
+                    cx.set_reduce_motion(cx.should_reduce_motion());
+                })
+                .detach();
+            }
             init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
             init_application_menu_support(cx, Some(application_callback.clone()));
@@ -2171,7 +2180,7 @@ impl GpuixRenderer {
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
         let app_name = options.app_name.clone().unwrap_or_else(|| title.clone());
         let menus = options.menus.clone();
-        let reduced_motion = options.reduced_motion.unwrap_or(false);
+        let reduced_motion = effective_reduced_motion(options.reduced_motion, || None);
         // `focus: false` must also skip `cx.activate`: the window flag only
         // decides key status inside the app, activation is what steals focus.
         let activate = options.focus.unwrap_or(true);
@@ -2726,7 +2735,7 @@ impl GpuixRenderer {
                         .unwrap_or(false)
                 });
                 if !running {
-                    *self.lifecycle.lock().unwrap() = RendererLifecycle::Terminated;
+                    self.finish_macos_termination();
                     return Ok(());
                 }
             }
@@ -2800,7 +2809,7 @@ impl GpuixRenderer {
                     .unwrap_or(false)
             });
             if !running {
-                *self.lifecycle.lock().unwrap() = RendererLifecycle::Terminated;
+                self.finish_macos_termination();
             }
             return Ok(running);
         }
@@ -2841,6 +2850,63 @@ impl GpuixRenderer {
         let running = self.pump_native_event_loop(false)?;
         self.surface_canvas_preparation_diagnostics()?;
         Ok(running)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn finish_macos_termination(&self) {
+        GPUI_WINDOW.with(|window| {
+            window.borrow_mut().take();
+        });
+        GPUI_APP.with(|app| {
+            app.borrow_mut().take();
+        });
+        MAC_PLATFORM.with(|platform| {
+            platform.borrow_mut().take();
+        });
+        *self.lifecycle.lock().unwrap() = RendererLifecycle::Terminated;
+    }
+
+    /// Test seam that posts the real macOS accessibility-display notification.
+    #[napi]
+    pub fn test_set_platform_reduced_motion(&self, enabled: bool) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            if *self.lifecycle.lock().unwrap() != RendererLifecycle::Running {
+                return Err(Error::from_reason(
+                    "Renderer not initialized. Call init() first.",
+                ));
+            }
+            MAC_PLATFORM.with(|platform| {
+                let platform = platform.borrow();
+                let platform = platform
+                    .as_ref()
+                    .ok_or_else(|| Error::from_reason("GPUI platform is not initialized"))?;
+                platform.test_set_reduce_motion_and_post_notification(enabled);
+                Ok(())
+            })
+        }
+
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = enabled;
+            Err(Error::from_reason(
+                "Platform reduced-motion test seam requires macOS test support",
+            ))
+        }
+    }
+
+    /// Whether the embedded macOS runtime is still retained by thread-local handles.
+    #[napi]
+    pub fn test_has_embedded_runtime(&self) -> bool {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            GPUI_WINDOW.with(|window| window.borrow().is_some())
+                || GPUI_APP.with(|app| app.borrow().is_some())
+                || MAC_PLATFORM.with(|platform| platform.borrow().is_some())
+        }
+
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        false
     }
 
     #[napi]
@@ -6485,11 +6551,11 @@ pub(crate) fn build_element(
                 }
             }
         };
-        if let Err(error) = state.sync(source, ctx.now) {
+        if let Err(error) = state.sync(source, ctx.now, ctx.reduce_motion) {
             log::warn!("Invalid motion update for element {id}: {error}");
         }
         state.is_valid().then(|| {
-            let frame = state.frame(ctx.now);
+            let frame = state.frame(ctx.now, ctx.reduce_motion);
             *ctx.animation_active |= frame.active;
             // `Arc<StyleDesc>` is shared, so the animated frame is applied to a
             // copy. Mutating through the pointer would restyle every element
@@ -8827,7 +8893,7 @@ pub struct WindowOptions {
     pub window_background: Option<String>,
     pub traffic_light_x: Option<f64>,
     pub traffic_light_y: Option<f64>,
-    /// Force GPUI's reduced-motion policy for this application.
+    /// Override GPUI's reduced-motion policy for this application.
     pub reduced_motion: Option<bool>,
     /// Allow URL-backed images to connect to loopback and private networks.
     /// Link-local and cloud-metadata ranges remain blocked.
@@ -8838,6 +8904,13 @@ pub struct WindowOptions {
     /// Show the window when it opens. `false` opens it hidden; call
     /// `activateWindow()` to reveal it. Ignored on Linux.
     pub show: Option<bool>,
+}
+
+fn effective_reduced_motion(
+    override_: Option<bool>,
+    os: impl FnOnce() -> Option<bool>,
+) -> bool {
+    override_.or_else(os).unwrap_or(false)
 }
 
 /// Features offered by one renderer instance on its current platform.
@@ -9486,6 +9559,26 @@ mod window_options_tests {
         let gpui_options = mapped(WindowOptions::default());
         assert!(gpui_options.focus);
         assert!(gpui_options.show);
+    }
+
+    #[test]
+    fn reduced_motion_override_takes_precedence_over_the_os() {
+        let os_reads = std::rc::Rc::new(std::cell::Cell::new(0));
+        let os = |value| {
+            let os_reads = os_reads.clone();
+            move || {
+                os_reads.set(os_reads.get() + 1);
+                value
+            }
+        };
+
+        assert!(effective_reduced_motion(Some(true), os(Some(false))));
+        assert!(!effective_reduced_motion(Some(false), os(Some(true))));
+        assert_eq!(os_reads.get(), 0, "explicit overrides must not read the OS");
+        assert!(effective_reduced_motion(None, os(Some(true))));
+        assert!(!effective_reduced_motion(None, os(Some(false))));
+        assert!(!effective_reduced_motion(None, os(None)));
+        assert_eq!(os_reads.get(), 3);
     }
 
     #[test]

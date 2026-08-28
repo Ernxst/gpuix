@@ -12,6 +12,7 @@
     "typecheck:test": "tsc --project tsconfig.test.json",
     "test:perf": "vitest run chat.perf.test.tsx timeline.perf.test.tsx canvas-map.perf.test.tsx",
     "native-text": "bun --hot native-text.tsx",
+    "reduced-motion": "bun --hot reduced-motion.tsx",
     "live-scroll-wheel:smoke": "bun live-scroll-wheel.smoke.ts",
     "live-click:smoke": "bun live-click.smoke.ts",
     "chat": "bun --hot chat.tsx",
