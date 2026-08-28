@@ -2,11 +2,15 @@
 
 import React from 'react'
 import { connectTest } from '@gpuix/react/automation'
-import { createTestRoot, hasNativeTestRenderer, type TestRenderer } from '@gpuix/react/testing'
+import {
+  createTestRoot,
+  isNativeTestRendererAvailable,
+  type TestRenderer,
+} from '@gpuix/react/testing'
 import { describe, expect, it, vi } from 'vitest'
 import { createFakeMessageApi, InfiniteChatApp } from './infinite-chat'
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 const LOADING = 'Loading older messages…'
 

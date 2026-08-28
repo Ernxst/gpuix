@@ -11,10 +11,10 @@ import fs from "fs"
 import path from "path"
 import React, { useState } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing.js"
+import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 function shot(name: string): string {
   fs.mkdirSync(SHOTS_DIR, { recursive: true })
@@ -88,7 +88,8 @@ describeNative("text element identity", () => {
   it("blocks a click behind a filled <text>", () => {
     const behind = vi.fn()
     testRoot.render(
-      <div style={{ width: 600, height: 400 }} onClick={behind}>
+      <div style={{ width: 600, height: 400 }}>
+        <div style={{ width: 600, height: 400 }} onClick={behind} />
         <div
           style={{
             position: "absolute",
