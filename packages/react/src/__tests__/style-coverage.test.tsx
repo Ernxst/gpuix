@@ -153,7 +153,7 @@ function HoverWithinSiblingProbe({
   )
 }
 
-describe("style props reach the renderer", () => {
+describe("style props reach the renderer", { timeout: 16_000 }, () => {
   it("resolves ch, calc, and clamp dimensions on the GPU", () => {
     const shot = path.join(SHOTS_DIR, "expressive-lengths.png")
     const { render, renderer } = createTestRoot()

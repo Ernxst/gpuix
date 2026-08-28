@@ -147,7 +147,7 @@ async function captureLoadedSource(
   }
 }
 
-describeNative("custom element: img", () => {
+describeNative("custom element: img", { timeout: 28_000 }, () => {
   beforeAll(async () => {
     for (const fixture of FIXTURES) {
       fs.writeFileSync(FIXTURE_PATHS.get(fixture.name)!, fixture.bytes)

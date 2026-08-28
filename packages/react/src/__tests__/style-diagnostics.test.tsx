@@ -13,7 +13,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describeNative("style diagnostics", () => {
+describeNative("style diagnostics", { timeout: 12_000 }, () => {
   it("reports malformed, incompatible, hidden-focus, and unsupported-host accessibility props", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot()

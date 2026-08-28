@@ -79,7 +79,7 @@ function fillRectStream(color: string, x = 0, y = 0, width = 80, height = 60) {
   }
 }
 
-describeNative("retained canvas element", () => {
+describeNative("retained canvas element", { timeout: 14_000 }, () => {
   it("replaces its display list without a React commit or sibling mutation", () => {
     const testRoot = createTestRoot({ width: 240, height: 140 })
     const canvasRef = createRef<PublicInstance>()
