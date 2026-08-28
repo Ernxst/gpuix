@@ -243,7 +243,7 @@ impl CustomElement for DiffElement {
         &mut self,
         ctx: CustomRenderContext,
         _window: &mut gpui::Window,
-        _cx: &mut gpui::Context<crate::renderer::GpuixView>,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
@@ -262,7 +262,7 @@ impl CustomElement for DiffElement {
                 .justify_center()
                 .text_size(px(12.0))
                 .text_color(theme.text_faint);
-            return super::custom_surface(empty, &ctx)
+            return super::custom_surface(empty, &ctx, cx)
                 .child(ctx.chrome_text("No changes", None))
                 .into_any_element();
         }
@@ -377,7 +377,7 @@ impl CustomElement for DiffElement {
             container = container.min_h_0();
         }
 
-        super::custom_surface(container, &ctx)
+        super::custom_surface(container, &ctx, cx)
             .child(body)
             .into_any_element()
     }

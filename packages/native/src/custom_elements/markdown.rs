@@ -67,7 +67,7 @@ impl CustomElement for MarkdownElement {
         &mut self,
         ctx: CustomRenderContext,
         window: &mut gpui::Window,
-        _cx: &mut gpui::Context<crate::renderer::GpuixView>,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
@@ -112,7 +112,7 @@ impl CustomElement for MarkdownElement {
             .text_size(gpui::px(theme.metrics.md_text_size))
             .line_height(gpui::px(theme.metrics.md_line_height));
 
-        super::custom_surface(container, &ctx)
+        super::custom_surface(container, &ctx, cx)
             .child(body)
             .into_any_element()
     }

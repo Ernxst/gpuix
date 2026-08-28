@@ -285,7 +285,7 @@ impl CustomElement for AnchoredElement {
         &mut self,
         ctx: CustomRenderContext,
         _window: &mut gpui::Window,
-        _cx: &mut gpui::Context<crate::renderer::GpuixView>,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
@@ -300,7 +300,7 @@ impl CustomElement for AnchoredElement {
             )))
             .flex_col();
         content = crate::automation::track_own_bounds(content, ctx.id);
-        content = super::wire_standard_events(content, &ctx);
+        content = super::wire_standard_events(content, &ctx, cx);
         if let Some(style) = ctx.style {
             content = crate::renderer::apply_interactive_styles(content, style);
         }

@@ -303,7 +303,18 @@ const DIV_ALIASES = new Set([
 
 // Built-in element types that don't use custom props.
 const BUILT_IN_TYPES = new Set(["div", "text", ...DIV_ALIASES])
-const STYLE_TRANSITION_TYPES = new Set(["div", "text", "img"])
+const STYLE_TRANSITION_TYPES = new Set([
+  "div",
+  "text",
+  "img",
+  "canvas",
+  "code",
+  "diff",
+  "input",
+  "textarea",
+  "markdown",
+  "anchored",
+])
 const warnedUnsupportedStyleTransitions = new WeakSet<Instance>()
 const warnedInvalidStyleProps = new WeakSet<Instance>()
 const warnedUnsupportedAccessibilityRoleProps = new WeakSet<Instance>()
@@ -396,7 +407,8 @@ function diagnoseUnsupportedStyleTransition(
   const subject = elementSubject(instance, props)
   const message =
     `[gpuix] ${subject} does not support style.transition. ` +
-    "Style transitions are available on <div>, <text>, and <img>."
+    "Style transitions are available on <div>, <text>, <img>, <canvas>, <code>, " +
+    "<diff>, <input>, <textarea>, <markdown>, and <anchored>."
 
   if (container.strictStyles) throw new UnsupportedStyleTransitionError(message)
   if (warnedUnsupportedStyleTransitions.has(instance)) return

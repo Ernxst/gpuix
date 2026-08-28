@@ -165,7 +165,7 @@ impl CustomElement for CodeElement {
         &mut self,
         ctx: CustomRenderContext,
         _window: &mut gpui::Window,
-        _cx: &mut gpui::Context<crate::renderer::GpuixView>,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
@@ -246,6 +246,7 @@ impl CustomElement for CodeElement {
         let block = super::custom_surface(
             gpui::div().id(SharedString::from(format!("__gpuix_code_{}", ctx.id))),
             &ctx,
+            cx,
         );
         block.child(body).into_any_element()
     }

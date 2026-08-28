@@ -1219,6 +1219,7 @@ impl CanvasElement {
         &self,
         mut element: gpui::Stateful<gpui::Div>,
         ctx: &CustomRenderContext,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::Stateful<gpui::Div> {
         let id = ctx.id;
         for event_type in ctx.events {
@@ -1375,10 +1376,21 @@ impl CanvasElement {
         }
         let has_enter = ctx.events.contains("mouseEnter");
         let has_leave = ctx.events.contains("mouseLeave");
-        if has_enter || has_leave {
+        let transition_hover = ctx
+            .style
+            .is_some_and(|style| style.transition.is_some() && style.hover.is_some());
+        if has_enter || has_leave || transition_hover {
             let callback_enter = has_enter.then(|| ctx.event_callback.clone()).flatten();
             let callback_leave = has_leave.then(|| ctx.event_callback.clone()).flatten();
-            element = element.on_hover(move |hovered, _window, _cx| {
+            element = element.on_hover(cx.listener(move |view, hovered: &bool, _window, cx| {
+                let transition_changed = transition_hover
+                    && view
+                        .transition_states
+                        .get_mut(&id)
+                        .is_some_and(|state| state.set_hovered(*hovered));
+                if transition_changed {
+                    cx.notify();
+                }
                 if *hovered {
                     crate::renderer::emit_event_full(
                         &callback_enter,
@@ -1398,7 +1410,50 @@ impl CanvasElement {
                         },
                     );
                 }
-            });
+            }));
+        }
+
+        let transition_active = ctx
+            .style
+            .is_some_and(|style| style.transition.is_some() && style.active.is_some());
+        if transition_active {
+            element = element
+                .on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(move |view, _event: &gpui::MouseDownEvent, _window, cx| {
+                        if view
+                            .transition_states
+                            .get_mut(&id)
+                            .is_some_and(|state| state.set_active(true))
+                        {
+                            cx.notify();
+                        }
+                    }),
+                )
+                .on_mouse_up(
+                    gpui::MouseButton::Left,
+                    cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
+                        if view
+                            .transition_states
+                            .get_mut(&id)
+                            .is_some_and(|state| state.set_active(false))
+                        {
+                            cx.notify();
+                        }
+                    }),
+                )
+                .on_mouse_up_out(
+                    gpui::MouseButton::Left,
+                    cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
+                        if view
+                            .transition_states
+                            .get_mut(&id)
+                            .is_some_and(|state| state.set_active(false))
+                        {
+                            cx.notify();
+                        }
+                    }),
+                );
         }
 
         element
@@ -1549,7 +1604,7 @@ impl CustomElement for CanvasElement {
             .w(gpui::px(self.width as f32))
             .h(gpui::px(self.height as f32));
         if let Some(style) = ctx.style {
-            root = crate::renderer::apply_styles(root, style);
+            root = crate::renderer::apply_interactive_styles(root, style);
             if style.pointer_events.as_deref() == Some("none") {
                 root = root.ignore_mouse();
             } else if crate::style::should_occlude(Some(style), !ctx.events.is_empty()) {
@@ -1559,7 +1614,7 @@ impl CustomElement for CanvasElement {
         root = root
             .child(crate::automation::bounds_tracker(ctx.id, None))
             .child(drawing);
-        self.attach_mouse_events(root, &ctx).into_any_element()
+        self.attach_mouse_events(root, &ctx, cx).into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {

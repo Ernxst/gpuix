@@ -383,6 +383,7 @@ impl CustomElement for TextEditorElement {
             Some(&focus_handle),
             ctx.accessibility_hidden,
         );
+        editor = super::wire_style_transition_events(editor, &ctx, cx);
         if ctx.events.contains("click") && !action_disabled {
             let callback = ctx.event_callback.clone();
             let id = ctx.id;

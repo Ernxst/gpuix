@@ -123,6 +123,7 @@ impl CustomRenderContext<'_> {
 pub(crate) fn custom_surface(
     mut el: gpui::Stateful<gpui::Div>,
     ctx: &CustomRenderContext,
+    cx: &mut gpui::Context<crate::renderer::GpuixView>,
 ) -> gpui::Stateful<gpui::Div> {
     use gpui::prelude::*;
 
@@ -139,7 +140,7 @@ pub(crate) fn custom_surface(
         el = el.relative();
     }
     el = el.child(crate::automation::bounds_tracker(ctx.id, None));
-    wire_standard_events(el, ctx)
+    wire_standard_events(el, ctx, cx)
 }
 
 /// Attach the mouse events a custom element declares in `supported_events`.
@@ -153,6 +154,7 @@ pub(crate) fn custom_surface(
 pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
     mut el: E,
     ctx: &CustomRenderContext,
+    cx: &mut gpui::Context<crate::renderer::GpuixView>,
 ) -> E {
     let id = ctx.id;
     for event in ctx.events {
@@ -169,25 +171,108 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
                     });
                 });
             }
-            "mouseEnter" | "mouseLeave" => {
-                // gpui reports both edges through one listener, so wire it once.
-                if event == "mouseEnter" || !ctx.events.contains("mouseEnter") {
-                    let enter = ctx.events.contains("mouseEnter");
-                    let leave = ctx.events.contains("mouseLeave");
-                    let callback = ctx.event_callback.clone();
-                    el = el.on_hover(move |&hovered, _window, _cx| {
-                        let kind = if hovered { "mouseEnter" } else { "mouseLeave" };
-                        if (hovered && enter) || (!hovered && leave) {
-                            crate::renderer::emit_event_full(&callback, id, kind, |p| {
-                                p.hovered = Some(hovered);
-                            });
-                        }
-                    });
-                }
-            }
+            "mouseEnter" | "mouseLeave" => {}
             _ => {}
         }
     }
+    wire_hover_and_style_transition_events(el, ctx, cx, true)
+}
+
+/// Drive a custom root's retained transition track without adding standard
+/// mouse event emission. Adapters with specialised event payloads use this
+/// after installing their own handlers.
+pub(crate) fn wire_style_transition_events<E: gpui::StatefulInteractiveElement>(
+    el: E,
+    ctx: &CustomRenderContext,
+    cx: &mut gpui::Context<crate::renderer::GpuixView>,
+) -> E {
+    wire_hover_and_style_transition_events(el, ctx, cx, false)
+}
+
+fn wire_hover_and_style_transition_events<E: gpui::StatefulInteractiveElement>(
+    mut el: E,
+    ctx: &CustomRenderContext,
+    cx: &mut gpui::Context<crate::renderer::GpuixView>,
+    emit_standard_hover: bool,
+) -> E {
+    let id = ctx.id;
+    let transition_hover = ctx
+        .style
+        .is_some_and(|style| style.transition.is_some() && style.hover.is_some());
+    let transition_active = ctx
+        .style
+        .is_some_and(|style| style.transition.is_some() && style.active.is_some());
+    let enter = emit_standard_hover && ctx.events.contains("mouseEnter");
+    let leave = emit_standard_hover && ctx.events.contains("mouseLeave");
+
+    // GPUI stores exactly one hover listener per element. Transition state and
+    // mouseEnter/mouseLeave therefore share this listener rather than competing
+    // for the same slot.
+    if transition_hover || enter || leave {
+        let callback = ctx.event_callback.clone();
+        el = el.on_hover(cx.listener(move |view, is_hovered: &bool, _window, cx| {
+            let transition_changed = transition_hover
+                && view
+                    .transition_states
+                    .get_mut(&id)
+                    .is_some_and(|state| state.set_hovered(*is_hovered));
+            if transition_changed {
+                cx.notify();
+            }
+
+            let kind = if *is_hovered {
+                "mouseEnter"
+            } else {
+                "mouseLeave"
+            };
+            if (*is_hovered && enter) || (!*is_hovered && leave) {
+                crate::renderer::emit_event_full(&callback, id, kind, |payload| {
+                    payload.hovered = Some(*is_hovered);
+                });
+            }
+        }));
+    }
+
+    if transition_active {
+        el = el
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(move |view, _event: &gpui::MouseDownEvent, _window, cx| {
+                    if view
+                        .transition_states
+                        .get_mut(&id)
+                        .is_some_and(|state| state.set_active(true))
+                    {
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
+                    if view
+                        .transition_states
+                        .get_mut(&id)
+                        .is_some_and(|state| state.set_active(false))
+                    {
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_mouse_up_out(
+                gpui::MouseButton::Left,
+                cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
+                    if view
+                        .transition_states
+                        .get_mut(&id)
+                        .is_some_and(|state| state.set_active(false))
+                    {
+                        cx.notify();
+                    }
+                }),
+            );
+    }
+
     el
 }
 
