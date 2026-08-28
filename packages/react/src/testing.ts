@@ -363,6 +363,7 @@ export class TestRenderer implements NativeRenderer {
   private applicationEventHandler: ((event: EventPayload) => void) | null = null
   private windowEventHandler: ((event: EventPayload) => void) | null = null
   private animationFrameRequestCount = 0
+  private elementMap: Map<number, TestElement> | null = null
 
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
@@ -403,42 +404,53 @@ export class TestRenderer implements NativeRenderer {
 
   createElement(id: number, elementType: string): void {
     this.native.createElement(id, elementType)
+    this.invalidateElementMap()
   }
 
   destroyElement(id: number): Array<number> {
-    return this.native.destroyElement(id)
+    const destroyed = this.native.destroyElement(id)
+    this.invalidateElementMap()
+    return destroyed
   }
 
   appendChild(parentId: number, childId: number): void {
     this.native.appendChild(parentId, childId)
+    this.invalidateElementMap()
   }
 
   removeChild(parentId: number, childId: number): void {
     this.native.removeChild(parentId, childId)
+    this.invalidateElementMap()
   }
 
   insertBefore(parentId: number, childId: number, beforeId: number): void {
     this.native.insertBefore(parentId, childId, beforeId)
+    this.invalidateElementMap()
   }
 
   setStyle(id: number, styleJson: string): void {
     this.native.setStyle(id, styleJson)
+    this.invalidateElementMap()
   }
 
   setText(id: number, content: string): void {
     this.native.setText(id, content)
+    this.invalidateElementMap()
   }
 
   setEventListener(id: number, eventType: string, hasHandler: boolean): void {
     this.native.setEventListener(id, eventType, hasHandler)
+    this.invalidateElementMap()
   }
 
   setRoot(id: number): void {
     this.native.setRoot(id)
+    this.invalidateElementMap()
   }
 
   setCustomProp(id: number, key: string, valueJson: string): void {
     this.native.setCustomProp(id, key, valueJson)
+    this.invalidateElementMap()
   }
 
   commitMutations(): void {
@@ -447,7 +459,9 @@ export class TestRenderer implements NativeRenderer {
   }
 
   applyBatch(json: string): Array<number> {
-    return this.native.applyBatch(json)
+    const destroyed = this.native.applyBatch(json)
+    this.invalidateElementMap()
+    return destroyed
   }
 
   applyCanvasCommands(
@@ -808,6 +822,8 @@ export class TestRenderer implements NativeRenderer {
   /** Build a flat map of TestElements from the native tree JSON.
    *  One FFI call to get the full tree, then parse into TestElement objects. */
   private buildElementMap(): Map<number, TestElement> {
+    if (this.elementMap) return this.elementMap
+
     const json = JSON.parse(this.native.getTreeJson())
     const map = new Map<number, TestElement>()
     const walk = (node: any, parentId: number | null) => {
@@ -830,7 +846,12 @@ export class TestRenderer implements NativeRenderer {
       }
     }
     walk(json, null)
+    this.elementMap = map
     return map
+  }
+
+  private invalidateElementMap(): void {
+    this.elementMap = null
   }
 
   /** Get the root element. */
