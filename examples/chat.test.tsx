@@ -280,6 +280,56 @@ describeNative('chat example', () => {
     expect(painted.some((line) => line.includes('React renderer for GPUI'))).toBe(true)
   })
 
+  it('updates the header and active sidebar row when a conversation is selected', async () => {
+    const { render, renderer } = createTestRoot()
+    render(<ChatApp />)
+
+    const initialTitle = 'give me a quick overview'
+    const nextTitle = 'Native SDK vs GPUI comparison'
+    const containsElement = (nodeId: number, descendantId: number): boolean => {
+      const node = renderer.getElement(nodeId)
+      return (
+        node?.children.some(
+          (childId) => childId === descendantId || containsElement(childId, descendantId)
+        ) ?? false
+      )
+    }
+    const conversationRow = (title: string) => {
+      const titleNode = renderer.findByText(title)
+      expect(titleNode).toBeDefined()
+      const row = renderer
+        .findByType('div')
+        .find((node) => node.style.cursor === 'pointer' && containsElement(node.id, titleNode!.id))
+      expect(row).toBeDefined()
+      return row!
+    }
+
+    const initialTitleCount = renderer.getPaintedText().filter((text) => text === initialTitle).length
+    const nextTitleCount = renderer.getPaintedText().filter((text) => text === nextTitle).length
+
+    const initialRow = conversationRow(initialTitle)
+    const nextRow = conversationRow(nextTitle)
+    const activeBackground = initialRow.style.backgroundColor
+    const inactiveBackground = nextRow.style.backgroundColor
+    expect(activeBackground).not.toBe(inactiveBackground)
+
+    const app = await connectTest(renderer)
+    try {
+      await app.getByText(nextTitle).click()
+
+      expect(renderer.getPaintedText().filter((text) => text === initialTitle)).toHaveLength(
+        initialTitleCount - 1
+      )
+      expect(renderer.getPaintedText().filter((text) => text === nextTitle)).toHaveLength(
+        nextTitleCount + 1
+      )
+      expect(renderer.getElement(initialRow.id)?.style.backgroundColor).toBe(inactiveBackground)
+      expect(renderer.getElement(nextRow.id)?.style.backgroundColor).toBe(activeBackground)
+    } finally {
+      await app.close()
+    }
+  })
+
   it('scrolls the transcript past the first turn', () => {
     const { render, renderer } = createTestRoot()
     render(<ChatApp />)
