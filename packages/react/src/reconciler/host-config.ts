@@ -303,9 +303,25 @@ const DIV_ALIASES = new Set([
 
 // Built-in element types that don't use custom props.
 const BUILT_IN_TYPES = new Set(["div", "text", ...DIV_ALIASES])
-const STYLE_TRANSITION_TYPES = new Set([
+const CUSTOM_STYLE_TRANSITION_TYPES = new Set<ElementType>([
+  "img",
+  "canvas",
+  "code",
+  "diff",
+  "input",
+  "textarea",
+  "markdown",
+  "anchored",
+])
+const STYLE_TRANSITION_TYPES = new Set<ElementType>([
   "div",
   "text",
+  ...CUSTOM_STYLE_TRANSITION_TYPES,
+])
+// These adapters paint their text/content from element-owned props or themes,
+// not from the styled outer surface. A root `color` value can therefore appear
+// in getResolvedStyle without changing the pixels an author meant to animate.
+const ELEMENT_INTERNAL_COLOR_TRANSITION_TYPES = new Set<ElementType>([
   "img",
   "canvas",
   "code",
@@ -402,13 +418,39 @@ function diagnoseUnsupportedStyleTransition(
   container: Container,
   props: Props
 ): void {
-  if (props.style?.transition == null || supportsStyleTransitions(instance.type)) return
+  const style = props.style
+  if (style == null) return
 
   const subject = elementSubject(instance, props)
-  const message =
-    `[gpuix] ${subject} does not support style.transition. ` +
-    "Style transitions are available on <div>, <text>, <img>, <canvas>, <code>, " +
-    "<diff>, <input>, <textarea>, <markdown>, and <anchored>."
+  const support =
+    "Style transitions are available on <div> and <text>. <img>, <canvas>, <code>, " +
+    "<diff>, <input>, <textarea>, <markdown>, and <anchored> support outer-container " +
+    "properties only."
+  let message: string
+  if (
+    CUSTOM_STYLE_TRANSITION_TYPES.has(instance.type) &&
+    style.hoverWithin != null
+  ) {
+    message =
+      `[gpuix] ${subject} does not support style.hoverWithin. ` +
+      "Custom elements do not paint hoverWithin; put the state and transition on a " +
+      "<div> or <text> wrapper instead."
+  } else if (style.transition == null) {
+    return
+  } else if (!supportsStyleTransitions(instance.type)) {
+    message = `[gpuix] ${subject} does not support style.transition. ${support}`
+  } else if (
+    ELEMENT_INTERNAL_COLOR_TRANSITION_TYPES.has(instance.type) &&
+    Array.isArray(style.transition.properties) &&
+    style.transition.properties.includes("color")
+  ) {
+    message =
+      `[gpuix] ${subject} does not support style.transition property "color". ` +
+      "Its text or content is painted by the element adapter, not the outer container; " +
+      `element-internal colours do not interpolate. ${support}`
+  } else {
+    return
+  }
 
   if (container.strictStyles) throw new UnsupportedStyleTransitionError(message)
   if (warnedUnsupportedStyleTransitions.has(instance)) return

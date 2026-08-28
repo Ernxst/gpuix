@@ -5409,7 +5409,7 @@ impl GpuixView {
         }
     }
 
-    fn update_hover_target(
+    pub(crate) fn update_hover_target(
         &mut self,
         id: u64,
         is_hovered: bool,
@@ -6684,6 +6684,7 @@ pub(crate) fn build_element(
                 id,
                 retained_element: element,
                 events: &element.events,
+                tracks_mouse_hover: tracks_mouse_hover_events(element, ctx.tree),
                 event_callback: ctx.event_callback,
                 focus_handle: ctx.focus_handles.get(&id),
                 style,

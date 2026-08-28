@@ -1374,15 +1374,12 @@ impl CanvasElement {
         if ctx.events.contains("mouseDown") && ctx.events.contains("mouseMove") {
             element = element.capture_pointer();
         }
-        let has_enter = ctx.events.contains("mouseEnter");
-        let has_leave = ctx.events.contains("mouseLeave");
         let transition_hover = ctx
             .style
             .is_some_and(|style| style.transition.is_some() && style.hover.is_some());
-        if has_enter || has_leave || transition_hover {
-            let callback_enter = has_enter.then(|| ctx.event_callback.clone()).flatten();
-            let callback_leave = has_leave.then(|| ctx.event_callback.clone()).flatten();
-            element = element.on_hover(cx.listener(move |view, hovered: &bool, _window, cx| {
+        let tracks_mouse_hover = ctx.tracks_mouse_hover;
+        if tracks_mouse_hover || transition_hover {
+            element = element.on_hover(cx.listener(move |view, hovered: &bool, window, cx| {
                 let transition_changed = transition_hover
                     && view
                         .transition_states
@@ -1391,24 +1388,8 @@ impl CanvasElement {
                 if transition_changed {
                     cx.notify();
                 }
-                if *hovered {
-                    crate::renderer::emit_event_full(
-                        &callback_enter,
-                        id,
-                        "mouseEnter",
-                        |payload| {
-                            payload.hovered = Some(true);
-                        },
-                    );
-                } else {
-                    crate::renderer::emit_event_full(
-                        &callback_leave,
-                        id,
-                        "mouseLeave",
-                        |payload| {
-                            payload.hovered = Some(false);
-                        },
-                    );
+                if tracks_mouse_hover {
+                    view.update_hover_target(id, *hovered, window, cx);
                 }
             }));
         }

@@ -33,6 +33,10 @@ pub struct CustomRenderContext<'a> {
     pub retained_element: &'a crate::retained_tree::RetainedElement,
     /// Event types registered by React (e.g. "keyDown", "click").
     pub events: &'a HashSet<String>,
+    /// Whether this element or a retained ancestor declares mouse enter/leave.
+    /// Custom roots report their hit target through the same ancestry-diff path
+    /// as host containers, so an ancestor edge is emitted exactly once.
+    pub tracks_mouse_hover: bool,
     /// Callback for emitting events back to JS.
     pub event_callback: &'a Option<EventCallback>,
     /// Pre-created FocusHandle for this element (if it has keyboard/focus listeners).
@@ -175,25 +179,24 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
             _ => {}
         }
     }
-    wire_hover_and_style_transition_events(el, ctx, cx, true)
+    wire_hover_and_style_transition_events(el, ctx, cx)
 }
 
-/// Drive a custom root's retained transition track without adding standard
-/// mouse event emission. Adapters with specialised event payloads use this
-/// after installing their own handlers.
+/// Drive a custom root's retained transition track and report its hover target
+/// through the shared ancestry-diff path. Adapters with specialised event
+/// payloads use this after installing their own handlers.
 pub(crate) fn wire_style_transition_events<E: gpui::StatefulInteractiveElement>(
     el: E,
     ctx: &CustomRenderContext,
     cx: &mut gpui::Context<crate::renderer::GpuixView>,
 ) -> E {
-    wire_hover_and_style_transition_events(el, ctx, cx, false)
+    wire_hover_and_style_transition_events(el, ctx, cx)
 }
 
 fn wire_hover_and_style_transition_events<E: gpui::StatefulInteractiveElement>(
     mut el: E,
     ctx: &CustomRenderContext,
     cx: &mut gpui::Context<crate::renderer::GpuixView>,
-    emit_standard_hover: bool,
 ) -> E {
     let id = ctx.id;
     let transition_hover = ctx
@@ -202,15 +205,13 @@ fn wire_hover_and_style_transition_events<E: gpui::StatefulInteractiveElement>(
     let transition_active = ctx
         .style
         .is_some_and(|style| style.transition.is_some() && style.active.is_some());
-    let enter = emit_standard_hover && ctx.events.contains("mouseEnter");
-    let leave = emit_standard_hover && ctx.events.contains("mouseLeave");
+    let tracks_mouse_hover = ctx.tracks_mouse_hover;
 
     // GPUI stores exactly one hover listener per element. Transition state and
-    // mouseEnter/mouseLeave therefore share this listener rather than competing
-    // for the same slot.
-    if transition_hover || enter || leave {
-        let callback = ctx.event_callback.clone();
-        el = el.on_hover(cx.listener(move |view, is_hovered: &bool, _window, cx| {
+    // React's ancestry-diff target therefore share this listener rather than
+    // competing for the same slot or emitting a second bubbling event source.
+    if transition_hover || tracks_mouse_hover {
+        el = el.on_hover(cx.listener(move |view, is_hovered: &bool, window, cx| {
             let transition_changed = transition_hover
                 && view
                     .transition_states
@@ -219,16 +220,8 @@ fn wire_hover_and_style_transition_events<E: gpui::StatefulInteractiveElement>(
             if transition_changed {
                 cx.notify();
             }
-
-            let kind = if *is_hovered {
-                "mouseEnter"
-            } else {
-                "mouseLeave"
-            };
-            if (*is_hovered && enter) || (!*is_hovered && leave) {
-                crate::renderer::emit_event_full(&callback, id, kind, |payload| {
-                    payload.hovered = Some(*is_hovered);
-                });
+            if tracks_mouse_hover {
+                view.update_hover_target(id, *is_hovered, window, cx);
             }
         }));
     }

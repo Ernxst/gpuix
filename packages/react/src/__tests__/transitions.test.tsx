@@ -8,8 +8,9 @@ import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 const STYLE_TRANSITION_SUPPORT_MESSAGE =
-  "Style transitions are available on <div>, <text>, <img>, <canvas>, <code>, " +
-  "<diff>, <input>, <textarea>, <markdown>, and <anchored>."
+  "Style transitions are available on <div> and <text>. <img>, <canvas>, <code>, " +
+  "<diff>, <input>, <textarea>, <markdown>, and <anchored> support outer-container " +
+  "properties only."
 
 const customTransitionStyle = (expanded: boolean) => ({
   width: expanded ? 140 : 100,
@@ -256,9 +257,10 @@ describeNative("native style transitions", () => {
     }
   })
 
-  it("warns once for unsupported transition declarations in non-strict roots", () => {
+  it("warns once per unsupported transition declaration in non-strict roots", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const root = createTestRoot({ strictStyles: false })
+    const customRoot = createTestRoot({ strictStyles: false })
 
     try {
       root.render(
@@ -290,14 +292,38 @@ describeNative("native style transitions", () => {
         />
       )
 
-      expect(warn).toHaveBeenCalledTimes(1)
+      const markdown = (property: "opacity" | "color") => (
+        <markdown
+          source="internal colour"
+          testId="internal-colour-transition"
+          style={{
+            opacity: 0.5,
+            color: "#ffffff",
+            transition: {
+              properties: [property],
+              durationMs: 100,
+              delayMs: 0,
+              easing: "ease",
+            },
+          }}
+        />
+      )
+      customRoot.render(markdown("opacity"))
+      customRoot.render(markdown("color"))
+
+      expect(warn).toHaveBeenCalledTimes(2)
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('<virtual-list testId="inert-transition">')
       )
       expect(warn).toHaveBeenCalledWith(expect.stringContaining(STYLE_TRANSITION_SUPPORT_MESSAGE))
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('does not support style.transition property "color"')
+      )
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("outer-container properties only"))
     } finally {
       warn.mockRestore()
       root.unmount()
+      customRoot.unmount()
     }
   })
 
@@ -383,8 +409,9 @@ describeNative("native style transitions", () => {
     }
   })
 
-  it("does not introduce hoverWithin painting on custom elements", () => {
-    const root = createTestRoot()
+  it("warns and does not introduce hoverWithin painting on custom elements", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const root = createTestRoot({ strictStyles: false })
     try {
       root.renderer.clockPause()
       root.render(
@@ -398,7 +425,12 @@ describeNative("native style transitions", () => {
               pointerEvents: "none",
               opacity: 0.2,
               hoverWithin: { opacity: 0.8 },
-              transition: { properties: ["opacity"], durationMs: 100, easing: "linear" },
+              transition: {
+                properties: ["opacity"],
+                durationMs: 100,
+                delayMs: 0,
+                easing: "linear",
+              },
             }}
           />
         </div>
@@ -410,7 +442,12 @@ describeNative("native style transitions", () => {
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       root.renderer.advanceAsyncClock(100)
       expect(root.renderer.getResolvedStyle(target.id)?.opacity).toBe(0.2)
+      expect(warn).toHaveBeenCalledOnce()
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("does not support style.hoverWithin")
+      )
     } finally {
+      warn.mockRestore()
       root.unmount()
     }
   })
@@ -825,6 +862,8 @@ describeNative("native style transitions", () => {
   it("throws for unsupported transition declarations in strict roots", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const root = createTestRoot({ strictStyles: true })
+    const hoverWithinRoot = createTestRoot({ strictStyles: true })
+    const internalColourRoot = createTestRoot({ strictStyles: true })
 
     try {
       root.render(
@@ -852,9 +891,47 @@ describeNative("native style transitions", () => {
           message: expect.stringContaining(STYLE_TRANSITION_SUPPORT_MESSAGE),
         })
       )
+
+      hoverWithinRoot.render(
+        <markdown
+          source="unsupported hoverWithin"
+          style={{ opacity: 0.2, hoverWithin: { opacity: 0.8 } }}
+        />
+      )
+      expect(error.mock.calls.flat()).toContainEqual(
+        expect.objectContaining({
+          name: "UnsupportedStyleTransitionError",
+          message: expect.stringContaining("does not support style.hoverWithin"),
+        })
+      )
+
+      internalColourRoot.render(
+        <markdown
+          source="unsupported internal colour"
+          style={{
+            color: "#ffffff",
+            transition: {
+              properties: ["color"],
+              durationMs: 100,
+              delayMs: 0,
+              easing: "ease",
+            },
+          }}
+        />
+      )
+      expect(error.mock.calls.flat()).toContainEqual(
+        expect.objectContaining({
+          name: "UnsupportedStyleTransitionError",
+          message: expect.stringContaining(
+            'does not support style.transition property "color"'
+          ),
+        })
+      )
     } finally {
       error.mockRestore()
       root.unmount()
+      hoverWithinRoot.unmount()
+      internalColourRoot.unmount()
     }
   })
 })
