@@ -117,6 +117,7 @@ change `@gpuix/react` from `workspace:^` to a version range, and run
 | **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, message list, composer, `<markdown>` |
 | **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
+| **reduced-motion** | `bun --hot reduced-motion.tsx` | Style and `motion.div` transitions following macOS Reduce Motion live |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
 | **menus** | `bun --hot menus.tsx` | Application menus, JS menu actions, explicit quit, and graceful termination |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
@@ -453,7 +454,7 @@ the previous tree.
 | `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. The chat example uses `(16, 17)` |
 | `transparent` | boolean | Same as `windowBackground: "transparent"` when that option is unset |
 | `appName` | string | Name inside the macOS `Hide X` and `Quit X` items. Defaults to `title` |
-| `reducedMotion` | boolean | Force GPUI's reduced-motion policy. Style transitions snap to their target |
+| `reducedMotion` | boolean | Override macOS Reduce Motion. Omit it to follow live system changes on macOS |
 | `focus` | boolean, default `true` | `false` opens the window behind the active app, like `open -g` |
 | `show` | boolean, default `true` | `false` opens the window hidden. Call `activateWindow()` to reveal it |
 
@@ -917,10 +918,11 @@ premultiplied RGB and alpha, then unpremultiplies the result; a zero-alpha
 result keeps the destination RGB. Consequently, the exact midpoint from
 transparent to white is white at 50% alpha, not grey at 50% alpha.
 
-Set the renderer option `reducedMotion: true` to make transitions finish on
-their target immediately. GPUI exposes reduced motion as application policy,
-but its current desktop platforms do not populate that policy from the OS, so
-an app that mirrors the system preference must pass its resolved setting.
+On macOS, both style transitions and `motion.div` follow Accessibility >
+Display > Reduce motion by default, and changes take effect live. Set the
+renderer option `reducedMotion: true` or `false` to override the system
+preference for the lifetime of the renderer. Other platforms retain GPUI's
+default policy unless the app supplies an override.
 
 Use **`motion.div`** to animate from an initial style to a target style. React
 sends the target once. Rust calculates intermediate values and requests GPUI

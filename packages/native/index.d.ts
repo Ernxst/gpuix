@@ -100,6 +100,10 @@ export declare class GpuixRenderer {
    * This keeps input and application lifecycle events responsive between frames.
    */
   tickIdle(): boolean
+  /** Test seam that posts the real macOS accessibility-display notification. */
+  testSetPlatformReducedMotion(enabled: boolean): void
+  /** Whether the embedded macOS runtime is still retained by thread-local handles. */
+  testHasEmbeddedRuntime(): boolean
   isInitialized(): boolean
   /**
    * Stable platform and renderer feature read. Keep individual methods for
@@ -880,7 +884,7 @@ export interface WindowOptions {
   windowBackground?: string
   trafficLightX?: number
   trafficLightY?: number
-  /** Force GPUI's reduced-motion policy for this application. */
+  /** Override GPUI's reduced-motion policy for this application. */
   reducedMotion?: boolean
   /**
    * Allow URL-backed images to connect to loopback and private networks.
