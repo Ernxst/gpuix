@@ -93,4 +93,4 @@ function LiveScrollWheel() {
   )
 }
 
-render(<LiveScrollWheel />, { title: "GPUIX live scroll wheel", width: 528, height: 748 })
+render(<LiveScrollWheel />, { title: "GPUIX live scroll wheel", width: 528, height: 748, focus: false })
