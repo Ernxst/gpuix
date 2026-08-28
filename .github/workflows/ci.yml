@@ -122,6 +122,10 @@ jobs:
         working-directory: .
         run: bun install
 
+      - name: Check all Rust targets without default features
+        if: contains(matrix.settings.target, 'linux')
+        run: RUST_FONTCONFIG_DLOPEN=1 cargo check --target x86_64-unknown-linux-gnu --no-default-features --all-targets
+
       - name: Build native
         run: ${{ matrix.settings.build }}
         shell: bash
