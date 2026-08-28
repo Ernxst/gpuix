@@ -17,6 +17,7 @@ import type {
   NativeRenderer,
   Props,
   PublicInstance,
+  StyleDesc,
   TextInstance,
   VirtualListProps,
 } from "../types/host.js"
@@ -262,10 +263,10 @@ function diffEventListeners(
 
 // ── Style helper ─────────────────────────────────────────────────────
 
-function sendStyle(renderer: NativeRenderer, id: number, props: Props): void {
-  const style = props.style
+function sendStyle(container: Container, instance: Instance): void {
+  const style = styleForRenderer(instance, container, instance.props)
   if (style == null || Object.keys(style).length === 0) return
-  renderer.setStyle(id, style)
+  container.renderer.setStyle(instance.id, style)
 }
 
 // ── Custom prop forwarding ───────────────────────────────────────────
@@ -304,9 +305,81 @@ const DIV_ALIASES = new Set([
 const BUILT_IN_TYPES = new Set(["div", "text", ...DIV_ALIASES])
 const STYLE_TRANSITION_TYPES = new Set(["div", "text", "img"])
 const warnedUnsupportedStyleTransitions = new WeakSet<Instance>()
+const warnedInvalidStyleProps = new WeakSet<Instance>()
+const warnedUnsupportedAccessibilityRoleProps = new WeakSet<Instance>()
 
 class UnsupportedStyleTransitionError extends Error {
   override name = "UnsupportedStyleTransitionError"
+}
+
+class InvalidStylePropError extends Error {
+  override name = "InvalidStylePropError"
+}
+
+class UnsupportedAccessibilityRolePropError extends Error {
+  override name = "UnsupportedAccessibilityRolePropError"
+}
+
+function elementSubject(instance: Instance, props: Props): string {
+  const identity = [
+    props.testId === undefined ? undefined : `testId=${JSON.stringify(props.testId)}`,
+    props["data-testid"] === undefined
+      ? undefined
+      : `data-testid=${JSON.stringify(props["data-testid"])}`,
+    props.id === undefined ? undefined : `id=${JSON.stringify(props.id)}`,
+  ]
+    .filter((attribute): attribute is string => attribute !== undefined)
+    .join(" ")
+  return identity.length === 0 ? `<${instance.type}>` : `<${instance.type} ${identity}>`
+}
+
+function isPlainStyleObject(style: unknown): style is StyleDesc {
+  if (style === null || typeof style !== "object") return false
+  const prototype = Object.getPrototypeOf(style)
+  return prototype === Object.prototype || prototype === null
+}
+
+/**
+ * Keep malformed whole-prop inputs out of the native JSON path. Field-level
+ * validation remains native because it can report the specific style property.
+ */
+function styleForRenderer(instance: Instance, container: Container, props: Props): StyleDesc | undefined {
+  const { style } = props
+  if (style == null || isPlainStyleObject(style)) return style
+
+  const message =
+    `[gpuix] ${elementSubject(instance, props)} received an invalid style prop. ` +
+    "style accepts a plain style object only."
+  if (container.strictStyles) throw new InvalidStylePropError(message)
+  if (!warnedInvalidStyleProps.has(instance)) {
+    warnedInvalidStyleProps.add(instance)
+    console.warn(message)
+  }
+  // Treat a rejected update like style removal instead of preserving stale or
+  // serialising an arbitrary value into the native renderer.
+  return {}
+}
+
+/**
+ * `role` is the only public role prop. Keep a DOM-adapter spelling from being
+ * silently filtered out on built-in aliases, where it would otherwise lose to
+ * their synthesized role.
+ */
+function diagnoseUnsupportedAccessibilityRoleProp(
+  instance: Instance,
+  container: Container,
+  props: Props
+): void {
+  const accessibilityRole = (props as Props & { accessibilityRole?: unknown }).accessibilityRole
+  if (accessibilityRole === undefined) return
+
+  const message =
+    `[gpuix] ${elementSubject(instance, props)} does not support accessibilityRole. ` +
+    "Use role instead."
+  if (container.strictStyles) throw new UnsupportedAccessibilityRolePropError(message)
+  if (warnedUnsupportedAccessibilityRoleProps.has(instance)) return
+  warnedUnsupportedAccessibilityRoleProps.add(instance)
+  console.warn(message)
 }
 
 function supportsStyleTransitions(type: ElementType): boolean {
@@ -320,16 +393,7 @@ function diagnoseUnsupportedStyleTransition(
 ): void {
   if (props.style?.transition == null || supportsStyleTransitions(instance.type)) return
 
-  const identity = [
-    props.testId === undefined ? undefined : `testId=${JSON.stringify(props.testId)}`,
-    props["data-testid"] === undefined
-      ? undefined
-      : `data-testid=${JSON.stringify(props["data-testid"])}`,
-    props.id === undefined ? undefined : `id=${JSON.stringify(props.id)}`,
-  ]
-    .filter((attribute): attribute is string => attribute !== undefined)
-    .join(" ")
-  const subject = identity.length === 0 ? `<${instance.type}>` : `<${instance.type} ${identity}>`
+  const subject = elementSubject(instance, props)
   const message =
     `[gpuix] ${subject} does not support style.transition. ` +
     "Style transitions are available on <div>, <text>, and <img>."
@@ -418,10 +482,11 @@ function serializeCustomProp(
 
 type CustomPropInput = object | string | number | boolean | null | undefined
 
-/** Preserve the browser's natural tab stop when an `<a href>` becomes a native div. */
+/** Preserve native tab stops when JSX aliases become native divs. */
 function nativeTabIndex(type: string, props: Props): number | undefined {
   if (props.disabled === true) return undefined
   if (props.tabIndex !== undefined) return props.tabIndex
+  if (type === "button") return 0
   const href = type === "a" ? (props as Props & { href?: unknown }).href : undefined
   return typeof href === "string" ? 0 : undefined
 }
@@ -432,14 +497,24 @@ function nativeActivationKind(type: string, props: Props): "anchor" | undefined 
   return type === "a" || typeof href === "string" ? "anchor" : undefined
 }
 
+/** Restore the two semantic aliases after both normalize to a native div. */
+function nativeRole(type: string, props: Props): Props["role"] | undefined {
+  if (props.role !== undefined) return props.role
+  if (type === "button") return "button"
+  if (type === "a") return "link"
+  return undefined
+}
+
 function customPropEntries(type: string, props: Props): Array<[string, CustomPropInput]> {
   const entries = (Object.entries(props) as Array<[string, CustomPropInput]>).filter(
-    ([key]) => key !== "activationKind" && key !== "tabIndex"
+    ([key]) => key !== "activationKind" && key !== "role" && key !== "tabIndex"
   )
   const tabIndex = nativeTabIndex(type, props)
   if (tabIndex !== undefined) entries.push(["tabIndex", tabIndex])
   const activationKind = nativeActivationKind(type, props)
   if (activationKind) entries.push(["activationKind", activationKind])
+  const role = nativeRole(type, props)
+  if (role !== undefined) entries.push(["role", role])
 
   const virtualListProps = props as Props & VirtualListProps
   if (type !== "virtual-list" || virtualListProps.estimatedItemHeight !== undefined) {
@@ -511,7 +586,7 @@ function materialize(node: HostNode): HostNodeState {
     state.container.eventTargets.set(node.id, node)
     validateVirtualListRowContract(node, state)
     renderer.createElement(node.id, DIV_ALIASES.has(node.type) ? "div" : node.type)
-    sendStyle(renderer, node.id, node.props)
+    sendStyle(state.container, node)
     syncEventListeners(state.container, node.id, node.props)
     syncCustomProps(renderer, node.id, node.type, node.props)
   } else {
@@ -621,6 +696,7 @@ export const hostConfig = {
       mounted: false,
     })
     diagnoseUnsupportedStyleTransition(instance, rootContainerInstance, props)
+    diagnoseUnsupportedAccessibilityRoleProp(instance, rootContainerInstance, props)
     return instance
   },
 
@@ -765,9 +841,10 @@ export const hostConfig = {
   ): void {
     const container = containerFor(instance)
     diagnoseUnsupportedStyleTransition(instance, container, newProps)
+    diagnoseUnsupportedAccessibilityRoleProp(instance, container, newProps)
     // Always resend style — per-element JSON is small, and this avoids
     // bugs from same-reference mutations or style removal.
-    container.renderer.setStyle(instance.id, newProps.style ?? {})
+    container.renderer.setStyle(instance.id, styleForRenderer(instance, container, newProps) ?? {})
     diffEventListeners(container, instance.id, oldProps, newProps)
     // Custom prop diff (for non-div/text elements)
     diffCustomProps(container.renderer, instance.id, instance.type, oldProps, newProps)
