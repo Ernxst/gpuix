@@ -14,6 +14,7 @@
     "live-scroll-wheel:smoke": "bun live-scroll-wheel.smoke.ts",
     "live-click:smoke": "bun live-click.smoke.ts",
     "chat": "bun --hot chat.tsx",
+    "infinite-chat": "bun --hot infinite-chat.tsx",
     "timeline": "bun --hot timeline.tsx",
     "compile": "bun compile-chat.ts",
     "bench:serde": "bun bench-serialization.ts"
@@ -24,7 +25,8 @@
     "diff": "^8.0.3",
     "react": "^19.2.4",
     "safe-mdx": "1.14.0",
-    "shiki": "^3.0.0"
+    "shiki": "^3.0.0",
+    "string-dedent": "^3.0.2"
   },
   "devDependencies": {
     "@types/mdast": "^4.0.4",

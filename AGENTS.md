@@ -331,19 +331,52 @@ a hard reload, and only a server restart clears it. This is why `build` is plain
 `tsc` and the wipe lives in a separate `clean` script. Clean first, then start
 the server.
 
-## Custom elements are invisible to automation unless they say otherwise
+## A new element needs a host-derived GPUI id, or it has no state
 
-`automation::bounds_tracker` is what puts an element in the bounds registry, and
-`build_element` only attaches it for `<div>` and `<text>`. A custom element that
-paints itself has **no bounds**, so `getByTestId(..).click()` throws
-`Element has no painted bounds`. `<code>` and `<input>` / `<textarea>` attach
-their own. `<img>`, `<svg>`, `<anchored>`, `<diff>` and `<markdown>` do not.
+`.id(..)` is not decoration. gpui keys `InteractiveElementState` off the
+`GlobalElementId`, so an element without one silently loses **hover, active,
+pointer capture, implicit scroll, its accessibility node, and any element state
+gpui itself keeps**. `<img>` had no id, which is why an animated GIF never left
+frame zero: `ImgState` holds the frame index.
 
-Add `el.child(crate::automation::bounds_tracker(ctx.id, None))` to any new custom
-element whose root is a `relative()` div. The tracker is `absolute().size_full()`,
-so it needs a positioned parent. Pass `Some(selectable)` instead of `None` when
-the element also owns a selection-start region; the editor uses `Some(false)` so
-a drag moves the caret instead of starting a document selection.
+`<div>` and `<text>` use `gpui::ElementId::Integer(host_id)`. Host ids are
+already unique per renderer, and a formatted name cost a `SharedString`
+allocation on every node on every frame. Custom elements use
+`ElementId::Name("__gpuix_<kind>_<host id>")`; that is a different enum variant,
+so the two namespaces cannot collide.
+
+**Never call `.id(<index>)` in this crate.** `impl From<usize> for ElementId`
+makes the idiomatic gpui row id an `Integer`, which is the same namespace as a
+host id. Every per-row id here is a formatted name for that reason:
+`__gpuix_diff_line_{ix}`, `__gpuix_md_table_{id}_{sub}`, and the rest.
+
+**Never call `apply_styles` on a stateful root. Call `apply_interactive_styles`.**
+`StyleDesc` carries `hover` and `active` for every element type, so a builder
+that applies only the base styles type-checks the prop, serializes it, and drops
+it. `custom_surface` in `custom_elements/mod.rs` does this for you.
+
+## Bounds: a container uses a tracker, a leaf uses `on_painted`
+
+`getByTestId(..).click()` needs a recorded box. Two mechanisms, both required:
+
+- **Containers** (`<div>`, `<text>`, `<code>`, `<diff>`, `<markdown>`, `<input>`)
+  add `crate::automation::bounds_tracker(id, selection_start)` as a child. It is
+  `absolute().size_full()`, so the parent must be positioned. Pass
+  `Some(selectable)` when the element also owns a selection-start region; the
+  editor uses `Some(false)` so a drag moves the caret instead of starting a
+  document selection. `custom_surface` attaches it.
+- **Leaves** (`<img>`, `<svg>`) and **`<anchored>`** use
+  `crate::automation::track_own_bounds(el, id)`, which is gpui's `on_painted`.
+  Wrapping a leaf in a div instead would move the layout box: the wrapper
+  becomes the flex item, and the image loses intrinsic sizing and corner
+  clipping. `<anchored>` uses it because only gpui knows where the overlay
+  landed after snapping.
+
+Both record during **paint**, and `bounds_frame_reset` clears the registry
+during paint too. Never move any of them to prepaint: `gpui::list()` prepaints a
+speculative row range, then rolls the window back through `Window::transact` and
+prepaints a different one, so a prepaint-recorded box can belong to a row that
+never reached the screen.
 
 ## A macOS menu item owns its shortcut, so the window never sees it
 
@@ -452,6 +485,33 @@ every layout, so the drift is invisible. It appears on the frame where the list
 first overflows. `example-app` looked stuck on two rows for exactly that reason,
 and the regression test in `virtual-list.test.tsx` grows a 160px list from 2 rows
 to 12 rather than starting tall.
+
+**A loading row is the anchor while the reader waits in it**, so an
+infinite-scroll prepend splices the page in *under* it and replaces the screen
+the reader was looking at. The splice-shift above only protects an anchor
+*below* the insert point. The app owns the correction, because only it knows the
+loading row stands for the arriving content: read `getListScrollTop`, commit,
+then `scrollToItem(listId, indexOfTheMessageUnderTheVoid, offsetInVoid -
+EDGE_HEIGHT)`. The negative offset anchors the viewport top above that row and
+gpui resolves it at layout time against the freshly measured new rows, which is
+what makes the restore pixel-exact; any pixel math done in JS would trust
+`estimatedItemHeight` and still jump. The append twin: a reader waiting at a
+trailing loading row usually rests on gpui's **at-end sentinel**
+(`itemIndex == item count`, stored `logical_scroll_top` is `None`), not inside
+the void, so the offset is meaningless there; convert with the viewport height
+from the same tuple (`EDGE_HEIGHT - viewportHeight`). Traps that cost a
+session each:
+
+- virtual-list `scrollToItem` is **queued and applied after the next render's
+  splice** (`PENDING_VIRTUAL_LIST_SCROLLS` in `renderer.rs`). Applying it
+  eagerly let `splice_focusable` shift the just-restored anchor a second time
+  on the live renderer, while the test renderer hid it because
+  `TestRenderer.scrollToItem` flushes first
+- a bottom-aligned list with a trailing loading row starts **scrolled to the
+  end**, i.e. showing that loading row. In tests, wheel direction is therefore
+  ambiguous at mount: the first wheel tick can trigger a `next` fetch even when
+  the test means to scroll up. Start from the latest page (no trailing edge) or
+  `scrollToItem` onto content first. `infinite-chat.test.tsx` does both
 
 ## A frozen header cannot use native scroll
 
@@ -1114,6 +1174,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] `setWindowTitle`
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Application menus, standard macOS shortcuts (`appName`), Cmd+Q, explicit quit, and graceful React termination
+- [x] Background launch (`focus`, `show`, `activateWindow`)
 - [x] Last window close terminates through the shared graceful lifecycle
 - [x] Debug frame overlay (`setDebugFrameOverlay`)
 
@@ -1216,10 +1277,30 @@ Mark targets with `testId`. Then either:
 - `launch({ command, args })` against a child process. The app serves commands
   on stdin only when stdin is a **pipe**
 
+**Always pass `focus: false` when you start a window to check your own work.**
+The user is doing something else. A window that activates on launch takes the
+keyboard mid-sentence, once per iteration, and there is no reason for it:
+`click()` and `screenshot()` never need focus. Wire the entry file so the flag
+comes from the environment, then set it in `launch({ env })`, so a human run
+still behaves normally.
+
+```tsx
+render(<App />, { focus: process.env.GPUIX_BACKGROUND !== '1' })
+```
+
+`fill()` and `press()` do **not** work against `launch()`. The live renderer has
+no `simulateKeystrokes`, so they throw `keystrokes are not live yet`. That is
+unrelated to focus. Use `createTestRoot()` for anything that types.
+
 ```ts
 import { launch } from '@gpuix/react/automation'
 
-const app = await launch({ command: 'bun', args: ['chat.tsx'], cwd: 'examples' })
+const app = await launch({
+  command: 'bun',
+  args: ['chat.tsx'],
+  cwd: 'examples',
+  env: { GPUIX_BACKGROUND: '1' },
+})
 await app.getByTestId('sidebar-collapse').waitFor({ timeoutMs: 30_000 })
 await app.screenshot({ path: 'tmp/chat.png' })
 

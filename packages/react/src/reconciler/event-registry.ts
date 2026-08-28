@@ -41,11 +41,23 @@ const NON_BUBBLING_EVENTS = new Set([
 ])
 
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
-  eventRegistrySlot().containersByRenderer.set(renderer, container)
+  const containersByRenderer = eventRegistrySlot().containersByRenderer
+  const owner = containersByRenderer.get(renderer)
+  if (owner && owner !== container) {
+    throw new Error(
+      "This renderer already drives a mounted GPUIX root. One renderer owns one window, one native root id, and one event map, so a second root would silently take both over. Unmount the first root first."
+    )
+  }
+  containersByRenderer.set(renderer, container)
 }
 
-export function detachRoot(renderer: NativeRenderer): void {
-  eventRegistrySlot().containersByRenderer.delete(renderer)
+/** Only the owner may detach. Otherwise unmounting a rejected or stale root
+ *  would delete the live root's event mapping and every handler would go dead. */
+export function detachRoot(renderer: NativeRenderer, container: Container): void {
+  const containersByRenderer = eventRegistrySlot().containersByRenderer
+  if (containersByRenderer.get(renderer) === container) {
+    containersByRenderer.delete(renderer)
+  }
 }
 
 export function containerForRenderer(renderer: NativeRenderer): Container | undefined {

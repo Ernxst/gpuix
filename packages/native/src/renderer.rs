@@ -822,6 +822,30 @@ thread_local! {
     /// TODO: Scope by renderer/window ID when multi-window support is added.
     static SCROLL_HANDLES: RefCell<HashMap<u64, gpui::ScrollHandle>> = RefCell::new(HashMap::new());
     static VIRTUAL_LIST_STATES: RefCell<HashMap<u64, gpui::ListState>> = RefCell::new(HashMap::new());
+    /// Virtual-list scrolls queued for the next `GpuixView::render`, applied
+    /// AFTER `VirtualListEntry::sync` splices that frame's child changes.
+    ///
+    /// Never applied eagerly: JS computes row indices against the child list it
+    /// just committed, but that commit only reaches `gpui::ListState` when the
+    /// next render splices it in. An eager `scroll_to` would be shifted a
+    /// second time by `splice_focusable` and land on the wrong row.
+    static PENDING_VIRTUAL_LIST_SCROLLS: RefCell<HashMap<u64, gpui::ListOffset>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Queue a virtual-list scroll for the next render. `offset_in_item` may be
+/// negative: gpui then anchors the viewport top above the item, which is what
+/// keeps a row pixel-stable while unmeasured rows are spliced in above it.
+pub(crate) fn queue_virtual_list_scroll(id: u64, index: usize, offset_in_item: f32) {
+    PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| {
+        cell.borrow_mut().insert(
+            id,
+            gpui::ListOffset {
+                item_ix: index,
+                offset_in_item: gpui::px(offset_in_item),
+            },
+        );
+    });
 }
 
 fn parse_debug_frame_overlay_mode_str(
@@ -1070,6 +1094,7 @@ enum UiCommand {
     Quit {
         response: SyncSender<()>,
     },
+    ActivateWindow,
     SetWindowTitle(String),
     GetWindowSize {
         response: SyncSender<WindowSize>,
@@ -1096,10 +1121,15 @@ enum UiCommand {
     ScrollToItem {
         id: u64,
         index: usize,
+        offset: f32,
     },
     GetScrollOffset {
         id: u64,
         response: SyncSender<Option<[f64; 2]>>,
+    },
+    GetListScrollTop {
+        id: u64,
+        response: SyncSender<Option<[f64; 3]>>,
     },
     GetAutomationBounds {
         response: SyncSender<HashMap<u64, crate::automation::ElementBounds>>,
@@ -1211,6 +1241,10 @@ async fn run_ui_commands(
                 response.send(()).ok();
                 Ok(())
             }
+            UiCommand::ActivateWindow => window.update(cx, |_view, window, cx| {
+                cx.activate(true);
+                window.activate_window();
+            }),
             UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
                 view.window_title = title;
                 cx.notify();
@@ -1279,16 +1313,12 @@ async fn run_ui_commands(
                 }
                 refresh_ui_window(window, cx)
             }
-            UiCommand::ScrollToItem { id, index } => {
+            UiCommand::ScrollToItem { id, index, offset } => {
                 if !VIRTUAL_LIST_STATES.with(|cell| {
-                    let states = cell.borrow();
-                    let Some(state) = states.get(&id) else {
+                    if !cell.borrow().contains_key(&id) {
                         return false;
-                    };
-                    state.scroll_to(gpui::ListOffset {
-                        item_ix: index,
-                        offset_in_item: gpui::px(0.0),
-                    });
+                    }
+                    queue_virtual_list_scroll(id, index, offset);
                     true
                 }) {
                     SCROLL_HANDLES.with(|cell| {
@@ -1322,6 +1352,20 @@ async fn run_ui_commands(
                         })
                     });
                 response.send(offset).ok();
+                Ok(())
+            }
+            UiCommand::GetListScrollTop { id, response } => {
+                let top = VIRTUAL_LIST_STATES.with(|cell| {
+                    cell.borrow().get(&id).map(|state| {
+                        let top = state.logical_scroll_top();
+                        [
+                            top.item_ix as f64,
+                            f64::from(f32::from(top.offset_in_item)),
+                            f64::from(f32::from(state.viewport_bounds().size.height)),
+                        ]
+                    })
+                });
+                response.send(top).ok();
                 Ok(())
             }
             UiCommand::GetAutomationBounds { response } => {
@@ -1952,6 +1996,9 @@ impl GpuixRenderer {
         let app_name = options.app_name.clone().unwrap_or_else(|| title.clone());
         let menus = options.menus.clone();
         let reduced_motion = options.reduced_motion.unwrap_or(false);
+        // `focus: false` must also skip `cx.activate`: the window flag only
+        // decides key status inside the app, activation is what steals focus.
+        let activate = options.focus.unwrap_or(true);
         let window_options = options.clone();
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
@@ -2063,7 +2110,9 @@ impl GpuixRenderer {
             ) {
                 Ok(window_handle) => {
                     *opened_window_for_app.borrow_mut() = Some(window_handle);
-                    cx.activate(true);
+                    if activate {
+                        cx.activate(true);
+                    }
                 }
                 Err(error) => {
                     *startup_error_for_app.borrow_mut() = Some(error.to_string());
@@ -2123,6 +2172,9 @@ impl GpuixRenderer {
         let app_name = options.app_name.clone().unwrap_or_else(|| title.clone());
         let menus = options.menus.clone();
         let reduced_motion = options.reduced_motion.unwrap_or(false);
+        // `focus: false` must also skip `cx.activate`: the window flag only
+        // decides key status inside the app, activation is what steals focus.
+        let activate = options.focus.unwrap_or(true);
         let window_options = options.clone();
         let tree = self.tree.clone();
         let canvas_display_lists = self.canvas_display_lists.clone();
@@ -2190,7 +2242,9 @@ impl GpuixRenderer {
                             run_ui_commands(command_receiver, window, cx).await;
                         })
                         .detach();
-                        cx.activate(true);
+                        if activate {
+                            cx.activate(true);
+                        }
                         *lifecycle_for_app.lock().unwrap() = RendererLifecycle::Running;
                         launched_for_thread.store(true, Ordering::Release);
                         startup_sender.send(Ok(())).ok();
@@ -2932,7 +2986,15 @@ impl GpuixRenderer {
             return update_window(|_view, window, _cx| window.activate_window());
         }
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ActivateWindow);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
         unsupported_capability(_env, "window.activate")
     }
 
@@ -3272,20 +3334,28 @@ impl GpuixRenderer {
     }
 
     /// Scroll a child into view by its index in the children list.
+    ///
+    /// For a `<virtual-list>` the scroll is queued and applied on the next
+    /// render, after that frame's child splice, so indices computed against a
+    /// just-committed child list are never shifted twice. `offsetInItem` is in
+    /// pixels and may be negative, which anchors the viewport top above the
+    /// item and resolves against measured heights at layout time.
     #[napi]
-    pub fn scroll_to_item(&self, element_id: f64, index: f64) -> Result<()> {
+    pub fn scroll_to_item(
+        &self,
+        element_id: f64,
+        index: f64,
+        offset_in_item: Option<f64>,
+    ) -> Result<()> {
         let id = to_element_id(element_id)?;
         let index = index as usize;
+        let offset = offset_in_item.unwrap_or(0.0) as f32;
         #[cfg(target_os = "macos")]
         if !VIRTUAL_LIST_STATES.with(|cell| {
-            let states = cell.borrow();
-            let Some(state) = states.get(&id) else {
+            if !cell.borrow().contains_key(&id) {
                 return false;
-            };
-            state.scroll_to(gpui::ListOffset {
-                item_ix: index,
-                offset_in_item: gpui::px(0.0),
-            });
+            }
+            queue_virtual_list_scroll(id, index, offset);
             true
         }) {
             SCROLL_HANDLES.with(|cell| {
@@ -3299,7 +3369,48 @@ impl GpuixRenderer {
         return invalidate_window();
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ScrollToItem { id, index });
+        return self.send_ui_command(UiCommand::ScrollToItem { id, index, offset });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = offset;
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    /// The logical scroll anchor of a `<virtual-list>`:
+    /// `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
+    /// else. `itemIndex == item count` is gpui's at-end sentinel.
+    ///
+    /// Unlike `getScrollOffset` this is exact even while row heights are still
+    /// estimates, because it is the anchor gpui itself scrolls by.
+    #[napi]
+    pub fn get_list_scroll_top(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return Ok(VIRTUAL_LIST_STATES.with(|cell| {
+            cell.borrow().get(&id).map(|state| {
+                let top = state.logical_scroll_top();
+                vec![
+                    top.item_ix as f64,
+                    f64::from(f32::from(top.offset_in_item)),
+                    f64::from(f32::from(state.viewport_bounds().size.height)),
+                ]
+            })
+        }));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetListScrollTop { id, response })?;
+            return Ok(recv_ui_response(receiver, "the GPUI list scroll query")?
+                .map(|top| top.to_vec()));
+        }
 
         #[cfg(not(any(
             target_os = "macos",
@@ -4668,18 +4779,20 @@ impl WebGpuixRenderer {
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = scrollToItem)]
-    pub fn scroll_to_item(&self, element_id: f64, index: f64) -> Result<(), wasm_bindgen::JsValue> {
+    pub fn scroll_to_item(
+        &self,
+        element_id: f64,
+        index: f64,
+        offset_in_item: Option<f64>,
+    ) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
         let index = index as usize;
+        let offset = offset_in_item.unwrap_or(0.0) as f32;
         if !VIRTUAL_LIST_STATES.with(|states| {
-            let states = states.borrow();
-            let Some(state) = states.get(&id) else {
+            if !states.borrow().contains_key(&id) {
                 return false;
-            };
-            state.scroll_to(gpui::ListOffset {
-                item_ix: index,
-                offset_in_item: gpui::px(0.0),
-            });
+            }
+            queue_virtual_list_scroll(id, index, offset);
             true
         }) {
             SCROLL_HANDLES.with(|handles| {
@@ -4690,6 +4803,28 @@ impl WebGpuixRenderer {
         }
         notify_web();
         Ok(())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getListScrollTop)]
+    pub fn get_list_scroll_top(
+        &self,
+        element_id: f64,
+    ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        let top = VIRTUAL_LIST_STATES.with(|states| {
+            states.borrow().get(&id).map(|state| {
+                let top = state.logical_scroll_top();
+                [
+                    top.item_ix as f64,
+                    f64::from(f32::from(top.offset_in_item)),
+                    f64::from(f32::from(state.viewport_bounds().size.height)),
+                ]
+            })
+        });
+        let Some(top) = top else {
+            return Ok(wasm_bindgen::JsValue::NULL);
+        };
+        Ok(web_number_array(top))
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getScrollOffset)]
@@ -5418,19 +5553,37 @@ impl GpuixView {
         row.child(child).into_any_element()
     }
 
-    pub(crate) fn scroll_virtual_list_to_item(&self, id: u64, index: usize) -> bool {
-        let Some(entry) = self.virtual_lists.get(&id) else {
+    pub(crate) fn scroll_virtual_list_to_item(
+        &self,
+        id: u64,
+        index: usize,
+        offset_in_item: f32,
+    ) -> bool {
+        if !self.virtual_lists.contains_key(&id) {
             return false;
-        };
-        entry.state.scroll_to(gpui::ListOffset {
-            item_ix: index,
-            offset_in_item: gpui::px(0.0),
-        });
+        }
+        queue_virtual_list_scroll(id, index, offset_in_item);
         emit_event_full(&self.event_callback, id, "visibleRange", |payload| {
             payload.start_index = Some(index as f64);
             payload.end_index = Some((index + 1) as f64);
         });
         true
+    }
+
+    /// The list's logical scroll anchor as
+    /// `[item_ix, offset_in_item_px, viewport_height_px]`.
+    ///
+    /// `item_ix == item count` is gpui's at-end sentinel (a bottom-aligned
+    /// list resting at its very end); the viewport height is what lets a
+    /// caller convert that into a position relative to the trailing rows.
+    pub(crate) fn virtual_list_scroll_top(&self, id: u64) -> Option<[f64; 3]> {
+        let state = &self.virtual_lists.get(&id)?.state;
+        let top = state.logical_scroll_top();
+        Some([
+            top.item_ix as f64,
+            f64::from(f32::from(top.offset_in_item)),
+            f64::from(f32::from(state.viewport_bounds().size.height)),
+        ])
     }
 
     pub(crate) fn set_virtual_list_offset(&self, id: u64, x: f32, y: f32) -> bool {
@@ -5481,7 +5634,7 @@ impl GpuixView {
         let Some((list_id, index)) = location else {
             return false;
         };
-        self.scroll_virtual_list_to_item(list_id, index)
+        self.scroll_virtual_list_to_item(list_id, index, 0.0)
     }
 }
 
@@ -6155,7 +6308,7 @@ impl gpui::Render for GpuixView {
 
         // Clean up scroll handles for destroyed elements (IDs removed from tree).
         // Scrollability-based cleanup (element still exists but style changed
-        // from scroll to non-scroll) is handled inside build_div().
+        // from scroll to non-scroll) is handled inside build_host_container().
         self.scroll_handles
             .retain(|id, _| tree.elements.contains_key(id));
         self.virtual_lists
@@ -6251,6 +6404,10 @@ impl gpui::Render for GpuixView {
                 states.insert(id, entry.state.clone());
             }
         });
+        // One-shot: a queued scroll for a list that did not build this frame
+        // would otherwise fire on some later frame, against child indices that
+        // no longer match what JS meant.
+        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().clear());
 
         if style_transition_active {
             self.style_transition_frame_requests =
@@ -6406,13 +6563,13 @@ pub(crate) fn build_element(
     }
 
     let built = match element.element_type.as_str() {
-        "div" => {
+        // `<text>` is a `<div>` that happens to carry a string. Giving it its
+        // own builder meant every interaction prop on the shared `Props` type
+        // (onClick, hover, focus, tabIndex) type-checked, registered a JS
+        // listener, and then silently did nothing.
+        "div" | "text" => {
             ctx.custom_registry.destroy(id);
-            build_div(element, style, ctx, window, cx)
-        }
-        "text" => {
-            ctx.custom_registry.destroy(id);
-            build_text(element, style, ctx, window, cx)
+            build_host_container(element, style, ctx, window, cx)
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
@@ -6554,6 +6711,15 @@ fn build_virtual_list(
             entry.state.clone()
         }
     };
+
+    // Queued scrolls apply here, after `sync` spliced this frame's child
+    // changes, so the indices JS computed against its committed child list are
+    // the indices the splice-adjusted ListState sees.
+    if let Some(offset) =
+        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().remove(&element.id))
+    {
+        list_state.scroll_to(offset);
+    }
 
     if element.events.contains("visibleRange") {
         let callback = ctx.event_callback.clone();
@@ -6780,7 +6946,12 @@ fn is_hover_target_descendant(tree: &RetainedTree, descendant: u64, ancestor: u6
     false
 }
 
-pub(crate) fn build_div(
+/// The one builder for `<div>` and `<text>`.
+///
+/// Both get the same stable GPUI id, so gpui keeps their interactive element
+/// state (hover, active, pointer capture, scroll, accessibility node) across
+/// frames, and both wire the whole shared `Props` surface.
+pub(crate) fn build_host_container(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
     ctx: &mut BuildCtx,
@@ -6793,8 +6964,9 @@ pub(crate) fn build_div(
         style.is_some_and(|style| style.transition.is_some() && style.hover.is_some());
     let transition_active =
         style.is_some_and(|style| style.transition.is_some() && style.active.is_some());
-    let element_id_str = format!("__gpuix_{}", element.id);
-    let mut el = gpui::div().id(gpui::SharedString::from(element_id_str));
+    // Host ids are already unique per renderer. Keeping them as integers avoids
+    // allocating a formatted name for every `<div>` and `<text>` on every frame.
+    let mut el = gpui::div().id(gpui::ElementId::Integer(element.id));
     let hover_group = element
         .custom_props
         .get("hoverGroup")
@@ -6808,15 +6980,7 @@ pub(crate) fn build_div(
     }
 
     if let Some(style) = style {
-        el = apply_styles(el, style);
-
-        // ── Pseudo-selector styles (hover / active) ──────────────────
-        // GPUI's .hover() and .active() take a closure that receives a
-        // StyleRefinement and returns it with modifications. Since
-        // StyleRefinement implements Styled, we can reuse apply_styles().
-        if let Some(ref hover_style) = style.hover {
-            el = el.hover(|refinement| apply_styles(refinement, hover_style));
-        }
+        el = apply_interactive_styles(el, style);
         if let (Some(group), Some(hover_within_style)) = (
             ctx.inherited.hover_group.clone(),
             style.hover_within.as_ref(),
@@ -6825,10 +6989,6 @@ pub(crate) fn build_div(
                 apply_styles(refinement, hover_within_style)
             });
         }
-        if let Some(ref active_style) = style.active {
-            el = el.active(|refinement| apply_styles(refinement, active_style));
-        }
-        el = apply_focus_styles(el, style);
     }
 
     if style.and_then(|style| style.pointer_events.as_deref()) == Some("none") {
@@ -7216,20 +7376,27 @@ pub(crate) fn build_div(
             );
     }
 
-    // Text content — selectable, same as a <text> leaf.
-    if let Some(ref content) = element.content {
-        el = el.child(text_content(element, content, ctx));
-    }
+    if element.element_type == "text" {
+        // React splits interpolated text into adjacent host nodes. Flatten the
+        // subtree into one selectable layout while keeping this shared host
+        // surface for identity, events, styles, focus and automation bounds.
+        el = el.child(flattened_text_content(element, ctx));
+    } else {
+        // Text content — selectable, same as a <text> leaf.
+        if let Some(ref content) = element.content {
+            el = el.child(text_content(element, content, ctx));
+        }
 
-    // Children
-    let child_ids: Vec<u64> = element.children.clone();
-    for child_id in child_ids {
-        let child = build_element(child_id, ctx, window, cx);
-        el = if overflow_x_only {
-            el.child(gpui::div().flex_none().child(child))
-        } else {
-            el.child(child)
-        };
+        // Children
+        let child_ids: Vec<u64> = element.children.clone();
+        for child_id in child_ids {
+            let child = build_element(child_id, ctx, window, cx);
+            el = if overflow_x_only {
+                el.child(gpui::div().flex_none().child(child))
+            } else {
+                el.child(child)
+            };
+        }
     }
 
     el.into_any_element()
@@ -7270,71 +7437,10 @@ fn text_content(
     })
 }
 
-pub(crate) fn build_text(
+fn flattened_text_content(
     element: &crate::retained_tree::RetainedElement,
-    style: Option<&StyleDesc>,
-    ctx: &mut BuildCtx,
-    _window: &mut gpui::Window,
-    _cx: &mut gpui::Context<GpuixView>,
+    ctx: &BuildCtx,
 ) -> gpui::AnyElement {
-    use gpui::prelude::*;
-
-    // Fast path: plain text leaf without style. It still goes through
-    // `text_content` so the glyphs land in the selection registry — the old
-    // raw-string return was the reason text was not selectable.
-    if style.is_none()
-        && element.children.is_empty()
-        && element.events.is_empty()
-        && !crate::accessibility::has_semantics(element)
-    {
-        let content = element.content.clone().unwrap_or_default();
-        return gpui::div()
-            .relative()
-            .child(crate::automation::bounds_tracker(element.id, None))
-            .child(text_content(element, &content, ctx))
-            .into_any_element();
-    }
-
-    // The full style set, exactly as `<div>` gets it. `<text>` used to apply a
-    // text-only subset, so `padding`, `width` and every layout prop on a text
-    // node were silently dropped — a hole with no error and no warning.
-    let mut el = gpui::div().id(gpui::SharedString::from(format!("__gpuix_{}", element.id)));
-    if let Some(style) = style {
-        el = apply_styles(el, style);
-    }
-    if style.and_then(|style| style.position.as_deref()).is_none() {
-        el = el.relative();
-    }
-    el = el.child(crate::automation::bounds_tracker(
-        element.id,
-        selection_start_flag(style),
-    ));
-    let native_disabled =
-        crate::accessibility::is_native_disabled(element) || ctx.inherited.accessibility_hidden;
-    if !native_disabled {
-        if let Some(handle) = ctx.focus_handles.get(&element.id) {
-            el = el.track_focus(handle);
-        }
-    }
-    el = crate::accessibility::apply(
-        el,
-        element,
-        ctx.event_callback,
-        ctx.focus_handles.get(&element.id),
-        ctx.inherited.accessibility_hidden,
-    );
-    if !native_disabled {
-        if let Some(tab_index) = element
-            .custom_props
-            .get("tabIndex")
-            .and_then(serde_json::Value::as_i64)
-            .and_then(|index| isize::try_from(index).ok())
-        {
-            el = el.tab_index(tab_index).tab_stop(tab_index >= 0);
-        }
-    }
-    el = apply_click_handler(el, element, ctx);
-
     let inline = match crate::text::inline::flatten_inline_text(
         ctx.tree,
         element.id,
@@ -7385,11 +7491,8 @@ pub(crate) fn build_text(
         }));
     }
 
-    el = el.child(selectable_text(content));
-
-    el.into_any_element()
+    selectable_text(content)
 }
-
 /// Explicit `userSelect` on this node. `None` means inherit; the ancestor
 /// that set the value already owns the start region.
 fn selection_start_flag(style: Option<&StyleDesc>) -> Option<bool> {
@@ -7557,6 +7660,27 @@ pub(crate) fn apply_focus_styles<E: gpui::StatefulInteractiveElement>(
         el = el.focus_visible(|refinement| apply_styles(refinement, focus_visible_style));
     }
     el
+}
+
+/// Base styles plus gpui's `hover` and `active` refinements.
+///
+/// Every stateful GPUI root must go through this, never `apply_styles` alone.
+/// `StyleDesc` carries `hover` and `active` for every element type, so a custom
+/// element that only applied the base styles accepted the prop, serialized it,
+/// and dropped it. gpui reads both refinements from the element state behind the
+/// element's `ElementId`, so the caller must have called `.id(..)` first.
+pub(crate) fn apply_interactive_styles<E>(mut el: E, style: &StyleDesc) -> E
+where
+    E: gpui::Styled + gpui::StatefulInteractiveElement,
+{
+    el = apply_styles(el, style);
+    if let Some(hover_style) = style.hover.as_deref() {
+        el = el.hover(|refinement| apply_styles(refinement, hover_style));
+    }
+    if let Some(active_style) = style.active.as_deref() {
+        el = el.active(|refinement| apply_styles(refinement, active_style));
+    }
+    apply_focus_styles(el, style)
 }
 
 fn to_gpui_grid_track(track: &GridTrackValue) -> gpui::GridTrack {
@@ -7935,12 +8059,12 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         el = el.cursor(cursor);
     }
     // Overflow: hidden is on the Styled trait, so we handle it here.
-    // overflow: "scroll" requires StatefulInteractiveElement — handled in build_div().
+    // overflow: "scroll" requires StatefulInteractiveElement — handled in build_host_container().
     // CSS precedence: axis-specific (overflowX/Y) overrides the shorthand (overflow).
     {
         let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
         let resolved_y = style.overflow_y.as_deref().or(style.overflow.as_deref());
-        // Only apply hidden here — scroll is handled in build_div.
+        // Only apply hidden here — scroll is handled in build_host_container.
         if resolved_x == Some("hidden") && resolved_y == Some("hidden") {
             el = el.overflow_hidden();
         } else if resolved_x == Some("hidden") {
@@ -8702,6 +8826,12 @@ pub struct WindowOptions {
     /// Allow URL-backed images to connect to loopback and private networks.
     /// Link-local and cloud-metadata ranges remain blocked.
     pub allow_private_network_images: Option<bool>,
+    /// Give the window key focus when it opens. `false` opens it behind the
+    /// active app, like `open -g`. Ignored on Linux.
+    pub focus: Option<bool>,
+    /// Show the window when it opens. `false` opens it hidden; call
+    /// `activateWindow()` to reveal it. Ignored on Linux.
+    pub show: Option<bool>,
 }
 
 /// Features offered by one renderer instance on its current platform.
@@ -8782,16 +8912,16 @@ pub struct AutomationCapabilities {
 }
 
 pub(crate) fn renderer_capabilities(frame_clock_kind: &str) -> RendererCapabilities {
-    let (platform, requires_tick, activate, screenshot) = if cfg!(target_os = "macos") {
-        ("macos", true, true, cfg!(feature = "test-support"))
+    let (platform, requires_tick, screenshot) = if cfg!(target_os = "macos") {
+        ("macos", true, cfg!(feature = "test-support"))
     } else if cfg!(target_os = "windows") {
-        ("windows", false, false, cfg!(feature = "test-support"))
+        ("windows", false, cfg!(feature = "test-support"))
     } else if cfg!(target_os = "linux") {
-        ("linux", false, false, false)
+        ("linux", false, false)
     } else if cfg!(target_os = "freebsd") {
-        ("freebsd", false, false, false)
+        ("freebsd", false, false)
     } else {
-        ("unknown", false, false, false)
+        ("unknown", false, false)
     };
 
     RendererCapabilities {
@@ -8803,7 +8933,7 @@ pub(crate) fn renderer_capabilities(frame_clock_kind: &str) -> RendererCapabilit
         },
         window: WindowCapabilities {
             activation: matches!(platform, "macos" | "windows" | "linux" | "freebsd"),
-            activate,
+            activate: matches!(platform, "macos" | "windows" | "linux" | "freebsd"),
             resize: matches!(platform, "macos" | "windows" | "linux" | "freebsd"),
             multiple: false,
         },
@@ -8908,6 +9038,8 @@ impl Default for WindowOptions {
             traffic_light_y: None,
             reduced_motion: Some(false),
             allow_private_network_images: Some(false),
+            focus: Some(true),
+            show: Some(true),
         }
     }
 }
@@ -8950,6 +9082,8 @@ fn to_gpui_window_options(
         is_resizable: options.resizable.unwrap_or(true),
         window_background,
         window_min_size,
+        focus: options.focus.unwrap_or(true),
+        show: options.show.unwrap_or(true),
         ..Default::default()
     }
 }
@@ -9326,5 +9460,80 @@ mod batch_tests {
         apply(&mut tree, r#"[["destroyElement",1]]"#).expect("valid batch");
         tree.styles.sweep();
         assert_eq!(tree.styles.len(), 0);
+    }
+}
+
+#[cfg(test)]
+mod window_options_tests {
+    use super::*;
+
+    fn mapped(options: WindowOptions) -> gpui::WindowOptions {
+        let bounds = gpui::Bounds {
+            origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
+            size: gpui::size(gpui::px(800.0), gpui::px(600.0)),
+        };
+        to_gpui_window_options(&options, bounds)
+    }
+
+    #[test]
+    fn defaults_open_a_focused_visible_window() {
+        let gpui_options = mapped(WindowOptions::default());
+        assert!(gpui_options.focus);
+        assert!(gpui_options.show);
+    }
+
+    #[test]
+    fn unset_focus_and_show_still_default_to_true() {
+        let gpui_options = mapped(WindowOptions {
+            focus: None,
+            show: None,
+            ..WindowOptions::default()
+        });
+        assert!(gpui_options.focus);
+        assert!(gpui_options.show);
+    }
+
+    #[test]
+    fn focus_false_leaves_the_window_visible() {
+        let gpui_options = mapped(WindowOptions {
+            focus: Some(false),
+            ..WindowOptions::default()
+        });
+        assert!(!gpui_options.focus);
+        assert!(gpui_options.show);
+    }
+
+    #[test]
+    fn show_false_keeps_focus_independent() {
+        let gpui_options = mapped(WindowOptions {
+            show: Some(false),
+            ..WindowOptions::default()
+        });
+        assert!(!gpui_options.show);
+        assert!(gpui_options.focus);
+    }
+
+    #[test]
+    fn existing_options_are_still_mapped() {
+        let gpui_options = mapped(WindowOptions {
+            title: Some("Background".to_string()),
+            resizable: Some(false),
+            window_background: Some("blurred".to_string()),
+            min_width: Some(320.0),
+            min_height: Some(240.0),
+            focus: Some(false),
+            ..WindowOptions::default()
+        });
+        let titlebar = gpui_options.titlebar.expect("titlebar options");
+        assert_eq!(titlebar.title.as_deref(), Some("Background"));
+        assert!(!gpui_options.is_resizable);
+        assert_eq!(
+            gpui_options.window_background,
+            gpui::WindowBackgroundAppearance::Blurred
+        );
+        assert_eq!(
+            gpui_options.window_min_size,
+            Some(gpui::size(gpui::px(320.0), gpui::px(240.0)))
+        );
     }
 }

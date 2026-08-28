@@ -15,6 +15,8 @@
  * Keep Wasm init in a module that can never become an HMR boundary and is never
  * explicitly accepted. Only a full page reload re-creates it, which is fine.
  *
+ * `/` serves the chat example and `/infinite` serves the infinite history one.
+ *
  *   bun scripts/web.ts               # build the Wasm if it is missing, then serve
  *   bun scripts/web.ts --rebuild     # force the cargo + wasm-bindgen step first
  *   bun scripts/web.ts --build-only  # only cargo + wasm-bindgen, do not serve
@@ -25,7 +27,8 @@ import { spawn } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import page from "../examples/web.html"
+import chatPage from "../examples/web.html"
+import infinitePage from "../examples/web-infinite-chat.html"
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const NATIVE = path.join(ROOT, "packages", "native")
@@ -44,13 +47,16 @@ const ISOLATION_HEADERS = {
 }
 
 /**
- * `Bun.serve` has no way to add headers to an HTML route, so the bundled
- * document is registered on a private path and re-sent from `/` with the two
- * isolation headers. Only the top-level document needs them: `require-corp`
- * constrains cross-origin subresources, and every asset the dev server emits is
- * same-origin. Tracking: https://github.com/oven-sh/bun/issues/16873
+ * `Bun.serve` has no way to add headers to an HTML route, so each bundled
+ * document is registered on a private path and re-sent from its public path with
+ * the two isolation headers. Only the top-level document needs them:
+ * `require-corp` constrains cross-origin subresources, and every asset the dev
+ * server emits is same-origin. Tracking: https://github.com/oven-sh/bun/issues/16873
  */
-const DOCUMENT_PATH = "/__gpuix-document"
+const EXAMPLES = [
+  { path: "/", document: "/__gpuix-document-chat", page: chatPage },
+  { path: "/infinite", document: "/__gpuix-document-infinite", page: infinitePage },
+]
 
 function run({ command, args, cwd }: { command: string; args: string[]; cwd: string }): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -124,22 +130,27 @@ async function main() {
     return
   }
 
+  const routes: Record<string, unknown> = {}
+  for (const example of EXAMPLES) {
+    routes[example.document] = example.page
+    routes[example.path] = async (_request: Request, self: { url: string }) => {
+      const bundled = await fetch(new URL(example.document, self.url))
+      const headers = new Headers(bundled.headers)
+      for (const [key, value] of Object.entries(ISOLATION_HEADERS)) {
+        headers.set(key, value)
+      }
+      return new Response(bundled.body, { status: bundled.status, headers })
+    }
+  }
+
   const server = Bun.serve({
     port: Number(process.env.PORT || 4173),
-    routes: {
-      [DOCUMENT_PATH]: page,
-      "/": async (_request, self) => {
-        const bundled = await fetch(new URL(DOCUMENT_PATH, self.url))
-        const headers = new Headers(bundled.headers)
-        for (const [key, value] of Object.entries(ISOLATION_HEADERS)) {
-          headers.set(key, value)
-        }
-        return new Response(bundled.body, { status: bundled.status, headers })
-      },
-    },
+    routes: routes as Parameters<typeof Bun.serve>[0]["routes"],
     development: { hmr: true, console: true },
   })
-  console.log(`web: ${server.url}`)
+  for (const example of EXAMPLES) {
+    console.log(`web: ${new URL(example.path, server.url)}`)
+  }
 }
 
 main().catch((error) => {
