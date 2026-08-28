@@ -2399,7 +2399,7 @@ impl GpuixRenderer {
     pub fn set_root(&self, id: f64) -> Result<()> {
         let id = to_element_id(id)?;
         let mut tree = self.tree.lock().unwrap();
-        tree.root_id = Some(id);
+        tree.set_root(Some(id));
         Ok(())
     }
 
@@ -4542,7 +4542,7 @@ impl WebGpuixRenderer {
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setRoot)]
     pub fn set_root(&self, id: f64) -> Result<(), wasm_bindgen::JsValue> {
-        self.tree.lock().unwrap().root_id = Some(web_element_id(id)?);
+        self.tree.lock().unwrap().set_root(Some(web_element_id(id)?));
         Ok(())
     }
 
@@ -8633,7 +8633,7 @@ pub(crate) fn apply_batch_to_tree_with_diagnostics(
                 tree.set_event_listener(id, event_type, has_handler);
             }
             BatchOp::SetRoot { id } => {
-                tree.root_id = Some(id);
+                tree.set_root(Some(id));
             }
             BatchOp::SetCustomProp { id, key, value } => {
                 if let Some(diagnostic) = pending_custom_prop_diagnostic(tree, id, &key, &value) {
