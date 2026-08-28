@@ -3,7 +3,7 @@ import { GpuixRenderer } from "../packages/native/index.js"
 const sampleCount = Number(process.env.PUMP_RACE_SAMPLES ?? 64)
 const maximumPumpMs = Number(process.env.PUMP_RACE_MAX_MS ?? 1_000 / 60)
 const renderer = new GpuixRenderer(() => {})
-renderer.init({ title: "GPUIX frame pump race", width: 320, height: 200, menus: [] })
+renderer.init({ title: "GPUIX frame pump race", width: 320, height: 200, menus: [], focus: false })
 for (let index = 0; index < 4; index += 1) renderer.tick()
 
 let callbacks = 0
