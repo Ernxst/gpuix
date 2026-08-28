@@ -5393,8 +5393,14 @@ impl GpuixView {
             return Err("Cannot capture pointer without an active mouse-down sequence".into());
         }
 
-        let element_id = gpui::ElementId::from(format!("__gpuix_{id}"));
-        if !window.capture_pointer_for_element(&element_id) {
+        // Upstream host surfaces use the retained integer id. Fork-native
+        // surfaces such as <canvas> predate that identity scheme and still use
+        // the original namespaced string; accept both during reconciliation.
+        let captured = window.capture_pointer_for_element(&gpui::ElementId::Integer(id))
+            || window.capture_pointer_for_element(&gpui::ElementId::from(format!(
+                "__gpuix_{id}"
+            )));
+        if !captured {
             self.pointer_router.borrow_mut().release(id);
             return Err(format!(
                 "Cannot capture pointer for element {id} before it has painted a hitbox"
