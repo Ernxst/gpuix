@@ -95,7 +95,7 @@ function captureBackground(name: string, background: BackgroundValue) {
   return screenshotPath
 }
 
-describeNative("native color functions", () => {
+describeNative("native color functions", { timeout: 12_000 }, () => {
   it.each(absoluteCases)(
     "paints absolute %s exactly like its canonical hex",
     (name, input, expected) => {

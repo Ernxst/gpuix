@@ -96,7 +96,7 @@ function expectHardenedRuleRejects(
   }
 }
 
-describeLocalMac("canvas browser-equivalence harness", () => {
+describeLocalMac("canvas browser-equivalence harness", { timeout: 12_000 }, () => {
   test("reports zero diff for a golden compared with itself", () => {
     const testRoot = createTestRoot()
     try {

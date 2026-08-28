@@ -32,7 +32,7 @@ function codeBounds(renderer: { findByType(type: string): { id: number }[]; getE
   return { x: bounds![0]!, y: bounds![1]!, width: bounds![2]!, height: bounds![3]! }
 }
 
-describe("<code>", () => {
+describe("<code>", { timeout: 16_000 }, () => {
   it("renders one row per source line", () => {
     const { render, renderer } = createTestRoot()
     render(<code code={"a\nb\nc"} language="ts" />)

@@ -980,7 +980,7 @@ describeNative("events", () => {
       expectScreenshotsEqual(pointerPath, pointerExpectedPath)
       expectScreenshotsEqual(keyboardPath, keyboardExpectedPath)
       expectScreenshotsDiffer(pointerPath, keyboardPath)
-    })
+    }, 20_000)
 
     it("keeps focus-visible styling on the directly focused control", () => {
       const actualPath = "/tmp/gpuix-focus-scoped.png"

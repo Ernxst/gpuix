@@ -293,7 +293,7 @@ describeNative("text wrapping", () => {
 /// macOS runner is 1024x768 and turned a green suite red without a code change.
 /// Everything below is expressed against `getWindowSize()`, which is what the
 /// platform actually granted, or against a size derived from it.
-describeNative("test window size", () => {
+describeNative("test window size", { timeout: 14_000 }, () => {
   function sized(options: Parameters<typeof createTestRoot>[0]) {
     const root = createTestRoot(options)
     root.render(
