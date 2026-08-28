@@ -126,6 +126,8 @@ export function wrapWithBatching(inner: NativeRenderer): NativeRenderer {
           if (container) {
             for (const id of destroyedIds) {
               unregisterEventHandlers(container.eventHandlers, id)
+              container.eventTargets.delete(id)
+              container.preventedKeyboardActivations.delete(id)
             }
           }
 

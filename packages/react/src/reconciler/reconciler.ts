@@ -116,8 +116,8 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
       })
       container = null
     }
-    detachRoot(renderer)
-    detachRoot(batchedRenderer)
+    detachRoot(renderer, gpuixContainer)
+    detachRoot(batchedRenderer, gpuixContainer)
     detachCanvasImageLoader(renderer)
   }
 

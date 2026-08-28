@@ -515,6 +515,12 @@ function materialize(node: HostNode): HostNodeState {
     syncEventListeners(state.container, node.id, node.props)
     syncCustomProps(renderer, node.id, node.type, node.props)
   } else {
+    // Native hit testing reports the deepest painted retained node. A raw React
+    // text node has no public host instance of its own, so route that source to
+    // its nearest host parent while preserving the native source id as the map key.
+    const parentTarget =
+      node.parentId == null ? undefined : state.container.eventTargets.get(node.parentId)
+    if (parentTarget) state.container.eventTargets.set(node.id, parentTarget)
     renderer.createElement(node.id, "text")
     renderer.setText(node.id, node.text)
   }
@@ -622,15 +628,25 @@ export const hostConfig = {
     const parentState = materialize(parent)
     materialize(child)
     appendTrackedChild(parent, parentState, child)
+    if (!("type" in child)) parentState.container.eventTargets.set(child.id, parent)
     scheduleVirtualListValidation(parent, parentState)
     parentState.container.renderer.appendChild(parent.id, child.id)
   },
 
+  // React only calls this from the deletion path, never to move a node, so the
+  // child is gone for good and has to be freed here. Detaching alone leaked
+  // every removed text node: `detachDeletedInstance` runs for host components
+  // only, so nothing else would ever destroy a `HostText`.
   removeChild(parent: Instance, child: Instance | TextInstance): void {
     const parentState = stateFor(parent)
     removeTrackedChild(parentState, child)
     scheduleVirtualListValidation(parent, parentState)
-    parentState.container.renderer.removeChild(parent.id, child.id)
+    const destroyed = parentState.container.renderer.destroyElement(child.id)
+    for (const id of destroyed) {
+      unregisterEventHandlers(parentState.container.eventHandlers, id)
+      parentState.container.eventTargets.delete(id)
+      parentState.container.preventedKeyboardActivations.delete(id)
+    }
   },
 
   insertBefore(
@@ -641,6 +657,7 @@ export const hostConfig = {
     const parentState = materialize(parent)
     materialize(child)
     insertTrackedChild(parent, parentState, child, beforeChild)
+    if (!("type" in child)) parentState.container.eventTargets.set(child.id, parent)
     scheduleVirtualListValidation(parent, parentState)
     parentState.container.renderer.insertBefore(parent.id, child.id, beforeChild.id)
   },

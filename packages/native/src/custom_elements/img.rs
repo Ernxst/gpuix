@@ -1585,28 +1585,24 @@ impl ImgElement {
     }
 }
 
-fn accessible_image_root(ctx: &CustomRenderContext, child: gpui::AnyElement) -> gpui::AnyElement {
-    use gpui::prelude::*;
-
+fn apply_image_accessibility<E>(ctx: &CustomRenderContext, mut el: E) -> E
+where
+    E: gpui::StatefulInteractiveElement,
+{
     let native_disabled =
         crate::accessibility::is_native_disabled(ctx.retained_element) || ctx.accessibility_hidden;
-    let mut root = gpui::div()
-        .id(gpui::SharedString::from(format!("__gpuix_{}", ctx.id)))
-        .relative()
-        .child(crate::automation::bounds_tracker(ctx.id, None));
     if !native_disabled {
         if let Some(handle) = ctx.focus_handle {
-            root = root.track_focus(handle);
+            el = el.track_focus(handle);
         }
     }
-    root = crate::accessibility::apply(
-        root,
+    crate::accessibility::apply(
+        el,
         ctx.retained_element,
         ctx.event_callback,
         ctx.focus_handle,
         ctx.accessibility_hidden,
-    );
-    root.child(child).into_any_element()
+    )
 }
 
 impl CustomElement for ImgElement {
@@ -1619,19 +1615,20 @@ impl CustomElement for ImgElement {
         use gpui::prelude::*;
 
         if let Some(error) = self.source_error.as_deref() {
-            let mut fallback = Self::fallback(format!("img: invalid src: {error}"));
-            if let Some(style) = ctx.style {
-                fallback = crate::renderer::apply_styles(fallback, style);
-            }
-            return accessible_image_root(&ctx, fallback.into_any_element());
+            let fallback = Self::fallback(format!("img: invalid src: {error}")).id(
+                gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)),
+            );
+            let fallback = super::custom_surface(fallback, &ctx);
+            return apply_image_accessibility(&ctx, fallback).into_any_element();
         }
 
         let Some(source) = self.source.clone() else {
-            let mut fallback = Self::fallback("img: no src");
-            if let Some(style) = ctx.style {
-                fallback = crate::renderer::apply_styles(fallback, style);
-            }
-            return accessible_image_root(&ctx, fallback.into_any_element());
+            let fallback = Self::fallback("img: no src").id(gpui::SharedString::from(format!(
+                "__gpuix_img_{}",
+                ctx.id
+            )));
+            let fallback = super::custom_surface(fallback, &ctx);
+            return apply_image_accessibility(&ctx, fallback).into_any_element();
         };
 
         let request = ImageRequest {
@@ -1707,17 +1704,16 @@ impl CustomElement for ImgElement {
                 .clone()
                 .unwrap_or_else(|| format!("img: loading {fallback_label}"));
             Self::fallback(message).into_any_element()
-        });
+        })
+        .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)));
 
         if let Some(style) = ctx.style {
-            el = crate::renderer::apply_styles(el, style);
+            el = crate::renderer::apply_interactive_styles(el, style);
         }
 
-        // `<img>` is not a parent element, so record its last paint box from
-        // a relative wrapper just as the other native custom elements do.
-        // The image keeps its own styles, preserving intrinsic sizing and
-        // object-fit behaviour while the wrapper tracks the same layout box.
-        accessible_image_root(&ctx, el.into_any_element())
+        let el = apply_image_accessibility(&ctx, el);
+        let el = super::wire_standard_events(el, &ctx);
+        crate::automation::track_own_bounds(el, ctx.id).into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
@@ -1742,7 +1738,7 @@ impl CustomElement for ImgElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &[]
+        &["click", "mouseEnter", "mouseLeave"]
     }
 
     fn test_state(&self) -> Option<serde_json::Value> {
@@ -1853,19 +1849,22 @@ impl CustomElement for SvgElement {
         } else {
             Some(self.source.as_bytes())
         };
+        let element_id = gpui::SharedString::from(format!("__gpuix_svg_{}", ctx.id));
         let Some(bytes) = bytes else {
-            let mut empty = gpui::div();
-            if let Some(style) = ctx.style {
-                empty = crate::renderer::apply_styles(empty, style);
-            }
+            let empty = super::custom_surface(gpui::div().id(element_id), &ctx);
             return empty.into_any_element();
         };
 
-        let mut icon = gpui::svg().data(bytes).flex_none();
+        let mut icon = gpui::svg()
+            .data(bytes)
+            .flex_none()
+            .text_color(ctx.current_color)
+            .id(element_id);
         if let Some(style) = ctx.style {
-            icon = crate::renderer::apply_styles(icon, style);
+            icon = crate::renderer::apply_interactive_styles(icon, style);
         }
-        icon.into_any_element()
+        let icon = super::wire_standard_events(icon, &ctx);
+        crate::automation::track_own_bounds(icon, ctx.id).into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
@@ -1881,7 +1880,7 @@ impl CustomElement for SvgElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &[]
+        &["click", "mouseEnter", "mouseLeave"]
     }
 
     fn destroy(&mut self) {}

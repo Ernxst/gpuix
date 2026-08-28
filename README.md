@@ -454,6 +454,9 @@ the previous tree.
 | `transparent` | boolean | Same as `windowBackground: "transparent"` when that option is unset |
 | `appName` | string | Name inside the macOS `Hide X` and `Quit X` items. Defaults to `title` |
 | `reducedMotion` | boolean | Force GPUI's reduced-motion policy. Style transitions snap to their target |
+| `focus` | boolean, default `true` | `false` opens the window behind the active app, like `open -g` |
+| `show` | boolean, default `true` | `false` opens the window hidden. Call `activateWindow()` to reveal it |
+
 Call it again after a save and it remounts the tree on the same window.
 
 ### The macOS menu bar
@@ -546,6 +549,122 @@ bun --hot menus.tsx
 Enter fullscreen, choose **Actions → Fire JavaScript Action**, confirm the
 window and terminal log update once, then press Cmd+Q. The terminal should print
 `termination cleanup finished` and return to the shell.
+
+**One renderer drives one root.** A renderer owns one window, one native root
+id, and one event map, so `createRoot()` throws if that renderer already has a
+mounted root. Call `unmount()` on the first root before you create another;
+`render()` already does that for you.
+
+### Background launch
+
+`focus: false` opens the window **without taking focus**. The app you were
+typing in keeps the caret and the active titlebar. `show: false` goes further
+and opens no window at all, so the process runs with a live React tree and
+nothing on screen.
+
+```tsx
+render(<App />, { title: 'Notes', focus: false })
+```
+
+**Turn this on whenever a coding agent runs your app.** An agent that starts
+the app to check its work will otherwise yank the window in front of whatever
+you are doing, mid-sentence, once per iteration. With `focus: false` the agent
+still gets a real GPU-rendered window it can screenshot and click, and you keep
+your editor. See [Let an agent drive the app](#let-an-agent-drive-the-app).
+
+`activateWindow()` brings the window forward and focuses it. It is the only way
+to reveal a `show: false` window. Reach it from any component with
+`useGpuixRequired()`:
+
+```tsx
+import { useGpuixRequired } from '@gpuix/react'
+
+function Reveal() {
+  const renderer = useGpuixRequired()
+  return <div onClick={() => renderer.activateWindow?.()}>Show</div>
+}
+```
+
+Outside React, call it on the renderer that `createRenderer()` returned.
+
+| Platform | `focus: false` | `show: false` |
+|---|---|---|
+| macOS | window orders in front without becoming key, like `open -g` | honored |
+| Windows | `SW_SHOWNOACTIVATE` | honored |
+| Linux | **ignored**, the window opens focused | **ignored** |
+
+The process still gets a **Dock icon** on macOS. GPUI sets the regular
+activation policy, so there is no menu-bar-agent mode yet. For a real
+background daemon, run the app from a `launchd` agent in
+`~/Library/LaunchAgents/`; launchd never activates the process.
+
+### Let an agent drive the app
+
+Make focus opt-in through the environment, so a human run behaves normally and
+an agent run stays out of the way:
+
+```tsx
+render(<App />, {
+  title: 'Notes',
+  focus: process.env.GPUIX_BACKGROUND !== '1',
+})
+```
+
+```bash
+bun app.tsx                      # you: window comes to the front
+GPUIX_BACKGROUND=1 bun app.tsx   # agent: window opens behind your editor
+```
+
+`launch()` passes `env` straight through, so an agent script sets it once and
+every screenshot, click, and assertion runs on a window that never interrupts
+you:
+
+```ts
+import { launch } from '@gpuix/react/automation'
+
+const app = await launch({
+  command: 'bun',
+  args: ['app.tsx'],
+  env: { GPUIX_BACKGROUND: '1' },
+})
+
+await app.getByTestId('bump').waitFor()
+await app.getByTestId('bump').click()
+await app.screenshot({ path: 'tmp/after-click.png' })
+await app.close()
+```
+
+Focus is the only thing that changes. **Automation does not need focus.**
+`click()` hits the last painted bounds and `screenshot()` reads the GPU
+surface, so both work while the window sits behind your editor, and even on a
+`show: false` window that is not on screen at all.
+
+```
+  agent ──►  launch({ env: { GPUIX_BACKGROUND: '1' } })
+                │
+                ▼
+          GPU window renders and paints, but never activates
+                │
+                ├──►  getByTestId(..).click()   ✓  hits the last painted bounds
+                ├──►  screenshot({ path })      ✓  reads the GPU surface
+                ├──►  fill() / press()          ✗  keystrokes are not live yet
+                └──►  close()
+
+  you   ──►  keep typing, your editor stays frontmost the whole time
+```
+
+Two limits to know before you rely on it:
+
+- **Keyboard input does not reach a launched process.** `fill()` and `press()`
+  throw `keystrokes are not live yet`, because the live renderer implements no
+  `simulateKeystrokes`. This is not about focus; it fails on a focused window
+  too. Use `createTestRoot()` when a check needs typing
+- **Linux ignores `focus`**, so an agent there still gets a focused window
+
+Prefer `createTestRoot()` when you can. It opens **no window at all**, so
+nothing can steal focus and keyboard input works. Reach for `launch()` plus
+`focus: false` when the check needs a real window, real GPU paint, or a real
+process.
 
 ### flushSync
 
@@ -1239,6 +1358,32 @@ function Results({ rows }: { rows: Result[] }) {
 ```
 
 `scrollTo`, `scrollToItem`, and `getScrollOffset` all support virtual lists.
+
+On a virtual list, `scrollToItem` takes an optional **pixel offset** and the
+list reports its logical anchor:
+
+```tsx
+renderer.scrollToItem(listId, index, offsetInItem)  // offset in px, may be negative
+renderer.getListScrollTop(listId)  // [itemIndex, offsetInItemPx, viewportHeightPx] or null
+```
+
+A **negative offset anchors the viewport top above the row**, and the next
+layout resolves it against real measured heights. That is the tool for
+infinite-scroll history: while the reader waits in a loading row, read
+`getListScrollTop`, commit the fetched page, then re-anchor on the message
+that was under the loading row with a negative offset. The message stays at
+the same pixel while the new rows are measured above it —
+`examples/infinite-chat.tsx` is the worked example.
+
+An `itemIndex` equal to the item count is gpui's **at-end sentinel**: a
+bottom-aligned list resting at its very end. A reader waiting at a trailing
+loading row usually sits there, and the viewport height in the same tuple is
+what converts that into a position relative to the trailing rows
+(`EDGE_HEIGHT - viewportHeight` in the example).
+
+Virtual-list `scrollToItem` calls are applied on the **next render, after
+that frame's child splice**, so an index computed against a just-committed
+child list is never shifted twice.
 
 ### Performance model
 
@@ -2561,6 +2706,12 @@ does not need an app-side `tabIndex` or `onKeyDown` adapter. Native text editors
 keep Space as text input instead of synthesizing a click.
 
 > **`whiteSpace: "pre"` preserves explicit newlines and repeated spaces without soft wrapping.** It remains one selectable `<text>` layout, including nested inline text runs, so copying and selection preserve the original string. Whitespace policy is layout-wide: put `pre` on the outer `<text>`; a nested inline run cannot switch it mid-sentence.
+
+They work on **every** element, including `<text>`, `<code>`, `<markdown>`,
+`<diff>`, `<img>`, `<svg>` and the editors. The one exception is
+`<virtual-list>`, whose `style` type rejects them: gpui's list has no
+interactive identity to hold a hovered or pressed state, so put them on a
+wrapping `<div>`.
 >
 > ```tsx
 > <text style={{ whiteSpace: 'pre', fontFamily: 'Menlo' }}>{code}</text>
@@ -2719,11 +2870,14 @@ await app.getByTestId('canvas').wheel(0, 120, { modifiers: 'cmd' })
 await app.getByTestId('clip-8').click({ modifiers: 'shift' })
 ```
 
-`click()` needs painted bounds, and a custom element only has them if its
-builder records them. `<div>`, `<text>`, `<input>`, `<textarea>` and `<code>`
-do. **`<img>`, `<svg>`, `<anchored>`, `<diff>` and `<markdown>` do not**, so
-`click()` on those throws `Element has no painted bounds`. `getByText` still
-finds text painted inside them, because text registers separately.
+`click()` needs painted bounds. **Every element that accepts `testId` records
+them**, including `<img>`, `<svg>` and `<anchored>`. An `<anchored>` reports the
+box of the overlay itself, not of the trigger it is anchored to, so `click()`
+lands on the menu even when it is deferred and snapped back inside the window.
+
+`<virtual-list>` is the exception, and it takes no `testId`. gpui's list is not
+an interactive element, so it has nothing to record a box against. Put the
+locator on a wrapping `<div>`.
 
 ### Screenshots and clock
 
@@ -3027,6 +3181,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Application menus, standard macOS shortcuts (`appName`), Cmd+Q, explicit quit, and graceful React termination
+- [x] Background launch (`focus`, `show`, `activateWindow`)
 - [x] Last window close terminates through the shared graceful lifecycle
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [ ] Canvas element
