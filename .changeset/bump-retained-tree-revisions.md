@@ -2,4 +2,4 @@
 "@gpuix/native": patch
 ---
 
-Advance retained-tree revisions for event, identity, custom-property, and root mutations.
+Advance retained-tree revisions for every state-changing mutation without invalidating on redundant writes.

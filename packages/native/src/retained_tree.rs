@@ -210,6 +210,9 @@ pub struct RetainedTree {
     pub styles: StyleTable,
     /// The root element ID set by appendChildToContainer.
     pub root_id: Option<u64>,
+    /// Advances only when a retained-tree operation changes state. Consumers
+    /// such as virtual-list remeasurement use revisions as invalidation keys,
+    /// so redundant writes must not advance this counter.
     next_revision: u64,
 }
 
@@ -321,6 +324,7 @@ impl RetainedTree {
     /// longer in the tree.
     pub fn destroy_element(&mut self, id: u64) -> Vec<u64> {
         let parent_id = self.elements.get(&id).and_then(|element| element.parent);
+        let destroys_root = self.root_id == Some(id);
         if let Some(parent_id) = parent_id {
             if let Some(parent) = self.elements.get_mut(&parent_id) {
                 parent.children.retain(|child| *child != id);
@@ -328,11 +332,13 @@ impl RetainedTree {
         }
         let mut destroyed = Vec::new();
         self.destroy_element_recursive(id, &mut destroyed);
-        if self.root_id == Some(id) {
+        if destroys_root {
             self.set_root(None);
         }
         if let Some(parent_id) = parent_id {
             self.mark_changed(parent_id);
+        } else if !destroyed.is_empty() && !destroys_root {
+            self.take_revision();
         }
         destroyed
     }
@@ -347,60 +353,141 @@ impl RetainedTree {
     }
 
     pub fn append_child(&mut self, parent_id: u64, child_id: u64) {
-        // Remove from old parent if any
-        let old_parent_id = self.elements.get(&child_id).and_then(|e| e.parent);
-        if let Some(old_parent_id) = old_parent_id {
-            if let Some(old_parent) = self.elements.get_mut(&old_parent_id) {
-                old_parent.children.retain(|c| *c != child_id);
-            }
+        let Some(child) = self.elements.get(&child_id) else {
+            return;
+        };
+        let Some(parent) = self.elements.get(&parent_id) else {
+            return;
+        };
+        let old_parent_id = child.parent;
+        let mut new_children = parent.children.clone();
+        new_children.retain(|id| *id != child_id);
+        new_children.push(child_id);
+        let parent_changed = new_children != parent.children;
+        let child_changed = old_parent_id != Some(parent_id);
+        let old_parent_changed = old_parent_id
+            .filter(|old_parent_id| *old_parent_id != parent_id)
+            .and_then(|old_parent_id| {
+                self.elements.get(&old_parent_id).map(|old_parent| {
+                    (
+                        old_parent_id,
+                        old_parent.children.iter().any(|id| *id == child_id),
+                    )
+                })
+            });
+        if !parent_changed && !child_changed && old_parent_changed.is_none() {
+            return;
         }
-        // Set new parent
-        if let Some(child) = self.elements.get_mut(&child_id) {
-            child.parent = Some(parent_id);
-        }
-        // Add to new parent's children
-        if let Some(parent) = self.elements.get_mut(&parent_id) {
-            parent.children.push(child_id);
-        }
-        if let Some(old_parent_id) = old_parent_id {
+
+        if let Some((old_parent_id, true)) = old_parent_changed {
+            self.elements
+                .get_mut(&old_parent_id)
+                .expect("old parent was read from the retained tree")
+                .children
+                .retain(|id| *id != child_id);
             self.mark_changed(old_parent_id);
+        }
+        if parent_changed {
+            self.elements
+                .get_mut(&parent_id)
+                .expect("parent was read from the retained tree")
+                .children = new_children;
+        }
+        if child_changed {
+            self.elements
+                .get_mut(&child_id)
+                .expect("child was read from the retained tree")
+                .parent = Some(parent_id);
         }
         self.mark_changed(parent_id);
     }
 
     pub fn remove_child(&mut self, parent_id: u64, child_id: u64) {
-        if let Some(parent) = self.elements.get_mut(&parent_id) {
-            parent.children.retain(|c| *c != child_id);
+        let Some(parent) = self.elements.get(&parent_id) else {
+            return;
+        };
+        let child_was_listed = parent.children.iter().any(|id| *id == child_id);
+        let child_was_attached = self
+            .elements
+            .get(&child_id)
+            .is_some_and(|child| child.parent == Some(parent_id));
+        if !child_was_listed && !child_was_attached {
+            return;
         }
-        if let Some(child) = self.elements.get_mut(&child_id) {
-            child.parent = None;
+
+        if child_was_listed {
+            self.elements
+                .get_mut(&parent_id)
+                .expect("parent was read from the retained tree")
+                .children
+                .retain(|id| *id != child_id);
+        }
+        if child_was_attached {
+            self.elements
+                .get_mut(&child_id)
+                .expect("child was read from the retained tree")
+                .parent = None;
         }
         self.mark_changed(parent_id);
     }
 
     pub fn insert_before(&mut self, parent_id: u64, child_id: u64, before_id: u64) {
-        // Remove from old parent if any
-        let old_parent_id = self.elements.get(&child_id).and_then(|e| e.parent);
-        if let Some(old_parent_id) = old_parent_id {
-            if let Some(old_parent) = self.elements.get_mut(&old_parent_id) {
-                old_parent.children.retain(|c| *c != child_id);
-            }
+        let Some(child) = self.elements.get(&child_id) else {
+            return;
+        };
+        let Some(parent) = self.elements.get(&parent_id) else {
+            return;
+        };
+        let old_parent_id = child.parent;
+        if child_id == before_id
+            && old_parent_id == Some(parent_id)
+            && parent.children.contains(&child_id)
+        {
+            return;
         }
-        // Set new parent
-        if let Some(child) = self.elements.get_mut(&child_id) {
-            child.parent = Some(parent_id);
+
+        let mut new_children = parent.children.clone();
+        new_children.retain(|id| *id != child_id);
+        let position = new_children
+            .iter()
+            .position(|id| *id == before_id)
+            .unwrap_or(new_children.len());
+        new_children.insert(position, child_id);
+        let parent_changed = new_children != parent.children;
+        let child_changed = old_parent_id != Some(parent_id);
+        let old_parent_changed = old_parent_id
+            .filter(|old_parent_id| *old_parent_id != parent_id)
+            .and_then(|old_parent_id| {
+                self.elements.get(&old_parent_id).map(|old_parent| {
+                    (
+                        old_parent_id,
+                        old_parent.children.iter().any(|id| *id == child_id),
+                    )
+                })
+            });
+        if !parent_changed && !child_changed && old_parent_changed.is_none() {
+            return;
         }
-        // Insert before the target
-        if let Some(parent) = self.elements.get_mut(&parent_id) {
-            let pos = parent
+
+        if let Some((old_parent_id, true)) = old_parent_changed {
+            self.elements
+                .get_mut(&old_parent_id)
+                .expect("old parent was read from the retained tree")
                 .children
-                .iter()
-                .position(|c| *c == before_id)
-                .unwrap_or(parent.children.len());
-            parent.children.insert(pos, child_id);
-        }
-        if let Some(old_parent_id) = old_parent_id {
+                .retain(|id| *id != child_id);
             self.mark_changed(old_parent_id);
+        }
+        if parent_changed {
+            self.elements
+                .get_mut(&parent_id)
+                .expect("parent was read from the retained tree")
+                .children = new_children;
+        }
+        if child_changed {
+            self.elements
+                .get_mut(&child_id)
+                .expect("child was read from the retained tree")
+                .parent = Some(parent_id);
         }
         self.mark_changed(parent_id);
     }
@@ -720,6 +807,32 @@ mod tests {
         tree
     }
 
+    fn assert_revision_advanced(
+        tree: &mut RetainedTree,
+        mutation: &str,
+        mutate: impl FnOnce(&mut RetainedTree),
+    ) {
+        let before = tree.next_revision;
+        mutate(tree);
+        assert!(
+            tree.next_revision > before,
+            "{mutation} must advance next_revision"
+        );
+    }
+
+    fn assert_revision_unchanged(
+        tree: &mut RetainedTree,
+        mutation: &str,
+        mutate: impl FnOnce(&mut RetainedTree),
+    ) {
+        let before = tree.next_revision;
+        mutate(tree);
+        assert_eq!(
+            tree.next_revision, before,
+            "{mutation} must not advance next_revision"
+        );
+    }
+
     #[test]
     fn destroy_unlinks_from_parent() {
         let mut tree = tree_with_child();
@@ -772,43 +885,109 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_mutations_advance_next_revision() {
+    fn snapshot_mutations_advance_next_revision_and_noops_do_not() {
         let mut tree = RetainedTree::new();
-        tree.create_element(1, "div".to_string());
+        assert_revision_advanced(&mut tree, "creating the root", |tree| {
+            tree.create_element(1, "div".to_string())
+        });
+        assert_revision_advanced(&mut tree, "setting the root", |tree| tree.set_root(Some(1)));
+        assert_revision_unchanged(&mut tree, "setting the same root", |tree| {
+            tree.set_root(Some(1))
+        });
+        assert_revision_advanced(&mut tree, "creating a child", |tree| {
+            tree.create_element(2, "text".to_string())
+        });
+        assert_revision_advanced(&mut tree, "appending a child", |tree| {
+            tree.append_child(1, 2)
+        });
+        assert_revision_unchanged(&mut tree, "appending the final child again", |tree| {
+            tree.append_child(1, 2)
+        });
+        assert_revision_advanced(&mut tree, "creating a sibling", |tree| {
+            tree.create_element(3, "text".to_string())
+        });
+        assert_revision_advanced(&mut tree, "appending the sibling", |tree| {
+            tree.append_child(1, 3)
+        });
+        assert_revision_unchanged(&mut tree, "inserting an already preceding child", |tree| {
+            tree.insert_before(1, 2, 3)
+        });
+        assert_revision_advanced(&mut tree, "inserting before a sibling", |tree| {
+            tree.insert_before(1, 3, 2)
+        });
+        assert_revision_advanced(&mut tree, "removing an attached child", |tree| {
+            tree.remove_child(1, 3)
+        });
+        assert_revision_unchanged(&mut tree, "removing an absent child", |tree| {
+            tree.remove_child(1, 3)
+        });
+        assert_revision_advanced(&mut tree, "setting text", |tree| {
+            tree.set_text(2, "text".to_string())
+        });
+        assert_revision_unchanged(&mut tree, "setting the same text", |tree| {
+            tree.set_text(2, "text".to_string())
+        });
 
-        let mut assert_advanced = |mutation: &str, mutate: &mut dyn FnMut(&mut RetainedTree)| {
-            let before = tree.next_revision;
-            mutate(&mut tree);
-            assert!(
-                tree.next_revision > before,
-                "{mutation} must advance next_revision"
-            );
-        };
-
-        assert_advanced("adding an event listener", &mut |tree| {
-            tree.set_event_listener(1, "click".to_string(), true)
+        let style = tree.styles.intern(br##"{"color":"#fff"}"##).unwrap();
+        assert_revision_advanced(&mut tree, "setting style", |tree| {
+            tree.set_style(2, style.clone())
         });
-        assert_advanced("removing an event listener", &mut |tree| {
-            tree.set_event_listener(1, "click".to_string(), false)
+        assert_revision_unchanged(&mut tree, "setting the same style", |tree| {
+            tree.set_style(2, style)
         });
-        assert_advanced("setting autoFocus", &mut |tree| {
-            tree.set_custom_prop(1, "autoFocus".to_string(), serde_json::json!(true))
+        assert_revision_advanced(&mut tree, "setting a general custom prop", |tree| {
+            tree.set_custom_prop(2, "name".to_string(), serde_json::json!("value"))
         });
-        assert_advanced("setting testId", &mut |tree| {
-            tree.set_custom_prop(1, "testId".to_string(), serde_json::json!("test-id"))
+        assert_revision_unchanged(&mut tree, "setting the same general custom prop", |tree| {
+            tree.set_custom_prop(2, "name".to_string(), serde_json::json!("value"))
         });
-        assert_advanced("setting id", &mut |tree| {
-            tree.set_custom_prop(1, "id".to_string(), serde_json::json!("author-id"))
+        assert_revision_advanced(&mut tree, "adding an event listener", |tree| {
+            tree.set_event_listener(2, "click".to_string(), true)
         });
-        assert_advanced("setting data-testid", &mut |tree| {
+        assert_revision_unchanged(&mut tree, "adding the same event listener", |tree| {
+            tree.set_event_listener(2, "click".to_string(), true)
+        });
+        assert_revision_advanced(&mut tree, "setting autoFocus", |tree| {
+            tree.set_custom_prop(2, "autoFocus".to_string(), serde_json::json!(true))
+        });
+        assert_revision_advanced(&mut tree, "setting testId", |tree| {
+            tree.set_custom_prop(2, "testId".to_string(), serde_json::json!("test-id"))
+        });
+        assert_revision_advanced(&mut tree, "setting id", |tree| {
+            tree.set_custom_prop(2, "id".to_string(), serde_json::json!("author-id"))
+        });
+        assert_revision_advanced(&mut tree, "setting data-testid", |tree| {
             tree.set_custom_prop(
                 1,
                 "data-testid".to_string(),
                 serde_json::json!("data-test-id"),
             )
         });
-        assert_advanced("setting the root", &mut |tree| tree.set_root(Some(1)));
-        assert_advanced("clearing the root", &mut |tree| tree.set_root(None));
+        assert_revision_advanced(&mut tree, "creating an attached element", |tree| {
+            tree.create_element(4, "div".to_string())
+        });
+        assert_revision_advanced(&mut tree, "attaching the element", |tree| {
+            tree.append_child(1, 4)
+        });
+        assert_revision_advanced(&mut tree, "destroying an attached element", |tree| {
+            tree.destroy_element(4);
+        });
+        assert_revision_advanced(&mut tree, "creating a detached element", |tree| {
+            tree.create_element(5, "div".to_string())
+        });
+        assert_revision_advanced(&mut tree, "destroying a detached element", |tree| {
+            tree.destroy_element(5);
+        });
+        assert_revision_unchanged(&mut tree, "destroying a missing element", |tree| {
+            tree.destroy_element(5);
+        });
+        assert_revision_advanced(&mut tree, "clearing the root", |tree| tree.set_root(None));
+        assert_revision_advanced(&mut tree, "restoring the root", |tree| {
+            tree.set_root(Some(1))
+        });
+        assert_revision_advanced(&mut tree, "destroying the root", |tree| {
+            tree.destroy_element(1);
+        });
     }
 
     /// The whole point of `search_revision`: `highlight` is a custom prop, so
