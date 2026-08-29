@@ -39,6 +39,7 @@ function captureCanvasScene(scene: CanvasScene, outputPath: string): void {
   const testRoot = createTestRoot({
     width: CANVAS_GOLDEN_WIDTH,
     height: CANVAS_GOLDEN_HEIGHT,
+    scaleFactor: CANVAS_GOLDEN_DPR,
   })
   const canvasRef = createRef<CanvasPublicInstance>()
   try {
@@ -97,6 +98,53 @@ function expectHardenedRuleRejects(
 }
 
 describeLocalMac("canvas browser-equivalence harness", { timeout: 12_000 }, () => {
+  test("keeps canvas layout geometry in logical pixels at 1x and 2x", () => {
+    const renderAtScale = (scaleFactor: number) => {
+      const testRoot = createTestRoot({
+        width: CANVAS_GOLDEN_WIDTH,
+        height: CANVAS_GOLDEN_HEIGHT,
+        scaleFactor,
+      })
+      try {
+        testRoot.render(
+          createElement(
+            "div",
+            { style: { padding: 16 } },
+            createElement("canvas", {
+              testId: "logical-canvas",
+              width: CANVAS_GOLDEN_WIDTH * CANVAS_GOLDEN_DPR,
+              height: CANVAS_GOLDEN_HEIGHT * CANVAS_GOLDEN_DPR,
+              style: { width: CANVAS_GOLDEN_WIDTH, height: CANVAS_GOLDEN_HEIGHT },
+            })
+          )
+        )
+        const canvas = testRoot.renderer.findByTestId("logical-canvas")!
+        return {
+          bounds: testRoot.renderer.getElementBounds(canvas.id),
+          window: testRoot.renderer.getWindowSize(),
+        }
+      } finally {
+        testRoot.unmount()
+      }
+    }
+
+    const oneX = renderAtScale(1)
+    const twoX = renderAtScale(2)
+
+    expect(oneX.window).toEqual({
+      width: CANVAS_GOLDEN_WIDTH,
+      height: CANVAS_GOLDEN_HEIGHT,
+      scaleFactor: 1,
+    })
+    expect(twoX.window).toEqual({
+      width: CANVAS_GOLDEN_WIDTH,
+      height: CANVAS_GOLDEN_HEIGHT,
+      scaleFactor: 2,
+    })
+    expect(oneX.bounds).toEqual(twoX.bounds)
+    expect(oneX.bounds?.slice(2)).toEqual([CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT])
+  })
+
   test("reports zero diff for a golden compared with itself", () => {
     const testRoot = createTestRoot()
     try {
