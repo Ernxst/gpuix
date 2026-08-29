@@ -466,7 +466,7 @@ impl TestGpuixRenderer {
         // and native GPU renderer as production.
         let window_handle = cx
             .open_offscreen_window(window_size, |_window, app| {
-                app.new(|_cx| {
+                app.new(|cx| {
                     GpuixView::new(
                         tree_clone,
                         canvas_display_lists_for_view,
@@ -475,6 +475,7 @@ impl TestGpuixRenderer {
                         "GPUIX Test".to_string(),
                         selection_clone,
                         image_network_policy_for_view,
+                        cx,
                     )
                 })
             })

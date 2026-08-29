@@ -2104,7 +2104,7 @@ impl GpuixRenderer {
             match cx.open_window(
                 to_gpui_window_options(&window_options, bounds),
                 |_window, cx| {
-                    cx.new(|_view_cx| {
+                    cx.new(|view_cx| {
                         GpuixView::new(
                             tree.clone(),
                             canvas_display_lists.clone(),
@@ -2113,6 +2113,7 @@ impl GpuixRenderer {
                             title,
                             selection.clone(),
                             image_network_policy.clone(),
+                            view_cx,
                         )
                     })
                 },
@@ -2224,7 +2225,7 @@ impl GpuixRenderer {
                         let window = match cx.open_window(
                             to_gpui_window_options(&window_options, bounds),
                             |_window, cx| {
-                                cx.new(|_view_cx| {
+                                cx.new(|view_cx| {
                                     GpuixView::new(
                                         tree,
                                         canvas_display_lists,
@@ -2233,6 +2234,7 @@ impl GpuixRenderer {
                                         title,
                                         selection,
                                         image_network_policy,
+                                        view_cx,
                                     )
                                 })
                             },
@@ -4267,7 +4269,7 @@ fn start_web_app(
             if let Some(mode) = PENDING_DEBUG_OVERLAY.with(|pending| pending.borrow_mut().take()) {
                 window.set_debug_frame_overlay_mode(mode);
             }
-            cx.new(|_view_cx| {
+            cx.new(|view_cx| {
                 GpuixView::new(
                     tree,
                     canvas_display_lists,
@@ -4276,6 +4278,7 @@ fn start_web_app(
                     "GPUIX Web".to_string(),
                     selection,
                     crate::custom_elements::img::ImageNetworkPolicy::default(),
+                    view_cx,
                 )
             })
         });
@@ -5185,6 +5188,10 @@ pub(crate) struct GpuixView {
     window_event_callback: WindowEventCallback,
     window_bounds_subscription: Option<gpui::Subscription>,
     pub(crate) window_title: String,
+    /// Non-tab-stop focus target that keeps root actions reachable when no
+    /// retained element is focused.
+    root_focus_handle: gpui::FocusHandle,
+    focus_lost_subscription: Option<gpui::Subscription>,
     /// Persistent FocusHandles keyed by element ID.
     /// Created lazily for elements with keyboard or focus/blur listeners.
     /// Handles persist across renders so GPUI maintains focus state.
@@ -5379,6 +5386,7 @@ impl GpuixView {
         window_title: String,
         selection: SharedSelection,
         image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
+        cx: &mut gpui::Context<Self>,
     ) -> Self {
         Self {
             tree,
@@ -5388,6 +5396,8 @@ impl GpuixView {
             window_event_callback,
             window_bounds_subscription: None,
             window_title,
+            root_focus_handle: cx.focus_handle().tab_stop(false),
+            focus_lost_subscription: None,
             focus_handles: HashMap::new(),
             focus_subscriptions: HashMap::new(),
             custom_registry: CustomElementRegistry::with_defaults(),
@@ -6372,6 +6382,20 @@ impl gpui::Render for GpuixView {
         // Sync focus handles before building elements.
         self.sync_focus_handles(&tree, &callback, window, cx);
 
+        if self.focus_lost_subscription.is_none() {
+            self.focus_lost_subscription = Some(cx.on_focus_lost(window, |view, window, cx| {
+                if window.focused(cx).is_none() {
+                    view.root_focus_handle.focus(window, cx);
+                }
+            }));
+        }
+        // autoFocus is resolved above, before the fallback root can claim an
+        // otherwise empty focus path. Once a retained element has focus this
+        // check remains inert, including across ordinary React re-renders.
+        if window.focused(cx).is_none() {
+            self.root_focus_handle.focus(window, cx);
+        }
+
         // Ensure custom element instances are destroyed when their IDs disappear.
         self.custom_registry
             .prune_missing(|id| tree.elements.contains_key(&id));
@@ -6448,6 +6472,7 @@ impl gpui::Render for GpuixView {
             let root = gpui::div()
                 .size_full()
                 .text_color(gpui::rgba(0xe2e2e2ff))
+                .track_focus(&self.root_focus_handle)
                 .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
                 .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx));
             with_window_menu_actions(root)
