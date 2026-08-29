@@ -200,7 +200,8 @@ pub struct SelectableText {
     /// `Some` emits one AccessKit `Label` whose value may differ from the
     /// painted string when an inline `ariaHidden` subtree was flattened out.
     /// `None` keeps the run out of the accessibility tree, as required for a
-    /// hidden subtree or text whose explicit role owns its accessible name.
+    /// hidden subtree or text whose own or ancestor role owns its accessible
+    /// name.
     pub accessibility_value: Option<SharedString>,
     /// `None` is the important case for plain `<text>` nodes: gpui then derives
     /// one run from `window.text_style()`, so colour, weight and family keep

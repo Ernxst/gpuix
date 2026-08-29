@@ -5769,6 +5769,10 @@ pub(crate) struct Inherited {
     /// True for an `ariaHidden` element and every descendant. Semantics are
     /// omitted at build time so AccessKit never receives a partial hidden tree.
     pub accessibility_hidden: bool,
+    /// True once this element or an ancestor has a supported role. Descendant
+    /// text contributes to that role's accessible name instead of emitting a
+    /// separate `Label` node.
+    pub text_accessibility_owned_by_role: bool,
     /// Selection wash colour for this subtree.
     pub selection_wash: gpui::Hsla,
     /// Text case transformation inherited by plain text descendants.
@@ -5804,6 +5808,7 @@ impl Inherited {
         Self {
             selectable: true,
             accessibility_hidden: false,
+            text_accessibility_owned_by_role: false,
             selection_wash: wash,
             text_transform: TextTransform::None,
             current_color: gpui::rgba(0xe2e2e2ff),
@@ -6661,6 +6666,8 @@ pub(crate) fn build_element(
         .clone()
         .descend(style, hover_group, id, current_color, font);
     ctx.inherited.accessibility_hidden |= crate::accessibility::is_hidden(element);
+    ctx.inherited.text_accessibility_owned_by_role |=
+        crate::accessibility::has_supported_role(element);
 
     // A `highlight` here replaces any ancestor's: the nearest declaration wins,
     // and `GroupList::collect` skips nested declarations so an ancestor never
@@ -7517,7 +7524,7 @@ pub(crate) fn build_host_container(
         let inline = flattened_text
             .expect("text hosts are flattened before their content is attached");
         let accessibility_value = (!ctx.inherited.accessibility_hidden
-            && !text_owns_accessible_name
+            && !ctx.inherited.text_accessibility_owned_by_role
             && !inline.accessibility_text.is_empty())
         .then(|| gpui::SharedString::from(inline.accessibility_text.clone()));
         el = el.child(flattened_text_content(
@@ -7558,8 +7565,9 @@ fn text_content(
     content: &str,
     ctx: &BuildCtx,
 ) -> gpui::AnyElement {
-    let accessibility_value =
-        (!ctx.inherited.accessibility_hidden).then(|| gpui::SharedString::from(content.to_owned()));
+    let accessibility_value = (!ctx.inherited.accessibility_hidden
+        && !ctx.inherited.text_accessibility_owned_by_role)
+        .then(|| gpui::SharedString::from(content.to_owned()));
     let painted_content = match ctx.inherited.text_transform {
         TextTransform::None => content.to_string(),
         TextTransform::Uppercase => content.to_uppercase(),
