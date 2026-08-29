@@ -757,26 +757,46 @@ export interface Props {
   "aria-label"?: string
   /** Supplementary accessible description announced after the name, role, and value. */
   ariaDescription?: string
+  /** DOM-compatible alias for ariaDescription. */
+  "aria-description"?: string
   /** Checked state for checkboxes and switches. */
   ariaChecked?: boolean | "mixed"
+  /** DOM-compatible alias for ariaChecked. */
+  "aria-checked"?: boolean | "mixed"
   /** Expanded state for controls that disclose another region. */
   ariaExpanded?: boolean
+  /** DOM-compatible alias for ariaExpanded. */
+  "aria-expanded"?: boolean
   /** Selected state for selectable semantic nodes. */
   ariaSelected?: boolean
+  /** DOM-compatible alias for ariaSelected. */
+  "aria-selected"?: boolean
   /** Human-readable value text for a value control. */
   ariaValue?: string
+  /** DOM-compatible semantic alias for ariaValue. */
+  "aria-valuetext"?: string
   /** Minimum numeric value for a value control. */
   ariaValueMin?: number
+  /** DOM-compatible alias for ariaValueMin. */
+  "aria-valuemin"?: number
   /** Maximum numeric value for a value control. */
   ariaValueMax?: number
+  /** DOM-compatible alias for ariaValueMax. */
+  "aria-valuemax"?: number
   /** Current numeric value for a value control. */
   ariaValueNow?: number
+  /** DOM-compatible alias for ariaValueNow. */
+  "aria-valuenow"?: number
   /** One-based heading level. */
   ariaLevel?: number
+  /** DOM-compatible alias for ariaLevel. */
+  "aria-level"?: number
   /** Native disabled state: unavailable, non-activating, and removed from tab order. */
   disabled?: boolean
   /** Unavailable and non-activating, but intentionally retained in tab order. */
   ariaDisabled?: boolean
+  /** DOM-compatible alias for ariaDisabled. */
+  "aria-disabled"?: boolean
   /** Exclude this element and its descendants from the accessibility tree. */
   ariaHidden?: boolean
   /** DOM-compatible alias for ariaHidden. */

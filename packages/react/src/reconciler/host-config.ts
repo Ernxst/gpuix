@@ -416,6 +416,16 @@ function diagnoseUnsupportedAccessibilityRoleProp(
 
 const ARIA_PROP_ALIASES = {
   "aria-label": "ariaLabel",
+  "aria-description": "ariaDescription",
+  "aria-checked": "ariaChecked",
+  "aria-expanded": "ariaExpanded",
+  "aria-selected": "ariaSelected",
+  "aria-valuetext": "ariaValue",
+  "aria-valuemin": "ariaValueMin",
+  "aria-valuemax": "ariaValueMax",
+  "aria-valuenow": "ariaValueNow",
+  "aria-level": "ariaLevel",
+  "aria-disabled": "ariaDisabled",
   "aria-hidden": "ariaHidden",
 } as const
 
