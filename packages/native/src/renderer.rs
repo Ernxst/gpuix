@@ -8597,14 +8597,6 @@ fn style_payload_bytes<'a>(
     }
 }
 
-fn intern_style_payload(
-    styles: &mut StyleTable,
-    payload: &serde_json::value::RawValue,
-) -> BatchResult<Arc<StyleDesc>> {
-    let raw = style_payload_bytes(payload)?;
-    styles.intern(raw.as_ref())
-}
-
 /// Resolve every `setStyle` payload in the batch, in op order.
 ///
 /// This is the last fallible step, so it runs before the apply loop and borrows
@@ -8620,23 +8612,73 @@ fn resolve_styles(
     let mut resolved = Vec::new();
     for (index, op) in ops.iter().enumerate() {
         if let BatchOp::SetStyle { style, .. } = op {
-            let resolved_style = if collect_diagnostics {
-                let raw = style_payload_bytes(style)
-                    .map_err(|error| format!("Batch op {index} setStyle parse error: {error}"))?;
-                let value: serde_json::Value = serde_json::from_slice(raw.as_ref())
-                    .map_err(|error| format!("Batch op {index} setStyle parse error: {error}"))?;
-                let parsed = crate::style::parse_style_value(&value);
-                let shared = styles.intern_parsed(raw.as_ref(), parsed.style);
-                (shared, parsed.problems)
+            let raw = style_payload_bytes(style)
+                .map_err(|error| format!("Batch op {index} setStyle parse error: {error}"))?;
+            let value: serde_json::Value = serde_json::from_slice(raw.as_ref())
+                .map_err(|error| format!("Batch op {index} setStyle parse error: {error}"))?;
+            let parsed = crate::style::parse_style_value(&value);
+            let shared = styles.intern_parsed(raw.as_ref(), parsed.style);
+            let problems = if collect_diagnostics {
+                parsed.problems
             } else {
-                let shared = intern_style_payload(styles, style)
-                    .map_err(|error| format!("Batch op {index} setStyle parse error: {error}"))?;
-                (shared, Vec::new())
+                Vec::new()
             };
-            resolved.push(resolved_style);
+            resolved.push((shared, problems));
         }
     }
     Ok(resolved)
+}
+
+#[cfg(test)]
+mod resolve_styles_tests {
+    use super::*;
+    use crate::style::TransitionEasing;
+    use serde_json::json;
+
+    fn resolve(
+        style: serde_json::Value,
+        collect_diagnostics: bool,
+    ) -> (StyleDesc, Vec<PendingStyleDiagnostic>) {
+        let batch = serde_json::to_vec(&json!([
+            ["createElement", 1, "div"],
+            ["setStyle", 1, style],
+            ["setRoot", 1]
+        ]))
+        .unwrap();
+        let mut tree = RetainedTree::new();
+        let outcome = apply_batch_to_tree_with_diagnostics(&mut tree, &batch, collect_diagnostics)
+            .expect("style problems must degrade instead of rejecting the batch");
+        let style = tree.elements[&1]
+            .style
+            .as_deref()
+            .expect("the degraded style is still applied")
+            .clone();
+        (style, outcome.diagnostics)
+    }
+
+    #[test]
+    fn strict_and_non_strict_resolve_the_same_degraded_style() {
+        let payload = json!({
+            "display": "flex",
+            "width": "banana",
+            "flexGrain": 4,
+            "transition": { "properties": ["opacity"], "durationMs": 150 }
+        });
+
+        let (strict_style, strict_diagnostics) = resolve(payload.clone(), true);
+        let (non_strict_style, non_strict_diagnostics) = resolve(payload, false);
+
+        assert_eq!(strict_style, non_strict_style);
+        assert_eq!(strict_style.display.as_deref(), Some("flex"));
+        assert_eq!(strict_style.width, None);
+        let transition = strict_style
+            .transition
+            .expect("partial transition is valid");
+        assert_eq!(transition.delay_ms, 0.0);
+        assert_eq!(transition.easing, TransitionEasing::Name("ease".into()));
+        assert_eq!(strict_diagnostics.len(), 2);
+        assert!(non_strict_diagnostics.is_empty());
+    }
 }
 
 /// Apply a batch of mutation tuples to a RetainedTree.
@@ -9339,10 +9381,8 @@ mod batch_tests {
         out
     }
 
-    /// The regression test for batch atomicity. `intern_style_payload` used to
-    /// run inside the apply loop, so this batch created the element, set its
-    /// text, and only then threw — leaving JS to retry against a tree that had
-    /// already moved.
+    /// Style-value problems degrade, but malformed JSON is still fallible and
+    /// must be resolved before the apply loop touches an element.
     #[test]
     fn a_malformed_style_applies_nothing_at_all() {
         let mut tree = RetainedTree::new();
@@ -9352,7 +9392,7 @@ mod batch_tests {
 
         let error = apply(
             &mut tree,
-            r#"[["createElement",2,"div"],["setText",2,"changed"],["setStyle",2,123]]"#,
+            r#"[["createElement",2,"div"],["setText",2,"changed"],["setStyle",2,"{not json"]]"#,
         )
         .expect_err("a malformed style must reject the batch");
 
@@ -9372,7 +9412,7 @@ mod batch_tests {
         let mut tree = RetainedTree::new();
         let error = apply(
             &mut tree,
-            r#"[["createElement",1,"div"],["setStyle",1,{"color":"red"}],["setStyle",1,{"color":5}]]"#,
+            r#"[["createElement",1,"div"],["setStyle",1,{"color":"red"}],["setStyle",1,"{not json"]]"#,
         )
         .expect_err("a bad style rejects the batch");
         assert!(
@@ -9395,21 +9435,17 @@ mod batch_tests {
         );
     }
 
-    /// `null` is not "no style". Treating it as `{}` would silently clear every
-    /// declared property instead of telling JS it sent something wrong.
+    /// A non-object style is a field-level problem: non-strict mode deliberately
+    /// applies the degraded empty style instead of terminating the application.
     #[test]
-    fn a_null_style_is_an_error() {
+    fn a_null_style_degrades_to_an_empty_style() {
         let mut tree = RetainedTree::new();
-        let error = apply(
+        apply(
             &mut tree,
             r#"[["createElement",1,"div"],["setStyle",1,null]]"#,
         )
-        .expect_err("null is not a style");
-        assert!(
-            error.contains("Batch op 1 setStyle parse error:"),
-            "{error}"
-        );
-        assert!(tree.elements.is_empty(), "and the batch stays atomic");
+        .expect("style problems degrade");
+        assert_eq!(tree.elements[&1].style.as_deref(), Some(&StyleDesc::default()));
     }
 
     /// Skipping an unknown opcode would let a JS/Rust version skew desync the

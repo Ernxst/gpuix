@@ -161,12 +161,18 @@ pub enum TransitionEasing {
     CubicBezier([f64; 4]),
 }
 
+fn default_transition_easing() -> TransitionEasing {
+    TransitionEasing::Name("ease".to_string())
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StyleTransition {
     pub(crate) properties: Vec<TransitionProperty>,
     pub(crate) duration_ms: f64,
+    #[serde(default)]
     pub(crate) delay_ms: f64,
+    #[serde(default = "default_transition_easing")]
     pub(crate) easing: TransitionEasing,
 }
 
@@ -1071,7 +1077,7 @@ fn parse_transition(
         },
     };
     let easing = match object.get("easing") {
-        None => TransitionEasing::Name("ease".to_string()),
+        None => default_transition_easing(),
         Some(value) => match serde_json::from_value::<TransitionEasing>(value.clone()) {
             Ok(TransitionEasing::Name(name))
                 if matches!(
@@ -1096,7 +1102,7 @@ fn parse_transition(
                     "expected linear, ease, easeIn, easeOut, easeInOut, or a cubic-bezier tuple with x values from 0 through 1",
                 );
                 valid = false;
-                TransitionEasing::Name("ease".to_string())
+                default_transition_easing()
             }
         },
     };
@@ -1953,6 +1959,18 @@ pub fn parse_cursor(name: &str) -> Option<gpui::CursorStyle> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn transition_deserialization_defaults_optional_fields() {
+        let transition: StyleTransition = serde_json::from_value(json!({
+            "properties": ["opacity"],
+            "durationMs": 150
+        }))
+        .expect("the published optional fields may be omitted");
+
+        assert_eq!(transition.delay_ms, 0.0);
+        assert_eq!(transition.easing, TransitionEasing::Name("ease".into()));
+    }
 
     #[test]
     fn parses_expressive_dimensions_once_with_their_css_source() {
