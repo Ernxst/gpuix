@@ -363,6 +363,7 @@ describeNative("automation", () => {
   })
 
   it("aliases supported aria props on built-in and custom hosts", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const { render, renderer } = createTestRoot({ strictStyles: true })
 
     render(
@@ -499,6 +500,7 @@ describeNative("automation", () => {
         "Hyphen hidden custom",
       ])
     )
+    expect(warn).not.toHaveBeenCalled()
   })
 
   it("publishes every ariaCurrent token as AccessKit current-item state", () => {
@@ -529,36 +531,23 @@ describeNative("automation", () => {
     }
   })
 
-  it("rejects unsupported hyphenated aria props under strict mode and warns once otherwise", () => {
+  it("warns once per instance for unsupported hyphenated aria props under strict mode", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const strict = createTestRoot({ strictStyles: true })
     strict.render(<div {...({ "aria-busy": "true" } as Record<string, string>)} />)
-    expect(error.mock.calls.flat()).toContainEqual(
-      expect.objectContaining({
-        name: "UnsupportedAriaPropError",
-        message: expect.stringMatching(/aria-busy.*no camelCase GPUIX accessibility prop/),
-      })
-    )
-    strict.unmount()
-    error.mockRestore()
-
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-    const compatibility = createTestRoot({ strictStyles: false })
-    compatibility.render(
-      <div {...({ "aria-busy": "true" } as Record<string, string>)} />
-    )
-    compatibility.render(
+    strict.render(
       <div {...({ "aria-busy": "false" } as Record<string, string>)} />
     )
-    compatibility.render(
+    strict.render(
       <div {...({ "aria-busy": "true" } as Record<string, string>)} />
     )
+    expect(error).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledTimes(1)
     expect(warn).toHaveBeenCalledWith(
       expect.stringMatching(/aria-busy.*no camelCase GPUIX accessibility prop/)
     )
-    compatibility.unmount()
-    warn.mockRestore()
+    strict.unmount()
   })
 
   it("publishes flattened plain text and suppresses every hidden text funnel", () => {
