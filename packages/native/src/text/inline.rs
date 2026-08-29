@@ -93,9 +93,9 @@ pub(crate) struct StyledTextRun {
 #[derive(Debug, Default)]
 pub(crate) struct InlineText {
     pub(crate) text: String,
-    /// Painted text with every `ariaHidden` inline subtree removed. A flattened
-    /// layout remains one visual string, but hidden runs must not leak into the
-    /// value exposed to accessibility clients.
+    /// Authored text with every `ariaHidden` inline subtree removed. A flattened
+    /// layout remains one visual string, but presentational transforms and
+    /// hidden runs must not leak into the value exposed to accessibility clients.
     pub(crate) accessibility_text: String,
     pub(crate) runs: Vec<StyledTextRun>,
     /// Nested React host ids whose glyph ranges should be exposed to automation.
@@ -186,10 +186,10 @@ fn collect_node(
         inherited_accessibility_hidden || crate::accessibility::is_hidden(element);
 
     if let Some(content) = &element.content {
-        let content = transform(content, transform_kind);
-        push_content(output, &content, style.clone());
+        let painted_content = transform(content, transform_kind);
+        push_content(output, &painted_content, style.clone());
         if !accessibility_hidden {
-            output.accessibility_text.push_str(&content);
+            output.accessibility_text.push_str(content);
         }
     }
     for child_id in &element.children {
@@ -236,10 +236,10 @@ pub(crate) fn flatten_inline_text(
     let mut output = InlineText::default();
     let accessibility_hidden = crate::accessibility::is_hidden(root);
     if let Some(content) = &root.content {
-        let content = transform(content, inherited_transform);
-        push_content(&mut output, &content, TextRunStyle::default());
+        let painted_content = transform(content, inherited_transform);
+        push_content(&mut output, &painted_content, TextRunStyle::default());
         if !accessibility_hidden {
-            output.accessibility_text.push_str(&content);
+            output.accessibility_text.push_str(content);
         }
     }
     for child_id in &root.children {
@@ -409,6 +409,7 @@ mod tests {
 
         let inline = flatten_inline_text(&tree, 1, TextTransform::None).unwrap();
         assert_eq!(inline.text, "STRASSE");
+        assert_eq!(inline.accessibility_text, "straße");
         assert_eq!(inline.runs[0].range, 0..7);
         assert!(validate_runs(&inline.text, &inline.runs).is_ok());
     }
