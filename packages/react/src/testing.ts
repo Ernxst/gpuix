@@ -85,6 +85,7 @@ export interface AccessKitNodeSnapshot {
     description?: string
     value?: string
     selected?: boolean
+    current?: "False" | "True" | "Page" | "Step" | "Location" | "Date" | "Time"
     expanded?: boolean
     toggled?: "False" | "True" | "Mixed"
     disabled?: true
