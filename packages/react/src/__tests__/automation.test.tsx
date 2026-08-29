@@ -581,6 +581,29 @@ describeNative("automation", () => {
     expect(tree.frame?.node_count).toBe(2)
   })
 
+  it("keeps authored text in accessibility when pixels are transformed", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <text style={{ color: "#ffffff", textTransform: "uppercase" }}>
+          Built
+        </text>
+        <text style={{ color: "#ffffff", textTransform: "lowercase" }}>
+          LOUD
+        </text>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const labels = Object.values(renderer.getAccessibilityTree().nodes)
+      .filter((node) => node.aria.role === "Label")
+      .map((node) => node.aria.value)
+    expect(labels).toEqual(["Built", "LOUD"])
+    expect(renderer.getPaintedText()).toEqual(["BUILT", "loud"])
+  })
+
   it("gives a roled text host its flattened name without a duplicate Label", () => {
     const { render, renderer } = createTestRoot()
 

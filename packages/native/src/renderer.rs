@@ -7558,14 +7558,14 @@ fn text_content(
     content: &str,
     ctx: &BuildCtx,
 ) -> gpui::AnyElement {
-    let content = match ctx.inherited.text_transform {
+    let accessibility_value =
+        (!ctx.inherited.accessibility_hidden).then(|| gpui::SharedString::from(content.to_owned()));
+    let painted_content = match ctx.inherited.text_transform {
         TextTransform::None => content.to_string(),
         TextTransform::Uppercase => content.to_uppercase(),
         TextTransform::Lowercase => content.to_lowercase(),
     };
-    let content = gpui::SharedString::from(content);
-    let accessibility_value =
-        (!ctx.inherited.accessibility_hidden).then(|| content.clone());
+    let painted_content = gpui::SharedString::from(painted_content);
     selectable_text(crate::text::SelectableText {
         group: crate::text::search::group_id(ctx.tree, element.id),
         selectable: ctx.inherited.selectable,
@@ -7577,7 +7577,7 @@ fn text_content(
         ..crate::text::SelectableText::new(
             element.id,
             0,
-            content,
+            painted_content,
             None,
             ctx.selection.clone(),
             ctx.inherited.selection_wash,
