@@ -84,6 +84,7 @@ impl CustomRenderContext<'_> {
         runs: Option<Vec<gpui::TextRun>>,
     ) -> gpui::AnyElement {
         let text = text.into();
+        let accessibility_value = (!self.accessibility_hidden).then(|| text.clone());
         crate::text::selectable_text(crate::text::SelectableText {
             selectable: self.selectable,
             highlight: self
@@ -97,6 +98,7 @@ impl CustomRenderContext<'_> {
                 runs,
                 self.selection.clone(),
                 self.selection_wash,
+                accessibility_value,
             )
         })
     }

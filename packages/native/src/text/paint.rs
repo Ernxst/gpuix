@@ -197,6 +197,11 @@ pub struct SelectableText {
     pub element_id: u64,
     pub sub: usize,
     pub text: SharedString,
+    /// `Some` emits one AccessKit `Label` whose value may differ from the
+    /// painted string when an inline `ariaHidden` subtree was flattened out.
+    /// `None` keeps the run out of the accessibility tree, as required for a
+    /// hidden subtree or text whose explicit role owns its accessible name.
+    pub accessibility_value: Option<SharedString>,
     /// `None` is the important case for plain `<text>` nodes: gpui then derives
     /// one run from `window.text_style()`, so colour, weight and family keep
     /// inheriting from ancestor `style` props. Pass `Some(..)` only when the
@@ -239,11 +244,13 @@ impl SelectableText {
         runs: Option<Vec<TextRun>>,
         selection: SharedSelection,
         wash_color: Hsla,
+        accessibility_value: Option<SharedString>,
     ) -> Self {
         Self {
             element_id,
             sub,
             text,
+            accessibility_value,
             runs,
             run_styles: None,
             selection,
@@ -261,6 +268,20 @@ impl SelectableText {
     }
 }
 
+type StyledTextAccessibility = Option<(ElementId, SharedString)>;
+
+fn apply_styled_text_accessibility(
+    styled: StyledText,
+    accessibility: &StyledTextAccessibility,
+) -> StyledText {
+    match accessibility {
+        Some((id, value)) => styled
+            .with_id(id.clone())
+            .with_accessibility_value(value.clone()),
+        None => styled,
+    }
+}
+
 /// A `StyledText` whose exact-cover run refinements resolve after the parent
 /// div has pushed its inherited `TextStyle` onto the GPUI window stack.
 struct RunStyledText {
@@ -270,9 +291,16 @@ struct RunStyledText {
 }
 
 impl RunStyledText {
-    fn new(text: SharedString, runs: Vec<StyledTextRun>) -> Self {
+    fn new(
+        text: SharedString,
+        runs: Vec<StyledTextRun>,
+        accessibility: &StyledTextAccessibility,
+    ) -> Self {
         Self {
-            styled: StyledText::new(text.clone()),
+            styled: apply_styled_text_accessibility(
+                StyledText::new(text.clone()),
+                accessibility,
+            ),
             text,
             runs,
         }
@@ -320,11 +348,19 @@ impl Element for RunStyledText {
     type PrepaintState = ();
 
     fn id(&self) -> Option<ElementId> {
-        None
+        self.styled.id()
     }
 
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
         None
+    }
+
+    fn a11y_role(&self) -> Option<gpui::accesskit::Role> {
+        self.styled.a11y_role()
+    }
+
+    fn write_a11y_info(&self, node: &mut gpui::accesskit::Node) {
+        self.styled.write_a11y_info(node);
     }
 
     fn request_layout(
@@ -391,6 +427,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         element_id,
         sub,
         text,
+        accessibility_value,
         runs,
         run_styles,
         selection,
@@ -406,17 +443,28 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         highlight,
     } = opts;
     let key = selection_key(element_id, sub);
+    let accessibility = accessibility_value
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            (
+                ElementId::Name(format!("__gpuix_text_run_{element_id}_{sub}").into()),
+                value,
+            )
+        });
 
     debug_assert!(runs.is_none() || run_styles.is_none());
     let (layout, styled) = match run_styles {
         Some(run_styles) => match validate_runs(&text, &run_styles) {
             Ok(()) => {
-                let styled = RunStyledText::new(text.clone(), run_styles);
+                let styled = RunStyledText::new(text.clone(), run_styles, &accessibility);
                 (styled.layout().clone(), styled.into_any_element())
             }
             Err(error) => {
                 log::error!("Invalid inline text runs: {error}");
-                let styled = StyledText::new(text.clone());
+                let styled = apply_styled_text_accessibility(
+                    StyledText::new(text.clone()),
+                    &accessibility,
+                );
                 (styled.layout().clone(), styled.into_any_element())
             }
         },
@@ -425,6 +473,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                 Some(runs) => StyledText::new(text.clone()).with_runs(runs),
                 None => StyledText::new(text.clone()),
             };
+            let styled = apply_styled_text_accessibility(styled, &accessibility);
             (styled.layout().clone(), styled.into_any_element())
         }
     };

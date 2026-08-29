@@ -1632,6 +1632,17 @@ map directly to their GPUI / AccessKit equivalents:
 | `ariaDisabled` | Unavailable and non-activating, but retained in tab order |
 | `ariaHidden` | Excludes the element and its complete subtree from AccessKit |
 
+Unroled drawn text enters AccessKit as `Label` content. `<text>` exposes its
+flattened inline string as one label, while native `<code>`, `<markdown>`, and
+`<diff>` expose one label per content string they paint. Element chrome such as
+line-number gutters, language tags, and diff file headers remains excluded so a
+screen reader does not announce implementation decoration as peer content.
+
+An explicitly roled `<text>` owns its accessible name instead of adding a
+duplicate child label. `ariaLabel` wins when present; otherwise GPUIX derives
+the name from the flattened, non-`ariaHidden` text content. This fallback is
+limited to `<text>` hosts rather than every semantic container.
+
 Role/state combinations are validated rather than silently approximated:
 
 | Role | Role-specific properties and actions |

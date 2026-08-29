@@ -533,6 +533,99 @@ describeNative("automation", () => {
     warn.mockRestore()
   })
 
+  it("publishes flattened plain text and suppresses every hidden text funnel", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <text>
+          Readable <text>plain</text> text
+        </text>
+        <div ariaHidden>
+          <text>Hidden retained text</text>
+          <code code="hidden code" />
+          <markdown source="Hidden markdown" />
+          <diff
+            patch={
+              "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new"
+            }
+          />
+        </div>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+    const tree = renderer.getAccessibilityTree()
+
+    const labels = Object.values(tree.nodes)
+      .filter((node) => node.aria.role === "Label")
+      .map((node) => node.aria.value)
+    expect(labels).toEqual(["Readable plain text"])
+    expect(tree.frame?.node_count).toBe(2)
+  })
+
+  it("gives a roled text host its flattened name without a duplicate Label", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <text role="heading" ariaLevel={2}>
+          Production <text>totals</text>
+        </text>
+        <text role="heading" ariaLevel={3} ariaLabel="Explicit totals name">
+          Ignored contents
+        </text>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+    const tree = renderer.getAccessibilityTree()
+    const nodes = Object.values(tree.nodes)
+
+    expect(nodes.find((node) => node.aria.label === "Production totals")).toMatchObject({
+      aria: { role: "Heading", label: "Production totals", level: 2 },
+    })
+    expect(nodes.find((node) => node.aria.label === "Explicit totals name")).toMatchObject({
+      aria: { role: "Heading", label: "Explicit totals name", level: 3 },
+    })
+    expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
+  })
+
+  it("emits one Label per native content string while leaving chrome inaccessible", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(<code code={"first line\nsecond line"} showLineNumbers />)
+    renderer.flush()
+    renderer.drawPendingFrame()
+    const tree = renderer.getAccessibilityTree()
+
+    const labels = Object.values(tree.nodes)
+      .filter((node) => node.aria.role === "Label")
+      .map((node) => node.aria.value)
+    expect(labels).toEqual(["first line", "second line"])
+    expect(tree.frame?.node_count).toBe(3)
+  })
+
+  it("keeps a representative text-heavy tree linear", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        {Array.from({ length: 70 }, (_, index) => (
+          <text key={index}>{`Factory metric ${index + 1}`}</text>
+        ))}
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+    const tree = renderer.getAccessibilityTree()
+
+    expect(tree.frame?.node_count).toBe(71)
+    expect(
+      Object.values(tree.nodes).filter((node) => node.aria.role === "Label")
+    ).toHaveLength(70)
+  })
+
   it("keeps accessibility reads and actions on the last explicit draw", () => {
     const clicks: string[] = []
     const { render, renderer } = createTestRoot()
