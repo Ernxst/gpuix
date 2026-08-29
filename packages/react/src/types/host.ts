@@ -753,6 +753,8 @@ export interface Props {
   role?: AccessibilityRole
   /** Accessible name announced for this semantic node. */
   ariaLabel?: string
+  /** DOM-compatible alias for ariaLabel. */
+  "aria-label"?: string
   /** Supplementary accessible description announced after the name, role, and value. */
   ariaDescription?: string
   /** Checked state for checkboxes and switches. */
@@ -777,6 +779,8 @@ export interface Props {
   ariaDisabled?: boolean
   /** Exclude this element and its descendants from the accessibility tree. */
   ariaHidden?: boolean
+  /** DOM-compatible alias for ariaHidden. */
+  "aria-hidden"?: boolean
   /** Value or focus action requested by assistive technology. Activate uses onClick. */
   onAccessibilityAction?: (event: GpuixSyntheticEvent) => void
 

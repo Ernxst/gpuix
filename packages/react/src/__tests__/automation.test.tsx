@@ -362,6 +362,76 @@ describeNative("automation", () => {
     })
   })
 
+  it("aliases aria-label and aria-hidden on built-in and custom hosts", () => {
+    const { render, renderer } = createTestRoot({ strictStyles: true })
+
+    render(
+      <div>
+        <div role="button" ariaLabel="Camel built-in" />
+        <div role="button" aria-label="Hyphen built-in" />
+        <img role="img" ariaLabel="Camel custom" />
+        <img role="img" aria-label="Hyphen custom" />
+        <div ariaHidden>
+          <div role="button" ariaLabel="Camel hidden built-in" />
+        </div>
+        <div aria-hidden>
+          <div role="button" ariaLabel="Hyphen hidden built-in" />
+        </div>
+        <img role="img" ariaLabel="Camel hidden custom" ariaHidden />
+        <img role="img" aria-label="Hyphen hidden custom" aria-hidden />
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    const byLabel = (label: string) => nodes.find((node) => node.aria.label === label)?.aria
+    expect(byLabel("Camel built-in")).toMatchObject({ role: "Button" })
+    expect(byLabel("Hyphen built-in")).toMatchObject({ role: "Button" })
+    expect(byLabel("Camel custom")).toMatchObject({ role: "Image" })
+    expect(byLabel("Hyphen custom")).toMatchObject({ role: "Image" })
+    expect(nodes.map((node) => node.aria.label)).not.toEqual(
+      expect.arrayContaining([
+        "Camel hidden built-in",
+        "Hyphen hidden built-in",
+        "Camel hidden custom",
+        "Hyphen hidden custom",
+      ])
+    )
+  })
+
+  it("rejects unsupported hyphenated aria props under strict mode and warns once otherwise", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const strict = createTestRoot({ strictStyles: true })
+    strict.render(<div {...({ "aria-current": "page" } as Record<string, string>)} />)
+    expect(error.mock.calls.flat()).toContainEqual(
+      expect.objectContaining({
+        name: "UnsupportedAriaPropError",
+        message: expect.stringMatching(/aria-current.*no camelCase GPUIX accessibility prop/),
+      })
+    )
+    strict.unmount()
+    error.mockRestore()
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const compatibility = createTestRoot({ strictStyles: false })
+    compatibility.render(
+      <div {...({ "aria-current": "page" } as Record<string, string>)} />
+    )
+    compatibility.render(
+      <div {...({ "aria-current": "step" } as Record<string, string>)} />
+    )
+    compatibility.render(
+      <div {...({ "aria-current": "location" } as Record<string, string>)} />
+    )
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/aria-current.*no camelCase GPUIX accessibility prop/)
+    )
+    compatibility.unmount()
+    warn.mockRestore()
+  })
+
   it("keeps accessibility reads and actions on the last explicit draw", () => {
     const clicks: string[] = []
     const { render, renderer } = createTestRoot()
