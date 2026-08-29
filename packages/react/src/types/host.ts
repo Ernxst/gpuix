@@ -727,6 +727,16 @@ export type AccessibilityRole =
   | "switch"
   | "textbox"
 
+/** Identifies this node as the current item within a related set. */
+export type AriaCurrent =
+  | "page"
+  | "step"
+  | "location"
+  | "date"
+  | "time"
+  | "true"
+  | "false"
+
 /** AccessKit actions delivered through `onAccessibilityAction`. */
 export type AccessibilityAction = "increment" | "decrement" | "focus"
 
@@ -767,6 +777,10 @@ export interface Props {
   ariaExpanded?: boolean
   /** DOM-compatible alias for ariaExpanded. */
   "aria-expanded"?: boolean
+  /** Current item within a related set of destinations. */
+  ariaCurrent?: AriaCurrent
+  /** DOM-compatible alias for ariaCurrent. */
+  "aria-current"?: AriaCurrent
   /** Selected state for selectable semantic nodes. */
   ariaSelected?: boolean
   /** DOM-compatible alias for ariaSelected. */
