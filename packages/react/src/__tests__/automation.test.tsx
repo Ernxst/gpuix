@@ -362,6 +362,177 @@ describeNative("automation", () => {
     })
   })
 
+  it("aliases supported aria props on built-in and custom hosts", () => {
+    const { render, renderer } = createTestRoot({ strictStyles: true })
+
+    render(
+      <div>
+        <div role="button" ariaLabel="Camel built-in" />
+        <div role="button" aria-label="Hyphen built-in" />
+        <img role="img" ariaLabel="Camel custom" />
+        <img role="img" aria-label="Hyphen custom" />
+        <div
+          role="checkbox"
+          ariaLabel="Camel checked built-in"
+          ariaDescription="Built-in state"
+          ariaChecked
+          ariaDisabled
+        />
+        <div
+          role="checkbox"
+          aria-label="Hyphen checked built-in"
+          aria-description="Built-in state"
+          aria-checked
+          aria-disabled
+        />
+        <input
+          role="checkbox"
+          ariaLabel="Camel checked custom"
+          ariaDescription="Custom state"
+          ariaChecked
+          ariaDisabled
+        />
+        <input
+          role="checkbox"
+          aria-label="Hyphen checked custom"
+          aria-description="Custom state"
+          aria-checked
+          aria-disabled
+        />
+        <div role="button" ariaLabel="Camel expanded built-in" ariaExpanded />
+        <div role="button" aria-label="Hyphen expanded built-in" aria-expanded />
+        <input role="button" ariaLabel="Camel expanded custom" ariaExpanded />
+        <input role="button" aria-label="Hyphen expanded custom" aria-expanded />
+        <div role="option" ariaLabel="Camel selected built-in" ariaSelected />
+        <div role="option" aria-label="Hyphen selected built-in" aria-selected />
+        <input role="option" ariaLabel="Camel selected custom" ariaSelected />
+        <input role="option" aria-label="Hyphen selected custom" aria-selected />
+        <div role="heading" ariaLabel="Camel level built-in" ariaLevel={3} />
+        <div role="heading" aria-label="Hyphen level built-in" aria-level={3} />
+        <input role="heading" ariaLabel="Camel level custom" ariaLevel={3} />
+        <input role="heading" aria-label="Hyphen level custom" aria-level={3} />
+        <div
+          role="slider"
+          ariaLabel="Camel value built-in"
+          ariaValue="Medium"
+          ariaValueMin={1}
+          ariaValueMax={3}
+          ariaValueNow={2}
+        />
+        <div
+          role="slider"
+          aria-label="Hyphen value built-in"
+          aria-valuetext="Medium"
+          aria-valuemin={1}
+          aria-valuemax={3}
+          aria-valuenow={2}
+        />
+        <input
+          role="slider"
+          ariaLabel="Camel value custom"
+          ariaValue="Medium"
+          ariaValueMin={1}
+          ariaValueMax={3}
+          ariaValueNow={2}
+        />
+        <input
+          role="slider"
+          aria-label="Hyphen value custom"
+          aria-valuetext="Medium"
+          aria-valuemin={1}
+          aria-valuemax={3}
+          aria-valuenow={2}
+        />
+        <div ariaHidden>
+          <div role="button" ariaLabel="Camel hidden built-in" />
+        </div>
+        <div aria-hidden>
+          <div role="button" ariaLabel="Hyphen hidden built-in" />
+        </div>
+        <img role="img" ariaLabel="Camel hidden custom" ariaHidden />
+        <img role="img" aria-label="Hyphen hidden custom" aria-hidden />
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    const byLabel = (label: string) => nodes.find((node) => node.aria.label === label)?.aria
+    for (const [camel, hyphen, expected] of [
+      ["Camel built-in", "Hyphen built-in", { role: "Button" }],
+      ["Camel custom", "Hyphen custom", { role: "Image" }],
+      [
+        "Camel checked built-in",
+        "Hyphen checked built-in",
+        { role: "CheckBox", description: "Built-in state", toggled: "True", disabled: true },
+      ],
+      [
+        "Camel checked custom",
+        "Hyphen checked custom",
+        { role: "CheckBox", description: "Custom state", toggled: "True", disabled: true },
+      ],
+      ["Camel expanded built-in", "Hyphen expanded built-in", { role: "Button", expanded: true }],
+      ["Camel expanded custom", "Hyphen expanded custom", { role: "Button", expanded: true }],
+      ["Camel selected built-in", "Hyphen selected built-in", { role: "ListBoxOption", selected: true }],
+      ["Camel selected custom", "Hyphen selected custom", { role: "ListBoxOption", selected: true }],
+      ["Camel level built-in", "Hyphen level built-in", { role: "Heading", level: 3 }],
+      ["Camel level custom", "Hyphen level custom", { role: "Heading", level: 3 }],
+      [
+        "Camel value built-in",
+        "Hyphen value built-in",
+        { role: "Slider", value: "Medium", min_numeric_value: 1, max_numeric_value: 3, numeric_value: 2 },
+      ],
+      [
+        "Camel value custom",
+        "Hyphen value custom",
+        { role: "Slider", value: "Medium", min_numeric_value: 1, max_numeric_value: 3, numeric_value: 2 },
+      ],
+    ] as const) {
+      expect(byLabel(camel)).toMatchObject(expected)
+      expect(byLabel(hyphen)).toMatchObject(expected)
+    }
+    expect(nodes.map((node) => node.aria.label)).not.toEqual(
+      expect.arrayContaining([
+        "Camel hidden built-in",
+        "Hyphen hidden built-in",
+        "Camel hidden custom",
+        "Hyphen hidden custom",
+      ])
+    )
+  })
+
+  it("rejects unsupported hyphenated aria props under strict mode and warns once otherwise", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const strict = createTestRoot({ strictStyles: true })
+    strict.render(<div {...({ "aria-current": "page" } as Record<string, string>)} />)
+    expect(error.mock.calls.flat()).toContainEqual(
+      expect.objectContaining({
+        name: "UnsupportedAriaPropError",
+        message: expect.stringMatching(/aria-current.*no camelCase GPUIX accessibility prop/),
+      })
+    )
+    strict.unmount()
+    error.mockRestore()
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const compatibility = createTestRoot({ strictStyles: false })
+    compatibility.render(
+      <div {...({ "aria-current": "page" } as Record<string, string>)} />
+    )
+    compatibility.render(
+      <div {...({ "aria-current": "step" } as Record<string, string>)} />
+    )
+    compatibility.render(
+      <div {...({ "aria-current": "location" } as Record<string, string>)} />
+    )
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/aria-current.*no camelCase GPUIX accessibility prop/)
+    )
+    compatibility.unmount()
+    warn.mockRestore()
+  })
+
   it("keeps accessibility reads and actions on the last explicit draw", () => {
     const clicks: string[] = []
     const { render, renderer } = createTestRoot()

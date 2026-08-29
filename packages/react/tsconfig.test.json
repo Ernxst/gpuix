@@ -4,6 +4,7 @@
     "noEmit": true
   },
   "files": [
+    "src/__tests__/accessibility-props.types.tsx",
     "src/__tests__/style-desc.types.ts",
     "src/__tests__/element-identity.test.tsx"
   ]

@@ -334,6 +334,7 @@ const ELEMENT_INTERNAL_COLOR_TRANSITION_TYPES = new Set<ElementType>([
 const warnedUnsupportedStyleTransitions = new WeakSet<Instance>()
 const warnedInvalidStyleProps = new WeakSet<Instance>()
 const warnedUnsupportedAccessibilityRoleProps = new WeakSet<Instance>()
+const warnedUnsupportedAriaProps = new WeakSet<Instance>()
 
 class UnsupportedStyleTransitionError extends Error {
   override name = "UnsupportedStyleTransitionError"
@@ -345,6 +346,10 @@ class InvalidStylePropError extends Error {
 
 class UnsupportedAccessibilityRolePropError extends Error {
   override name = "UnsupportedAccessibilityRolePropError"
+}
+
+class UnsupportedAriaPropError extends Error {
+  override name = "UnsupportedAriaPropError"
 }
 
 function elementSubject(instance: Instance, props: Props): string {
@@ -406,6 +411,42 @@ function diagnoseUnsupportedAccessibilityRoleProp(
   if (container.strictStyles) throw new UnsupportedAccessibilityRolePropError(message)
   if (warnedUnsupportedAccessibilityRoleProps.has(instance)) return
   warnedUnsupportedAccessibilityRoleProps.add(instance)
+  console.warn(message)
+}
+
+const ARIA_PROP_ALIASES = {
+  "aria-label": "ariaLabel",
+  "aria-description": "ariaDescription",
+  "aria-checked": "ariaChecked",
+  "aria-expanded": "ariaExpanded",
+  "aria-selected": "ariaSelected",
+  "aria-valuetext": "ariaValue",
+  "aria-valuemin": "ariaValueMin",
+  "aria-valuemax": "ariaValueMax",
+  "aria-valuenow": "ariaValueNow",
+  "aria-level": "ariaLevel",
+  "aria-disabled": "ariaDisabled",
+  "aria-hidden": "ariaHidden",
+} as const
+
+function diagnoseUnsupportedAriaProp(
+  instance: Instance,
+  container: Container,
+  props: Props
+): void {
+  const unsupported = Object.entries(props).find(
+    ([key, value]) =>
+      value !== undefined && key.startsWith("aria-") && !(key in ARIA_PROP_ALIASES)
+  )
+  if (!unsupported) return
+
+  const [name] = unsupported
+  const message =
+    `[gpuix] ${elementSubject(instance, props)} does not support ${name}. ` +
+    "It has no camelCase GPUIX accessibility prop."
+  if (container.strictStyles) throw new UnsupportedAriaPropError(message)
+  if (warnedUnsupportedAriaProps.has(instance)) return
+  warnedUnsupportedAriaProps.add(instance)
   console.warn(message)
 }
 
@@ -560,9 +601,14 @@ function nativeRole(type: string, props: Props): Props["role"] | undefined {
 }
 
 function customPropEntries(type: string, props: Props): Array<[string, CustomPropInput]> {
-  const entries = (Object.entries(props) as Array<[string, CustomPropInput]>).filter(
-    ([key]) => key !== "activationKind" && key !== "role" && key !== "tabIndex"
-  )
+  const propEntries = Object.entries(props) as Array<[string, CustomPropInput]>
+  const entries = propEntries.flatMap(([key, value]): Array<[string, CustomPropInput]> => {
+    if (key === "activationKind" || key === "role" || key === "tabIndex") return []
+    const alias = ARIA_PROP_ALIASES[key as keyof typeof ARIA_PROP_ALIASES]
+    if (alias === undefined) return [[key, value]]
+    if (Object.prototype.hasOwnProperty.call(props, alias)) return []
+    return [[alias, value]]
+  })
   const tabIndex = nativeTabIndex(type, props)
   if (tabIndex !== undefined) entries.push(["tabIndex", tabIndex])
   const activationKind = nativeActivationKind(type, props)
@@ -751,6 +797,7 @@ export const hostConfig = {
     })
     diagnoseUnsupportedStyleTransition(instance, rootContainerInstance, props)
     diagnoseUnsupportedAccessibilityRoleProp(instance, rootContainerInstance, props)
+    diagnoseUnsupportedAriaProp(instance, rootContainerInstance, props)
     return instance
   },
 
@@ -896,6 +943,7 @@ export const hostConfig = {
     const container = containerFor(instance)
     diagnoseUnsupportedStyleTransition(instance, container, newProps)
     diagnoseUnsupportedAccessibilityRoleProp(instance, container, newProps)
+    diagnoseUnsupportedAriaProp(instance, container, newProps)
     // Always resend style — per-element JSON is small, and this avoids
     // bugs from same-reference mutations or style removal.
     container.renderer.setStyle(instance.id, styleForRenderer(instance, container, newProps) ?? {})
