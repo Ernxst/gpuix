@@ -35,8 +35,34 @@ import { containerForRenderer, unregisterEventHandlers } from "./event-registry.
 
 export type MutationTuple = (number | string | boolean | object | null)[]
 
+// Keep warning history scoped to the renderer, which makes it collectible with
+// the root, while the cap bounds memory for long-running renderers.
+const MAX_REPORTED_STYLE_DIAGNOSTICS = 1_024
+const reportedStyleDiagnostics = new WeakMap<NativeRenderer, Map<string, undefined>>()
+
 export function reportStyleDiagnostics(renderer: NativeRenderer): void {
-  for (const diagnostic of renderer.drainStyleDiagnostics?.() ?? []) {
+  const diagnostics = renderer.drainStyleDiagnostics?.() ?? []
+  if (diagnostics.length === 0) return
+
+  let reported = reportedStyleDiagnostics.get(renderer)
+  if (!reported) {
+    reported = new Map()
+    reportedStyleDiagnostics.set(renderer, reported)
+  }
+
+  for (const diagnostic of diagnostics) {
+    const key = JSON.stringify([diagnostic.elementId, diagnostic.property, diagnostic.message])
+    if (reported.has(key)) {
+      reported.delete(key)
+      reported.set(key, undefined)
+      continue
+    }
+
+    reported.set(key, undefined)
+    if (reported.size > MAX_REPORTED_STYLE_DIAGNOSTICS) {
+      const oldest = reported.keys().next()
+      if (!oldest.done) reported.delete(oldest.value)
+    }
     console.warn(diagnostic.message)
   }
 }
