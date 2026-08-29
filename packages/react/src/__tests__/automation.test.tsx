@@ -631,6 +631,90 @@ describeNative("automation", () => {
     expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
   })
 
+  it("omits a child Label when link text matches its name", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <a role="link" ariaLabel="Coal Current">
+          <text>Coal Current</text>
+        </a>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+
+    expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
+    expect(nodes.find((node) => node.aria.role === "Link")).toMatchObject({
+      aria: { role: "Link", label: "Coal Current" },
+    })
+  })
+
+  it("lets an explicit link name replace descendant text without emitting child Labels", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <a role="link" ariaLabel="Overview, 5 sites, current page">
+          <text>OVERVIEW</text>
+          <text>5</text>
+        </a>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+
+    expect(nodes.find((node) => node.aria.role === "Link")).toMatchObject({
+      aria: { role: "Link", label: "Overview, 5 sites, current page" },
+    })
+    expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
+  })
+
+  it("keeps unroled text exposed as a Label", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <text>Standalone status</text>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const labels = Object.values(renderer.getAccessibilityTree().nodes)
+      .filter((node) => node.aria.role === "Label")
+      .map((node) => node.aria.value)
+    expect(labels).toEqual(["Standalone status"])
+  })
+
+  it("keeps a roled element nested inside a roled ancestor", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <a role="link" ariaLabel="Factory overview">
+          <text role="heading" ariaLevel={2}>
+            Factory status
+          </text>
+        </a>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+    const tree = renderer.getAccessibilityTree()
+    const link = Object.entries(tree.nodes).find(([, node]) => node.aria.role === "Link")
+    const heading = Object.entries(tree.nodes).find(([, node]) => node.aria.role === "Heading")
+
+    expect(link?.[1]).toMatchObject({ aria: { role: "Link", label: "Factory overview" } })
+    expect(heading?.[1]).toMatchObject({
+      aria: { role: "Heading", label: "Factory status", level: 2 },
+    })
+    expect(link?.[1].children).toContain(heading?.[0])
+    expect(Object.values(tree.nodes).some((node) => node.aria.role === "Label")).toBe(false)
+  })
+
   it("emits one Label per native content string while leaving chrome inaccessible", () => {
     const { render, renderer } = createTestRoot()
 
