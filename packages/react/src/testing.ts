@@ -1484,6 +1484,9 @@ export function expectCanvasMatchesBrowser(
   const testRoot = createTestRoot({
     width: CANVAS_GOLDEN_WIDTH,
     height: CANVAS_GOLDEN_HEIGHT,
+    // The Chromium goldens are 2x device-pixel images. Keep their renderer
+    // independent of whichever display happens to be primary.
+    scaleFactor: CANVAS_GOLDEN_DPR,
     strictStyles: true,
   })
   const canvasRef = createRef<CanvasPublicInstance>()

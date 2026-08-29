@@ -179,7 +179,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
 
   it("resolves percentage expressions from the containing block and ch from inherited text", () => {
     const shot = path.join(SHOTS_DIR, "expressive-lengths-containing-block.png")
-    const { render, renderer } = createTestRoot()
+    const { render, renderer } = createTestRoot({ scaleFactor: 2 })
 
     render(
       <div style={{ width: "100%", backgroundColor: "#101010" }}>
