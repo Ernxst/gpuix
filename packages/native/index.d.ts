@@ -243,7 +243,7 @@ export declare class GpuixRenderer {
  *   r.captureScreenshot("/tmp/test.png")  // saves rendered UI as PNG
  */
 export declare class TestGpuixRenderer {
-  constructor(width?: number | undefined | null, height?: number | undefined | null)
+  constructor(width?: number | undefined | null, height?: number | undefined | null, scaleFactor?: number | undefined | null)
   /**
    * Dispose this renderer's offscreen window and GPUI application context.
    * Further interaction attempts fail instead of being routed to another root.

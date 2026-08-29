@@ -152,6 +152,20 @@ fn window_dimension(value: Option<f64>, default: f64, label: &str) -> Result<f32
     Ok(pixels)
 }
 
+/// Validate a caller-supplied virtual display scale factor.
+fn window_scale_factor(value: Option<f64>) -> Result<Option<f32>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let scale_factor = value as f32;
+    if !scale_factor.is_finite() || scale_factor <= 0.0 {
+        return Err(Error::from_reason(format!(
+            "TestGpuixRenderer scale factor must be a positive, finite number, got {value}"
+        )));
+    }
+    Ok(Some(scale_factor))
+}
+
 /// Convert JS button number (0=left, 1=middle, 2=right) to GPUI MouseButton.
 fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
     match button {
@@ -403,18 +417,19 @@ pub struct TestGpuixRenderer {
 #[napi]
 impl TestGpuixRenderer {
     #[napi(constructor)]
-    pub fn new(width: Option<f64>, height: Option<f64>) -> Result<Self> {
+    pub fn new(width: Option<f64>, height: Option<f64>, scale_factor: Option<f64>) -> Result<Self> {
         catch_gpui_initialization("GPUI test renderer initialization", || {
-            Self::try_new(width, height)
+            Self::try_new(width, height, scale_factor)
         })
     }
 
-    fn try_new(width: Option<f64>, height: Option<f64>) -> Result<Self> {
+    fn try_new(width: Option<f64>, height: Option<f64>, scale_factor: Option<f64>) -> Result<Self> {
         let state_id = NEXT_TEST_STATE_ID.fetch_add(1, Ordering::Relaxed);
         let window_size = gpui::size(
             gpui::px(window_dimension(width, DEFAULT_WINDOW_WIDTH, "width")?),
             gpui::px(window_dimension(height, DEFAULT_WINDOW_HEIGHT, "height")?),
         );
+        let requested_scale_factor = window_scale_factor(scale_factor)?;
         let tree = Arc::new(Mutex::new(RetainedTree::new()));
         let canvas_display_lists = crate::canvas::SharedDisplayLists::default();
         let events: Arc<Mutex<Vec<EventPayload>>> = Arc::new(Mutex::new(Vec::new()));
@@ -434,7 +449,11 @@ impl TestGpuixRenderer {
         let image_network_policy_for_view = image_network_policy.clone();
 
         let platform = gpui_platform::current_platform(false);
-        let mut cx = gpui::VisualTestAppContext::new(platform);
+        let mut cx = if let Some(scale_factor) = requested_scale_factor {
+            gpui::VisualTestAppContext::with_virtual_display_scale_factor(platform, scale_factor)
+        } else {
+            gpui::VisualTestAppContext::new(platform)
+        };
         cx.update(|cx| {
             cx.set_http_client(default_http_client());
             crate::renderer::init_key_bindings(cx);
@@ -468,6 +487,17 @@ impl TestGpuixRenderer {
 
         // Convert typed WindowHandle<GpuixView> to AnyWindowHandle for simulation methods.
         let window: gpui::AnyWindowHandle = window_handle.into();
+
+        if let Some(requested_scale_factor) = requested_scale_factor {
+            let actual_scale_factor = cx
+                .update_window(window, |_, window, _| window.scale_factor())
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            if actual_scale_factor.to_bits() != requested_scale_factor.to_bits() {
+                return Err(Error::from_reason(format!(
+                    "Requested test scale factor {requested_scale_factor}, but the platform opened the window at {actual_scale_factor}"
+                )));
+            }
+        }
 
         // Test accessibility is a renderer capability, not a getter side
         // effect. Every explicit draw can now produce the snapshot that later
