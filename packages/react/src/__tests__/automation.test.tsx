@@ -501,14 +501,42 @@ describeNative("automation", () => {
     )
   })
 
+  it("publishes every ariaCurrent token as AccessKit current-item state", () => {
+    const values = ["page", "step", "location", "date", "time", "true", "false"] as const
+    const { render, renderer } = createTestRoot({ strictStyles: true })
+
+    render(
+      <div>
+        {values.flatMap((current) => [
+          <a key={`camel-${current}`} ariaLabel={`Camel ${current}`} ariaCurrent={current} />,
+          <a
+            key={`hyphen-${current}`}
+            aria-label={`Hyphen ${current}`}
+            aria-current={current}
+          />,
+        ])}
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    const byLabel = (label: string) => nodes.find((node) => node.aria.label === label)?.aria
+    for (const current of values) {
+      const expected = `${current[0].toUpperCase()}${current.slice(1)}`
+      expect(byLabel(`Camel ${current}`)).toMatchObject({ role: "Link", current: expected })
+      expect(byLabel(`Hyphen ${current}`)).toMatchObject({ role: "Link", current: expected })
+    }
+  })
+
   it("rejects unsupported hyphenated aria props under strict mode and warns once otherwise", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const strict = createTestRoot({ strictStyles: true })
-    strict.render(<div {...({ "aria-current": "page" } as Record<string, string>)} />)
+    strict.render(<div {...({ "aria-busy": "true" } as Record<string, string>)} />)
     expect(error.mock.calls.flat()).toContainEqual(
       expect.objectContaining({
         name: "UnsupportedAriaPropError",
-        message: expect.stringMatching(/aria-current.*no camelCase GPUIX accessibility prop/),
+        message: expect.stringMatching(/aria-busy.*no camelCase GPUIX accessibility prop/),
       })
     )
     strict.unmount()
@@ -517,17 +545,17 @@ describeNative("automation", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const compatibility = createTestRoot({ strictStyles: false })
     compatibility.render(
-      <div {...({ "aria-current": "page" } as Record<string, string>)} />
+      <div {...({ "aria-busy": "true" } as Record<string, string>)} />
     )
     compatibility.render(
-      <div {...({ "aria-current": "step" } as Record<string, string>)} />
+      <div {...({ "aria-busy": "false" } as Record<string, string>)} />
     )
     compatibility.render(
-      <div {...({ "aria-current": "location" } as Record<string, string>)} />
+      <div {...({ "aria-busy": "true" } as Record<string, string>)} />
     )
     expect(warn).toHaveBeenCalledTimes(1)
     expect(warn).toHaveBeenCalledWith(
-      expect.stringMatching(/aria-current.*no camelCase GPUIX accessibility prop/)
+      expect.stringMatching(/aria-busy.*no camelCase GPUIX accessibility prop/)
     )
     compatibility.unmount()
     warn.mockRestore()

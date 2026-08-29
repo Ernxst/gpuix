@@ -7,6 +7,7 @@ const aliases = [
     aria-description="Opens application settings"
     aria-checked
     aria-expanded
+    aria-current="page"
     aria-selected
     aria-valuetext="Medium"
     aria-valuemin={1}
@@ -24,6 +25,7 @@ const aliasProps: Props = {
   "aria-description": "Opens application settings",
   "aria-checked": true,
   "aria-expanded": true,
+  "aria-current": "page",
   "aria-selected": true,
   "aria-valuetext": "Medium",
   "aria-valuemin": 1,
@@ -33,9 +35,22 @@ const aliasProps: Props = {
   "aria-disabled": true,
   "aria-hidden": false,
 }
-// @ts-expect-error aria-current has no supported GPUIX accessibility prop.
-const unsupportedProps: Props = { "aria-current": "page" }
+const currentTokens: Props[] = [
+  { ariaCurrent: "page" },
+  { ariaCurrent: "step" },
+  { ariaCurrent: "location" },
+  { ariaCurrent: "date" },
+  { ariaCurrent: "time" },
+  { ariaCurrent: "true" },
+  { "aria-current": "false" },
+]
+// @ts-expect-error aria-busy has no supported GPUIX accessibility prop.
+const unsupportedProps: Props = { "aria-busy": true }
+// @ts-expect-error ariaCurrent accepts only the ARIA current-item token set.
+const invalidCurrent: Props = { ariaCurrent: "chapter" }
 
 void aliases
 void aliasProps
+void currentTokens
 void unsupportedProps
+void invalidCurrent

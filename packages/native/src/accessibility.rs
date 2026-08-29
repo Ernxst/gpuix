@@ -12,6 +12,7 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaDescription",
     "ariaChecked",
     "ariaExpanded",
+    "ariaCurrent",
     "ariaSelected",
     "ariaValue",
     "ariaValueMin",
@@ -83,6 +84,12 @@ impl AccessibilityRole {
         match property {
             "ariaChecked" => matches!(self, Self::CheckBox | Self::Switch),
             "ariaExpanded" => matches!(self, Self::Button | Self::Link),
+            "ariaCurrent" => {
+                // Of the roles GPUIX currently admits, only links represent
+                // destinations. Options use ariaSelected; controls expose
+                // their checked, expanded, or value state instead.
+                matches!(self, Self::Link)
+            }
             "ariaSelected" => matches!(self, Self::Option),
             "ariaValue" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
                 matches!(self, Self::Slider | Self::SpinButton)
@@ -94,6 +101,19 @@ impl AccessibilityRole {
     }
 }
 
+fn parse_aria_current(value: &serde_json::Value) -> Option<gpui::accesskit::AriaCurrent> {
+    match value.as_str()? {
+        "false" => Some(gpui::accesskit::AriaCurrent::False),
+        "true" => Some(gpui::accesskit::AriaCurrent::True),
+        "page" => Some(gpui::accesskit::AriaCurrent::Page),
+        "step" => Some(gpui::accesskit::AriaCurrent::Step),
+        "location" => Some(gpui::accesskit::AriaCurrent::Location),
+        "date" => Some(gpui::accesskit::AriaCurrent::Date),
+        "time" => Some(gpui::accesskit::AriaCurrent::Time),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Default)]
 struct AccessibilityProps<'a> {
     role: Option<AccessibilityRole>,
@@ -101,6 +121,7 @@ struct AccessibilityProps<'a> {
     description: Option<&'a str>,
     checked: Option<gpui::Toggled>,
     expanded: Option<bool>,
+    current: Option<gpui::accesskit::AriaCurrent>,
     selected: Option<bool>,
     value: Option<&'a str>,
     value_min: Option<f64>,
@@ -142,6 +163,10 @@ impl<'a> AccessibilityProps<'a> {
                 .custom_props
                 .get("ariaExpanded")
                 .and_then(serde_json::Value::as_bool),
+            current: element
+                .custom_props
+                .get("ariaCurrent")
+                .and_then(parse_aria_current),
             selected: element
                 .custom_props
                 .get("ariaSelected")
@@ -273,6 +298,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
         let malformed = match property.as_str() {
             "ariaLabel" | "ariaDescription" | "ariaValue" => !value.is_string(),
             "ariaChecked" => !(value.is_boolean() || value.as_str() == Some("mixed")),
+            "ariaCurrent" => parse_aria_current(value).is_none(),
             "ariaExpanded" | "ariaSelected" | "ariaDisabled" | "ariaHidden" | "disabled" => {
                 !value.is_boolean()
             }
@@ -286,6 +312,9 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
             let expected = match property.as_str() {
                 "ariaLabel" | "ariaDescription" | "ariaValue" => "a string",
                 "ariaChecked" => "a boolean or \"mixed\"",
+                "ariaCurrent" => {
+                    "one of \"page\", \"step\", \"location\", \"date\", \"time\", \"true\", or \"false\""
+                }
                 "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => "a finite number",
                 "ariaLevel" => "a positive integer",
                 _ => "a boolean",
@@ -312,6 +341,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
                 | "ariaDescription"
                 | "ariaChecked"
                 | "ariaExpanded"
+                | "ariaCurrent"
                 | "ariaSelected"
                 | "ariaValue"
                 | "ariaValueMin"
@@ -409,6 +439,9 @@ where
     }
     if let Some(expanded) = props.expanded {
         el = el.aria_expanded(expanded);
+    }
+    if let Some(current) = props.current {
+        el = el.aria_current(current);
     }
     if let Some(selected) = props.selected {
         el = el.aria_selected(selected);
@@ -514,6 +547,24 @@ mod tests {
         link.custom_props.insert("ariaSelected".into(), true.into());
         assert_eq!(element_problems(&link)[0].property, "ariaSelected");
 
+        let mut button = RetainedElement::new(10, "div".to_string(), 1);
+        button.custom_props.insert("role".into(), "button".into());
+        button
+            .custom_props
+            .insert("ariaCurrent".into(), "page".into());
+        assert_eq!(element_problems(&button)[0].property, "ariaCurrent");
+
+        let mut malformed_current = RetainedElement::new(11, "div".to_string(), 1);
+        malformed_current
+            .custom_props
+            .insert("role".into(), "link".into());
+        malformed_current
+            .custom_props
+            .insert("ariaCurrent".into(), "chapter".into());
+        assert!(element_problems(&malformed_current)[0]
+            .reason
+            .contains("expected one of"));
+
         let mut switch = RetainedElement::new(8, "div".to_string(), 1);
         switch.custom_props.insert("role".into(), "switch".into());
         switch
@@ -527,6 +578,29 @@ mod tests {
         assert!(element_problems(&heading)[0]
             .reason
             .contains("positive integer"));
+    }
+
+    #[test]
+    fn parses_every_aria_current_token_for_links() {
+        for (token, expected) in [
+            ("false", gpui::accesskit::AriaCurrent::False),
+            ("true", gpui::accesskit::AriaCurrent::True),
+            ("page", gpui::accesskit::AriaCurrent::Page),
+            ("step", gpui::accesskit::AriaCurrent::Step),
+            ("location", gpui::accesskit::AriaCurrent::Location),
+            ("date", gpui::accesskit::AriaCurrent::Date),
+            ("time", gpui::accesskit::AriaCurrent::Time),
+        ] {
+            let mut link = RetainedElement::new(12, "div".to_string(), 1);
+            link.custom_props.insert("role".into(), "link".into());
+            link.custom_props.insert("ariaCurrent".into(), token.into());
+
+            assert_eq!(
+                AccessibilityProps::from_element(&link).current,
+                Some(expected)
+            );
+            assert!(element_problems(&link).is_empty(), "{token}");
+        }
     }
 
     #[test]

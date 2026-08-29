@@ -17,13 +17,19 @@ afterEach(() => {
 describeNative("style diagnostics", { timeout: 12_000 }, () => {
   it("reports malformed, incompatible, hidden-focus, and unsupported-host accessibility props", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-    const testRoot = createTestRoot()
+    const testRoot = createTestRoot({ strictStyles: true })
 
     testRoot.render(
       <div>
         <div {...({ role: "bogus" } as Record<string, string>)} ariaLabel="Bad role" />
         <div ariaLabel="Missing role" />
         <a role="link" ariaLabel="Link" ariaSelected />
+        <button role="button" ariaLabel="Current button" ariaCurrent="page" />
+        <a
+          role="link"
+          ariaLabel="Malformed current"
+          {...({ ariaCurrent: "chapter" } as Record<string, string>)}
+        />
         <div role="switch" ariaLabel="Mode" ariaChecked="mixed" />
         <h2 role="heading" ariaLabel="Heading" ariaLevel={0} />
         <div role="slider" ariaLabel="Speed" ariaValueNow={Number.NaN} />
@@ -36,6 +42,9 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(messages).toContain("unsupported accessibility role")
     expect(messages).toContain("requires an explicit supported role")
     expect(messages).toContain("ariaSelected")
+    expect(messages).toContain("ariaCurrent")
+    expect(messages).toContain("role=Button")
+    expect(messages).toContain("expected one of \"page\"")
     expect(messages).toContain("ariaChecked")
     expect(messages).toContain("binary")
     expect(messages).toContain("positive integer")
