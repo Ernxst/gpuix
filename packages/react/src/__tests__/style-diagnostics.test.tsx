@@ -5,6 +5,7 @@ import {
   isNativeTestRendererAvailable,
   TestRenderer,
 } from "../testing.js"
+import { wrapWithBatching } from "../reconciler/batch-renderer.js"
 import type { StyleDesc } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
@@ -43,32 +44,55 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(messages).toContain("does not support accessibility semantics")
   })
 
-  it("rejects one malformed field without throwing through React", () => {
+  it("reports malformed fields and deduplicates repeated native diagnostics", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-    const testRoot = createTestRoot()
+    const testRoot = createTestRoot({ strictStyles: true })
 
-    expect(() => {
-      testRoot.render(
-        <div
-          testId="bad-card"
-          style={
-            {
-              backgroundColor: "#ff0000",
-              marginTop: "auto",
-            } as unknown as StyleDesc
-          }
-        />
+    try {
+      expect(() => {
+        testRoot.render(
+          <div
+            testId="bad-card"
+            style={
+              {
+                backgroundColor: "#ff0000",
+                marginTop: "auto",
+              } as unknown as StyleDesc
+            }
+          />
+        )
+      }).not.toThrow()
+
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('<div testId="bad-card">')
       )
-    }).not.toThrow()
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("marginTop"))
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('"auto"'))
+      expect(testRoot.renderer.findByTestId("bad-card")?.style).toMatchObject({
+        backgroundColor: "#ff0000",
+      })
 
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('<div testId="bad-card">')
-    )
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("marginTop"))
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"auto"'))
-    expect(testRoot.renderer.findByTestId("bad-card")?.style).toMatchObject({
-      backgroundColor: "#ff0000",
-    })
+      const renderer = wrapWithBatching(testRoot.renderer)
+      renderer.createElement(10_001, "div")
+      renderer.setCustomProp(10_001, "testId", "native-diagnostic")
+      renderer.setStyle(10_001, { width: "banana" })
+      renderer.commitMutations()
+
+      renderer.setStyle(10_001, { width: "banana" })
+      renderer.commitMutations()
+
+      renderer.setStyle(10_001, { width: "plantain" })
+      renderer.commitMutations()
+
+      expect(warn).toHaveBeenCalledTimes(3)
+      expect(warn.mock.calls.map(([message]) => String(message))).toEqual([
+        expect.stringContaining('"auto"'),
+        expect.stringContaining('"banana"'),
+        expect.stringContaining('"plantain"'),
+      ])
+    } finally {
+      testRoot.unmount()
+    }
   })
 
   it("reports an unknown direct style with element, property, and value", () => {
