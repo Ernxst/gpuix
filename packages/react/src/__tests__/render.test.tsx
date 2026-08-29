@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url"
 import React, { useState } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
 import {
+  createTestRoot,
   isNativeTestRendererAvailable,
   nativeTestRendererError,
   TestRenderer,
@@ -402,6 +403,55 @@ describeNative("render()", () => {
   beforeEach(() => {
     resetRender()
     renderer = new TestRenderer()
+  })
+
+  it("renders the same logical geometry at requested 1x and 2x scales", () => {
+    const renderAtScale = (scaleFactor: number) => {
+      const root = createTestRoot({ width: 320, height: 200, scaleFactor })
+      try {
+        root.render(
+          <div style={{ width: 320, height: 200 }}>
+            <div
+              testId="target"
+              style={{ width: 120, height: 48, marginLeft: 24, marginTop: 16 }}
+            />
+          </div>
+        )
+        const target = root.renderer.findByTestId("target")!
+        return {
+          bounds: root.renderer.getElementBounds(target.id),
+          window: root.renderer.getWindowSize(),
+          frame: root.renderer.getAccessibilityTree().frame,
+        }
+      } finally {
+        root.unmount()
+      }
+    }
+
+    const oneX = renderAtScale(1)
+    const twoX = renderAtScale(2)
+
+    expect(oneX.window).toEqual({ width: 320, height: 200, scaleFactor: 1 })
+    expect(twoX.window).toEqual({ width: 320, height: 200, scaleFactor: 2 })
+    expect(oneX.bounds).toEqual([24, 16, 120, 48])
+    expect(twoX.bounds).toEqual(oneX.bounds)
+    expect(oneX.frame).toMatchObject({
+      viewport_size: { width: 320, height: 200 },
+      scale_factor: 1,
+    })
+    expect(twoX.frame).toMatchObject({
+      viewport_size: { width: 320, height: 200 },
+      scale_factor: 2,
+    })
+  })
+
+  it("rejects scale factors that cannot produce a window", () => {
+    expect(() => new TestRenderer({ scaleFactor: 0 })).toThrow(
+      "TestGpuixRenderer scale factor must be a positive, finite number"
+    )
+    expect(() => new TestRenderer({ scaleFactor: Number.MAX_VALUE })).toThrow(
+      "TestGpuixRenderer scale factor must be a positive, finite number"
+    )
   })
 
   it("updates every useWindowSize consumer from a native resize and releases the handler", () => {

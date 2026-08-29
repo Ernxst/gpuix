@@ -207,13 +207,15 @@ interface NativeTestRendererApi extends NativeRenderer {
 }
 
 interface NativeTestRendererConstructor {
-  new (width?: number, height?: number): NativeTestRendererApi
+  new (width?: number, height?: number, scaleFactor?: number): NativeTestRendererApi
 }
 
-/** Offscreen window size for a test root. Defaults to 1280x800 in native. */
+/** Offscreen window geometry for a test root. Size defaults to 1280x800 in native. */
 export interface TestWindowOptions {
   width?: number
   height?: number
+  /** Virtual display scale factor. Unsupported or invalid requests throw. */
+  scaleFactor?: number
 }
 
 // The native test renderer is exported by macOS and Windows builds.
@@ -377,14 +379,17 @@ export class TestRenderer implements NativeRenderer {
         }`
       )
     }
-    const customSize = options.width !== undefined || options.height !== undefined
-    if (probedNativeTestRenderer && customSize) {
+    const customWindow =
+      options.width !== undefined ||
+      options.height !== undefined ||
+      options.scaleFactor !== undefined
+    if (probedNativeTestRenderer && customWindow) {
       probedNativeTestRenderer.dispose()
       probedNativeTestRenderer = null
     }
     this.native =
       probedNativeTestRenderer ??
-      new NativeTestRendererConstructor(options.width, options.height)
+      new NativeTestRendererConstructor(options.width, options.height, options.scaleFactor)
     probedNativeTestRenderer = null
   }
 
@@ -1313,7 +1318,8 @@ export interface TestRootOptions extends TestWindowOptions {
  * Returns the Root (for rendering), the TestRenderer (for inspection/events),
  * and convenience methods.
  *
- * Pass `width` / `height` to size the offscreen window. The 1280x800 default is
+ * Pass `width` / `height` to size the offscreen window, and `scaleFactor` to
+ * override its virtual display scale. The 1280x800 default is
  * wide enough to keep a centered max-width column capped, so a layout test that
  * needs to observe re-wrapping must ask for a narrower window.
  */
