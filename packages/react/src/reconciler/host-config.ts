@@ -348,10 +348,6 @@ class UnsupportedAccessibilityRolePropError extends Error {
   override name = "UnsupportedAccessibilityRolePropError"
 }
 
-class UnsupportedAriaPropError extends Error {
-  override name = "UnsupportedAriaPropError"
-}
-
 function elementSubject(instance: Instance, props: Props): string {
   const identity = [
     props.testId === undefined ? undefined : `testId=${JSON.stringify(props.testId)}`,
@@ -445,7 +441,6 @@ function diagnoseUnsupportedAriaProp(
   const message =
     `[gpuix] ${elementSubject(instance, props)} does not support ${name}. ` +
     "It has no camelCase GPUIX accessibility prop."
-  if (container.strictStyles) throw new UnsupportedAriaPropError(message)
   if (warnedUnsupportedAriaProps.has(instance)) return
   warnedUnsupportedAriaProps.add(instance)
   console.warn(message)
