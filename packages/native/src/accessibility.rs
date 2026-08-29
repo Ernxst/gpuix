@@ -189,6 +189,14 @@ pub(crate) fn has_semantics(element: &RetainedElement) -> bool {
         .any(|key| is_accessibility_prop(key))
 }
 
+pub(crate) fn has_supported_role(element: &RetainedElement) -> bool {
+    element
+        .custom_props
+        .get("role")
+        .and_then(AccessibilityRole::parse)
+        .is_some()
+}
+
 pub(crate) fn is_native_disabled(element: &RetainedElement) -> bool {
     bool_prop(element, "disabled")
 }
@@ -373,6 +381,7 @@ pub(crate) fn apply<E>(
     callback: &Option<EventCallback>,
     focus_handle: Option<&gpui::FocusHandle>,
     hidden: bool,
+    name_from_contents: Option<&str>,
 ) -> E
 where
     E: StatefulInteractiveElement,
@@ -389,7 +398,7 @@ where
     if let Some(author_id) = &element.author_id {
         el = el.accessibility_id(author_id.clone());
     }
-    if let Some(label) = props.label {
+    if let Some(label) = props.label.or(name_from_contents) {
         el = el.aria_label(label.to_owned());
     }
     if let Some(description) = props.description {

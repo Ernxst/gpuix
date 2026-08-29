@@ -93,6 +93,10 @@ pub(crate) struct StyledTextRun {
 #[derive(Debug, Default)]
 pub(crate) struct InlineText {
     pub(crate) text: String,
+    /// Painted text with every `ariaHidden` inline subtree removed. A flattened
+    /// layout remains one visual string, but hidden runs must not leak into the
+    /// value exposed to accessibility clients.
+    pub(crate) accessibility_text: String,
     pub(crate) runs: Vec<StyledTextRun>,
     /// Nested React host ids whose glyph ranges should be exposed to automation.
     pub(crate) tracked_ranges: Vec<(Range<usize>, u64)>,
@@ -161,6 +165,7 @@ fn collect_node(
     id: u64,
     inherited_style: TextRunStyle,
     inherited_transform: TextTransform,
+    inherited_accessibility_hidden: bool,
     output: &mut InlineText,
 ) -> Result<(), InlineTextError> {
     let Some(element) = tree.elements.get(&id) else {
@@ -177,9 +182,15 @@ fn collect_node(
     let start = output.text.len();
     let style = inherited_style.descend(element.style.as_deref());
     let transform_kind = descend_transform(inherited_transform, element.style.as_deref());
+    let accessibility_hidden =
+        inherited_accessibility_hidden || crate::accessibility::is_hidden(element);
 
     if let Some(content) = &element.content {
-        push_content(output, &transform(content, transform_kind), style.clone());
+        let content = transform(content, transform_kind);
+        push_content(output, &content, style.clone());
+        if !accessibility_hidden {
+            output.accessibility_text.push_str(&content);
+        }
     }
     for child_id in &element.children {
         let Some(child) = tree.elements.get(child_id) else {
@@ -192,7 +203,14 @@ fn collect_node(
                 child_type: child.element_type.clone(),
             });
         }
-        collect_node(tree, *child_id, style.clone(), transform_kind, output)?;
+        collect_node(
+            tree,
+            *child_id,
+            style.clone(),
+            transform_kind,
+            accessibility_hidden,
+            output,
+        )?;
     }
 
     let range = start..output.text.len();
@@ -216,12 +234,13 @@ pub(crate) fn flatten_inline_text(
     };
 
     let mut output = InlineText::default();
+    let accessibility_hidden = crate::accessibility::is_hidden(root);
     if let Some(content) = &root.content {
-        push_content(
-            &mut output,
-            &transform(content, inherited_transform),
-            TextRunStyle::default(),
-        );
+        let content = transform(content, inherited_transform);
+        push_content(&mut output, &content, TextRunStyle::default());
+        if !accessibility_hidden {
+            output.accessibility_text.push_str(&content);
+        }
     }
     for child_id in &root.children {
         let Some(child) = tree.elements.get(child_id) else {
@@ -239,6 +258,7 @@ pub(crate) fn flatten_inline_text(
             *child_id,
             TextRunStyle::default(),
             inherited_transform,
+            accessibility_hidden,
             &mut output,
         )?;
     }
@@ -359,6 +379,7 @@ mod tests {
 
         let inline = flatten_inline_text(&tree, 1, TextTransform::None).unwrap();
         assert_eq!(inline.text, "Cost 核🚀");
+        assert_eq!(inline.accessibility_text, "Cost 核🚀");
         assert_eq!(inline.runs.len(), 2);
         assert_eq!(inline.runs[1].range, 5..12);
         assert!(inline
@@ -390,6 +411,25 @@ mod tests {
         assert_eq!(inline.text, "STRASSE");
         assert_eq!(inline.runs[0].range, 0..7);
         assert!(validate_runs(&inline.text, &inline.runs).is_ok());
+    }
+
+    #[test]
+    fn accessibility_text_excludes_hidden_inline_subtrees_without_changing_paint() {
+        let mut tree = RetainedTree::new();
+        tree.create_element(1, "text".into());
+
+        tree.create_element(2, "text".into());
+        tree.set_text(2, "Visible ".into());
+        tree.append_child(1, 2);
+
+        tree.create_element(3, "text".into());
+        tree.set_text(3, "hidden".into());
+        tree.set_custom_prop(3, "ariaHidden".into(), serde_json::Value::Bool(true));
+        tree.append_child(1, 3);
+
+        let inline = flatten_inline_text(&tree, 1, TextTransform::None).unwrap();
+        assert_eq!(inline.text, "Visible hidden");
+        assert_eq!(inline.accessibility_text, "Visible ");
     }
 
     #[test]

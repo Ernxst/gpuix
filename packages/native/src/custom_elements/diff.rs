@@ -270,6 +270,7 @@ impl CustomElement for DiffElement {
         let element_id = ctx.id;
         let selection = ctx.selection.clone();
         let selectable = ctx.selectable;
+        let accessibility_hidden = ctx.accessibility_hidden;
         let wash = ctx.selection_wash;
         let highlight_set = ctx.highlight_set.clone();
         let callback = ctx.event_callback.clone();
@@ -328,6 +329,7 @@ impl CustomElement for DiffElement {
                         element_id,
                         selection: &selection,
                         selectable,
+                        accessibility_hidden,
                         wash,
                         highlight_set: highlight_set.clone(),
                         callback: &callback,
@@ -354,6 +356,7 @@ impl CustomElement for DiffElement {
                         element_id,
                         selection: &selection,
                         selectable,
+                        accessibility_hidden,
                         wash,
                         highlight_set: highlight_set.clone(),
                         callback: &callback,
@@ -441,6 +444,7 @@ struct RowContext<'a> {
     element_id: u64,
     selection: &'a SharedSelection,
     selectable: bool,
+    accessibility_hidden: bool,
     wash: Hsla,
     /// Inherited `highlight`, matched per painted row. See
     /// [`crate::text::search::washes_for_native_run`].
@@ -475,6 +479,8 @@ impl RowContext<'_> {
         // Content, not chrome: `userSelect: "none"` stops the drag, not the
         // find. `chrome_text` cannot paint a highlight wash, so it stays for
         // the gutter and the file header only.
+        let text = SharedString::from(text);
+        let accessibility_value = (!self.accessibility_hidden).then(|| text.clone());
         crate::text::selectable_text(crate::text::SelectableText {
             extra_wash,
             selectable: self.selectable,
@@ -485,10 +491,11 @@ impl RowContext<'_> {
             ..crate::text::SelectableText::new(
                 self.element_id,
                 sub,
-                SharedString::from(text),
+                text,
                 runs,
                 self.selection.clone(),
                 self.wash,
+                accessibility_value,
             )
         })
     }

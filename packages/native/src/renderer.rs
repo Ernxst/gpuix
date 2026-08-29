@@ -7055,6 +7055,19 @@ pub(crate) fn build_host_container(
 ) -> gpui::AnyElement {
     use gpui::prelude::*;
 
+    let flattened_text = (element.element_type == "text").then(|| flatten_text(element, ctx));
+    let text_owns_accessible_name = element.element_type == "text"
+        && crate::accessibility::has_supported_role(element);
+    let name_from_contents = text_owns_accessible_name
+        .then(|| {
+            flattened_text
+                .as_ref()
+                .expect("text hosts are flattened before accessibility is applied")
+                .accessibility_text
+                .as_str()
+        })
+        .filter(|name| !name.is_empty());
+
     let transition_hover =
         style.is_some_and(|style| style.transition.is_some() && style.hover.is_some());
     let transition_active =
@@ -7181,6 +7194,7 @@ pub(crate) fn build_host_container(
         ctx.event_callback,
         ctx.focus_handles.get(&element.id),
         ctx.inherited.accessibility_hidden,
+        name_from_contents,
     );
     if !native_disabled {
         if let Some(tab_index) = element
@@ -7475,7 +7489,18 @@ pub(crate) fn build_host_container(
         // React splits interpolated text into adjacent host nodes. Flatten the
         // subtree into one selectable layout while keeping this shared host
         // surface for identity, events, styles, focus and automation bounds.
-        el = el.child(flattened_text_content(element, ctx));
+        let inline = flattened_text
+            .expect("text hosts are flattened before their content is attached");
+        let accessibility_value = (!ctx.inherited.accessibility_hidden
+            && !text_owns_accessible_name
+            && !inline.accessibility_text.is_empty())
+        .then(|| gpui::SharedString::from(inline.accessibility_text.clone()));
+        el = el.child(flattened_text_content(
+            element,
+            ctx,
+            inline,
+            accessibility_value,
+        ));
     } else {
         // Text content — selectable, same as a <text> leaf.
         if let Some(ref content) = element.content {
@@ -7513,6 +7538,9 @@ fn text_content(
         TextTransform::Uppercase => content.to_uppercase(),
         TextTransform::Lowercase => content.to_lowercase(),
     };
+    let content = gpui::SharedString::from(content);
+    let accessibility_value =
+        (!ctx.inherited.accessibility_hidden).then(|| content.clone());
     selectable_text(crate::text::SelectableText {
         group: crate::text::search::group_id(ctx.tree, element.id),
         selectable: ctx.inherited.selectable,
@@ -7524,19 +7552,20 @@ fn text_content(
         ..crate::text::SelectableText::new(
             element.id,
             0,
-            gpui::SharedString::from(content),
+            content,
             None,
             ctx.selection.clone(),
             ctx.inherited.selection_wash,
+            accessibility_value,
         )
     })
 }
 
-fn flattened_text_content(
+fn flatten_text(
     element: &crate::retained_tree::RetainedElement,
     ctx: &BuildCtx,
-) -> gpui::AnyElement {
-    let inline = match crate::text::inline::flatten_inline_text(
+) -> crate::text::inline::InlineText {
+    match crate::text::inline::flatten_inline_text(
         ctx.tree,
         element.id,
         ctx.inherited.text_transform,
@@ -7546,7 +7575,15 @@ fn flattened_text_content(
             log::error!("Invalid inline text tree: {error}");
             crate::text::inline::InlineText::default()
         }
-    };
+    }
+}
+
+fn flattened_text_content(
+    element: &crate::retained_tree::RetainedElement,
+    ctx: &BuildCtx,
+    inline: crate::text::inline::InlineText,
+    accessibility_value: Option<gpui::SharedString>,
+) -> gpui::AnyElement {
     let mut highlight_mappings = Vec::new();
     if let Some(own_content) = element.content.as_ref().filter(|text| !text.is_empty()) {
         highlight_mappings.push((0..own_content.len(), element.id));
@@ -7560,6 +7597,7 @@ fn flattened_text_content(
         None,
         ctx.selection.clone(),
         ctx.inherited.selection_wash,
+        accessibility_value,
     );
     content.run_styles = Some(inline.runs);
     content.tracked_ranges = inline.tracked_ranges;

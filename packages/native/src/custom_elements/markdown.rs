@@ -94,6 +94,7 @@ impl CustomElement for MarkdownElement {
             ctx.id,
             ctx.selection.clone(),
             ctx.selectable,
+            ctx.accessibility_hidden,
             ctx.selection_wash,
             theme.clone(),
             on_link,

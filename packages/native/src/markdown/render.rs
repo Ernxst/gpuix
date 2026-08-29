@@ -163,6 +163,7 @@ pub struct MdContext {
     pub element_id: u64,
     pub selection: SharedSelection,
     pub selectable: bool,
+    pub accessibility_hidden: bool,
     pub selection_wash: Hsla,
     pub theme: Theme,
     /// Inherited `highlight`, matched per painted string. See
@@ -181,6 +182,7 @@ impl MdContext {
         element_id: u64,
         selection: SharedSelection,
         selectable: bool,
+        accessibility_hidden: bool,
         selection_wash: Hsla,
         theme: Theme,
         on_link: Option<Arc<dyn Fn(&str)>>,
@@ -190,6 +192,7 @@ impl MdContext {
             element_id,
             selection,
             selectable,
+            accessibility_hidden,
             selection_wash,
             theme,
             highlight_set,
@@ -385,6 +388,7 @@ fn flat_text_element(flat: &FlatText, ctx: &mut MdContext) -> AnyElement {
     // Selection and link interaction are independent: a toolbar can reasonably
     // set `userSelect: "none"` and still want its links clickable, so this
     // routes through `chrome_text` for the glyphs but keeps the link listener.
+    let accessibility_value = (!ctx.accessibility_hidden).then(|| flat.text.clone());
     crate::text::selectable_text(crate::text::SelectableText {
         extra_wash: extra,
         links: flat.links.clone(),
@@ -401,6 +405,7 @@ fn flat_text_element(flat: &FlatText, ctx: &mut MdContext) -> AnyElement {
             Some(flat.runs.clone()),
             ctx.selection.clone(),
             ctx.selection_wash,
+            accessibility_value,
         )
     })
 }
@@ -443,6 +448,8 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
         let sub = ctx.take_sub();
         // Content, not chrome: `userSelect: "none"` stops the drag, not the
         // find, and `chrome_text` cannot paint a highlight wash.
+        let text = SharedString::from(line.to_string());
+        let accessibility_value = (!ctx.accessibility_hidden).then(|| text.clone());
         let text: AnyElement = crate::text::selectable_text(crate::text::SelectableText {
             selectable: ctx.selectable,
             highlight: ctx
@@ -452,10 +459,11 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
             ..crate::text::SelectableText::new(
                 ctx.element_id,
                 sub,
-                SharedString::from(line.to_string()),
+                text,
                 Some(runs),
                 ctx.selection.clone(),
                 ctx.selection_wash,
+                accessibility_value,
             )
         });
         lines = lines.child(div().h(px(m.code_line_height)).flex_none().child(text));
