@@ -59,7 +59,12 @@ export interface RootOptions {
   strictStyles?: boolean
 }
 
+declare const Bun: {
+  readonly isStandaloneExecutable: boolean
+}
+
 export function strictStylesDefault(): boolean {
+  if (typeof Bun !== "undefined" && Bun.isStandaloneExecutable) return false
   if (typeof process === "undefined") return false
   return process.env?.NODE_ENV !== "production"
 }
