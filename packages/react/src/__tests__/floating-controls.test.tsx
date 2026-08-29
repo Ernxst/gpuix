@@ -26,10 +26,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../index"
-import { createTestRoot } from "../testing"
+import { createTestRoot, isNativeTestRendererAvailable } from "../testing"
 
-// This suite is pending its native focus-order regression.
-const describeNative = describe.skip
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 const triggerStyle = {
   width: 180,
