@@ -101,7 +101,7 @@ define_accessibility_roles! {
     "link" => Link, true,
     "list" => List, false,
     "listbox" => ListBox, false,
-    "listitem" => ListItem, true,
+    "listitem" => ListItem, false,
     "log" => Log, false,
     "main" => Main, false,
     "mark" => Mark, false,
@@ -147,7 +147,7 @@ define_accessibility_roles! {
     "time" => Time, false,
     "timer" => Timer, false,
     "toolbar" => Toolbar, false,
-    "tooltip" => Tooltip, true,
+    "tooltip" => Tooltip, false,
     "tree" => Tree, false,
     "treegrid" => TreeGrid, false,
     "treeitem" => TreeItem, true,
@@ -375,15 +375,6 @@ pub(crate) fn has_semantics(element: &RetainedElement) -> bool {
         .custom_props
         .keys()
         .any(|key| is_accessibility_prop(key))
-}
-
-pub(crate) fn has_supported_role(element: &RetainedElement) -> bool {
-    element
-        .custom_props
-        .get("role")
-        .and_then(AccessibilityRole::parse)
-        .and_then(AccessibilityRole::into_gpui)
-        .is_some()
 }
 
 pub(crate) fn role_supports_name_from_contents(element: &RetainedElement) -> bool {
@@ -748,7 +739,6 @@ mod tests {
                 "gridcell",
                 "heading",
                 "link",
-                "listitem",
                 "menuitem",
                 "menuitemcheckbox",
                 "menuitemradio",
@@ -758,7 +748,6 @@ mod tests {
                 "rowheader",
                 "switch",
                 "tab",
-                "tooltip",
                 "treeitem",
                 "graphics-object",
                 "doc-backlink",

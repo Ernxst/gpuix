@@ -12,7 +12,142 @@ import {
 } from "../automation/index.js"
 import { createRenderer } from "../reconciler/renderer.js"
 import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../testing.js"
-import type { GpuixSyntheticEvent, RendererCapabilities } from "../types/host.js"
+import type {
+  AccessibilityRole,
+  GpuixSyntheticEvent,
+  RendererCapabilities,
+} from "../types/host.js"
+
+const SUPPORTED_ACCESSIBILITY_ROLES = [
+  "alert",
+  "alertdialog",
+  "application",
+  "article",
+  "banner",
+  "blockquote",
+  "button",
+  "caption",
+  "cell",
+  "checkbox",
+  "code",
+  "columnheader",
+  "combobox",
+  "comment",
+  "complementary",
+  "contentinfo",
+  "definition",
+  "deletion",
+  "dialog",
+  "document",
+  "emphasis",
+  "feed",
+  "figure",
+  "form",
+  "generic",
+  "grid",
+  "gridcell",
+  "group",
+  "heading",
+  "img",
+  "insertion",
+  "link",
+  "list",
+  "listbox",
+  "listitem",
+  "log",
+  "main",
+  "mark",
+  "marquee",
+  "math",
+  "menu",
+  "menubar",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "meter",
+  "navigation",
+  "none",
+  "note",
+  "option",
+  "paragraph",
+  "presentation",
+  "progressbar",
+  "radio",
+  "radiogroup",
+  "region",
+  "row",
+  "rowgroup",
+  "rowheader",
+  "scrollbar",
+  "search",
+  "searchbox",
+  "sectionfooter",
+  "sectionheader",
+  "separator",
+  "slider",
+  "spinbutton",
+  "status",
+  "strong",
+  "suggestion",
+  "switch",
+  "tab",
+  "table",
+  "tablist",
+  "tabpanel",
+  "term",
+  "textbox",
+  "time",
+  "timer",
+  "toolbar",
+  "tooltip",
+  "tree",
+  "treegrid",
+  "treeitem",
+  "graphics-document",
+  "graphics-object",
+  "graphics-symbol",
+  "doc-abstract",
+  "doc-acknowledgments",
+  "doc-afterword",
+  "doc-appendix",
+  "doc-backlink",
+  "doc-biblioentry",
+  "doc-bibliography",
+  "doc-biblioref",
+  "doc-chapter",
+  "doc-colophon",
+  "doc-conclusion",
+  "doc-cover",
+  "doc-credit",
+  "doc-credits",
+  "doc-dedication",
+  "doc-endnote",
+  "doc-endnotes",
+  "doc-epigraph",
+  "doc-epilogue",
+  "doc-errata",
+  "doc-example",
+  "doc-footnote",
+  "doc-foreword",
+  "doc-glossary",
+  "doc-glossref",
+  "doc-index",
+  "doc-introduction",
+  "doc-noteref",
+  "doc-notice",
+  "doc-pagebreak",
+  "doc-pagefooter",
+  "doc-pageheader",
+  "doc-pagelist",
+  "doc-part",
+  "doc-preface",
+  "doc-prologue",
+  "doc-pullquote",
+  "doc-qna",
+  "doc-subtitle",
+  "doc-tip",
+  "doc-toc",
+] as const satisfies readonly AccessibilityRole[]
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -679,23 +814,62 @@ describeNative("automation", () => {
     expect(nodes.some((node) => node.aria.role === "Label")).toBe(expected.role === "Label")
   })
 
-  it("does not derive a textbox name from its contents", () => {
+  it("keeps descendant text reachable for every accessibility role", () => {
     const { render, renderer } = createTestRoot()
 
     render(
-      <div role="textbox">
-        <text>Hello</text>
+      <div>
+        {SUPPORTED_ACCESSIBILITY_ROLES.map((role) => {
+          const contents = `contents:${role}`
+          return (
+            <div key={role} role={role}>
+              <text>{contents}</text>
+            </div>
+          )
+        })}
       </div>
     )
     renderer.flush()
     renderer.drawPendingFrame()
-    const textbox = Object.values(renderer.getAccessibilityTree().nodes).find(
-      (node) => node.aria.role === "TextInput"
-    )!
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    const missing = SUPPORTED_ACCESSIBILITY_ROLES.filter((role) => {
+      const contents = `contents:${role}`
+      return !nodes.some(
+        (node) => node.aria.label === contents || node.aria.value === contents
+      )
+    })
 
-    expect(textbox.aria).toMatchObject({ role: "TextInput" })
-    expect(textbox.aria).not.toHaveProperty("label")
+    expect(SUPPORTED_ACCESSIBILITY_ROLES).toHaveLength(128)
+    expect(new Set(SUPPORTED_ACCESSIBILITY_ROLES).size).toBe(128)
+    expect(missing).toEqual([])
   })
+
+  it.each([
+    ["textbox", "TextInput"],
+    ["tooltip", "Tooltip"],
+  ] as const)(
+    "keeps %s contents as descendant text without deriving a name",
+    (role, nativeRole) => {
+      const { render, renderer } = createTestRoot()
+
+      render(
+        <div role={role}>
+          <text>Hello</text>
+        </div>
+      )
+      renderer.flush()
+      renderer.drawPendingFrame()
+      const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+      const roleNode = nodes.find((node) => node.aria.role === nativeRole)!
+
+      expect(roleNode.aria).toMatchObject({ role: nativeRole })
+      expect(roleNode.aria).not.toHaveProperty("label")
+      expect(nodes.find((node) => node.aria.role === "Label")?.aria).toMatchObject({
+        role: "Label",
+        value: "Hello",
+      })
+    }
+  )
 
   it("joins multiple descendant text runs with spaces in a contents-derived name", () => {
     const { render, renderer } = createTestRoot()
@@ -1018,7 +1192,7 @@ describeNative("automation", () => {
     expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
   })
 
-  it("publishes an unnamed list, named list items, and an author-named region", () => {
+  it("publishes author-named containers and preserves text under author-only roles", () => {
     const { render, renderer } = createTestRoot()
 
     render(
@@ -1040,15 +1214,26 @@ describeNative("automation", () => {
     const tree = renderer.getAccessibilityTree()
     const entries = Object.entries(tree.nodes)
     const list = entries.find(([, node]) => node.aria.role === "List")!
+    const listItems = entries.filter(([, node]) => node.aria.role === "ListItem")
     const region = entries.find(([, node]) => node.aria.label === "Sites and routes")!
 
     expect(list[1].aria).toMatchObject({ role: "List" })
     expect(list[1].aria).not.toHaveProperty("label")
-    expect(list[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
-      expect.objectContaining({ role: "ListItem", label: "Online" }),
-      expect.objectContaining({ role: "ListItem", label: "Paused" }),
-    ])
+    expect(list[1].children).toEqual(listItems.map(([key]) => key))
+    for (const [index, [, item]] of listItems.entries()) {
+      expect(item.aria).toMatchObject({ role: "ListItem" })
+      expect(item.aria).not.toHaveProperty("label")
+      expect(item.children?.map((key) => tree.nodes[key]?.aria)).toEqual([
+        expect.objectContaining({
+          role: "Label",
+          value: index === 0 ? "Online" : "Paused",
+        }),
+      ])
+    }
     expect(region[1].aria).toMatchObject({ role: "Region", label: "Sites and routes" })
+    expect(region[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
+      expect.objectContaining({ role: "Label", value: "Sites and routes" }),
+    ])
     expect(renderer.drainStyleDiagnostics()).toEqual([])
   })
 

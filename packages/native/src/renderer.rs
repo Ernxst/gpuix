@@ -5769,9 +5769,9 @@ pub(crate) struct Inherited {
     /// True for an `ariaHidden` element and every descendant. Semantics are
     /// omitted at build time so AccessKit never receives a partial hidden tree.
     pub accessibility_hidden: bool,
-    /// True once this element or an ancestor has a supported role. Descendant
-    /// text contributes to that role's accessible name instead of emitting a
-    /// separate `Label` node.
+    /// True once this element or an ancestor has a role whose name comes from
+    /// contents. Descendant text contributes to that name instead of emitting
+    /// a separate `Label` node.
     pub text_accessibility_owned_by_role: bool,
     /// Selection wash colour for this subtree.
     pub selection_wash: gpui::Hsla,
@@ -6667,7 +6667,7 @@ pub(crate) fn build_element(
         .descend(style, hover_group, id, current_color, font);
     ctx.inherited.accessibility_hidden |= crate::accessibility::is_hidden(element);
     ctx.inherited.text_accessibility_owned_by_role |=
-        crate::accessibility::has_supported_role(element);
+        crate::accessibility::role_supports_name_from_contents(element);
 
     // A `highlight` here replaces any ancestor's: the nearest declaration wins,
     // and `GroupList::collect` skips nested declarations so an ancestor never
