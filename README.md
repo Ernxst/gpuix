@@ -2669,6 +2669,47 @@ GPUI applies them natively without a JavaScript round trip. `focus` applies for
 pointer and keyboard focus. `focusVisible` applies only while the directly
 tracked element has keyboard-modality focus, matching CSS `:focus-visible`.
 
+### Shared web and native style helpers
+
+If an application maps only the keys shared by React's `CSSProperties` and
+`StyleDesc`, it deliberately excludes GPUIX-only state keys such as
+`focusVisible`. This preserves a useful guarantee: every property offered by
+the helper has a value type accepted by both renderers. Prefer a state style
+that reduces to shared declarations when possible. For example, a focus ring
+using `outlineColor`, `outlineWidth`, and `outlineOffset` needs no
+renderer-specific escape because those properties exist in both systems.
+
+When a native state key is needed, choose one of these escapes:
+
+```ts
+import type { CSSProperties } from 'react'
+import type { NativeStateStyleKey, StyleDesc } from '@gpuix/react'
+
+type SharedStyle = {
+  [Property in keyof CSSProperties & keyof StyleDesc]?: Exclude<CSSProperties[Property], undefined> &
+    Exclude<StyleDesc[Property], undefined>
+}
+
+// A: retain the shared-key guarantee and add GPUIX's maintained state-style family.
+type WidenedShared = SharedStyle & Pick<StyleDesc, NativeStateStyleKey>
+const nativeFocusable: WidenedShared = {
+  opacity: 0.5,
+  focusVisible: { opacity: 1 },
+}
+
+// B: keep the helper shared, then add the native state at the GPUIX call site.
+declare const sharedStyle: SharedStyle
+const gpuixStyle: StyleDesc = {
+  ...sharedStyle,
+  focusVisible: { opacity: 1 },
+}
+```
+
+Escape A is usually preferable: `NativeStateStyleKey` stays current when
+GPUIX adds another native state style, without copying a literal union into an
+application. Escape B is useful when the shared helper should remain strictly
+cross-renderer.
+
 ```tsx
 <div
   style={{

@@ -398,15 +398,29 @@ export type GridTrack =
 
 export type GridTemplate = number | GridTrack[]
 
-type NativeStateStyleKey =
+/** Keys that apply a native interaction state rather than a base style declaration. */
+export type NativeStateStyleKey =
   | "transition"
   | "hover"
   | "hoverWithin"
   | "active"
   | "focus"
   | "focusVisible"
-type NativeStateStyle = Omit<StyleDesc, NativeStateStyleKey>
 
+/** Base declarations accepted inside a native interaction-state style. */
+export type NativeStateStyle = Omit<StyleDesc, NativeStateStyleKey>
+
+/**
+ * A native GPUIX style descriptor.
+ *
+ * A mapped type over the keys shared by React `CSSProperties` and `StyleDesc`
+ * deliberately omits native-only state keys such as `focusVisible`. Prefer a
+ * state declaration made only from shared properties when possible (for
+ * example, `outlineColor`, `outlineWidth`, and `outlineOffset`). To add native
+ * state styles to such a helper, widen it with
+ * `Pick<StyleDesc, NativeStateStyleKey>`; alternatively, spread the shared
+ * style and add the native state at the GPUIX call site.
+ */
 export interface StyleDesc {
   display?: Display
   visibility?: Visibility
