@@ -902,25 +902,26 @@ describeNative("automation", () => {
       <div role="table" ariaLabel="Power ledger" ariaRowCount={3} ariaColCount={3}>
         <div role="rowgroup">
           <div role="row" ariaRowIndex={1}>
-            <text role="columnheader" ariaColIndex={1}>
-              Site
-            </text>
-            <text role="columnheader" ariaColIndex={2} ariaColSpan={2}>
-              Power
-            </text>
+            <text role="columnheader" ariaLabel="Site" ariaColIndex={1} />
+            <text
+              role="columnheader"
+              ariaLabel="Power"
+              ariaColIndex={2}
+              ariaColSpan={2}
+            />
           </div>
           <div role="row" ariaRowIndex={2}>
-            <text role="rowheader" ariaColIndex={1}>
-              Alpha
-            </text>
-            <text role="cell" ariaColIndex={2} ariaRowSpan={2} ariaColSpan={2}>
-              42 MW
-            </text>
+            <text role="rowheader" ariaLabel="Alpha" ariaColIndex={1} />
+            <text
+              role="cell"
+              ariaLabel="42 MW"
+              ariaColIndex={2}
+              ariaRowSpan={2}
+              ariaColSpan={2}
+            />
           </div>
           <div role="row" ariaRowIndex={3}>
-            <text role="rowheader" ariaColIndex={1}>
-              Beta
-            </text>
+            <text role="rowheader" ariaLabel="Beta" ariaColIndex={1} />
           </div>
         </div>
       </div>
@@ -942,14 +943,25 @@ describeNative("automation", () => {
       column_count: 3,
     })
     expect(table[1].children).toEqual([rowGroup[0]])
+    expect(rowGroup[1].aria).toMatchObject({ role: "RowGroup" })
+    expect(rowGroup[1].aria).not.toHaveProperty("label")
     expect(rowGroup[1].children).toEqual([headerRow[0], alphaRow[0], betaRow[0]])
-    expect(headerRow[1].children?.map((key) => tree.nodes[key]?.aria.role)).toEqual([
-      "ColumnHeader",
-      "ColumnHeader",
+    expect(headerRow[1].aria).toMatchObject({ role: "Row", row_index: 1 })
+    expect(headerRow[1].aria).not.toHaveProperty("label")
+    expect(headerRow[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
+      expect.objectContaining({ role: "ColumnHeader", label: "Site" }),
+      expect.objectContaining({ role: "ColumnHeader", label: "Power" }),
     ])
-    expect(alphaRow[1].children?.map((key) => tree.nodes[key]?.aria.role)).toEqual([
-      "RowHeader",
-      "Cell",
+    expect(alphaRow[1].aria).toMatchObject({ role: "Row", row_index: 2 })
+    expect(alphaRow[1].aria).not.toHaveProperty("label")
+    expect(alphaRow[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
+      expect.objectContaining({ role: "RowHeader", label: "Alpha" }),
+      expect.objectContaining({ role: "Cell", label: "42 MW" }),
+    ])
+    expect(betaRow[1].aria).toMatchObject({ role: "Row", row_index: 3 })
+    expect(betaRow[1].aria).not.toHaveProperty("label")
+    expect(betaRow[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
+      expect.objectContaining({ role: "RowHeader", label: "Beta" }),
     ])
     expect(
       entries.find(([, node]) => node.aria.label === "Power")?.[1].aria
@@ -959,25 +971,61 @@ describeNative("automation", () => {
     ).toMatchObject({ column_index: 2, row_span: 2, column_span: 2 })
   })
 
+  it("derives names for table, row, and cell wrappers from descendant text", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div role="table">
+        <div role="row">
+          <div role="cell">
+            <text>Output</text>
+          </div>
+        </div>
+      </div>
+    )
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+
+    expect(nodes.find((node) => node.aria.role === "Table")?.aria).toMatchObject({
+      role: "Table",
+      label: "Output",
+    })
+    expect(nodes.find((node) => node.aria.role === "Row")?.aria).toMatchObject({
+      role: "Row",
+      label: "Output",
+    })
+    expect(nodes.find((node) => node.aria.role === "Cell")?.aria).toMatchObject({
+      role: "Cell",
+      label: "Output",
+    })
+    expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
+  })
+
   it("publishes named list and region nodes with nested list items", () => {
     const { render, renderer } = createTestRoot()
 
     render(
       <div>
-        <ul role="list" aria-label="Site state">
-          <li role="listitem" ariaLabel="Online" />
-          <li role="listitem" ariaLabel="Paused" />
+        <ul role="list">
+          <li role="listitem">
+            <text>Online</text>
+          </li>
+          <li role="listitem">
+            <text>Paused</text>
+          </li>
         </ul>
-        <section role="region" tabIndex={0} aria-label="Sites and routes" />
+        <section role="region" tabIndex={0}>
+          <text>Sites and routes</text>
+        </section>
       </div>
     )
 
     const tree = renderer.getAccessibilityTree()
     const entries = Object.entries(tree.nodes)
-    const list = entries.find(([, node]) => node.aria.label === "Site state")!
+    const list = entries.find(([, node]) => node.aria.role === "List")!
     const region = entries.find(([, node]) => node.aria.label === "Sites and routes")!
 
-    expect(list[1].aria.role).toBe("List")
+    expect(list[1].aria).toMatchObject({ role: "List", label: "Online Paused" })
     expect(list[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
       expect.objectContaining({ role: "ListItem", label: "Online" }),
       expect.objectContaining({ role: "ListItem", label: "Paused" }),
@@ -1004,6 +1052,7 @@ describeNative("automation", () => {
     const entries = Object.entries(tree.nodes)
     const listbox = entries.find(([, node]) => node.aria.role === "ListBox")!
 
+    expect(listbox[1].aria).toMatchObject({ role: "ListBox", label: "Recipe" })
     expect(listbox[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
       expect.objectContaining({
         role: "ListBoxOption",
