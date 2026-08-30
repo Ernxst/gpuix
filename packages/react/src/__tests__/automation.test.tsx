@@ -1366,6 +1366,65 @@ describeNative("automation", () => {
     expect(labels).not.toContain("Decorative action")
   })
 
+  it("publishes Booleanish accessibility states and suppresses Booleanish hidden subtrees", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const { render, renderer } = createTestRoot({ strictStyles: true })
+    render(
+      <div>
+        <div role="button" ariaLabel="Hidden string" aria-hidden="true">
+          <text>Hidden string content</text>
+        </div>
+        <div role="button" ariaLabel="Hidden boolean" ariaHidden>
+          <text>Hidden boolean content</text>
+        </div>
+        <div role="button" ariaLabel="Visible false string" aria-hidden="false" />
+        <div
+          role="button"
+          ariaLabel="Hidden uppercase string"
+          {...({ "aria-hidden": "TRUE" } as Record<string, string>)}
+        />
+        <button ariaLabel="Expanded string" aria-expanded="true" />
+        <button ariaLabel="Expanded boolean" ariaExpanded />
+        <div role="option" ariaLabel="Selected string" aria-selected="true" />
+        <div role="option" ariaLabel="Selected boolean" ariaSelected />
+        <button ariaLabel="Aria disabled string" aria-disabled="true" />
+        <button ariaLabel="Aria disabled boolean" ariaDisabled />
+        <button ariaLabel="Disabled string" disabled="true" />
+        <button ariaLabel="Disabled boolean" disabled />
+        <div
+          role="button"
+          ariaLabel="Malformed hidden"
+          {...({ "aria-hidden": "yes" } as Record<string, string>)}
+        />
+      </div>
+    )
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    const byLabel = (label: string) => nodes.find((node) => node.aria.label === label)
+
+    expect(byLabel("Hidden string")).toBeUndefined()
+    expect(byLabel("Hidden boolean")).toBeUndefined()
+    expect(byLabel("Visible false string")?.aria).toMatchObject({ role: "Button" })
+    expect(byLabel("Hidden uppercase string")).toBeUndefined()
+    expect(byLabel("Expanded string")?.aria).toMatchObject({ expanded: true })
+    expect(byLabel("Expanded boolean")?.aria).toMatchObject({ expanded: true })
+    expect(byLabel("Selected string")?.aria).toMatchObject({ selected: true })
+    expect(byLabel("Selected boolean")?.aria).toMatchObject({ selected: true })
+    expect(byLabel("Aria disabled string")?.aria).toMatchObject({ disabled: true })
+    expect(byLabel("Aria disabled boolean")?.aria).toMatchObject({ disabled: true })
+    expect(byLabel("Disabled string")?.aria).toMatchObject({ disabled: true })
+    expect(byLabel("Disabled boolean")?.aria).toMatchObject({ disabled: true })
+    expect(byLabel("Malformed hidden")?.aria).toMatchObject({ role: "Button" })
+    const diagnostics = warn.mock.calls.map(([message]) => String(message)).join("\n")
+    for (const value of ["true", "false", "TRUE"]) {
+      expect(diagnostics).not.toContain(`ariaHidden" rejected value "${value}"`)
+    }
+    for (const property of ["ariaExpanded", "ariaSelected", "ariaDisabled", "disabled"]) {
+      expect(diagnostics).not.toContain(`${property}" rejected value "true"`)
+    }
+    expect(diagnostics).toContain('ariaHidden" rejected value "yes"')
+  })
+
   it("normalizes numeric and boolean data-testid props for lookup", () => {
     const { render, renderer } = createTestRoot()
 

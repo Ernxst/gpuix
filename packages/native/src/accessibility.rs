@@ -317,7 +317,7 @@ impl<'a> AccessibilityProps<'a> {
             expanded: element
                 .custom_props
                 .get("ariaExpanded")
-                .and_then(serde_json::Value::as_bool),
+                .and_then(parse_booleanish),
             current: element
                 .custom_props
                 .get("ariaCurrent")
@@ -325,7 +325,7 @@ impl<'a> AccessibilityProps<'a> {
             selected: element
                 .custom_props
                 .get("ariaSelected")
-                .and_then(serde_json::Value::as_bool),
+                .and_then(parse_booleanish),
             value: element
                 .custom_props
                 .get("ariaValue")
@@ -358,11 +358,24 @@ fn positive_integer(value: Option<&serde_json::Value>) -> Option<usize> {
         .filter(|value| *value > 0)
 }
 
+fn parse_booleanish(value: &serde_json::Value) -> Option<bool> {
+    value.as_bool().or_else(|| {
+        let value = value.as_str()?;
+        if value.eq_ignore_ascii_case("true") {
+            Some(true)
+        } else if value.eq_ignore_ascii_case("false") {
+            Some(false)
+        } else {
+            None
+        }
+    })
+}
+
 fn bool_prop(element: &RetainedElement, key: &str) -> bool {
     element
         .custom_props
         .get(key)
-        .and_then(serde_json::Value::as_bool)
+        .and_then(parse_booleanish)
         .unwrap_or(false)
 }
 
@@ -463,7 +476,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
             "ariaChecked" => !(value.is_boolean() || value.as_str() == Some("mixed")),
             "ariaCurrent" => parse_aria_current(value).is_none(),
             "ariaExpanded" | "ariaSelected" | "ariaDisabled" | "ariaHidden" | "disabled" => {
-                !value.is_boolean()
+                parse_booleanish(value).is_none()
             }
             "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
                 value.as_f64().is_none_or(|number| !number.is_finite())

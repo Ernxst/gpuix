@@ -24,6 +24,8 @@ export type DimensionValue =
 /** A line-height is either an absolute length or a unitless font-size multiplier. */
 export type LineHeightValue = number | `${number}px` | `${number}`
 
+type Booleanish = boolean | "true" | "false"
+
 type CssColorFunctionName =
   | "rgb"
   | "rgba"
@@ -764,17 +766,17 @@ export interface Props {
   /** DOM-compatible alias for ariaChecked. */
   "aria-checked"?: boolean | "mixed"
   /** Expanded state for controls that disclose another region. */
-  ariaExpanded?: boolean
+  ariaExpanded?: Booleanish
   /** DOM-compatible alias for ariaExpanded. */
-  "aria-expanded"?: boolean
+  "aria-expanded"?: Booleanish
   /** Current item within a related set of destinations. */
   ariaCurrent?: AriaCurrent
   /** DOM-compatible alias for ariaCurrent. */
   "aria-current"?: AriaCurrent
   /** Selected state for selectable semantic nodes. */
-  ariaSelected?: boolean
+  ariaSelected?: Booleanish
   /** DOM-compatible alias for ariaSelected. */
-  "aria-selected"?: boolean
+  "aria-selected"?: Booleanish
   /** Human-readable value text for a value control. */
   ariaValue?: string
   /** DOM-compatible semantic alias for ariaValue. */
@@ -820,15 +822,15 @@ export interface Props {
   /** DOM-compatible alias for ariaColSpan. */
   "aria-colspan"?: number
   /** Native disabled state: unavailable, non-activating, and removed from tab order. */
-  disabled?: boolean
+  disabled?: Booleanish
   /** Unavailable and non-activating, but intentionally retained in tab order. */
-  ariaDisabled?: boolean
+  ariaDisabled?: Booleanish
   /** DOM-compatible alias for ariaDisabled. */
-  "aria-disabled"?: boolean
+  "aria-disabled"?: Booleanish
   /** Exclude this element and its descendants from the accessibility tree. */
-  ariaHidden?: boolean
+  ariaHidden?: Booleanish
   /** DOM-compatible alias for ariaHidden. */
-  "aria-hidden"?: boolean
+  "aria-hidden"?: Booleanish
   /** Value or focus action requested by assistive technology. Activate uses onClick. */
   onAccessibilityAction?: (event: GpuixSyntheticEvent) => void
 
