@@ -4,6 +4,7 @@ import type {
   MenuSpec,
 } from "@gpuix/native"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
+import type { AccessibilityRole } from "../index.js"
 
 /**
  * CSS-compatible lengths accepted by the native layout parser. The grammar is
@@ -714,18 +715,7 @@ export interface HighlightMatch {
   rects: Array<{ x: number; y: number; width: number; height: number }>
 }
 
-/** Explicit roles currently translated to GPUI's AccessKit tree. */
-export type AccessibilityRole =
-  | "button"
-  | "checkbox"
-  | "heading"
-  | "img"
-  | "link"
-  | "option"
-  | "slider"
-  | "spinbutton"
-  | "switch"
-  | "textbox"
+export type { AccessibilityRole, AccessibilityRoleRegistry } from "../index.js"
 
 /** Identifies this node as the current item within a related set. */
 export type AriaCurrent =
@@ -805,6 +795,30 @@ export interface Props {
   ariaLevel?: number
   /** DOM-compatible alias for ariaLevel. */
   "aria-level"?: number
+  /** One-based row index within a table, grid, or treegrid. */
+  ariaRowIndex?: number
+  /** DOM-compatible alias for ariaRowIndex. */
+  "aria-rowindex"?: number
+  /** One-based column index within a table, grid, or treegrid. */
+  ariaColIndex?: number
+  /** DOM-compatible alias for ariaColIndex. */
+  "aria-colindex"?: number
+  /** Total rows represented by a table, grid, or treegrid. */
+  ariaRowCount?: number
+  /** DOM-compatible alias for ariaRowCount. */
+  "aria-rowcount"?: number
+  /** Total columns represented by a table, grid, or treegrid. */
+  ariaColCount?: number
+  /** DOM-compatible alias for ariaColCount. */
+  "aria-colcount"?: number
+  /** Number of rows occupied by a table or grid cell. */
+  ariaRowSpan?: number
+  /** DOM-compatible alias for ariaRowSpan. */
+  "aria-rowspan"?: number
+  /** Number of columns occupied by a table or grid cell. */
+  ariaColSpan?: number
+  /** DOM-compatible alias for ariaColSpan. */
+  "aria-colspan"?: number
   /** Native disabled state: unavailable, non-activating, and removed from tab order. */
   disabled?: boolean
   /** Unavailable and non-activating, but intentionally retained in tab order. */

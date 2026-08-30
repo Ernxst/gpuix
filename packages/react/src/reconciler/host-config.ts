@@ -422,6 +422,12 @@ const ARIA_PROP_ALIASES = {
   "aria-valuemax": "ariaValueMax",
   "aria-valuenow": "ariaValueNow",
   "aria-level": "ariaLevel",
+  "aria-rowindex": "ariaRowIndex",
+  "aria-colindex": "ariaColIndex",
+  "aria-rowcount": "ariaRowCount",
+  "aria-colcount": "ariaColCount",
+  "aria-rowspan": "ariaRowSpan",
+  "aria-colspan": "ariaColSpan",
   "aria-disabled": "ariaDisabled",
   "aria-hidden": "ariaHidden",
 } as const
@@ -516,6 +522,12 @@ const UNIVERSAL_PROPS = new Set([
   "ariaValueMax",
   "ariaValueNow",
   "ariaLevel",
+  "ariaRowIndex",
+  "ariaColIndex",
+  "ariaRowCount",
+  "ariaColCount",
+  "ariaRowSpan",
+  "ariaColSpan",
   "ariaDisabled",
   "ariaHidden",
   "disabled",
@@ -542,7 +554,18 @@ function serializeCustomProp(
   if (
     typeof value === "number" &&
     !Number.isFinite(value) &&
-    ["ariaValueMin", "ariaValueMax", "ariaValueNow", "ariaLevel"].includes(key)
+    [
+      "ariaValueMin",
+      "ariaValueMax",
+      "ariaValueNow",
+      "ariaLevel",
+      "ariaRowIndex",
+      "ariaColIndex",
+      "ariaRowCount",
+      "ariaColCount",
+      "ariaRowSpan",
+      "ariaColSpan",
+    ].includes(key)
   ) {
     // JSON.stringify would silently turn these into null, which means prop
     // removal. Preserve the malformed value as text so Rust can issue the

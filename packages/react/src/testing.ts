@@ -93,6 +93,12 @@ export interface AccessKitNodeSnapshot {
     min_numeric_value?: number
     max_numeric_value?: number
     level?: number
+    row_index?: number
+    column_index?: number
+    row_count?: number
+    column_count?: number
+    row_span?: number
+    column_span?: number
     on_action?: string[]
   }
 }
