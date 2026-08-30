@@ -7088,7 +7088,8 @@ pub(crate) fn build_host_container(
     use gpui::prelude::*;
 
     let flattened_text = (element.element_type == "text").then(|| flatten_text(element, ctx));
-    let text_owns_accessible_name = crate::accessibility::has_supported_role(element)
+    let text_owns_accessible_name =
+        crate::accessibility::role_supports_name_from_contents(element)
         && element
             .custom_props
             .get("ariaLabel")

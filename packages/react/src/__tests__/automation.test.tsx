@@ -679,6 +679,24 @@ describeNative("automation", () => {
     expect(nodes.some((node) => node.aria.role === "Label")).toBe(expected.role === "Label")
   })
 
+  it("does not derive a textbox name from its contents", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div role="textbox">
+        <text>Hello</text>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+    const textbox = Object.values(renderer.getAccessibilityTree().nodes).find(
+      (node) => node.aria.role === "TextInput"
+    )!
+
+    expect(textbox.aria).toMatchObject({ role: "TextInput" })
+    expect(textbox.aria).not.toHaveProperty("label")
+  })
+
   it("joins multiple descendant text runs with spaces in a contents-derived name", () => {
     const { render, renderer } = createTestRoot()
 
@@ -971,7 +989,7 @@ describeNative("automation", () => {
     ).toMatchObject({ column_index: 2, row_span: 2, column_span: 2 })
   })
 
-  it("derives names for table, row, and cell wrappers from descendant text", () => {
+  it("derives names for row and cell wrappers but not their table", () => {
     const { render, renderer } = createTestRoot()
 
     render(
@@ -986,10 +1004,9 @@ describeNative("automation", () => {
 
     const nodes = Object.values(renderer.getAccessibilityTree().nodes)
 
-    expect(nodes.find((node) => node.aria.role === "Table")?.aria).toMatchObject({
-      role: "Table",
-      label: "Output",
-    })
+    const table = nodes.find((node) => node.aria.role === "Table")!
+    expect(table.aria).toMatchObject({ role: "Table" })
+    expect(table.aria).not.toHaveProperty("label")
     expect(nodes.find((node) => node.aria.role === "Row")?.aria).toMatchObject({
       role: "Row",
       label: "Output",
@@ -1001,7 +1018,7 @@ describeNative("automation", () => {
     expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
   })
 
-  it("publishes named list and region nodes with nested list items", () => {
+  it("publishes an unnamed list, named list items, and an author-named region", () => {
     const { render, renderer } = createTestRoot()
 
     render(
@@ -1014,7 +1031,7 @@ describeNative("automation", () => {
             <text>Paused</text>
           </li>
         </ul>
-        <section role="region" tabIndex={0}>
+        <section role="region" tabIndex={0} aria-label="Sites and routes">
           <text>Sites and routes</text>
         </section>
       </div>
@@ -1025,7 +1042,8 @@ describeNative("automation", () => {
     const list = entries.find(([, node]) => node.aria.role === "List")!
     const region = entries.find(([, node]) => node.aria.label === "Sites and routes")!
 
-    expect(list[1].aria).toMatchObject({ role: "List", label: "Online Paused" })
+    expect(list[1].aria).toMatchObject({ role: "List" })
+    expect(list[1].aria).not.toHaveProperty("label")
     expect(list[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
       expect.objectContaining({ role: "ListItem", label: "Online" }),
       expect.objectContaining({ role: "ListItem", label: "Paused" }),

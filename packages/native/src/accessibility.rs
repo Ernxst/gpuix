@@ -33,23 +33,32 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
 ];
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-struct AccessibilityRole(gpui::Role);
+struct AccessibilityRole {
+    role: gpui::Role,
+    name_from_contents: bool,
+}
 
 impl fmt::Debug for AccessibilityRole {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
+        self.role.fmt(formatter)
     }
 }
 
 macro_rules! define_accessibility_roles {
-    ($($name:literal => $role:ident),+ $(,)?) => {
+    ($($name:literal => $role:ident, $name_from_contents:literal),+ $(,)?) => {
         #[cfg(test)]
         const SUPPORTED_ACCESSIBILITY_ROLE_NAMES: &[&str] = &[$($name),+];
+        #[cfg(test)]
+        const ACCESSIBILITY_ROLE_NAME_FROM_CONTENTS: &[(&str, bool)] =
+            &[$(($name, $name_from_contents)),+];
 
         impl AccessibilityRole {
             fn parse(value: &serde_json::Value) -> Option<Self> {
                 match value.as_str()? {
-                    $($name => Some(Self(gpui::Role::$role)),)+
+                    $($name => Some(Self {
+                        role: gpui::Role::$role,
+                        name_from_contents: $name_from_contents,
+                    }),)+
                     _ => None,
                 }
             }
@@ -58,145 +67,145 @@ macro_rules! define_accessibility_roles {
 }
 
 define_accessibility_roles! {
-    "alert" => Alert,
-    "alertdialog" => AlertDialog,
-    "application" => Application,
-    "article" => Article,
-    "banner" => Banner,
-    "blockquote" => Blockquote,
-    "button" => Button,
-    "caption" => Caption,
-    "cell" => Cell,
-    "checkbox" => CheckBox,
-    "code" => Code,
-    "columnheader" => ColumnHeader,
-    "combobox" => ComboBox,
-    "comment" => Comment,
-    "complementary" => Complementary,
-    "contentinfo" => ContentInfo,
-    "definition" => Definition,
-    "deletion" => ContentDeletion,
-    "dialog" => Dialog,
-    "document" => Document,
-    "emphasis" => Emphasis,
-    "feed" => Feed,
-    "figure" => Figure,
-    "form" => Form,
-    "generic" => GenericContainer,
-    "grid" => Grid,
-    "gridcell" => GridCell,
-    "group" => Group,
-    "heading" => Heading,
-    "img" => Image,
-    "insertion" => ContentInsertion,
-    "link" => Link,
-    "list" => List,
-    "listbox" => ListBox,
-    "listitem" => ListItem,
-    "log" => Log,
-    "main" => Main,
-    "mark" => Mark,
-    "marquee" => Marquee,
-    "math" => Math,
-    "menu" => Menu,
-    "menubar" => MenuBar,
-    "menuitem" => MenuItem,
-    "menuitemcheckbox" => MenuItemCheckBox,
-    "menuitemradio" => MenuItemRadio,
-    "meter" => Meter,
-    "navigation" => Navigation,
-    "none" => GenericContainer,
-    "note" => Note,
-    "option" => ListBoxOption,
-    "paragraph" => Paragraph,
-    "presentation" => GenericContainer,
-    "progressbar" => ProgressIndicator,
-    "radio" => RadioButton,
-    "radiogroup" => RadioGroup,
-    "region" => Region,
-    "row" => Row,
-    "rowgroup" => RowGroup,
-    "rowheader" => RowHeader,
-    "scrollbar" => ScrollBar,
-    "search" => Search,
-    "searchbox" => SearchInput,
-    "sectionfooter" => SectionFooter,
-    "sectionheader" => SectionHeader,
-    "separator" => Splitter,
-    "slider" => Slider,
-    "spinbutton" => SpinButton,
-    "status" => Status,
-    "strong" => Strong,
-    "suggestion" => Suggestion,
-    "switch" => Switch,
-    "tab" => Tab,
-    "table" => Table,
-    "tablist" => TabList,
-    "tabpanel" => TabPanel,
-    "term" => Term,
-    "textbox" => TextInput,
-    "time" => Time,
-    "timer" => Timer,
-    "toolbar" => Toolbar,
-    "tooltip" => Tooltip,
-    "tree" => Tree,
-    "treegrid" => TreeGrid,
-    "treeitem" => TreeItem,
-    "graphics-document" => GraphicsDocument,
-    "graphics-object" => GraphicsObject,
-    "graphics-symbol" => GraphicsSymbol,
-    "doc-abstract" => DocAbstract,
-    "doc-acknowledgments" => DocAcknowledgements,
-    "doc-afterword" => DocAfterword,
-    "doc-appendix" => DocAppendix,
-    "doc-backlink" => DocBackLink,
-    "doc-biblioentry" => DocBiblioEntry,
-    "doc-bibliography" => DocBibliography,
-    "doc-biblioref" => DocBiblioRef,
-    "doc-chapter" => DocChapter,
-    "doc-colophon" => DocColophon,
-    "doc-conclusion" => DocConclusion,
-    "doc-cover" => DocCover,
-    "doc-credit" => DocCredit,
-    "doc-credits" => DocCredits,
-    "doc-dedication" => DocDedication,
-    "doc-endnote" => DocEndnote,
-    "doc-endnotes" => DocEndnotes,
-    "doc-epigraph" => DocEpigraph,
-    "doc-epilogue" => DocEpilogue,
-    "doc-errata" => DocErrata,
-    "doc-example" => DocExample,
-    "doc-footnote" => DocFootnote,
-    "doc-foreword" => DocForeword,
-    "doc-glossary" => DocGlossary,
-    "doc-glossref" => DocGlossRef,
-    "doc-index" => DocIndex,
-    "doc-introduction" => DocIntroduction,
-    "doc-noteref" => DocNoteRef,
-    "doc-notice" => DocNotice,
-    "doc-pagebreak" => DocPageBreak,
-    "doc-pagefooter" => DocPageFooter,
-    "doc-pageheader" => DocPageHeader,
-    "doc-pagelist" => DocPageList,
-    "doc-part" => DocPart,
-    "doc-preface" => DocPreface,
-    "doc-prologue" => DocPrologue,
-    "doc-pullquote" => DocPullquote,
-    "doc-qna" => DocQna,
-    "doc-subtitle" => DocSubtitle,
-    "doc-tip" => DocTip,
-    "doc-toc" => DocToc,
+    "alert" => Alert, false,
+    "alertdialog" => AlertDialog, false,
+    "application" => Application, false,
+    "article" => Article, false,
+    "banner" => Banner, false,
+    "blockquote" => Blockquote, false,
+    "button" => Button, true,
+    "caption" => Caption, false,
+    "cell" => Cell, true,
+    "checkbox" => CheckBox, true,
+    "code" => Code, false,
+    "columnheader" => ColumnHeader, true,
+    "combobox" => ComboBox, false,
+    "comment" => Comment, true,
+    "complementary" => Complementary, false,
+    "contentinfo" => ContentInfo, false,
+    "definition" => Definition, false,
+    "deletion" => ContentDeletion, false,
+    "dialog" => Dialog, false,
+    "document" => Document, false,
+    "emphasis" => Emphasis, false,
+    "feed" => Feed, false,
+    "figure" => Figure, false,
+    "form" => Form, false,
+    "generic" => GenericContainer, false,
+    "grid" => Grid, false,
+    "gridcell" => GridCell, true,
+    "group" => Group, false,
+    "heading" => Heading, true,
+    "img" => Image, false,
+    "insertion" => ContentInsertion, false,
+    "link" => Link, true,
+    "list" => List, false,
+    "listbox" => ListBox, false,
+    "listitem" => ListItem, true,
+    "log" => Log, false,
+    "main" => Main, false,
+    "mark" => Mark, false,
+    "marquee" => Marquee, false,
+    "math" => Math, false,
+    "menu" => Menu, false,
+    "menubar" => MenuBar, false,
+    "menuitem" => MenuItem, true,
+    "menuitemcheckbox" => MenuItemCheckBox, true,
+    "menuitemradio" => MenuItemRadio, true,
+    "meter" => Meter, false,
+    "navigation" => Navigation, false,
+    "none" => GenericContainer, false,
+    "note" => Note, false,
+    "option" => ListBoxOption, true,
+    "paragraph" => Paragraph, false,
+    "presentation" => GenericContainer, false,
+    "progressbar" => ProgressIndicator, false,
+    "radio" => RadioButton, true,
+    "radiogroup" => RadioGroup, false,
+    "region" => Region, false,
+    "row" => Row, true,
+    "rowgroup" => RowGroup, false,
+    "rowheader" => RowHeader, true,
+    "scrollbar" => ScrollBar, false,
+    "search" => Search, false,
+    "searchbox" => SearchInput, false,
+    "sectionfooter" => SectionFooter, false,
+    "sectionheader" => SectionHeader, false,
+    "separator" => Splitter, false,
+    "slider" => Slider, false,
+    "spinbutton" => SpinButton, false,
+    "status" => Status, false,
+    "strong" => Strong, false,
+    "suggestion" => Suggestion, false,
+    "switch" => Switch, true,
+    "tab" => Tab, true,
+    "table" => Table, false,
+    "tablist" => TabList, false,
+    "tabpanel" => TabPanel, false,
+    "term" => Term, false,
+    "textbox" => TextInput, false,
+    "time" => Time, false,
+    "timer" => Timer, false,
+    "toolbar" => Toolbar, false,
+    "tooltip" => Tooltip, true,
+    "tree" => Tree, false,
+    "treegrid" => TreeGrid, false,
+    "treeitem" => TreeItem, true,
+    "graphics-document" => GraphicsDocument, false,
+    "graphics-object" => GraphicsObject, true,
+    "graphics-symbol" => GraphicsSymbol, false,
+    "doc-abstract" => DocAbstract, false,
+    "doc-acknowledgments" => DocAcknowledgements, false,
+    "doc-afterword" => DocAfterword, false,
+    "doc-appendix" => DocAppendix, false,
+    "doc-backlink" => DocBackLink, true,
+    "doc-biblioentry" => DocBiblioEntry, false,
+    "doc-bibliography" => DocBibliography, false,
+    "doc-biblioref" => DocBiblioRef, true,
+    "doc-chapter" => DocChapter, false,
+    "doc-colophon" => DocColophon, false,
+    "doc-conclusion" => DocConclusion, false,
+    "doc-cover" => DocCover, false,
+    "doc-credit" => DocCredit, false,
+    "doc-credits" => DocCredits, false,
+    "doc-dedication" => DocDedication, false,
+    "doc-endnote" => DocEndnote, false,
+    "doc-endnotes" => DocEndnotes, false,
+    "doc-epigraph" => DocEpigraph, false,
+    "doc-epilogue" => DocEpilogue, false,
+    "doc-errata" => DocErrata, false,
+    "doc-example" => DocExample, false,
+    "doc-footnote" => DocFootnote, false,
+    "doc-foreword" => DocForeword, false,
+    "doc-glossary" => DocGlossary, false,
+    "doc-glossref" => DocGlossRef, true,
+    "doc-index" => DocIndex, false,
+    "doc-introduction" => DocIntroduction, false,
+    "doc-noteref" => DocNoteRef, true,
+    "doc-notice" => DocNotice, false,
+    "doc-pagebreak" => DocPageBreak, false,
+    "doc-pagefooter" => DocPageFooter, false,
+    "doc-pageheader" => DocPageHeader, false,
+    "doc-pagelist" => DocPageList, false,
+    "doc-part" => DocPart, false,
+    "doc-preface" => DocPreface, false,
+    "doc-prologue" => DocPrologue, false,
+    "doc-pullquote" => DocPullquote, false,
+    "doc-qna" => DocQna, false,
+    "doc-subtitle" => DocSubtitle, true,
+    "doc-tip" => DocTip, false,
+    "doc-toc" => DocToc, false,
 }
 
 impl AccessibilityRole {
     fn into_gpui(self) -> Option<gpui::Role> {
-        (self.0 != gpui::Role::GenericContainer).then_some(self.0)
+        (self.role != gpui::Role::GenericContainer).then_some(self.role)
     }
 
     fn supports_specialized_action(self, action: gpui::AccessibleAction) -> bool {
         match action {
             gpui::AccessibleAction::Increment | gpui::AccessibleAction::Decrement => {
-                matches!(self.0, gpui::Role::Slider | gpui::Role::SpinButton)
+                matches!(self.role, gpui::Role::Slider | gpui::Role::SpinButton)
             }
             gpui::AccessibleAction::Focus => self.into_gpui().is_some(),
             _ => false,
@@ -207,35 +216,35 @@ impl AccessibilityRole {
         use gpui::Role;
 
         match property {
-            "ariaChecked" => matches!(self.0, Role::CheckBox | Role::Switch),
-            "ariaExpanded" => matches!(self.0, Role::Button | Role::Link),
+            "ariaChecked" => matches!(self.role, Role::CheckBox | Role::Switch),
+            "ariaExpanded" => matches!(self.role, Role::Button | Role::Link),
             "ariaCurrent" => {
                 // GPUIX currently exposes current-item state only for links.
                 // Options use ariaSelected; controls expose their checked,
                 // expanded, or value state instead.
-                matches!(self.0, Role::Link)
+                matches!(self.role, Role::Link)
             }
-            "ariaSelected" => matches!(self.0, Role::ListBoxOption),
+            "ariaSelected" => matches!(self.role, Role::ListBoxOption),
             "ariaValue" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
-                matches!(self.0, Role::Slider | Role::SpinButton)
+                matches!(self.role, Role::Slider | Role::SpinButton)
             }
-            "ariaLevel" => matches!(self.0, Role::Heading),
+            "ariaLevel" => matches!(self.role, Role::Heading),
             "ariaRowIndex" => matches!(
-                self.0,
+                self.role,
                 Role::Cell | Role::ColumnHeader | Role::GridCell | Role::Row | Role::RowHeader
             ),
             "ariaColIndex" => matches!(
-                self.0,
+                self.role,
                 Role::Cell | Role::ColumnHeader | Role::GridCell | Role::Row | Role::RowHeader
             ),
             "ariaRowCount" | "ariaColCount" => {
-                matches!(self.0, Role::Grid | Role::Table | Role::TreeGrid)
+                matches!(self.role, Role::Grid | Role::Table | Role::TreeGrid)
             }
             "ariaRowSpan" | "ariaColSpan" => matches!(
-                self.0,
+                self.role,
                 Role::Cell | Role::ColumnHeader | Role::GridCell | Role::RowHeader
             ),
-            "disabled" | "ariaDisabled" => !matches!(self.0, Role::Heading | Role::Image),
+            "disabled" | "ariaDisabled" => !matches!(self.role, Role::Heading | Role::Image),
             _ => true,
         }
     }
@@ -377,6 +386,14 @@ pub(crate) fn has_supported_role(element: &RetainedElement) -> bool {
         .is_some()
 }
 
+pub(crate) fn role_supports_name_from_contents(element: &RetainedElement) -> bool {
+    element
+        .custom_props
+        .get("role")
+        .and_then(AccessibilityRole::parse)
+        .is_some_and(|role| role.into_gpui().is_some() && role.name_from_contents)
+}
+
 pub(crate) fn is_native_disabled(element: &RetainedElement) -> bool {
     bool_prop(element, "disabled")
 }
@@ -487,7 +504,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
 
         if property == "ariaChecked"
             && value.as_str() == Some("mixed")
-            && role == Some(AccessibilityRole(gpui::Role::Switch))
+            && role.is_some_and(|role| role.role == gpui::Role::Switch)
         {
             problems.push(problem(
                 property,
@@ -710,6 +727,50 @@ mod tests {
     }
 
     #[test]
+    fn classifies_every_name_from_contents_role() {
+        assert_eq!(
+            ACCESSIBILITY_ROLE_NAME_FROM_CONTENTS.len(),
+            SUPPORTED_ACCESSIBILITY_ROLE_NAMES.len()
+        );
+        let actual = ACCESSIBILITY_ROLE_NAME_FROM_CONTENTS
+            .iter()
+            .filter_map(|(name, enabled)| enabled.then_some(*name))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            actual,
+            vec![
+                "button",
+                "cell",
+                "checkbox",
+                "columnheader",
+                "comment",
+                "gridcell",
+                "heading",
+                "link",
+                "listitem",
+                "menuitem",
+                "menuitemcheckbox",
+                "menuitemradio",
+                "option",
+                "radio",
+                "row",
+                "rowheader",
+                "switch",
+                "tab",
+                "tooltip",
+                "treeitem",
+                "graphics-object",
+                "doc-backlink",
+                "doc-biblioref",
+                "doc-glossref",
+                "doc-noteref",
+                "doc-subtitle",
+            ]
+        );
+    }
+
+    #[test]
     fn parses_supported_roles_and_valid_states() {
         let mut element = RetainedElement::new(7, "div".to_string(), 1);
         element.custom_props.insert("role".into(), "slider".into());
@@ -732,7 +793,13 @@ mod tests {
         element.custom_props.insert("disabled".into(), true.into());
 
         let props = AccessibilityProps::from_element(&element);
-        assert_eq!(props.role, Some(AccessibilityRole(gpui::Role::Slider)));
+        assert_eq!(
+            props.role,
+            Some(AccessibilityRole {
+                role: gpui::Role::Slider,
+                name_from_contents: false,
+            })
+        );
         assert_eq!(props.label, Some("Clock speed"));
         assert_eq!(props.description, Some("Factory output"));
         assert_eq!(props.value, Some("42 percent"));
