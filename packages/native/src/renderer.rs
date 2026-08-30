@@ -71,6 +71,41 @@ pub(crate) struct PendingStyleDiagnostic {
     kind: DiagnosticKind,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct PendingStyleDiagnostics {
+    diagnostics: Vec<PendingStyleDiagnostic>,
+    reported: usize,
+}
+
+impl PendingStyleDiagnostics {
+    pub(crate) fn push(&mut self, diagnostic: PendingStyleDiagnostic) {
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn extend(
+        &mut self,
+        diagnostics: impl IntoIterator<Item = PendingStyleDiagnostic>,
+    ) {
+        self.diagnostics.extend(diagnostics);
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.diagnostics.clear();
+        self.reported = 0;
+    }
+
+    fn drain(&mut self) -> Vec<PendingStyleDiagnostic> {
+        self.reported = 0;
+        std::mem::take(&mut self.diagnostics)
+    }
+
+    fn take_unreported(&mut self) -> Vec<PendingStyleDiagnostic> {
+        let diagnostics = self.diagnostics[self.reported..].to_vec();
+        self.reported = self.diagnostics.len();
+        diagnostics
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum DiagnosticKind {
     Style,
@@ -373,10 +408,27 @@ fn style_diagnostic_context(
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub(crate) fn drain_style_diagnostics(
-    pending: &Mutex<Vec<PendingStyleDiagnostic>>,
+    pending: &Mutex<PendingStyleDiagnostics>,
     tree: &Mutex<RetainedTree>,
 ) -> Vec<GpuixStyleDiagnostic> {
-    let pending = std::mem::take(&mut *pending.lock().unwrap());
+    let pending = pending.lock().unwrap().drain();
+    style_diagnostics(pending, tree)
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) fn take_style_diagnostics_for_reporting(
+    pending: &Mutex<PendingStyleDiagnostics>,
+    tree: &Mutex<RetainedTree>,
+) -> Vec<GpuixStyleDiagnostic> {
+    let pending = pending.lock().unwrap().take_unreported();
+    style_diagnostics(pending, tree)
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn style_diagnostics(
+    pending: Vec<PendingStyleDiagnostic>,
+    tree: &Mutex<RetainedTree>,
+) -> Vec<GpuixStyleDiagnostic> {
     let tree = tree.lock().unwrap();
     pending
         .into_iter()
@@ -1710,7 +1762,7 @@ pub struct GpuixRenderer {
     selection: SharedSelection,
     image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
-    style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
+    style_diagnostics: Mutex<PendingStyleDiagnostics>,
     canvas_diagnostic_members: Mutex<HashSet<(u64, String)>>,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     ui_commands: Mutex<Option<mpsc::UnboundedSender<UiCommand>>>,
@@ -1896,7 +1948,7 @@ impl GpuixRenderer {
             selection: SharedSelection::default(),
             image_network_policy: crate::custom_elements::img::ImageNetworkPolicy::default(),
             strict_styles: AtomicBool::new(true),
-            style_diagnostics: Mutex::new(Vec::new()),
+            style_diagnostics: Mutex::new(PendingStyleDiagnostics::default()),
             canvas_diagnostic_members: Mutex::new(HashSet::new()),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
@@ -2383,6 +2435,16 @@ impl GpuixRenderer {
                 .expect("non-strict canvas preparation diagnostics cannot throw");
         }
         drain_style_diagnostics(&self.style_diagnostics, &self.tree)
+    }
+
+    /// Return diagnostics not yet sent to stderr without consuming assertion evidence.
+    #[napi]
+    pub fn take_style_diagnostics_for_reporting(&self) -> Vec<GpuixStyleDiagnostic> {
+        if !self.strict_styles.load(Ordering::Relaxed) {
+            self.surface_canvas_preparation_diagnostics()
+                .expect("non-strict canvas preparation diagnostics cannot throw");
+        }
+        take_style_diagnostics_for_reporting(&self.style_diagnostics, &self.tree)
     }
 
     #[napi]

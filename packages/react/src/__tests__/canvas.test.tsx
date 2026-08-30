@@ -538,7 +538,18 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
         </div>
       )
       expect(warn).toHaveBeenCalledTimes(2)
-      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(
+        testRoot.renderer
+          .drainStyleDiagnostics()
+          .map(({ property, testId, value }) => ({ property, testId, value }))
+      ).toEqual([
+        { property: "lineDashOffset", testId: "warning-canvas", value: "op[0]" },
+        {
+          property: "lineDashOffset",
+          testId: "second-warning-canvas",
+          value: "op[0]",
+        },
+      ])
     } finally {
       warn.mockRestore()
       testRoot.unmount()
@@ -664,7 +675,13 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       expect(warn).toHaveBeenCalledWith(
         expect.stringMatching(/warning-clear-canvas.*clearRect.*punch through/)
       )
-      expect(nonStrict.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(nonStrict.renderer.drainStyleDiagnostics()).toEqual([
+        expect.objectContaining({
+          property: "clearRect",
+          testId: "warning-clear-canvas",
+          value: "op[0]",
+        }),
+      ])
     } finally {
       warn.mockRestore()
       nonStrict.unmount()

@@ -36,6 +36,8 @@ export declare class GpuixRenderer {
   setAllowPrivateNetworkImages(enabled: boolean): void
   /** Drain rejected style fields after a commit, once element type and testId are known. */
   drainStyleDiagnostics(): Array<GpuixStyleDiagnostic>
+  /** Return diagnostics not yet sent to stderr without consuming assertion evidence. */
+  takeStyleDiagnosticsForReporting(): Array<GpuixStyleDiagnostic>
   setText(id: number, content: string): void
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   /** Set the root element (called from appendChildToContainer). */
@@ -278,6 +280,7 @@ export declare class TestGpuixRenderer {
    */
   setAllowPrivateNetworkImages(enabled: boolean): void
   drainStyleDiagnostics(): Array<GpuixStyleDiagnostic>
+  takeStyleDiagnosticsForReporting(): Array<GpuixStyleDiagnostic>
   setText(id: number, content: string): void
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   /** Set the root element (called from appendChildToContainer). */

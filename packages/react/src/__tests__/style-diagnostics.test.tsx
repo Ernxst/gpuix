@@ -104,6 +104,72 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     }
   })
 
+  it("drains a rendered style diagnostic exactly once and leaves clean renders empty", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const invalid = createTestRoot({ strictStyles: true })
+
+    try {
+      invalid.render(
+        <div
+          testId="bad-width"
+          style={{ width: "banana" } as unknown as StyleDesc}
+        />
+      )
+
+      const element = invalid.renderer.findByTestId("bad-width")!
+      const diagnostics = invalid.renderer.drainStyleDiagnostics()
+      expect(diagnostics).toHaveLength(1)
+      expect(diagnostics[0]).toMatchObject({
+        elementId: element.id,
+        elementType: "div",
+        testId: "bad-width",
+        property: "width",
+        value: '"banana"',
+        message:
+          `[gpuix] Invalid style on <div testId="bad-width"> (element ${element.id}): ` +
+          'property "width" rejected value "banana": invalid length at byte 0: ' +
+          "expected a number with px, %, or ch",
+      })
+      expect(invalid.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      invalid.unmount()
+    }
+
+    const clean = createTestRoot({ strictStyles: true })
+    try {
+      clean.render(<div testId="valid-width" style={{ width: 320 }} />)
+      expect(clean.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      clean.unmount()
+    }
+  })
+
+  it("drains a rendered accessibility diagnostic with assertion metadata", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    try {
+      testRoot.render(<div testId="roleless-ledger" ariaLabel="Production ledger" />)
+
+      const element = testRoot.renderer.findByTestId("roleless-ledger")!
+      const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+      expect(diagnostics).toHaveLength(1)
+      expect(diagnostics[0]).toMatchObject({
+        elementId: element.id,
+        elementType: "div",
+        testId: "roleless-ledger",
+        property: "ariaLabel",
+        value: '"Production ledger"',
+        message:
+          `[gpuix] Invalid property on <div testId="roleless-ledger"> (element ${element.id}): ` +
+          'property "ariaLabel" rejected value "Production ledger": ' +
+          "requires an explicit supported role",
+      })
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
   it("reports an unknown direct style with element, property, and value", () => {
     const renderer = new TestRenderer()
     renderer.createElement(41, "text")

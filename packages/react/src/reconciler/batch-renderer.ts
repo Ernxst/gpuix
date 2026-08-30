@@ -41,7 +41,8 @@ const MAX_REPORTED_STYLE_DIAGNOSTICS = 1_024
 const reportedStyleDiagnostics = new WeakMap<NativeRenderer, Map<string, undefined>>()
 
 export function reportStyleDiagnostics(renderer: NativeRenderer): void {
-  const diagnostics = renderer.drainStyleDiagnostics?.() ?? []
+  const diagnostics =
+    renderer.takeStyleDiagnosticsForReporting?.() ?? renderer.drainStyleDiagnostics?.() ?? []
   if (diagnostics.length === 0) return
 
   let reported = reportedStyleDiagnostics.get(renderer)

@@ -208,6 +208,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   setStrictStyles(enabled: boolean): void
   setAllowPrivateNetworkImages(enabled: boolean): void
   drainStyleDiagnostics(): StyleDiagnostic[]
+  takeStyleDiagnosticsForReporting(): StyleDiagnostic[]
   captureScreenshot(path: string): void
   compareImages(goldenPath: string, actualPath: string, tolerance: number): ImageComparisonResult
   simulateResize(width: number, height: number): void
@@ -530,6 +531,10 @@ export class TestRenderer implements NativeRenderer {
 
   drainStyleDiagnostics(): StyleDiagnostic[] {
     return this.native.drainStyleDiagnostics()
+  }
+
+  takeStyleDiagnosticsForReporting(): StyleDiagnostic[] {
+    return this.native.takeStyleDiagnosticsForReporting()
   }
 
   // ── GPUI pipeline methods ───────────────────────────────────────
