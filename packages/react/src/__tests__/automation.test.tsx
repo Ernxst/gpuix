@@ -631,6 +631,73 @@ describeNative("automation", () => {
     expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
   })
 
+  it.each([
+    [
+      "A: names a link wrapper from descendant text",
+      <a role="link">
+        <text>Coal Current</text>
+      </a>,
+      { role: "Link", label: "Coal Current" },
+    ],
+    [
+      "B: keeps unroled text exposed as a Label",
+      <div>
+        <text>Coal Current</text>
+      </div>,
+      { role: "Label", value: "Coal Current" },
+    ],
+    [
+      "C: names a roled text host from its contents",
+      <text role="link">Coal Current</text>,
+      { role: "Link", label: "Coal Current" },
+    ],
+    [
+      "D: keeps an explicit link name",
+      <a role="link" ariaLabel="Coal Current">
+        <text>Coal Current</text>
+      </a>,
+      { role: "Link", label: "Coal Current" },
+    ],
+    [
+      "E: names a button wrapper from descendant text",
+      <div role="button">
+        <text>Save</text>
+      </div>,
+      { role: "Button", label: "Save" },
+    ],
+  ] as const)("%s", (_name, contents, expected) => {
+    const { render, renderer } = createTestRoot()
+
+    render(<div>{contents}</div>)
+    renderer.flush()
+    renderer.drawPendingFrame()
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+
+    expect(nodes.find((node) => node.aria.role === expected.role)).toMatchObject({
+      aria: expected,
+    })
+    expect(nodes.some((node) => node.aria.role === "Label")).toBe(expected.role === "Label")
+  })
+
+  it("joins multiple descendant text runs with spaces in a contents-derived name", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <a role="link">
+        <text>OVERVIEW</text>
+        <text>5</text>
+      </a>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+
+    expect(nodes.find((node) => node.aria.role === "Link")).toMatchObject({
+      aria: { role: "Link", label: "OVERVIEW 5" },
+    })
+    expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
+  })
+
   it("omits a child Label when link text matches its name", () => {
     const { render, renderer } = createTestRoot()
 

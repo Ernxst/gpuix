@@ -7088,15 +7088,43 @@ pub(crate) fn build_host_container(
     use gpui::prelude::*;
 
     let flattened_text = (element.element_type == "text").then(|| flatten_text(element, ctx));
-    let text_owns_accessible_name = element.element_type == "text"
-        && crate::accessibility::has_supported_role(element);
+    let text_owns_accessible_name = crate::accessibility::has_supported_role(element)
+        && element
+            .custom_props
+            .get("ariaLabel")
+            .and_then(serde_json::Value::as_str)
+            .is_none();
+    let wrapper_accessible_name =
+        (text_owns_accessible_name && flattened_text.is_none()).then(|| {
+            let mut descendants = vec![element];
+            let mut words = Vec::new();
+            while let Some(descendant) = descendants.pop() {
+                if crate::accessibility::is_hidden(descendant) {
+                    continue;
+                }
+                if let Some(content) = &descendant.content {
+                    words.extend(content.split_whitespace());
+                }
+                descendants.extend(
+                    descendant
+                        .children
+                        .iter()
+                        .rev()
+                        .filter_map(|id| ctx.tree.elements.get(id)),
+                );
+            }
+            words.join(" ")
+        });
     let name_from_contents = text_owns_accessible_name
         .then(|| {
-            flattened_text
-                .as_ref()
-                .expect("text hosts are flattened before accessibility is applied")
-                .accessibility_text
-                .as_str()
+            flattened_text.as_ref().map_or_else(
+                || {
+                    wrapper_accessible_name
+                        .as_deref()
+                        .expect("roled wrappers are flattened before accessibility is applied")
+                },
+                |text| text.accessibility_text.as_str(),
+            )
         })
         .filter(|name| !name.is_empty());
 
