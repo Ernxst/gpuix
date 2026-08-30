@@ -1105,6 +1105,8 @@ export interface NativeRenderer {
   /** Capture a frame in a capability-advertised image format. */
   captureScreenshot?(path: string): void
   drainStyleDiagnostics?(): StyleDiagnostic[]
+  /** @internal Read diagnostics not yet reported without consuming the public drain. */
+  takeStyleDiagnosticsForReporting?(): StyleDiagnostic[]
 
   // ── Application lifecycle ──────────────────────────────────────
   setMenus?(menus: MenuSpec[]): void

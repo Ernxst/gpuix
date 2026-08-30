@@ -32,10 +32,10 @@ use crate::renderer::{
     has_application_menus, init_application_menu_support, install_application_menus,
     parse_canvas_image_source, parse_debug_frame_overlay_mode, parse_style_json,
     pending_accessibility_diagnostics, pending_custom_prop_diagnostic,
-    pending_style_diagnostics, set_application_menus, to_element_id, validate_canvas_target,
-    AnimationFrameCallback, CanvasImageLoadState, DebugFrameOverlayStats, EventCallback,
-    FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostic,
-    WindowSize,
+    pending_style_diagnostics, set_application_menus, take_style_diagnostics_for_reporting,
+    to_element_id, validate_canvas_target, AnimationFrameCallback, CanvasImageLoadState,
+    DebugFrameOverlayStats, EventCallback, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView,
+    MenuSpec, PendingStyleDiagnostics, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -406,7 +406,7 @@ pub struct TestGpuixRenderer {
     selection: crate::text::SharedSelection,
     image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     strict_styles: AtomicBool,
-    style_diagnostics: Mutex<Vec<PendingStyleDiagnostic>>,
+    style_diagnostics: Mutex<PendingStyleDiagnostics>,
     canvas_diagnostic_members: Mutex<HashSet<(u64, String)>>,
     animation_frame_timestamp_origin: FrameTimestampOrigin,
     /// Mouse-down origin for the current GPUI active-state sequence. Retained
@@ -522,7 +522,7 @@ impl TestGpuixRenderer {
             selection,
             image_network_policy,
             strict_styles: AtomicBool::new(true),
-            style_diagnostics: Mutex::new(Vec::new()),
+            style_diagnostics: Mutex::new(PendingStyleDiagnostics::default()),
             canvas_diagnostic_members: Mutex::new(HashSet::new()),
             animation_frame_timestamp_origin: Arc::new(Mutex::new(None)),
             active_pointer_origin: Mutex::new(None),
@@ -643,6 +643,15 @@ impl TestGpuixRenderer {
                 .expect("non-strict canvas preparation diagnostics cannot throw");
         }
         drain_style_diagnostics(&self.style_diagnostics, &self.tree)
+    }
+
+    #[napi]
+    pub fn take_style_diagnostics_for_reporting(&self) -> Vec<GpuixStyleDiagnostic> {
+        if !self.strict_styles.load(Ordering::Relaxed) {
+            self.surface_canvas_preparation_diagnostics()
+                .expect("non-strict canvas preparation diagnostics cannot throw");
+        }
+        take_style_diagnostics_for_reporting(&self.style_diagnostics, &self.tree)
     }
 
     #[napi]
