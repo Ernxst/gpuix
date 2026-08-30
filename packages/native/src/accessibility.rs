@@ -1,3 +1,5 @@
+use std::fmt;
+
 use gpui::StatefulInteractiveElement;
 
 use crate::{
@@ -19,83 +21,221 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaValueMax",
     "ariaValueNow",
     "ariaLevel",
+    "ariaRowIndex",
+    "ariaColIndex",
+    "ariaRowCount",
+    "ariaColCount",
+    "ariaRowSpan",
+    "ariaColSpan",
     "ariaDisabled",
     "ariaHidden",
     "disabled",
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AccessibilityRole {
-    Button,
-    CheckBox,
-    Heading,
-    Image,
-    Link,
-    Option,
-    Slider,
-    SpinButton,
-    Switch,
-    TextBox,
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct AccessibilityRole(gpui::Role);
+
+impl fmt::Debug for AccessibilityRole {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+macro_rules! define_accessibility_roles {
+    ($($name:literal => $role:ident),+ $(,)?) => {
+        #[cfg(test)]
+        const SUPPORTED_ACCESSIBILITY_ROLE_NAMES: &[&str] = &[$($name),+];
+
+        impl AccessibilityRole {
+            fn parse(value: &serde_json::Value) -> Option<Self> {
+                match value.as_str()? {
+                    $($name => Some(Self(gpui::Role::$role)),)+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+define_accessibility_roles! {
+    "alert" => Alert,
+    "alertdialog" => AlertDialog,
+    "application" => Application,
+    "article" => Article,
+    "banner" => Banner,
+    "blockquote" => Blockquote,
+    "button" => Button,
+    "caption" => Caption,
+    "cell" => Cell,
+    "checkbox" => CheckBox,
+    "code" => Code,
+    "columnheader" => ColumnHeader,
+    "combobox" => ComboBox,
+    "comment" => Comment,
+    "complementary" => Complementary,
+    "contentinfo" => ContentInfo,
+    "definition" => Definition,
+    "deletion" => ContentDeletion,
+    "dialog" => Dialog,
+    "document" => Document,
+    "emphasis" => Emphasis,
+    "feed" => Feed,
+    "figure" => Figure,
+    "form" => Form,
+    "generic" => GenericContainer,
+    "grid" => Grid,
+    "gridcell" => GridCell,
+    "group" => Group,
+    "heading" => Heading,
+    "img" => Image,
+    "insertion" => ContentInsertion,
+    "link" => Link,
+    "list" => List,
+    "listbox" => ListBox,
+    "listitem" => ListItem,
+    "log" => Log,
+    "main" => Main,
+    "mark" => Mark,
+    "marquee" => Marquee,
+    "math" => Math,
+    "menu" => Menu,
+    "menubar" => MenuBar,
+    "menuitem" => MenuItem,
+    "menuitemcheckbox" => MenuItemCheckBox,
+    "menuitemradio" => MenuItemRadio,
+    "meter" => Meter,
+    "navigation" => Navigation,
+    "none" => GenericContainer,
+    "note" => Note,
+    "option" => ListBoxOption,
+    "paragraph" => Paragraph,
+    "presentation" => GenericContainer,
+    "progressbar" => ProgressIndicator,
+    "radio" => RadioButton,
+    "radiogroup" => RadioGroup,
+    "region" => Region,
+    "row" => Row,
+    "rowgroup" => RowGroup,
+    "rowheader" => RowHeader,
+    "scrollbar" => ScrollBar,
+    "search" => Search,
+    "searchbox" => SearchInput,
+    "sectionfooter" => SectionFooter,
+    "sectionheader" => SectionHeader,
+    "separator" => Splitter,
+    "slider" => Slider,
+    "spinbutton" => SpinButton,
+    "status" => Status,
+    "strong" => Strong,
+    "suggestion" => Suggestion,
+    "switch" => Switch,
+    "tab" => Tab,
+    "table" => Table,
+    "tablist" => TabList,
+    "tabpanel" => TabPanel,
+    "term" => Term,
+    "textbox" => TextInput,
+    "time" => Time,
+    "timer" => Timer,
+    "toolbar" => Toolbar,
+    "tooltip" => Tooltip,
+    "tree" => Tree,
+    "treegrid" => TreeGrid,
+    "treeitem" => TreeItem,
+    "graphics-document" => GraphicsDocument,
+    "graphics-object" => GraphicsObject,
+    "graphics-symbol" => GraphicsSymbol,
+    "doc-abstract" => DocAbstract,
+    "doc-acknowledgments" => DocAcknowledgements,
+    "doc-afterword" => DocAfterword,
+    "doc-appendix" => DocAppendix,
+    "doc-backlink" => DocBackLink,
+    "doc-biblioentry" => DocBiblioEntry,
+    "doc-bibliography" => DocBibliography,
+    "doc-biblioref" => DocBiblioRef,
+    "doc-chapter" => DocChapter,
+    "doc-colophon" => DocColophon,
+    "doc-conclusion" => DocConclusion,
+    "doc-cover" => DocCover,
+    "doc-credit" => DocCredit,
+    "doc-credits" => DocCredits,
+    "doc-dedication" => DocDedication,
+    "doc-endnote" => DocEndnote,
+    "doc-endnotes" => DocEndnotes,
+    "doc-epigraph" => DocEpigraph,
+    "doc-epilogue" => DocEpilogue,
+    "doc-errata" => DocErrata,
+    "doc-example" => DocExample,
+    "doc-footnote" => DocFootnote,
+    "doc-foreword" => DocForeword,
+    "doc-glossary" => DocGlossary,
+    "doc-glossref" => DocGlossRef,
+    "doc-index" => DocIndex,
+    "doc-introduction" => DocIntroduction,
+    "doc-noteref" => DocNoteRef,
+    "doc-notice" => DocNotice,
+    "doc-pagebreak" => DocPageBreak,
+    "doc-pagefooter" => DocPageFooter,
+    "doc-pageheader" => DocPageHeader,
+    "doc-pagelist" => DocPageList,
+    "doc-part" => DocPart,
+    "doc-preface" => DocPreface,
+    "doc-prologue" => DocPrologue,
+    "doc-pullquote" => DocPullquote,
+    "doc-qna" => DocQna,
+    "doc-subtitle" => DocSubtitle,
+    "doc-tip" => DocTip,
+    "doc-toc" => DocToc,
 }
 
 impl AccessibilityRole {
-    fn parse(value: &serde_json::Value) -> Option<Self> {
-        match value.as_str()? {
-            "button" => Some(Self::Button),
-            "checkbox" => Some(Self::CheckBox),
-            "heading" => Some(Self::Heading),
-            "img" => Some(Self::Image),
-            "link" => Some(Self::Link),
-            "option" => Some(Self::Option),
-            "slider" => Some(Self::Slider),
-            "spinbutton" => Some(Self::SpinButton),
-            "switch" => Some(Self::Switch),
-            "textbox" => Some(Self::TextBox),
-            _ => None,
-        }
-    }
-
-    fn into_gpui(self) -> gpui::Role {
-        match self {
-            Self::Button => gpui::Role::Button,
-            Self::CheckBox => gpui::Role::CheckBox,
-            Self::Heading => gpui::Role::Heading,
-            Self::Image => gpui::Role::Image,
-            Self::Link => gpui::Role::Link,
-            Self::Option => gpui::Role::ListBoxOption,
-            Self::Slider => gpui::Role::Slider,
-            Self::SpinButton => gpui::Role::SpinButton,
-            Self::Switch => gpui::Role::Switch,
-            Self::TextBox => gpui::Role::TextInput,
-        }
+    fn into_gpui(self) -> Option<gpui::Role> {
+        (self.0 != gpui::Role::GenericContainer).then_some(self.0)
     }
 
     fn supports_specialized_action(self, action: gpui::AccessibleAction) -> bool {
         match action {
             gpui::AccessibleAction::Increment | gpui::AccessibleAction::Decrement => {
-                matches!(self, Self::Slider | Self::SpinButton)
+                matches!(self.0, gpui::Role::Slider | gpui::Role::SpinButton)
             }
-            gpui::AccessibleAction::Focus => true,
+            gpui::AccessibleAction::Focus => self.into_gpui().is_some(),
             _ => false,
         }
     }
 
     fn supports(self, property: &str) -> bool {
+        use gpui::Role;
+
         match property {
-            "ariaChecked" => matches!(self, Self::CheckBox | Self::Switch),
-            "ariaExpanded" => matches!(self, Self::Button | Self::Link),
+            "ariaChecked" => matches!(self.0, Role::CheckBox | Role::Switch),
+            "ariaExpanded" => matches!(self.0, Role::Button | Role::Link),
             "ariaCurrent" => {
-                // Of the roles GPUIX currently admits, only links represent
-                // destinations. Options use ariaSelected; controls expose
-                // their checked, expanded, or value state instead.
-                matches!(self, Self::Link)
+                // GPUIX currently exposes current-item state only for links.
+                // Options use ariaSelected; controls expose their checked,
+                // expanded, or value state instead.
+                matches!(self.0, Role::Link)
             }
-            "ariaSelected" => matches!(self, Self::Option),
+            "ariaSelected" => matches!(self.0, Role::ListBoxOption),
             "ariaValue" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
-                matches!(self, Self::Slider | Self::SpinButton)
+                matches!(self.0, Role::Slider | Role::SpinButton)
             }
-            "ariaLevel" => matches!(self, Self::Heading),
-            "disabled" | "ariaDisabled" => !matches!(self, Self::Heading | Self::Image),
+            "ariaLevel" => matches!(self.0, Role::Heading),
+            "ariaRowIndex" => matches!(
+                self.0,
+                Role::Cell | Role::ColumnHeader | Role::GridCell | Role::Row | Role::RowHeader
+            ),
+            "ariaColIndex" => matches!(
+                self.0,
+                Role::Cell | Role::ColumnHeader | Role::GridCell | Role::Row | Role::RowHeader
+            ),
+            "ariaRowCount" | "ariaColCount" => {
+                matches!(self.0, Role::Grid | Role::Table | Role::TreeGrid)
+            }
+            "ariaRowSpan" | "ariaColSpan" => matches!(
+                self.0,
+                Role::Cell | Role::ColumnHeader | Role::GridCell | Role::RowHeader
+            ),
+            "disabled" | "ariaDisabled" => !matches!(self.0, Role::Heading | Role::Image),
             _ => true,
         }
     }
@@ -128,6 +268,12 @@ struct AccessibilityProps<'a> {
     value_max: Option<f64>,
     value_now: Option<f64>,
     level: Option<usize>,
+    row_index: Option<usize>,
+    column_index: Option<usize>,
+    row_count: Option<usize>,
+    column_count: Option<usize>,
+    row_span: Option<usize>,
+    column_span: Option<usize>,
     disabled: bool,
 }
 
@@ -178,12 +324,13 @@ impl<'a> AccessibilityProps<'a> {
             value_min: finite_number(element.custom_props.get("ariaValueMin")),
             value_max: finite_number(element.custom_props.get("ariaValueMax")),
             value_now: finite_number(element.custom_props.get("ariaValueNow")),
-            level: element
-                .custom_props
-                .get("ariaLevel")
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|level| usize::try_from(level).ok())
-                .filter(|level| *level > 0),
+            level: positive_integer(element.custom_props.get("ariaLevel")),
+            row_index: positive_integer(element.custom_props.get("ariaRowIndex")),
+            column_index: positive_integer(element.custom_props.get("ariaColIndex")),
+            row_count: positive_integer(element.custom_props.get("ariaRowCount")),
+            column_count: positive_integer(element.custom_props.get("ariaColCount")),
+            row_span: positive_integer(element.custom_props.get("ariaRowSpan")),
+            column_span: positive_integer(element.custom_props.get("ariaColSpan")),
             disabled: is_action_disabled(element),
         }
     }
@@ -193,6 +340,13 @@ fn finite_number(value: Option<&serde_json::Value>) -> Option<f64> {
     value
         .and_then(serde_json::Value::as_f64)
         .filter(|value| value.is_finite())
+}
+
+fn positive_integer(value: Option<&serde_json::Value>) -> Option<usize> {
+    value
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value > 0)
 }
 
 fn bool_prop(element: &RetainedElement, key: &str) -> bool {
@@ -219,6 +373,7 @@ pub(crate) fn has_supported_role(element: &RetainedElement) -> bool {
         .custom_props
         .get("role")
         .and_then(AccessibilityRole::parse)
+        .and_then(AccessibilityRole::into_gpui)
         .is_some()
 }
 
@@ -290,7 +445,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
         problems.push(problem(
             "role",
             value,
-            "unsupported accessibility role; expected button, checkbox, heading, img, link, option, slider, spinbutton, switch, or textbox",
+            "unsupported accessibility role; expected a WAI-ARIA role with an AccessKit mapping",
         ));
     }
 
@@ -305,7 +460,8 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
             "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
                 value.as_f64().is_none_or(|number| !number.is_finite())
             }
-            "ariaLevel" => value.as_u64().is_none_or(|level| level == 0),
+            "ariaLevel" | "ariaRowIndex" | "ariaColIndex" | "ariaRowCount" | "ariaColCount"
+            | "ariaRowSpan" | "ariaColSpan" => positive_integer(Some(value)).is_none(),
             _ => false,
         };
         if malformed {
@@ -316,7 +472,13 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
                     "one of \"page\", \"step\", \"location\", \"date\", \"time\", \"true\", or \"false\""
                 }
                 "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => "a finite number",
-                "ariaLevel" => "a positive integer",
+                "ariaLevel"
+                | "ariaRowIndex"
+                | "ariaColIndex"
+                | "ariaRowCount"
+                | "ariaColCount"
+                | "ariaRowSpan"
+                | "ariaColSpan" => "a positive integer",
                 _ => "a boolean",
             };
             problems.push(problem(property, value, format!("expected {expected}")));
@@ -325,7 +487,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
 
         if property == "ariaChecked"
             && value.as_str() == Some("mixed")
-            && role == Some(AccessibilityRole::Switch)
+            && role == Some(AccessibilityRole(gpui::Role::Switch))
         {
             problems.push(problem(
                 property,
@@ -348,6 +510,12 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
                 | "ariaValueMax"
                 | "ariaValueNow"
                 | "ariaLevel"
+                | "ariaRowIndex"
+                | "ariaColIndex"
+                | "ariaRowCount"
+                | "ariaColCount"
+                | "ariaRowSpan"
+                | "ariaColSpan"
                 | "disabled"
                 | "ariaDisabled"
         ) {
@@ -422,8 +590,8 @@ where
 
     let props = AccessibilityProps::from_element(element);
 
-    if let Some(role) = props.role {
-        el = el.role(role.into_gpui());
+    if let Some(role) = props.role.and_then(AccessibilityRole::into_gpui) {
+        el = el.role(role);
     }
     if let Some(author_id) = &element.author_id {
         el = el.accessibility_id(author_id.clone());
@@ -460,6 +628,24 @@ where
     }
     if let Some(level) = props.level {
         el = el.aria_level(level);
+    }
+    if let Some(index) = props.row_index {
+        el = el.aria_row_index(index);
+    }
+    if let Some(index) = props.column_index {
+        el = el.aria_column_index(index);
+    }
+    if let Some(count) = props.row_count {
+        el = el.aria_row_count(count);
+    }
+    if let Some(count) = props.column_count {
+        el = el.aria_column_count(count);
+    }
+    if let Some(span) = props.row_span {
+        el = el.aria_row_span(span);
+    }
+    if let Some(span) = props.column_span {
+        el = el.aria_column_span(span);
     }
     if props.disabled {
         el = el.aria_disabled(true);
@@ -507,6 +693,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parses_every_declared_accessibility_role() {
+        let unique = SUPPORTED_ACCESSIBILITY_ROLE_NAMES
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+
+        assert_eq!(SUPPORTED_ACCESSIBILITY_ROLE_NAMES.len(), 128);
+        assert_eq!(unique.len(), SUPPORTED_ACCESSIBILITY_ROLE_NAMES.len());
+        for name in SUPPORTED_ACCESSIBILITY_ROLE_NAMES {
+            assert!(
+                AccessibilityRole::parse(&serde_json::Value::String((*name).to_string())).is_some(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn parses_supported_roles_and_valid_states() {
         let mut element = RetainedElement::new(7, "div".to_string(), 1);
         element.custom_props.insert("role".into(), "slider".into());
@@ -529,7 +732,7 @@ mod tests {
         element.custom_props.insert("disabled".into(), true.into());
 
         let props = AccessibilityProps::from_element(&element);
-        assert_eq!(props.role, Some(AccessibilityRole::Slider));
+        assert_eq!(props.role, Some(AccessibilityRole(gpui::Role::Slider)));
         assert_eq!(props.label, Some("Clock speed"));
         assert_eq!(props.description, Some("Factory output"));
         assert_eq!(props.value, Some("42 percent"));

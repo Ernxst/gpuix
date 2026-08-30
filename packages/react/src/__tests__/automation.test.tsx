@@ -895,6 +895,129 @@ describeNative("automation", () => {
     })
   })
 
+  it("publishes table hierarchy and row, column, count, and span properties", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div role="table" ariaLabel="Power ledger" ariaRowCount={3} ariaColCount={3}>
+        <div role="rowgroup">
+          <div role="row" ariaRowIndex={1}>
+            <text role="columnheader" ariaColIndex={1}>
+              Site
+            </text>
+            <text role="columnheader" ariaColIndex={2} ariaColSpan={2}>
+              Power
+            </text>
+          </div>
+          <div role="row" ariaRowIndex={2}>
+            <text role="rowheader" ariaColIndex={1}>
+              Alpha
+            </text>
+            <text role="cell" ariaColIndex={2} ariaRowSpan={2} ariaColSpan={2}>
+              42 MW
+            </text>
+          </div>
+          <div role="row" ariaRowIndex={3}>
+            <text role="rowheader" ariaColIndex={1}>
+              Beta
+            </text>
+          </div>
+        </div>
+      </div>
+    )
+
+    const tree = renderer.getAccessibilityTree()
+    const entries = Object.entries(tree.nodes)
+    const table = entries.find(([, node]) => node.aria.role === "Table")!
+    const rowGroup = entries.find(([, node]) => node.aria.role === "RowGroup")!
+    const rows = entries.filter(([, node]) => node.aria.role === "Row")
+    const headerRow = rows.find(([, node]) => node.aria.row_index === 1)!
+    const alphaRow = rows.find(([, node]) => node.aria.row_index === 2)!
+    const betaRow = rows.find(([, node]) => node.aria.row_index === 3)!
+
+    expect(table[1].aria).toMatchObject({
+      role: "Table",
+      label: "Power ledger",
+      row_count: 3,
+      column_count: 3,
+    })
+    expect(table[1].children).toEqual([rowGroup[0]])
+    expect(rowGroup[1].children).toEqual([headerRow[0], alphaRow[0], betaRow[0]])
+    expect(headerRow[1].children?.map((key) => tree.nodes[key]?.aria.role)).toEqual([
+      "ColumnHeader",
+      "ColumnHeader",
+    ])
+    expect(alphaRow[1].children?.map((key) => tree.nodes[key]?.aria.role)).toEqual([
+      "RowHeader",
+      "Cell",
+    ])
+    expect(
+      entries.find(([, node]) => node.aria.label === "Power")?.[1].aria
+    ).toMatchObject({ column_index: 2, column_span: 2 })
+    expect(
+      entries.find(([, node]) => node.aria.label === "42 MW")?.[1].aria
+    ).toMatchObject({ column_index: 2, row_span: 2, column_span: 2 })
+  })
+
+  it("publishes named list and region nodes with nested list items", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <ul role="list" aria-label="Site state">
+          <li role="listitem" ariaLabel="Online" />
+          <li role="listitem" ariaLabel="Paused" />
+        </ul>
+        <section role="region" tabIndex={0} aria-label="Sites and routes" />
+      </div>
+    )
+
+    const tree = renderer.getAccessibilityTree()
+    const entries = Object.entries(tree.nodes)
+    const list = entries.find(([, node]) => node.aria.label === "Site state")!
+    const region = entries.find(([, node]) => node.aria.label === "Sites and routes")!
+
+    expect(list[1].aria.role).toBe("List")
+    expect(list[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
+      expect.objectContaining({ role: "ListItem", label: "Online" }),
+      expect.objectContaining({ role: "ListItem", label: "Paused" }),
+    ])
+    expect(region[1].aria).toMatchObject({ role: "Region", label: "Sites and routes" })
+    expect(renderer.drainStyleDiagnostics()).toEqual([])
+  })
+
+  it("publishes selected options inside their listbox container", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div role="listbox" ariaLabel="Recipe">
+        <text role="option" ariaSelected>
+          Turbo motor
+        </text>
+        <text role="option" ariaSelected={false}>
+          Cooling system
+        </text>
+      </div>
+    )
+
+    const tree = renderer.getAccessibilityTree()
+    const entries = Object.entries(tree.nodes)
+    const listbox = entries.find(([, node]) => node.aria.role === "ListBox")!
+
+    expect(listbox[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
+      expect.objectContaining({
+        role: "ListBoxOption",
+        label: "Turbo motor",
+        selected: true,
+      }),
+      expect.objectContaining({
+        role: "ListBoxOption",
+        label: "Cooling system",
+        selected: false,
+      }),
+    ])
+  })
+
   it("dispatches value and focus actions and reflects semantic focus", () => {
     const actions: string[] = []
     const { render, renderer } = createTestRoot()

@@ -1,4 +1,143 @@
 // GPUIX React - React bindings for GPUI
+/**
+ * Native ARIA roles translated to AccessKit.
+ *
+ * Consumers may declaration-merge web-only roles into this interface when a
+ * shared React tree targets both GPUIX and the DOM.
+ */
+export interface AccessibilityRoleRegistry {
+  alert: true
+  alertdialog: true
+  application: true
+  article: true
+  banner: true
+  blockquote: true
+  button: true
+  caption: true
+  cell: true
+  checkbox: true
+  code: true
+  columnheader: true
+  combobox: true
+  comment: true
+  complementary: true
+  contentinfo: true
+  definition: true
+  deletion: true
+  dialog: true
+  document: true
+  emphasis: true
+  feed: true
+  figure: true
+  form: true
+  generic: true
+  grid: true
+  gridcell: true
+  group: true
+  heading: true
+  img: true
+  insertion: true
+  link: true
+  list: true
+  listbox: true
+  listitem: true
+  log: true
+  main: true
+  mark: true
+  marquee: true
+  math: true
+  menu: true
+  menubar: true
+  menuitem: true
+  menuitemcheckbox: true
+  menuitemradio: true
+  meter: true
+  navigation: true
+  none: true
+  note: true
+  option: true
+  paragraph: true
+  presentation: true
+  progressbar: true
+  radio: true
+  radiogroup: true
+  region: true
+  row: true
+  rowgroup: true
+  rowheader: true
+  scrollbar: true
+  search: true
+  searchbox: true
+  sectionfooter: true
+  sectionheader: true
+  separator: true
+  slider: true
+  spinbutton: true
+  status: true
+  strong: true
+  suggestion: true
+  switch: true
+  tab: true
+  table: true
+  tablist: true
+  tabpanel: true
+  term: true
+  textbox: true
+  time: true
+  timer: true
+  toolbar: true
+  tooltip: true
+  tree: true
+  treegrid: true
+  treeitem: true
+  "graphics-document": true
+  "graphics-object": true
+  "graphics-symbol": true
+  "doc-abstract": true
+  "doc-acknowledgments": true
+  "doc-afterword": true
+  "doc-appendix": true
+  "doc-backlink": true
+  "doc-biblioentry": true
+  "doc-bibliography": true
+  "doc-biblioref": true
+  "doc-chapter": true
+  "doc-colophon": true
+  "doc-conclusion": true
+  "doc-cover": true
+  "doc-credit": true
+  "doc-credits": true
+  "doc-dedication": true
+  "doc-endnote": true
+  "doc-endnotes": true
+  "doc-epigraph": true
+  "doc-epilogue": true
+  "doc-errata": true
+  "doc-example": true
+  "doc-footnote": true
+  "doc-foreword": true
+  "doc-glossary": true
+  "doc-glossref": true
+  "doc-index": true
+  "doc-introduction": true
+  "doc-noteref": true
+  "doc-notice": true
+  "doc-pagebreak": true
+  "doc-pagefooter": true
+  "doc-pageheader": true
+  "doc-pagelist": true
+  "doc-part": true
+  "doc-preface": true
+  "doc-prologue": true
+  "doc-pullquote": true
+  "doc-qna": true
+  "doc-subtitle": true
+  "doc-tip": true
+  "doc-toc": true
+}
+
+export type AccessibilityRole = keyof AccessibilityRoleRegistry & string
+
 export { createRoot, flushSync } from "./reconciler/index.js"
 export { __applyCanvasCommands } from "./canvas/commands.js"
 export { createImageBitmap, Image } from "./canvas/image.js"
@@ -87,7 +226,6 @@ export type {
 export type { MotionDivProps } from "./components/index.js"
 export type {
   AccessibilityAction,
-  AccessibilityRole,
   CanvasProps,
   CanvasPublicInstance,
   CursorValue,
