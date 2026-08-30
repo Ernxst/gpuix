@@ -51,6 +51,73 @@ describeNative("keyboard focus", () => {
     expect(focusedLabel()).toBe("two")
   })
 
+  it("scrolls a plain overflow container only when tab focus leaves the viewport", () => {
+    testRoot.render(
+      <div
+        testId="plain-scroller"
+        style={{ width: 240, height: 80, overflowY: "scroll" }}
+      >
+        {Array.from({ length: 6 }, (_, index) => (
+          <a
+            key={index}
+            href={`/${index}`}
+            ariaLabel={`row-${index}`}
+            style={{ width: 200, height: 40, flexShrink: 0 }}
+          >
+            <text>{`Row ${index}`}</text>
+          </a>
+        ))}
+      </div>
+    )
+
+    const scroller = testRoot.renderer.findByTestId("plain-scroller")!
+    expect(testRoot.renderer.getScrollOffset(scroller.id)).toEqual([0, 0])
+
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("row-0")
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("row-1")
+    expect(testRoot.renderer.getScrollOffset(scroller.id)).toEqual([0, 0])
+
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("row-2")
+    expect(testRoot.renderer.getScrollOffset(scroller.id)?.[1] ?? 0).toBeLessThan(0)
+  })
+
+  it("scrolls a virtual list when tab focus leaves its visible rows", () => {
+    testRoot.render(
+      <virtual-list
+        overdraw={0}
+        estimatedItemHeight={40}
+        style={{ width: 240, height: 80 }}
+      >
+        {Array.from({ length: 12 }, (_, index) => (
+          <a
+            key={index}
+            href={`/${index}`}
+            ariaLabel={`virtual-row-${index}`}
+            style={{ width: 200, height: 40, flexShrink: 0 }}
+          >
+            <text>{`Virtual row ${index}`}</text>
+          </a>
+        ))}
+      </virtual-list>
+    )
+
+    const list = testRoot.renderer.findByType("virtual-list")[0]!
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(0)
+
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("virtual-row-0")
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("virtual-row-1")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(0)
+
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("virtual-row-2")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeLessThan(0)
+  })
+
   it("does not race autoFocus or steal focus from editors", () => {
     function Editors() {
       const [input, setInput] = React.useState("")
