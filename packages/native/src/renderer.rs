@@ -1387,11 +1387,7 @@ async fn run_ui_commands(
                 })
             }
             UiCommand::FocusElement(id) => window.update(cx, move |view, window, cx| {
-                view.reveal_virtual_list_ancestor(id);
-                if let Some(handle) = view.focus_handles.get(&id) {
-                    handle.focus(window, cx);
-                }
-                cx.notify();
+                view.focus_element_and_reveal(id, window, cx);
                 window.refresh();
             }),
             UiCommand::SetPointerCapture { id, response } => {
@@ -3255,11 +3251,7 @@ impl GpuixRenderer {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
         return update_window(move |view, window, cx| {
-            view.reveal_virtual_list_ancestor(id);
-            if let Some(handle) = view.focus_handles.get(&id) {
-                handle.focus(window, cx);
-            }
-            cx.notify();
+            view.focus_element_and_reveal(id, window, cx);
             window.refresh();
         });
 
@@ -4798,11 +4790,7 @@ impl WebGpuixRenderer {
     pub fn focus_element(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
         update_web_window(move |view, window, cx| {
-            view.reveal_virtual_list_ancestor(id);
-            if let Some(handle) = view.focus_handles.get(&id) {
-                handle.focus(window, cx);
-            }
-            cx.notify();
+            view.focus_element_and_reveal(id, window, cx);
         })
     }
 
@@ -5205,6 +5193,10 @@ pub(crate) struct GpuixView {
     /// Created lazily for elements with overflow: "scroll" (or per-axis scroll).
     /// Handles persist across renders so GPUI maintains scroll offset state.
     pub(crate) scroll_handles: HashMap<u64, gpui::ScrollHandle>,
+    /// Minimal-scroll anchors for focusable elements and nested scrollers.
+    /// Each anchor targets the nearest ordinary overflow ancestor; virtual
+    /// lists use their item-aware `ListState` path instead.
+    focus_scroll_anchors: HashMap<u64, FocusScrollAnchor>,
     /// Native animation clocks keyed by retained element ID.
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
     /// Hit-test state reported by GPUI's interactive-element callbacks.
@@ -5248,6 +5240,11 @@ pub(crate) struct GpuixView {
 pub(crate) struct InteractiveStyleState {
     pub hovered: bool,
     pub active: bool,
+}
+
+struct FocusScrollAnchor {
+    scroller_id: u64,
+    anchor: gpui::ScrollAnchor,
 }
 
 impl InteractiveStyleState {
@@ -5402,6 +5399,7 @@ impl GpuixView {
             focus_subscriptions: HashMap::new(),
             custom_registry: CustomElementRegistry::with_defaults(),
             scroll_handles: HashMap::new(),
+            focus_scroll_anchors: HashMap::new(),
             motion_states: HashMap::new(),
             interactive_style_states: HashMap::new(),
             hover_target: None,
@@ -5596,6 +5594,7 @@ impl GpuixView {
             canvas_image_store: &self.canvas_image_store,
             event_callback: &callback,
             focus_handles: &self.focus_handles,
+            focus_scroll_anchors: &self.focus_scroll_anchors,
             scroll_handles: &mut self.scroll_handles,
             custom_registry: &mut self.custom_registry,
             virtual_lists: &mut self.virtual_lists,
@@ -5718,6 +5717,20 @@ impl GpuixView {
         };
         self.scroll_virtual_list_to_item(list_id, index, 0.0)
     }
+
+    pub(crate) fn focus_element_and_reveal(
+        &mut self,
+        id: u64,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.reveal_virtual_list_ancestor(id);
+        if let Some(handle) = self.focus_handles.get(&id) {
+            handle.focus(window, cx);
+            self.scroll_focused_element_into_view(id, cx);
+        }
+        cx.notify();
+    }
 }
 
 /// Everything `build_element` threads through the tree.
@@ -5731,6 +5744,7 @@ pub(crate) struct BuildCtx<'a> {
     pub canvas_image_store: &'a crate::custom_elements::img::SharedCanvasImageStore,
     pub event_callback: &'a Option<EventCallback>,
     pub focus_handles: &'a HashMap<u64, gpui::FocusHandle>,
+    focus_scroll_anchors: &'a HashMap<u64, FocusScrollAnchor>,
     pub scroll_handles: &'a mut HashMap<u64, gpui::ScrollHandle>,
     pub custom_registry: &'a mut CustomElementRegistry,
     virtual_lists: &'a mut HashMap<u64, VirtualListEntry>,
@@ -6261,6 +6275,141 @@ impl VirtualListEntry {
 }
 
 impl GpuixView {
+    fn focus_next_action(
+        &mut self,
+        _: &FocusNext,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.focus_unrendered_virtual_target(FocusDirection::Next, window, cx) {
+            window.focus_next(cx);
+            self.scroll_current_focus_into_view(window, cx);
+        }
+    }
+
+    fn focus_previous_action(
+        &mut self,
+        _: &FocusPrevious,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.focus_unrendered_virtual_target(FocusDirection::Previous, window, cx) {
+            window.focus_prev(cx);
+            self.scroll_current_focus_into_view(window, cx);
+        }
+    }
+
+    fn scroll_current_focus_into_view(
+        &mut self,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if let Some(id) = self
+            .focus_handles
+            .iter()
+            .find_map(|(id, handle)| handle.is_focused(window).then_some(*id))
+        {
+            self.scroll_focused_element_into_view(id, cx);
+        }
+    }
+
+    fn focus_unrendered_virtual_target(
+        &mut self,
+        direction: FocusDirection,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(current_id) = self
+            .focus_handles
+            .iter()
+            .find_map(|(id, handle)| handle.is_focused(window).then_some(*id))
+        else {
+            return false;
+        };
+
+        let tree_arc = self.tree.clone();
+        let tree = tree_arc.lock().unwrap();
+        let Some(list_id) = virtual_list_ancestor_id(&tree, current_id) else {
+            return false;
+        };
+
+        let Some(root_id) = tree.root_id else {
+            return false;
+        };
+        let mut stack = vec![root_id];
+        let mut order = 0usize;
+        let mut focusable = Vec::new();
+        while let Some(id) = stack.pop() {
+            let is_focusable = self
+                .focus_handles
+                .get(&id)
+                .is_some_and(|handle| handle.tab_stop && handle.tab_index >= 0);
+            if is_focusable {
+                focusable.push((id, order));
+                order += 1;
+            }
+            if let Some(element) = tree.elements.get(&id) {
+                stack.extend(element.children.iter().rev().copied());
+            }
+        }
+        focusable.sort_by_key(|(id, document_order)| {
+            let tab_index = self.focus_handles[id].tab_index;
+            if tab_index > 0 {
+                (0, tab_index, *document_order)
+            } else {
+                (1, 0, *document_order)
+            }
+        });
+
+        let Some(current_index) = focusable.iter().position(|(id, _)| *id == current_id) else {
+            return false;
+        };
+        let target_index = match direction {
+            FocusDirection::Next => current_index.checked_add(1),
+            FocusDirection::Previous => current_index.checked_sub(1),
+        };
+        let Some(target_id) = target_index
+            .and_then(|index| focusable.get(index))
+            .map(|(id, _)| *id)
+        else {
+            return false;
+        };
+        if virtual_list_ancestor_id(&tree, target_id) != Some(list_id) {
+            return false;
+        }
+        let Some(row_id) = virtual_row_ancestor(&tree, list_id, target_id) else {
+            return false;
+        };
+        let Some(entry) = self.virtual_lists.get(&list_id) else {
+            return false;
+        };
+        let Some(row_index) = entry.logical_index_of(row_id) else {
+            return false;
+        };
+        let outside_viewport = entry
+            .state
+            .item_is_above_viewport(row_index)
+            .unwrap_or(true)
+            || entry
+                .state
+                .item_is_below_viewport(row_index)
+                .unwrap_or(true);
+        if !outside_viewport {
+            return false;
+        }
+
+        let Some(handle) = self.focus_handles.get(&target_id).cloned() else {
+            return false;
+        };
+        let state = entry.state.clone();
+        drop(tree);
+        handle.focus(window, cx);
+        state.scroll_to_reveal_item(row_index);
+        self.scroll_current_focus_into_view(window, cx);
+        cx.notify();
+        true
+    }
+
     /// Sync focus handles with the current element tree.
     /// Creates handles for new focusable elements, subscribes on_focus/on_blur,
     /// and cleans up handles for destroyed elements.
@@ -6292,6 +6441,7 @@ impl GpuixView {
                 || element.events.contains("focus")
                 || element.events.contains("blur")
         };
+        let mut pending_auto_focus = Vec::new();
         // Create handles for elements that need focus but don't have one yet.
         for (&id, element) in &tree.elements {
             let tab_index = tab_index(element).or_else(|| {
@@ -6308,7 +6458,7 @@ impl GpuixView {
                 // Focus once, at creation. Re-focusing every frame would
                 // steal focus back from whatever the user clicked next.
                 if element.auto_focus && !native_disabled {
-                    handle.focus(window, cx);
+                    pending_auto_focus.push((id, handle.clone()));
                 }
                 self.focus_handles.insert(id, handle);
             } else if let (Some(handle), Some(index)) =
@@ -6321,10 +6471,18 @@ impl GpuixView {
             }
         }
 
+        // Clean up handles for elements that no longer exist before deriving
+        // scroll anchors and subscriptions from the live focus set.
+        self.focus_handles
+            .retain(|id, _| tree.elements.get(id).is_some_and(&needs_focus));
+        self.sync_focus_scroll_anchors(tree);
+
         self.focus_subscriptions.retain(|(id, event), _| {
-            tree.elements
-                .get(id)
-                .is_some_and(|element| element.events.contains(event))
+            self.focus_handles.contains_key(id)
+                && tree
+                    .elements
+                    .get(id)
+                    .is_some_and(|element| element.events.contains(event))
         });
         for (&id, element) in &tree.elements {
             let Some(handle) = self.focus_handles.get(&id).cloned() else {
@@ -6351,9 +6509,101 @@ impl GpuixView {
             }
         }
 
-        // Clean up handles for elements that no longer exist.
-        self.focus_handles
-            .retain(|id, _| tree.elements.get(id).is_some_and(&needs_focus));
+        // Subscribe before applying autoFocus so its public focus event is not
+        // missed during the initial render.
+        for (id, handle) in pending_auto_focus {
+            handle.focus(window, cx);
+            let view = cx.weak_entity();
+            window.on_next_frame(move |window, app| {
+                view.update(app, |view, cx| {
+                    if handle.is_focused(window) {
+                        view.scroll_focused_element_into_view(id, cx);
+                    }
+                })
+                .ok();
+            });
+        }
+    }
+
+    fn sync_focus_scroll_anchors(&mut self, tree: &RetainedTree) {
+        let mut targets: HashSet<u64> = self.focus_handles.keys().copied().collect();
+        targets.extend(
+            tree.elements
+                .values()
+                .filter(|element| is_overflow_scroller(element))
+                .map(|element| element.id),
+        );
+
+        let mut previous = std::mem::take(&mut self.focus_scroll_anchors);
+        for id in targets {
+            let Some(ScrollAncestor::Overflow(scroller_id)) = nearest_scroll_ancestor(tree, id)
+            else {
+                continue;
+            };
+            let anchor = previous
+                .remove(&id)
+                .filter(|entry| entry.scroller_id == scroller_id)
+                .map(|entry| entry.anchor)
+                .unwrap_or_else(|| {
+                    let handle = self.scroll_handles.entry(scroller_id).or_default().clone();
+                    gpui::ScrollAnchor::for_handle(handle)
+                });
+            self.focus_scroll_anchors.insert(
+                id,
+                FocusScrollAnchor {
+                    scroller_id,
+                    anchor,
+                },
+            );
+        }
+    }
+
+    fn scroll_focused_element_into_view(
+        &mut self,
+        id: u64,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let tree_arc = self.tree.clone();
+        let tree = tree_arc.lock().unwrap();
+        let mut current = id;
+        let mut requested = false;
+
+        while let Some(ancestor) = nearest_scroll_ancestor(&tree, current) {
+            match ancestor {
+                ScrollAncestor::Overflow(scroller_id) => {
+                    if let Some(entry) = self
+                        .focus_scroll_anchors
+                        .get(&current)
+                        .filter(|entry| entry.scroller_id == scroller_id)
+                    {
+                        entry.anchor.scroll_to_reveal();
+                        requested = true;
+                    } else if let Some(index) = direct_child_index(&tree, scroller_id, current) {
+                        if let Some(handle) = self.scroll_handles.get(&scroller_id) {
+                            handle.scroll_to_item(index);
+                            requested = true;
+                        }
+                    }
+                    current = scroller_id;
+                }
+                ScrollAncestor::VirtualList(list_id) => {
+                    if let Some(row_id) = virtual_row_ancestor(&tree, list_id, current) {
+                        if let Some(entry) = self.virtual_lists.get(&list_id) {
+                            if let Some(index) = entry.logical_index_of(row_id) {
+                                entry.state.scroll_to_reveal_item(index);
+                                requested = true;
+                            }
+                        }
+                    }
+                    current = list_id;
+                }
+            }
+        }
+        drop(tree);
+
+        if requested {
+            cx.notify();
+        }
     }
 }
 
@@ -6444,6 +6694,7 @@ impl gpui::Render for GpuixView {
                     canvas_image_store: &self.canvas_image_store,
                     event_callback: &callback,
                     focus_handles: &self.focus_handles,
+                    focus_scroll_anchors: &self.focus_scroll_anchors,
                     scroll_handles: &mut self.scroll_handles,
                     custom_registry: &mut self.custom_registry,
                     virtual_lists: &mut self.virtual_lists,
@@ -6478,8 +6729,8 @@ impl gpui::Render for GpuixView {
                 .size_full()
                 .text_color(gpui::rgba(0xe2e2e2ff))
                 .track_focus(&self.root_focus_handle)
-                .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
-                .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx));
+                .on_action(cx.listener(Self::focus_next_action))
+                .on_action(cx.listener(Self::focus_previous_action));
             with_window_menu_actions(root)
                 .child(selection_frame_reset(self.selection.clone()))
                 .child(crate::automation::bounds_frame_reset())
@@ -6719,6 +6970,7 @@ pub(crate) fn build_element(
                 tracks_mouse_hover: tracks_mouse_hover_events(element, ctx.tree),
                 event_callback: ctx.event_callback,
                 focus_handle: ctx.focus_handles.get(&id),
+                scroll_anchor: ctx.focus_scroll_anchors.get(&id).map(|entry| &entry.anchor),
                 style,
                 children: custom_children,
                 selection: ctx.selection.clone(),
@@ -6894,6 +7146,74 @@ fn virtual_row_ancestor(tree: &RetainedTree, list_id: u64, element_id: u64) -> O
             return Some(current);
         }
         current = parent;
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ScrollAncestor {
+    Overflow(u64),
+    VirtualList(u64),
+}
+
+#[derive(Clone, Copy)]
+enum FocusDirection {
+    Next,
+    Previous,
+}
+
+fn is_overflow_scroller(element: &crate::retained_tree::RetainedElement) -> bool {
+    element.style.as_deref().is_some_and(|style| {
+        [
+            style.overflow.as_deref(),
+            style.overflow_x.as_deref(),
+            style.overflow_y.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| value == "scroll")
+    })
+}
+
+fn nearest_scroll_ancestor(tree: &RetainedTree, element_id: u64) -> Option<ScrollAncestor> {
+    let mut current = element_id;
+    loop {
+        let parent_id = tree.elements.get(&current)?.parent?;
+        let parent = tree.elements.get(&parent_id)?;
+        if parent.element_type == "virtual-list" {
+            return Some(ScrollAncestor::VirtualList(parent_id));
+        }
+        if is_overflow_scroller(parent) {
+            return Some(ScrollAncestor::Overflow(parent_id));
+        }
+        current = parent_id;
+    }
+}
+
+fn direct_child_index(tree: &RetainedTree, ancestor_id: u64, element_id: u64) -> Option<usize> {
+    let mut current = element_id;
+    loop {
+        let parent_id = tree.elements.get(&current)?.parent?;
+        if parent_id == ancestor_id {
+            return tree
+                .elements
+                .get(&ancestor_id)?
+                .children
+                .iter()
+                .position(|child| *child == current);
+        }
+        current = parent_id;
+    }
+}
+
+fn virtual_list_ancestor_id(tree: &RetainedTree, element_id: u64) -> Option<u64> {
+    let mut current = element_id;
+    loop {
+        let parent_id = tree.elements.get(&current)?.parent?;
+        let parent = tree.elements.get(&parent_id)?;
+        if parent.element_type == "virtual-list" {
+            return Some(parent_id);
+        }
+        current = parent_id;
     }
 }
 
@@ -7247,6 +7567,9 @@ pub(crate) fn build_host_container(
         if let Some(handle) = ctx.focus_handles.get(&element.id) {
             el = el.track_focus(handle);
         }
+    }
+    if let Some(entry) = ctx.focus_scroll_anchors.get(&element.id) {
+        el = el.anchor_scroll(Some(entry.anchor.clone()));
     }
     el = crate::accessibility::apply(
         el,

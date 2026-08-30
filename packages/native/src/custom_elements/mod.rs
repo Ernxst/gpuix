@@ -41,6 +41,8 @@ pub struct CustomRenderContext<'a> {
     pub event_callback: &'a Option<EventCallback>,
     /// Pre-created FocusHandle for this element (if it has keyboard/focus listeners).
     pub focus_handle: Option<&'a gpui::FocusHandle>,
+    /// Anchor that reveals this custom root inside its nearest overflow ancestor.
+    pub scroll_anchor: Option<&'a gpui::ScrollAnchor>,
     /// Style object from the retained element for layout and appearance.
     pub style: Option<&'a crate::style::StyleDesc>,
     /// Built child elements from the retained tree for this custom node.
@@ -200,6 +202,7 @@ fn wire_hover_and_style_transition_events<E: gpui::StatefulInteractiveElement>(
     ctx: &CustomRenderContext,
     cx: &mut gpui::Context<crate::renderer::GpuixView>,
 ) -> E {
+    el = el.anchor_scroll(ctx.scroll_anchor.cloned());
     let id = ctx.id;
     let transition_hover = ctx
         .style
