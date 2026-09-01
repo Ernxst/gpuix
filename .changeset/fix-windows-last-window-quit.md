@@ -9,4 +9,4 @@ Closing the window already stopped the GPUI UI thread. The Node/bun process stay
 
 `tick()` now returns `false` after that thread ends. `render()` already exits on that signal.
 
-Fixes #32
+Upstream: remorses/gpuix#32

@@ -15,4 +15,4 @@ new TestGpuixRenderer()
 
 Use `hasTestGpuixRenderer` (and `isNativeTestRendererAvailable()` from `@gpuix/react/testing`) to skip GPU tests. `GpuixRenderer` is unchanged and still works on Linux.
 
-Fixes #30
+Upstream: remorses/gpuix#30
