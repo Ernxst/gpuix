@@ -177,6 +177,18 @@ export declare class GpuixRenderer {
    * Returns [x, y] or null if the element has no scroll handle.
    */
   getScrollOffset(elementId: number): Array<number> | null
+  /**
+   * Web-shaped scroll geometry for a scrollable element, as
+   * `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]`,
+   * or null when the element is not a scroll container. Unlike
+   * `getScrollOffset` the offsets use the DOM's positive convention.
+   */
+  getScrollMetrics(elementId: number): Array<number> | null
+  /**
+   * Reveal one element inside every scrollable ancestor, as
+   * `Element.scrollIntoView()` does, without moving focus.
+   */
+  scrollElementIntoView(elementId: number): void
   getAutomationTree(): string
   getElementBounds(id: number): Array<number> | null
   getAllText(): Array<string>
@@ -488,6 +500,20 @@ export declare class TestGpuixRenderer {
    * Returns [x, y] or null if the element has no scroll handle.
    */
   getScrollOffset(elementId: number): Array<number> | null
+  /**
+   * Web-shaped scroll geometry for a scrollable element, as
+   * `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]`,
+   * or null when the element is not a scroll container. Unlike
+   * `getScrollOffset` the offsets use the DOM's positive convention.
+   * Call flush() before this so the element has painted bounds.
+   */
+  getScrollMetrics(elementId: number): Array<number> | null
+  /**
+   * Reveal one element inside every scrollable ancestor, as
+   * `Element.scrollIntoView()` does, without moving focus.
+   * Call flush() after to apply the scroll and re-render.
+   */
+  scrollElementIntoView(elementId: number): void
   /**
    * Capture a screenshot of the current rendered state and save as PNG.
    * Supported on macOS through Metal and Windows through DirectX.

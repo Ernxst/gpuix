@@ -1169,7 +1169,9 @@ export interface NativeRenderer {
 
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
-   *  x and y are negative pixel values (scroll down = more negative y). */
+   *  x and y are negative pixel values (scroll down = more negative y).
+   *  This is gpui's sign convention; `PublicInstance.scrollTo()` and
+   *  `PublicInstance.scrollTop` expose the same scroll under the DOM's. */
   scrollTo?(elementId: number, x: number, y: number): void
   /** Scroll a child into view by its index in the children list.
    *  `offsetInItem` is in pixels; a negative value anchors the viewport top
@@ -1181,6 +1183,13 @@ export interface NativeRenderer {
    *  `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
    *  else. `itemIndex == item count` is gpui's at-end sentinel. */
   getListScrollTop?(elementId: number): Array<number> | null
+  /** Web-shaped scroll geometry for a scrollable element:
+   *  `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]`,
+   *  or null when the element is not a scroll container. The offsets use the
+   *  DOM's positive convention, unlike `getScrollOffset`. */
+  getScrollMetrics?(elementId: number): Array<number> | null
+  /** Reveal an element inside every scrollable ancestor, without moving focus. */
+  scrollElementIntoView?(elementId: number): void
 
   // ── Selection API ──────────────────────────────────────────────
   /** The current text selection joined in document order, or null. */
@@ -1364,6 +1373,38 @@ export interface PublicInstance {
   blur(): void
   setPointerCapture(): void
   releasePointerCapture(): void
+  /**
+   * Pixels this element's content is scrolled down, matching
+   * `Element.scrollTop`: 0 at the top, growing positive as content scrolls up
+   * out of view. Assigning scrolls the element and is clamped natively.
+   * Reads 0 for an element that is not a scroll container.
+   */
+  scrollTop: number
+  /** Pixels scrolled right, matching `Element.scrollLeft`. */
+  scrollLeft: number
+  /** Scrollable content width, matching `Element.scrollWidth`. */
+  readonly scrollWidth: number
+  /** Scrollable content height, matching `Element.scrollHeight`. So
+   *  `scrollTop + clientHeight >= scrollHeight` means "scrolled to the bottom". */
+  readonly scrollHeight: number
+  /** Viewport width, matching `Element.clientWidth`. */
+  readonly clientWidth: number
+  /** Viewport height, matching `Element.clientHeight`. */
+  readonly clientHeight: number
+  /**
+   * Scroll to an absolute offset in DOM coordinates, matching
+   * `Element.scrollTo()`. `behavior` is accepted and ignored: every scroll
+   * here is instant.
+   */
+  scrollTo(options: ScrollToOptions): void
+  scrollTo(x: number, y: number): void
+  /**
+   * Reveal this element inside every scrollable ancestor, matching
+   * `Element.scrollIntoView()`. The scroll is the minimum that brings the
+   * element's row into view; alignment and behavior options are accepted for
+   * DOM-shaped call sites and ignored.
+   */
+  scrollIntoView(options?: boolean | ScrollIntoViewOptions): void
   parentId: number | null
   getAttribute(name: string): string | null
   /**

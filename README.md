@@ -1250,6 +1250,36 @@ renderer.scrollToItem(elementId, index)   // scroll child into view
 renderer.getScrollOffset(elementId)       // returns [x, y] or null
 ```
 
+The ref itself also carries the `Element` scroll API, so a component shared with
+the web reads and writes scroll position the same way in both renderers. These
+use the **DOM's sign convention** — `scrollTop` is `0` at the top and grows
+positive as content scrolls up out of view — while the renderer methods above
+keep gpui's negative offsets:
+
+```tsx
+const ref = useRef<PublicInstance>(null)
+
+ref.current.scrollTop            // pixels scrolled down (positive)
+ref.current.scrollLeft           // pixels scrolled right (positive)
+ref.current.scrollHeight         // scrollable content height
+ref.current.scrollWidth          // scrollable content width
+ref.current.clientHeight         // viewport height
+ref.current.clientWidth          // viewport width
+
+ref.current.scrollTop = ref.current.scrollHeight   // jump to the bottom
+ref.current.scrollTo({ top: 240 })                 // instant; `behavior` is ignored
+ref.current.scrollIntoView()                       // reveal inside every scroll ancestor
+
+// "Am I at the bottom?" — the standard DOM test
+const atBottom =
+  ref.current.scrollTop + ref.current.clientHeight >= ref.current.scrollHeight
+```
+
+An element that is not a scroll container reports its viewport for
+`clientWidth` / `clientHeight`, a matching scroll extent, and `0` offsets.
+`scrollIntoView()` scrolls the minimum needed to reveal the element's row;
+alignment options are accepted for DOM-shaped call sites and ignored.
+
 ## Virtual lists
 
 Use `<virtual-list>` for **long, variable-height collections** such as message
@@ -3408,6 +3438,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Scroll wheel events with delta and touch phase
 - [x] Scrollable containers (`overflow: "scroll"`) with persistent scroll state
 - [x] Programmatic scroll API (`scrollTo`, `scrollToItem`, `getScrollOffset`)
+- [x] `Element`-shaped scroll properties on refs (`scrollTop`, `scrollHeight`, `clientHeight`, `scrollIntoView()`)
 - [x] Keyboard events (keyDown, keyUp) with focus management
 - [x] Focus/blur events with automatic FocusHandle creation
 - [x] GPU-backed test renderer with screenshot capture

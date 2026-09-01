@@ -1681,6 +1681,45 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Web-shaped scroll geometry for a scrollable element, as
+    /// `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]`,
+    /// or null when the element is not a scroll container. Unlike
+    /// `getScrollOffset` the offsets use the DOM's positive convention.
+    /// Call flush() before this so the element has painted bounds.
+    #[napi]
+    pub fn get_scroll_metrics(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
+        let id = to_element_id(element_id)?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            let result = cx
+                .update_window(window, |_, _window, app| {
+                    view.update(app, |view, _cx| {
+                        view.scroll_metrics(id).map(|metrics| metrics.to_vec())
+                    })
+                })
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(result)
+        })
+    }
+
+    /// Reveal one element inside every scrollable ancestor, as
+    /// `Element.scrollIntoView()` does, without moving focus.
+    /// Call flush() after to apply the scroll and re-render.
+    #[napi]
+    pub fn scroll_element_into_view(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, cx| {
+                    view.scroll_element_into_view(id, cx);
+                });
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(())
+        })
+    }
+
     /// Capture a screenshot of the current rendered state and save as PNG.
     /// Supported on macOS through Metal and Windows through DirectX.
     #[napi]
