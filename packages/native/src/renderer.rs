@@ -4746,7 +4746,7 @@ impl WebGpuixRenderer {
         &self,
         default_prevented: bool,
     ) -> Result<(), wasm_bindgen::JsValue> {
-        update_web_window(move |view, window, cx| {
+        update_web_view(move |view, window, cx| {
             view.resolve_tab_key_down(default_prevented, window, cx);
         })
     }
