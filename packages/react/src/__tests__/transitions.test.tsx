@@ -4,6 +4,7 @@ import React from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
+import { motion } from "../index.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
@@ -27,6 +28,48 @@ const customTransitionStyle = (expanded: boolean) => ({
 })
 
 describeNative("native style transitions", () => {
+  it("ignores an extreme duration for spring easing through state styles", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const root = createTestRoot({ strictStyles: true })
+    try {
+      root.renderer.clockPause()
+      root.render(
+        <div style={{ width: 300, height: 120, padding: 10 }}>
+          <div
+            testId="spring-hover-target"
+            style={{
+              width: 100,
+              height: 80,
+              opacity: 0.2,
+              hover: { width: 200, opacity: 0.8 },
+              transition: {
+                properties: ["width", "opacity"],
+                durationMs: 1e300,
+                easing: { type: "spring" },
+              },
+            }}
+          />
+        </div>
+      )
+
+      const target = root.renderer.findByTestId("spring-hover-target")!
+      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+
+      root.renderer.advanceAsyncClock(100)
+      expect(root.renderer.getResolvedStyle(target.id)?.width).toBeCloseTo(134.03, 1)
+      root.renderer.advanceAsyncClock(200)
+      expect(root.renderer.getResolvedStyle(target.id)?.width).toBeGreaterThan(200)
+      root.renderer.advanceAsyncClock(4_000)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({ width: 200, opacity: 0.8 })
+      expect(warn).not.toHaveBeenCalled()
+      expect(root.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      root.unmount()
+      warn.mockRestore()
+    }
+  })
+
   it("interpolates React-driven style updates from the visible value", () => {
     const root = createTestRoot()
     const card = (expanded: boolean) => (
@@ -925,6 +968,37 @@ describeNative("native style transitions", () => {
       error.mockRestore()
       root.unmount()
       internalColourRoot.unmount()
+    }
+  })
+})
+
+describeNative("motion spring easing", () => {
+  it("samples overshoot natively and ignores a fixed duration", () => {
+    const root = createTestRoot()
+    try {
+      root.renderer.clockPause()
+      root.render(
+        <motion.div
+          testId="motion-spring-target"
+          initial={{ width: 0, opacity: 0 }}
+          animate={{ width: 100, opacity: 1 }}
+          transition={{
+            duration: 0,
+            ease: { type: "spring", stiffness: 100, damping: 10, mass: 1 },
+          }}
+          style={{ height: 80 }}
+        />
+      )
+
+      const target = root.renderer.findByTestId("motion-spring-target")!
+      root.renderer.advanceAsyncClock(100)
+      expect(root.renderer.getResolvedStyle(target.id)?.width).toBeCloseTo(34.03, 1)
+      root.renderer.advanceAsyncClock(200)
+      expect(root.renderer.getResolvedStyle(target.id)?.width).toBeGreaterThan(100)
+      root.renderer.advanceAsyncClock(4_000)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({ width: 100, opacity: 1 })
+    } finally {
+      root.unmount()
     }
   })
 })

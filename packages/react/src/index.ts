@@ -249,6 +249,7 @@ export type {
   HighlightSpec,
   MotionEase,
   MotionProps,
+  MotionSpringEase,
   MotionStyle,
   MotionTransition,
   NativeStateStyle,
@@ -261,7 +262,9 @@ export type {
   StyleDiagnostic,
   NativeWindowInsets,
   StyleDesc,
+  StyleSpringTransition,
   TransitionProperty,
+  StyleTweenTransition,
 } from "./types/host.js"
 export { handleGpuixEvent } from "./reconciler/event-registry.js"
 export type {
