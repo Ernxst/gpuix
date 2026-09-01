@@ -225,7 +225,7 @@ describeNative("TestRenderer query cache", () => {
       )
       expectCompatibilityMutation(
         "setCustomProp",
-        ["setCustomProp", rootId, "testId", "structural"],
+        ["setCustomPropValue", rootId, "testId", "structural"],
         () => renderer.setCustomProp(rootId, "testId", JSON.stringify("structural"))
       )
       const batchesBeforeInvalidCustomProp = applyBatch.mock.calls.length

@@ -3,7 +3,7 @@ import type { NativeRenderer } from "../types/host.js"
 import { wrapWithBatching } from "../reconciler/batch-renderer.js"
 
 describe("batch renderer error propagation", () => {
-  it("sends JSON-looking custom-prop strings as raw batch values", () => {
+  it("sends raw custom-prop values through the raw-value opcode", () => {
     const inner = {
       applyBatch: vi.fn(() => []),
     } satisfies NativeRenderer
@@ -15,10 +15,10 @@ describe("batch renderer error propagation", () => {
     renderer.flushMutations()
 
     expect(JSON.parse(inner.applyBatch.mock.calls[0][0])).toEqual([
-      ["setCustomProp", 1, "code", "true"],
-      ["setCustomProp", 2, "code", "null"],
-      ["setCustomProp", 3, "code", '{"a":1}'],
-      ["setCustomProp", 4, "code", '"quoted"'],
+      ["setCustomPropValue", 1, "code", "true"],
+      ["setCustomPropValue", 2, "code", "null"],
+      ["setCustomPropValue", 3, "code", '{"a":1}'],
+      ["setCustomPropValue", 4, "code", '"quoted"'],
     ])
   })
 

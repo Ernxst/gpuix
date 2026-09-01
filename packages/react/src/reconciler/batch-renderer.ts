@@ -1,8 +1,9 @@
 /// Buffers React mutations into one applyBatch() FFI call per commit.
 ///
-/// Queue raw objects for setStyle / setCustomProp. Do not JSON.stringify them
-/// first. The outer applyBatch stringify would escape that string again, and
-/// Rust would parse twice. A 10k-row mount spent 626ms in applyBatch that way.
+/// Queue raw objects for setStyle and raw values through setCustomPropValue.
+/// Do not JSON.stringify them first. The outer applyBatch stringify would
+/// escape that string again, and Rust would parse twice. A 10k-row mount spent
+/// 626ms in applyBatch that way.
 ///
 /// ## Batch timing
 ///
@@ -63,7 +64,7 @@ export function wrapWithBatching(inner: NativeRenderer): MutationRenderer {
       queue.push(["setRoot", id])
     },
     setCustomProp(id, key, value) {
-      queue.push(["setCustomProp", id, key, value])
+      queue.push(["setCustomPropValue", id, key, value])
     },
     flushMutations() {
       if (queue.length === 0) {

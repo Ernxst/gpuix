@@ -478,7 +478,7 @@ export class TestRenderer implements NativeRenderer {
 
   setCustomProp(id: number, key: string, valueJson: string): void {
     const value = JSON.parse(valueJson) as MutationTuple[number]
-    this.applyCompatibilityMutation(["setCustomProp", id, key, value])
+    this.applyCompatibilityMutation(["setCustomPropValue", id, key, value])
   }
 
   flushMutations(): void {

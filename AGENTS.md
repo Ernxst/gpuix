@@ -636,16 +636,15 @@ The 10k chat mount was 850ms. profano said:
 React was not the problem. The batch **stringified every style and theme**, then
 stringified the queue, then Rust parsed each escaped string again.
 
-Queue **raw values**. `setStyle` and `setCustomProp` carry JSON values inside
-the outer batch; never encode either value first. `applyBatch` decodes that
-outer JSON exactly once, so a string such as `"true"` stays a string. Rust also
-accepts the legacy `setCustomPropValue` opcode with the same raw-value
-semantics. Only the direct legacy `TestGpuixRenderer.setCustomProp(valueJson)`
-method accepts an encoded JSON argument.
+Queue **raw objects**. Opcode `setCustomPropValue` carries a raw JSON value.
+`setCustomProp` still accepts a JSON **string** for legacy consumers: strings
+containing valid JSON are decoded once, while other strings stay strings. New
+reconcilers must use `setCustomPropValue`, or a raw JSON-looking string such as
+`"true"` will become a boolean when an older native renderer decodes it.
 
 ```ts
 queue.push(['setStyle', id, styleObject])
-queue.push(['setCustomProp', id, 'side', 'top'])
+queue.push(['setCustomPropValue', id, 'side', 'top'])
 ```
 
 After a JS reconciler change, **build `@gpuix/react`**. `examples/` and

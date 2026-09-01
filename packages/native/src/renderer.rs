@@ -2603,7 +2603,7 @@ impl GpuixRenderer {
     ///   ["setText",          id, "content"]
     ///   ["setEventListener", id, "eventType", true|false]
     ///   ["setRoot",          id]
-    ///   ["setCustomProp",      id, "key", value]
+    ///   ["setCustomProp",      id, "key", value | "{valueJson}"]
     ///   ["setCustomPropValue", id, "key", value]
     ///
     /// Returns accumulated destroyed IDs from all destroyElement ops.
@@ -9035,6 +9035,24 @@ impl<'de> serde::Deserialize<'de> for StrArg<'de> {
     }
 }
 
+/// A legacy `setCustomProp` payload: a JSON string gets decoded, anything else
+/// is taken as-is. `setCustomPropValue` skips this and stores the raw value.
+struct LegacyPropArg(serde_json::Value);
+
+impl<'de> serde::Deserialize<'de> for LegacyPropArg {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if let serde_json::Value::String(encoded) = &value {
+            return Ok(LegacyPropArg(
+                serde_json::from_str(encoded).unwrap_or_else(|_| value.clone()),
+            ));
+        }
+        Ok(LegacyPropArg(value))
+    }
+}
+
 /// `hasHandler` arrives as a bool from the reconciler and as a non-negative
 /// integer from hand-written batches. That is exactly what `as_bool()` then
 /// `as_u64()` accepted before, so a negative or fractional number stays an
@@ -9139,7 +9157,7 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
                     "setCustomProp" => BatchOp::SetCustomProp {
                         id: next_id(&mut seq, "id")?,
                         key: next_arg::<A, StrArg>(&mut seq, "prop key")?.0.into_owned(),
-                        value: next_arg(&mut seq, "custom prop value")?,
+                        value: next_arg::<A, LegacyPropArg>(&mut seq, "custom prop value")?.0,
                     },
                     "setCustomPropValue" => BatchOp::SetCustomProp {
                         id: next_id(&mut seq, "id")?,
@@ -10123,32 +10141,28 @@ mod batch_tests {
     }
 
     #[test]
-    fn set_custom_prop_preserves_raw_json_looking_strings() {
-        for value in ["true", "null", r#"{"a":1}"#, r#""quoted""#, "ordinary text"] {
-            let mut tree = RetainedTree::new();
-            let json = serde_json::json!([
-                ["createElement", 1, "code"],
-                ["setCustomProp", 1, "code", value],
-            ])
-            .to_string();
+    fn set_custom_prop_decodes_legacy_json_input() {
+        let mut tree = RetainedTree::new();
+        apply(
+            &mut tree,
+            r#"[["createElement",1,"img"],["setCustomProp",1,"src","{\"kind\":\"path\",\"url\":\"/tmp/a.png\"}"]]"#,
+        )
+        .expect("legacy encoded custom-prop operation");
 
-            apply(&mut tree, &json).expect("raw custom-prop string");
-            assert_eq!(
-                tree.get_custom_prop(1, "code"),
-                Some(&serde_json::Value::String(value.to_owned())),
-                "{value:?} must stay a string"
-            );
-        }
+        assert_eq!(
+            tree.get_custom_prop(1, "src"),
+            Some(&serde_json::json!({ "kind": "path", "url": "/tmp/a.png" }))
+        );
     }
 
     #[test]
-    fn legacy_set_custom_prop_value_still_preserves_raw_values() {
+    fn set_custom_prop_value_preserves_raw_values() {
         let mut tree = RetainedTree::new();
         apply(
             &mut tree,
             r#"[["createElement",1,"code"],["setCustomPropValue",1,"code","true"],["setCustomPropValue",1,"metadata",{"language":"txt"}]]"#,
         )
-        .expect("legacy raw custom-prop operations");
+        .expect("raw custom-prop operations");
 
         assert_eq!(
             tree.get_custom_prop(1, "code"),
