@@ -1123,6 +1123,15 @@ impl TestGpuixRenderer {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         let button = button.unwrap_or(0);
         let result = with_test_state(self.state_id, |cx, window, _view| {
+            // A real click is delivered to the active window. The offscreen
+            // platform has no activation callback, so model that step here.
+            cx.update_window(window, |_, window, app| {
+                if !window.is_window_active() {
+                    window.simulate_active_status_change(true, app);
+                }
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+
             // Not `cx.simulate_click`: that helper hard-codes the left button,
             // so a right click silently became a left click.
             let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
@@ -1166,6 +1175,21 @@ impl TestGpuixRenderer {
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
+
+            // Offscreen windows receive no platform activation. Tab traversal
+            // nevertheless models input to the active production window, and
+            // GPUI intentionally suppresses focus paths for inactive windows.
+            if keystrokes
+                .iter()
+                .any(|keystroke| keystroke.key.eq_ignore_ascii_case("tab"))
+            {
+                cx.update_window(window, |_, window, app| {
+                    if !window.is_window_active() {
+                        window.simulate_active_status_change(true, app);
+                    }
+                })
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            }
 
             for keystroke in keystrokes {
                 // Match GPUI's simulated key-down/text-input path before releasing the key.
@@ -1255,6 +1279,9 @@ impl TestGpuixRenderer {
             let view = view.clone();
 
             cx.update_window(window, |_, window, app| {
+                if !window.is_window_active() {
+                    window.simulate_active_status_change(true, app);
+                }
                 view.update(app, |view, cx| {
                     view.focus_element_and_reveal(id, window, cx);
                 });

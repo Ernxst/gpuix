@@ -5,6 +5,7 @@ import {
   isNativeTestRendererAvailable,
   type TestRoot,
 } from "../testing.js"
+import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -49,6 +50,79 @@ describeNative("keyboard focus", () => {
 
     testRoot.renderer.simulateKeystrokes("shift-tab")
     expect(focusedLabel()).toBe("two")
+  })
+
+  it("delivers focus and blur handlers for click, programmatic, and keyboard focus moves", () => {
+    const events: string[] = []
+    const record = (label: string, event: GpuixSyntheticEvent): void => {
+      events.push(
+        `${event.type}:${label}:${event.eventPhase}:${event.bubbles}:${event.cancelable}`
+      )
+      event.preventDefault()
+      expect(event.defaultPrevented).toBe(false)
+    }
+    testRoot.render(
+      <div
+        onFocusCapture={(event) => record("parent-capture", event)}
+        onFocus={(event) => record("parent-bubble", event)}
+        onBlurCapture={(event) => record("parent-capture", event)}
+        onBlur={(event) => record("parent-bubble", event)}
+        style={{ width: 400, height: 200 }}
+      >
+        <a
+          href="/one"
+          testId="one"
+          onFocus={(event) => record("one", event)}
+          onBlur={(event) => record("one", event)}
+          style={{ width: 200, height: 40 }}
+        >
+          <text>One</text>
+        </a>
+        <a
+          href="/two"
+          onFocus={(event) => record("two", event)}
+          onBlur={(event) => record("two", event)}
+          style={{ width: 200, height: 40 }}
+        >
+          <text>Two</text>
+        </a>
+      </div>
+    )
+
+    const first = testRoot.renderer.findByTestId("one")!
+    testRoot.renderer.focusElement(first.id)
+    expect(events).toEqual([
+      "focus:parent-capture:1:false:false",
+      "focus:one:2:false:false",
+    ])
+
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(events).toEqual([
+      "focus:parent-capture:1:false:false",
+      "focus:one:2:false:false",
+      "blur:parent-capture:1:false:false",
+      "blur:one:2:false:false",
+      "focus:parent-capture:1:false:false",
+      "focus:two:2:false:false",
+    ])
+
+    const bounds = testRoot.renderer.getElementBounds(first.id)!
+    testRoot.renderer.nativeSimulateClick(
+      bounds[0]! + bounds[2]! / 2,
+      bounds[1]! + bounds[3]! / 2
+    )
+    expect(events).toEqual([
+      "focus:parent-capture:1:false:false",
+      "focus:one:2:false:false",
+      "blur:parent-capture:1:false:false",
+      "blur:one:2:false:false",
+      "focus:parent-capture:1:false:false",
+      "focus:two:2:false:false",
+      "blur:parent-capture:1:false:false",
+      "blur:two:2:false:false",
+      "focus:parent-capture:1:false:false",
+      "focus:one:2:false:false",
+    ])
   })
 
   it("scrolls a plain overflow container only when tab focus leaves the viewport", () => {
