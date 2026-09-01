@@ -503,6 +503,30 @@ describeNative("automation", () => {
     })
   })
 
+  it("gives <img> its implicit role and its alt name", () => {
+    const { render, renderer } = createTestRoot()
+    const src =
+      "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E"
+
+    render(
+      <div>
+        <img src={src} alt="Recipe preview" />
+        <img src={src} alt="Ignored alt" ariaLabel="Authored name" />
+        <img src={src} />
+        <img src={src} alt="" />
+      </div>
+    )
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    const images = nodes.filter((node) => node.aria.role === "Image")
+    // The decorative `alt=""` image is the only one without an image node.
+    expect(images).toHaveLength(3)
+    const labels = images.map((node) => node.aria.label)
+    expect(labels).toContain("Recipe preview")
+    expect(labels).toContain("Authored name")
+    expect(labels).not.toContain("Ignored alt")
+  })
+
   it("aliases supported aria props on built-in and custom hosts", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const { render, renderer } = createTestRoot({ strictStyles: true })

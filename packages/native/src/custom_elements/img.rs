@@ -2004,6 +2004,10 @@ impl CustomElement for ImgElement {
             );
         }
 
+        // One GPUI identity for the image and for the accessibility projection
+        // below: the projection is never laid out, painted, or hit-tested, so a
+        // second id would name an element that nothing can address.
+        let element_id = gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id));
         let load_error = self.load_error.clone();
         let loader_error = load_error.clone();
         let load_result = self.load_result.clone();
@@ -2030,7 +2034,7 @@ impl CustomElement for ImgElement {
                 .unwrap_or_else(|| format!("img: loading {fallback_label}"));
             Self::fallback(message).into_any_element()
         })
-        .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)));
+        .id(element_id.clone());
 
         if let Some(style) = ctx.style {
             el = crate::renderer::apply_interactive_styles(el, style);
@@ -2038,11 +2042,7 @@ impl CustomElement for ImgElement {
 
         let el = apply_image_accessibility(&ctx, el);
         let el = super::wire_standard_events(el, &ctx, cx);
-        let accessibility = gpui::div().id(gpui::SharedString::from(format!(
-            "__gpuix_img_accessibility_{}",
-            ctx.id
-        )));
-        let accessibility = apply_image_accessibility(&ctx, accessibility);
+        let accessibility = apply_image_accessibility(&ctx, gpui::div().id(element_id));
         let el = AccessibleImg {
             image: el,
             accessibility,
