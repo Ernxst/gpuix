@@ -2,7 +2,6 @@ import React from "react"
 import { describe, expect, it, vi } from "vitest"
 import {
   createTestRoot,
-  getAllByText,
   isNativeTestRendererAvailable,
   readMacCpuThrottle,
   TestRenderer,
@@ -136,7 +135,7 @@ describeNative("TestRenderer query cache", () => {
       }
 
       try {
-        expect(getAllByText(root.renderer, "row-159")).toHaveLength(1)
+        expect(root.getAllByText("row-159")).toHaveLength(1)
         expect(treeJsonReads).toBe(1)
       } finally {
         native.getTreeJson = getTreeJson
@@ -151,11 +150,11 @@ describeNative("TestRenderer query cache", () => {
 
     try {
       root.render(largeTree())
-      expect(getAllByText(root.renderer, "row-159")).toHaveLength(1)
+      expect(root.getAllByText("row-159")).toHaveLength(1)
 
       const started = performance.now()
       for (let index = 0; index < 5; index += 1) {
-        expect(getAllByText(root.renderer, "row-159")).toHaveLength(1)
+        expect(root.getAllByText("row-159")).toHaveLength(1)
       }
       const elapsed = performance.now() - started
       console.log(

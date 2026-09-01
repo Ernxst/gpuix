@@ -296,19 +296,15 @@ Module._load = function (request, parent, isMain) {
 
 const BARE_TESTING_IMPORT_PROGRAM = `
 import {
-  getAllByText,
-  getByText,
   getChildren,
   getParent,
-  queryByText,
   textContent,
-  within,
 } from "@gpuix/react/testing"
 
-if ([getAllByText, getByText, getChildren, getParent, queryByText, textContent, within].some(
+if ([getChildren, getParent, textContent].some(
   (query) => typeof query !== "function"
 )) {
-  throw new Error("testing queries were not exported")
+  throw new Error("testing inspection helpers were not exported")
 }
 
 if (globalThis.__gpuixNativeModuleLoads !== 0) {
