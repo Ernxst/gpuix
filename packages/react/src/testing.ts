@@ -306,13 +306,25 @@ export interface TestElement {
 }
 
 export type TextMatcher = RegExp | string
+export type TestIdMatcher = RegExp | string
 
 /** Text queries over the GPU-IX desktop test renderer. */
 export interface TextQueries {
   getByText: (text: TextMatcher) => TestElement
   queryByText: (text: TextMatcher) => TestElement | undefined
   getAllByText: (text: TextMatcher) => TestElement[]
+  queryAllByText: (text: TextMatcher) => TestElement[]
 }
+
+/** Test ID queries over the GPU-IX desktop test renderer. */
+export interface TestIdQueries {
+  getByTestId: (testId: TestIdMatcher) => TestElement
+  queryByTestId: (testId: TestIdMatcher) => TestElement | undefined
+  getAllByTestId: (testId: TestIdMatcher) => TestElement[]
+  queryAllByTestId: (testId: TestIdMatcher) => TestElement[]
+}
+
+export interface TestQueries extends TextQueries, TestIdQueries {}
 
 /** Current async load state for a live native `<img>` test element. */
 export interface ImageLoadState {
@@ -1162,50 +1174,65 @@ export function textContent(renderer: TestRenderer, element: TestElement): strin
     .join("")}`
 }
 
-export function getByText(renderer: TestRenderer, text: TextMatcher): TestElement {
-  return getQueries(renderer, getRoot(renderer)).getByText(text)
-}
-
-export function queryByText(renderer: TestRenderer, text: TextMatcher): TestElement | undefined {
-  return getQueries(renderer, getRoot(renderer)).queryByText(text)
-}
-
-export function getAllByText(renderer: TestRenderer, text: TextMatcher): TestElement[] {
-  return getQueries(renderer, getRoot(renderer)).getAllByText(text)
-}
-
-/** Limits text queries to an element and its descendants. */
-export function within(renderer: TestRenderer, element: TestElement): TextQueries {
-  return getQueries(renderer, element)
-}
-
-function getQueries(renderer: TestRenderer, scope: TestElement): TextQueries {
+function getQueries(renderer: TestRenderer, resolveScope: () => TestElement): TestQueries {
   return {
     getByText: (text) => {
+      const scope = resolveScope()
       const matches = findAllByText(renderer, scope, text)
 
-      if (matches.length === 0) throw noMatchError(renderer, scope, text)
-      if (matches.length > 1) throw multipleMatchesError(renderer, text, matches)
+      if (matches.length === 0) throw noTextMatchError(renderer, scope, text)
+      if (matches.length > 1) throw multipleTextMatchesError(renderer, text, matches)
 
       const [match] = matches
-      if (match === undefined) throw noMatchError(renderer, scope, text)
+      if (match === undefined) throw noTextMatchError(renderer, scope, text)
 
       return match
     },
     queryByText: (text) => {
+      const scope = resolveScope()
       const matches = findAllByText(renderer, scope, text)
 
-      if (matches.length > 1) throw multipleMatchesError(renderer, text, matches)
+      if (matches.length > 1) throw multipleTextMatchesError(renderer, text, matches)
 
       return matches[0]
     },
     getAllByText: (text) => {
+      const scope = resolveScope()
       const matches = findAllByText(renderer, scope, text)
 
-      if (matches.length === 0) throw noMatchError(renderer, scope, text)
+      if (matches.length === 0) throw noTextMatchError(renderer, scope, text)
 
       return matches
     },
+    queryAllByText: (text) => findAllByText(renderer, resolveScope(), text),
+    getByTestId: (testId) => {
+      const scope = resolveScope()
+      const matches = findAllByTestId(renderer, scope, testId)
+
+      if (matches.length === 0) throw noTestIdMatchError(renderer, scope, testId)
+      if (matches.length > 1) throw multipleTestIdMatchesError(renderer, testId, matches)
+
+      const [match] = matches
+      if (match === undefined) throw noTestIdMatchError(renderer, scope, testId)
+
+      return match
+    },
+    queryByTestId: (testId) => {
+      const matches = findAllByTestId(renderer, resolveScope(), testId)
+
+      if (matches.length > 1) throw multipleTestIdMatchesError(renderer, testId, matches)
+
+      return matches[0]
+    },
+    getAllByTestId: (testId) => {
+      const scope = resolveScope()
+      const matches = findAllByTestId(renderer, scope, testId)
+
+      if (matches.length === 0) throw noTestIdMatchError(renderer, scope, testId)
+
+      return matches
+    },
+    queryAllByTestId: (testId) => findAllByTestId(renderer, resolveScope(), testId),
   }
 }
 
@@ -1218,6 +1245,18 @@ function findAllByText(
     (element) =>
       matchesText(textContent(renderer, element), text) &&
       !hasMatchingChild(renderer, element, text)
+  )
+}
+
+function findAllByTestId(
+  renderer: TestRenderer,
+  scope: TestElement,
+  testId: TestIdMatcher
+): TestElement[] {
+  return getElements(renderer, scope).filter(
+    (element) =>
+      (element.dataTestId !== undefined && matchesTestId(element.dataTestId, testId)) ||
+      (element.testId !== undefined && matchesTestId(element.testId, testId))
   )
 }
 
@@ -1258,7 +1297,16 @@ function matchesText(content: string, text: TextMatcher): boolean {
   return matches
 }
 
-function noMatchError(renderer: TestRenderer, scope: TestElement, text: TextMatcher): Error {
+function matchesTestId(value: string, testId: TestIdMatcher): boolean {
+  if (!(testId instanceof RegExp)) return value === testId
+
+  testId.lastIndex = 0
+  const matches = testId.test(value)
+  testId.lastIndex = 0
+  return matches
+}
+
+function noTextMatchError(renderer: TestRenderer, scope: TestElement, text: TextMatcher): Error {
   const nearMisses = getElements(renderer, scope)
     .map((element) => ({ element, content: textContent(renderer, element) }))
     .filter(({ element, content }) => element.text !== null && content.length > 0)
@@ -1272,7 +1320,7 @@ function noMatchError(renderer: TestRenderer, scope: TestElement, text: TextMatc
   )
 }
 
-function multipleMatchesError(
+function multipleTextMatchesError(
   renderer: TestRenderer,
   text: TextMatcher,
   matches: TestElement[]
@@ -1284,9 +1332,32 @@ function multipleMatchesError(
   )
 }
 
+function noTestIdMatchError(
+  renderer: TestRenderer,
+  scope: TestElement,
+  testId: TestIdMatcher
+): Error {
+  return new Error(
+    `Unable to find an element with test ID ${describeMatcher(testId)} within ${describeElement(renderer, scope)}`
+  )
+}
+
+function multipleTestIdMatchesError(
+  renderer: TestRenderer,
+  testId: TestIdMatcher,
+  matches: TestElement[]
+): Error {
+  return new Error(
+    `Found multiple elements with test ID ${describeMatcher(testId)}:\n${matches
+      .map((element) => `  ${describeElement(renderer, element)}`)
+      .join("\n")}`
+  )
+}
+
 function describeElement(renderer: TestRenderer, element: TestElement): string {
   const identity = [
     element.dataTestId === undefined ? undefined : `data-testid=${JSON.stringify(element.dataTestId)}`,
+    element.testId === undefined ? undefined : `testId=${JSON.stringify(element.testId)}`,
     element.authorId === undefined ? undefined : `id=${JSON.stringify(element.authorId)}`,
   ]
     .filter((attribute): attribute is string => attribute !== undefined)
@@ -1310,10 +1381,11 @@ function missingElementError(id: number, relationship: string): Error {
   return new Error(`Unable to find ${relationship}: element #${id} is absent`)
 }
 
-export interface TestRoot {
+export interface TestRoot extends TestQueries {
   root: Root
   renderer: TestRenderer
   render: (node: ReactNode) => void
+  within: (element: TestElement) => TestQueries
   unmount: () => void
 }
 
@@ -1343,6 +1415,7 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   })
   renderer.setAllowPrivateNetworkImages(options.allowPrivateNetworkImages ?? false)
   const root = createRoot(renderer, { strictStyles: options.strictStyles })
+  const queries = getQueries(renderer, () => getRoot(renderer))
   let unmounted = false
 
   const render = (node: ReactNode): void => {
@@ -1365,6 +1438,8 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
     root,
     renderer,
     render,
+    ...queries,
+    within: (element) => getQueries(renderer, () => element),
     unmount,
   }
 }

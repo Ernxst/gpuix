@@ -3017,13 +3017,40 @@ way to consume the unpublished fork under Bun.
 `isNativeTestRendererAvailable()` when a test must check whether the native
 renderer can initialize.
 
-```ts
+`createTestRoot()` returns synchronous queries bound to its renderer. Text
+queries match retained `<text>` content, while test ID queries match both
+`testId` and the standard `data-testid` prop. The singular `getBy...` and
+`queryBy...` methods throw when more than one element matches; required
+`getBy...` / `getAllBy...` methods also throw when none match. Their
+`queryBy...` / `queryAllBy...` counterparts return `undefined` / `[]` for a
+miss. `within(element)` returns the same query families scoped to that element
+and its descendants.
+
+These are Testing Library-shaped call sites, not DOM locators: they return a
+`TestElement` immediately and do not add browser accessibility or asynchronous
+locator semantics.
+
+```tsx
 import { createTestRoot } from '@gpuix/react/testing'
 
-const { root, renderer } = createTestRoot()
+const screen = createTestRoot()
 
-root.render(<MyComponent />)
-renderer.flush()  // triggers GpuixView::render() on the native GPU
+screen.render(<MyComponent />)
+
+screen.getByText('Power')
+screen.getAllByText(/Built/)
+screen.queryByText('Missing')
+screen.queryAllByText(/Missing/)
+
+const panel = screen.getByTestId('power-panel')
+screen.within(panel).getByText('Rate')
+screen.queryAllByTestId(/^optional-/)
+
+// Re-render through the same bound screen.
+screen.render(<UpdatedComponent />)
+
+// The renderer remains available for GPUIX-specific operations.
+const { renderer } = screen
 
 // Simulate events through GPUI's native input pipeline
 renderer.nativeSimulateClick(50, 50)
