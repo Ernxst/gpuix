@@ -30,16 +30,16 @@ describeNative("createTestRoot bound queries", () => {
         "Rate",
         "Rate",
       ])
-      expect(screen.queryByText("Missing")).toBeUndefined()
+      expect(screen.queryByText("Missing")).toBeNull()
       expect(screen.queryAllByText("Missing")).toEqual([])
 
       const summary = screen.getByTestId("summary")
       expect(screen.within(summary).getByText("Rate").text).toBe("Rate")
-      expect(screen.within(summary).queryByText("Built")).toBeUndefined()
+      expect(screen.within(summary).queryByText("Built")).toBeNull()
 
       screen.render(<text>Updated</text>)
       expect(screen.renderer).toBe(renderer)
-      expect(screen.queryByText("Power")).toBeUndefined()
+      expect(screen.queryByText("Power")).toBeNull()
       expect(screen.getByText("Updated").text).toBe("Updated")
     } finally {
       screen.unmount()
@@ -65,12 +65,12 @@ describeNative("createTestRoot bound queries", () => {
       expect(summary).not.toBeInstanceOf(Promise)
       expect(screen.getAllByTestId("value")).toHaveLength(2)
       expect(screen.getAllByTestId(/^val/)).toHaveLength(2)
-      expect(screen.queryByTestId("missing")).toBeUndefined()
+      expect(screen.queryByTestId("missing")).toBeNull()
       expect(screen.queryAllByTestId("missing")).toEqual([])
 
       const scoped = screen.within(summary)
       expect(textContent(screen.renderer, scoped.getByTestId("value"))).toBe("Power")
-      expect(scoped.queryByTestId("details")).toBeUndefined()
+      expect(scoped.queryByTestId("details")).toBeNull()
       expect(() => scoped.getByTestId("details")).toThrowError(
         'Unable to find an element with test ID "details" within <div testId="summary"'
       )
@@ -111,6 +111,53 @@ describeNative("createTestRoot bound queries", () => {
       expect(() => screen.getAllByTestId("missing")).toThrowError(
         'Unable to find an element with test ID "missing"'
       )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("refreshes a scoped element after rerendering its descendants", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div testId="panel">
+          <text>Before</text>
+        </div>
+      )
+      const panel = screen.getByTestId("panel")
+      const scoped = screen.within(panel)
+
+      screen.render(
+        <div testId="panel">
+          <div>
+            <text>After</text>
+          </div>
+        </div>
+      )
+
+      expect(scoped.getByText("After").text).toBe("After")
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("uses Testing Library scoped and nullable query conventions", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div testId="panel">
+          <text testId="value">Rate</text>
+        </div>
+      )
+
+      const scoped = screen.within(screen.getByTestId("panel"))
+      expect(scoped.queryByTestId("panel")).toBeNull()
+      expect(scoped.queryAllByTestId("panel")).toEqual([])
+      expect(textContent(screen.renderer, scoped.getByTestId("value"))).toBe("Rate")
+      expect(screen.queryByText("Missing")).toBeNull()
+      expect(scoped.queryByText("Missing")).toBeNull()
     } finally {
       screen.unmount()
     }

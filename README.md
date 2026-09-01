@@ -3022,9 +3022,9 @@ queries match retained `<text>` content, while test ID queries match both
 `testId` and the standard `data-testid` prop. The singular `getBy...` and
 `queryBy...` methods throw when more than one element matches; required
 `getBy...` / `getAllBy...` methods also throw when none match. Their
-`queryBy...` / `queryAllBy...` counterparts return `undefined` / `[]` for a
-miss. `within(element)` returns the same query families scoped to that element
-and its descendants.
+`queryBy...` / `queryAllBy...` counterparts return `null` / `[]` for a miss.
+`within(element)` returns the same query families scoped to that element's
+descendants.
 
 These are Testing Library-shaped call sites, not DOM locators: they return a
 `TestElement` immediately and do not add browser accessibility or asynchronous
