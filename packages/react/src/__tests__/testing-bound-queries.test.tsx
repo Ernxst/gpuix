@@ -1,6 +1,11 @@
 import React from "react"
 import { describe, expect, it } from "vitest"
-import { createTestRoot, isNativeTestRendererAvailable, textContent } from "../testing.js"
+import {
+  createTestRoot,
+  getDefaultNormalizer,
+  isNativeTestRendererAvailable,
+  textContent,
+} from "../testing.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -125,6 +130,87 @@ describeNative("createTestRoot bound queries", () => {
 
       expect(screen.getAllByText("Nested only")).toHaveLength(1)
       expect(screen.getByTestId("wrapper").text).toBeNull()
+
+      // trim and collapseWhitespace switch off the default normalizer's parts,
+      // and getDefaultNormalizer composes them into a custom one.
+      expect(screen.queryByText("Save factory", { collapseWhitespace: false })).toBeNull()
+      expect(screen.getByText("Save\n  factory", { collapseWhitespace: false })).toBe(save)
+      expect(screen.getByText(" Save factory ", { trim: false })).toBe(save)
+      expect(
+        screen.getByText("SAVE FACTORY", {
+          normalizer: (content) => getDefaultNormalizer()(content).toUpperCase(),
+        })
+      ).toBe(save)
+      expect(() =>
+        screen.getByText("Save factory", { trim: false, normalizer: (content) => content })
+      ).toThrowError(/trim and collapseWhitespace are not supported with a normalizer/)
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("resolves one test ID per element, preferring data-testid", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text testId="legacy-only">Legacy</text>
+          <text data-testid="standard" testId="shadowed">
+            Standard
+          </text>
+        </div>
+      )
+
+      const standard = screen.getByTestId("standard")
+      expect(standard.testId).toBe("shadowed")
+      expect(screen.getAllByTestId("legacy-only")).toHaveLength(1)
+
+      // The legacy prop no longer answers on an element that has data-testid,
+      // so a mixed tree cannot report different counts to different query paths.
+      expect(screen.queryAllByTestId("shadowed")).toEqual([])
+      expect(screen.queryByTestId("shadowed")).toBeNull()
+      expect(screen.renderer.findByTestId("shadowed")).toBeUndefined()
+      expect(screen.renderer.findByTestId("standard")).toBe(standard)
+      expect(screen.renderer.findByTestId("legacy-only")?.testId).toBe("legacy-only")
+
+      // renderer.findByText runs on the shared matcher, not a raw substring.
+      const label = screen.renderer.findByText("Standard")
+      expect(label?.text).toBe("Standard")
+      expect(screen.renderer.findByText("Stand")).toBeUndefined()
+      expect(screen.renderer.findByText("stand", { exact: false })).toBe(label)
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("matches accessible names through the shared matcher", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div testId="output" role="heading" ariaLabel="  Iron   Output  " ariaLevel={2} />
+        </div>
+      )
+
+      const output = screen.getByTestId("output")
+
+      expect(screen.getByRole("heading", { name: "Iron Output" })).toBe(output)
+      expect(screen.queryByRole("heading", { name: "  Iron   Output  " })).toBeNull()
+      expect(screen.getByRole("heading", { name: "iron out", exact: false })).toBe(output)
+      expect(
+        screen.getByRole("heading", {
+          name: "IRON OUTPUT",
+          normalizer: (content) => getDefaultNormalizer()(content).toUpperCase(),
+        })
+      ).toBe(output)
+      expect(screen.getByRole("heading", { name: /^Iron Output$/, level: 2 })).toBe(output)
+      expect(
+        screen.getByRole("heading", {
+          name: (name, element) => name === "Iron Output" && element.testId === "output",
+        })
+      ).toBe(output)
     } finally {
       screen.unmount()
     }

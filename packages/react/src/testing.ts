@@ -17,7 +17,9 @@ import { fileURLToPath } from "node:url"
 import { createElement, createRef, type ReactNode } from "react"
 import type { EventPayload, MenuSpec } from "@gpuix/native"
 import {
+  getDefaultNormalizer,
   matches as matchesMatcher,
+  resolveTestId,
   type Matcher,
   type MatcherOptions as TestingMatcherOptions,
   type NormalizerFn,
@@ -308,8 +310,9 @@ export interface TestElement {
   events: Set<string>
   children: number[]
   parentId: number | null
+  /** The legacy locator prop. Only used when `data-testid` is absent. */
   testId?: string
-  /** The standard `data-testid` attribute used by the test renderer lookup. */
+  /** The standard `data-testid` attribute. Wins over `testId` on the same element. */
   dataTestId?: string
   /** The author-defined `id` attribute, distinct from the numeric renderer ID. */
   authorId?: string
@@ -318,6 +321,7 @@ export interface TestElement {
 
 export type MatcherOptions = TestingMatcherOptions
 export type { NormalizerFn }
+export { getDefaultNormalizer }
 export type TextMatcher = Matcher<TestElement>
 export type TestIdMatcher = Matcher<TestElement>
 export type AccessibleNameMatcher =
@@ -325,7 +329,8 @@ export type AccessibleNameMatcher =
   | string
   | ((accessibleName: string, element: TestElement) => boolean)
 
-export interface ByRoleOptions {
+/** As in Testing Library, the matcher options apply to the accessible `name`. */
+export interface ByRoleOptions extends MatcherOptions {
   name?: AccessibleNameMatcher
   level?: number
   /** Defaults to false. `true` awaits native hidden-node snapshot support. */
@@ -976,17 +981,30 @@ export class TestRenderer implements NativeRenderer {
     return [...this.buildElementMap().values()].filter((el) => el.type === type)
   }
 
-  /** Find the first text element containing the given string. */
-  findByText(text: string): TestElement | undefined {
+  /** Find the first element whose own text matches, on the shared matcher
+   *  semantics: exact after trimming and collapsing whitespace unless the
+   *  matcher or options say otherwise. */
+  findByText(text: TextMatcher, options?: MatcherOptions): TestElement | undefined {
     return [...this.buildElementMap().values()].find(
-      (el) => el.text != null && el.text.includes(text)
+      (el) => el.text != null && matchesMatcher(el.text, el, text, options)
     )
   }
 
-  findByTestId(testId: string): TestElement | undefined {
-    const dataTestId = this.native.findByDataTestId(testId)
-    if (dataTestId != null) return this.getElement(dataTestId)
-    return [...this.buildElementMap().values()].find((el) => el.testId === testId)
+  /** Find the first element whose resolved test ID matches, on the same
+   *  `data-testid`-wins-per-element rule as the bound `*ByTestId` queries. */
+  findByTestId(testId: TestIdMatcher, options?: MatcherOptions): TestElement | undefined {
+    // A raw string hit on the native index is always a `data-testid` match, so
+    // it already satisfies the resolution rule; a miss still falls through to
+    // the full scan, which is what normalizes and answers for legacy testIds.
+    if (typeof testId === "string" && options === undefined) {
+      const id = this.native.findByDataTestId(testId)
+      if (id != null) return this.getElement(id)
+    }
+
+    return [...this.buildElementMap().values()].find((el) => {
+      const resolved = resolveTestId(el)
+      return resolved !== undefined && matchesMatcher(resolved, el, testId, options)
+    })
   }
 
   /** Resolve an author-defined `id` attribute in the native retained tree. */
@@ -1354,12 +1372,10 @@ function findAllByTestId(
   includeScope: boolean,
   options?: MatcherOptions
 ): TestElement[] {
-  return getElements(renderer, scope, includeScope).filter(
-    (element) =>
-      (element.dataTestId !== undefined &&
-        matchesMatcher(element.dataTestId, element, testId, options)) ||
-      (element.testId !== undefined && matchesMatcher(element.testId, element, testId, options))
-  )
+  return getElements(renderer, scope, includeScope).filter((element) => {
+    const resolved = resolveTestId(element)
+    return resolved !== undefined && matchesMatcher(resolved, element, testId, options)
+  })
 }
 
 interface AccessibleHost {
@@ -1399,7 +1415,7 @@ function findAllByRole(
     .filter(
       (candidate) =>
         options.name === undefined ||
-        matchesAccessibleName(candidate.name, options.name, candidate.element)
+        matchesAccessibleName(candidate.name, options.name, candidate.element, options)
     )
     .map((candidate) => candidate.element)
 }
@@ -1471,18 +1487,15 @@ function describeComputedRole(role: string): string {
   return normalized
 }
 
+/** The accessible name goes through the same matcher as text and test IDs, so
+ *  `{ exact: false }`, a `normalizer`, and predicates read the normalized name. */
 function matchesAccessibleName(
   accessibleName: string,
   matcher: AccessibleNameMatcher,
-  element: TestElement
+  element: TestElement,
+  options?: MatcherOptions
 ): boolean {
-  if (typeof matcher === "function") return matcher(accessibleName, element)
-  if (!(matcher instanceof RegExp)) return accessibleName === matcher
-
-  matcher.lastIndex = 0
-  const matches = matcher.test(accessibleName)
-  matcher.lastIndex = 0
-  return matches
+  return matchesMatcher(accessibleName, element, matcher, options)
 }
 
 function nodeText(renderer: TestRenderer, element: TestElement): string {

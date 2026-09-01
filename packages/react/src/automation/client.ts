@@ -23,6 +23,7 @@ import {
 import type { RendererCapabilities } from "../types/host.js"
 import {
   matches as matchesMatcher,
+  resolveTestId,
   type Matcher,
   type MatcherOptions,
 } from "../testing-matchers.js"
@@ -456,13 +457,9 @@ interface Selector {
   parent?: Selector
 }
 
-function matches(
-  node: TreeNode,
-  selector: Selector,
-  testIdSource: "data" | "legacy" = "legacy"
-): boolean {
+function matches(node: TreeNode, selector: Selector): boolean {
   if (selector.testId != null) {
-    const testId = testIdSource === "data" ? node.dataTestId : node.testId
+    const testId = resolveTestId(node)
     if (testId === undefined) return false
     if (!matchesMatcher(testId, node, selector.testId, selector.matcherOptions)) return false
   }
@@ -496,30 +493,21 @@ function collect(node: TreeNode | null, selector: Selector): TreeNode[] {
     ? collect(node, selector.parent)
     : [node]
 
-  const find = (testIdSource: "data" | "legacy"): TreeNode[] => {
-    const found: TreeNode[] = []
-    const walk = (current: TreeNode) => {
-      if (
-        matches(current, selector, testIdSource) &&
-        !hasMatchingTextChild(current, selector)
-      ) {
-        found.push(current)
-      }
-      for (const child of current.children ?? []) walk(child)
+  const found: TreeNode[] = []
+  const walk = (current: TreeNode) => {
+    if (matches(current, selector) && !hasMatchingTextChild(current, selector)) {
+      found.push(current)
     }
-    for (const root of roots) {
-      if (selector.parent) {
-        for (const child of root.children ?? []) walk(child)
-      } else {
-        walk(root)
-      }
-    }
-    return found
+    for (const child of current.children ?? []) walk(child)
   }
-
-  if (selector.testId == null) return find("legacy")
-  const dataMatches = find("data")
-  return dataMatches.length > 0 ? dataMatches : find("legacy")
+  for (const root of roots) {
+    if (selector.parent) {
+      for (const child of root.children ?? []) walk(child)
+    } else {
+      walk(root)
+    }
+  }
+  return found
 }
 
 /** A window-space point, or a locator resolved to the centre of its bounds. */

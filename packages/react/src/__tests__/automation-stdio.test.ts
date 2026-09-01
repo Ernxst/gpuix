@@ -61,7 +61,10 @@ describe("automation stdio", () => {
         id: 1,
         type: "div",
         testId: "  inc  ",
-        children: [{ id: 2, type: "text", text: "  clicks:\n0  " }],
+        children: [
+          { id: 2, type: "text", text: "  clicks:\n0  " },
+          { id: 3, type: "div", dataTestId: "standard", testId: "shadowed" },
+        ],
       })
     const app = await connectTest(renderer)
 
@@ -88,6 +91,11 @@ describe("automation stdio", () => {
         .getByTestId((content, element) => content === "inc" && element.id === 1)
         .count()
     ).toBe(1)
+
+    // One test ID per node: data-testid wins, and the legacy prop does not
+    // answer for a node that carries one, whatever else the tree holds.
+    expect(await app.getByTestId("standard").count()).toBe(1)
+    expect(await app.getByTestId("shadowed").count()).toBe(0)
     await app.close()
   })
 
