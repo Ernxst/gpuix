@@ -126,9 +126,9 @@ export declare class GpuixRenderer {
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
-  /** Move focus to the next GPUI tab stop without changing the default Tab policy. */
+  /** Move focus to the next GPUIX tab stop without dispatching a key event. */
   focusNext(): void
-  /** Move focus to the previous GPUI tab stop without changing the default Tab policy. */
+  /** Move focus to the previous GPUIX tab stop without dispatching a key event. */
   focusPrevious(): void
   /**
    * Complete the DOM default for a Tab keydown after React capture and

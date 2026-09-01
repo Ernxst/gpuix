@@ -1525,10 +1525,12 @@ async fn run_ui_commands(
                 view.focus_element_and_reveal(id, window, cx);
                 window.refresh();
             }),
-            UiCommand::FocusNext => window.update(cx, |_view, window, cx| window.focus_next(cx)),
-            UiCommand::FocusPrevious => {
-                window.update(cx, |_view, window, cx| window.focus_prev(cx))
-            }
+            UiCommand::FocusNext => window.update(cx, |view, window, cx| {
+                view.move_focus(FocusDirection::Next, window, cx)
+            }),
+            UiCommand::FocusPrevious => window.update(cx, |view, window, cx| {
+                view.move_focus(FocusDirection::Previous, window, cx)
+            }),
             UiCommand::ResolveTabKeyDown { default_prevented } => {
                 window.update(cx, move |view, window, cx| {
                     view.resolve_tab_key_down(default_prevented, window, cx);
@@ -3347,11 +3349,11 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
-    /// Move focus to the next GPUI tab stop without changing the default Tab policy.
+    /// Move focus to the next GPUIX tab stop without dispatching a key event.
     #[napi]
     pub fn focus_next(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(|_view, window, cx| window.focus_next(cx));
+        return update_window(|view, window, cx| view.move_focus(FocusDirection::Next, window, cx));
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusNext);
@@ -3365,11 +3367,13 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
-    /// Move focus to the previous GPUI tab stop without changing the default Tab policy.
+    /// Move focus to the previous GPUIX tab stop without dispatching a key event.
     #[napi]
     pub fn focus_previous(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(|_view, window, cx| window.focus_prev(cx));
+        return update_window(|view, window, cx| {
+            view.move_focus(FocusDirection::Previous, window, cx)
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusPrevious);
@@ -4841,12 +4845,12 @@ impl WebGpuixRenderer {
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusNext)]
     pub fn focus_next(&self) -> Result<(), wasm_bindgen::JsValue> {
-        update_web_window(|window, cx| window.focus_next(cx))
+        update_web_view(|view, window, cx| view.move_focus(FocusDirection::Next, window, cx))
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusPrevious)]
     pub fn focus_previous(&self) -> Result<(), wasm_bindgen::JsValue> {
-        update_web_window(|window, cx| window.focus_prev(cx))
+        update_web_view(|view, window, cx| view.move_focus(FocusDirection::Previous, window, cx))
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = resolveTabKeyDown)]
@@ -6479,7 +6483,7 @@ impl GpuixView {
         self.dispatch_next_tab_key_down(window, cx);
     }
 
-    fn move_focus(
+    pub(crate) fn move_focus(
         &mut self,
         direction: FocusDirection,
         window: &mut gpui::Window,
@@ -7800,7 +7804,7 @@ enum ScrollAncestor {
 }
 
 #[derive(Clone, Copy)]
-enum FocusDirection {
+pub(crate) enum FocusDirection {
     Next,
     Previous,
 }
