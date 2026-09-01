@@ -744,6 +744,12 @@ export const hostConfig = {
       id,
       type,
       props,
+      focus: () => rootContainerInstance.native.focusElement?.(id),
+      blur: () => {
+        const native = rootContainerInstance.native
+        if (native.getActiveElement && native.getActiveElement() !== id) return
+        native.blur?.()
+      },
       setPointerCapture: () => rootContainerInstance.native.setPointerCapture?.(id),
       releasePointerCapture: () =>
         rootContainerInstance.native.releasePointerCapture?.(id),

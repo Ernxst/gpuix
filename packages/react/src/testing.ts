@@ -148,6 +148,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   hasMainMenu(): boolean
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number): void
+  getActiveElement(): number | null
+  blur(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   setPointerCapture(elementId: number): void
   releasePointerCapture(elementId: number): void
@@ -1044,6 +1046,16 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.native.focusElement(elementId)
     // Programmatic focus is reported when GPUI commits the next frame.
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
+  getActiveElement(): number | null {
+    return this.native.getActiveElement()
+  }
+
+  blur(): void {
+    this.native.blur()
     this.native.flush()
     this.dispatchNativeEvents()
   }

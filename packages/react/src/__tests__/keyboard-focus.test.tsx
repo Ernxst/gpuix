@@ -6,6 +6,7 @@ import {
   type TestRoot,
 } from "../testing.js"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
+import type { PublicInstance } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -26,6 +27,31 @@ describeNative("keyboard focus", () => {
     const tree = testRoot.renderer.getAccessibilityTree()
     return tree.gpui_focus ? (tree.nodes[tree.gpui_focus]?.aria.label ?? null) : null
   }
+
+  it("exposes HTMLElement-shaped focus and blur methods on host refs", () => {
+    const ref = React.createRef<PublicInstance>()
+    const otherRef = React.createRef<PublicInstance>()
+
+    testRoot.render(
+      <div>
+        <div ref={ref} tabIndex={0} ariaLabel="imperative focus target">
+          <text>Target</text>
+        </div>
+        <div ref={otherRef} tabIndex={0} ariaLabel="other focus target">
+          <text>Other</text>
+        </div>
+      </div>
+    )
+
+    ref.current!.focus()
+    expect(testRoot.renderer.getActiveElement()).toBe(ref.current!.id)
+
+    otherRef.current!.blur()
+    expect(testRoot.renderer.getActiveElement()).toBe(ref.current!.id)
+
+    ref.current!.blur()
+    expect(testRoot.renderer.getActiveElement()).toBeNull()
+  })
 
   it("tabs from a cold start and wraps backwards past the first control", () => {
     testRoot.render(

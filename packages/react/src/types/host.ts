@@ -1347,6 +1347,10 @@ export interface PublicInstance {
   id: number
   type: ElementType
   props: Props
+  /** Moves focus to this host element, matching HTMLElement.focus(). */
+  focus(): void
+  /** Removes focus when this host element currently owns it. */
+  blur(): void
   setPointerCapture(): void
   releasePointerCapture(): void
   parentId: number | null

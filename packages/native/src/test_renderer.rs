@@ -1271,6 +1271,28 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// The focused host element id, analogous to `document.activeElement`, or null.
+    #[napi]
+    pub fn get_active_element(&self) -> Result<Option<f64>> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.read(app).active_element_id(window).map(|id| id as f64)
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
+    #[napi]
+    pub fn blur(&self) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, |_, window, _app| window.blur())
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
     #[napi]
     pub fn resolve_tab_key_down(&self, default_prevented: bool) -> Result<()> {
         with_test_state(self.state_id, |cx, window, view| {

@@ -380,6 +380,9 @@ export declare class TestGpuixRenderer {
    * Call flush() before this so the element tree and focus handles exist.
    */
   focusElement(id: number): void
+  /** The focused host element id, analogous to `document.activeElement`, or null. */
+  getActiveElement(): number | null
+  blur(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   setPointerCapture(id: number): void
   releasePointerCapture(id: number): void
