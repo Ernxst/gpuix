@@ -815,8 +815,12 @@ on the returned handle to end it. One thrown tick is reported and retried;
 repeated failures quit instead of abandoning the native window.
 
 On **Windows and Linux**, GPUI runs its normal blocking native event loop on one
-dedicated Rust UI thread. Node sends in-process commands to that thread, so
-`startFrameLoop` returns a no-op handle and does not create a JavaScript timer.
+dedicated Rust UI thread. Node sends in-process commands to that thread, so a
+timer tick neither pumps that loop nor requests a frame. `startFrameLoop` still
+runs there: its ticks observe whether the UI thread is alive, and `tick()`
+returns `false` once the last window closes, which stops the loop and runs
+`onTerminated`. Call it on every platform — `render()` does. Skipping it on
+Windows or Linux leaves the process running after the window is gone.
 All platforms use GPUI's native platform, window, renderer, input, scroll,
 clipboard, keyboard, and IME implementations. The embedded macOS run-loop
 extension comes from the pinned GPUIX fork. CI runs the full React and example
@@ -1700,9 +1704,16 @@ phase to keep focus on the current element, matching the browser:
 
 ### Imperative focus
 
-`focusNext()` and `focusPrevious()` map directly to GPUI's
-`window.focus_next()` and `window.focus_prev()`. They supplement the default Tab
-policy; applications do not need to reimplement traversal to retain it.
+`focusNext()` and `focusPrevious()` take the same path as the default `Tab` and
+`Shift+Tab`: they first reveal the next focusable row when it is a virtual item
+that has not been painted yet, then move GPUI focus with `window.focus_next()`
+or `window.focus_prev()`, then scroll the newly focused element into view. They
+do not dispatch a `keydown`, so a `preventDefault()` handler cannot cancel them.
+
+```ts
+renderer.focusNext()
+renderer.focusPrevious()
+```
 
 Use a ref for imperative focus:
 
