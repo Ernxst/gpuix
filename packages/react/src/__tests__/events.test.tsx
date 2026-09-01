@@ -458,7 +458,29 @@ describeNative("events", () => {
           }
         />
       )
-      const target = testRoot.renderer.findByTestId("double-click-target")!
+      // The platform reports the repeat count on the second press.
+      testRoot.renderer.nativeSimulateClick(40, 40)
+      testRoot.renderer.nativeSimulateClick(40, 40, 0, undefined, 2)
+
+      expect(calls).toEqual([
+        { type: "click", detail: 1 },
+        { type: "click", detail: 2 },
+        { type: "doubleClick", detail: 2 },
+      ])
+    })
+
+    it("does not turn a repeated keyboard activation into a double click", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <div
+          testId="keyboard-activation-target"
+          style={{ width: 200, height: 80 }}
+          onClick={() => calls.push("click")}
+          onDoubleClick={() => calls.push("doubleClick")}
+        />
+      )
+      const target = testRoot.renderer.findByTestId("keyboard-activation-target")!
 
       handleGpuixEvent(
         {
@@ -467,18 +489,16 @@ describeNative("events", () => {
           button: 0,
           clickCount: 2,
           isRightClick: false,
-          inputSource: "mouse",
+          inputSource: "keyboard",
         },
         testRoot.renderer
       )
 
-      expect(calls).toEqual([
-        { type: "click", detail: 2 },
-        { type: "doubleClick", detail: 2 },
-      ])
+      expect(calls).toEqual(["click"])
     })
 
-    it("delivers a cancelable context menu after right mouse up", () => {
+    it("delivers a cancelable context menu on the right mouse press", () => {
+      const order: string[] = []
       const calls: Array<{
         type: string
         button: number
@@ -490,8 +510,12 @@ describeNative("events", () => {
       testRoot.render(
         <div
           style={{ width: 200, height: 80 }}
+          onMouseDown={() => order.push("mouseDown")}
+          onMouseUp={() => order.push("mouseUp")}
+          onAuxClick={() => order.push("auxClick")}
           onContextMenu={(event) => {
             event.preventDefault()
+            order.push("contextMenu")
             calls.push({
               type: "contextMenu",
               button: event.button,
@@ -506,6 +530,17 @@ describeNative("events", () => {
       testRoot.renderer.nativeSimulateClick(40, 40)
       testRoot.renderer.nativeSimulateClick(40, 40, 2)
 
+      // macOS fires contextmenu on the press, between mousedown and auxclick.
+      // The right-button mouseup is missing: GPUI's aux-click listener stops
+      // propagation before the mouse-up listener runs. That divergence
+      // predates this event and is not what this test locks in.
+      expect(order).toEqual([
+        "mouseDown",
+        "mouseUp",
+        "mouseDown",
+        "contextMenu",
+        "auxClick",
+      ])
       expect(calls).toEqual([
         {
           type: "contextMenu",
@@ -515,6 +550,31 @@ describeNative("events", () => {
           defaultPrevented: true,
         },
       ])
+    })
+
+    it("delivers double click and context menu on a canvas that declares neither click", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <canvas
+          width={200}
+          height={80}
+          testId="canvas-synthetic-clicks"
+          style={{ width: 200, height: 80 }}
+          onDoubleClick={() => calls.push("doubleClick")}
+          onContextMenu={() => calls.push("contextMenu")}
+        />
+      )
+      const canvas = testRoot.renderer.findByTestId("canvas-synthetic-clicks")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(canvas.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      testRoot.renderer.nativeSimulateClick(centerX, centerY)
+      testRoot.renderer.nativeSimulateClick(centerX, centerY, 0, undefined, 2)
+      testRoot.renderer.nativeSimulateClick(centerX, centerY, 2)
+
+      expect(calls).toEqual(["doubleClick", "contextMenu"])
     })
 
     it("dispatches one event through capture, target, and bubble with DOM-shaped targets", () => {

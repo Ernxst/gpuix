@@ -1090,6 +1090,8 @@ impl TestGpuixRenderer {
     /// which triggers the same event handlers as production.
     /// IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
     /// `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
+    /// `click_count` models a repeat within one click sequence: a platform
+    /// sends 2 for the second click of a double click (default 1).
     #[napi]
     pub fn simulate_click(
         &self,
@@ -1097,9 +1099,11 @@ impl TestGpuixRenderer {
         y: f64,
         button: Option<u32>,
         modifiers: Option<String>,
+        click_count: Option<u32>,
     ) -> Result<()> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         let button = button.unwrap_or(0);
+        let click_count = click_count.unwrap_or(1) as usize;
         let result = with_test_state(self.state_id, |cx, window, _view| {
             // A real click is delivered to the active window. The offscreen
             // platform has no activation callback, so model that step here.
@@ -1120,7 +1124,7 @@ impl TestGpuixRenderer {
                     position,
                     modifiers,
                     button: gpui_button,
-                    click_count: 1,
+                    click_count,
                     first_mouse: false,
                 },
             );
@@ -1130,7 +1134,7 @@ impl TestGpuixRenderer {
                     position,
                     modifiers,
                     button: gpui_button,
-                    click_count: 1,
+                    click_count,
                 },
             );
             Ok(())

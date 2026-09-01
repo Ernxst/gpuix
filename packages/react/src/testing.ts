@@ -156,7 +156,13 @@ interface NativeTestRendererApi extends NativeRenderer {
   activateWindow(): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
-  simulateClick(x: number, y: number, button?: number, modifiers?: string): void
+  simulateClick(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string,
+    clickCount?: number
+  ): void
   simulateScrollWheel(
     x: number,
     y: number,
@@ -725,15 +731,18 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** End-to-end: simulate a click through GPUI hit testing →
-   *  dispatch resulting events to React. */
+   *  dispatch resulting events to React.
+   *  `clickCount` is the platform's repeat count: pass 2 for the second
+   *  click of a double click. */
   nativeSimulateClick(
     x: number,
     y: number,
     button?: number,
-    modifiers?: string
+    modifiers?: string,
+    clickCount?: number
   ): void {
     this.native.flush()
-    this.native.simulateClick(x, y, button, modifiers)
+    this.native.simulateClick(x, y, button, modifiers, clickCount)
     // A click may move focus; draw before draining its focus event.
     this.native.flush()
     this.dispatchNativeEvents()

@@ -8282,9 +8282,7 @@ pub(crate) fn build_host_container(
     // inert background-painted child to reach an ancestor listener.
     el = apply_click_handler(el, element, ctx);
 
-    if tracks_pointer_event(element, ctx.tree, "auxClick")
-        || tracks_pointer_event(element, ctx.tree, "contextMenu")
-    {
+    if tracks_pointer_event(element, ctx.tree, "auxClick") {
         let callback = ctx.event_callback.clone();
         let id = element.id;
         el = el.on_aux_click(move |click_event, _window, cx| {
@@ -8312,7 +8310,12 @@ pub(crate) fn build_host_container(
         });
     }
 
-    if tracks_pointer_event(element, ctx.tree, "mouseDown") {
+    // `contextMenu` rides the mouse-down listener: macOS opens a context menu
+    // on the press, so the DOM order is mousedown, contextmenu, mouseup,
+    // auxclick. React synthesizes it from the right-button payload.
+    if tracks_pointer_event(element, ctx.tree, "mouseDown")
+        || tracks_pointer_event(element, ctx.tree, "contextMenu")
+    {
         for &button in &[
             gpui::MouseButton::Left,
             gpui::MouseButton::Middle,

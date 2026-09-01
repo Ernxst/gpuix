@@ -1221,11 +1221,20 @@ impl CanvasElement {
         cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::Stateful<gpui::Div> {
         let id = ctx.id;
+        // `doubleClick` and `contextMenu` are synthesized in React from the
+        // click and mouse-down payloads, so they ride those listeners. The
+        // flags keep a canvas that declares both from attaching two.
+        let mut click_attached = false;
+        let mut mouse_down_attached = false;
         for event_type in ctx.events {
             let callback = ctx.event_callback.clone();
             let geometry = self.geometry.clone();
             match event_type.as_str() {
-                "click" => {
+                "click" | "doubleClick" => {
+                    if click_attached {
+                        continue;
+                    }
+                    click_attached = true;
                     element = element.on_click(move |event, _window, cx| {
                         let (x, y) = local_point(&geometry, event.position());
                         crate::renderer::emit_event_full(&callback, id, "click", |payload| {
@@ -1265,7 +1274,11 @@ impl CanvasElement {
                         });
                     });
                 }
-                "mouseDown" => {
+                "mouseDown" | "contextMenu" => {
+                    if mouse_down_attached {
+                        continue;
+                    }
+                    mouse_down_attached = true;
                     for &button in &[
                         gpui::MouseButton::Left,
                         gpui::MouseButton::Middle,
@@ -1633,7 +1646,9 @@ impl CustomElement for CanvasElement {
     fn supported_events(&self) -> &'static [&'static str] {
         &[
             "click",
+            "doubleClick",
             "auxClick",
+            "contextMenu",
             "mouseDown",
             "mouseUp",
             "mouseMove",
