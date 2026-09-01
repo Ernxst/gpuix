@@ -343,6 +343,10 @@ impl<'a> AccessibilityProps<'a> {
             disabled: is_action_disabled(element),
         }
     }
+
+    fn supports(&self, property: &str) -> bool {
+        self.role.is_some_and(|role| role.supports(property))
+    }
 }
 
 fn finite_number(value: Option<&serde_json::Value>) -> Option<f64> {
@@ -414,12 +418,81 @@ fn value_json(value: &serde_json::Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| format!("{value:?}"))
 }
 
-fn problem(property: &str, value: &serde_json::Value, reason: impl Into<String>) -> StyleProblem {
-    StyleProblem {
-        property: property.to_string(),
-        value: value_json(value),
-        reason: reason.into(),
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum AccessibilityProblemEffect {
+    /// Typed parsing withholds the malformed value before GPUI sees it.
+    Rejected,
+    /// Role processing omits the retained value from the accessibility tree.
+    Ignored,
+    /// The retained value affects the accessibility tree as authored.
+    Applied,
+    /// Role processing applies a computed value instead of the authored value.
+    AppliedAs(&'static str),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AccessibilityProblem {
+    pub(crate) problem: StyleProblem,
+    pub(crate) effect: AccessibilityProblemEffect,
+}
+
+fn problem(
+    property: &str,
+    value: &serde_json::Value,
+    reason: impl Into<String>,
+    effect: AccessibilityProblemEffect,
+) -> AccessibilityProblem {
+    AccessibilityProblem {
+        problem: StyleProblem {
+            property: property.to_string(),
+            value: value_json(value),
+            reason: reason.into(),
+        },
+        effect,
     }
+}
+
+fn rejected_problem(
+    property: &str,
+    value: &serde_json::Value,
+    reason: impl Into<String>,
+) -> AccessibilityProblem {
+    problem(
+        property,
+        value,
+        reason,
+        AccessibilityProblemEffect::Rejected,
+    )
+}
+
+fn applied_problem(
+    property: &str,
+    value: &serde_json::Value,
+    reason: impl Into<String>,
+) -> AccessibilityProblem {
+    problem(property, value, reason, AccessibilityProblemEffect::Applied)
+}
+
+fn ignored_problem(
+    property: &str,
+    value: &serde_json::Value,
+    reason: impl Into<String>,
+) -> AccessibilityProblem {
+    problem(property, value, reason, AccessibilityProblemEffect::Ignored)
+}
+
+fn applied_as_problem(
+    property: &str,
+    value: &serde_json::Value,
+    computed_value: &'static str,
+    reason: impl Into<String>,
+) -> AccessibilityProblem {
+    problem(
+        property,
+        value,
+        reason,
+        AccessibilityProblemEffect::AppliedAs(computed_value),
+    )
 }
 
 fn supports_accessibility_host(element_type: &str) -> bool {
@@ -429,7 +502,7 @@ fn supports_accessibility_host(element_type: &str) -> bool {
 /// Validate the complete retained accessibility declaration after a mutation
 /// batch. Cross-property checks intentionally happen here, not while props are
 /// arriving, so JSX property order cannot change the diagnostics.
-pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
+pub(crate) fn element_problems(element: &RetainedElement) -> Vec<AccessibilityProblem> {
     let mut problems = Vec::new();
     let role_value = element.custom_props.get("role");
     let role = role_value.and_then(AccessibilityRole::parse);
@@ -451,7 +524,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
                     .map(|(key, value)| (key.as_str(), value))
             })
             .expect("semantic host has a semantic property");
-        problems.push(problem(
+        problems.push(rejected_problem(
             property,
             value,
             format!(
@@ -463,7 +536,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
     }
 
     if let Some(value) = role_value.filter(|value| AccessibilityRole::parse(value).is_none()) {
-        problems.push(problem(
+        problems.push(rejected_problem(
             "role",
             value,
             "unsupported accessibility role; expected a WAI-ARIA role with an AccessKit mapping",
@@ -502,7 +575,11 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
                 | "ariaColSpan" => "a positive integer",
                 _ => "a boolean",
             };
-            problems.push(problem(property, value, format!("expected {expected}")));
+            problems.push(rejected_problem(
+                property,
+                value,
+                format!("expected {expected}"),
+            ));
             continue;
         }
 
@@ -510,10 +587,11 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
             && value.as_str() == Some("mixed")
             && role.is_some_and(|role| role.role == gpui::Role::Switch)
         {
-            problems.push(problem(
+            problems.push(applied_as_problem(
                 property,
                 value,
-                "role=\"switch\" is binary; ariaChecked=\"mixed\" is valid only for role=\"checkbox\"",
+                "false",
+                "role=\"switch\" is binary; WAI-ARIA computes ariaChecked=\"mixed\" as false",
             ));
             continue;
         }
@@ -541,26 +619,41 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
                 | "ariaDisabled"
         ) {
             match role {
-                Some(role) if !role.supports(property) => problems.push(problem(
+                Some(role) if !role.supports(property) => problems.push(ignored_problem(
                     property,
                     value,
-                    format!("is not supported by role={:?}", role),
+                    format!(
+                        "role={:?} does not support {property}, so it is omitted from the accessibility tree",
+                        role
+                    ),
                 )),
-                None if role_value.is_none() => problems.push(problem(
-                    property,
-                    value,
-                    "requires an explicit supported role",
-                )),
+                None if role_value.is_none() => {
+                    let reason = match property.as_str() {
+                        "ariaLabel" => {
+                            "a name requires an explicit supported role, so it is omitted from the accessibility tree"
+                        }
+                        "ariaDescription" => {
+                            "a description requires an explicit supported role, so it is omitted from the accessibility tree"
+                        }
+                        _ => {
+                            "the property requires an explicit supported role, so it is omitted from the accessibility tree"
+                        }
+                    };
+                    problems.push(ignored_problem(property, value, reason));
+                }
                 _ => {}
             }
         }
     }
 
-    if is_native_disabled(element) && bool_prop(element, "ariaDisabled") {
-        problems.push(problem(
+    if role.is_some_and(|role| role.supports("ariaDisabled"))
+        && is_native_disabled(element)
+        && bool_prop(element, "ariaDisabled")
+    {
+        problems.push(ignored_problem(
             "ariaDisabled",
             &serde_json::Value::Bool(true),
-            "do not combine disabled and ariaDisabled; disabled removes the control from tab order, while ariaDisabled keeps it focusable",
+            "disabled takes precedence and already sets disabled=true, so ariaDisabled does not change the accessibility tree",
         ));
     }
 
@@ -579,10 +672,10 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<StyleProblem> {
                 )
             });
         if focusable {
-            problems.push(problem(
+            problems.push(applied_problem(
                 "ariaHidden",
                 &serde_json::Value::Bool(true),
-                "an ariaHidden subtree must not contain or be a focusable control",
+                "removes the focusable control from the accessibility tree; an ariaHidden subtree must not contain or be a focusable control",
             ));
         }
     }
@@ -609,6 +702,9 @@ where
         return el;
     }
 
+    // `from_element` withholds malformed values. The role checks below compute
+    // the accessibility projection, including role-specific fallbacks such as
+    // ariaChecked="mixed" becoming false on a switch.
     let props = AccessibilityProps::from_element(element);
 
     if let Some(role) = props.role.and_then(AccessibilityRole::into_gpui) {
@@ -617,58 +713,101 @@ where
     if let Some(author_id) = &element.author_id {
         el = el.accessibility_id(author_id.clone());
     }
-    if let Some(label) = props.label.or(name_from_contents) {
+    if let Some(label) = props
+        .label
+        .filter(|_| props.supports("ariaLabel"))
+        .or(name_from_contents)
+    {
         el = el.aria_label(label.to_owned());
     }
-    if let Some(description) = props.description {
+    if let Some(description) = props
+        .description
+        .filter(|_| props.supports("ariaDescription"))
+    {
         el = el.aria_description(description.to_owned());
     }
-    if let Some(checked) = props.checked {
+    if let Some(checked) = props.checked.filter(|_| props.supports("ariaChecked")) {
+        let checked = if props
+            .role
+            .is_some_and(|role| role.role == gpui::Role::Switch)
+            && checked == gpui::Toggled::Mixed
+        {
+            gpui::Toggled::False
+        } else {
+            checked
+        };
         el = el.aria_toggled(checked);
     }
-    if let Some(expanded) = props.expanded {
+    if let Some(expanded) = props.expanded.filter(|_| props.supports("ariaExpanded")) {
         el = el.aria_expanded(expanded);
     }
-    if let Some(current) = props.current {
+    if let Some(current) = props.current.filter(|_| props.supports("ariaCurrent")) {
         el = el.aria_current(current);
     }
-    if let Some(selected) = props.selected {
+    if let Some(selected) = props.selected.filter(|_| props.supports("ariaSelected")) {
         el = el.aria_selected(selected);
     }
-    if let Some(value) = props.value {
+    if let Some(value) = props.value.filter(|_| props.supports("ariaValue")) {
         el = el.aria_value(value.to_owned());
     }
-    if let Some(value_min) = props.value_min {
+    if let Some(value_min) = props
+        .value_min
+        .filter(|_| props.supports("ariaValueMin"))
+    {
         el = el.aria_min_numeric_value(value_min);
     }
-    if let Some(value_max) = props.value_max {
+    if let Some(value_max) = props
+        .value_max
+        .filter(|_| props.supports("ariaValueMax"))
+    {
         el = el.aria_max_numeric_value(value_max);
     }
-    if let Some(value_now) = props.value_now {
+    if let Some(value_now) = props
+        .value_now
+        .filter(|_| props.supports("ariaValueNow"))
+    {
         el = el.aria_numeric_value(value_now);
     }
-    if let Some(level) = props.level {
+    if let Some(level) = props.level.filter(|_| props.supports("ariaLevel")) {
         el = el.aria_level(level);
     }
-    if let Some(index) = props.row_index {
+    if let Some(index) = props
+        .row_index
+        .filter(|_| props.supports("ariaRowIndex"))
+    {
         el = el.aria_row_index(index);
     }
-    if let Some(index) = props.column_index {
+    if let Some(index) = props
+        .column_index
+        .filter(|_| props.supports("ariaColIndex"))
+    {
         el = el.aria_column_index(index);
     }
-    if let Some(count) = props.row_count {
+    if let Some(count) = props
+        .row_count
+        .filter(|_| props.supports("ariaRowCount"))
+    {
         el = el.aria_row_count(count);
     }
-    if let Some(count) = props.column_count {
+    if let Some(count) = props
+        .column_count
+        .filter(|_| props.supports("ariaColCount"))
+    {
         el = el.aria_column_count(count);
     }
-    if let Some(span) = props.row_span {
+    if let Some(span) = props
+        .row_span
+        .filter(|_| props.supports("ariaRowSpan"))
+    {
         el = el.aria_row_span(span);
     }
-    if let Some(span) = props.column_span {
+    if let Some(span) = props
+        .column_span
+        .filter(|_| props.supports("ariaColSpan"))
+    {
         el = el.aria_column_span(span);
     }
-    if props.disabled {
+    if props.disabled && props.supports("disabled") {
         el = el.aria_disabled(true);
     }
 
@@ -817,14 +956,16 @@ mod tests {
         let mut link = RetainedElement::new(7, "div".to_string(), 1);
         link.custom_props.insert("role".into(), "link".into());
         link.custom_props.insert("ariaSelected".into(), true.into());
-        assert_eq!(element_problems(&link)[0].property, "ariaSelected");
+        let link_problem = &element_problems(&link)[0];
+        assert_eq!(link_problem.problem.property, "ariaSelected");
 
         let mut button = RetainedElement::new(10, "div".to_string(), 1);
         button.custom_props.insert("role".into(), "button".into());
         button
             .custom_props
             .insert("ariaCurrent".into(), "page".into());
-        assert_eq!(element_problems(&button)[0].property, "ariaCurrent");
+        let button_problem = &element_problems(&button)[0];
+        assert_eq!(button_problem.problem.property, "ariaCurrent");
 
         let mut malformed_current = RetainedElement::new(11, "div".to_string(), 1);
         malformed_current
@@ -833,7 +974,9 @@ mod tests {
         malformed_current
             .custom_props
             .insert("ariaCurrent".into(), "chapter".into());
-        assert!(element_problems(&malformed_current)[0]
+        let malformed_current_problem = &element_problems(&malformed_current)[0];
+        assert!(malformed_current_problem
+            .problem
             .reason
             .contains("expected one of"));
 
@@ -842,14 +985,14 @@ mod tests {
         switch
             .custom_props
             .insert("ariaChecked".into(), "mixed".into());
-        assert!(element_problems(&switch)[0].reason.contains("binary"));
+        let switch_problem = &element_problems(&switch)[0];
+        assert!(switch_problem.problem.reason.contains("binary"));
 
         let mut heading = RetainedElement::new(9, "text".to_string(), 1);
         heading.custom_props.insert("role".into(), "heading".into());
         heading.custom_props.insert("ariaLevel".into(), 0.into());
-        assert!(element_problems(&heading)[0]
-            .reason
-            .contains("positive integer"));
+        let heading_problem = &element_problems(&heading)[0];
+        assert!(heading_problem.problem.reason.contains("positive integer"));
     }
 
     #[test]
@@ -899,6 +1042,7 @@ mod tests {
             assert_eq!(problems.len(), 1, "<{element_type}>");
             assert!(
                 problems[0]
+                    .problem
                     .reason
                     .contains("does not support accessibility semantics"),
                 "<{element_type}>"

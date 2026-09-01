@@ -1668,8 +1668,14 @@ Role/state combinations are validated rather than silently approximated:
 | `link` | `ariaExpanded`; Activate uses `onClick` |
 | `option` | `ariaSelected` |
 | `slider`, `spinbutton` | value text/range; Increment and Decrement use `onAccessibilityAction` |
-| `switch` | boolean `ariaChecked` only; `"mixed"` is rejected; Activate uses `onClick` |
+| `switch` | boolean `ariaChecked` only; `"mixed"` is computed as `false` with a normalization diagnostic; Activate uses `onClick` |
 | `textbox` | accessible name and description |
+
+Malformed accessibility values are rejected field by field. A well-formed
+property that its role does not support remains in the retained declaration but
+is omitted from the computed accessibility tree; its diagnostic says that it
+was ignored. Role-defined fallbacks are applied to the computed tree and name
+the normalized value in the diagnostic.
 
 `disabled` and `ariaDisabled` are accepted on control roles. Do not combine
 them. `onAccessibilityAction` reports specialised `increment`, `decrement`, or
