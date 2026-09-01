@@ -3313,9 +3313,16 @@ Testing Library's defaults (`timeout` 1000ms, `interval` 50ms, `onTimeout`) and
 rethrowing the last error on expiry. Unlike a browser `waitFor` it does not wait
 on wall-clock time alone: between attempts it drains microtasks, advances both
 `advanceAsyncClock` and `advanceTime` by `interval`, and flushes the renderer, so
-animation- and timer-driven UI actually progresses. `findBy*` is
-`waitFor(() => getBy*(...))`, taking the matcher options first and the waitFor
-options second, and is available on `screen` and on `within(element)`.
+animation- and timer-driven UI actually progresses. An `interval` below 1ms is
+clamped to 1ms rather than rejected, since a zero advance would freeze the very
+clocks the pump exists to turn. `findBy*` is `waitFor(() => getBy*(...))`,
+taking the matcher options first and the waitFor options second, and is
+available on `screen` and on `within(element)`.
+
+`expectCanvasMatchesBrowser` polls on the same loop but with a repaint-only
+pump: image decoding runs off the renderer's clocks, so advancing them there
+would run a golden scene's animations and timers forward by however long the
+disk took.
 
 `TestElement.style` is the declared descriptor and keeps nested state styles
 unchanged. Use `getResolvedStyle(elementId)` after simulating input to read the

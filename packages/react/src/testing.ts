@@ -1290,16 +1290,25 @@ export function textContent(renderer: TestRenderer, element: TestElement): strin
 
 const DEFAULT_WAIT_FOR_TIMEOUT_MS = 1_000
 const DEFAULT_WAIT_FOR_INTERVAL_MS = 50
+const MIN_WAIT_FOR_INTERVAL_MS = 1
 const MICROTASK_DRAIN_TICKS = 3
 
 export interface WaitForOptions {
   /** Wall-clock budget before the last callback error is rethrown. Defaults to 1000ms. */
   timeout?: number
-  /** Delay between attempts, and the amount each clock advances per attempt. Defaults to 50ms. */
+  /**
+   * Delay between attempts, and the amount each clock advances per attempt.
+   * Defaults to 50ms. Testing Library accepts `0` to mean "poll as fast as
+   * possible", so anything below 1ms is clamped to 1ms rather than rejected —
+   * a zero advance would freeze the clocks this pump exists to turn.
+   */
   interval?: number
   /** Maps the error thrown on timeout, as in Testing Library. */
   onTimeout?: (error: Error) => Error
 }
+
+/** Advances the clocks a `waitFor` loop owns, by one interval. */
+export type WaitForPump = (deltaMs: number) => void
 
 /**
  * Retries `callback` until it stops throwing, pumping the frame and timer
@@ -1334,16 +1343,16 @@ function resolveWaitForOptions(options: WaitForOptions): {
   interval: number
 } {
   const timeout = options.timeout ?? DEFAULT_WAIT_FOR_TIMEOUT_MS
-  const interval = options.interval ?? DEFAULT_WAIT_FOR_INTERVAL_MS
+  const requestedInterval = options.interval ?? DEFAULT_WAIT_FOR_INTERVAL_MS
 
   if (!Number.isFinite(timeout) || timeout < 0) {
     throw new Error(`waitFor timeout must be a finite non-negative number, got ${timeout}`)
   }
-  if (!Number.isFinite(interval) || interval <= 0) {
-    throw new Error(`waitFor interval must be a finite positive number, got ${interval}`)
+  if (!Number.isFinite(requestedInterval)) {
+    throw new Error(`waitFor interval must be a finite number, got ${requestedInterval}`)
   }
 
-  return { timeout, interval }
+  return { timeout, interval: Math.max(requestedInterval, MIN_WAIT_FOR_INTERVAL_MS) }
 }
 
 function createWaitFor(renderer: TestRenderer): TestWaitFor {
@@ -1365,21 +1374,25 @@ function createWaitFor(renderer: TestRenderer): TestWaitFor {
 
       if (Date.now() >= deadline) throw onTimeout(waitForTimeoutError(lastError))
 
+      // Wait first, then pump, then retry. Pumping before the sleep would make
+      // the callback observe the clocks an entire interval after they moved.
+      await new Promise((resolve) => setTimeout(resolve, interval))
       await drainMicrotasks()
       pumpRenderer(renderer, interval)
-      await new Promise((resolve) => setTimeout(resolve, interval))
     }
   }
 }
 
 /**
  * The synchronous sibling of `waitFor`, for the few call sites that cannot
- * become async. It shares the pump and the timeout error, and blocks the
- * thread between attempts instead of yielding to the event loop.
+ * become async. It shares the timeout error and blocks the thread between
+ * attempts instead of yielding to the event loop. The pump is the caller's:
+ * only a call site that owns the clocks may advance them, and one that is
+ * waiting on real async work outside them must pass a repaint-only pump.
  */
 function waitForSync(
-  renderer: TestRenderer,
   predicate: () => boolean,
+  pump: WaitForPump,
   describeFailure: () => string,
   options: WaitForOptions = {}
 ): void {
@@ -1391,8 +1404,8 @@ function waitForSync(
     if (predicate()) return
     if (Date.now() >= deadline) throw waitForTimeoutError(new Error(describeFailure()))
 
-    pumpRenderer(renderer, interval)
     Atomics.wait(pause, 0, 0, interval)
+    pump(interval)
   }
 }
 
@@ -2164,8 +2177,11 @@ export function expectCanvasMatchesBrowser(
       const loadedImageCount = (): number =>
         testRoot.renderer.getCanvasState(element.id)?.loadedImageCount ?? 0
       waitForSync(
-        testRoot.renderer,
         () => loadedImageCount() === images.length,
+        // Image decoding happens off the renderer's clocks, so this poll only
+        // repaints. Advancing them here would silently run a golden scene's
+        // animations and timers forward by however long the disk took.
+        () => testRoot.renderer.flush(),
         () =>
           `Canvas scene ${JSON.stringify(resolved.name)} loaded ` +
           `${loadedImageCount()}/${images.length} image fixtures`,

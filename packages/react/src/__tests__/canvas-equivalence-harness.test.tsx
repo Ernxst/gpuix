@@ -262,6 +262,37 @@ describeLocalMac("canvas browser-equivalence harness", { timeout: 12_000 }, () =
     }
   )
 
+  test("waits for image fixtures without advancing the scene's clocks", (context) => {
+    // Report the fixture as still loading for the first few reads so the poll
+    // has to iterate; a warm image cache would otherwise satisfy it outright
+    // and prove nothing about what the loop does between attempts.
+    const readCanvasState = TestRenderer.prototype.getCanvasState
+    let pendingReads = 3
+    const getCanvasState = vi
+      .spyOn(TestRenderer.prototype, "getCanvasState")
+      .mockImplementation(function (this: TestRenderer, id: number) {
+        const state = readCanvasState.call(this, id)
+        if (state == null || pendingReads === 0) return state
+        pendingReads -= 1
+        return { ...state, loadedImageCount: 0 }
+      })
+    const advanceTime = vi.spyOn(TestRenderer.prototype, "advanceTime")
+    const advanceAsyncClock = vi.spyOn(TestRenderer.prototype, "advanceAsyncClock")
+
+    try {
+      expectCanvasMatchesBrowser("image-whole", {
+        skip: (message) => context.skip(message),
+      })
+      expect(pendingReads).toBe(0)
+      expect(advanceTime).not.toHaveBeenCalled()
+      expect(advanceAsyncClock).not.toHaveBeenCalled()
+    } finally {
+      getCanvasState.mockRestore()
+      advanceTime.mockRestore()
+      advanceAsyncClock.mockRestore()
+    }
+  })
+
   test("throws loudly when an unavailable prerequisite has no skip callback", () => {
     expect(() =>
       expectCanvasMatchesBrowser("fill-rect-grid", {

@@ -129,9 +129,23 @@ describeNative("createTestRoot waitFor", () => {
       ).rejects.toThrow(/never settles/)
       expect(attempts).toBeGreaterThan(1)
 
+      // Testing Library takes interval 0 as "poll as fast as possible", so it
+      // is clamped, not rejected. Only a non-finite interval is an error.
+      expect(await screen.waitFor(() => "ok", { timeout: 80, interval: 0 })).toBe("ok")
+      let polls = 0
       await expect(
-        screen.waitFor(() => "ok", { timeout: 80, interval: 0 })
-      ).rejects.toThrow(/waitFor interval must be a finite positive number/)
+        screen.waitFor(
+          () => {
+            polls += 1
+            throw new Error("still nothing")
+          },
+          { timeout: 40, interval: 0 }
+        )
+      ).rejects.toThrow(/still nothing/)
+      expect(polls).toBeGreaterThan(1)
+      await expect(
+        screen.waitFor(() => "ok", { timeout: 80, interval: Number.NaN })
+      ).rejects.toThrow(/waitFor interval must be a finite number/)
     } finally {
       screen.unmount()
     }
