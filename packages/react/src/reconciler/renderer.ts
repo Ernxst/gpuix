@@ -254,7 +254,7 @@ function renderSlot(): RenderSlot {
 export interface RenderOptions extends WindowOptions {
   onEvent?: (event: EventPayload) => void
   onMenuAction?: (event: MenuActionEvent) => void
-  /** Runs once after menu Quit, explicit quit, last-window close, or a fatal error. */
+  /** Runs once after menu Quit, explicit quit, last-window close, or an owned renderer's fatal error. */
   onTerminated?: () => void | Promise<void>
   renderer?: NativeRenderer
   /** GPUI scene overlay. Does not go through React or layout. */
@@ -473,6 +473,10 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
   root = createRoot(host, {
     strictStyles,
     onUncaughtError: ({ error }) => {
+      // Injected renderers are embedder-owned lifecycles: the failed root and
+      // renderer diagnostic are the recovery signal, and the embedder decides
+      // whether to unmount, recover, or exit its process.
+      if (injected) return
       // React 19 reports this from its commit path instead of rethrowing it,
       // so neither flushSync's catch nor the process guards can observe it.
       queueMicrotask(() => {
