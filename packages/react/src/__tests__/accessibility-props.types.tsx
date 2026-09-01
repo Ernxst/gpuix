@@ -94,6 +94,8 @@ const roleVocabulary = [
 const unsupportedProps: Props = { "aria-busy": true }
 // @ts-expect-error ariaCurrent accepts only the ARIA current-item token set.
 const invalidCurrent: Props = { ariaCurrent: "chapter" }
+// @ts-expect-error disabled is an HTML boolean attribute, not an ARIA Booleanish attribute.
+const invalidDisabled: Props = { disabled: "false" }
 
 void aliases
 void aliasProps
@@ -101,3 +103,4 @@ void currentTokens
 void roleVocabulary
 void unsupportedProps
 void invalidCurrent
+void invalidDisabled

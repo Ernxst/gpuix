@@ -383,6 +383,14 @@ fn bool_prop(element: &RetainedElement, key: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn html_boolean_prop(element: &RetainedElement, key: &str) -> bool {
+    match element.custom_props.get(key) {
+        Some(serde_json::Value::Bool(value)) => *value,
+        Some(serde_json::Value::String(_)) => true,
+        _ => false,
+    }
+}
+
 pub(crate) fn is_accessibility_prop(key: &str) -> bool {
     ACCESSIBILITY_PROPS.contains(&key)
 }
@@ -403,7 +411,7 @@ pub(crate) fn role_supports_name_from_contents(element: &RetainedElement) -> boo
 }
 
 pub(crate) fn is_native_disabled(element: &RetainedElement) -> bool {
-    bool_prop(element, "disabled")
+    html_boolean_prop(element, "disabled")
 }
 
 pub(crate) fn is_action_disabled(element: &RetainedElement) -> bool {
@@ -548,9 +556,10 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<AccessibilityPr
             "ariaLabel" | "ariaDescription" | "ariaValue" => !value.is_string(),
             "ariaChecked" => !(value.is_boolean() || value.as_str() == Some("mixed")),
             "ariaCurrent" => parse_aria_current(value).is_none(),
-            "ariaExpanded" | "ariaSelected" | "ariaDisabled" | "ariaHidden" | "disabled" => {
+            "ariaExpanded" | "ariaSelected" | "ariaDisabled" | "ariaHidden" => {
                 parse_booleanish(value).is_none()
             }
+            "disabled" => !(value.is_boolean() || value.is_string()),
             "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
                 value.as_f64().is_none_or(|number| !number.is_finite())
             }
@@ -573,6 +582,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<AccessibilityPr
                 | "ariaColCount"
                 | "ariaRowSpan"
                 | "ariaColSpan" => "a positive integer",
+                "disabled" => "a boolean or string",
                 _ => "a boolean",
             };
             problems.push(rejected_problem(
@@ -581,6 +591,15 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<AccessibilityPr
                 format!("expected {expected}"),
             ));
             continue;
+        }
+
+        if property == "disabled" && value.is_string() {
+            problems.push(applied_as_problem(
+                property,
+                value,
+                "true",
+                "disabled is an HTML boolean attribute; its presence computes disabled=true",
+            ));
         }
 
         if property == "ariaChecked"
@@ -928,6 +947,59 @@ mod tests {
         assert_eq!(props.value_now, Some(42.0));
         assert!(props.disabled);
         assert!(element_problems(&element).is_empty());
+    }
+
+    #[test]
+    fn treats_disabled_as_an_html_boolean_attribute() {
+        for (description, value, expected, computed) in [
+            ("boolean true", serde_json::Value::Bool(true), true, None),
+            ("boolean false", serde_json::Value::Bool(false), false, None),
+            (
+                "string true",
+                serde_json::Value::String("true".into()),
+                true,
+                Some("true"),
+            ),
+            (
+                "string false",
+                serde_json::Value::String("false".into()),
+                true,
+                Some("true"),
+            ),
+            (
+                "empty string",
+                serde_json::Value::String(String::new()),
+                true,
+                Some("true"),
+            ),
+        ] {
+            let mut element = RetainedElement::new(7, "div".to_string(), 1);
+            element.custom_props.insert("role".into(), "button".into());
+            element.custom_props.insert("disabled".into(), value);
+
+            assert_eq!(
+                AccessibilityProps::from_element(&element).disabled,
+                expected,
+                "{description}"
+            );
+
+            let problems = element_problems(&element);
+            match computed {
+                Some(value) => assert_eq!(
+                    problems.as_slice(),
+                    [AccessibilityProblem {
+                        problem: StyleProblem {
+                            property: "disabled".into(),
+                            value: value_json(element.custom_props.get("disabled").unwrap()),
+                            reason: "disabled is an HTML boolean attribute; its presence computes disabled=true".into(),
+                        },
+                        effect: AccessibilityProblemEffect::AppliedAs(value),
+                    }],
+                    "{description}"
+                ),
+                None => assert!(problems.is_empty(), "{description}: {problems:?}"),
+            }
+        }
     }
 
     #[test]

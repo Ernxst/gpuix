@@ -1366,7 +1366,7 @@ describeNative("automation", () => {
     expect(labels).not.toContain("Decorative action")
   })
 
-  it("publishes Booleanish accessibility states and suppresses Booleanish hidden subtrees", () => {
+  it("publishes Booleanish ARIA states and HTML boolean disabled state", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const { render, renderer } = createTestRoot({ strictStyles: true })
     render(
@@ -1389,8 +1389,20 @@ describeNative("automation", () => {
         <div role="option" ariaLabel="Selected boolean" ariaSelected />
         <button ariaLabel="Aria disabled string" aria-disabled="true" />
         <button ariaLabel="Aria disabled boolean" ariaDisabled />
-        <button ariaLabel="Disabled string" disabled="true" />
-        <button ariaLabel="Disabled boolean" disabled />
+        <button ariaLabel="Disabled boolean true" disabled />
+        <button ariaLabel="Disabled boolean false" disabled={false} />
+        <button
+          ariaLabel="Disabled true string"
+          {...({ disabled: "true" } as Record<string, string>)}
+        />
+        <button
+          ariaLabel="Disabled false string"
+          {...({ disabled: "false" } as Record<string, string>)}
+        />
+        <button
+          ariaLabel="Disabled empty string"
+          {...({ disabled: "" } as Record<string, string>)}
+        />
         <div
           role="button"
           ariaLabel="Malformed hidden"
@@ -1412,16 +1424,22 @@ describeNative("automation", () => {
     expect(byLabel("Selected boolean")?.aria).toMatchObject({ selected: true })
     expect(byLabel("Aria disabled string")?.aria).toMatchObject({ disabled: true })
     expect(byLabel("Aria disabled boolean")?.aria).toMatchObject({ disabled: true })
-    expect(byLabel("Disabled string")?.aria).toMatchObject({ disabled: true })
-    expect(byLabel("Disabled boolean")?.aria).toMatchObject({ disabled: true })
+    expect(byLabel("Disabled boolean true")?.aria).toMatchObject({ disabled: true })
+    expect(byLabel("Disabled boolean false")?.aria.disabled).not.toBe(true)
+    expect(byLabel("Disabled true string")?.aria).toMatchObject({ disabled: true })
+    expect(byLabel("Disabled false string")?.aria).toMatchObject({ disabled: true })
+    expect(byLabel("Disabled empty string")?.aria).toMatchObject({ disabled: true })
     expect(byLabel("Malformed hidden")?.aria).toMatchObject({ role: "Button" })
     const diagnostics = warn.mock.calls.map(([message]) => String(message)).join("\n")
     for (const value of ["true", "false", "TRUE"]) {
       expect(diagnostics).not.toContain(`ariaHidden" rejected value "${value}"`)
     }
-    for (const property of ["ariaExpanded", "ariaSelected", "ariaDisabled", "disabled"]) {
+    for (const property of ["ariaExpanded", "ariaSelected", "ariaDisabled"]) {
       expect(diagnostics).not.toContain(`${property}" rejected value "true"`)
     }
+    expect(diagnostics).not.toContain('disabled" rejected value "true"')
+    expect(diagnostics).toContain('disabled" applied value "false" as true')
+    expect(diagnostics).toContain('disabled" applied value "" as true')
     expect(diagnostics).toContain('ariaHidden" rejected value "yes"')
   })
 
