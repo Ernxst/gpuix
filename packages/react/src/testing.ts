@@ -79,6 +79,8 @@ export interface ImageComparisonResult {
 
 export interface AccessKitNodeSnapshot {
   accesskit_id: string
+  /** Retained GPUIX host identity. Omitted for the window and synthetic nodes. */
+  host_id?: number
   children?: string[]
   aria: {
     role: string
@@ -146,6 +148,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   hasMainMenu(): boolean
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number): void
+  resolveTabKeyDown(defaultPrevented: boolean): void
   setPointerCapture(elementId: number): void
   releasePointerCapture(elementId: number): void
   simulateWindowActivation(active: boolean): void
@@ -309,6 +312,17 @@ export interface TestElement {
 
 export type TextMatcher = RegExp | string
 export type TestIdMatcher = RegExp | string
+export type AccessibleNameMatcher =
+  | RegExp
+  | string
+  | ((accessibleName: string, element: TestElement) => boolean)
+
+export interface ByRoleOptions {
+  name?: AccessibleNameMatcher
+  level?: number
+  /** Defaults to false. `true` awaits native hidden-node snapshot support. */
+  hidden?: boolean
+}
 
 /** Text queries over the GPU-IX desktop test renderer. */
 export interface TextQueries {
@@ -326,7 +340,15 @@ export interface TestIdQueries {
   queryAllByTestId: (testId: TestIdMatcher) => TestElement[]
 }
 
-export interface TestQueries extends TextQueries, TestIdQueries {}
+/** Computed accessibility-tree queries over the GPU-IX desktop test renderer. */
+export interface RoleQueries {
+  getByRole: (role: string, options?: ByRoleOptions) => TestElement
+  queryByRole: (role: string, options?: ByRoleOptions) => TestElement | null
+  getAllByRole: (role: string, options?: ByRoleOptions) => TestElement[]
+  queryAllByRole: (role: string, options?: ByRoleOptions) => TestElement[]
+}
+
+export interface TestQueries extends TextQueries, TestIdQueries, RoleQueries {}
 
 /** Current async load state for a live native `<img>` test element. */
 export interface ImageLoadState {
@@ -644,11 +666,15 @@ export class TestRenderer implements NativeRenderer {
    *  the only way to test that `autoFocus` (or a click) actually moved focus. */
   simulateKeystrokes(keystrokes: string): void {
     this.native.flush()
-    this.native.simulateKeystrokes(keystrokes)
-    // Focus listeners run in GPUI's draw-time focus phase.
-    this.native.flush()
-    this.dispatchNativeEvents()
-    this.native.flush()
+    for (const keystroke of keystrokes.split(/\s+/).filter(Boolean)) {
+      this.native.simulateKeystrokes(keystroke)
+      // A Tab keydown now resolves its focus default through React. Drain each
+      // physical keypress before sending the next one so `tab a` delivers `a`
+      // to the newly focused element, as a real platform event stream does.
+      this.native.flush()
+      this.dispatchNativeEvents()
+      this.native.flush()
+    }
   }
 
   /** Dispatch one key-down event to the element that already holds focus. */
@@ -1022,6 +1048,13 @@ export class TestRenderer implements NativeRenderer {
     this.dispatchNativeEvents()
   }
 
+  resolveTabKeyDown(defaultPrevented: boolean): void {
+    this.native.resolveTabKeyDown(defaultPrevented)
+    // Production reports the resulting focus transition on a later frame.
+    // Draw it now so the enclosing drain loop observes blur/focus in order.
+    this.native.flush()
+  }
+
   // ── Scroll API ──────────────────────────────────────────────────
 
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
@@ -1252,6 +1285,41 @@ function getQueries(
       return matches
     },
     queryAllByTestId: (testId) => findAllByTestId(renderer, resolveScope(), testId, includeScope),
+    getByRole: (role, options = {}) => {
+      const scope = resolveScope()
+      const matches = findAllByRole(renderer, scope, role, options, includeScope)
+
+      if (matches.length === 0) {
+        throw noRoleMatchError(renderer, scope, role, options, includeScope)
+      }
+      if (matches.length > 1) throw multipleRoleMatchesError(renderer, role, options, matches)
+
+      const [match] = matches
+      if (match === undefined) {
+        throw noRoleMatchError(renderer, scope, role, options, includeScope)
+      }
+
+      return match
+    },
+    queryByRole: (role, options = {}) => {
+      const matches = findAllByRole(renderer, resolveScope(), role, options, includeScope)
+
+      if (matches.length > 1) throw multipleRoleMatchesError(renderer, role, options, matches)
+
+      return matches[0] ?? null
+    },
+    getAllByRole: (role, options = {}) => {
+      const scope = resolveScope()
+      const matches = findAllByRole(renderer, scope, role, options, includeScope)
+
+      if (matches.length === 0) {
+        throw noRoleMatchError(renderer, scope, role, options, includeScope)
+      }
+
+      return matches
+    },
+    queryAllByRole: (role, options = {}) =>
+      findAllByRole(renderer, resolveScope(), role, options, includeScope),
   }
 }
 
@@ -1279,6 +1347,129 @@ function findAllByTestId(
       (element.dataTestId !== undefined && matchesTestId(element.dataTestId, testId)) ||
       (element.testId !== undefined && matchesTestId(element.testId, testId))
   )
+}
+
+interface AccessibleHost {
+  element: TestElement
+  node: AccessKitNodeSnapshot
+  role: string
+  name: string
+}
+
+const ACCESSKIT_ROLE_ALIASES: Readonly<Record<string, string>> = {
+  contentdeletion: "deletion",
+  contentinsertion: "insertion",
+  image: "img",
+  listboxoption: "option",
+  progressindicator: "progressbar",
+  radiobutton: "radio",
+  searchinput: "searchbox",
+  splitter: "separator",
+  textinput: "textbox",
+}
+
+const HIDDEN_ROLE_ERROR =
+  "hidden: true requires native hidden-node snapshot support, not yet implemented; see issue #209"
+
+function findAllByRole(
+  renderer: TestRenderer,
+  scope: TestElement,
+  role: string,
+  options: ByRoleOptions,
+  includeScope: boolean
+): TestElement[] {
+  if (options.hidden === true) throw new Error(HIDDEN_ROLE_ERROR)
+
+  return accessibleHosts(renderer, scope, includeScope)
+    .filter((candidate) => matchesRole(candidate.node.aria.role, role))
+    .filter((candidate) => options.level === undefined || candidate.node.aria.level === options.level)
+    .filter(
+      (candidate) =>
+        options.name === undefined ||
+        matchesAccessibleName(candidate.name, options.name, candidate.element)
+    )
+    .map((candidate) => candidate.element)
+}
+
+function accessibleHosts(
+  renderer: TestRenderer,
+  scope: TestElement,
+  includeScope: boolean
+): AccessibleHost[] {
+  const scopedIds = new Set(
+    getElements(renderer, scope, includeScope).map((element) => element.id)
+  )
+  const tree = renderer.getAccessibilityTree()
+
+  return accessibilityNodesInOrder(tree).flatMap((node): AccessibleHost[] => {
+    if (node.host_id === undefined || !scopedIds.has(node.host_id)) return []
+    const element = renderer.getElement(node.host_id)
+    if (element === undefined) return []
+
+    return [
+      {
+        element,
+        node,
+        role: describeComputedRole(node.aria.role),
+        name: node.aria.label ?? "",
+      },
+    ]
+  })
+}
+
+function accessibilityNodesInOrder(tree: AccessKitTreeSnapshot): AccessKitNodeSnapshot[] {
+  if (tree.root === null) return []
+  const visited = new Set<string>()
+  const nodes: AccessKitNodeSnapshot[] = []
+
+  const visit = (id: string): void => {
+    if (visited.has(id)) return
+    visited.add(id)
+    const node = tree.nodes[id]
+    if (node === undefined) return
+    nodes.push(node)
+    for (const child of node.children ?? []) visit(child)
+  }
+
+  visit(tree.root)
+  return nodes
+}
+
+function normalizeRole(role: string): string {
+  return role.replace(/[^a-z0-9]/gi, "").toLowerCase()
+}
+
+function matchesRole(computedRole: string, requestedRole: string): boolean {
+  const computed = normalizeRole(computedRole)
+  return (ACCESSKIT_ROLE_ALIASES[computed] ?? computed) === normalizeRole(requestedRole)
+}
+
+function describeComputedRole(role: string): string {
+  const normalized = normalizeRole(role)
+  const alias = ACCESSKIT_ROLE_ALIASES[normalized]
+  if (alias !== undefined) return alias
+  if (normalized.startsWith("doc") && normalized.length > 3) {
+    const suffix = normalized.slice(3)
+    return `doc-${suffix === "acknowledgements" ? "acknowledgments" : suffix}`
+  }
+  if (normalized.startsWith("graphics") && normalized.length > 8) {
+    return `graphics-${normalized.slice(8)}`
+  }
+  return normalized
+}
+
+function matchesAccessibleName(
+  accessibleName: string,
+  matcher: AccessibleNameMatcher,
+  element: TestElement
+): boolean {
+  if (typeof matcher === "function") return matcher(accessibleName, element)
+  if (!(matcher instanceof RegExp)) return accessibleName === matcher
+
+  matcher.lastIndex = 0
+  const matches = matcher.test(accessibleName)
+  matcher.lastIndex = 0
+  return matches
 }
 
 function hasMatchingChild(
@@ -1381,6 +1572,56 @@ function multipleTestIdMatchesError(
       .map((element) => `  ${describeElement(renderer, element)}`)
       .join("\n")}`
   )
+}
+
+function noRoleMatchError(
+  renderer: TestRenderer,
+  scope: TestElement,
+  role: string,
+  options: ByRoleOptions,
+  includeScope: boolean
+): Error {
+  if (options.hidden === true) return new Error(HIDDEN_ROLE_ERROR)
+
+  const present = accessibleHosts(renderer, scope, includeScope)
+  const available =
+    present.length === 0
+      ? "  No accessible roles were found in this scope."
+      : present
+          .map(
+            ({ element, role: presentRole, name }) =>
+              `  ${presentRole}:\n    Name ${JSON.stringify(name)}\n    ${describeElement(renderer, element)}`
+          )
+          .join("\n\n")
+
+  return new Error(
+    `Unable to find an accessible element with the role ${JSON.stringify(role)}${describeRoleOptions(options)} within ${describeElement(renderer, scope)}.\n\nHere are the accessible roles:\n\n${available}`
+  )
+}
+
+function multipleRoleMatchesError(
+  renderer: TestRenderer,
+  role: string,
+  options: ByRoleOptions,
+  matches: TestElement[]
+): Error {
+  return new Error(
+    `Found multiple elements with the role ${JSON.stringify(role)}${describeRoleOptions(options)}:\n${matches
+      .map((element) => `  ${describeElement(renderer, element)}`)
+      .join("\n")}`
+  )
+}
+
+function describeRoleOptions(options: ByRoleOptions): string {
+  const name =
+    options.name === undefined ? "" : ` and name ${describeAccessibleNameMatcher(options.name)}`
+  const level = options.level === undefined ? "" : ` and level ${options.level}`
+  return `${name}${level}`
+}
+
+function describeAccessibleNameMatcher(matcher: AccessibleNameMatcher): string {
+  if (typeof matcher === "function") return `[function ${matcher.name || "anonymous"}]`
+  return describeMatcher(matcher)
 }
 
 function describeElement(renderer: TestRenderer, element: TestElement): string {

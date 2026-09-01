@@ -221,19 +221,19 @@ export function detachCanvasImageLoader(renderer: NativeRenderer): void {
 class GpuixImage {
   onload: ((this: GlobalEventHandlers, event: Event) => unknown) | null = null
   onerror: OnErrorEventHandler = null
-  width: number
-  height: number
   naturalWidth = 0
   naturalHeight = 0
   complete = true
 
+  private specifiedWidth: number | undefined
+  private specifiedHeight: number | undefined
   private value = ""
   private listeners = new Map<string, Set<EventListenerOrEventListenerObject>>()
   private readonly record: ImageRecord
 
-  constructor(width = 0, height = 0) {
-    this.width = Number.isFinite(width) && width > 0 ? Number(width) : 0
-    this.height = Number.isFinite(height) && height > 0 ? Number(height) : 0
+  constructor(width?: number, height?: number) {
+    if (width !== undefined) this.width = width
+    if (height !== undefined) this.height = height
     this.record = {
       state: "unloaded",
       width: 0,
@@ -243,6 +243,22 @@ class GpuixImage {
       owner: this,
     }
     imageRecords.set(this, this.record)
+  }
+
+  get width(): number {
+    return this.specifiedWidth ?? this.naturalWidth
+  }
+
+  set width(value: number) {
+    this.specifiedWidth = Number.isFinite(value) && value > 0 ? Number(value) : 0
+  }
+
+  get height(): number {
+    return this.specifiedHeight ?? this.naturalHeight
+  }
+
+  set height(value: number) {
+    this.specifiedHeight = Number.isFinite(value) && value > 0 ? Number(value) : 0
   }
 
   get src(): string {

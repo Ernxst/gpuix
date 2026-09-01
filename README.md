@@ -1,5 +1,8 @@
 # GPUIX
 
+> [!NOTE]
+> **Ernxst/gpuix** is a fork of [remorses/gpuix](https://github.com/remorses/gpuix) that keeps one codebase for web and desktop, with DOM/CSS semantics as the source of truth. It tracks and reconciles with upstream regularly; fork-specific divergences are recorded in [`.changeset/`](./.changeset). This fork intentionally does **not** publish packages to npm.
+
 React bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) - Zed's GPU-accelerated UI framework.
 
 Build native GPU-accelerated desktop apps with React and TypeScript. Your components render directly to the GPU via Metal, DirectX, or Vulkan. No Electron, no web views.
@@ -315,8 +318,8 @@ the unchanged payload is exposed as `nativeEvent`. The synthetic surface adds:
 - `preventDefault()` / `defaultPrevented` and `stopPropagation()`
 
 `handleGpuixEvent()` returns the synchronous prevention result. A prevented
-Enter or Space key event cancels the keyboard-generated click that follows;
-future native defaults must likewise check this result before running.
+Enter or Space key event cancels the keyboard-generated click that follows. A
+prevented Tab or Shift+Tab keydown likewise keeps focus on the current element.
 
 ## Packages
 
@@ -437,6 +440,22 @@ GPUI clock, so `advanceAsyncClock()` controls it deterministically. Requesting a
 callback creates frame demand without dirtying the window; drawing still happens
 only through the normal GPUI frame path. A hot remount drops callbacks owned by
 the previous tree.
+
+### Canvas bitmap and layout dimensions
+
+On desktop, `<canvas width>` and `<canvas height>` define the logical coordinate
+space for recorded drawing commands; `style.width` and `style.height` define the
+layout box. GPUIX deliberately rasterizes that logical drawing at the layout
+box's device-pixel resolution. This is a desktop-superset divergence from the
+DOM canvas, whose fixed-size bitmap caps the detail available when the element
+is enlarged.
+
+The browser high-DPI idiom is therefore unnecessary in desktop-only code: do
+not multiply the canvas dimensions by `window.devicePixelRatio` merely to make
+GPUIX drawing sharp. A component shared with the browser can keep its one DOM
+path without a renderer check, however. DPR-scaled bitmap dimensions paired
+with the matching `context.scale(dpr, dpr)` map back to the same GPUIX layout
+geometry, while GPUIX still rasterizes at the layout box's physical resolution.
 
 ### Canvas image residency
 
@@ -916,12 +935,32 @@ type. Element-owned painting remains outside that surface: for example, a
 container, but it does not independently interpolate syntax tokens, diff rows,
 or markdown runs.
 
-`durationMs` is required and uses milliseconds; `delayMs` defaults to `0`.
-`easing` accepts `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut`, or a
-four-number cubic-bezier tuple. Pixel lengths interpolate with pixels and
-percentages with percentages. Incompatible endpoints such as `auto` to pixels
-snap to the new value. Malformed transition objects are rejected as a whole
-through the strict style-diagnostic channel.
+For a tween, `durationMs` is required and uses milliseconds; `delayMs` defaults
+to `0`. `easing` accepts `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut`, or
+a four-number cubic-bezier tuple. A spring replaces that fixed-duration easing
+with the same object used by `motion.div`:
+
+```tsx
+transition: {
+  properties: ['width', 'opacity'],
+  delayMs: 40,
+  easing: { type: 'spring', stiffness: 400, damping: 28, mass: 0.9 },
+}
+```
+
+Spring defaults are `stiffness: 100`, `damping: 10`, `mass: 1`, and
+`velocity: 0`. `durationMs` may be omitted and is ignored when supplied; the
+native spring runs until every channel settles. Delay still applies. Pixel
+channels settle within `0.05px`, while opacity, percentage, and colour channels
+use a proportionally smaller threshold so the exact final value does not make a
+visible end-snap. An interrupted spring retargets from the painted value and
+carries its current channel velocity into the new trajectory.
+
+Pixel lengths interpolate with pixels and percentages with percentages.
+Incompatible endpoints such as `auto` to pixels snap to the new value.
+Malformed transition objects, including spring objects with unknown `type`
+values or invalid physical parameters, are rejected as a whole through the
+strict style-diagnostic channel.
 
 Radius shorthand and corner longhands are resolved to four painted corners
 before interpolation, so either form can override the other without a stale
@@ -961,6 +1000,23 @@ function WelcomeCard() {
 }
 ```
 
+Use the same spring easing object for a physics-driven target:
+
+```tsx
+<motion.div
+  initial={{ width: 0, opacity: 0 }}
+  animate={{ width: 320, opacity: 1 }}
+  transition={{
+    delay: 0.04,
+    ease: { type: 'spring', stiffness: 400, damping: 28, mass: 0.9 },
+  }}
+/>
+```
+
+The spring is integrated inside the existing native motion track. React sends
+only the target; there is no JavaScript frame loop. Retargeting while it is
+moving keeps both the visible position and instantaneous velocity.
+
 Set **`initial={false}`** when the element must mount at its first `animate`
 target. Later `animate` changes still transition normally. If a target changes
 while motion is active, the next transition starts from the current visible
@@ -983,10 +1039,32 @@ The **transition** uses seconds, like Motion for React:
 |---|---:|---|
 | `duration` | `0.3` | Non-negative seconds |
 | `delay` | `0` | Non-negative seconds |
-| `ease` | `"easeOut"` | `"linear"`, `"ease"`, `"easeIn"`, `"easeOut"`, `"easeInOut"`, or `[x1, y1, x2, y2]` |
+| `ease` | `"easeOut"` | `"linear"`, `"ease"`, `"easeIn"`, `"easeOut"`, `"easeInOut"`, `[x1, y1, x2, y2]`, or a spring object |
 
-Springs, keyframes, variants, exit transitions, and shared layout animations
-are not available yet.
+`duration` is ignored when `ease.type` is `"spring"`; settling derives the end
+time. Keyframes, variants, exit transitions, and shared layout animations are
+not available yet.
+
+### Browser mirror: sampled springs with CSS `linear()`
+
+The web-platform encoding of a sampled spring is the CSS `linear()` easing
+function. A browser mirror samples the same normalized spring trajectory from
+`0` until its channel-aware settling time, keeps overshoot samples above `1` or
+below `0`, and emits them as linear stops:
+
+```css
+.card {
+  transition-property: width, opacity;
+  transition-duration: var(--derived-spring-settling-time);
+  transition-delay: 40ms;
+  transition-timing-function: linear(0, 0.057, 0.198, 0.58, 0.994, 1.126, 1.075, 1);
+}
+```
+
+The generated CSS duration is the sampling horizon, not the ignored author
+`duration` / `durationMs`. A browser implementation that retargets a sampled
+spring must regenerate the samples from the computed value and current
+velocity to match the native interruption semantics.
 
 ### Animate a sidebar
 
@@ -1584,8 +1662,20 @@ a `div` when it should receive keyboard focus:
 | `autoFocus` | Takes focus once, when its native focus handle is created |
 
 `Tab` calls GPUI's `window.focus_next()`. `Shift+Tab` calls
-`window.focus_prev()`. This navigation stays in Rust and does not make a
-JavaScript round trip.
+`window.focus_prev()`. Before that default runs, GPUIX dispatches the keydown
+through React's capture and bubble phases. Call `preventDefault()` from either
+phase to keep focus on the current element, matching the browser:
+
+```tsx
+<div
+  tabIndex={0}
+  onKeyDown={(event) => {
+    if (event.key === 'tab') event.preventDefault()
+  }}
+>
+  Editor
+</div>
+```
 
 Use a ref for imperative focus:
 
@@ -3107,13 +3197,21 @@ way to consume the unpublished fork under Bun.
 renderer can initialize.
 
 `createTestRoot()` returns synchronous queries bound to its renderer. Text
-queries match retained `<text>` content, while test ID queries match both
-`testId` and the standard `data-testid` prop. The singular `getBy...` and
-`queryBy...` methods throw when more than one element matches; required
-`getBy...` / `getAllBy...` methods also throw when none match. Their
-`queryBy...` / `queryAllBy...` counterparts return `null` / `[]` for a miss.
-`within(element)` returns the same query families scoped to that element's
-descendants.
+queries match retained `<text>` content, test ID queries match both `testId`
+and the standard `data-testid` prop, and role queries match GPUI's computed
+accessibility role, accessible name, and heading level. Role names are ARIA
+names such as `button`, `heading`, and `region`; `name` accepts a string,
+regular expression, or predicate. The singular `getBy...` and `queryBy...`
+methods throw when more than one element matches; required `getBy...` /
+`getAllBy...` methods also throw when none match. Their `queryBy...` /
+`queryAllBy...` counterparts return `null` / `[]` for a miss. `within(element)`
+returns the same query families scoped to that element's descendants.
+
+Role queries currently search the visible accessibility tree. `hidden` defaults
+to `false`, and `{ hidden: false }` is supported explicitly. `{ hidden: true }`
+throws `hidden: true requires native hidden-node snapshot support, not yet
+implemented; see issue #209` until the native snapshot can retain computed
+semantics for `ariaHidden` subtrees.
 
 These are Testing Library-shaped call sites, not DOM locators: they return a
 `TestElement` immediately and do not add browser accessibility or asynchronous
@@ -3131,8 +3229,14 @@ screen.getAllByText(/Built/)
 screen.queryByText('Missing')
 screen.queryAllByText(/Missing/)
 
+const ledger = screen.getByRole('region', { name: 'Production ledger' })
+screen.getByRole('link', { name: /coal current/i })
+screen.getByRole('heading', { name: 'Build list', level: 2 })
+screen.queryAllByRole('button')
+
 const panel = screen.getByTestId('power-panel')
 screen.within(panel).getByText('Rate')
+screen.within(ledger).getByText('State')
 screen.queryAllByTestId(/^optional-/)
 
 // Re-render through the same bound screen.

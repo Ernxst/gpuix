@@ -121,6 +121,11 @@ export declare class GpuixRenderer {
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
   /**
+   * Complete the DOM default for a Tab keydown after React capture and
+   * bubble handlers have had a chance to call preventDefault().
+   */
+  resolveTabKeyDown(defaultPrevented: boolean): void
+  /**
    * The focused host element id, analogous to `document.activeElement`, or null.
    * This reads GPUI focus directly, so role-less focusable elements are included.
    */
@@ -375,6 +380,7 @@ export declare class TestGpuixRenderer {
    * Call flush() before this so the element tree and focus handles exist.
    */
   focusElement(id: number): void
+  resolveTabKeyDown(defaultPrevented: boolean): void
   setPointerCapture(id: number): void
   releasePointerCapture(id: number): void
   /** Simulate a platform window activation change through the production observer path. */

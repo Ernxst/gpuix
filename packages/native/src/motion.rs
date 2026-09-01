@@ -6,7 +6,7 @@ use serde::Deserialize;
 use web_time::Instant;
 
 use crate::style::{
-    DimensionValue, StyleDesc, StyleTransition, TransitionEasing, TransitionProperty,
+    DimensionValue, SpringEasing, StyleDesc, StyleTransition, TransitionEasing, TransitionProperty,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -14,6 +14,13 @@ enum TransitionValue {
     Number(f64),
     Dimension(DimensionValue),
     Color([f32; 4]),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum TransitionVelocity {
+    Number(f64),
+    Dimension(f64),
+    Color([f64; 4]),
 }
 
 impl TransitionValue {
@@ -135,10 +142,169 @@ impl TransitionValue {
             _ => {}
         }
     }
+
+    fn initial_spring_velocity_to(
+        &self,
+        target: &Self,
+        velocity: f64,
+    ) -> Option<TransitionVelocity> {
+        match (self, target) {
+            (Self::Number(from), Self::Number(to)) if from != to => {
+                Some(TransitionVelocity::Number(velocity))
+            }
+            (
+                Self::Dimension(DimensionValue::Pixels(from)),
+                Self::Dimension(DimensionValue::Pixels(to)),
+            )
+            | (
+                Self::Dimension(DimensionValue::Percentage(from)),
+                Self::Dimension(DimensionValue::Percentage(to)),
+            ) if from != to => Some(TransitionVelocity::Dimension(velocity)),
+            (Self::Color(from), Self::Color(to)) if from != to => {
+                Some(TransitionVelocity::Color([velocity; 4]))
+            }
+            _ => None,
+        }
+    }
+
+    fn accepts_spring_velocity(&self, target: &Self, velocity: &TransitionVelocity) -> bool {
+        matches!(
+            (self, target, velocity),
+            (
+                Self::Number(_),
+                Self::Number(_),
+                TransitionVelocity::Number(_)
+            ) | (
+                Self::Dimension(DimensionValue::Pixels(_)),
+                Self::Dimension(DimensionValue::Pixels(_)),
+                TransitionVelocity::Dimension(_)
+            ) | (
+                Self::Dimension(DimensionValue::Percentage(_)),
+                Self::Dimension(DimensionValue::Percentage(_)),
+                TransitionVelocity::Dimension(_)
+            ) | (Self::Color(_), Self::Color(_), TransitionVelocity::Color(_))
+        )
+    }
+
+    fn spring_to(
+        &self,
+        target: &Self,
+        velocity: Option<&TransitionVelocity>,
+        elapsed: f64,
+        spring: &SpringEasing,
+        property: TransitionProperty,
+    ) -> (Self, Option<TransitionVelocity>, bool) {
+        match (self, target) {
+            (Self::Number(from), Self::Number(to)) => {
+                let velocity = match velocity {
+                    Some(TransitionVelocity::Number(velocity)) => *velocity,
+                    _ => 0.0,
+                };
+                let epsilon = if property == TransitionProperty::Opacity {
+                    0.000_5
+                } else {
+                    0.05
+                };
+                let sample = sample_spring(*from, *to, velocity, elapsed, spring, epsilon);
+                (
+                    Self::Number(sample.position),
+                    Some(TransitionVelocity::Number(sample.velocity)),
+                    sample.active,
+                )
+            }
+            (
+                Self::Dimension(DimensionValue::Pixels(from)),
+                Self::Dimension(DimensionValue::Pixels(to)),
+            ) => {
+                let velocity = match velocity {
+                    Some(TransitionVelocity::Dimension(velocity)) => *velocity,
+                    _ => 0.0,
+                };
+                let sample = sample_spring(*from, *to, velocity, elapsed, spring, 0.05);
+                (
+                    Self::Dimension(DimensionValue::Pixels(sample.position)),
+                    Some(TransitionVelocity::Dimension(sample.velocity)),
+                    sample.active,
+                )
+            }
+            (
+                Self::Dimension(DimensionValue::Percentage(from)),
+                Self::Dimension(DimensionValue::Percentage(to)),
+            ) => {
+                let velocity = match velocity {
+                    Some(TransitionVelocity::Dimension(velocity)) => *velocity,
+                    _ => 0.0,
+                };
+                let sample = sample_spring(*from, *to, velocity, elapsed, spring, 0.000_5);
+                (
+                    Self::Dimension(DimensionValue::Percentage(sample.position)),
+                    Some(TransitionVelocity::Dimension(sample.velocity)),
+                    sample.active,
+                )
+            }
+            (Self::Color(from), Self::Color(to)) => {
+                let from = premultiply(*from);
+                let to = premultiply(*to);
+                let velocity = match velocity {
+                    Some(TransitionVelocity::Color(velocity)) => *velocity,
+                    _ => [0.0; 4],
+                };
+                let mut sampled = [0.0; 4];
+                let mut sampled_velocity = [0.0; 4];
+                let mut active = false;
+                for channel in 0..4 {
+                    let sample = sample_spring(
+                        from[channel],
+                        to[channel],
+                        velocity[channel],
+                        elapsed,
+                        spring,
+                        0.000_5,
+                    );
+                    sampled[channel] = sample.position;
+                    sampled_velocity[channel] = sample.velocity;
+                    active |= sample.active;
+                }
+                (
+                    Self::Color(unpremultiply(sampled, to)),
+                    Some(TransitionVelocity::Color(sampled_velocity)),
+                    active,
+                )
+            }
+            _ => (target.clone(), None, false),
+        }
+    }
+}
+
+fn premultiply(color: [f32; 4]) -> [f64; 4] {
+    let alpha = f64::from(color[3]);
+    [
+        f64::from(color[0]) * alpha,
+        f64::from(color[1]) * alpha,
+        f64::from(color[2]) * alpha,
+        alpha,
+    ]
+}
+
+fn unpremultiply(color: [f64; 4], target: [f64; 4]) -> [f32; 4] {
+    let alpha = color[3];
+    let channel = |index: usize| {
+        if alpha.abs() > f64::from(f32::EPSILON) {
+            (color[index] / alpha) as f32
+        } else if target[3].abs() > f64::from(f32::EPSILON) {
+            (target[index] / target[3]) as f32
+        } else {
+            0.0
+        }
+    };
+    [channel(0), channel(1), channel(2), alpha as f32]
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct TransitionValues(Vec<(TransitionProperty, Option<TransitionValue>)>);
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct TransitionVelocities(Vec<(TransitionProperty, Option<TransitionVelocity>)>);
 
 impl TransitionValues {
     fn from_style(style: &StyleDesc, transition: &StyleTransition) -> Self {
@@ -189,6 +355,101 @@ impl TransitionValues {
             }
         }
     }
+
+    fn spring_velocities(
+        &self,
+        target: &Self,
+        previous: &TransitionVelocities,
+        carry_previous: bool,
+        initial_velocity: f64,
+    ) -> TransitionVelocities {
+        TransitionVelocities(
+            target
+                .0
+                .iter()
+                .map(|(property, target)| {
+                    let from = self
+                        .0
+                        .iter()
+                        .find(|(candidate, _)| candidate == property)
+                        .and_then(|(_, value)| value.as_ref());
+                    let target = target.as_ref();
+                    let carried = carry_previous
+                        .then(|| previous.get(*property))
+                        .flatten()
+                        .filter(|velocity| {
+                            from.zip(target).is_some_and(|(from, target)| {
+                                from.accepts_spring_velocity(target, velocity)
+                            })
+                        })
+                        .cloned();
+                    let velocity = carried.or_else(|| {
+                        from.zip(target).and_then(|(from, target)| {
+                            from.initial_spring_velocity_to(target, initial_velocity)
+                        })
+                    });
+                    (*property, velocity)
+                })
+                .collect(),
+        )
+    }
+
+    fn spring_sample(
+        &self,
+        target: &Self,
+        velocities: &TransitionVelocities,
+        elapsed: f64,
+        spring: &SpringEasing,
+    ) -> (Self, TransitionVelocities, bool) {
+        let mut active = false;
+        let mut sampled_velocities = Vec::with_capacity(target.0.len());
+        let values = target
+            .0
+            .iter()
+            .map(|(property, target)| {
+                let from = self
+                    .0
+                    .iter()
+                    .find(|(candidate, _)| candidate == property)
+                    .and_then(|(_, value)| value.as_ref());
+                let velocity = velocities.get(*property);
+                let (value, velocity, value_active) = match (from, target.as_ref()) {
+                    (Some(from), Some(target)) => {
+                        let (value, velocity, active) =
+                            from.spring_to(target, velocity, elapsed, spring, *property);
+                        (Some(value), velocity, active)
+                    }
+                    (_, target) => (target.cloned(), None, false),
+                };
+                active |= value_active;
+                sampled_velocities.push((*property, velocity));
+                (*property, value)
+            })
+            .collect();
+        (
+            Self(values),
+            TransitionVelocities(sampled_velocities),
+            active,
+        )
+    }
+}
+
+impl TransitionVelocities {
+    fn get(&self, property: TransitionProperty) -> Option<&TransitionVelocity> {
+        self.0
+            .iter()
+            .find(|(candidate, _)| *candidate == property)
+            .and_then(|(_, velocity)| velocity.as_ref())
+    }
+
+    fn is_zero(&self) -> bool {
+        self.0.iter().all(|(_, velocity)| match velocity {
+            None => true,
+            Some(TransitionVelocity::Number(value))
+            | Some(TransitionVelocity::Dimension(value)) => *value == 0.0,
+            Some(TransitionVelocity::Color(values)) => values.iter().all(|value| *value == 0.0),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -205,6 +466,7 @@ pub(crate) struct StyleTransitionFrame {
 pub(crate) struct StyleTransitionState {
     from: TransitionValues,
     target: TransitionValues,
+    velocities: TransitionVelocities,
     target_style: StyleDesc,
     transition: StyleTransition,
     started: Instant,
@@ -228,6 +490,7 @@ impl StyleTransitionState {
         Self {
             from: target.clone(),
             target,
+            velocities: TransitionVelocities::default(),
             target_style,
             transition,
             started: now,
@@ -256,7 +519,10 @@ impl StyleTransitionState {
             // Resolve the whole painted style before adopting the new property
             // list. A property added to that list must start at the value it
             // was already painting, not at its new target.
-            let visible_style = self.frame(now, false).style;
+            let (visible_frame, previous_velocities) = self.frame_with_velocities(now, false);
+            let carry_velocity = matches!(self.transition.easing, TransitionEasing::Spring(_))
+                && visible_frame.active;
+            let visible_style = visible_frame.style;
             let visible_style = resolve_transition_properties(
                 &visible_style,
                 state,
@@ -267,6 +533,15 @@ impl StyleTransitionState {
             );
             let visible = TransitionValues::from_style(&visible_style, &transition);
             self.from = visible.interpolate(&target, 0.0);
+            self.velocities = match &transition.easing {
+                TransitionEasing::Spring(spring) => self.from.spring_velocities(
+                    &target,
+                    &previous_velocities,
+                    carry_velocity,
+                    spring.velocity,
+                ),
+                _ => TransitionVelocities::default(),
+            };
             self.target = target;
             self.started = now;
         }
@@ -274,20 +549,60 @@ impl StyleTransitionState {
         self.transition = transition;
         if reduce_motion {
             self.from = self.target.clone();
+            self.velocities = TransitionVelocities::default();
         }
     }
 
     pub(crate) fn frame(&self, now: Instant, reduce_motion: bool) -> StyleTransitionFrame {
-        if reduce_motion || self.from == self.target {
-            return StyleTransitionFrame {
-                style: self.target_style.clone(),
-                active: false,
-            };
+        self.frame_with_velocities(now, reduce_motion).0
+    }
+
+    fn frame_with_velocities(
+        &self,
+        now: Instant,
+        reduce_motion: bool,
+    ) -> (StyleTransitionFrame, TransitionVelocities) {
+        if reduce_motion || (self.from == self.target && self.velocities.is_zero()) {
+            return (
+                StyleTransitionFrame {
+                    style: self.target_style.clone(),
+                    active: false,
+                },
+                TransitionVelocities::default(),
+            );
         }
 
         let delay = milliseconds(self.transition.delay_ms);
-        let duration = milliseconds(self.transition.duration_ms);
         let elapsed = now.saturating_duration_since(self.started);
+        if let TransitionEasing::Spring(spring) = &self.transition.easing {
+            let spring_elapsed = elapsed
+                .checked_sub(delay)
+                .unwrap_or(Duration::ZERO)
+                .as_secs_f64();
+            let (values, velocities, active) =
+                self.from
+                    .spring_sample(&self.target, &self.velocities, spring_elapsed, spring);
+            if !active {
+                return (
+                    StyleTransitionFrame {
+                        style: self.target_style.clone(),
+                        active: false,
+                    },
+                    velocities,
+                );
+            }
+            let mut style = self.target_style.clone();
+            values.apply_to(&mut style);
+            return (
+                StyleTransitionFrame {
+                    style,
+                    active: true,
+                },
+                velocities,
+            );
+        }
+
+        let duration = milliseconds(self.transition.duration_ms);
         let raw = if elapsed < delay {
             0.0
         } else if duration.is_zero() {
@@ -296,10 +611,13 @@ impl StyleTransitionState {
             elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
         };
         if raw >= 1.0 {
-            return StyleTransitionFrame {
-                style: self.target_style.clone(),
-                active: false,
-            };
+            return (
+                StyleTransitionFrame {
+                    style: self.target_style.clone(),
+                    active: false,
+                },
+                TransitionVelocities::default(),
+            );
         }
 
         let mut style = self.target_style.clone();
@@ -309,10 +627,13 @@ impl StyleTransitionState {
                 transition_ease(raw.clamp(0.0, 1.0), &self.transition.easing),
             )
             .apply_to(&mut style);
-        StyleTransitionFrame {
-            style,
-            active: true,
-        }
+        (
+            StyleTransitionFrame {
+                style,
+                active: true,
+            },
+            TransitionVelocities::default(),
+        )
     }
 
     pub(crate) fn set_hovered(&mut self, hovered: bool) -> bool {
@@ -506,6 +827,9 @@ fn clear_transition_property(style: &mut StyleDesc, property: TransitionProperty
 fn transition_ease(progress: f64, easing: &TransitionEasing) -> f64 {
     let curve = match easing {
         TransitionEasing::CubicBezier(curve) => *curve,
+        TransitionEasing::Spring(_) => {
+            unreachable!("spring easings are sampled by the native spring track")
+        }
         TransitionEasing::Name(name) => match name.as_str() {
             "linear" => return progress,
             "easeIn" => [0.42, 0.0, 1.0, 1.0],
@@ -515,6 +839,61 @@ fn transition_ease(progress: f64, easing: &TransitionEasing) -> f64 {
         },
     };
     cubic_bezier(progress, curve)
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SpringSample {
+    position: f64,
+    velocity: f64,
+    active: bool,
+}
+
+fn sample_spring(
+    from: f64,
+    target: f64,
+    velocity: f64,
+    elapsed: f64,
+    spring: &SpringEasing,
+    epsilon: f64,
+) -> SpringSample {
+    let displacement = from - target;
+    let natural_frequency = (spring.stiffness / spring.mass).sqrt();
+    let damping_ratio = spring.damping / (2.0 * (spring.stiffness * spring.mass).sqrt());
+    let (offset, velocity) = if damping_ratio < 1.0 - 1e-7 {
+        let damped_frequency = natural_frequency * (1.0 - damping_ratio.powi(2)).sqrt();
+        let decay = (-damping_ratio * natural_frequency * elapsed).exp();
+        let a = displacement;
+        let b = (velocity + damping_ratio * natural_frequency * displacement) / damped_frequency;
+        let sin = (damped_frequency * elapsed).sin();
+        let cos = (damped_frequency * elapsed).cos();
+        let wave = a * cos + b * sin;
+        let wave_velocity = -a * damped_frequency * sin + b * damped_frequency * cos;
+        (
+            decay * wave,
+            decay * (wave_velocity - damping_ratio * natural_frequency * wave),
+        )
+    } else if damping_ratio <= 1.0 + 1e-7 {
+        let decay = (-natural_frequency * elapsed).exp();
+        let a = displacement;
+        let b = velocity + natural_frequency * displacement;
+        let wave = a + b * elapsed;
+        (decay * wave, decay * (b - natural_frequency * wave))
+    } else {
+        let root = (damping_ratio.powi(2) - 1.0).sqrt();
+        let slow = -natural_frequency * (damping_ratio - root);
+        let fast = -natural_frequency * (damping_ratio + root);
+        let slow_amplitude = (velocity - fast * displacement) / (slow - fast);
+        let fast_amplitude = displacement - slow_amplitude;
+        let slow_wave = slow_amplitude * (slow * elapsed).exp();
+        let fast_wave = fast_amplitude * (fast * elapsed).exp();
+        (slow_wave + fast_wave, slow * slow_wave + fast * fast_wave)
+    };
+    let active = offset.abs() > epsilon || velocity.abs() > epsilon;
+    SpringSample {
+        position: if active { target + offset } else { target },
+        velocity: if active { velocity } else { 0.0 },
+        active,
+    }
 }
 
 fn milliseconds(value: f64) -> Duration {
@@ -579,6 +958,135 @@ impl MotionStyle {
             style.border_radius = Some(value);
         }
     }
+
+    fn spring_sample(
+        self,
+        target: Self,
+        velocities: MotionVelocity,
+        elapsed: f64,
+        spring: &SpringEasing,
+    ) -> (Self, MotionVelocity, bool) {
+        let mut active = false;
+        let mut channel =
+            |from: Option<f64>, target: Option<f64>, velocity: Option<f64>, epsilon: f64| {
+                let Some(target) = target else {
+                    return (None, None);
+                };
+                let sample = sample_spring(
+                    from.unwrap_or(target),
+                    target,
+                    velocity.unwrap_or(0.0),
+                    elapsed,
+                    spring,
+                    epsilon,
+                );
+                active |= sample.active;
+                (Some(sample.position), Some(sample.velocity))
+            };
+        let (width, width_velocity) = channel(self.width, target.width, velocities.width, 0.05);
+        let (height, height_velocity) =
+            channel(self.height, target.height, velocities.height, 0.05);
+        let (opacity, opacity_velocity) =
+            channel(self.opacity, target.opacity, velocities.opacity, 0.000_5);
+        let (top, top_velocity) = channel(self.top, target.top, velocities.top, 0.05);
+        let (right, right_velocity) = channel(self.right, target.right, velocities.right, 0.05);
+        let (bottom, bottom_velocity) =
+            channel(self.bottom, target.bottom, velocities.bottom, 0.05);
+        let (left, left_velocity) = channel(self.left, target.left, velocities.left, 0.05);
+        let (border_radius, border_radius_velocity) = channel(
+            self.border_radius,
+            target.border_radius,
+            velocities.border_radius,
+            0.05,
+        );
+        (
+            Self {
+                width,
+                height,
+                opacity,
+                top,
+                right,
+                bottom,
+                left,
+                border_radius,
+            },
+            MotionVelocity {
+                width: width_velocity,
+                height: height_velocity,
+                opacity: opacity_velocity,
+                top: top_velocity,
+                right: right_velocity,
+                bottom: bottom_velocity,
+                left: left_velocity,
+                border_radius: border_radius_velocity,
+            },
+            active,
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct MotionVelocity {
+    width: Option<f64>,
+    height: Option<f64>,
+    opacity: Option<f64>,
+    top: Option<f64>,
+    right: Option<f64>,
+    bottom: Option<f64>,
+    left: Option<f64>,
+    border_radius: Option<f64>,
+}
+
+impl MotionVelocity {
+    fn retarget(
+        from: MotionStyle,
+        target: MotionStyle,
+        previous: Self,
+        carry_previous: bool,
+        initial_velocity: f64,
+    ) -> Self {
+        let channel = |from: Option<f64>, target: Option<f64>, previous: Option<f64>| {
+            target.and_then(|target| {
+                let from = from.unwrap_or(target);
+                if carry_previous && previous.is_some() {
+                    previous
+                } else if from != target {
+                    Some(initial_velocity)
+                } else {
+                    None
+                }
+            })
+        };
+        Self {
+            width: channel(from.width, target.width, previous.width),
+            height: channel(from.height, target.height, previous.height),
+            opacity: channel(from.opacity, target.opacity, previous.opacity),
+            top: channel(from.top, target.top, previous.top),
+            right: channel(from.right, target.right, previous.right),
+            bottom: channel(from.bottom, target.bottom, previous.bottom),
+            left: channel(from.left, target.left, previous.left),
+            border_radius: channel(
+                from.border_radius,
+                target.border_radius,
+                previous.border_radius,
+            ),
+        }
+    }
+
+    fn is_zero(self) -> bool {
+        [
+            self.width,
+            self.height,
+            self.opacity,
+            self.top,
+            self.right,
+            self.bottom,
+            self.left,
+            self.border_radius,
+        ]
+        .into_iter()
+        .all(|velocity| velocity.is_none_or(|velocity| velocity == 0.0))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -589,13 +1097,6 @@ enum MotionInitial {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(untagged)]
-enum MotionEase {
-    Name(String),
-    CubicBezier([f64; 4]),
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct MotionTransition {
     #[serde(default = "default_duration")]
@@ -603,7 +1104,7 @@ struct MotionTransition {
     #[serde(default)]
     delay: f64,
     #[serde(default = "default_ease")]
-    ease: MotionEase,
+    ease: TransitionEasing,
 }
 
 impl Default for MotionTransition {
@@ -620,8 +1121,8 @@ fn default_duration() -> f64 {
     0.3
 }
 
-fn default_ease() -> MotionEase {
-    MotionEase::Name("easeOut".to_string())
+fn default_ease() -> TransitionEasing {
+    TransitionEasing::Name("easeOut".to_string())
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -643,6 +1144,7 @@ pub(crate) struct MotionState {
     source: serde_json::Value,
     from: MotionStyle,
     target: MotionStyle,
+    velocity: MotionVelocity,
     transition: MotionTransition,
     started: Instant,
     valid: bool,
@@ -656,11 +1158,22 @@ impl MotionState {
             Some(MotionInitial::Disabled(false)) | None => description.animate,
             Some(MotionInitial::Disabled(true)) => unreachable!("validated above"),
         };
+        let velocity = match &description.transition.ease {
+            TransitionEasing::Spring(spring) => MotionVelocity::retarget(
+                from,
+                description.animate,
+                MotionVelocity::default(),
+                false,
+                spring.velocity,
+            ),
+            _ => MotionVelocity::default(),
+        };
 
         Ok(Self {
             source: source.clone(),
             from,
             target: description.animate,
+            velocity,
             transition: description.transition,
             started: now,
             valid: true,
@@ -672,6 +1185,7 @@ impl MotionState {
             source: source.clone(),
             from: MotionStyle::default(),
             target: MotionStyle::default(),
+            velocity: MotionVelocity::default(),
             transition: MotionTransition::default(),
             started: now,
             valid: false,
@@ -691,6 +1205,7 @@ impl MotionState {
         if self.source == *source {
             if reduce_motion {
                 self.from = self.target;
+                self.velocity = MotionVelocity::default();
             }
             return Ok(());
         }
@@ -703,37 +1218,87 @@ impl MotionState {
                 return Err(error);
             }
         };
-        self.from = if self.valid {
-            self.frame(now, reduce_motion).style
+        let previous_was_spring = matches!(self.transition.ease, TransitionEasing::Spring(_));
+        let (previous_frame, previous_velocity) = if self.valid {
+            self.frame_with_velocity(now, reduce_motion)
         } else {
-            match description.initial {
-                Some(MotionInitial::Style(style)) => style,
-                Some(MotionInitial::Disabled(false)) | None => description.animate,
-                Some(MotionInitial::Disabled(true)) => unreachable!("validated above"),
-            }
+            (
+                MotionFrame {
+                    style: match description.initial {
+                        Some(MotionInitial::Style(style)) => style,
+                        Some(MotionInitial::Disabled(false)) | None => description.animate,
+                        Some(MotionInitial::Disabled(true)) => unreachable!("validated above"),
+                    },
+                    active: false,
+                },
+                MotionVelocity::default(),
+            )
         };
+        self.from = previous_frame.style;
         self.target = description.animate;
+        self.velocity = match &description.transition.ease {
+            TransitionEasing::Spring(spring) => MotionVelocity::retarget(
+                self.from,
+                self.target,
+                previous_velocity,
+                previous_was_spring && previous_frame.active,
+                spring.velocity,
+            ),
+            _ => MotionVelocity::default(),
+        };
         self.transition = description.transition;
         self.started = now;
         self.source = source.clone();
         self.valid = true;
         if reduce_motion {
             self.from = self.target;
+            self.velocity = MotionVelocity::default();
         }
         Ok(())
     }
 
     pub(crate) fn frame(&self, now: Instant, reduce_motion: bool) -> MotionFrame {
+        self.frame_with_velocity(now, reduce_motion).0
+    }
+
+    fn frame_with_velocity(
+        &self,
+        now: Instant,
+        reduce_motion: bool,
+    ) -> (MotionFrame, MotionVelocity) {
         if reduce_motion {
-            return MotionFrame {
-                style: self.target,
-                active: false,
-            };
+            return (
+                MotionFrame {
+                    style: self.target,
+                    active: false,
+                },
+                MotionVelocity::default(),
+            );
         }
 
         let delay = seconds(self.transition.delay);
-        let duration = seconds(self.transition.duration);
         let elapsed = now.saturating_duration_since(self.started);
+        if let TransitionEasing::Spring(spring) = &self.transition.ease {
+            if self.from == self.target && self.velocity.is_zero() {
+                return (
+                    MotionFrame {
+                        style: self.target,
+                        active: false,
+                    },
+                    MotionVelocity::default(),
+                );
+            }
+            let spring_elapsed = elapsed
+                .checked_sub(delay)
+                .unwrap_or(Duration::ZERO)
+                .as_secs_f64();
+            let (style, velocity, active) =
+                self.from
+                    .spring_sample(self.target, self.velocity, spring_elapsed, spring);
+            return (MotionFrame { style, active }, velocity);
+        }
+
+        let duration = seconds(self.transition.duration);
         let raw = if elapsed <= delay {
             0.0
         } else if duration.is_zero() {
@@ -742,12 +1307,15 @@ impl MotionState {
             elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
         };
         let active = self.from != self.target && raw < 1.0;
-        let progress = ease(raw.clamp(0.0, 1.0), &self.transition.ease);
+        let progress = transition_ease(raw.clamp(0.0, 1.0), &self.transition.ease);
 
-        MotionFrame {
-            style: self.from.interpolate(self.target, progress),
-            active,
-        }
+        (
+            MotionFrame {
+                style: self.from.interpolate(self.target, progress),
+                active,
+            },
+            MotionVelocity::default(),
+        )
     }
 }
 
@@ -762,9 +1330,11 @@ fn parse_description(source: &serde_json::Value) -> Result<MotionDescription, St
     if let Some(MotionInitial::Style(initial)) = &description.initial {
         validate_style(initial)?;
     }
-    validate_seconds(description.transition.duration, "duration")?;
     validate_seconds(description.transition.delay, "delay")?;
     validate_ease(&description.transition.ease)?;
+    if !matches!(description.transition.ease, TransitionEasing::Spring(_)) {
+        validate_seconds(description.transition.duration, "duration")?;
+    }
     Ok(description)
 }
 
@@ -807,15 +1377,15 @@ fn validate_seconds(value: f64, name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_ease(ease: &MotionEase) -> Result<(), String> {
+fn validate_ease(ease: &TransitionEasing) -> Result<(), String> {
     match ease {
-        MotionEase::Name(name)
+        TransitionEasing::Name(name)
             if matches!(
                 name.as_str(),
                 "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut"
             ) => {}
-        MotionEase::Name(name) => return Err(format!("unknown motion easing: {name}")),
-        MotionEase::CubicBezier([x1, y1, x2, y2]) => {
+        TransitionEasing::Name(name) => return Err(format!("unknown motion easing: {name}")),
+        TransitionEasing::CubicBezier([x1, y1, x2, y2]) => {
             if ![x1, y1, x2, y2].iter().all(|value| value.is_finite())
                 || !(0.0..=1.0).contains(x1)
                 || !(0.0..=1.0).contains(x2)
@@ -826,26 +1396,19 @@ fn validate_ease(ease: &MotionEase) -> Result<(), String> {
                 );
             }
         }
+        TransitionEasing::Spring(spring) if spring.is_valid() => {}
+        TransitionEasing::Spring(_) => {
+            return Err(
+                "motion spring stiffness, damping, and mass must be positive finite 32-bit numbers and velocity must be finite"
+                    .to_string(),
+            );
+        }
     }
     Ok(())
 }
 
 fn seconds(value: f64) -> Duration {
     Duration::try_from_secs_f64(value).expect("motion durations are validated when parsed")
-}
-
-fn ease(progress: f64, ease: &MotionEase) -> f64 {
-    let curve = match ease {
-        MotionEase::CubicBezier(curve) => *curve,
-        MotionEase::Name(name) => match name.as_str() {
-            "linear" => return progress,
-            "easeIn" => [0.42, 0.0, 1.0, 1.0],
-            "easeInOut" => [0.42, 0.0, 0.58, 1.0],
-            "ease" => [0.25, 0.1, 0.25, 1.0],
-            _ => [0.0, 0.0, 0.58, 1.0],
-        },
-    };
-    cubic_bezier(progress, curve)
 }
 
 fn cubic_bezier(x: f64, [x1, y1, x2, y2]: [f64; 4]) -> f64 {
@@ -1204,6 +1767,166 @@ mod tests {
     }
 
     #[test]
+    fn style_spring_retarget_carries_the_visible_velocity() {
+        let started = Instant::now();
+        let initial = style(serde_json::json!({
+            "width": 100,
+            "hover": { "width": 200 },
+            "transition": {
+                "properties": ["width"],
+                "easing": { "type": "spring" }
+            }
+        }));
+        let mut carried =
+            StyleTransitionState::new(&initial, StyleState::default(), false, started);
+        carried.set_hovered(true);
+        carried.sync(&initial, StyleState::default(), false, started, false);
+
+        let retargeted_at = started + Duration::from_millis(100);
+        let visible = match carried.frame(retargeted_at, false).style.width {
+            Some(DimensionValue::Pixels(width)) => width,
+            width => panic!("expected a visible pixel width, got {width:?}"),
+        };
+        let reversed = style(serde_json::json!({
+            "width": 100,
+            "hover": { "width": 50 },
+            "transition": {
+                "properties": ["width"],
+                "easing": { "type": "spring" }
+            }
+        }));
+        carried.sync(
+            &reversed,
+            StyleState::default(),
+            false,
+            retargeted_at,
+            false,
+        );
+
+        let zero_restart_style = style(serde_json::json!({
+            "width": visible,
+            "hover": { "width": 50 },
+            "transition": {
+                "properties": ["width"],
+                "easing": { "type": "spring", "velocity": 0 }
+            }
+        }));
+        let mut zero_restart = StyleTransitionState::new(
+            &zero_restart_style,
+            StyleState::default(),
+            false,
+            retargeted_at,
+        );
+        zero_restart.set_hovered(true);
+        zero_restart.sync(
+            &zero_restart_style,
+            StyleState::default(),
+            false,
+            retargeted_at,
+            false,
+        );
+
+        let sampled_at = retargeted_at + Duration::from_millis(16);
+        let width = |state: &StyleTransitionState| match state.frame(sampled_at, false).style.width
+        {
+            Some(DimensionValue::Pixels(width)) => width,
+            width => panic!("expected a sampled pixel width, got {width:?}"),
+        };
+        let carried_width = width(&carried);
+        let restarted_width = width(&zero_restart);
+        assert!(
+            carried_width > restarted_width + 1.0,
+            "state-style interruption must carry velocity: {carried_width} vs {restarted_width}"
+        );
+    }
+
+    #[test]
+    fn style_spring_holds_during_its_delay() {
+        let started = Instant::now();
+        let style = style(serde_json::json!({
+            "opacity": 0,
+            "hover": { "opacity": 1 },
+            "transition": {
+                "properties": ["opacity"],
+                "delayMs": 50,
+                "easing": { "type": "spring" }
+            }
+        }));
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), false, started);
+        state.set_hovered(true);
+        state.sync(&style, StyleState::default(), false, started, false);
+
+        assert_eq!(
+            state
+                .frame(started + Duration::from_millis(49), false)
+                .style
+                .opacity,
+            Some(0.0)
+        );
+        let after_delay = state.frame(started + Duration::from_millis(100), false);
+        assert!(after_delay.style.opacity.unwrap() > 0.0);
+        assert!(after_delay.style.opacity.unwrap() < 1.0);
+        assert!(after_delay.active);
+    }
+
+    #[test]
+    fn style_spring_settles_proportional_channels_without_a_visible_snap() {
+        let started = Instant::now();
+        let style = style(serde_json::json!({
+            "width": "0%",
+            "opacity": 0,
+            "backgroundColor": "transparent",
+            "hover": {
+                "width": "100%",
+                "opacity": 1,
+                "backgroundColor": "#ffffff"
+            },
+            "transition": {
+                "properties": ["width", "opacity", "backgroundColor"],
+                "easing": { "type": "spring" }
+            }
+        }));
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), false, started);
+        state.set_hovered(true);
+        state.sync(&style, StyleState::default(), false, started, false);
+
+        let mut last_active = None;
+        let mut settled = None;
+        for tick in 1..=5_000 {
+            let frame = state.frame(started + Duration::from_millis(tick), false);
+            if frame.active {
+                let width = match frame.style.width {
+                    Some(DimensionValue::Percentage(width)) => width,
+                    width => panic!("expected a percentage width, got {width:?}"),
+                };
+                let color =
+                    TransitionValue::from_style(&frame.style, TransitionProperty::BackgroundColor)
+                        .expect("the spring must keep painting a valid colour");
+                last_active = Some((width, frame.style.opacity.unwrap(), color));
+            } else {
+                settled = Some(frame);
+                break;
+            }
+        }
+
+        let (width, opacity, color) = last_active.expect("the spring must paint active frames");
+        assert!((width - 1.0).abs() <= 0.000_51);
+        assert!((opacity - 1.0).abs() <= 0.000_51);
+        let TransitionValue::Color(color) = color else {
+            panic!("expected a colour transition value")
+        };
+        assert!((color[3] - 1.0).abs() <= 0.000_51);
+
+        let settled = settled.expect("the default spring must settle");
+        assert_eq!(settled.style.width, Some(DimensionValue::Percentage(1.0)));
+        assert_eq!(settled.style.opacity, Some(1.0));
+        assert_eq!(
+            TransitionValue::from_style(&settled.style, TransitionProperty::BackgroundColor,),
+            Some(TransitionValue::Color([1.0, 1.0, 1.0, 1.0]))
+        );
+    }
+
+    #[test]
     fn interpolates_and_retargets_from_the_visible_value() {
         let started = Instant::now();
         let initial = serde_json::json!({
@@ -1309,5 +2032,134 @@ mod tests {
         let next_midpoint = state.frame(midpoint + Duration::from_millis(500), false);
         assert_eq!(next_midpoint.style.width, Some(150.0));
         assert!(next_midpoint.active);
+    }
+
+    #[test]
+    fn motion_spring_overshoots_and_settles_without_a_visible_channel_snap() {
+        let started = Instant::now();
+        let description = serde_json::json!({
+            "initial": { "width": 0.0, "opacity": 0.0 },
+            "animate": { "width": 100.0, "opacity": 1.0 },
+            "transition": {
+                "duration": 1e300,
+                "ease": { "type": "spring" }
+            }
+        });
+        let state = MotionState::new(&description, started).unwrap();
+        let mut saw_width_overshoot = false;
+        let mut last_active = None;
+        let mut settled = None;
+
+        for tick in 1..=5_000 {
+            let frame = state.frame(started + Duration::from_millis(tick), false);
+            saw_width_overshoot |= frame.style.width.is_some_and(|width| width > 100.0);
+            if frame.active {
+                last_active = Some(frame);
+            } else {
+                settled = Some(frame);
+                break;
+            }
+        }
+
+        assert!(
+            saw_width_overshoot,
+            "the sampled width trajectory must overshoot"
+        );
+        let last_active = last_active.expect("the spring must emit intermediate frames");
+        assert!(
+            (last_active.style.width.unwrap() - 100.0).abs() <= 0.051,
+            "the final width snap must stay below 0.05px plus tick precision"
+        );
+        assert!(
+            (last_active.style.opacity.unwrap() - 1.0).abs() <= 0.000_51,
+            "opacity needs a proportionally smaller settling window"
+        );
+        let settled = settled.expect("the default spring must settle");
+        assert_eq!(settled.style.width, Some(100.0));
+        assert_eq!(settled.style.opacity, Some(1.0));
+        assert!(!settled.active);
+    }
+
+    #[test]
+    fn motion_spring_delay_applies_while_duration_is_ignored() {
+        let started = Instant::now();
+        let description = serde_json::json!({
+            "initial": { "width": 0.0 },
+            "animate": { "width": 100.0 },
+            "transition": {
+                "duration": 0.0,
+                "delay": 0.1,
+                "ease": { "type": "spring", "stiffness": 100, "damping": 10, "mass": 1 }
+            }
+        });
+        let state = MotionState::new(&description, started).unwrap();
+
+        assert_eq!(
+            state
+                .frame(started + Duration::from_millis(99), false)
+                .style
+                .width,
+            Some(0.0)
+        );
+        let after_delay = state.frame(started + Duration::from_millis(150), false);
+        assert!(after_delay.style.width.unwrap() > 0.0);
+        assert!(after_delay.style.width.unwrap() < 100.0);
+        assert!(after_delay.active);
+    }
+
+    #[test]
+    fn motion_spring_retarget_carries_the_visible_velocity() {
+        let started = Instant::now();
+        let initial = serde_json::json!({
+            "initial": { "width": 0.0 },
+            "animate": { "width": 100.0 },
+            "transition": { "ease": { "type": "spring" } }
+        });
+        let mut carried = MotionState::new(&initial, started).unwrap();
+        let retargeted_at = started + Duration::from_millis(100);
+        let visible = carried.frame(retargeted_at, false).style.width.unwrap();
+        let reversed = serde_json::json!({
+            "initial": false,
+            "animate": { "width": 0.0 },
+            "transition": { "ease": { "type": "spring" } }
+        });
+        carried.sync(&reversed, retargeted_at, false).unwrap();
+
+        let zero_restart_description = serde_json::json!({
+            "initial": { "width": visible },
+            "animate": { "width": 0.0 },
+            "transition": { "ease": { "type": "spring", "velocity": 0.0 } }
+        });
+        let zero_restart = MotionState::new(&zero_restart_description, retargeted_at).unwrap();
+        let sampled_at = retargeted_at + Duration::from_millis(16);
+        let carried_width = carried.frame(sampled_at, false).style.width.unwrap();
+        let restarted_width = zero_restart.frame(sampled_at, false).style.width.unwrap();
+
+        assert!(
+            carried_width > restarted_width + 1.0,
+            "carried velocity must produce a different post-retarget trajectory: {carried_width} vs {restarted_width}"
+        );
+    }
+
+    #[test]
+    fn motion_rejects_unknown_and_malformed_spring_easings() {
+        let now = Instant::now();
+        for ease in [
+            serde_json::json!({ "type": "bounce" }),
+            serde_json::json!({ "type": "spring", "stiffness": 0 }),
+            serde_json::json!({ "type": "spring", "damping": -1 }),
+            serde_json::json!({ "type": "spring", "mass": 0 }),
+            serde_json::json!({ "type": "spring", "velocity": 1e300 }),
+            serde_json::json!({ "type": "spring", "unknown": 1 }),
+        ] {
+            let description = serde_json::json!({
+                "animate": { "width": 100 },
+                "transition": { "ease": ease }
+            });
+            assert!(
+                MotionState::new(&description, now).is_err(),
+                "{description}"
+            );
+        }
     }
 }
