@@ -129,9 +129,9 @@ describeNative("keyboard focus", () => {
     testRoot.render(
       <div
         testId="plain-scroller"
-        style={{ width: 240, height: 80, overflowY: "scroll" }}
+        style={{ width: 240, height: 120, overflowY: "scroll" }}
       >
-        {Array.from({ length: 6 }, (_, index) => (
+        {Array.from({ length: 12 }, (_, index) => (
           <a
             key={index}
             href={`/${index}`}
@@ -151,19 +151,38 @@ describeNative("keyboard focus", () => {
     expect(focusedLabel()).toBe("row-0")
     testRoot.renderer.simulateKeystrokes("tab")
     expect(focusedLabel()).toBe("row-1")
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("row-2")
     expect(testRoot.renderer.getScrollOffset(scroller.id)).toEqual([0, 0])
 
     testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("row-3")
+    expect(testRoot.renderer.getScrollOffset(scroller.id)).toEqual([0, -40])
+
+    testRoot.renderer.scrollTo(scroller.id, 0, -120)
+    testRoot.renderer.simulateKeystrokes("shift-tab")
     expect(focusedLabel()).toBe("row-2")
-    expect(testRoot.renderer.getScrollOffset(scroller.id)?.[1] ?? 0).toBeLessThan(0)
+    expect(testRoot.renderer.getScrollOffset(scroller.id)).toEqual([0, -80])
+
+    testRoot.renderer.scrollTo(scroller.id, 0, -120)
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("row-3")
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("row-4")
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("row-5")
+    expect(testRoot.renderer.getScrollOffset(scroller.id)).toEqual([0, -120])
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("row-6")
+    expect(testRoot.renderer.getScrollOffset(scroller.id)).toEqual([0, -160])
   })
 
-  it("scrolls a virtual list when tab focus leaves its visible rows", () => {
+  it("nearest-edges focused rows in a virtual list", () => {
     testRoot.render(
       <virtual-list
         overdraw={0}
         estimatedItemHeight={40}
-        style={{ width: 240, height: 80 }}
+        style={{ width: 240, height: 120 }}
       >
         {Array.from({ length: 12 }, (_, index) => (
           <a
@@ -185,11 +204,135 @@ describeNative("keyboard focus", () => {
     expect(focusedLabel()).toBe("virtual-row-0")
     testRoot.renderer.simulateKeystrokes("tab")
     expect(focusedLabel()).toBe("virtual-row-1")
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("virtual-row-2")
     expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(0)
 
     testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("virtual-row-3")
+    testRoot.renderer.scrollToItem(list.id, 3)
+    testRoot.renderer.simulateKeystrokes("shift-tab")
     expect(focusedLabel()).toBe("virtual-row-2")
-    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeLessThan(0)
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(-80)
+
+    testRoot.renderer.scrollToItem(list.id, 3)
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("virtual-row-3")
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("virtual-row-4")
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("virtual-row-5")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(-120)
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("virtual-row-6")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(-160)
+  })
+
+  it("keeps an oversized focused row fixed when both edges are outside the viewport", () => {
+    testRoot.render(
+      <div style={{ width: 520, height: 520, display: "flex", flexDirection: "column" }}>
+        <div
+          testId="plain-tall-scroller"
+          style={{ width: 240, height: 120, overflowY: "scroll", flexShrink: 0 }}
+        >
+          <a
+            href="/plain-tall"
+            ariaLabel="plain-tall"
+            testId="plain-tall"
+            style={{ width: 200, height: 200, flexShrink: 0 }}
+          >
+            <text>Plain tall row</text>
+          </a>
+        </div>
+        <virtual-list
+          itemCount={1}
+          overdraw={0}
+          estimatedItemHeight={200}
+          style={{ width: 240, height: 120, flexShrink: 0 }}
+        >
+          <a
+            href="/virtual-tall"
+            ariaLabel="virtual-tall"
+            testId="virtual-tall"
+            style={{ width: 200, height: 200, flexShrink: 0 }}
+          >
+            <text>Virtual tall row</text>
+          </a>
+        </virtual-list>
+      </div>
+    )
+
+    const plain = testRoot.renderer.findByTestId("plain-tall-scroller")!
+    const plainTarget = testRoot.renderer.findByTestId("plain-tall")!
+    const virtual = testRoot.renderer.findByType("virtual-list")[0]!
+    const virtualTarget = testRoot.renderer.findByTestId("virtual-tall")!
+
+    testRoot.renderer.scrollTo(plain.id, 0, -40)
+    testRoot.renderer.focusElement(plainTarget.id)
+    expect(focusedLabel()).toBe("plain-tall")
+    expect(testRoot.renderer.getScrollOffset(plain.id)).toEqual([0, -40])
+
+    testRoot.renderer.scrollTo(virtual.id, 0, -40)
+    testRoot.renderer.focusElement(virtualTarget.id)
+    expect(focusedLabel()).toBe("virtual-tall")
+    expect(testRoot.renderer.getScrollOffset(virtual.id)?.[1] ?? 0).toBeCloseTo(-40)
+  })
+
+  it("reveals a focused descendant by the same distance inside a tall row", () => {
+    const tallRow = (kind: "plain" | "virtual") => (
+      <div
+        style={{
+          width: 200,
+          height: 240,
+          display: "flex",
+          flexDirection: "column",
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ width: 200, height: 180, flexShrink: 0 }} />
+        <a
+          href={`/${kind}-descendant`}
+          ariaLabel={`${kind}-descendant`}
+          testId={`${kind}-descendant`}
+          style={{ width: 200, height: 40, flexShrink: 0 }}
+        >
+          <text>{`${kind} descendant`}</text>
+        </a>
+        <div style={{ width: 200, height: 20, flexShrink: 0 }} />
+      </div>
+    )
+
+    testRoot.render(
+      <div style={{ width: 520, height: 520, display: "flex", flexDirection: "column" }}>
+        <div
+          testId="plain-descendant-scroller"
+          style={{ width: 240, height: 120, overflowY: "scroll", flexShrink: 0 }}
+        >
+          {tallRow("plain")}
+        </div>
+        <virtual-list
+          itemCount={1}
+          overdraw={0}
+          estimatedItemHeight={240}
+          style={{ width: 240, height: 120, flexShrink: 0 }}
+        >
+          {tallRow("virtual")}
+        </virtual-list>
+      </div>
+    )
+
+    const plain = testRoot.renderer.findByTestId("plain-descendant-scroller")!
+    const plainTarget = testRoot.renderer.findByTestId("plain-descendant")!
+    const virtual = testRoot.renderer.findByType("virtual-list")[0]!
+    const virtualTarget = testRoot.renderer.findByTestId("virtual-descendant")!
+
+    testRoot.renderer.focusElement(plainTarget.id)
+    expect(focusedLabel()).toBe("plain-descendant")
+    expect(testRoot.renderer.getScrollOffset(plain.id)).toEqual([0, -100])
+
+    testRoot.renderer.focusElement(virtualTarget.id)
+    expect(focusedLabel()).toBe("virtual-descendant")
+    expect(testRoot.renderer.getScrollOffset(virtual.id)?.[1] ?? 0).toBeCloseTo(-100)
   })
 
   it("does not race autoFocus or steal focus from editors", () => {

@@ -1607,7 +1607,11 @@ impl CustomElement for CanvasElement {
             }
         }
         root = root
-            .child(crate::automation::bounds_tracker(ctx.id, None))
+            .child(crate::automation::bounds_tracker(
+                ctx.id,
+                None,
+                ctx.paint_bounds_listener.clone(),
+            ))
             .child(drawing);
         self.attach_mouse_events(root, &ctx, cx).into_any_element()
     }

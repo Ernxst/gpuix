@@ -43,6 +43,8 @@ pub struct CustomRenderContext<'a> {
     pub focus_handle: Option<&'a gpui::FocusHandle>,
     /// Anchor that reveals this custom root inside its nearest overflow ancestor.
     pub scroll_anchor: Option<&'a gpui::ScrollAnchor>,
+    /// Paint-time recorder for an exact focus target inside a virtual list.
+    pub paint_bounds_listener: Option<crate::automation::PaintBoundsListener>,
     /// Style object from the retained element for layout and appearance.
     pub style: Option<&'a crate::style::StyleDesc>,
     /// Built child elements from the retained tree for this custom node.
@@ -147,7 +149,11 @@ pub(crate) fn custom_surface(
     {
         el = el.relative();
     }
-    el = el.child(crate::automation::bounds_tracker(ctx.id, None));
+    el = el.child(crate::automation::bounds_tracker(
+        ctx.id,
+        None,
+        ctx.paint_bounds_listener.clone(),
+    ));
     wire_standard_events(el, ctx, cx)
 }
 

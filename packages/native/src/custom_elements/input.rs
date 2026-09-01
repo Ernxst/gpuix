@@ -375,7 +375,11 @@ impl CustomElement for TextEditorElement {
         // `Some(false)` also claims the same box as a non-selectable
         // selection-start region: a drag inside an editor must move the caret,
         // not start a document selection.
-        editor = editor.child(crate::automation::bounds_tracker(ctx.id, Some(false)));
+        editor = editor.child(crate::automation::bounds_tracker(
+            ctx.id,
+            Some(false),
+            ctx.paint_bounds_listener.clone(),
+        ));
         editor = crate::accessibility::apply(
             editor,
             ctx.retained_element,

@@ -9,6 +9,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -91,6 +92,8 @@ thread_local! {
     static BOUNDS: RefCell<HashMap<u64, ElementBounds>> = RefCell::new(HashMap::new());
 }
 
+pub type PaintBoundsListener = Rc<dyn Fn(Bounds<Pixels>, &mut Window, &mut App) + 'static>;
+
 /// Zero-size canvas. Keep it ahead of the app subtree under the root.
 ///
 /// Everything here is recorded during **paint**, never prepaint: gpui's
@@ -115,8 +118,17 @@ pub fn bounds_frame_reset() -> impl IntoElement {
 /// such as `gpui::img` cannot have. Wrapping the leaf in a div instead would
 /// move the layout box: the wrapper would become the flex item and the image
 /// would lose intrinsic sizing and corner clipping.
-pub fn track_own_bounds<E: gpui::InteractiveElement>(el: E, id: u64) -> E {
-    el.on_painted(move |bounds, _, _| record_bounds(id, bounds))
+pub fn track_own_bounds<E: gpui::InteractiveElement>(
+    el: E,
+    id: u64,
+    listener: Option<PaintBoundsListener>,
+) -> E {
+    el.on_painted(move |bounds, window, cx| {
+        record_bounds(id, bounds);
+        if let Some(listener) = &listener {
+            listener(bounds, window, cx);
+        }
+    })
 }
 
 pub fn record_bounds(id: u64, bounds: Bounds<Pixels>) {
@@ -134,11 +146,18 @@ pub fn all_bounds() -> HashMap<u64, ElementBounds> {
     BOUNDS.with(|cell| cell.borrow().clone())
 }
 
-pub fn bounds_tracker(id: u64, selection_start: Option<bool>) -> impl IntoElement {
+pub fn bounds_tracker(
+    id: u64,
+    selection_start: Option<bool>,
+    listener: Option<PaintBoundsListener>,
+) -> impl IntoElement {
     canvas(
         |bounds, _, _| bounds,
-        move |bounds, _, _, _| {
+        move |bounds, _, window, cx| {
             record_bounds(id, bounds);
+            if let Some(listener) = &listener {
+                listener(bounds, window, cx);
+            }
             if let Some(selectable) = selection_start {
                 crate::text::record_start_region(bounds, selectable);
             }

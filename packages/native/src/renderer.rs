@@ -5304,9 +5304,33 @@ pub(crate) struct InteractiveStyleState {
     pub active: bool,
 }
 
-struct FocusScrollAnchor {
-    scroller_id: u64,
-    anchor: gpui::ScrollAnchor,
+#[derive(Clone, Copy)]
+struct VirtualFocusBounds {
+    /// Window-space top with the list's scroll translation removed.
+    content_top: gpui::Pixels,
+    height: gpui::Pixels,
+}
+
+enum FocusScrollAnchor {
+    Overflow {
+        scroller_id: u64,
+        anchor: gpui::ScrollAnchor,
+    },
+    VirtualList {
+        list_id: u64,
+        bounds: Arc<Mutex<Option<VirtualFocusBounds>>>,
+        /// List offset before a row-only reveal mounts an unpainted target.
+        pending_reveal_origin: Arc<Mutex<Option<gpui::Pixels>>>,
+    },
+}
+
+impl FocusScrollAnchor {
+    fn overflow_anchor(&self) -> Option<&gpui::ScrollAnchor> {
+        match self {
+            Self::Overflow { anchor, .. } => Some(anchor),
+            Self::VirtualList { .. } => None,
+        }
+    }
 }
 
 impl InteractiveStyleState {
@@ -5751,42 +5775,12 @@ impl GpuixView {
         ])
     }
 
-    pub(crate) fn reveal_virtual_list_ancestor(&self, id: u64) -> bool {
-        let tree_arc = self.tree.clone();
-        let tree = tree_arc.lock().unwrap();
-        let mut current = id;
-        let location = loop {
-            let Some(parent_id) = tree
-                .elements
-                .get(&current)
-                .and_then(|element| element.parent)
-            else {
-                break None;
-            };
-            if self.virtual_lists.contains_key(&parent_id) {
-                let index = tree
-                    .elements
-                    .get(&parent_id)
-                    .and_then(|parent| parent.children.iter().position(|child| *child == current));
-                break index.map(|index| (parent_id, index));
-            }
-            current = parent_id;
-        };
-        drop(tree);
-
-        let Some((list_id, index)) = location else {
-            return false;
-        };
-        self.scroll_virtual_list_to_item(list_id, index, 0.0)
-    }
-
     pub(crate) fn focus_element_and_reveal(
         &mut self,
         id: u64,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.reveal_virtual_list_ancestor(id);
         if let Some(handle) = self.focus_handles.get(&id) {
             handle.focus(window, cx);
             self.scroll_focused_element_into_view(id, cx);
@@ -6463,10 +6457,8 @@ impl GpuixView {
         let Some(handle) = self.focus_handles.get(&target_id).cloned() else {
             return false;
         };
-        let state = entry.state.clone();
         drop(tree);
         handle.focus(window, cx);
-        state.scroll_to_reveal_item(row_index);
         self.scroll_current_focus_into_view(window, cx);
         cx.notify();
         true
@@ -6605,47 +6597,84 @@ impl GpuixView {
 
         let mut previous = std::mem::take(&mut self.focus_scroll_anchors);
         for id in targets {
-            let Some(ScrollAncestor::Overflow(scroller_id)) = nearest_scroll_ancestor(tree, id)
-            else {
+            let Some(ancestor) = nearest_scroll_ancestor(tree, id) else {
                 continue;
             };
-            let anchor = previous
-                .remove(&id)
-                .filter(|entry| entry.scroller_id == scroller_id)
-                .map(|entry| entry.anchor)
-                .unwrap_or_else(|| {
-                    let handle = self.scroll_handles.entry(scroller_id).or_default().clone();
-                    gpui::ScrollAnchor::for_handle(handle)
-                });
-            self.focus_scroll_anchors.insert(
-                id,
-                FocusScrollAnchor {
-                    scroller_id,
-                    anchor,
-                },
-            );
+            let entry = match ancestor {
+                ScrollAncestor::Overflow(scroller_id) => previous
+                    .remove(&id)
+                    .and_then(|entry| match entry {
+                        FocusScrollAnchor::Overflow {
+                            scroller_id: previous_id,
+                            anchor,
+                        } if previous_id == scroller_id => Some(FocusScrollAnchor::Overflow {
+                            scroller_id,
+                            anchor,
+                        }),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| {
+                        let handle = self.scroll_handles.entry(scroller_id).or_default().clone();
+                        FocusScrollAnchor::Overflow {
+                            scroller_id,
+                            anchor: gpui::ScrollAnchor::for_handle(handle),
+                        }
+                    }),
+                ScrollAncestor::VirtualList(list_id) => previous
+                    .remove(&id)
+                    .and_then(|entry| match entry {
+                        FocusScrollAnchor::VirtualList {
+                            list_id: previous_id,
+                            bounds,
+                            pending_reveal_origin,
+                        } if previous_id == list_id => Some(FocusScrollAnchor::VirtualList {
+                            list_id,
+                            bounds,
+                            pending_reveal_origin,
+                        }),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| FocusScrollAnchor::VirtualList {
+                        list_id,
+                        bounds: Arc::new(Mutex::new(None)),
+                        pending_reveal_origin: Arc::new(Mutex::new(None)),
+                    }),
+            };
+            self.focus_scroll_anchors.insert(id, entry);
         }
     }
 
-    fn scroll_focused_element_into_view(
-        &mut self,
-        id: u64,
-        cx: &mut gpui::Context<Self>,
-    ) {
+    fn scroll_focused_element_into_view(&mut self, id: u64, cx: &mut gpui::Context<Self>) {
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
         let mut current = id;
         let mut requested = false;
 
+        for anchor in self.focus_scroll_anchors.values() {
+            if let FocusScrollAnchor::VirtualList {
+                pending_reveal_origin,
+                ..
+            } = anchor
+            {
+                *pending_reveal_origin.lock().unwrap() = None;
+            }
+        }
+
         while let Some(ancestor) = nearest_scroll_ancestor(&tree, current) {
             match ancestor {
                 ScrollAncestor::Overflow(scroller_id) => {
-                    if let Some(entry) = self
-                        .focus_scroll_anchors
-                        .get(&current)
-                        .filter(|entry| entry.scroller_id == scroller_id)
+                    if let Some(anchor) =
+                        self.focus_scroll_anchors
+                            .get(&current)
+                            .and_then(|entry| match entry {
+                                FocusScrollAnchor::Overflow {
+                                    scroller_id: anchor_scroller_id,
+                                    anchor,
+                                } if *anchor_scroller_id == scroller_id => Some(anchor),
+                                _ => None,
+                            })
                     {
-                        entry.anchor.scroll_to_reveal();
+                        anchor.scroll_to_reveal();
                         requested = true;
                     } else if let Some(index) = direct_child_index(&tree, scroller_id, current) {
                         if let Some(handle) = self.scroll_handles.get(&scroller_id) {
@@ -6656,9 +6685,37 @@ impl GpuixView {
                     current = scroller_id;
                 }
                 ScrollAncestor::VirtualList(list_id) => {
-                    if let Some(row_id) = virtual_row_ancestor(&tree, list_id, current) {
-                        if let Some(entry) = self.virtual_lists.get(&list_id) {
+                    if let Some(entry) = self.virtual_lists.get(&list_id) {
+                        let exact =
+                            self.focus_scroll_anchors.get(&current).and_then(
+                                |anchor| match anchor {
+                                    FocusScrollAnchor::VirtualList {
+                                        list_id: anchor_list_id,
+                                        bounds,
+                                        pending_reveal_origin,
+                                    } if *anchor_list_id == list_id => {
+                                        Some((bounds, pending_reveal_origin))
+                                    }
+                                    _ => None,
+                                },
+                            );
+                        let tracked_bounds = exact.and_then(|(bounds, _)| *bounds.lock().unwrap());
+
+                        if let Some(bounds) = tracked_bounds {
+                            let distance = virtual_focus_scroll_distance(&entry.state, bounds);
+                            if distance != gpui::px(0.) {
+                                entry.state.scroll_by(distance);
+                                requested = true;
+                            }
+                        } else if let Some(row_id) = virtual_row_ancestor(&tree, list_id, current) {
+                            if let Some((_, pending_reveal_origin)) = exact {
+                                *pending_reveal_origin.lock().unwrap() =
+                                    Some(entry.state.scroll_px_offset_for_scrollbar().y);
+                            }
                             if let Some(index) = entry.logical_index_of(row_id) {
+                                // An unpainted target has no exact geometry yet. Reveal its row
+                                // only to mount it; the paint listener then applies the element-
+                                // precise nearest-edge correction on the next frame.
                                 entry.state.scroll_to_reveal_item(index);
                                 requested = true;
                             }
@@ -6673,6 +6730,39 @@ impl GpuixView {
         if requested {
             cx.notify();
         }
+    }
+}
+
+fn virtual_focus_scroll_distance(
+    state: &gpui::ListState,
+    target: VirtualFocusBounds,
+) -> gpui::Pixels {
+    virtual_focus_scroll_distance_at_offset(
+        state.viewport_bounds(),
+        target,
+        state.scroll_px_offset_for_scrollbar().y,
+    )
+}
+
+fn virtual_focus_scroll_distance_at_offset(
+    viewport: gpui::Bounds<gpui::Pixels>,
+    target: VirtualFocusBounds,
+    scroll_offset: gpui::Pixels,
+) -> gpui::Pixels {
+    // Mirror gpui::ScrollAnchor::scroll_to_reveal, with the sign translated
+    // for ListState::scroll_by. ListState exposes item reveal but no element
+    // anchor, so paint supplies the target geometry its public scroll API needs.
+    let target_top = target.content_top + scroll_offset;
+    let target_bottom = target_top + target.height;
+
+    if target_top < viewport.top() && target_bottom > viewport.bottom() {
+        gpui::px(0.)
+    } else if target_top < viewport.top() {
+        target_top - viewport.top()
+    } else if target_bottom > viewport.bottom() {
+        target_bottom - viewport.bottom()
+    } else {
+        gpui::px(0.)
     }
 }
 
@@ -6844,6 +6934,49 @@ impl gpui::Render for GpuixView {
 }
 
 // ── Element builders ─────────────────────────────────────────────────
+
+fn focus_paint_bounds_listener(
+    id: u64,
+    ctx: &BuildCtx,
+) -> Option<crate::automation::PaintBoundsListener> {
+    let FocusScrollAnchor::VirtualList {
+        list_id,
+        bounds,
+        pending_reveal_origin,
+    } = ctx.focus_scroll_anchors.get(&id)?
+    else {
+        return None;
+    };
+    let state = ctx.virtual_lists.get(list_id)?.state.clone();
+    let bounds = bounds.clone();
+    let pending_reveal_origin = pending_reveal_origin.clone();
+
+    Some(std::rc::Rc::new(move |painted_bounds, window, _cx| {
+        let tracked = VirtualFocusBounds {
+            content_top: painted_bounds.top() - state.scroll_px_offset_for_scrollbar().y,
+            height: painted_bounds.size.height,
+        };
+        *bounds.lock().unwrap() = Some(tracked);
+
+        let reveal_origin = pending_reveal_origin.lock().unwrap().take();
+        if let Some(origin_offset) = reveal_origin {
+            let desired_distance = virtual_focus_scroll_distance_at_offset(
+                state.viewport_bounds(),
+                tracked,
+                origin_offset,
+            );
+            // The row reveal already changed the list offset. Move from that
+            // temporary position to the offset the exact target would have
+            // produced from the original viewport.
+            let correction = state.scroll_px_offset_for_scrollbar().y - origin_offset
+                + desired_distance;
+            if correction != gpui::px(0.) {
+                state.scroll_by(correction);
+                window.refresh();
+            }
+        }
+    }))
+}
 
 pub(crate) fn build_element(
     id: u64,
@@ -7045,6 +7178,7 @@ fn build_element_with_parent_layout(
                 .map(|child_id| build_element(child_id, ctx, window, cx))
                 .collect();
             let inherited = ctx.inherited.clone();
+            let paint_bounds_listener = focus_paint_bounds_listener(id, ctx);
             let render_ctx = CustomRenderContext {
                 id,
                 retained_element: element,
@@ -7052,7 +7186,11 @@ fn build_element_with_parent_layout(
                 tracks_mouse_hover: tracks_mouse_hover_events(element, ctx.tree),
                 event_callback: ctx.event_callback,
                 focus_handle: ctx.focus_handles.get(&id),
-                scroll_anchor: ctx.focus_scroll_anchors.get(&id).map(|entry| &entry.anchor),
+                scroll_anchor: ctx
+                    .focus_scroll_anchors
+                    .get(&id)
+                    .and_then(FocusScrollAnchor::overflow_anchor),
+                paint_bounds_listener,
                 style,
                 children: custom_children,
                 selection: ctx.selection.clone(),
@@ -7118,25 +7256,42 @@ fn build_virtual_list(
         .keys()
         .filter_map(|element_id| virtual_row_ancestor(ctx.tree, element.id, *element_id))
         .collect();
-    let focused_row = ctx
+    let focused_target = ctx
         .focus_handles
         .iter()
         .find_map(|(element_id, handle)| {
-            handle
-                .is_focused(window)
-                .then(|| virtual_row_ancestor(ctx.tree, element.id, *element_id))
-                .flatten()
+            if handle.is_focused(window) {
+                virtual_row_ancestor(ctx.tree, element.id, *element_id)
+                    .map(|row_id| (*element_id, row_id))
+            } else {
+                None
+            }
         })
         .or_else(|| {
             ctx.focus_handles.keys().find_map(|element_id| {
-                ctx.tree
+                if ctx
+                    .tree
                     .elements
                     .get(element_id)
                     .is_some_and(|element| element.auto_focus)
-                    .then(|| virtual_row_ancestor(ctx.tree, element.id, *element_id))
-                    .flatten()
+                {
+                    virtual_row_ancestor(ctx.tree, element.id, *element_id)
+                        .map(|row_id| (*element_id, row_id))
+                } else {
+                    None
+                }
             })
         });
+    let pending_reveal_origin = focused_target.and_then(|(target_id, _)| {
+        match ctx.focus_scroll_anchors.get(&target_id) {
+            Some(FocusScrollAnchor::VirtualList {
+                list_id,
+                pending_reveal_origin,
+                ..
+            }) if *list_id == element.id => Some(pending_reveal_origin.clone()),
+            _ => None,
+        }
+    });
     let config = VirtualListConfig::from_element(element);
     let window_start = if config.item_count.is_some() {
         window_start_from_element(element)
@@ -7154,12 +7309,15 @@ fn build_virtual_list(
                 cx,
             );
             let entry = entry.into_mut();
-            if let Some(row_id) = focused_row.filter(|row_id| !entry.seen_rows.contains(row_id)) {
+            if let Some((_, row_id)) =
+                focused_target.filter(|(_, row_id)| !entry.seen_rows.contains(row_id))
+            {
                 if let Some(index) = entry.logical_index_of(row_id) {
-                    entry.state.scroll_to(gpui::ListOffset {
-                        item_ix: index,
-                        offset_in_item: gpui::px(0.0),
-                    });
+                    if let Some(pending_reveal_origin) = &pending_reveal_origin {
+                        *pending_reveal_origin.lock().unwrap() =
+                            Some(entry.state.scroll_px_offset_for_scrollbar().y);
+                    }
+                    entry.state.scroll_to_reveal_item(index);
                 }
             }
             entry.state.clone()
@@ -7176,12 +7334,13 @@ fn build_virtual_list(
                 child_revisions,
                 row_focus_handles,
             ));
-            if let Some(row_id) = focused_row {
+            if let Some((_, row_id)) = focused_target {
                 if let Some(index) = entry.logical_index_of(row_id) {
-                    entry.state.scroll_to(gpui::ListOffset {
-                        item_ix: index,
-                        offset_in_item: gpui::px(0.0),
-                    });
+                    if let Some(pending_reveal_origin) = &pending_reveal_origin {
+                        *pending_reveal_origin.lock().unwrap() =
+                            Some(entry.state.scroll_px_offset_for_scrollbar().y);
+                    }
+                    entry.state.scroll_to_reveal_item(index);
                 }
             }
             entry.state.clone()
@@ -7654,9 +7813,11 @@ pub(crate) fn build_host_container(
     if style.and_then(|style| style.position.as_deref()).is_none() {
         el = el.relative();
     }
+    let paint_bounds_listener = focus_paint_bounds_listener(element.id, ctx);
     el = el.child(crate::automation::bounds_tracker(
         element.id,
         selection_start_flag(style),
+        paint_bounds_listener,
     ));
 
     let native_disabled =
@@ -7666,8 +7827,12 @@ pub(crate) fn build_host_container(
             el = el.track_focus(handle);
         }
     }
-    if let Some(entry) = ctx.focus_scroll_anchors.get(&element.id) {
-        el = el.anchor_scroll(Some(entry.anchor.clone()));
+    if let Some(anchor) = ctx
+        .focus_scroll_anchors
+        .get(&element.id)
+        .and_then(FocusScrollAnchor::overflow_anchor)
+    {
+        el = el.anchor_scroll(Some(anchor.clone()));
     }
     el = crate::accessibility::apply(
         el,
