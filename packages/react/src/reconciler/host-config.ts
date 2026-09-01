@@ -468,15 +468,7 @@ function diagnoseUnsupportedStyleTransition(
     "<diff>, <input>, <textarea>, <markdown>, and <anchored> support outer-container " +
     "properties only."
   let message: string
-  if (
-    CUSTOM_STYLE_TRANSITION_TYPES.has(instance.type) &&
-    style.hoverWithin != null
-  ) {
-    message =
-      `[gpuix] ${subject} does not support style.hoverWithin. ` +
-      "Custom elements do not paint hoverWithin; put the state and transition on a " +
-      "<div> or <text> wrapper instead."
-  } else if (style.transition == null) {
+  if (style.transition == null) {
     return
   } else if (!supportsStyleTransitions(instance.type)) {
     message = `[gpuix] ${subject} does not support style.transition. ${support}`
@@ -507,7 +499,6 @@ const UNIVERSAL_PROPS = new Set([
   "tabIndex",
   "motion",
   "testId",
-  "hoverGroup",
   "role",
   "ariaLabel",
   "ariaDescription",

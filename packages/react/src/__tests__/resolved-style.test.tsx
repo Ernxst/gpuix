@@ -21,8 +21,13 @@ describe("resolved test-renderer styles", () => {
       root.render(
         <div style={{ width: 400, height: 120, backgroundColor: "#222222" }}>
           <div
-            hoverGroup="row"
-            style={{ display: "flex", flexDirection: "row", width: 400, height: 40 }}
+            style={{
+              hoverGroup: "row",
+              display: "flex",
+              flexDirection: "row",
+              width: 400,
+              height: 40,
+            }}
           >
             <span style={{ width: 200, height: 40, backgroundColor: "#333333" }} />
             <span

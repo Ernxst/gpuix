@@ -760,9 +760,14 @@ describeNative("custom element: svg", () => {
           }}
         >
           <div
-            hoverGroup="svg-current-color-group"
             testId="svg-current-color-group"
-            style={{ width: 180, height: 100, display: "flex", alignItems: "center" }}
+            style={{
+              hoverGroup: "svg-current-color-group",
+              width: 180,
+              height: 100,
+              display: "flex",
+              alignItems: "center",
+            }}
           >
             <div style={{ width: 40, height: 100 }} />
             <div

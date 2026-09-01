@@ -181,21 +181,27 @@ fn point_is_inside(bounds: crate::automation::ElementBounds, point: (f64, f64)) 
         && point.1 < bounds.y + bounds.height
 }
 
-fn nearest_hover_group(tree: &RetainedTree, element_id: u64) -> Option<u64> {
-    let mut current = Some(element_id);
+fn ancestor_hover_groups(tree: &RetainedTree, element_id: u64) -> Vec<u64> {
+    let mut groups = Vec::new();
+    let mut current = tree
+        .elements
+        .get(&element_id)
+        .and_then(|element| element.parent);
     while let Some(id) = current {
-        let element = tree.elements.get(&id)?;
+        let Some(element) = tree.elements.get(&id) else {
+            break;
+        };
         if element
-            .custom_props
-            .get("hoverGroup")
-            .and_then(serde_json::Value::as_str)
+            .style
+            .as_deref()
+            .and_then(|style| style.hover_group.as_deref())
             .is_some()
         {
-            return Some(id);
+            groups.push(id);
         }
         current = element.parent;
     }
-    None
+    groups
 }
 
 fn style_object(style: &StyleDesc) -> Result<serde_json::Map<String, serde_json::Value>> {
@@ -1772,29 +1778,34 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_resolved_style(&self, id: f64) -> Result<Option<String>> {
         let id = to_element_id(id)?;
-        let (style, hover_group_id, hover_group_accepts_pointer) = {
+        let (style, hover_groups) = {
             let tree = self.tree.lock().unwrap();
             let Some(element) = tree.elements.get(&id) else {
                 return Ok(None);
             };
-            let hover_group_id = nearest_hover_group(&tree, id);
-            let hover_group_accepts_pointer = hover_group_id.is_some_and(|group_id| {
-                tree.elements
-                    .get(&group_id)
-                    .and_then(|group| group.style.as_ref())
-                    .and_then(|style| style.pointer_events.as_deref())
-                    != Some("none")
-            });
             (
                 element.style.clone().unwrap_or_default(),
-                hover_group_id,
-                hover_group_accepts_pointer,
+                ancestor_hover_groups(&tree, id)
+                    .into_iter()
+                    .map(|group_id| {
+                        let accepts_pointer = tree
+                            .elements
+                            .get(&group_id)
+                            .and_then(|group| group.style.as_ref())
+                            .and_then(|style| style.pointer_events.as_deref())
+                            != Some("none");
+                        (group_id, accepts_pointer)
+                    })
+                    .collect::<Vec<_>>(),
             )
         };
 
         self.flush()?;
         let element_bounds = crate::automation::get_bounds(id);
-        let hover_group_bounds = hover_group_id.and_then(crate::automation::get_bounds);
+        let hover_group_bounds = hover_groups
+            .iter()
+            .map(|(group_id, _)| crate::automation::get_bounds(*group_id))
+            .collect::<Vec<_>>();
         let active_pointer_origin = *self.active_pointer_origin.lock().unwrap();
         let (
             pointer,
@@ -1820,11 +1831,14 @@ impl TestGpuixRenderer {
                     .interactive_style_states
                     .get(&id)
                     .map(|state| state.hovered);
-                let hover_within = hover_group_id.and_then(|group_id| {
-                    view.interactive_style_states
-                        .get(&group_id)
-                        .map(|state| state.hovered)
-                });
+                let hover_within = hover_groups
+                    .iter()
+                    .map(|(group_id, _)| {
+                        view.interactive_style_states
+                            .get(group_id)
+                            .map(|state| state.hovered)
+                    })
+                    .collect::<Vec<_>>();
                 let active = view
                     .interactive_style_states
                     .get(&id)
@@ -1854,11 +1868,17 @@ impl TestGpuixRenderer {
 
         let accepts_pointer = style.pointer_events.as_deref() != Some("none");
         let hovered = hovered_state.unwrap_or(false);
-        let hover_within = hover_within_state.unwrap_or_else(|| {
-            hover_group_accepts_pointer
-                && !keyboard_input
-                && hover_group_bounds.is_some_and(|bounds| point_is_inside(bounds, pointer))
-        });
+        let hover_within = hover_within_state
+            .iter()
+            .zip(hover_groups.iter())
+            .zip(hover_group_bounds.iter())
+            .any(|((state, (_, accepts_pointer)), bounds)| {
+                state.unwrap_or_else(|| {
+                    *accepts_pointer
+                        && !keyboard_input
+                        && bounds.is_some_and(|bounds| point_is_inside(bounds, pointer))
+                })
+            });
         let active = active_state.unwrap_or_else(|| {
             accepts_pointer
                 && active_pointer_origin.is_some_and(|origin| {

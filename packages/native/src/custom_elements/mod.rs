@@ -123,7 +123,7 @@ impl CustomRenderContext<'_> {
 
 /// Prepare the stateful gpui root of a custom element.
 ///
-/// Applies the declared styles including `hover` and `active`, records the last
+/// Applies the declared styles including interaction states, records the last
 /// painted box so `getElementBounds` and automation locators can find the
 /// element, and installs the mouse handlers the adapter listed in
 /// `supported_events`. Call it before adding children.
@@ -216,19 +216,26 @@ fn wire_hover_and_style_transition_events<E: gpui::StatefulInteractiveElement>(
     let transition_active = ctx
         .style
         .is_some_and(|style| style.transition.is_some() && style.active.is_some());
+    let tracks_hover_group = ctx.style.is_some_and(|style| style.hover_group.is_some());
     let tracks_mouse_hover = ctx.tracks_mouse_hover;
 
     // GPUI stores exactly one hover listener per element. Transition state and
     // React's ancestry-diff target therefore share this listener rather than
     // competing for the same slot or emitting a second bubbling event source.
-    if transition_hover || tracks_mouse_hover {
+    if transition_hover || tracks_hover_group || tracks_mouse_hover {
         el = el.on_hover(cx.listener(move |view, is_hovered: &bool, window, cx| {
             let transition_changed = transition_hover
                 && view
                     .transition_states
                     .get_mut(&id)
                     .is_some_and(|state| state.set_hovered(*is_hovered));
-            if transition_changed {
+            let hover_group_changed = tracks_hover_group
+                && view
+                    .interactive_style_states
+                    .entry(id)
+                    .or_default()
+                    .set_hovered(*is_hovered);
+            if transition_changed || hover_group_changed {
                 cx.notify();
             }
             if tracks_mouse_hover {

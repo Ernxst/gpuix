@@ -910,9 +910,11 @@ colours, syntax-highlight runs and gutters, diff rows, editor text, markdown
 runs, and image contents remain under their adapter or content API. Declaring
 `color` as a custom transition property is therefore diagnosed instead of
 returning an interpolated resolved value while those pixels stay unchanged.
-Custom elements also do not paint `hoverWithin`; put that state and transition
-on a `<div>` or `<text>` wrapper. Strict roots reject both declarations, while
-compatibility roots warn once per element.
+`hoverWithin` uses the same outer-container transition surface on every element
+type. Element-owned painting remains outside that surface: for example, a
+`hoverWithin: { color: ... }` refinement can recolour a custom element's outer
+container, but it does not independently interpolate syntax tokens, diff rows,
+or markdown runs.
 
 `durationMs` is required and uses milliseconds; `delayMs` defaults to `0`.
 `easing` accepts `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut`, or a
@@ -2730,9 +2732,10 @@ application. Escape B is useful when the shared helper should remain strictly
 cross-renderer.
 
 `NativeStateStyleKey` contains only the five interaction states above.
-`transition` remains a root-level `StyleDesc` declaration: native parsing
-rejects it inside a state style, and its native transition object is not a
-compatible replacement for React's CSS `transition` string.
+`transition` and `hoverGroup` remain root-level `StyleDesc` declarations and
+are excluded from `NativeStateStyle`; native parsing rejects either inside a
+state style. The native transition object is not a compatible replacement for
+React's CSS `transition` string.
 
 ```tsx
 <div
@@ -2754,16 +2757,27 @@ compatible replacement for React's CSS `transition` string.
 </div>
 ```
 
-Put `hoverGroup` on a container when its hover should style an opted-in
-descendant. The descendant's `hoverWithin` style follows the nearest hover
-group, including while the pointer is over a sibling such as the destination
-label. During pointer capture it remains active while the pointer is within the
+`hoverGroup` and `hoverWithin` are sugar for the CSS ancestor-hover pattern
+`.group:hover .descendant`. Put `hoverGroup` in an ancestor's style and
+`hoverWithin` in any descendant element's style. Every marked ancestor matches
+independently when groups nest, just as separate equivalent CSS rules do, so
+hovering an outer group can activate a descendant through an unhovered inner
+group. Activation uses normal `:hover` hit testing across each ancestor's full
+box, including padding. This applies to every element type, including
+`virtual-list`.
+During pointer capture it remains active while the pointer is within the
 group's hit-test bounds or the capture owner is the group or one of its
 descendants. Releasing capture outside the group clears the style. No React
 hover state or mouse handlers are involved.
 
 ```tsx
-<div hoverGroup="destination-row" style={{ display: 'flex', flexDirection: 'column' }}>
+<div
+  style={{
+    hoverGroup: 'destination-row',
+    display: 'flex',
+    flexDirection: 'column',
+  }}
+>
   <span>Destination</span>
   <span
     style={{
@@ -2781,8 +2795,9 @@ move content. Focus styles do not make an element focusable: use `tabIndex`, a
 keyboard/focus event, or a native input. A focused descendant does not apply a
 parent's `focus` or `focusVisible` style.
 
-Nesting is one level deep. A state style cannot contain `hover`, `active`,
-`focus`, or `focusVisible`.
+Nesting is one level deep. A state style cannot contain `hover`, `hoverWithin`,
+`active`, `focus`, `focusVisible`, `transition`, or `hoverGroup`; the last two
+are declarations on the base style only.
 
 ### Keyboard activation
 

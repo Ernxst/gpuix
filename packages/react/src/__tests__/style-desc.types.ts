@@ -1,4 +1,4 @@
-import type { ImageSource, ImgProps, StyleDesc } from "../types/host.js"
+import type { ImageSource, ImgProps, Props, StyleDesc } from "../types/host.js"
 
 const validStyle = {
   display: "grid",
@@ -14,6 +14,7 @@ const validStyle = {
   letterSpacing: 0.25,
   textTransform: "uppercase",
   textWrap: "wrap",
+  hoverGroup: "destination-row",
   hoverWithin: {
     borderColor: "#7c86ff",
   },
@@ -114,6 +115,18 @@ const nestedTransition: StyleDesc = {
   },
 }
 
+const nestedHoverGroup: StyleDesc = {
+  hover: {
+    // @ts-expect-error A hover group marks the base element, not a state refinement.
+    hoverGroup: "nested-group",
+  },
+}
+
+const removedElementHoverGroup: Props = {
+  // @ts-expect-error hoverGroup moved into the style descriptor.
+  hoverGroup: "legacy-element-prop",
+}
+
 const invalidGrid: StyleDesc = {
   gridTemplateColumns: [
     {
@@ -150,5 +163,7 @@ void invalidHoverStyle
 void invalidTransitionProperty
 void missingTransitionDuration
 void nestedTransition
+void nestedHoverGroup
+void removedElementHoverGroup
 void invalidGrid
 void invalidImage

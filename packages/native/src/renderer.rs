@@ -5179,7 +5179,7 @@ impl FocusScrollAnchor {
 }
 
 impl InteractiveStyleState {
-    fn set_hovered(&mut self, hovered: bool) -> bool {
+    pub(crate) fn set_hovered(&mut self, hovered: bool) -> bool {
         if self.hovered == hovered {
             return false;
         }
@@ -5716,11 +5716,10 @@ pub(crate) struct Inherited {
     pub text_transform: TextTransform,
     /// Resolved CSS currentColor value for custom image elements.
     pub current_color: gpui::Rgba,
-    /// Nearest native hover group for descendant `hoverWithin` styles.
-    pub hover_group: Option<gpui::SharedString>,
-    /// Retained ID for the same group. The string is for GPUI's group API;
-    /// this ID lets inherited currentColor follow the exact hit-test state.
-    pub hover_group_id: Option<u64>,
+    /// Every marked ancestor that can activate descendant `hoverWithin`
+    /// styles, in outer-to-inner order. CSS ancestor-hover selectors match any
+    /// hovered ancestor; a nested marker does not shadow an outer one.
+    hover_groups: Vec<InheritedHoverGroup>,
     /// The nearest ancestor's `highlight`, resolved. `None` in every app that
     /// does not use search. It carries the declaring element id, which is what
     /// a virtual-list row re-resolves against: that row is built after the root
@@ -5730,6 +5729,14 @@ pub(crate) struct Inherited {
     /// Font state is retained separately from GPUI's build-time text stack so
     /// `ch` sees the same inherited family, weight, and size as descendants.
     font: Option<InheritedFont>,
+}
+
+#[derive(Clone)]
+struct InheritedHoverGroup {
+    /// GPUI group name used for the paint-time refinement.
+    name: gpui::SharedString,
+    /// Retained ID used for the exact hit-test state reported by GPUI.
+    id: u64,
 }
 
 #[derive(Clone)]
@@ -5749,8 +5756,7 @@ impl Inherited {
             selection_wash: wash,
             text_transform: TextTransform::None,
             current_color: gpui::rgba(0xe2e2e2ff),
-            hover_group: None,
-            hover_group_id: None,
+            hover_groups: Vec::new(),
             highlight: None,
             font: None,
         }
@@ -5804,8 +5810,10 @@ impl Inherited {
             }
         }
         if let Some(hover_group) = hover_group {
-            self.hover_group = Some(gpui::SharedString::from(hover_group.to_owned()));
-            self.hover_group_id = Some(hover_group_id);
+            self.hover_groups.push(InheritedHoverGroup {
+                name: gpui::SharedString::from(hover_group.to_owned()),
+                id: hover_group_id,
+            });
         }
         if let Some(color) = resolved_current_color {
             self.current_color = color;
@@ -6982,14 +6990,11 @@ fn build_element_with_parent_layout(
 
     let declared_style = element.style.as_deref();
     let parent_inherited = ctx.inherited.clone();
-    // Only host containers install GPUI's group_hover refinement. Custom
-    // surfaces still deliberately exclude hoverWithin painting, so a retained
-    // transition must not introduce that separate capability by accident.
-    let hover_within = matches!(element.element_type.as_str(), "div" | "text")
-        && parent_inherited
-            .hover_group_id
-            .and_then(|group_id| ctx.interactive_style_states.get(&group_id))
-            .is_some_and(|state| state.hovered);
+    let hover_within = parent_inherited.hover_groups.iter().any(|group| {
+        ctx.interactive_style_states
+            .get(&group.id)
+            .is_some_and(|state| state.hovered)
+    });
     let supports_style_transitions = matches!(
         element.element_type.as_str(),
         "div"
@@ -7075,10 +7080,6 @@ fn build_element_with_parent_layout(
 
     // Inheritable style resolves once here so both built-ins and custom
     // elements see the same cascade.
-    let hover_group = element
-        .custom_props
-        .get("hoverGroup")
-        .and_then(serde_json::Value::as_str);
     let font = parent_inherited.font_for(layered_style, window);
     // Percentage terms stay deferred through GPUI/Taffy, where the layout
     // algorithm supplies the containing block's content size. Only `ch` is
@@ -7088,7 +7089,18 @@ fn build_element_with_parent_layout(
     if default_flex_none {
         default_flex_none_for_parent_layout(resolved_style.get_or_insert_default());
     }
+    if let Some(style) = resolved_style.as_mut() {
+        // GPUI stores one group-hover refinement per element. The outermost
+        // marked ancestor is sufficient for the CSS OR: hovering any nested
+        // marked ancestor also hovers every ancestor containing it, while the
+        // outer group's own padding remains independently hoverable.
+        style.hover_within_group = parent_inherited
+            .hover_groups
+            .first()
+            .map(|group| group.name.clone());
+    }
     let style = resolved_style.as_ref();
+    let hover_group = style.and_then(|style| style.hover_group.as_deref());
     let focused = ctx
         .focus_handles
         .get(&id)
@@ -7143,7 +7155,7 @@ fn build_element_with_parent_layout(
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
-            build_virtual_list(element, style, ctx, window, cx)
+            build_virtual_list(element, style, hover_within, ctx, window, cx)
         }
 
         // Polymorphic dispatch for all custom elements.
@@ -7208,6 +7220,7 @@ fn default_flex_none_for_parent_layout(style: &mut StyleDesc) {
 fn build_virtual_list(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
+    hover_within: bool,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -7364,6 +7377,38 @@ fn build_virtual_list(
         gpui::list(list_state, render_item).with_sizing_behavior(gpui::ListSizingBehavior::Auto);
     if let Some(style) = style {
         list = apply_styles(list, style);
+        if hover_within {
+            if let Some(hover_within_style) = style.hover_within.as_deref() {
+                list = apply_styles(list, hover_within_style);
+            }
+        }
+    }
+    if let Some(group) = style.and_then(|style| style.hover_group.as_deref()) {
+        // `gpui::List` is Styled but has no interactive identity. A transparent
+        // stateful surface gives the retained virtual-list node the same group
+        // hitbox/state contract as every other hoverGroup source while the list
+        // continues to own its declared layout and scrolling styles.
+        let id = element.id;
+        let mut surface = gpui::div()
+            .id(gpui::ElementId::Integer(id))
+            .relative()
+            .group(gpui::SharedString::from(group.to_owned()))
+            .child(list)
+            .child(crate::automation::bounds_tracker(id, None, None))
+            .on_hover(cx.listener(move |view, is_hovered: &bool, _window, cx| {
+                if view
+                    .interactive_style_states
+                    .entry(id)
+                    .or_default()
+                    .set_hovered(*is_hovered)
+                {
+                    cx.notify();
+                }
+            }));
+        if style.and_then(|style| style.pointer_events.as_deref()) == Some("none") {
+            surface = surface.ignore_mouse();
+        }
+        return surface.into_any_element();
     }
     list.into_any_element()
 }
@@ -7692,28 +7737,13 @@ pub(crate) fn build_host_container(
     // Host ids are already unique per renderer. Keeping them as integers avoids
     // allocating a formatted name for every `<div>` and `<text>` on every frame.
     let mut el = gpui::div().id(gpui::ElementId::Integer(element.id));
-    let hover_group = element
-        .custom_props
-        .get("hoverGroup")
-        .and_then(serde_json::Value::as_str);
-    let tracks_hover = style.is_some_and(|style| style.hover.is_some()) || hover_group.is_some();
+    let tracks_hover =
+        style.is_some_and(|style| style.hover.is_some() || style.hover_group.is_some());
     let tracks_active = style.is_some_and(|style| style.active.is_some());
     let tracks_mouse_hover = tracks_mouse_hover_events(element, ctx.tree);
 
-    if let Some(group) = hover_group {
-        el = el.group(gpui::SharedString::from(group.to_owned()));
-    }
-
     if let Some(style) = style {
         el = apply_interactive_styles(el, style);
-        if let (Some(group), Some(hover_within_style)) = (
-            ctx.inherited.hover_group.clone(),
-            style.hover_within.as_ref(),
-        ) {
-            el = el.group_hover(group, |refinement| {
-                apply_styles(refinement, hover_within_style)
-            });
-        }
     }
 
     if style.and_then(|style| style.pointer_events.as_deref()) == Some("none") {
@@ -8422,25 +8452,35 @@ pub(crate) fn apply_focus_styles<E: gpui::StatefulInteractiveElement>(
     el
 }
 
-/// Base styles plus gpui's `hover` and `active` refinements.
+/// Base styles plus GPUI's native interaction refinements and hover groups.
 ///
 /// Every stateful GPUI root must go through this, never `apply_styles` alone.
-/// `StyleDesc` carries `hover` and `active` for every element type, so a custom
-/// element that only applied the base styles accepted the prop, serialized it,
-/// and dropped it. gpui reads both refinements from the element state behind the
-/// element's `ElementId`, so the caller must have called `.id(..)` first.
+/// GPUI reads the refinements from the element state behind the element's
+/// `ElementId`, so the caller must have called `.id(..)` first.
 pub(crate) fn apply_interactive_styles<E>(mut el: E, style: &StyleDesc) -> E
 where
     E: gpui::Styled + gpui::StatefulInteractiveElement,
 {
     el = apply_styles(el, style);
+    if let Some(group) = style.hover_group.as_deref() {
+        el = el.group(gpui::SharedString::from(group.to_owned()));
+    }
     if let Some(hover_style) = style.hover.as_deref() {
         el = el.hover(|refinement| apply_styles(refinement, hover_style));
     }
     if let Some(active_style) = style.active.as_deref() {
         el = el.active(|refinement| apply_styles(refinement, active_style));
     }
-    apply_focus_styles(el, style)
+    el = apply_focus_styles(el, style);
+    if let (Some(group), Some(hover_within_style)) = (
+        style.hover_within_group.clone(),
+        style.hover_within.as_deref(),
+    ) {
+        el = el.group_hover(group, |refinement| {
+            apply_styles(refinement, hover_within_style)
+        });
+    }
+    el
 }
 
 fn to_gpui_grid_track(track: &GridTrackValue) -> gpui::GridTrack {
