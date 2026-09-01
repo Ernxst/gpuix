@@ -1742,6 +1742,30 @@ map directly to their GPUI / AccessKit equivalents:
 | `disabled` | Unavailable, non-activating, and removed from tab order |
 | `ariaDisabled` | Unavailable and non-activating, but retained in tab order |
 | `ariaHidden` | Excludes the element and its complete subtree from AccessKit |
+| `visuallyHidden` | Keeps the roled node and its name in AccessKit while painting nothing and reserving no layout space |
+
+`visuallyHidden` is the screen-reader-only announcement that CSS spells
+`sr-only`. It accepts `true` only, and requires an explicit supported `role`,
+because it projects the element as an accessibility node rather than styling it:
+
+```tsx
+<text visuallyHidden role="heading" ariaLevel={1}>
+  Production ledger
+</text>
+```
+
+The projection carries the element's own semantics and its flattened text, and
+nothing else, so GPUIX rejects with a property diagnostic — and renders the
+element as authored — when it is asked to hide more than that:
+
+- `ariaHidden` on the same element, which would remove the node it preserves
+- an interactive element (`<input>`, `<textarea>`, `tabIndex`, `autoFocus`, or a
+  click/key/focus handler), whose control the projection would destroy
+- any host other than `<text>` that has children, because those children would
+  leave the accessibility tree along with the element's box
+
+A visually hidden subtree is not supported yet; on the web `sr-only` keeps the
+whole subtree exposed. Track it as a follow-up before hiding a wrapper.
 
 Unroled drawn text enters AccessKit as `Label` content. `<text>` exposes its
 flattened inline string as one label, while native `<code>`, `<markdown>`, and

@@ -8462,11 +8462,15 @@ fn build_visually_hidden_element(
     let name_from_contents = accessible_name_from_contents(element, flattened_text.as_ref(), ctx);
     let element_id = retained_gpui_element_id(element)
         .expect("a validated visuallyHidden semantic host has a GPUI element id");
+    // One pixel, out of flow, painting nothing. The web's `sr-only` clips to
+    // 1x1 rather than collapsing the box for the same reason: platform
+    // assistive technology moves a cursor over node bounds and hit-tests them,
+    // and a zero-area rect is not reliably addressable.
     let el = gpui::div()
         .id(element_id)
         .absolute()
-        .w(gpui::px(0.0))
-        .h(gpui::px(0.0));
+        .w(gpui::px(1.0))
+        .h(gpui::px(1.0));
     crate::accessibility::apply(
         el,
         element,

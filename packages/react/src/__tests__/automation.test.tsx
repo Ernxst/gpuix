@@ -818,37 +818,41 @@ describeNative("automation", () => {
       </div>
     )
 
-    render(frame(false))
-    renderer.flush()
-    renderer.drawPendingFrame()
-    const trailingBefore = renderer.getElementBounds(
-      renderer.findByTestId("trailing-heading")!.id
-    )
-    renderer.captureScreenshot(baselinePath)
+    try {
+      render(frame(false))
+      renderer.flush()
+      renderer.drawPendingFrame()
+      const trailingBefore = renderer.getElementBounds(
+        renderer.findByTestId("trailing-heading")!.id
+      )
+      renderer.captureScreenshot(baselinePath)
 
-    render(frame(true))
-    renderer.flush()
-    renderer.drawPendingFrame()
-    const tree = renderer.getAccessibilityTree()
-    const nodes = Object.values(tree.nodes)
-    const trailingAfter = renderer.getElementBounds(
-      renderer.findByTestId("trailing-heading")!.id
-    )
-    renderer.captureScreenshot(hiddenPath)
+      render(frame(true))
+      renderer.flush()
+      renderer.drawPendingFrame()
+      const tree = renderer.getAccessibilityTree()
+      const nodes = Object.values(tree.nodes)
+      const trailingAfter = renderer.getElementBounds(
+        renderer.findByTestId("trailing-heading")!.id
+      )
+      renderer.captureScreenshot(hiddenPath)
 
-    expect(nodes.find((node) => node.aria.label === "Production totals")).toMatchObject({
-      aria: { role: "Heading", label: "Production totals", level: 2 },
-    })
-    expect(nodes.find((node) => node.aria.label === "Explicit totals name")).toMatchObject({
-      aria: { role: "Heading", label: "Explicit totals name", level: 3 },
-    })
-    expect(nodes.find((node) => node.aria.label === "Production ledger")).toMatchObject({
-      aria: { role: "Heading", label: "Production ledger", level: 1 },
-    })
-    expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
-    expect(renderer.getPaintedText()).not.toContain("Production ledger")
-    expect(trailingAfter).toEqual(trailingBefore)
-    expect(fs.readFileSync(hiddenPath).equals(fs.readFileSync(baselinePath))).toBe(true)
+      expect(nodes.find((node) => node.aria.label === "Production totals")).toMatchObject({
+        aria: { role: "Heading", label: "Production totals", level: 2 },
+      })
+      expect(nodes.find((node) => node.aria.label === "Explicit totals name")).toMatchObject({
+        aria: { role: "Heading", label: "Explicit totals name", level: 3 },
+      })
+      expect(nodes.find((node) => node.aria.label === "Production ledger")).toMatchObject({
+        aria: { role: "Heading", label: "Production ledger", level: 1 },
+      })
+      expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
+      expect(renderer.getPaintedText()).not.toContain("Production ledger")
+      expect(trailingAfter).toEqual(trailingBefore)
+      expect(fs.readFileSync(hiddenPath).equals(fs.readFileSync(baselinePath))).toBe(true)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
 
     render(
       <div ariaHidden>

@@ -525,14 +525,68 @@ pub(crate) fn is_visually_hidden(element: &RetainedElement) -> bool {
         .get("visuallyHidden")
         .and_then(VisuallyHiddenMode::parse)
         .is_some()
-        && !is_hidden(element)
         && supports_accessibility_host(&element.element_type)
-        && element
+        && visually_hidden_rejection(element).is_none()
+}
+
+/// A control, an authored tab stop, or an element wired to keyboard and focus
+/// interaction. Focus is not derived from the accessibility role, so this reads
+/// the same declaration the focus handles are built from.
+fn is_focusable(element: &RetainedElement) -> bool {
+    matches!(element.element_type.as_str(), "input" | "textarea")
+        || element
             .custom_props
-            .get("role")
-            .and_then(AccessibilityRole::parse)
-            .and_then(AccessibilityRole::into_gpui)
-            .is_some()
+            .get("tabIndex")
+            .and_then(serde_json::Value::as_i64)
+            .is_some_and(|index| index >= 0)
+        || element.auto_focus
+        || element.events.iter().any(|event| {
+            matches!(
+                event.as_str(),
+                "click" | "keyDown" | "keyUp" | "focus" | "accessibilityAction"
+            )
+        })
+}
+
+/// Why a well-formed `visuallyHidden` declaration cannot be projected, or
+/// `None` when the element can become an accessibility-only node.
+///
+/// The projection replaces the element with an unpainted node carrying its own
+/// semantics and flattened text, so anything else the element owns — a control,
+/// a focus target, a child subtree — would be destroyed rather than hidden. The
+/// web's `sr-only` clips a fully live element instead, so declarations GPUIX
+/// cannot honour that way are rejected rather than silently narrowed.
+fn visually_hidden_rejection(element: &RetainedElement) -> Option<&'static str> {
+    if is_hidden(element) {
+        return Some(
+            "ariaHidden removes the accessibility node that visuallyHidden exists to preserve; remove one property",
+        );
+    }
+    if element
+        .custom_props
+        .get("role")
+        .and_then(AccessibilityRole::parse)
+        .and_then(AccessibilityRole::into_gpui)
+        .is_none()
+    {
+        return Some(
+            "visuallyHidden requires an explicit supported role so the accessibility-only element produces a node",
+        );
+    }
+    if is_focusable(element) {
+        return Some(
+            "visuallyHidden replaces the element with an accessibility-only node, which would destroy this control; visually hide a non-interactive element instead",
+        );
+    }
+    // A `<text>` host owns its inline runs: they are flattened into its
+    // accessible name rather than dropped. Every other host would lose its
+    // children entirely, so the subtree stays out of scope for now.
+    if element.element_type != "text" && !element.children.is_empty() {
+        return Some(
+            "visuallyHidden exposes only this element, so its children would leave the accessibility tree; put visuallyHidden on a childless <text> instead",
+        );
+    }
+    None
 }
 
 /// Validate the complete retained accessibility declaration after a mutation
@@ -700,18 +754,8 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<AccessibilityPr
         .get("visuallyHidden")
         .filter(|value| VisuallyHiddenMode::parse(value).is_some())
     {
-        if is_hidden(element) {
-            problems.push(rejected_problem(
-                "visuallyHidden",
-                value,
-                "ariaHidden removes the accessibility node that visuallyHidden exists to preserve; remove one property",
-            ));
-        } else if role.and_then(AccessibilityRole::into_gpui).is_none() {
-            problems.push(rejected_problem(
-                "visuallyHidden",
-                value,
-                "visuallyHidden requires an explicit supported role so the accessibility-only element produces a node",
-            ));
+        if let Some(reason) = visually_hidden_rejection(element) {
+            problems.push(rejected_problem("visuallyHidden", value, reason));
         }
     }
 
@@ -727,20 +771,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<AccessibilityPr
     }
 
     if is_hidden(element) {
-        let focusable = matches!(element.element_type.as_str(), "input" | "textarea")
-            || element
-                .custom_props
-                .get("tabIndex")
-                .and_then(serde_json::Value::as_i64)
-                .is_some_and(|index| index >= 0)
-            || element.auto_focus
-            || element.events.iter().any(|event| {
-                matches!(
-                    event.as_str(),
-                    "click" | "keyDown" | "keyUp" | "focus" | "accessibilityAction"
-                )
-            });
-        if focusable {
+        if is_focusable(element) {
             problems.push(applied_problem(
                 "ariaHidden",
                 &serde_json::Value::Bool(true),
@@ -1124,6 +1155,55 @@ mod tests {
         let malformed = element_problems(&malformed_visually_hidden);
         assert_eq!(malformed.len(), 1);
         assert!(malformed[0].problem.reason.contains("boolean true"));
+    }
+
+    #[test]
+    fn rejects_visually_hidden_where_the_projection_would_destroy_the_element() {
+        let visually_hidden = |mut element: RetainedElement| {
+            element
+                .custom_props
+                .insert("visuallyHidden".into(), true.into());
+            element
+        };
+        let only_reason = |element: &RetainedElement| {
+            let problems = element_problems(element);
+            assert_eq!(problems.len(), 1, "{problems:?}");
+            assert_eq!(problems[0].problem.property, "visuallyHidden");
+            assert_eq!(problems[0].effect, AccessibilityProblemEffect::Rejected);
+            problems[0].problem.reason.clone()
+        };
+
+        let mut control = visually_hidden(RetainedElement::new(20, "input".to_string(), 1));
+        control.custom_props.insert("role".into(), "textbox".into());
+        assert!(!is_visually_hidden(&control));
+        assert!(only_reason(&control).contains("destroy this control"));
+
+        let mut clickable = visually_hidden(RetainedElement::new(21, "text".to_string(), 1));
+        clickable
+            .custom_props
+            .insert("role".into(), "heading".into());
+        clickable.events.insert("click".into());
+        assert!(!is_visually_hidden(&clickable));
+        assert!(only_reason(&clickable).contains("destroy this control"));
+
+        let mut tab_stop = visually_hidden(RetainedElement::new(22, "div".to_string(), 1));
+        tab_stop.custom_props.insert("role".into(), "img".into());
+        tab_stop.custom_props.insert("tabIndex".into(), 0.into());
+        assert!(!is_visually_hidden(&tab_stop));
+        assert!(only_reason(&tab_stop).contains("destroy this control"));
+
+        // A `<text>` keeps its inline runs: they flatten into its own name.
+        let mut wrapper = visually_hidden(RetainedElement::new(23, "div".to_string(), 1));
+        wrapper.custom_props.insert("role".into(), "heading".into());
+        wrapper.children.push(24);
+        assert!(!is_visually_hidden(&wrapper));
+        assert!(only_reason(&wrapper).contains("children would leave"));
+
+        let mut runs = visually_hidden(RetainedElement::new(25, "text".to_string(), 1));
+        runs.custom_props.insert("role".into(), "heading".into());
+        runs.children.push(26);
+        assert!(is_visually_hidden(&runs));
+        assert!(element_problems(&runs).is_empty());
     }
 
     #[test]

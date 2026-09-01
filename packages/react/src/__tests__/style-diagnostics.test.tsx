@@ -300,6 +300,52 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     }
   })
 
+  it("rejects a visuallyHidden projection that would destroy the element", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    try {
+      testRoot.render(
+        <div style={{ width: 400, height: 200 }}>
+          <input testId="hidden-control" role="textbox" ariaLabel="Hidden search" visuallyHidden />
+          <div testId="hidden-wrapper" role="heading" ariaLevel={1} visuallyHidden>
+            <text>Production ledger</text>
+          </div>
+        </div>
+      )
+
+      const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+      const byTestId = (testId: string) => {
+        const diagnostic = diagnostics.find((candidate) => candidate.testId === testId)
+        expect(diagnostic, testId).toBeDefined()
+        return diagnostic!
+      }
+      expect(diagnostics).toHaveLength(2)
+      expect(byTestId("hidden-control")).toMatchObject({
+        elementType: "input",
+        property: "visuallyHidden",
+        value: "true",
+        message: expect.stringContaining("which would destroy this control"),
+      })
+      expect(byTestId("hidden-wrapper")).toMatchObject({
+        elementType: "div",
+        property: "visuallyHidden",
+        value: "true",
+        message: expect.stringContaining("children would leave the accessibility tree"),
+      })
+
+      // Rejected means the element renders as authored, not as a stripped node.
+      const nodes = Object.values(testRoot.renderer.getAccessibilityTree().nodes)
+      expect(nodes.find((node) => node.aria.label === "Hidden search")).toMatchObject({
+        aria: { role: "TextInput", label: "Hidden search" },
+      })
+      expect(testRoot.renderer.getPaintedText()).toContain("Production ledger")
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
   it("omits every well-formed state that its role does not support", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })
