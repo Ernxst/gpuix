@@ -348,6 +348,16 @@ export interface TextQueries {
   queryByText: (text: TextMatcher, options?: MatcherOptions) => TestElement | null
   getAllByText: (text: TextMatcher, options?: MatcherOptions) => TestElement[]
   queryAllByText: (text: TextMatcher, options?: MatcherOptions) => TestElement[]
+  findByText: (
+    text: TextMatcher,
+    options?: MatcherOptions,
+    waitForOptions?: WaitForOptions
+  ) => Promise<TestElement>
+  findAllByText: (
+    text: TextMatcher,
+    options?: MatcherOptions,
+    waitForOptions?: WaitForOptions
+  ) => Promise<TestElement[]>
 }
 
 /** Test ID queries over the GPU-IX desktop test renderer. */
@@ -356,6 +366,16 @@ export interface TestIdQueries {
   queryByTestId: (testId: TestIdMatcher, options?: MatcherOptions) => TestElement | null
   getAllByTestId: (testId: TestIdMatcher, options?: MatcherOptions) => TestElement[]
   queryAllByTestId: (testId: TestIdMatcher, options?: MatcherOptions) => TestElement[]
+  findByTestId: (
+    testId: TestIdMatcher,
+    options?: MatcherOptions,
+    waitForOptions?: WaitForOptions
+  ) => Promise<TestElement>
+  findAllByTestId: (
+    testId: TestIdMatcher,
+    options?: MatcherOptions,
+    waitForOptions?: WaitForOptions
+  ) => Promise<TestElement[]>
 }
 
 /** Computed accessibility-tree queries over the GPU-IX desktop test renderer. */
@@ -364,6 +384,16 @@ export interface RoleQueries {
   queryByRole: (role: string, options?: ByRoleOptions) => TestElement | null
   getAllByRole: (role: string, options?: ByRoleOptions) => TestElement[]
   queryAllByRole: (role: string, options?: ByRoleOptions) => TestElement[]
+  findByRole: (
+    role: string,
+    options?: ByRoleOptions,
+    waitForOptions?: WaitForOptions
+  ) => Promise<TestElement>
+  findAllByRole: (
+    role: string,
+    options?: ByRoleOptions,
+    waitForOptions?: WaitForOptions
+  ) => Promise<TestElement[]>
 }
 
 export interface TestQueries extends TextQueries, TestIdQueries, RoleQueries {}
@@ -1256,12 +1286,124 @@ export function textContent(renderer: TestRenderer, element: TestElement): strin
     .join("")}`
 }
 
+// ── waitFor ──────────────────────────────────────────────────────────
+
+const DEFAULT_WAIT_FOR_TIMEOUT_MS = 1_000
+const DEFAULT_WAIT_FOR_INTERVAL_MS = 50
+const MICROTASK_DRAIN_TICKS = 3
+
+export interface WaitForOptions {
+  /** Wall-clock budget before the last callback error is rethrown. Defaults to 1000ms. */
+  timeout?: number
+  /** Delay between attempts, and the amount each clock advances per attempt. Defaults to 50ms. */
+  interval?: number
+  /** Maps the error thrown on timeout, as in Testing Library. */
+  onTimeout?: (error: Error) => Error
+}
+
+/**
+ * Retries `callback` until it stops throwing, pumping the frame and timer
+ * clocks between attempts so timer-driven UI can make progress.
+ */
+export type TestWaitFor = <T>(
+  callback: () => T | Promise<T>,
+  options?: WaitForOptions
+) => Promise<T>
+
+/** Advance every clock the renderer owns and repaint, once. */
+function pumpRenderer(renderer: TestRenderer, deltaMs: number): void {
+  renderer.advanceAsyncClock(deltaMs)
+  renderer.advanceTime(deltaMs)
+  renderer.flush()
+}
+
+async function drainMicrotasks(): Promise<void> {
+  for (let tick = 0; tick < MICROTASK_DRAIN_TICKS; tick += 1) {
+    await Promise.resolve()
+  }
+}
+
+function waitForTimeoutError(lastError: unknown): Error {
+  if (lastError instanceof Error) return lastError
+  if (lastError === undefined) return new Error("Timed out in waitFor.")
+  return new Error(`Timed out in waitFor: ${String(lastError)}`)
+}
+
+function resolveWaitForOptions(options: WaitForOptions): {
+  timeout: number
+  interval: number
+} {
+  const timeout = options.timeout ?? DEFAULT_WAIT_FOR_TIMEOUT_MS
+  const interval = options.interval ?? DEFAULT_WAIT_FOR_INTERVAL_MS
+
+  if (!Number.isFinite(timeout) || timeout < 0) {
+    throw new Error(`waitFor timeout must be a finite non-negative number, got ${timeout}`)
+  }
+  if (!Number.isFinite(interval) || interval <= 0) {
+    throw new Error(`waitFor interval must be a finite positive number, got ${interval}`)
+  }
+
+  return { timeout, interval }
+}
+
+function createWaitFor(renderer: TestRenderer): TestWaitFor {
+  return async <T>(
+    callback: () => T | Promise<T>,
+    options: WaitForOptions = {}
+  ): Promise<T> => {
+    const { timeout, interval } = resolveWaitForOptions(options)
+    const onTimeout = options.onTimeout ?? ((error: Error) => error)
+    const deadline = Date.now() + timeout
+    let lastError: unknown
+
+    for (;;) {
+      try {
+        return await callback()
+      } catch (error) {
+        lastError = error
+      }
+
+      if (Date.now() >= deadline) throw onTimeout(waitForTimeoutError(lastError))
+
+      await drainMicrotasks()
+      pumpRenderer(renderer, interval)
+      await new Promise((resolve) => setTimeout(resolve, interval))
+    }
+  }
+}
+
+/**
+ * The synchronous sibling of `waitFor`, for the few call sites that cannot
+ * become async. It shares the pump and the timeout error, and blocks the
+ * thread between attempts instead of yielding to the event loop.
+ */
+function waitForSync(
+  renderer: TestRenderer,
+  predicate: () => boolean,
+  describeFailure: () => string,
+  options: WaitForOptions = {}
+): void {
+  const { timeout, interval } = resolveWaitForOptions(options)
+  const deadline = Date.now() + timeout
+  const pause = new Int32Array(new SharedArrayBuffer(4))
+
+  for (;;) {
+    if (predicate()) return
+    if (Date.now() >= deadline) throw waitForTimeoutError(new Error(describeFailure()))
+
+    pumpRenderer(renderer, interval)
+    Atomics.wait(pause, 0, 0, interval)
+  }
+}
+
 function getQueries(
   renderer: TestRenderer,
   resolveScope: () => TestElement,
   includeScope: boolean
 ): TestQueries {
-  return {
+  const waitFor = createWaitFor(renderer)
+
+  const queries: TestQueries = {
     getByText: (text, options) => {
       const scope = resolveScope()
       const matches = findAllByText(renderer, scope, text, includeScope, options)
@@ -1356,7 +1498,21 @@ function getQueries(
     },
     queryAllByRole: (role, options = {}) =>
       findAllByRole(renderer, resolveScope(), role, options, includeScope),
+    findByText: (text, options, waitForOptions) =>
+      waitFor(() => queries.getByText(text, options), waitForOptions),
+    findAllByText: (text, options, waitForOptions) =>
+      waitFor(() => queries.getAllByText(text, options), waitForOptions),
+    findByTestId: (testId, options, waitForOptions) =>
+      waitFor(() => queries.getByTestId(testId, options), waitForOptions),
+    findAllByTestId: (testId, options, waitForOptions) =>
+      waitFor(() => queries.getAllByTestId(testId, options), waitForOptions),
+    findByRole: (role, options, waitForOptions) =>
+      waitFor(() => queries.getByRole(role, options), waitForOptions),
+    findAllByRole: (role, options, waitForOptions) =>
+      waitFor(() => queries.getAllByRole(role, options), waitForOptions),
   }
+
+  return queries
 }
 
 function findAllByText(
@@ -1680,6 +1836,8 @@ export interface TestRoot extends TestQueries {
   render: (node: ReactNode) => void
   within: (element: TestElement) => TestQueries
   userEvent: TestUserEvent
+  /** Retries a callback while pumping the frame and timer clocks. */
+  waitFor: TestWaitFor
   unmount: () => void
 }
 
@@ -1836,6 +1994,7 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
     ...queries,
     within: (element) => getQueries(renderer, () => getElement(renderer, element.id, "scoped element"), false),
     userEvent: createTestUserEvent(renderer),
+    waitFor: createWaitFor(renderer),
     unmount,
   }
 }
@@ -2002,20 +2161,16 @@ export function expectCanvasMatchesBrowser(
 
     if (images.length > 0) {
       const element = testRoot.renderer.findByType("canvas")[0]!
-      let state = testRoot.renderer.getCanvasState(element.id)
-      const pause = new Int32Array(new SharedArrayBuffer(4))
-      for (let attempt = 0; attempt < 500; attempt += 1) {
-        if (state?.loadedImageCount === images.length) break
-        Atomics.wait(pause, 0, 0, 4)
-        testRoot.renderer.flush()
-        state = testRoot.renderer.getCanvasState(element.id)
-      }
-      if (state?.loadedImageCount !== images.length) {
-        throw new Error(
+      const loadedImageCount = (): number =>
+        testRoot.renderer.getCanvasState(element.id)?.loadedImageCount ?? 0
+      waitForSync(
+        testRoot.renderer,
+        () => loadedImageCount() === images.length,
+        () =>
           `Canvas scene ${JSON.stringify(resolved.name)} loaded ` +
-            `${state?.loadedImageCount ?? 0}/${images.length} image fixtures`
-        )
-      }
+          `${loadedImageCount()}/${images.length} image fixtures`,
+        { timeout: 2_000, interval: 4 }
+      )
     }
 
     const windowSize = testRoot.renderer.getWindowSize()

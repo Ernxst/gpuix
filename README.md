@@ -3234,9 +3234,9 @@ throws `hidden: true requires native hidden-node snapshot support, not yet
 implemented; see issue #209` until the native snapshot can retain computed
 semantics for `ariaHidden` subtrees.
 
-These are Testing Library-shaped call sites, not DOM locators: they return a
-`TestElement` immediately and do not add browser accessibility or asynchronous
-locator semantics.
+These are Testing Library-shaped call sites, not DOM locators: `getBy*` and
+`queryBy*` return a `TestElement` immediately, `findBy*` returns a promise that
+retries, and none of them add browser accessibility semantics.
 
 `TestElement.children` and `TestElement.parentElement` expose current retained
 relationships in the DOM shape. A previously returned element re-resolves
@@ -3273,6 +3273,12 @@ await screen.userEvent.clear(screen.getByTestId('search'))
 await screen.userEvent.keyboard(panel, 'cmd-enter')
 await screen.userEvent.tab({ shift: true })
 
+// Asynchronous queries retry while the frame and timer clocks are pumped.
+await screen.findByTestId('panel')
+await screen.findByRole('button', { name: 'Confirm' })
+await screen.findAllByText(/loaded/, undefined, { timeout: 2000, interval: 20 })
+await screen.waitFor(() => screen.getByText('Ready'))
+
 // Re-render through the same bound screen.
 screen.render(<UpdatedComponent />)
 
@@ -3301,6 +3307,15 @@ platform chord (`cmd-a` on macOS, `ctrl-a` elsewhere) and deletes.
 out of the window at `(-1, -1)` when the element fills it. `dblClick` currently
 rejects with an issue #216 message until the native dispatcher can carry
 `click_count`.
+
+`waitFor(callback, options)` retries `callback` until it stops throwing, using
+Testing Library's defaults (`timeout` 1000ms, `interval` 50ms, `onTimeout`) and
+rethrowing the last error on expiry. Unlike a browser `waitFor` it does not wait
+on wall-clock time alone: between attempts it drains microtasks, advances both
+`advanceAsyncClock` and `advanceTime` by `interval`, and flushes the renderer, so
+animation- and timer-driven UI actually progresses. `findBy*` is
+`waitFor(() => getBy*(...))`, taking the matcher options first and the waitFor
+options second, and is available on `screen` and on `within(element)`.
 
 `TestElement.style` is the declared descriptor and keeps nested state styles
 unchanged. Use `getResolvedStyle(elementId)` after simulating input to read the
