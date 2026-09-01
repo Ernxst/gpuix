@@ -427,10 +427,6 @@ enum Op<'a, S> {
         parent: u64,
         child: u64,
     },
-    RemoveChild {
-        parent: u64,
-        child: u64,
-    },
     InsertBefore {
         parent: u64,
         child: u64,
@@ -498,10 +494,6 @@ impl<'de, S: Deserialize<'de>> Visitor<'de> for OpVisitor<S> {
                 id: next(&mut seq)?,
             },
             "appendChild" => Op::AppendChild {
-                parent: next(&mut seq)?,
-                child: next(&mut seq)?,
-            },
-            "removeChild" => Op::RemoveChild {
                 parent: next(&mut seq)?,
                 child: next(&mut seq)?,
             },

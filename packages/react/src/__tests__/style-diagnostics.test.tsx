@@ -408,13 +408,13 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       renderer.createElement(10_001, "div")
       renderer.setCustomProp(10_001, "testId", "native-diagnostic")
       renderer.setStyle(10_001, { width: "banana" })
-      renderer.commitMutations()
+      renderer.flushMutations()
 
       renderer.setStyle(10_001, { width: "banana" })
-      renderer.commitMutations()
+      renderer.flushMutations()
 
       renderer.setStyle(10_001, { width: "plantain" })
-      renderer.commitMutations()
+      renderer.flushMutations()
 
       expect(warn).toHaveBeenCalledTimes(3)
       expect(warn.mock.calls.map(([message]) => String(message))).toEqual([

@@ -15,6 +15,7 @@ const LARGE_TREE_ROWS = 160
 
 interface TestRendererInternals {
   native: {
+    applyBatch(json: string): number[]
     getTreeJson(): string
   }
   elementMap: Map<number, TestElement> | null
@@ -170,47 +171,106 @@ describeNative("TestRenderer query cache", () => {
     }
   }, 10_000)
 
-  it("routes every native tree mutator through the invalidation helper", () => {
+  it("routes compatibility mutators through batched transport and invalidation", () => {
     const renderer = new TestRenderer()
     const state = internals(renderer)
     const invalidate = vi.spyOn(state, "invalidateElementMap")
+    const applyBatch = vi.spyOn(state.native, "applyBatch")
     const exercised: string[] = []
     const rootId = 10_000
     const textId = 10_001
     const insertedId = 10_002
+    const destroyedId = 10_003
 
-    const expectInvalidation = (name: string, mutate: () => unknown) => {
-      const callsBefore = invalidate.mock.calls.length
-      mutate()
-      expect(invalidate.mock.calls.length, name).toBe(callsBefore + 1)
+    const expectCompatibilityMutation = (
+      name: string,
+      mutation: unknown[],
+      mutate: () => unknown
+    ): unknown => {
+      const invalidationsBefore = invalidate.mock.calls.length
+      const batchesBefore = applyBatch.mock.calls.length
+      const result = mutate()
+      expect(invalidate.mock.calls.length, name).toBe(invalidationsBefore + 1)
+      expect(applyBatch.mock.calls.length, name).toBe(batchesBefore + 1)
+      expect(JSON.parse(applyBatch.mock.calls.at(-1)![0]), name).toEqual([mutation])
       exercised.push(name)
+      return result
     }
 
     try {
-      expectInvalidation("createElement", () => renderer.createElement(rootId, "div"))
-      expectInvalidation("setRoot", () => renderer.setRoot(rootId))
-      expectInvalidation("createElement", () => renderer.createElement(textId, "text"))
-      expectInvalidation("appendChild", () => renderer.appendChild(rootId, textId))
-      expectInvalidation("setText", () => renderer.setText(textId, "direct"))
-      expectInvalidation("setStyle", () => renderer.setStyle(rootId, JSON.stringify({ width: 20 })))
-      expectInvalidation("setEventListener", () =>
-        renderer.setEventListener(rootId, "click", true)
+      expectCompatibilityMutation("createElement", ["createElement", rootId, "div"], () =>
+        renderer.createElement(rootId, "div")
       )
-      expectInvalidation("setCustomProp", () =>
-        renderer.setCustomProp(rootId, "testId", JSON.stringify("structural"))
+      expectCompatibilityMutation("setRoot", ["setRoot", rootId], () =>
+        renderer.setRoot(rootId)
       )
-      expectInvalidation("createElement", () => renderer.createElement(insertedId, "div"))
-      expectInvalidation("insertBefore", () =>
-        renderer.insertBefore(rootId, insertedId, textId)
+      expectCompatibilityMutation("createElement", ["createElement", textId, "text"], () =>
+        renderer.createElement(textId, "text")
       )
-      expectInvalidation("removeChild", () => renderer.removeChild(rootId, insertedId))
-      expectInvalidation("destroyElement", () => renderer.destroyElement(insertedId))
-      expectInvalidation("applyBatch", () =>
+      expectCompatibilityMutation("appendChild", ["appendChild", rootId, textId], () =>
+        renderer.appendChild(rootId, textId)
+      )
+      expectCompatibilityMutation("setText", ["setText", textId, "direct"], () =>
+        renderer.setText(textId, "direct")
+      )
+      expectCompatibilityMutation(
+        "setStyle",
+        ["setStyle", rootId, JSON.stringify({ width: 20 })],
+        () => renderer.setStyle(rootId, JSON.stringify({ width: 20 }))
+      )
+      expectCompatibilityMutation(
+        "setEventListener",
+        ["setEventListener", rootId, "click", true],
+        () => renderer.setEventListener(rootId, "click", true)
+      )
+      expectCompatibilityMutation(
+        "setCustomProp",
+        ["setCustomProp", rootId, "testId", "structural"],
+        () => renderer.setCustomProp(rootId, "testId", JSON.stringify("structural"))
+      )
+      const batchesBeforeInvalidCustomProp = applyBatch.mock.calls.length
+      const invalidationsBeforeInvalidCustomProp = invalidate.mock.calls.length
+      expect(() => renderer.setCustomProp(rootId, "testId", "not-json")).toThrow()
+      expect(applyBatch.mock.calls.length).toBe(batchesBeforeInvalidCustomProp)
+      expect(invalidate.mock.calls.length).toBe(invalidationsBeforeInvalidCustomProp)
+      expectCompatibilityMutation(
+        "createElement",
+        ["createElement", insertedId, "div"],
+        () => renderer.createElement(insertedId, "div")
+      )
+      expectCompatibilityMutation(
+        "insertBefore",
+        ["insertBefore", rootId, insertedId, textId],
+        () => renderer.insertBefore(rootId, insertedId, textId)
+      )
+      expectCompatibilityMutation(
+        "removeChild",
+        ["destroyElement", insertedId],
+        () => renderer.removeChild(rootId, insertedId)
+      )
+      expectCompatibilityMutation(
+        "createElement",
+        ["createElement", destroyedId, "div"],
+        () => renderer.createElement(destroyedId, "div")
+      )
+      expect(
+        expectCompatibilityMutation(
+          "destroyElement",
+          ["destroyElement", destroyedId],
+          () => renderer.destroyElement(destroyedId)
+        )
+      ).toEqual([destroyedId])
+      expectCompatibilityMutation("applyBatch", ["setText", textId, "batched"], () =>
         renderer.applyBatch(JSON.stringify([["setText", textId, "batched"]]))
       )
       // Disposal clears the native retained tree, so it must also drop the
       // snapshot — a cached map would keep serving the dead tree.
-      expectInvalidation("dispose", () => renderer.dispose())
+      const invalidationsBeforeDispose = invalidate.mock.calls.length
+      renderer.dispose()
+      expect(invalidate.mock.calls.length, "dispose").toBe(
+        invalidationsBeforeDispose + 1
+      )
+      exercised.push("dispose")
 
       expect(new Set(exercised)).toEqual(
         new Set([
@@ -229,6 +289,7 @@ describeNative("TestRenderer query cache", () => {
         ])
       )
     } finally {
+      applyBatch.mockRestore()
       invalidate.mockRestore()
       renderer.dispose()
     }

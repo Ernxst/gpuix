@@ -750,31 +750,19 @@ where
     if let Some(value) = props.value.filter(|_| props.supports("ariaValue")) {
         el = el.aria_value(value.to_owned());
     }
-    if let Some(value_min) = props
-        .value_min
-        .filter(|_| props.supports("ariaValueMin"))
-    {
+    if let Some(value_min) = props.value_min.filter(|_| props.supports("ariaValueMin")) {
         el = el.aria_min_numeric_value(value_min);
     }
-    if let Some(value_max) = props
-        .value_max
-        .filter(|_| props.supports("ariaValueMax"))
-    {
+    if let Some(value_max) = props.value_max.filter(|_| props.supports("ariaValueMax")) {
         el = el.aria_max_numeric_value(value_max);
     }
-    if let Some(value_now) = props
-        .value_now
-        .filter(|_| props.supports("ariaValueNow"))
-    {
+    if let Some(value_now) = props.value_now.filter(|_| props.supports("ariaValueNow")) {
         el = el.aria_numeric_value(value_now);
     }
     if let Some(level) = props.level.filter(|_| props.supports("ariaLevel")) {
         el = el.aria_level(level);
     }
-    if let Some(index) = props
-        .row_index
-        .filter(|_| props.supports("ariaRowIndex"))
-    {
+    if let Some(index) = props.row_index.filter(|_| props.supports("ariaRowIndex")) {
         el = el.aria_row_index(index);
     }
     if let Some(index) = props
@@ -783,10 +771,7 @@ where
     {
         el = el.aria_column_index(index);
     }
-    if let Some(count) = props
-        .row_count
-        .filter(|_| props.supports("ariaRowCount"))
-    {
+    if let Some(count) = props.row_count.filter(|_| props.supports("ariaRowCount")) {
         el = el.aria_row_count(count);
     }
     if let Some(count) = props
@@ -795,16 +780,10 @@ where
     {
         el = el.aria_column_count(count);
     }
-    if let Some(span) = props
-        .row_span
-        .filter(|_| props.supports("ariaRowSpan"))
-    {
+    if let Some(span) = props.row_span.filter(|_| props.supports("ariaRowSpan")) {
         el = el.aria_row_span(span);
     }
-    if let Some(span) = props
-        .column_span
-        .filter(|_| props.supports("ariaColSpan"))
-    {
+    if let Some(span) = props.column_span.filter(|_| props.supports("ariaColSpan")) {
         el = el.aria_column_span(span);
     }
     if props.disabled && props.supports("disabled") {

@@ -114,6 +114,7 @@ change `@gpuix/react` from `workspace:^` to a version range, and run
 | Example | Run | What it shows |
 |---|---|---|
 | **todo** | `bun run dev` in [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) | The starting point: one file, a `<virtual-list>`, a native `<input>`, and an animated sidebar |
+| **blurred window** | `bun run blurred-window` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
 | **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, message list, composer, `<markdown>` |
 | **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
@@ -208,7 +209,7 @@ Markdown, code and a virtualized diff in one frame:
 
 ## Architecture
 
-GPUIX bridges React to GPUI using a **mutation-based protocol**. Desktop apps use napi-rs; browser apps load the same Rust renderer through wasm-bindgen. React's reconciler sends individual DOM-like mutations (`createElement`, `appendChild`, `setStyle`, etc.) directly to Rust, with no JSON tree serialization. Rust maintains a retained element tree that GPUI reads each frame.
+GPUIX bridges React to GPUI using a **mutation-based protocol**. Desktop apps use napi-rs; browser apps load the same Rust renderer through wasm-bindgen. React collects changed elements into one atomic mutation batch per commit. Rust applies that batch to a retained element tree that GPUI reads each frame.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -226,10 +227,11 @@ GPUIX bridges React to GPUI using a **mutation-based protocol**. Desktop apps us
 │  }                                                              │
 └─────────────────────────────────────────────────────────────────┘
                     │ napi desktop / wasm-bindgen browser
-                    │ createElement(1, "div")
-                    │ appendChild(0, 1)
-                    │ setStyle(1, "{...}")
-                    │ commitMutations()
+                    │ applyBatch([
+                    │   ["createElement", 1, "div"],
+                    │   ["setStyle", 1, {...}],
+                    │   ["setRoot", 1]
+                    │ ])
                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Rust host bridge                                               │
@@ -237,14 +239,14 @@ GPUIX bridges React to GPUI using a **mutation-based protocol**. Desktop apps us
 │  RetainedTree ── stores elements, styles, event flags           │
 │       │                                                         │
 │       ▼  each GPUI frame                                        │
-│  GpuixView::render() → build_element() → GPUI elements         │
+│  GpuixView::render() → build_element() → GPUI elements          │
 └─────────────────────────────────────────────────────────────────┘
                     │
                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  GPUI                                                           │
 │                                                                 │
-│  Metal, DirectX, Vulkan, or browser WebGPU / WebGL2              │
+│  Metal, DirectX, Vulkan, or browser WebGPU / WebGL2             │
 │  Flexbox layout via Taffy                                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -253,8 +255,8 @@ GPUIX bridges React to GPUI using a **mutation-based protocol**. Desktop apps us
 
 GPUI is an **immediate-mode** UI framework — it rebuilds the entire element tree every frame. Instead of fighting this, GPUIX embraces it:
 
-1. React reconciler detects a state change and calls host mutations (`createElement`, `setStyle`, `appendChild`, etc.)
-2. Each mutation updates a **RetainedTree** on the Rust side — a HashMap of element nodes with styles, children, and event flags
+1. React reconciler detects a state change and queues host mutations (`createElement`, `setStyle`, `appendChild`, etc.)
+2. `applyBatch()` validates and applies the complete commit to the Rust **RetainedTree**
 3. On each GPUI frame, `GpuixView::render()` walks the RetainedTree and calls `build_element()` to produce ephemeral GPUI elements
 4. GPUI lays them out (Taffy flexbox) and renders to the GPU
 5. Only **changed elements** cross the FFI boundary — React's reconciler diffs the virtual tree and sends minimal mutations
@@ -263,26 +265,15 @@ This is the same protocol React uses for the DOM (`createElement`, `appendChild`
 
 ## Mutation API
 
-The host surface between JS and Rust is the `NativeRenderer` interface. Desktop uses napi calls and the browser uses wasm-bindgen methods:
+The mutation surface between JS and Rust is one atomic method. Desktop uses napi and the browser uses wasm-bindgen:
 
 ```ts
 interface NativeRenderer {
-  createElement(id: number, elementType: string): void
-  destroyElement(id: number): Array<number>
-  appendChild(parentId: number, childId: number): void
-  removeChild(parentId: number, childId: number): void
-  insertBefore(parentId: number, childId: number, beforeId: number): void
-  setStyle(id: number, styleJson: string): void
-  setText(id: number, content: string): void
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void
-  setPointerCapture(id: number): void
-  releasePointerCapture(id: number): void
-  setRoot(id: number): void
-  commitMutations(): void
+  applyBatch(json: string): Array<number>
 }
 ```
 
-Element IDs are plain numbers generated by an incrementing counter in JS. React may abandon work in concurrent render mode, so GPUIX keeps new host nodes in JS until React places the accepted subtree during commit. Only then are its mutations added to the batch. `commitMutations()` flushes that accepted commit and marks the Rust view dirty for the next frame.
+Element IDs are plain numbers generated by an incrementing counter in JS. React may abandon work in concurrent render mode, so GPUIX keeps new host nodes in JS until React places the accepted subtree during commit. Only then are its mutations added to the batch. `applyBatch()` applies that accepted commit atomically and marks the Rust view dirty for the next frame.
 
 ## Event Flow
 
@@ -658,23 +649,19 @@ surface, so both work while the window sits behind your editor, and even on a
   agent ──►  launch({ env: { GPUIX_BACKGROUND: '1' } })
                 │
                 ▼
-          GPU window renders and paints, but never activates
+           GPU window renders and paints without activation
                 │
                 ├──►  getByTestId(..).click()   ✓  hits the last painted bounds
                 ├──►  screenshot({ path })      ✓  reads the GPU surface
-                ├──►  fill() / press()          ✗  keystrokes are not live yet
+                ├──►  fill() / press()          ✓  uses the live input pipeline
                 └──►  close()
 
   you   ──►  keep typing, your editor stays frontmost the whole time
 ```
 
-Two limits to know before you rely on it:
-
-- **Keyboard input does not reach a launched process.** `fill()` and `press()`
-  throw `keystrokes are not live yet`, because the live renderer implements no
-  `simulateKeystrokes`. This is not about focus; it fails on a focused window
-  too. Use `createTestRoot()` when a check needs typing
-- **Linux ignores `focus`**, so an agent there still gets a focused window
+`fill()` and `press()` use the live GPUI window input pipeline. They work
+without activating the desktop window. **Linux ignores `focus`**, so an agent
+there still gets a focused window.
 
 Prefer `createTestRoot()` when you can. It opens **no window at all**, so
 nothing can steal focus and keyboard input works. Reach for `launch()` plus
@@ -2995,7 +2982,11 @@ ignored; `console.log` cannot break a message.
 ```ts
 import { launch } from '@gpuix/react/automation'
 
-const app = await launch({ command: 'bun', args: ['examples/chat.tsx'] })
+const app = await launch({
+  command: 'bun',
+  args: ['examples/chat.tsx'],
+  env: { GPUIX_BACKGROUND: '1' },
+})
 await app.getByTestId('composer').fill('hello')
 await app.getByTestId('composer').press('enter')
 await app.getByText('hello').waitFor()
@@ -3023,6 +3014,11 @@ bun run live-scroll-wheel:smoke
 
 The window may briefly appear while the controller sends the gesture. The command
 prints `live scroll-wheel automation passed` on success.
+
+Every live-app check must set `GPUIX_BACKGROUND=1`, and the app entry must map
+that flag to `focus: false`. On macOS and Windows, automation uses the real
+window input and paint pipelines without making the window active, so taking
+the user's keyboard has no test benefit. Linux currently ignores `focus`.
 
 `fill()` and `press()` dispatch through the live GPUI window input pipeline, so
 native `<input>` and `<textarea>` elements receive GPUI's keyboard and IME
@@ -3272,7 +3268,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 ## Status
 
 - [x] React reconciler with mutation-based protocol
-- [x] napi-rs FFI bindings (createElement, appendChild, setStyle, etc.)
+- [x] Atomic `applyBatch()` mutation transport through napi-rs and wasm-bindgen
 - [x] RetainedTree (Rust-side element storage)
 - [x] Style mapping (CSS properties → GPUI style methods)
 - [x] Mouse events (click, mouseDown, mouseUp, mouseMove, mouseEnter, mouseLeave)

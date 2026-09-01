@@ -61,7 +61,7 @@ describe("strict style defaults", () => {
 
 function strictStylesRenderer(): NativeRenderer & { setStrictStyles: ReturnType<typeof vi.fn> } {
   return {
-    commitMutations: vi.fn(),
+    applyBatch: vi.fn(() => []),
     setStrictStyles: vi.fn(),
   } as NativeRenderer & { setStrictStyles: ReturnType<typeof vi.fn> }
 }

@@ -901,8 +901,7 @@ mod tests {
                 "easing": "linear"
             }
         }));
-        let mut state =
-            StyleTransitionState::new(&style, StyleState::default(), false, started);
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), false, started);
         assert!(state.set_hovered(true));
         state.sync(&style, StyleState::default(), false, started, false);
 
@@ -995,8 +994,7 @@ mod tests {
             None
         );
 
-        let hovered =
-            resolve_transition_properties(&style, focus, true, true, false, transition);
+        let hovered = resolve_transition_properties(&style, focus, true, true, false, transition);
         assert_eq!(hovered.opacity, Some(0.6));
         let active = resolve_transition_properties(&style, focus, true, true, true, transition);
         assert_eq!(active.opacity, Some(1.0));
@@ -1146,8 +1144,7 @@ mod tests {
                 "easing": "linear"
             }
         }));
-        let mut state =
-            StyleTransitionState::new(&initial, StyleState::default(), false, started);
+        let mut state = StyleTransitionState::new(&initial, StyleState::default(), false, started);
         state.set_hovered(true);
         state.sync(&initial, StyleState::default(), false, started, false);
 
@@ -1195,8 +1192,7 @@ mod tests {
                 "easing": "linear"
             }
         }));
-        let mut state =
-            StyleTransitionState::new(&style, StyleState::default(), false, started);
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), false, started);
         state.set_hovered(true);
         state.sync(&style, StyleState::default(), false, started, false);
 

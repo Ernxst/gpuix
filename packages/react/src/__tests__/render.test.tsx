@@ -176,6 +176,7 @@ import React from "react"
 import { render } from ${JSON.stringify(join(srcDir, "reconciler/renderer.ts"))}
 
 const renderer = {
+  applyBatch() { return [] },
   createElement() {},
   destroyElement() { return [] },
   appendChild() {},

@@ -15,6 +15,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -23,16 +24,14 @@ use gpui::AppContext as _;
 
 use crate::element_tree::EventPayload;
 use crate::renderer::{
-    animation_frame_origin, animation_frame_timestamp_ms,
-    apply_batch_to_tree_with_diagnostics, canvas_size, catch_gpui_initialization,
-    canvas_image_load_state_js, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
-    default_http_client,
+    animation_frame_origin, animation_frame_timestamp_ms, apply_batch_to_tree_with_diagnostics,
+    canvas_image_load_state_js, canvas_size, catch_gpui_initialization,
+    debug_frame_overlay_mode_name, debug_frame_overlay_stats_js, default_http_client,
     dispatch_animation_frame_callback, dispatch_application_menu_action, drain_style_diagnostics,
     first_canvas_diagnostic_message, forget_canvas_diagnostics, fresh_canvas_diagnostics,
     has_application_menus, init_application_menu_support, install_application_menus,
-    parse_canvas_image_source, parse_debug_frame_overlay_mode, parse_style_json,
-    pending_accessibility_diagnostics, pending_custom_prop_diagnostic,
-    pending_style_diagnostics, set_application_menus, take_style_diagnostics_for_reporting,
+    parse_canvas_image_source, parse_debug_frame_overlay_mode, pending_accessibility_diagnostics,
+    pending_custom_prop_diagnostic, set_application_menus, take_style_diagnostics_for_reporting,
     to_element_id, validate_canvas_target, AnimationFrameCallback, CanvasImageLoadState,
     DebugFrameOverlayStats, EventCallback, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView,
     MenuSpec, PendingStyleDiagnostics, WindowSize,
@@ -388,9 +387,7 @@ fn compare_image_bytes(
 ///
 /// Usage from JS:
 ///   const r = new TestGpuixRenderer()
-///   r.createElement(1, "div")
-///   r.setRoot(1)
-///   r.commitMutations()
+///   r.applyBatch('[["createElement",1,"div"],["setRoot",1]]')
 ///   r.flush()                  // triggers GpuixView::render() on the GPU
 ///   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
 ///   const events = r.drainEvents()
@@ -543,15 +540,6 @@ impl TestGpuixRenderer {
         crate::renderer::test_renderer_capabilities()
     }
 
-    // ── Mutation API (same interface as GpuixRenderer) ────────────────
-
-    #[napi]
-    pub fn create_element(&self, id: f64, element_type: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree.lock().unwrap().create_element(id, element_type);
-        Ok(())
-    }
-
     /// Destroy an element and all descendants. Returns destroyed IDs
     /// so JS can clean up event handlers.
     #[napi]
@@ -570,55 +558,6 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_retained_element_count(&self) -> u32 {
         self.tree.lock().unwrap().elements.len() as u32
-    }
-
-    #[napi]
-    pub fn append_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
-        let parent_id = to_element_id(parent_id)?;
-        let child_id = to_element_id(child_id)?;
-        self.tree.lock().unwrap().append_child(parent_id, child_id);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn remove_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
-        let parent_id = to_element_id(parent_id)?;
-        let child_id = to_element_id(child_id)?;
-        self.tree.lock().unwrap().remove_child(parent_id, child_id);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn insert_before(&self, parent_id: f64, child_id: f64, before_id: f64) -> Result<()> {
-        let parent_id = to_element_id(parent_id)?;
-        let child_id = to_element_id(child_id)?;
-        let before_id = to_element_id(before_id)?;
-        self.tree
-            .lock()
-            .unwrap()
-            .insert_before(parent_id, child_id, before_id);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        let parsed = parse_style_json(&style_json);
-        let mut tree = self.tree.lock().unwrap();
-        let style = tree
-            .styles
-            .intern_parsed(style_json.as_bytes(), parsed.style);
-        tree.set_style(id, style);
-        let live_elements = tree.elements.len();
-        tree.styles.maybe_sweep(live_elements);
-        drop(tree);
-        if self.strict_styles.load(Ordering::Relaxed) {
-            self.style_diagnostics
-                .lock()
-                .unwrap()
-                .extend(pending_style_diagnostics(id, parsed.problems));
-        }
-        Ok(())
     }
 
     #[napi]
@@ -988,10 +927,8 @@ impl TestGpuixRenderer {
         let timestamp_origin = self.animation_frame_timestamp_origin.clone();
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, move |_, window, app| {
-                let origin = animation_frame_origin(
-                    &timestamp_origin,
-                    app.background_executor().now(),
-                );
+                let origin =
+                    animation_frame_origin(&timestamp_origin, app.background_executor().now());
                 window.on_next_frame(move |_window, app| {
                     dispatch_animation_frame_callback(
                         callback,
@@ -1859,53 +1796,61 @@ impl TestGpuixRenderer {
         let element_bounds = crate::automation::get_bounds(id);
         let hover_group_bounds = hover_group_id.and_then(crate::automation::get_bounds);
         let active_pointer_origin = *self.active_pointer_origin.lock().unwrap();
-        let (pointer, focus, keyboard_input, hovered_state, hover_within_state, active_state, transitioned_style, motion_style) =
-            with_test_state(self.state_id, |cx, window, view| {
-                let view = view.clone();
-                cx.update_window(window, |_, window, app| {
-                    let reduce_motion = app.reduce_motion();
-                    let mouse = window.mouse_position();
-                    let view = view.read(app);
-                    let focus = view
-                        .focus_handles
-                        .get(&id)
-                        .is_some_and(|handle| handle.is_focused(window));
-                    let keyboard = window.last_input_was_keyboard();
-                    let hovered = view
-                        .interactive_style_states
-                        .get(&id)
-                        .map(|state| state.hovered);
-                    let hover_within = hover_group_id.and_then(|group_id| {
-                        view.interactive_style_states
-                            .get(&group_id)
-                            .map(|state| state.hovered)
-                    });
-                    let active = view
-                        .interactive_style_states
-                        .get(&id)
-                        .map(|state| state.active);
-                    let transitioned_style = view
-                        .transition_states
-                        .get(&id)
-                        .map(|state| state.frame(view.clock.now(), reduce_motion).style);
-                    let motion_style = view
-                        .motion_states
-                        .get(&id)
-                        .filter(|state| state.is_valid())
-                        .map(|state| state.frame(view.clock.now(), reduce_motion).style);
-                    (
-                        (f64::from(f32::from(mouse.x)), f64::from(f32::from(mouse.y))),
-                        focus,
-                        keyboard,
-                        hovered,
-                        hover_within,
-                        active,
-                        transitioned_style,
-                        motion_style,
-                    )
-                })
-                .map_err(|error| Error::from_reason(error.to_string()))
-            })?;
+        let (
+            pointer,
+            focus,
+            keyboard_input,
+            hovered_state,
+            hover_within_state,
+            active_state,
+            transitioned_style,
+            motion_style,
+        ) = with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                let reduce_motion = app.reduce_motion();
+                let mouse = window.mouse_position();
+                let view = view.read(app);
+                let focus = view
+                    .focus_handles
+                    .get(&id)
+                    .is_some_and(|handle| handle.is_focused(window));
+                let keyboard = window.last_input_was_keyboard();
+                let hovered = view
+                    .interactive_style_states
+                    .get(&id)
+                    .map(|state| state.hovered);
+                let hover_within = hover_group_id.and_then(|group_id| {
+                    view.interactive_style_states
+                        .get(&group_id)
+                        .map(|state| state.hovered)
+                });
+                let active = view
+                    .interactive_style_states
+                    .get(&id)
+                    .map(|state| state.active);
+                let transitioned_style = view
+                    .transition_states
+                    .get(&id)
+                    .map(|state| state.frame(view.clock.now(), reduce_motion).style);
+                let motion_style = view
+                    .motion_states
+                    .get(&id)
+                    .filter(|state| state.is_valid())
+                    .map(|state| state.frame(view.clock.now(), reduce_motion).style);
+                (
+                    (f64::from(f32::from(mouse.x)), f64::from(f32::from(mouse.y))),
+                    focus,
+                    keyboard,
+                    hovered,
+                    hover_within,
+                    active,
+                    transitioned_style,
+                    motion_style,
+                )
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })?;
 
         let accepts_pointer = style.pointer_events.as_deref() != Some("none");
         let hovered = hovered_state.unwrap_or(false);
@@ -2109,6 +2054,21 @@ impl TestGpuixRenderer {
                 .map_err(|e| Error::from_reason(e.to_string()))?;
             cx.run_until_parked();
             Ok(now_ms)
+        })
+    }
+
+    /// Advance GPUI's deterministic test executor and run due timers.
+    #[napi]
+    pub fn advance_time(&self, milliseconds: f64) -> Result<()> {
+        if !milliseconds.is_finite() || milliseconds < 0.0 {
+            return Err(Error::from_reason(format!(
+                "advanceTime milliseconds must be finite and non-negative, got {milliseconds}"
+            )));
+        }
+        with_test_state(self.state_id, |cx, _window, _view| {
+            cx.advance_clock(Duration::from_secs_f64(milliseconds / 1000.0));
+            cx.run_until_parked();
+            Ok(())
         })
     }
 

@@ -250,19 +250,6 @@ impl RetainedTree {
         }
     }
 
-    /// Intern a raw style payload and assign it, then keep the table bounded.
-    ///
-    /// The single-op entry points go through here so none of them can forget
-    /// the sweep. `apply_batch_to_tree` resolves its styles up front instead,
-    /// because it must do so before it mutates anything.
-    pub fn set_style_json(&mut self, id: u64, raw: &[u8]) -> Result<(), String> {
-        let style = self.styles.intern(raw)?;
-        self.set_style(id, style);
-        let live_elements = self.elements.len();
-        self.styles.maybe_sweep(live_elements);
-        Ok(())
-    }
-
     pub fn create_element(&mut self, id: u64, element_type: String) {
         let revision = self.take_revision();
         self.elements
@@ -316,12 +303,8 @@ impl RetainedTree {
     /// Recursively destroy an element and all its children.
     /// Returns all destroyed IDs so the caller can clean up JS-side state.
     ///
-    /// Unlinks from the parent BEFORE removing, then marks the parent chain
-    /// changed. React normally sends `removeChild` first, so this used to look
-    /// harmless, but the batch and napi APIs allow a direct destroy: without the
-    /// unlink the parent keeps a dangling child id, and without `mark_changed`
-    /// any cache keyed on `subtree_revision` keeps serving text that is no
-    /// longer in the tree.
+    /// Unlinks from the parent before removing, then marks the parent chain
+    /// changed so caches cannot serve text that is no longer in the tree.
     pub fn destroy_element(&mut self, id: u64) -> Vec<u64> {
         let parent_id = self.elements.get(&id).and_then(|element| element.parent);
         let destroys_root = self.root_id == Some(id);
@@ -398,35 +381,6 @@ impl RetainedTree {
                 .get_mut(&child_id)
                 .expect("child was read from the retained tree")
                 .parent = Some(parent_id);
-        }
-        self.mark_changed(parent_id);
-    }
-
-    pub fn remove_child(&mut self, parent_id: u64, child_id: u64) {
-        let Some(parent) = self.elements.get(&parent_id) else {
-            return;
-        };
-        let child_was_listed = parent.children.iter().any(|id| *id == child_id);
-        let child_was_attached = self
-            .elements
-            .get(&child_id)
-            .is_some_and(|child| child.parent == Some(parent_id));
-        if !child_was_listed && !child_was_attached {
-            return;
-        }
-
-        if child_was_listed {
-            self.elements
-                .get_mut(&parent_id)
-                .expect("parent was read from the retained tree")
-                .children
-                .retain(|id| *id != child_id);
-        }
-        if child_was_attached {
-            self.elements
-                .get_mut(&child_id)
-                .expect("child was read from the retained tree")
-                .parent = None;
         }
         self.mark_changed(parent_id);
     }
@@ -796,6 +750,10 @@ fn element_to_json(
 mod tests {
     use super::*;
 
+    fn apply(tree: &mut RetainedTree, json: &str) {
+        crate::renderer::apply_batch_to_tree(tree, json.as_bytes()).expect("valid batch");
+    }
+
     fn tree_with_child() -> RetainedTree {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
@@ -868,23 +826,6 @@ mod tests {
     }
 
     #[test]
-    fn attachment_follows_the_parent_chain_not_table_existence() {
-        let mut tree = RetainedTree::new();
-        tree.create_element(1, "div".to_string());
-        tree.create_element(2, "div".to_string());
-        tree.create_element(3, "div".to_string());
-        tree.set_root(Some(1));
-        tree.append_child(1, 2);
-        tree.append_child(2, 3);
-
-        assert!(tree.is_attached(3));
-        tree.remove_child(1, 2);
-        assert!(!tree.is_attached(2));
-        assert!(!tree.is_attached(3));
-        assert!(tree.elements.contains_key(&3));
-    }
-
-    #[test]
     fn snapshot_mutations_advance_next_revision_and_noops_do_not() {
         let mut tree = RetainedTree::new();
         assert_revision_advanced(&mut tree, "creating the root", |tree| {
@@ -914,12 +855,6 @@ mod tests {
         });
         assert_revision_advanced(&mut tree, "inserting before a sibling", |tree| {
             tree.insert_before(1, 3, 2)
-        });
-        assert_revision_advanced(&mut tree, "removing an attached child", |tree| {
-            tree.remove_child(1, 3)
-        });
-        assert_revision_unchanged(&mut tree, "removing an absent child", |tree| {
-            tree.remove_child(1, 3)
         });
         assert_revision_advanced(&mut tree, "setting text", |tree| {
             tree.set_text(2, "text".to_string())
@@ -1074,14 +1009,15 @@ mod tests {
         }
     }
 
-    /// A drag through the real entry point, which is the one an app hits.
-    /// Calling `sweep()` by hand would pass even with `maybe_sweep` broken.
+    /// A drag through the batch entry point must keep the style table bounded.
     #[test]
-    fn a_drag_through_set_style_json_stays_bounded() {
+    fn a_drag_through_apply_batch_stays_bounded() {
         let mut tree = tree_with_child();
         for frame in 0..1_000 {
-            let payload = format!(r#"{{"left":{frame}}}"#);
-            tree.set_style_json(3, payload.as_bytes()).unwrap();
+            apply(
+                &mut tree,
+                &format!(r#"[["setStyle",3,{{"left":{frame}}}]]"#),
+            );
             assert!(
                 tree.styles.len() <= STYLE_SWEEP_FLOOR * 2,
                 "frame {frame} grew the table to {}",
@@ -1105,8 +1041,11 @@ mod tests {
             let child = 100 + index as u64;
             tree.create_element(child, "div".to_string());
             tree.append_child(1, child);
-            tree.set_style_json(child, format!(r#"{{"left":{index}}}"#).as_bytes())
+            let style = tree
+                .styles
+                .intern(format!(r#"{{"left":{index}}}"#).as_bytes())
                 .unwrap();
+            tree.set_style(child, style);
         }
         assert_eq!(tree.styles.len(), wide, "every style is still live");
 
@@ -1128,8 +1067,11 @@ mod tests {
         for index in 0..(STYLE_SWEEP_FLOOR * 4) {
             let id = index as u64 + 1;
             tree.create_element(id, "div".to_string());
-            tree.set_style_json(id, format!(r#"{{"left":{index}}}"#).as_bytes())
+            let style = tree
+                .styles
+                .intern(format!(r#"{{"left":{index}}}"#).as_bytes())
                 .unwrap();
+            tree.set_style(id, style);
         }
         let live = tree.styles.len();
         let live_elements = tree.elements.len();

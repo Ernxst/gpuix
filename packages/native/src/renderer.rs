@@ -7,12 +7,17 @@
 //! Desktop lifecycle:
 //!   const renderer = new GpuixRenderer(eventCallback)
 //!   renderer.init({ title: 'My App', width: 800, height: 600 })
-//!   renderer.createElement(1, "div")     // mutations from React reconciler
-//!   renderer.appendChild(0, 1)
-//!   renderer.commitMutations()           // signal batch complete
-//!   renderer.setFrameRequestHandler(() => {
-//!     if (!renderer.tick()) onTerminated()
+//!   renderer.applyBatch(json)             // one atomic React commit
+//!   setTimeout(function loop() {         // drive AppKit on macOS
+//!     if (!renderer.tick()) process.exit(0)
+//!     setTimeout(loop, 8)
 //!   })
+#[cfg(target_os = "macos")]
+use cocoa::{
+    appkit::{NSApplication, NSEvent, NSEventModifierFlags, NSEventType},
+    base::{id, nil, NO},
+    foundation::{NSInteger, NSPoint, NSRect},
+};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use futures::{channel::mpsc, StreamExt as _};
 use gpui::AppContext as _;
@@ -23,24 +28,17 @@ use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use napi_derive::napi;
 #[cfg(target_os = "macos")]
-use cocoa::{
-    appkit::{NSApplication, NSEvent, NSEventModifierFlags, NSEventType},
-    base::{id, nil, NO},
-    foundation::{NSInteger, NSPoint, NSRect},
-};
-#[cfg(target_os = "macos")]
 use objc::{class, msg_send, sel, sel_impl};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 #[cfg(any(target_os = "macos", target_family = "wasm"))]
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(all(target_os = "macos", feature = "test-support"))]
 use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use std::time::Duration;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen::JsCast as _;
@@ -51,7 +49,7 @@ use crate::element_tree::EventPayload;
 use crate::retained_tree::{RetainedTree, StyleTable};
 use crate::style::{
     parse_font_weight, GridTemplateValue, GridTrackMaxValue, GridTrackMinValue, GridTrackValue,
-    ParsedStyle, StyleDesc, StyleProblem,
+    StyleDesc, StyleProblem,
 };
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection, TextTransform};
 use crate::theme::Theme;
@@ -82,10 +80,7 @@ impl PendingStyleDiagnostics {
         self.diagnostics.push(diagnostic);
     }
 
-    pub(crate) fn extend(
-        &mut self,
-        diagnostics: impl IntoIterator<Item = PendingStyleDiagnostic>,
-    ) {
+    pub(crate) fn extend(&mut self, diagnostics: impl IntoIterator<Item = PendingStyleDiagnostic>) {
         self.diagnostics.extend(diagnostics);
     }
 
@@ -128,21 +123,6 @@ pub struct GpuixStyleDiagnostic {
     pub test_id: Option<String>,
     pub property: String,
     pub value: String,
-}
-
-pub(crate) fn parse_style_json(style_json: &str) -> ParsedStyle {
-    match serde_json::from_str(style_json) {
-        Ok(value) => crate::style::parse_style_value(&value),
-        Err(error) => ParsedStyle {
-            style: StyleDesc::default(),
-            problems: vec![StyleProblem {
-                property: "<style>".into(),
-                value: serde_json::to_string(style_json)
-                    .unwrap_or_else(|_| format!("{style_json:?}")),
-                reason: format!("invalid style JSON: {error}"),
-            }],
-        },
-    }
 }
 
 pub(crate) fn pending_style_diagnostics(
@@ -847,8 +827,9 @@ pub(crate) fn to_element_id(id: f64) -> Result<u64> {
 pub(crate) fn parse_canvas_image_source(
     source_json: String,
 ) -> Result<crate::custom_elements::img::CanvasImageSource> {
-    let value: serde_json::Value = serde_json::from_str(&source_json)
-        .map_err(|error| Error::from_reason(format!("Invalid canvas image source JSON: {error}")))?;
+    let value: serde_json::Value = serde_json::from_str(&source_json).map_err(|error| {
+        Error::from_reason(format!("Invalid canvas image source JSON: {error}"))
+    })?;
     let source = crate::custom_elements::img::ImageSource::parse(&value)
         .map_err(|error| Error::from_reason(format!("Invalid canvas image source: {error}")))?;
     Ok(crate::custom_elements::img::CanvasImageSource {
@@ -922,6 +903,39 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
+const SELECTION_SCROLL_TICK_MS: u64 = 24;
+const SELECTION_SCROLL_EDGE_PX: f32 = 36.0;
+const SELECTION_SCROLL_MAX_STEP_PX: f32 = 24.0;
+
+/// Signed list scroll step for a pointer near a viewport edge.
+fn selection_scroll_step(
+    bounds: gpui::Bounds<gpui::Pixels>,
+    position: gpui::Point<gpui::Pixels>,
+) -> f32 {
+    let height = f32::from(bounds.size.height);
+    if height <= 0.0 {
+        return 0.0;
+    }
+    let edge = SELECTION_SCROLL_EDGE_PX.min(height / 6.0);
+    if edge <= 0.0 {
+        return 0.0;
+    }
+    let y = f32::from(position.y);
+    let top = f32::from(bounds.top());
+    let bottom = f32::from(bounds.bottom());
+    let scaled = |penetration: f32| {
+        let progress = (penetration / edge).clamp(0.0, 1.0);
+        SELECTION_SCROLL_MAX_STEP_PX * progress * progress
+    };
+    if y < top + edge {
+        -scaled(top + edge - y)
+    } else if y > bottom - edge {
+        scaled(y - (bottom - edge))
+    } else {
+        0.0
+    }
+}
+
 /// Queue a virtual-list scroll for the next render. `offset_in_item` may be
 /// negative: gpui then anchors the viewport top above the item, which is what
 /// keeps a row pixel-stable while unmeasured rows are spliced in above it.
@@ -947,6 +961,29 @@ fn parse_debug_frame_overlay_mode_str(
         other => Err(format!(
             "Unknown debug frame overlay mode {other:?}. Use hidden, minimal, or full."
         )),
+    }
+}
+
+#[cfg(test)]
+mod selection_scroll_tests {
+    use super::*;
+
+    #[test]
+    fn selection_scroll_ramps_at_viewport_edges() {
+        let bounds = gpui::Bounds::new(
+            gpui::point(gpui::px(10.0), gpui::px(20.0)),
+            gpui::size(gpui::px(300.0), gpui::px(200.0)),
+        );
+        assert_eq!(
+            selection_scroll_step(bounds, gpui::point(gpui::px(20.0), gpui::px(120.0))),
+            0.0
+        );
+        assert!(selection_scroll_step(bounds, gpui::point(gpui::px(20.0), gpui::px(20.0))) < 0.0);
+        assert!(selection_scroll_step(bounds, gpui::point(gpui::px(20.0), gpui::px(220.0))) > 0.0);
+        assert!(
+            selection_scroll_step(bounds, gpui::point(gpui::px(20.0), gpui::px(220.0)))
+                > selection_scroll_step(bounds, gpui::point(gpui::px(20.0), gpui::px(200.0)))
+        );
     }
 }
 
@@ -1063,7 +1100,9 @@ fn post_appkit_click(x: f64, y: f64) -> Result<()> {
             }
         }
         if window == nil {
-            return Err(Error::from_reason("No AppKit window is available for click automation"));
+            return Err(Error::from_reason(
+                "No AppKit window is available for click automation",
+            ));
         }
 
         let content_view: id = msg_send![window, contentView];
@@ -1304,10 +1343,8 @@ async fn run_ui_commands(
                 callback,
                 timestamp_origin,
             } => window.update(cx, move |_view, window, cx| {
-                let origin = animation_frame_origin(
-                    &timestamp_origin,
-                    cx.background_executor().now(),
-                );
+                let origin =
+                    animation_frame_origin(&timestamp_origin, cx.background_executor().now());
                 window.on_next_frame(move |_window, cx| {
                     dispatch_animation_frame_callback(
                         callback,
@@ -1753,10 +1790,7 @@ pub(crate) fn animation_frame_timestamp_ms(
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-pub(crate) fn dispatch_animation_frame_callback(
-    callback: AnimationFrameCallback,
-    timestamp: f64,
-) {
+pub(crate) fn dispatch_animation_frame_callback(callback: AnimationFrameCallback, timestamp: f64) {
     let _ = callback.call_with_return_value(
         timestamp,
         ThreadsafeFunctionCallMode::NonBlocking,
@@ -2377,76 +2411,6 @@ impl GpuixRenderer {
         Ok(())
     }
 
-    // ── Mutation API ─────────────────────────────────────────────────
-
-    #[napi]
-    pub fn create_element(&self, id: f64, element_type: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        let mut tree = self.tree.lock().unwrap();
-        tree.create_element(id, element_type);
-        Ok(())
-    }
-
-    /// Destroy an element and all descendants. Returns array of destroyed IDs
-    /// so JS can clean up event handlers for the entire subtree.
-    #[napi]
-    pub fn destroy_element(&self, id: f64) -> Result<Vec<f64>> {
-        let id = to_element_id(id)?;
-        let mut tree = self.tree.lock().unwrap();
-        let destroyed = tree.destroy_element(id);
-        drop(tree);
-        crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed);
-        forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed);
-        Ok(destroyed.iter().map(|&id| id as f64).collect())
-    }
-
-    #[napi]
-    pub fn append_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
-        let parent_id = to_element_id(parent_id)?;
-        let child_id = to_element_id(child_id)?;
-        let mut tree = self.tree.lock().unwrap();
-        tree.append_child(parent_id, child_id);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn remove_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
-        let parent_id = to_element_id(parent_id)?;
-        let child_id = to_element_id(child_id)?;
-        let mut tree = self.tree.lock().unwrap();
-        tree.remove_child(parent_id, child_id);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn insert_before(&self, parent_id: f64, child_id: f64, before_id: f64) -> Result<()> {
-        let parent_id = to_element_id(parent_id)?;
-        let child_id = to_element_id(child_id)?;
-        let before_id = to_element_id(before_id)?;
-        let mut tree = self.tree.lock().unwrap();
-        tree.insert_before(parent_id, child_id, before_id);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        let parsed = parse_style_json(&style_json);
-        let mut tree = self.tree.lock().unwrap();
-        let style = tree
-            .styles
-            .intern_parsed(style_json.as_bytes(), parsed.style);
-        tree.set_style(id, style);
-        drop(tree);
-        if self.strict_styles.load(Ordering::Relaxed) {
-            self.style_diagnostics
-                .lock()
-                .unwrap()
-                .extend(pending_style_diagnostics(id, parsed.problems));
-        }
-        Ok(())
-    }
-
     /// Enable actionable diagnostics for rejected style fields. React enables this
     /// by default outside production builds.
     #[napi]
@@ -2484,56 +2448,6 @@ impl GpuixRenderer {
         take_style_diagnostics_for_reporting(&self.style_diagnostics, &self.tree)
     }
 
-    #[napi]
-    pub fn set_text(&self, id: f64, content: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        let mut tree = self.tree.lock().unwrap();
-        tree.set_text(id, content);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn set_event_listener(&self, id: f64, event_type: String, has_handler: bool) -> Result<()> {
-        let id = to_element_id(id)?;
-        let mut tree = self.tree.lock().unwrap();
-        tree.set_event_listener(id, event_type, has_handler);
-        Ok(())
-    }
-
-    /// Set the root element (called from appendChildToContainer).
-    #[napi]
-    pub fn set_root(&self, id: f64) -> Result<()> {
-        let id = to_element_id(id)?;
-        let mut tree = self.tree.lock().unwrap();
-        tree.set_root(Some(id));
-        Ok(())
-    }
-
-    /// Set a custom prop on an element (for non-div/text elements like input, editor, diff).
-    /// Key is the prop name, value is JSON-encoded.
-    #[napi]
-    pub fn set_custom_prop(&self, id: f64, key: String, value_json: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        let value: serde_json::Value = serde_json::from_str(&value_json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
-        let mut tree = self.tree.lock().unwrap();
-        let diagnostic = pending_custom_prop_diagnostic(&tree, id, &key, &value);
-        let accessibility_changed = crate::accessibility::is_accessibility_prop(&key);
-        tree.set_custom_prop(id, key, value);
-        let accessibility_diagnostics = accessibility_changed
-            .then(|| pending_accessibility_diagnostics(&tree, id))
-            .unwrap_or_default();
-        drop(tree);
-        if self.strict_styles.load(Ordering::Relaxed) {
-            let mut pending = self.style_diagnostics.lock().unwrap();
-            if let Some(diagnostic) = diagnostic {
-                pending.push(diagnostic);
-            }
-            pending.extend(accessibility_diagnostics);
-        }
-        Ok(())
-    }
-
     /// Get a custom prop value from an element. Returns JSON string or null.
     #[napi]
     pub fn get_custom_prop(&self, id: f64, key: String) -> Result<Option<String>> {
@@ -2542,15 +2456,6 @@ impl GpuixRenderer {
         Ok(tree
             .get_custom_prop(id, &key)
             .map(|v| serde_json::to_string(v).unwrap_or_default()))
-    }
-
-    /// Signal that a batch of mutations is complete. Triggers re-render.
-    #[napi]
-    pub fn commit_mutations(&self) -> Result<()> {
-        if *self.lifecycle.lock().unwrap() == RendererLifecycle::Terminated {
-            return Ok(());
-        }
-        self.request_invalidate()
     }
 
     /// Replace one canvas element's retained display list and repaint without
@@ -2693,13 +2598,12 @@ impl GpuixRenderer {
     ///   ["createElement",    id, "type"]
     ///   ["destroyElement",   id]
     ///   ["appendChild",      parentId, childId]
-    ///   ["removeChild",      parentId, childId]
     ///   ["insertBefore",     parentId, childId, beforeId]
     ///   ["setStyle",         id, { ...style } | "{styleJson}"]
     ///   ["setText",          id, "content"]
     ///   ["setEventListener", id, "eventType", true|false]
     ///   ["setRoot",          id]
-    ///   ["setCustomProp",      id, "key", value | "{valueJson}"]
+    ///   ["setCustomProp",      id, "key", value]
     ///   ["setCustomPropValue", id, "key", value]
     ///
     /// Returns accumulated destroyed IDs from all destroyElement ops.
@@ -3078,10 +2982,8 @@ impl GpuixRenderer {
         {
             let timestamp_origin = self.animation_frame_timestamp_origin.clone();
             return update_window_without_view(move |window, cx| {
-                let origin = animation_frame_origin(
-                    &timestamp_origin,
-                    cx.background_executor().now(),
-                );
+                let origin =
+                    animation_frame_origin(&timestamp_origin, cx.background_executor().now());
                 window.on_next_frame(move |_window, cx| {
                     dispatch_animation_frame_callback(
                         callback,
@@ -3567,8 +3469,9 @@ impl GpuixRenderer {
         {
             let (response, receiver) = sync_channel(1);
             self.send_ui_command(UiCommand::GetListScrollTop { id, response })?;
-            return Ok(recv_ui_response(receiver, "the GPUI list scroll query")?
-                .map(|top| top.to_vec()));
+            return Ok(
+                recv_ui_response(receiver, "the GPUI list scroll query")?.map(|top| top.to_vec())
+            );
         }
 
         #[cfg(not(any(
@@ -3745,9 +3648,7 @@ impl GpuixRenderer {
     /// A quad is invisible to `getPaintedText()`, so this is the only way to
     /// assert on `highlight` without a screenshot.
     #[napi]
-    pub fn get_painted_highlights(
-        &self,
-    ) -> Result<Vec<crate::element_tree::HighlightMatch>> {
+    pub fn get_painted_highlights(&self) -> Result<Vec<crate::element_tree::HighlightMatch>> {
         #[cfg(target_os = "macos")]
         draw_window_for_automation_read()?;
         Ok(crate::text::painted_highlights()
@@ -3877,7 +3778,9 @@ impl GpuixRenderer {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = (x, y);
-            Err(Error::from_reason("AppKit click automation is only available on macOS"))
+            Err(Error::from_reason(
+                "AppKit click automation is only available on macOS",
+            ))
         }
     }
 
@@ -4593,144 +4496,9 @@ impl WebGpuixRenderer {
         )
     }
 
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = createElement)]
-    pub fn create_element(
-        &self,
-        id: f64,
-        element_type: String,
-    ) -> Result<(), wasm_bindgen::JsValue> {
-        self.tree
-            .lock()
-            .unwrap()
-            .create_element(web_element_id(id)?, element_type);
-        Ok(())
-    }
-
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = destroyElement)]
-    pub fn destroy_element(&self, id: f64) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-        let destroyed = self
-            .tree
-            .lock()
-            .unwrap()
-            .destroy_element(web_element_id(id)?)
-            .into_iter()
-            .collect::<Vec<_>>();
-        let destroyed_canvas_ids: Vec<u64> = destroyed.iter().map(|id| *id as u64).collect();
-        crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed_canvas_ids);
-        forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed_canvas_ids);
-        Ok(web_number_array(destroyed.into_iter().map(|id| id as f64)))
-    }
-
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = appendChild)]
-    pub fn append_child(&self, parent_id: f64, child_id: f64) -> Result<(), wasm_bindgen::JsValue> {
-        self.tree
-            .lock()
-            .unwrap()
-            .append_child(web_element_id(parent_id)?, web_element_id(child_id)?);
-        Ok(())
-    }
-
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = removeChild)]
-    pub fn remove_child(&self, parent_id: f64, child_id: f64) -> Result<(), wasm_bindgen::JsValue> {
-        self.tree
-            .lock()
-            .unwrap()
-            .remove_child(web_element_id(parent_id)?, web_element_id(child_id)?);
-        Ok(())
-    }
-
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = insertBefore)]
-    pub fn insert_before(
-        &self,
-        parent_id: f64,
-        child_id: f64,
-        before_id: f64,
-    ) -> Result<(), wasm_bindgen::JsValue> {
-        self.tree.lock().unwrap().insert_before(
-            web_element_id(parent_id)?,
-            web_element_id(child_id)?,
-            web_element_id(before_id)?,
-        );
-        Ok(())
-    }
-
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setStyle)]
-    pub fn set_style(&self, id: f64, style_json: String) -> Result<(), wasm_bindgen::JsValue> {
-        let id = web_element_id(id)?;
-        let parsed = parse_style_json(&style_json);
-        let mut tree = self.tree.lock().unwrap();
-        let style = tree
-            .styles
-            .intern_parsed(style_json.as_bytes(), parsed.style);
-        tree.set_style(id, style);
-        if self.strict_styles.load(Ordering::Relaxed) {
-            for diagnostic in pending_style_diagnostics(id, parsed.problems) {
-                let (message, _, _, _, _) = style_diagnostic_context(&diagnostic, &tree);
-                web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
-            }
-        }
-        Ok(())
-    }
-
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setStrictStyles)]
     pub fn set_strict_styles(&self, enabled: bool) {
         self.strict_styles.store(enabled, Ordering::Relaxed);
-    }
-
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setText)]
-    pub fn set_text(&self, id: f64, content: String) -> Result<(), wasm_bindgen::JsValue> {
-        self.tree
-            .lock()
-            .unwrap()
-            .set_text(web_element_id(id)?, content);
-        Ok(())
-    }
-
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setEventListener)]
-    pub fn set_event_listener(
-        &self,
-        id: f64,
-        event_type: String,
-        has_handler: bool,
-    ) -> Result<(), wasm_bindgen::JsValue> {
-        self.tree
-            .lock()
-            .unwrap()
-            .set_event_listener(web_element_id(id)?, event_type, has_handler);
-        Ok(())
-    }
-
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setRoot)]
-    pub fn set_root(&self, id: f64) -> Result<(), wasm_bindgen::JsValue> {
-        self.tree.lock().unwrap().set_root(Some(web_element_id(id)?));
-        Ok(())
-    }
-
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setCustomProp)]
-    pub fn set_custom_prop(
-        &self,
-        id: f64,
-        key: String,
-        value_json: String,
-    ) -> Result<(), wasm_bindgen::JsValue> {
-        let id = web_element_id(id)?;
-        let value = serde_json::from_str(&value_json).map_err(|error| {
-            wasm_bindgen::JsValue::from_str(&format!("Failed to parse custom prop: {error}"))
-        })?;
-        let mut tree = self.tree.lock().unwrap();
-        let diagnostic = pending_custom_prop_diagnostic(&tree, id, &key, &value);
-        let accessibility_changed = crate::accessibility::is_accessibility_prop(&key);
-        tree.set_custom_prop(id, key, value);
-        let accessibility_diagnostics = accessibility_changed
-            .then(|| pending_accessibility_diagnostics(&tree, id))
-            .unwrap_or_default();
-        if self.strict_styles.load(Ordering::Relaxed) {
-            for diagnostic in diagnostic.into_iter().chain(accessibility_diagnostics) {
-                let (message, _, _, _, _) = style_diagnostic_context(&diagnostic, &tree);
-                web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&message));
-            }
-        }
-        Ok(())
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getCustomProp)]
@@ -4775,11 +4543,6 @@ impl WebGpuixRenderer {
         forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed_canvas_ids);
         notify_web();
         Ok(web_number_array(destroyed))
-    }
-
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = commitMutations)]
-    pub fn commit_mutations(&self) {
-        notify_web();
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = applyCanvasCommands)]
@@ -5324,6 +5087,10 @@ pub(crate) struct GpuixView {
     window_activation_subscription: Option<gpui::Subscription>,
     /// Persistent measurement and scroll state for React-backed virtual lists.
     virtual_lists: HashMap<u64, VirtualListEntry>,
+    /// Latest pointer sample and list during selection edge scrolling.
+    selection_drag_position: Option<gpui::Point<gpui::Pixels>>,
+    selection_scroll_list: Option<u64>,
+    selection_scroll_task: Option<gpui::Task<()>>,
     /// Motion / review clock. Live wall time unless automation freezes it.
     pub(crate) clock: crate::automation::AutomationClock,
     /// Resolved `highlight` state, keyed by the element that declared it.
@@ -5535,6 +5302,9 @@ impl GpuixView {
             pointer_router: Default::default(),
             window_activation_subscription: None,
             virtual_lists: HashMap::new(),
+            selection_drag_position: None,
+            selection_scroll_list: None,
+            selection_scroll_task: None,
             clock: crate::automation::AutomationClock::new(),
             highlights: HashMap::new(),
         }
@@ -5594,9 +5364,7 @@ impl GpuixView {
         // surfaces such as <canvas> predate that identity scheme and still use
         // the original namespaced string; accept both during reconciliation.
         let captured = window.capture_pointer_for_element(&gpui::ElementId::Integer(id))
-            || window.capture_pointer_for_element(&gpui::ElementId::from(format!(
-                "__gpuix_{id}"
-            )));
+            || window.capture_pointer_for_element(&gpui::ElementId::from(format!("__gpuix_{id}")));
         if !captured {
             self.pointer_router.borrow_mut().release(id);
             return Err(format!(
@@ -6501,6 +6269,105 @@ impl GpuixView {
         true
     }
 
+    fn on_selection_mouse_move(
+        &mut self,
+        position: gpui::Point<gpui::Pixels>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.selection.lock().is_dragging() {
+            self.stop_selection_scroll();
+            return;
+        }
+        let list_id = self
+            .selection_scroll_list
+            .filter(|id| {
+                self.virtual_lists.get(id).is_some_and(|entry| {
+                    let bounds = entry.state.viewport_bounds();
+                    position.x >= bounds.left() && position.x <= bounds.right()
+                })
+            })
+            .or_else(|| {
+                self.virtual_lists
+                    .iter()
+                    .find(|(_, entry)| entry.state.viewport_bounds().contains(&position))
+                    .map(|(id, _)| *id)
+            });
+        let Some(list_id) = list_id else {
+            self.stop_selection_scroll();
+            return;
+        };
+        self.selection_drag_position = Some(position);
+        self.selection_scroll_list = Some(list_id);
+        self.schedule_selection_scroll(cx);
+    }
+
+    fn stop_selection_scroll(&mut self) {
+        self.selection_drag_position = None;
+        self.selection_scroll_list = None;
+        self.selection_scroll_task = None;
+    }
+
+    fn schedule_selection_scroll(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.selection_scroll_task.is_some() || !self.selection.lock().is_dragging() {
+            return;
+        }
+        let (Some(position), Some(list_id)) =
+            (self.selection_drag_position, self.selection_scroll_list)
+        else {
+            return;
+        };
+        let Some(entry) = self.virtual_lists.get(&list_id) else {
+            return;
+        };
+        if selection_scroll_step(entry.state.viewport_bounds(), position) == 0.0 {
+            return;
+        }
+        self.selection_scroll_task = Some(cx.spawn(async move |view, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(SELECTION_SCROLL_TICK_MS))
+                .await;
+            if let Err(error) = view.update(cx, |view, cx| {
+                view.selection_scroll_task = None;
+                view.step_selection_scroll(cx);
+            }) {
+                log::debug!("selection scroll stopped after view teardown: {error}");
+            }
+        }));
+    }
+
+    fn step_selection_scroll(&mut self, cx: &mut gpui::Context<Self>) {
+        if !self.selection.lock().is_dragging() {
+            self.stop_selection_scroll();
+            return;
+        }
+        let (Some(position), Some(list_id)) =
+            (self.selection_drag_position, self.selection_scroll_list)
+        else {
+            return;
+        };
+        let Some(entry) = self.virtual_lists.get(&list_id) else {
+            self.stop_selection_scroll();
+            return;
+        };
+        let step = selection_scroll_step(entry.state.viewport_bounds(), position);
+        if step == 0.0 {
+            return;
+        }
+
+        let before = entry.state.logical_scroll_top();
+        let selection_moved = crate::text::paint::update_drag_at(&self.selection, position);
+        entry.state.scroll_by(gpui::px(step));
+        let after = entry.state.logical_scroll_top();
+        let list_moved =
+            after.item_ix != before.item_ix || after.offset_in_item != before.offset_in_item;
+        if !selection_moved && !list_moved {
+            self.stop_selection_scroll();
+            return;
+        }
+        cx.notify();
+        self.schedule_selection_scroll(cx);
+    }
+
     /// Sync focus handles with the current element tree.
     /// Creates handles for new focusable elements, subscribes on_focus/on_blur,
     /// and cleans up handles for destroyed elements.
@@ -6921,6 +6788,8 @@ impl gpui::Render for GpuixView {
         // longer on screen.
         let result = {
             use gpui::prelude::*;
+            let drag_move_view = cx.weak_entity();
+            let drag_end_view = drag_move_view.clone();
             let root = gpui::div()
                 .size_full()
                 .text_color(gpui::rgba(0xe2e2e2ff))
@@ -6928,7 +6797,19 @@ impl gpui::Render for GpuixView {
                 .on_action(cx.listener(Self::focus_next_action))
                 .on_action(cx.listener(Self::focus_previous_action));
             with_window_menu_actions(root)
-                .child(selection_frame_reset(self.selection.clone()))
+                .child(selection_frame_reset(
+                    self.selection.clone(),
+                    move |position, app| {
+                        drag_move_view
+                            .update(app, |view, cx| view.on_selection_mouse_move(position, cx))
+                            .ok();
+                    },
+                    move |app| {
+                        drag_end_view
+                            .update(app, |view, _cx| view.stop_selection_scroll())
+                            .ok();
+                    },
+                ))
                 .child(crate::automation::bounds_frame_reset())
                 .child(crate::pointer::pointer_router_frame(
                     self.pointer_router.clone(),
@@ -7005,8 +6886,8 @@ fn focus_paint_bounds_listener(
             // The row reveal already changed the list offset. Move from that
             // temporary position to the offset the exact target would have
             // produced from the original viewport.
-            let correction = state.scroll_px_offset_for_scrollbar().y - origin_offset
-                + desired_distance;
+            let correction =
+                state.scroll_px_offset_for_scrollbar().y - origin_offset + desired_distance;
             if correction != gpui::px(0.) {
                 state.scroll_by(correction);
                 window.refresh();
@@ -7073,13 +6954,7 @@ fn build_element_with_parent_layout(
             let state = ctx.transition_states.entry(id).or_insert_with(|| {
                 crate::motion::StyleTransitionState::new(style, focus_state, hover_within, ctx.now)
             });
-            state.sync(
-                style,
-                focus_state,
-                hover_within,
-                ctx.now,
-                ctx.reduce_motion,
-            );
+            state.sync(style, focus_state, hover_within, ctx.now, ctx.reduce_motion);
             let frame = state.frame(ctx.now, ctx.reduce_motion);
             *ctx.animation_active |= frame.active;
             *ctx.style_transition_active |= frame.active;
@@ -7156,7 +7031,11 @@ fn build_element_with_parent_layout(
         .focus_handles
         .get(&id)
         .is_some_and(|handle| handle.is_focused(window));
-    let interaction = ctx.interactive_style_states.get(&id).copied().unwrap_or_default();
+    let interaction = ctx
+        .interactive_style_states
+        .get(&id)
+        .copied()
+        .unwrap_or_default();
     let current_color = resolved_current_color(
         style,
         focused,
@@ -7319,16 +7198,17 @@ fn build_virtual_list(
                 }
             })
         });
-    let pending_reveal_origin = focused_target.and_then(|(target_id, _)| {
-        match ctx.focus_scroll_anchors.get(&target_id) {
-            Some(FocusScrollAnchor::VirtualList {
-                list_id,
-                pending_reveal_origin,
-                ..
-            }) if *list_id == element.id => Some(pending_reveal_origin.clone()),
-            _ => None,
-        }
-    });
+    let pending_reveal_origin =
+        focused_target.and_then(
+            |(target_id, _)| match ctx.focus_scroll_anchors.get(&target_id) {
+                Some(FocusScrollAnchor::VirtualList {
+                    list_id,
+                    pending_reveal_origin,
+                    ..
+                }) if *list_id == element.id => Some(pending_reveal_origin.clone()),
+                _ => None,
+            },
+        );
     let config = VirtualListConfig::from_element(element);
     let window_start = if config.item_count.is_some() {
         window_start_from_element(element)
@@ -7667,7 +7547,9 @@ fn captures_pointer_in_ancestry(
         let Some(current_element) = tree.elements.get(&id) else {
             return false;
         };
-        if current_element.events.contains("mouseDown") && current_element.events.contains("mouseMove") {
+        if current_element.events.contains("mouseDown")
+            && current_element.events.contains("mouseMove")
+        {
             return true;
         }
         current = current_element.parent;
@@ -7701,8 +7583,7 @@ pub(crate) fn build_host_container(
     use gpui::prelude::*;
 
     let flattened_text = (element.element_type == "text").then(|| flatten_text(element, ctx));
-    let text_owns_accessible_name =
-        crate::accessibility::role_supports_name_from_contents(element)
+    let text_owns_accessible_name = crate::accessibility::role_supports_name_from_contents(element)
         && element
             .custom_props
             .get("ariaLabel")
@@ -8119,10 +8000,10 @@ pub(crate) fn build_host_container(
                             .is_some_and(|state| state.set_active(true));
                     let interactive_changed = tracks_active
                         && view
-                        .interactive_style_states
-                        .entry(id)
-                        .or_default()
-                        .set_active(true);
+                            .interactive_style_states
+                            .entry(id)
+                            .or_default()
+                            .set_active(true);
                     if transition_changed || interactive_changed {
                         cx.notify();
                     }
@@ -8138,10 +8019,10 @@ pub(crate) fn build_host_container(
                             .is_some_and(|state| state.set_active(false));
                     let interactive_changed = tracks_active
                         && view
-                        .interactive_style_states
-                        .entry(id)
-                        .or_default()
-                        .set_active(false);
+                            .interactive_style_states
+                            .entry(id)
+                            .or_default()
+                            .set_active(false);
                     if transition_changed || interactive_changed {
                         cx.notify();
                     }
@@ -8157,10 +8038,10 @@ pub(crate) fn build_host_container(
                             .is_some_and(|state| state.set_active(false));
                     let interactive_changed = tracks_active
                         && view
-                        .interactive_style_states
-                        .entry(id)
-                        .or_default()
-                        .set_active(false);
+                            .interactive_style_states
+                            .entry(id)
+                            .or_default()
+                            .set_active(false);
                     if transition_changed || interactive_changed {
                         cx.notify();
                     }
@@ -8172,8 +8053,8 @@ pub(crate) fn build_host_container(
         // React splits interpolated text into adjacent host nodes. Flatten the
         // subtree into one selectable layout while keeping this shared host
         // surface for identity, events, styles, focus and automation bounds.
-        let inline = flattened_text
-            .expect("text hosts are flattened before their content is attached");
+        let inline =
+            flattened_text.expect("text hosts are flattened before their content is attached");
         let accessibility_value = (!ctx.inherited.accessibility_hidden
             && !ctx.inherited.text_accessibility_owned_by_role
             && !inline.accessibility_text.is_empty())
@@ -9010,10 +8891,6 @@ enum BatchOp<'a> {
         parent_id: u64,
         child_id: u64,
     },
-    RemoveChild {
-        parent_id: u64,
-        child_id: u64,
-    },
     InsertBefore {
         parent_id: u64,
         child_id: u64,
@@ -9158,24 +9035,6 @@ impl<'de> serde::Deserialize<'de> for StrArg<'de> {
     }
 }
 
-/// A legacy `setCustomProp` payload: a JSON string gets decoded, anything else
-/// is taken as-is. `setCustomPropValue` skips this and stores the raw value.
-struct LegacyPropArg(serde_json::Value);
-
-impl<'de> serde::Deserialize<'de> for LegacyPropArg {
-    fn deserialize<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<Self, D::Error> {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        if let serde_json::Value::String(encoded) = &value {
-            return Ok(LegacyPropArg(
-                serde_json::from_str(encoded).unwrap_or_else(|_| value.clone()),
-            ));
-        }
-        Ok(LegacyPropArg(value))
-    }
-}
-
 /// `hasHandler` arrives as a bool from the reconciler and as a non-negative
 /// integer from hand-written batches. That is exactly what `as_bool()` then
 /// `as_u64()` accepted before, so a negative or fractional number stays an
@@ -9254,10 +9113,6 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
                         parent_id: next_id(&mut seq, "parent id")?,
                         child_id: next_id(&mut seq, "child id")?,
                     },
-                    "removeChild" => BatchOp::RemoveChild {
-                        parent_id: next_id(&mut seq, "parent id")?,
-                        child_id: next_id(&mut seq, "child id")?,
-                    },
                     "insertBefore" => BatchOp::InsertBefore {
                         parent_id: next_id(&mut seq, "parent id")?,
                         child_id: next_id(&mut seq, "child id")?,
@@ -9284,7 +9139,7 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
                     "setCustomProp" => BatchOp::SetCustomProp {
                         id: next_id(&mut seq, "id")?,
                         key: next_arg::<A, StrArg>(&mut seq, "prop key")?.0.into_owned(),
-                        value: next_arg::<A, LegacyPropArg>(&mut seq, "custom prop value")?.0,
+                        value: next_arg(&mut seq, "custom prop value")?,
                     },
                     "setCustomPropValue" => BatchOp::SetCustomProp {
                         id: next_id(&mut seq, "id")?,
@@ -9464,12 +9319,6 @@ pub(crate) fn apply_batch_to_tree_with_diagnostics(
             } => {
                 tree.append_child(parent_id, child_id);
                 inline_subtree_roots.push(child_id);
-            }
-            BatchOp::RemoveChild {
-                parent_id,
-                child_id,
-            } => {
-                tree.remove_child(parent_id, child_id);
             }
             BatchOp::InsertBefore {
                 parent_id,
@@ -9703,10 +9552,7 @@ pub struct WindowOptions {
     pub show: Option<bool>,
 }
 
-fn effective_reduced_motion(
-    override_: Option<bool>,
-    os: impl FnOnce() -> Option<bool>,
-) -> bool {
+fn effective_reduced_motion(override_: Option<bool>, os: impl FnOnce() -> Option<bool>) -> bool {
     override_.or_else(os).unwrap_or(false)
 }
 
@@ -9719,7 +9565,9 @@ fn effective_reduced_motion(
 pub struct RendererCapabilities {
     #[cfg_attr(
         not(all(target_arch = "wasm32", target_os = "unknown")),
-        napi(ts_type = "\"macos\" | \"windows\" | \"linux\" | \"freebsd\" | \"browser\" | \"unknown\"")
+        napi(
+            ts_type = "\"macos\" | \"windows\" | \"linux\" | \"freebsd\" | \"browser\" | \"unknown\""
+        )
     )]
     pub platform: String,
     pub frame_clock: FrameClockCapabilities,
@@ -10087,7 +9935,6 @@ mod highlight_cache_tests {
 #[cfg(test)]
 mod batch_tests {
     use super::*;
-    use crate::retained_tree::STYLE_SWEEP_FLOOR;
 
     fn apply(tree: &mut RetainedTree, json: &str) -> BatchResult<Vec<f64>> {
         apply_batch_to_tree(tree, json.as_bytes())
@@ -10183,7 +10030,10 @@ mod batch_tests {
             r#"[["createElement",1,"div"],["setStyle",1,null]]"#,
         )
         .expect("style problems degrade");
-        assert_eq!(tree.elements[&1].style.as_deref(), Some(&StyleDesc::default()));
+        assert_eq!(
+            tree.elements[&1].style.as_deref(),
+            Some(&StyleDesc::default())
+        );
     }
 
     /// Skipping an unknown opcode would let a JS/Rust version skew desync the
@@ -10205,8 +10055,6 @@ mod batch_tests {
             r#"[["destroyElement",ID]]"#,
             r#"[["appendChild",ID,2]]"#,
             r#"[["appendChild",1,ID]]"#,
-            r#"[["removeChild",ID,2]]"#,
-            r#"[["removeChild",1,ID]]"#,
             r#"[["insertBefore",ID,2,3]]"#,
             r#"[["insertBefore",1,ID,3]]"#,
             r#"[["insertBefore",1,2,ID]]"#,
@@ -10274,22 +10122,42 @@ mod batch_tests {
         }
     }
 
-    /// The single-op entry points sweep too. Without that,
-    /// `for (...) renderer.setStyle(1, ...)` grows the table forever.
     #[test]
-    fn repeated_direct_set_style_keeps_the_table_bounded() {
-        let mut tree = RetainedTree::new();
-        tree.create_element(1, "div".to_string());
-        for frame in 0..10_000 {
-            let payload = format!(r#"{{"left":{frame}}}"#);
-            tree.set_style_json(1, payload.as_bytes())
-                .expect("valid style");
-            assert!(
-                tree.styles.len() <= STYLE_SWEEP_FLOOR,
-                "frame {frame} left {} styles interned",
-                tree.styles.len()
+    fn set_custom_prop_preserves_raw_json_looking_strings() {
+        for value in ["true", "null", r#"{"a":1}"#, r#""quoted""#, "ordinary text"] {
+            let mut tree = RetainedTree::new();
+            let json = serde_json::json!([
+                ["createElement", 1, "code"],
+                ["setCustomProp", 1, "code", value],
+            ])
+            .to_string();
+
+            apply(&mut tree, &json).expect("raw custom-prop string");
+            assert_eq!(
+                tree.get_custom_prop(1, "code"),
+                Some(&serde_json::Value::String(value.to_owned())),
+                "{value:?} must stay a string"
             );
         }
+    }
+
+    #[test]
+    fn legacy_set_custom_prop_value_still_preserves_raw_values() {
+        let mut tree = RetainedTree::new();
+        apply(
+            &mut tree,
+            r#"[["createElement",1,"code"],["setCustomPropValue",1,"code","true"],["setCustomPropValue",1,"metadata",{"language":"txt"}]]"#,
+        )
+        .expect("legacy raw custom-prop operations");
+
+        assert_eq!(
+            tree.get_custom_prop(1, "code"),
+            Some(&serde_json::Value::String("true".to_owned()))
+        );
+        assert_eq!(
+            tree.get_custom_prop(1, "metadata"),
+            Some(&serde_json::json!({ "language": "txt" }))
+        );
     }
 
     /// Interning keys on raw bytes, so re-ordered keys are two `Arc`s. They are
@@ -10505,15 +10373,19 @@ mod window_options_tests {
 
     #[test]
     fn existing_options_are_still_mapped() {
-        let gpui_options = mapped_with_bounds(WindowOptions {
-            title: Some("Background".to_string()),
-            resizable: Some(false),
-            window_background: Some("blurred".to_string()),
-            min_width: Some(320.0),
-            min_height: Some(240.0),
-            focus: Some(false),
-            ..WindowOptions::default()
-        }, 200.0, 100.0);
+        let gpui_options = mapped_with_bounds(
+            WindowOptions {
+                title: Some("Background".to_string()),
+                resizable: Some(false),
+                window_background: Some("blurred".to_string()),
+                min_width: Some(320.0),
+                min_height: Some(240.0),
+                focus: Some(false),
+                ..WindowOptions::default()
+            },
+            200.0,
+            100.0,
+        );
         let titlebar = gpui_options.titlebar.expect("titlebar options");
         assert_eq!(titlebar.title.as_deref(), Some("Background"));
         assert!(!gpui_options.is_resizable);

@@ -6,17 +6,7 @@ import type { NativeRenderer } from "../types/host.js"
 
 function rendererStub(): NativeRenderer {
   return {
-    createElement: vi.fn(),
-    destroyElement: vi.fn(() => []),
-    appendChild: vi.fn(),
-    removeChild: vi.fn(),
-    insertBefore: vi.fn(),
-    setStyle: vi.fn(),
-    setText: vi.fn(),
-    setEventListener: vi.fn(),
-    setRoot: vi.fn(),
-    setCustomProp: vi.fn(),
-    commitMutations: vi.fn(),
+    applyBatch: vi.fn(() => []),
     setStrictStyles: vi.fn(),
   }
 }

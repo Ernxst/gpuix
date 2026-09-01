@@ -1080,10 +1080,7 @@ impl CanvasImageEntry {
     }
 }
 
-fn render_image_with_opacity(
-    image: &gpui::RenderImage,
-    opacity: u8,
-) -> Option<gpui::RenderImage> {
+fn render_image_with_opacity(image: &gpui::RenderImage, opacity: u8) -> Option<gpui::RenderImage> {
     let mut frames = Vec::with_capacity(image.frame_count());
     for frame_index in 0..image.frame_count() {
         let size = image.size(frame_index);
@@ -1241,9 +1238,7 @@ impl SharedCanvasImageStore {
         self.release_observer(observer_id, window);
         let should_load = {
             let mut state = self.state.lock().unwrap();
-            state
-                .observer_keys
-                .insert(observer_id, source.key.clone());
+            state.observer_keys.insert(observer_id, source.key.clone());
             let entry = state.entries.entry(source.key.clone()).or_default();
             entry.source.get_or_insert(source.source.clone());
             entry.observers.insert(observer_id);
@@ -1334,9 +1329,10 @@ impl SharedCanvasImageStore {
                 if let Some(entry) = state.entries.get_mut(&key) {
                     entry.users.remove(&element_id);
                 }
-                if state.entries.get(&key).is_some_and(|entry| {
-                    entry.users.is_empty() && entry.observers.is_empty()
-                })
+                if state
+                    .entries
+                    .get(&key)
+                    .is_some_and(|entry| entry.users.is_empty() && entry.observers.is_empty())
                 {
                     dropped.extend(state.remove_entry(&key));
                     state.revision = state.revision.saturating_add(1);
@@ -1700,18 +1696,15 @@ impl CustomElement for ImgElement {
         use gpui::prelude::*;
 
         if let Some(error) = self.source_error.as_deref() {
-            let fallback = Self::fallback(format!("img: invalid src: {error}")).id(
-                gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)),
-            );
+            let fallback = Self::fallback(format!("img: invalid src: {error}"))
+                .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)));
             let fallback = super::custom_surface(fallback, &ctx, cx);
             return apply_image_accessibility(&ctx, fallback).into_any_element();
         }
 
         let Some(source) = self.source.clone() else {
-            let fallback = Self::fallback("img: no src").id(gpui::SharedString::from(format!(
-                "__gpuix_img_{}",
-                ctx.id
-            )));
+            let fallback = Self::fallback("img: no src")
+                .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)));
             let fallback = super::custom_surface(fallback, &ctx, cx);
             return apply_image_accessibility(&ctx, fallback).into_any_element();
         };

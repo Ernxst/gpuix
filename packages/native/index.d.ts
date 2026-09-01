@@ -14,16 +14,6 @@ export declare class GpuixRenderer {
    * them by `scaleFactor` to obtain device-pixel dimensions.
    */
   setWindowEventHandler(eventCallback?: (((arg: EventPayload) => unknown)) | undefined | null): void
-  createElement(id: number, elementType: string): void
-  /**
-   * Destroy an element and all descendants. Returns array of destroyed IDs
-   * so JS can clean up event handlers for the entire subtree.
-   */
-  destroyElement(id: number): Array<number>
-  appendChild(parentId: number, childId: number): void
-  removeChild(parentId: number, childId: number): void
-  insertBefore(parentId: number, childId: number, beforeId: number): void
-  setStyle(id: number, styleJson: string): void
   /**
    * Enable actionable diagnostics for rejected style fields. React enables this
    * by default outside production builds.
@@ -38,19 +28,8 @@ export declare class GpuixRenderer {
   drainStyleDiagnostics(): Array<GpuixStyleDiagnostic>
   /** Return diagnostics not yet sent to stderr without consuming assertion evidence. */
   takeStyleDiagnosticsForReporting(): Array<GpuixStyleDiagnostic>
-  setText(id: number, content: string): void
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void
-  /** Set the root element (called from appendChildToContainer). */
-  setRoot(id: number): void
-  /**
-   * Set a custom prop on an element (for non-div/text elements like input, editor, diff).
-   * Key is the prop name, value is JSON-encoded.
-   */
-  setCustomProp(id: number, key: string, valueJson: string): void
   /** Get a custom prop value from an element. Returns JSON string or null. */
   getCustomProp(id: number, key: string): string | null
-  /** Signal that a batch of mutations is complete. Triggers re-render. */
-  commitMutations(): void
   /**
    * Replace one canvas element's retained display list and repaint without
    * requiring a React commit.
@@ -73,13 +52,12 @@ export declare class GpuixRenderer {
    *   ["createElement",    id, "type"]
    *   ["destroyElement",   id]
    *   ["appendChild",      parentId, childId]
-   *   ["removeChild",      parentId, childId]
    *   ["insertBefore",     parentId, childId, beforeId]
    *   ["setStyle",         id, { ...style } | "{styleJson}"]
    *   ["setText",          id, "content"]
    *   ["setEventListener", id, "eventType", true|false]
    *   ["setRoot",          id]
-   *   ["setCustomProp",      id, "key", value | "{valueJson}"]
+   *   ["setCustomProp",      id, "key", value]
    *   ["setCustomPropValue", id, "key", value]
    *
    * Returns accumulated destroyed IDs from all destroyElement ops.
@@ -236,9 +214,7 @@ export declare class GpuixRenderer {
  *
  * Usage from JS:
  *   const r = new TestGpuixRenderer()
- *   r.createElement(1, "div")
- *   r.setRoot(1)
- *   r.commitMutations()
+ *   r.applyBatch('[["createElement",1,"div"],["setRoot",1]]')
  *   r.flush()                  // triggers GpuixView::render() on the GPU
  *   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
  *   const events = r.drainEvents()
@@ -256,7 +232,6 @@ export declare class TestGpuixRenderer {
    * offscreen GPU-backed window.
    */
   capabilities(): RendererCapabilities
-  createElement(id: number, elementType: string): void
   /**
    * Destroy an element and all descendants. Returns destroyed IDs
    * so JS can clean up event handlers.
@@ -269,10 +244,6 @@ export declare class TestGpuixRenderer {
    * removal actually freed it.
    */
   getRetainedElementCount(): number
-  appendChild(parentId: number, childId: number): void
-  removeChild(parentId: number, childId: number): void
-  insertBefore(parentId: number, childId: number, beforeId: number): void
-  setStyle(id: number, styleJson: string): void
   setStrictStyles(enabled: boolean): void
   /**
    * Opt in to loopback and private-network URL image sources for local tests.
@@ -555,6 +526,8 @@ export declare class TestGpuixRenderer {
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
   clockResume(): number
+  /** Advance GPUI's deterministic test executor and run due timers. */
+  advanceTime(milliseconds: number): void
   /** Get the root element ID, or null if no root is set. */
   getRootId(): number | null
 }

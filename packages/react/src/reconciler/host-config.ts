@@ -5,7 +5,6 @@
 /// of the full element tree. Only changed elements cross the FFI boundary.
 
 import { createContext } from "react"
-import type { ReactContext } from "react-reconciler"
 import { DefaultEventPriority } from "react-reconciler/constants.js"
 
 const NoEventPriority = 0
@@ -14,7 +13,7 @@ import type {
   ElementType,
   HostContext,
   Instance,
-  NativeRenderer,
+  MutationRenderer,
   Props,
   PublicInstance,
   StyleDesc,
@@ -35,7 +34,7 @@ import {
   disposeRecordingContext2D,
   getOrCreateRecordingContext2D,
 } from "../canvas/context-2d.js"
-import { reportStyleDiagnostics } from "./batch-renderer.js"
+import { reportStyleDiagnostics } from "./renderer-diagnostics.js"
 
 let currentUpdatePriority = NoEventPriority
 
@@ -66,7 +65,7 @@ function containerFor(node: HostNode): Container {
   return stateFor(node).container
 }
 
-function rendererFor(node: HostNode): NativeRenderer {
+function rendererFor(node: HostNode): MutationRenderer {
   return containerFor(node).renderer
 }
 
@@ -648,7 +647,7 @@ function customPropEntries(type: string, props: Props): Array<[string, CustomPro
 
 /** Send all custom props to Rust for non-built-in element types. */
 function syncCustomProps(
-  renderer: NativeRenderer,
+  renderer: MutationRenderer,
   id: number,
   type: string,
   props: Props
@@ -663,7 +662,7 @@ function syncCustomProps(
 
 /** Diff and send changed custom props to Rust. */
 function diffCustomProps(
-  renderer: NativeRenderer,
+  renderer: MutationRenderer,
   id: number,
   type: string,
   oldProps: Props,
@@ -755,15 +754,15 @@ export const hostConfig = {
       id,
       type,
       props,
-      setPointerCapture: () => rootContainerInstance.renderer.setPointerCapture?.(id),
+      setPointerCapture: () => rootContainerInstance.native.setPointerCapture?.(id),
       releasePointerCapture: () =>
-        rootContainerInstance.renderer.releasePointerCapture?.(id),
+        rootContainerInstance.native.releasePointerCapture?.(id),
       getBounds: () => {
-        const getElementBounds = rootContainerInstance.renderer.getElementBounds
+        const getElementBounds = rootContainerInstance.native.getElementBounds
         if (!getElementBounds) {
           throw new Error("This GPUIX renderer does not support element measurement")
         }
-        const bounds = getElementBounds.call(rootContainerInstance.renderer, id)
+        const bounds = getElementBounds.call(rootContainerInstance.native, id)
         if (!bounds) return null
         return { x: bounds[0]!, y: bounds[1]!, width: bounds[2]!, height: bounds[3]! }
       },
@@ -773,12 +772,12 @@ export const hostConfig = {
             `Canvas commands can only target <canvas>, received <${instance.type}>`
           )
         }
-        const apply = rootContainerInstance.renderer.applyCanvasCommands
+        const apply = rootContainerInstance.native.applyCanvasCommands
         if (!apply) {
           throw new Error("This GPUIX renderer does not support retained canvas commands")
         }
-        apply.call(rootContainerInstance.renderer, id, ops, operands, strings)
-        reportStyleDiagnostics(rootContainerInstance.renderer)
+        apply.call(rootContainerInstance.native, id, ops, operands, strings)
+        reportStyleDiagnostics(rootContainerInstance.native)
       },
       parentId: null,
       getAttribute(name): string | null {
@@ -879,7 +878,7 @@ export const hostConfig = {
     return null
   },
 
-  // Batch flush point: commitMutations() sends all queued mutations to Rust
+  // Batch flush point: flushMutations() sends all queued mutations to Rust
   // in a single applyBatch() FFI call. This is the end of React's synchronous
   // commit phase — all mutations from this render are flushed together.
   resetAfterCommit(containerInfo: Container): void {
@@ -890,7 +889,7 @@ export const hostConfig = {
       console.error(error)
       return
     }
-    containerInfo.renderer.commitMutations()
+    containerInfo.renderer.flushMutations()
   },
 
   getRootHostContext(_rootContainerInstance: Container): HostContext {
@@ -1025,7 +1024,7 @@ export const hostConfig = {
   },
 
   NotPendingTransition: null,
-  HostTransitionContext: createContext(null) as unknown as ReactContext<null>,
+  HostTransitionContext: createContext(null),
   resetFormInstance(): void {},
   requestPostPaintCallback(): void {},
   trackSchedulerEvent(): void {},

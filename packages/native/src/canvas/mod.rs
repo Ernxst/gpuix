@@ -1917,7 +1917,9 @@ mod tests {
         assert_eq!(outcome.diagnostics.len(), 1);
         assert_eq!(outcome.diagnostics[0].op_name, "drawImage");
         assert!(outcome.diagnostics[0].reason.contains("R1"));
-        assert!(outcome.diagnostics[0].reason.contains("negative axis scales"));
+        assert!(outcome.diagnostics[0]
+            .reason
+            .contains("negative axis scales"));
         assert!(!outcome.invalidates);
     }
 

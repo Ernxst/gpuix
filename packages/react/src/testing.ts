@@ -35,6 +35,7 @@ import type {
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
+import type { MutationTuple } from "./reconciler/batch-renderer.js"
 import {
   disposeRecordingContext2D,
   flushRecordingContext2D,
@@ -122,7 +123,7 @@ export interface AccessKitTreeSnapshot {
 interface NativeTestRendererApi extends NativeRenderer {
   dispose(): void
   capabilities(): RendererCapabilities
-  applyBatch(json: string): number[]
+  commitMutations(): void
   applyCanvasCommands(
     id: number,
     ops: Uint32Array,
@@ -185,6 +186,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
   clockResume(): number
+  advanceTime(milliseconds: number): void
   getRootId(): number | null
   getWindowSize(): { width: number; height: number; scaleFactor: number }
   getAllText(): string[]
@@ -428,62 +430,61 @@ export class TestRenderer implements NativeRenderer {
     return this.native.capabilities()
   }
 
-  // ── NativeRenderer interface (all mutations delegate to native) ──
+  // Keep direct mutation methods at runtime for one compatibility release.
+
+  private applyCompatibilityMutation(mutation: MutationTuple): Array<number> {
+    const destroyedIds = this.native.applyBatch(JSON.stringify([mutation]))
+    this.invalidateElementMap()
+    return destroyedIds
+  }
 
   createElement(id: number, elementType: string): void {
-    this.native.createElement(id, elementType)
-    this.invalidateElementMap()
+    this.applyCompatibilityMutation(["createElement", id, elementType])
   }
 
   destroyElement(id: number): Array<number> {
-    const destroyed = this.native.destroyElement(id)
-    this.invalidateElementMap()
-    return destroyed
+    return this.applyCompatibilityMutation(["destroyElement", id])
   }
 
   appendChild(parentId: number, childId: number): void {
-    this.native.appendChild(parentId, childId)
-    this.invalidateElementMap()
+    this.applyCompatibilityMutation(["appendChild", parentId, childId])
   }
 
-  removeChild(parentId: number, childId: number): void {
-    this.native.removeChild(parentId, childId)
-    this.invalidateElementMap()
+  removeChild(_parentId: number, childId: number): void {
+    // The atomic transport intentionally has no detach-only operation because
+    // React removals now own and destroy the removed subtree.
+    this.applyCompatibilityMutation(["destroyElement", childId])
   }
 
   insertBefore(parentId: number, childId: number, beforeId: number): void {
-    this.native.insertBefore(parentId, childId, beforeId)
-    this.invalidateElementMap()
+    this.applyCompatibilityMutation(["insertBefore", parentId, childId, beforeId])
   }
 
   setStyle(id: number, styleJson: string): void {
-    this.native.setStyle(id, styleJson)
-    this.invalidateElementMap()
+    this.applyCompatibilityMutation(["setStyle", id, styleJson])
   }
 
   setText(id: number, content: string): void {
-    this.native.setText(id, content)
-    this.invalidateElementMap()
+    this.applyCompatibilityMutation(["setText", id, content])
   }
 
   setEventListener(id: number, eventType: string, hasHandler: boolean): void {
-    this.native.setEventListener(id, eventType, hasHandler)
-    this.invalidateElementMap()
+    this.applyCompatibilityMutation(["setEventListener", id, eventType, hasHandler])
   }
 
   setRoot(id: number): void {
-    this.native.setRoot(id)
-    this.invalidateElementMap()
+    this.applyCompatibilityMutation(["setRoot", id])
   }
 
   setCustomProp(id: number, key: string, valueJson: string): void {
-    this.native.setCustomProp(id, key, valueJson)
-    this.invalidateElementMap()
+    const value = JSON.parse(valueJson) as MutationTuple[number]
+    this.applyCompatibilityMutation(["setCustomProp", id, key, value])
   }
 
-  commitMutations(): void {
+  flushMutations(): void {
     this.native.commitMutations()
     this.commitCount++
+    this.invalidateElementMap()
   }
 
   applyBatch(json: string): Array<number> {
@@ -1003,6 +1004,14 @@ export class TestRenderer implements NativeRenderer {
 
   clockResume(): number {
     return this.native.clockResume()
+  }
+
+  /** Advance GPUI's test dispatcher and run due timers.
+   *  This is not `clockFastForward`. That moves the motion clock only.
+   *  Use this for caret blink, input drag autoscroll, and list edge scroll. */
+  advanceTime(milliseconds: number): void {
+    this.native.advanceTime(milliseconds)
+    this.dispatchNativeEvents()
   }
 
   focusElement(elementId: number): void {

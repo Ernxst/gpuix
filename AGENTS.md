@@ -636,15 +636,16 @@ The 10k chat mount was 850ms. profano said:
 React was not the problem. The batch **stringified every style and theme**, then
 stringified the queue, then Rust parsed each escaped string again.
 
-Queue **raw objects**. Opcode `setCustomPropValue` carries a raw JSON value.
-`setCustomProp` still means a JSON **string** (legacy). A raw `"top"` or
-`"true"` on `setCustomProp` is parsed as JSON and throws. That is why the
-composer Selects died after the first applyBatch change: `<anchored side="top">`
-never committed.
+Queue **raw values**. `setStyle` and `setCustomProp` carry JSON values inside
+the outer batch; never encode either value first. `applyBatch` decodes that
+outer JSON exactly once, so a string such as `"true"` stays a string. Rust also
+accepts the legacy `setCustomPropValue` opcode with the same raw-value
+semantics. Only the direct legacy `TestGpuixRenderer.setCustomProp(valueJson)`
+method accepts an encoded JSON argument.
 
 ```ts
 queue.push(['setStyle', id, styleObject])
-queue.push(['setCustomPropValue', id, 'side', 'top'])
+queue.push(['setCustomProp', id, 'side', 'top'])
 ```
 
 After a JS reconciler change, **build `@gpuix/react`**. `examples/` and
@@ -1162,7 +1163,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] Style mapping, including native `hover` / `active`
 - [x] Native focus styles, paint-only outlines, and keyboard activation
 - [x] Mouse, keyboard, focus, scroll, and click-outside events
-- [x] `commitMutations()` stores the view entity and calls `cx.notify()`
+- [x] Atomic `applyBatch()` mutation transport
 - [x] GPU-backed test renderer
 - [x] Native `<input>` and `<textarea>`
 - [x] `<img>` (path/URL/data raster and full-colour SVG) and `<svg>` (tintable monochrome icons)
@@ -1260,10 +1261,13 @@ can be inspected after a run.
 ### Integration Test
 
 ```bash
-cd examples && bun --hot chat.tsx
+cd examples && GPUIX_BACKGROUND=1 bun --hot chat.tsx
 ```
 
 Use tuistory for the long-running process. Do not use `tsx` or raw `tmux`.
+On macOS and Windows, the background flag keeps the real GPU window from taking
+the user's keyboard; live paint, clicks, screenshots, and automation still
+work. Linux currently ignores `focus`.
 
 ### Drive the live window
 
@@ -1288,9 +1292,8 @@ still behaves normally.
 render(<App />, { focus: process.env.GPUIX_BACKGROUND !== '1' })
 ```
 
-`fill()` and `press()` do **not** work against `launch()`. The live renderer has
-no `simulateKeystrokes`, so they throw `keystrokes are not live yet`. That is
-unrelated to focus. Use `createTestRoot()` for anything that types.
+`fill()` and `press()` use the live GPUI window input pipeline and do not need
+the desktop window to become active.
 
 ```ts
 import { launch } from '@gpuix/react/automation'

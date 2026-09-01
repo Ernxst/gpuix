@@ -14,11 +14,11 @@ import type {
   NativeRenderer,
   StyleDiagnostic,
 } from "../types/host.js"
+import { wrapWithBatching } from "./batch-renderer.js"
 import {
   enqueueRendererDiagnostic,
   installRendererDiagnosticChannel,
-  wrapWithBatching,
-} from "./batch-renderer.js"
+} from "./renderer-diagnostics.js"
 import { attachRoot, detachRoot } from "./event-registry.js"
 import { hostConfig } from "./host-config.js"
 
@@ -138,6 +138,7 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
   const batchedRenderer = wrapWithBatching(renderer)
   const gpuixContainer: Container = {
     renderer: batchedRenderer,
+    native: renderer,
     ids: idAllocatorFor(renderer),
     eventHandlers: new Map(),
     eventTargets: new Map(),
@@ -146,7 +147,6 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     strictStyles,
   }
   attachRoot(renderer, gpuixContainer)
-  attachRoot(batchedRenderer, gpuixContainer)
   let status: RootStatus = { status: "active" }
 
   const cleanup = (): void => {
@@ -158,7 +158,6 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
       container = null
     }
     detachRoot(renderer, gpuixContainer)
-    detachRoot(batchedRenderer, gpuixContainer)
     detachCanvasImageLoader(renderer)
     if (status.status === "active") status = { status: "unmounted" }
   }
@@ -216,7 +215,7 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
       reconciler.updateContainer(
         React.createElement(
           GpuixContext.Provider,
-          { value: { renderer: batchedRenderer } },
+          { value: { renderer } },
           node
         ),
         activeContainer,
