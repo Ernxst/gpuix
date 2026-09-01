@@ -797,7 +797,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     expectScreenshotsDiffer(before, after)
   })
 
-  it("resolves hoverWithin against the nearest nested hoverGroup", () => {
+  it("activates hoverWithin through any hovered ancestor across nested groups", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div
@@ -842,15 +842,97 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     const outer = boundsFor(renderer, "outer-hover-group")
     const inner = boundsFor(renderer, "inner-hover-group")
     const target = renderer.findByTestId("nested-hover-within-target")!
+    const before = path.join(SHOTS_DIR, "nested-hover-within-before.png")
+    const outerHovered = path.join(SHOTS_DIR, "nested-hover-within-outer.png")
+    const innerHovered = path.join(SHOTS_DIR, "nested-hover-within-inner.png")
 
-    renderer.nativeSimulateMouseMove(outer[0] + 10, outer[1] + 10)
+    renderer.nativeSimulateMouseMove(outer[0] + outer[2] + 20, outer[1] + outer[3] + 20)
     expect(renderer.getResolvedStyle(target.id)).toMatchObject({
       backgroundColor: "#334155",
     })
+    renderer.captureScreenshot(before)
+
+    // CSS `.group:hover .descendant` still matches the outer group when an
+    // unhovered nested group sits between it and the descendant.
+    renderer.nativeSimulateMouseMove(outer[0] + 10, outer[1] + 10)
+    expect(renderer.getResolvedStyle(target.id)).toMatchObject({
+      backgroundColor: "#f59e0b",
+    })
+    renderer.captureScreenshot(outerHovered)
+
     renderer.nativeSimulateMouseMove(inner[0] + 10, inner[1] + 10)
     expect(renderer.getResolvedStyle(target.id)).toMatchObject({
       backgroundColor: "#f59e0b",
     })
+    renderer.captureScreenshot(innerHovered)
+
+    expectScreenshotsDiffer(before, outerHovered)
+    expectScreenshotsEqual(outerHovered, innerHovered)
+  })
+
+  it("lets virtual-list hoverGroup activate descendant hoverWithin", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "100%",
+          height: "100%",
+          backgroundColor: "#101010",
+        }}
+      >
+        <virtual-list
+          itemCount={1}
+          estimatedItemHeight={100}
+          style={{
+            hoverGroup: "virtual-list-group",
+            width: 320,
+            height: 160,
+            padding: 24,
+            backgroundColor: "#20283a",
+          }}
+        >
+          <div
+            testId="virtual-list-hover-row"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: 100,
+              backgroundColor: "#1f2937",
+            }}
+          >
+            <span
+              testId="virtual-list-hover-target"
+              style={{
+                width: 180,
+                height: 40,
+                pointerEvents: "none",
+                backgroundColor: "#334155",
+                hoverWithin: { backgroundColor: "#f59e0b" },
+              }}
+            />
+          </div>
+        </virtual-list>
+      </div>
+    )
+
+    const row = boundsFor(renderer, "virtual-list-hover-row")
+    const target = renderer.findByTestId("virtual-list-hover-target")!
+    const before = path.join(SHOTS_DIR, "virtual-list-hover-group-before.png")
+    const after = path.join(SHOTS_DIR, "virtual-list-hover-group-after.png")
+
+    renderer.nativeSimulateMouseMove(10, 10)
+    expect(renderer.getResolvedStyle(target.id)).toMatchObject({
+      backgroundColor: "#334155",
+    })
+    renderer.captureScreenshot(before)
+
+    renderer.nativeSimulateMouseMove(centerX(row), row[1] - 12)
+    renderer.captureScreenshot(after)
+    expectScreenshotsDiffer(before, after)
   })
 
   it("keeps hover and click interaction isolated between two live offscreen roots", () => {

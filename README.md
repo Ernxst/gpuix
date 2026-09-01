@@ -2747,9 +2747,12 @@ React's CSS `transition` string.
 
 `hoverGroup` and `hoverWithin` are sugar for the CSS ancestor-hover pattern
 `.group:hover .descendant`. Put `hoverGroup` in an ancestor's style and
-`hoverWithin` in any descendant element's style. The nearest marked ancestor
-wins when groups nest, just as the equivalent CSS rules do, and activation uses
-normal `:hover` hit testing across the ancestor's full box, including padding.
+`hoverWithin` in any descendant element's style. Every marked ancestor matches
+independently when groups nest, just as separate equivalent CSS rules do, so
+hovering an outer group can activate a descendant through an unhovered inner
+group. Activation uses normal `:hover` hit testing across each ancestor's full
+box, including padding. This applies to every element type, including
+`virtual-list`.
 During pointer capture it remains active while the pointer is within the
 group's hit-test bounds or the capture owner is the group or one of its
 descendants. Releasing capture outside the group clears the style. No React

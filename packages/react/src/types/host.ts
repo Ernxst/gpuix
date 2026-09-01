@@ -527,7 +527,7 @@ export interface StyleDesc {
   // Native state styles — applied by GPUI without a JS round trip.
   // Nesting is one level deep: a state style cannot contain another state style.
   hover?: NativeStateStyle
-  /** Applies while the nearest ancestor with `hoverGroup` is hovered. */
+  /** Applies while any ancestor with `hoverGroup` is hovered. */
   hoverWithin?: NativeStateStyle
   active?: NativeStateStyle
   focus?: NativeStateStyle
