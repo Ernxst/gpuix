@@ -1,5 +1,8 @@
 # GPUIX
 
+> [!NOTE]
+> **Ernxst/gpuix** is a fork of [remorses/gpuix](https://github.com/remorses/gpuix) that keeps one codebase for web and desktop, with DOM/CSS semantics as the source of truth. It tracks and reconciles with upstream regularly; fork-specific divergences are recorded in [`.changeset/`](./.changeset). This fork intentionally does **not** publish packages to npm.
+
 React bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) - Zed's GPU-accelerated UI framework.
 
 Build native GPU-accelerated desktop apps with React and TypeScript. Your components render directly to the GPU via Metal, DirectX, or Vulkan. No Electron, no web views.
