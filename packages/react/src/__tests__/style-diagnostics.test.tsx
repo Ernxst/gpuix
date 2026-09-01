@@ -745,6 +745,31 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     compatibility.unmount()
   })
 
+  it("stays quiet for a className that applies no classes", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    // `className=""` and `className={null}` apply no CSS classes on the web
+    // either, so there is nothing for the native renderer to lose.
+    const strict = createTestRoot({ strictStyles: true })
+    strict.render(
+      <div testId="empty-class-name" {...({ className: "" } as Record<string, string>)} />
+    )
+    strict.render(
+      <div
+        testId="empty-class-name"
+        {...({ className: null } as unknown as Record<string, string>)}
+      />
+    )
+
+    expect(warn).not.toHaveBeenCalled()
+    expect(error).not.toHaveBeenCalled()
+
+    strict.unmount()
+    warn.mockRestore()
+    error.mockRestore()
+  })
+
   it("validates outline and focus-visible fields with their full property paths", () => {
     const renderer = new TestRenderer()
     renderer.createElement(101, "div")

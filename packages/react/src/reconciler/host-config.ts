@@ -397,7 +397,9 @@ function diagnoseUnsupportedClassNameProp(
   props: Props
 ): void {
   const className = (props as Props & { className?: unknown }).className
-  if (className === undefined) return
+  // `className=""` and `className={null}` apply no CSS classes on the web
+  // either, so nothing is lost by ignoring them here.
+  if (className === undefined || className === null || className === "") return
 
   const message =
     `[gpuix] ${elementSubject(instance, props)} does not support className. ` +
