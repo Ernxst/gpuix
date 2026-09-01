@@ -1,4 +1,10 @@
-import type { ImageSource, ImgProps, Props, StyleDesc } from "../types/host.js"
+import type {
+  ImageSource,
+  ImgProps,
+  MotionTransition,
+  Props,
+  StyleDesc,
+} from "../types/host.js"
 
 const validStyle = {
   display: "grid",
@@ -108,6 +114,23 @@ const missingTransitionDuration: StyleDesc = {
   transition: { properties: ["opacity"] },
 }
 
+const validSpringTransition: StyleDesc = {
+  transition: {
+    properties: ["width", "opacity"],
+    easing: { type: "spring", stiffness: 400, damping: 28, mass: 0.9, velocity: 12 },
+  },
+}
+
+const validMotionSpring: MotionTransition = {
+  duration: 0,
+  ease: { type: "spring", stiffness: 400, damping: 28, mass: 0.9, velocity: 12 },
+}
+
+const unknownSpringType: MotionTransition = {
+  // @ts-expect-error Tagged spring easings reject unknown type values.
+  ease: { type: "bounce" },
+}
+
 const nestedTransition: StyleDesc = {
   hover: {
     // @ts-expect-error State refinements inherit the base transition declaration.
@@ -162,6 +185,9 @@ void invalidTextWrap
 void invalidHoverStyle
 void invalidTransitionProperty
 void missingTransitionDuration
+void validSpringTransition
+void validMotionSpring
+void unknownSpringType
 void nestedTransition
 void nestedHoverGroup
 void removedElementHoverGroup

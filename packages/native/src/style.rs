@@ -159,6 +159,51 @@ impl TransitionProperty {
 pub enum TransitionEasing {
     Name(String),
     CubicBezier([f64; 4]),
+    Spring(SpringEasing),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+enum SpringEasingType {
+    #[serde(rename = "spring")]
+    Spring,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SpringEasing {
+    #[serde(rename = "type")]
+    _kind: SpringEasingType,
+    #[serde(default = "default_spring_stiffness")]
+    pub(crate) stiffness: f64,
+    #[serde(default = "default_spring_damping")]
+    pub(crate) damping: f64,
+    #[serde(default = "default_spring_mass")]
+    pub(crate) mass: f64,
+    #[serde(default)]
+    pub(crate) velocity: f64,
+}
+
+impl SpringEasing {
+    pub(crate) fn is_valid(&self) -> bool {
+        let fits_f32 = |value: f64| value.is_finite() && value.abs() <= f64::from(f32::MAX);
+        let positive_f32 = |value: f64| fits_f32(value) && value >= f64::from(f32::MIN_POSITIVE);
+        positive_f32(self.stiffness)
+            && positive_f32(self.damping)
+            && positive_f32(self.mass)
+            && fits_f32(self.velocity)
+    }
+}
+
+fn default_spring_stiffness() -> f64 {
+    100.0
+}
+
+fn default_spring_damping() -> f64 {
+    10.0
+}
+
+fn default_spring_mass() -> f64 {
+    1.0
 }
 
 fn default_transition_easing() -> TransitionEasing {
@@ -1059,13 +1104,34 @@ fn parse_transition(
         }
     }
 
-    let duration_ms = match object.get("durationMs").and_then(serde_json::Value::as_f64) {
-        Some(value) if valid_transition_milliseconds(value) => value,
-        _ => {
+    let easing_value = object.get("easing");
+    let parsed_easing = easing_value
+        .map(|value| serde_json::from_value::<TransitionEasing>(value.clone()))
+        .transpose();
+    // A spring-shaped easing does not acquire a fixed duration merely because
+    // one of its own fields is malformed. Report the easing itself and keep
+    // duration optional for the whole tagged-object branch.
+    let spring_shaped = easing_value.is_some_and(serde_json::Value::is_object);
+    let duration_ms = match object.get("durationMs") {
+        None if spring_shaped => 0.0,
+        Some(value) => match value.as_f64() {
+            Some(value) if valid_transition_milliseconds(value) => value,
+            _ => {
+                reject(
+                    problems,
+                    "transition.durationMs",
+                    value,
+                    "expected a supported finite non-negative number of milliseconds",
+                );
+                valid = false;
+                0.0
+            }
+        },
+        None => {
             reject(
                 problems,
                 "transition.durationMs",
-                object.get("durationMs").unwrap_or(&serde_json::Value::Null),
+                &serde_json::Value::Null,
                 "expected a supported finite non-negative number of milliseconds",
             );
             valid = false;
@@ -1088,10 +1154,10 @@ fn parse_transition(
             }
         },
     };
-    let easing = match object.get("easing") {
-        None => default_transition_easing(),
-        Some(value) => match serde_json::from_value::<TransitionEasing>(value.clone()) {
-            Ok(TransitionEasing::Name(name))
+    let easing = match (easing_value, parsed_easing) {
+        (None, _) => default_transition_easing(),
+        (Some(value), Ok(Some(easing))) => match easing {
+            TransitionEasing::Name(name)
                 if matches!(
                     name.as_str(),
                     "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut"
@@ -1099,24 +1165,37 @@ fn parse_transition(
             {
                 TransitionEasing::Name(name)
             }
-            Ok(TransitionEasing::CubicBezier(curve))
+            TransitionEasing::CubicBezier(curve)
                 if curve.iter().all(|value| value.is_finite())
                     && (0.0..=1.0).contains(&curve[0])
                     && (0.0..=1.0).contains(&curve[2]) =>
             {
                 TransitionEasing::CubicBezier(curve)
             }
+            TransitionEasing::Spring(spring) if spring.is_valid() => {
+                TransitionEasing::Spring(spring)
+            }
             _ => {
                 reject(
                     problems,
                     "transition.easing",
                     value,
-                    "expected linear, ease, easeIn, easeOut, easeInOut, or a cubic-bezier tuple with x values from 0 through 1",
+                    "expected linear, ease, easeIn, easeOut, easeInOut, a cubic-bezier tuple with x values from 0 through 1, or a valid spring easing",
                 );
                 valid = false;
                 default_transition_easing()
             }
         },
+        (Some(value), _) => {
+            reject(
+                problems,
+                "transition.easing",
+                value,
+                "expected linear, ease, easeIn, easeOut, easeInOut, a cubic-bezier tuple with x values from 0 through 1, or a valid spring easing",
+            );
+            valid = false;
+            default_transition_easing()
+        }
     };
 
     valid.then_some(StyleTransition {
@@ -2140,6 +2219,40 @@ mod tests {
         }));
         assert_eq!(oversized.style.transition, None);
         assert_eq!(oversized.problems[0].property, "transition.durationMs");
+    }
+
+    #[test]
+    fn spring_easing_may_omit_duration_but_malformed_springs_reject_the_transition() {
+        let spring = parse_style_value(&json!({
+            "opacity": 0.5,
+            "transition": {
+                "properties": ["opacity"],
+                "easing": { "type": "spring" }
+            }
+        }));
+        assert!(spring.problems.is_empty(), "{:?}", spring.problems);
+        assert!(spring.style.transition.is_some());
+
+        for easing in [
+            json!({ "type": "bounce" }),
+            json!({ "type": "spring", "stiffness": 0 }),
+            json!({ "type": "spring", "damping": -1 }),
+            json!({ "type": "spring", "mass": 0 }),
+            json!({ "type": "spring", "velocity": 1e300 }),
+            json!({ "type": "spring", "unknown": 1 }),
+        ] {
+            let parsed = parse_style_value(&json!({
+                "opacity": 0.5,
+                "transition": {
+                    "properties": ["opacity"],
+                    "easing": easing
+                }
+            }));
+            assert_eq!(parsed.style.opacity, Some(0.5));
+            assert_eq!(parsed.style.transition, None);
+            assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+            assert_eq!(parsed.problems[0].property, "transition.easing");
+        }
     }
 
     #[test]

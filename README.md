@@ -916,12 +916,32 @@ type. Element-owned painting remains outside that surface: for example, a
 container, but it does not independently interpolate syntax tokens, diff rows,
 or markdown runs.
 
-`durationMs` is required and uses milliseconds; `delayMs` defaults to `0`.
-`easing` accepts `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut`, or a
-four-number cubic-bezier tuple. Pixel lengths interpolate with pixels and
-percentages with percentages. Incompatible endpoints such as `auto` to pixels
-snap to the new value. Malformed transition objects are rejected as a whole
-through the strict style-diagnostic channel.
+For a tween, `durationMs` is required and uses milliseconds; `delayMs` defaults
+to `0`. `easing` accepts `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut`, or
+a four-number cubic-bezier tuple. A spring replaces that fixed-duration easing
+with the same object used by `motion.div`:
+
+```tsx
+transition: {
+  properties: ['width', 'opacity'],
+  delayMs: 40,
+  easing: { type: 'spring', stiffness: 400, damping: 28, mass: 0.9 },
+}
+```
+
+Spring defaults are `stiffness: 100`, `damping: 10`, `mass: 1`, and
+`velocity: 0`. `durationMs` may be omitted and is ignored when supplied; the
+native spring runs until every channel settles. Delay still applies. Pixel
+channels settle within `0.05px`, while opacity, percentage, and colour channels
+use a proportionally smaller threshold so the exact final value does not make a
+visible end-snap. An interrupted spring retargets from the painted value and
+carries its current channel velocity into the new trajectory.
+
+Pixel lengths interpolate with pixels and percentages with percentages.
+Incompatible endpoints such as `auto` to pixels snap to the new value.
+Malformed transition objects, including spring objects with unknown `type`
+values or invalid physical parameters, are rejected as a whole through the
+strict style-diagnostic channel.
 
 Radius shorthand and corner longhands are resolved to four painted corners
 before interpolation, so either form can override the other without a stale
@@ -961,6 +981,23 @@ function WelcomeCard() {
 }
 ```
 
+Use the same spring easing object for a physics-driven target:
+
+```tsx
+<motion.div
+  initial={{ width: 0, opacity: 0 }}
+  animate={{ width: 320, opacity: 1 }}
+  transition={{
+    delay: 0.04,
+    ease: { type: 'spring', stiffness: 400, damping: 28, mass: 0.9 },
+  }}
+/>
+```
+
+The spring is integrated inside the existing native motion track. React sends
+only the target; there is no JavaScript frame loop. Retargeting while it is
+moving keeps both the visible position and instantaneous velocity.
+
 Set **`initial={false}`** when the element must mount at its first `animate`
 target. Later `animate` changes still transition normally. If a target changes
 while motion is active, the next transition starts from the current visible
@@ -983,10 +1020,32 @@ The **transition** uses seconds, like Motion for React:
 |---|---:|---|
 | `duration` | `0.3` | Non-negative seconds |
 | `delay` | `0` | Non-negative seconds |
-| `ease` | `"easeOut"` | `"linear"`, `"ease"`, `"easeIn"`, `"easeOut"`, `"easeInOut"`, or `[x1, y1, x2, y2]` |
+| `ease` | `"easeOut"` | `"linear"`, `"ease"`, `"easeIn"`, `"easeOut"`, `"easeInOut"`, `[x1, y1, x2, y2]`, or a spring object |
 
-Springs, keyframes, variants, exit transitions, and shared layout animations
-are not available yet.
+`duration` is ignored when `ease.type` is `"spring"`; settling derives the end
+time. Keyframes, variants, exit transitions, and shared layout animations are
+not available yet.
+
+### Browser mirror: sampled springs with CSS `linear()`
+
+The web-platform encoding of a sampled spring is the CSS `linear()` easing
+function. A browser mirror samples the same normalized spring trajectory from
+`0` until its channel-aware settling time, keeps overshoot samples above `1` or
+below `0`, and emits them as linear stops:
+
+```css
+.card {
+  transition-property: width, opacity;
+  transition-duration: var(--derived-spring-settling-time);
+  transition-delay: 40ms;
+  transition-timing-function: linear(0, 0.057, 0.198, 0.58, 0.994, 1.126, 1.075, 1);
+}
+```
+
+The generated CSS duration is the sampling horizon, not the ignored author
+`duration` / `durationMs`. A browser implementation that retargets a sampled
+spring must regenerate the samples from the computed value and current
+velocity to match the native interruption semantics.
 
 ### Animate a sidebar
 
