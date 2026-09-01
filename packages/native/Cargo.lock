@@ -2603,7 +2603,6 @@ name = "gpuix-native"
 version = "0.6.0-fork.1"
 dependencies = [
  "anyhow",
- "base64",
  "cocoa 0.26.0",
  "core-graphics 0.24.0",
  "core-text",
