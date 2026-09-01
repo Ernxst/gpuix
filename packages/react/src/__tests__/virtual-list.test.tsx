@@ -117,6 +117,38 @@ describe("<virtual-list>", () => {
     ).toBeUndefined()
   })
 
+  it("warns and renders a wrapper row in standalone compatibility mode", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.stubEnv("NODE_ENV", "development")
+    vi.stubGlobal("Bun", { isStandaloneExecutable: true })
+    const packaged = createTestRoot()
+
+    try {
+      packaged.render(
+        <virtual-list style={{ width: 400, height: 160 }}>
+          <div>
+            <Rows count={100} />
+          </div>
+        </virtual-list>
+      )
+
+      expect(warn).toHaveBeenCalledOnce()
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(/immediate children are rows.*itemCount.*windowStart.*estimatedItemHeight/is)
+      )
+      expect(error).not.toHaveBeenCalled()
+      expect(packaged.renderer.findByType("virtual-list")).toHaveLength(1)
+      expect(packaged.renderer.getPaintedText()).toContain("row-0")
+    } finally {
+      packaged.unmount()
+      vi.unstubAllGlobals()
+      vi.unstubAllEnvs()
+      warn.mockRestore()
+      error.mockRestore()
+    }
+  })
+
   it("rejects one wrapper row unless a one-row list is explicit", () => {
     const reportError = vi.spyOn(console, "error").mockImplementation(() => {})
     try {
