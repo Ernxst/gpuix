@@ -265,7 +265,7 @@ describeNative('chat example', () => {
     const transcript = renderer.findByType('virtual-list')[0]
     expect(transcript).toBeDefined()
     expect(
-      transcript.children.map((id) => renderer.getElement(id)?.style.width)
+      transcript.children.map((child) => child.style.width)
     ).toEqual(Array(transcript.children.length).fill(1))
 
     const painted = renderer.getPaintedText()
@@ -294,11 +294,9 @@ describeNative('chat example', () => {
     const nextTitle = 'Native SDK vs GPUI comparison'
     const containsElement = (nodeId: number, descendantId: number): boolean => {
       const node = renderer.getElement(nodeId)
-      return (
-        node?.children.some(
-          (childId) => childId === descendantId || containsElement(childId, descendantId)
-        ) ?? false
-      )
+      return node?.children.some(
+        (child) => child.id === descendantId || containsElement(child.id, descendantId)
+      ) ?? false
     }
     const conversationRow = (title: string) => {
       const titleNode = renderer.findByText(title)
@@ -440,13 +438,13 @@ describeNative('chat example', () => {
   it('keeps transcript row ids when the sidebar collapses', async () => {
     const { render, renderer } = createTestRoot()
     render(<ChatApp turnCount={80} />)
-    const before = renderer.findByType('virtual-list')[0]?.children.slice() ?? []
+    const before = renderer.findByType('virtual-list')[0]?.children.map((child) => child.id) ?? []
     expect(before.length).toBe(80)
 
     const app = await connectTest(renderer)
     await app.getByTestId('sidebar-collapse').click()
 
-    expect(renderer.findByType('virtual-list')[0]?.children).toEqual(before)
+    expect(renderer.findByType('virtual-list')[0]?.children.map((child) => child.id)).toEqual(before)
     expect(await app.getByTestId('sidebar-expand').count()).toBe(1)
   })
 

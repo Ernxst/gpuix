@@ -119,12 +119,12 @@ describeNative('infinite chat example', () => {
     render(<InfiniteChatApp api={api} initialMessageId="message-024" />)
 
     const list = listOf(renderer)
-    const rows = list.children.slice()
+    const rows = list.children.map((child) => child.id)
 
     renderer.scrollToItem(list.id, 0)
     expect(isLoading(renderer)).toBe(true)
     expect(listOf(renderer).id).toBe(list.id)
-    expect(listOf(renderer).children).toEqual(rows)
+    expect(listOf(renderer).children.map((child) => child.id)).toEqual(rows)
 
     await waitForIdle(renderer)
   })

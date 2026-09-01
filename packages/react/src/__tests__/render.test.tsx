@@ -417,16 +417,13 @@ Module._load = function (request, parent, isMain) {
 `
 
 const BARE_TESTING_IMPORT_PROGRAM = `
-import {
-  getChildren,
-  getParent,
-  textContent,
-} from "@gpuix/react/testing"
+import * as testing from "@gpuix/react/testing"
 
-if ([getChildren, getParent, textContent].some(
-  (query) => typeof query !== "function"
-)) {
-  throw new Error("testing inspection helpers were not exported")
+if (typeof testing.textContent !== "function") {
+  throw new Error("textContent was not exported")
+}
+if ("getChildren" in testing || "getParent" in testing) {
+  throw new Error("legacy relationship helpers are still exported")
 }
 
 if (globalThis.__gpuixNativeModuleLoads !== 0) {
