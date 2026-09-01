@@ -31,7 +31,7 @@ function eventRegistrySlot(): EventRegistrySlot {
   return created
 }
 
-const NON_BUBBLING_EVENTS = new Set([
+const TARGET_ONLY_EVENTS = new Set([
   "mouseDownOutside",
   "toggleFile",
   "showMore",
@@ -39,6 +39,8 @@ const NON_BUBBLING_EVENTS = new Set([
   "linkClick",
   "visibleRange",
 ])
+
+const NON_BUBBLING_EVENTS = new Set(["focus", "blur"])
 
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
   const containersByRenderer = eventRegistrySlot().containersByRenderer
@@ -207,9 +209,7 @@ export function handleGpuixEvent(
   const target = container.eventTargets.get(payload.elementId)
   if (!target) return { defaultPrevented: false, propagationStopped: false }
 
-  const path = NON_BUBBLING_EVENTS.has(payload.eventType)
-    ? [target]
-    : eventPath(container, target)
+  const path = TARGET_ONLY_EVENTS.has(payload.eventType) ? [target] : eventPath(container, target)
   const controller = createGpuixSyntheticEvent(payload, target, renderer)
   const { event } = controller
 
@@ -237,7 +237,7 @@ export function handleGpuixEvent(
   invoke(target, `${payload.eventType}Capture`, 2)
   invoke(target, payload.eventType, 2)
 
-  if (!event.isPropagationStopped()) {
+  if (!event.isPropagationStopped() && !NON_BUBBLING_EVENTS.has(payload.eventType)) {
     for (let index = 1; index < path.length; index += 1) {
       invoke(path[index]!, payload.eventType, 3)
       if (event.isPropagationStopped()) break

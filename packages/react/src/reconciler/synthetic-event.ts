@@ -16,8 +16,8 @@ export type GpuixSyntheticEvent = EventPayload & {
   readonly currentTarget: PublicInstance
   readonly type: string
   readonly eventPhase: GpuixEventPhase
-  readonly bubbles: true
-  readonly cancelable: true
+  readonly bubbles: boolean
+  readonly cancelable: boolean
   readonly defaultPrevented: boolean
   readonly altKey: boolean
   readonly ctrlKey: boolean
@@ -58,20 +58,21 @@ export function createGpuixSyntheticEvent(
   let propagationStopped = false
 
   const modifiers = nativeEvent.modifiers
+  const isPlainFocusEvent = nativeEvent.eventType === "focus" || nativeEvent.eventType === "blur"
   const event = {
     ...nativeEvent,
     nativeEvent,
     target,
     type: nativeEvent.eventType,
-    bubbles: true,
-    cancelable: true,
+    bubbles: !isPlainFocusEvent,
+    cancelable: !isPlainFocusEvent,
     altKey: modifiers?.alt ?? false,
     ctrlKey: modifiers?.ctrl ?? false,
     metaKey: modifiers?.cmd ?? false,
     shiftKey: modifiers?.shift ?? false,
     button: nativeEvent.button ?? 0,
     preventDefault(): void {
-      defaultPrevented = true
+      if (!isPlainFocusEvent) defaultPrevented = true
     },
     stopPropagation(): void {
       propagationStopped = true

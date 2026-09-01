@@ -6555,8 +6555,15 @@ impl GpuixView {
                 && !self.focus_subscriptions.contains_key(&focus_key)
             {
                 let callback = callback.clone();
-                let subscription = cx.on_focus(&handle, window, move |_this, _window, _cx| {
-                    emit_event_full(&callback, id, "focus", |_| {});
+                let subscription = cx.on_focus(&handle, window, move |_this, _window, cx| {
+                    let callback = callback.clone();
+                    // GPUI notifies all listeners for one focus transition in
+                    // subscription order. Defer focus until that listener pass
+                    // ends so the old target's blur is always emitted first,
+                    // matching the DOM focus event order.
+                    cx.defer(move |_| {
+                        emit_event_full(&callback, id, "focus", |_| {});
+                    });
                 });
                 self.focus_subscriptions.insert(focus_key, subscription);
             }
