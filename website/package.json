@@ -13,7 +13,7 @@
     "typegen": "wrangler types"
   },
   "dependencies": {
-    "@cloudflare/vite-plugin": "1.35.0",
+    "@cloudflare/vite-plugin": "1.52.0",
     "@cloudflare/workers-types": "^4.20250712.0",
     "@holocron.so/vite": "^0.30.0",
     "@tailwindcss/vite": "^4.3.0",
@@ -27,7 +27,7 @@
     "@types/react-dom": "^19.2.3",
     "typescript": "^5.8.3",
     "vite": "^8.2.1",
-    "wrangler": "4.92.0"
+    "wrangler": "4.122.0"
   },
   "engines": {
     "node": ">=18.0.0"
