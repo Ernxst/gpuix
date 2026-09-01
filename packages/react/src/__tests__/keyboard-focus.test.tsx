@@ -52,6 +52,88 @@ describeNative("keyboard focus", () => {
     expect(focusedLabel()).toBe("two")
   })
 
+  it("keeps focus when Tab is prevented across phases, virtual targets, and queued presses", () => {
+    let preventCapture = true
+    let preventBubble = true
+
+    testRoot.render(
+      <virtual-list
+        overdraw={0}
+        estimatedItemHeight={40}
+        onKeyDownCapture={(event) => {
+          if (preventCapture && event.key === "tab" && !event.shiftKey) {
+            event.preventDefault()
+          }
+        }}
+        onKeyDown={(event) => {
+          if (preventBubble && event.key === "tab" && event.shiftKey) {
+            event.preventDefault()
+          }
+        }}
+        style={{ width: 240, height: 120 }}
+      >
+        {Array.from({ length: 12 }, (_, index) => (
+          <a
+            key={index}
+            href={`/${index}`}
+            ariaLabel={`row-${index}`}
+            testId={`row-${index}`}
+            style={{ width: 200, height: 40, flexShrink: 0 }}
+          >
+            <text>{`Row ${index}`}</text>
+          </a>
+        ))}
+      </virtual-list>
+    )
+
+    const list = testRoot.renderer.findByType("virtual-list")[0]!
+    const third = testRoot.renderer.findByTestId("row-2")!
+    testRoot.renderer.focusElement(third.id)
+    expect(focusedLabel()).toBe("row-2")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(0)
+
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("row-2")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(0)
+
+    preventCapture = false
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("row-3")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(-40)
+
+    testRoot.renderer.simulateKeystrokes("shift-tab")
+    expect(focusedLabel()).toBe("row-3")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(-40)
+
+    preventBubble = false
+    testRoot.renderer.simulateKeystrokes("shift-tab")
+    expect(focusedLabel()).toBe("row-2")
+
+    testRoot.render(
+      <div style={{ width: 240, height: 120 }}>
+        <a href="/first" ariaLabel="first" testId="first">
+          <text>First</text>
+        </a>
+        <a
+          href="/second"
+          ariaLabel="second"
+          onKeyDown={(event) => {
+            if (event.key === "tab") event.preventDefault()
+          }}
+        >
+          <text>Second</text>
+        </a>
+        <a href="/third" ariaLabel="third">
+          <text>Third</text>
+        </a>
+      </div>
+    )
+
+    const first = testRoot.renderer.findByTestId("first")!
+    testRoot.renderer.nativeSimulateKeystrokes(first.id, "tab tab")
+    expect(focusedLabel()).toBe("second")
+  })
+
   it("delivers focus and blur handlers for click, programmatic, and keyboard focus moves", () => {
     const events: string[] = []
     const record = (label: string, event: GpuixSyntheticEvent): void => {
