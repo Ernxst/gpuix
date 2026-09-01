@@ -16,6 +16,32 @@ describeNative("host instance scroll properties", () => {
     testRoot.renderer.dispose()
   })
 
+  /** Eight 40px rows in a 100px viewport, targeting row 4 (160..200). Nearest
+   *  reveal stops at scrollTop 100, `block: "start"` lands on 160, and the
+   *  320px extent leaves both unclamped. */
+  const renderRowScroller = (): { scroller: PublicInstance; target: PublicInstance } => {
+    const scrollerRef = React.createRef<PublicInstance>()
+    const targetRef = React.createRef<PublicInstance>()
+
+    testRoot.render(
+      <div ref={scrollerRef} style={{ width: 200, height: 100, overflow: "scroll" }}>
+        {Array.from({ length: 8 }, (_, index) => (
+          <div key={index} style={{ height: 40, flexShrink: 0 }}>
+            {index === 4 ? (
+              <div ref={targetRef}>
+                <text>target</text>
+              </div>
+            ) : (
+              <text>{`row-${index}`}</text>
+            )}
+          </div>
+        ))}
+      </div>
+    )
+
+    return { scroller: scrollerRef.current!, target: targetRef.current! }
+  }
+
   it("reports scroll geometry the way Element does", () => {
     const ref = React.createRef<PublicInstance>()
 
@@ -83,37 +109,117 @@ describeNative("host instance scroll properties", () => {
     expect(plain.scrollTop).toBe(0)
   })
 
-  it("reveals a descendant with scrollIntoView", () => {
-    const scrollerRef = React.createRef<PublicInstance>()
+  it("reports scroll extent inside the mount layout effect, before any frame", () => {
+    // The chat-autoscroll idiom runs in a layout effect on first mount, before
+    // the renderer has drawn a frame for this commit. A metrics read that does
+    // not force layout reports scrollHeight === clientHeight there, and
+    // `scrollTop = scrollHeight` under-scrolls.
+    const seen: { scrollHeight: number; clientHeight: number }[] = []
+    let scroller: PublicInstance | null = null
+
+    function Chat(): React.ReactElement {
+      const ref = React.useRef<PublicInstance>(null)
+      React.useLayoutEffect(() => {
+        const element = ref.current!
+        seen.push({ scrollHeight: element.scrollHeight, clientHeight: element.clientHeight })
+        element.scrollTop = element.scrollHeight
+        scroller = element
+      }, [])
+      return (
+        <div ref={ref} style={{ width: 200, height: 100, overflow: "scroll" }}>
+          <div style={{ height: 500, flexShrink: 0 }}>
+            <text>Very tall content</text>
+          </div>
+        </div>
+      )
+    }
+
+    testRoot.render(<Chat />)
+
+    expect(seen).toEqual([{ scrollHeight: 500, clientHeight: 100 }])
+    testRoot.renderer.flush()
+    expect(scroller!.scrollTop).toBe(400)
+  })
+
+  it("reveals a descendant with scrollIntoView, top-aligned like the DOM", () => {
+    const { scroller, target } = renderRowScroller()
+
+    expect(scroller.scrollTop).toBe(0)
+
+    target.scrollIntoView()
+    testRoot.renderer.flush()
+
+    // DOM default is block: "start" — the row's top edge meets the viewport
+    // top. A nearest-edge reveal would stop at 100.
+    expect(scroller.scrollTop).toBe(160)
+  })
+
+  it("honors block: \"nearest\" in scrollIntoView", () => {
+    const { scroller, target } = renderRowScroller()
+
+    target.scrollIntoView({ block: "nearest" })
+    testRoot.renderer.flush()
+
+    // Smallest scroll that makes row 4 (160..200) fully visible in a 100px
+    // viewport: its bottom edge meets the viewport bottom.
+    expect(scroller.scrollTop).toBe(100)
+  })
+
+  it("treats scrollIntoView(true) as the DOM's align-to-top", () => {
+    const { scroller, target } = renderRowScroller()
+
+    target.scrollIntoView(true)
+    testRoot.renderer.flush()
+
+    expect(scroller.scrollTop).toBe(160)
+  })
+
+  it("rejects scrollIntoView alignments gpui cannot express", () => {
+    const { target } = renderRowScroller()
+
+    expect(() => target.scrollIntoView({ block: "center" })).toThrow(
+      /scrollIntoView.*block: "center"/
+    )
+    expect(() => target.scrollIntoView(false)).toThrow(/scrollIntoView.*block: "end"/)
+  })
+
+  it("reveals a focused element through nested scrollers", () => {
+    const outerRef = React.createRef<PublicInstance>()
+    const innerRef = React.createRef<PublicInstance>()
     const targetRef = React.createRef<PublicInstance>()
 
     testRoot.render(
-      <div ref={scrollerRef} style={{ width: 200, height: 100, overflow: "scroll" }}>
-        {Array.from({ length: 5 }, (_, index) => (
-          <div key={index} style={{ height: 100, flexShrink: 0 }}>
-            {index === 4 ? (
-              <div ref={targetRef}>
-                <text>target</text>
-              </div>
-            ) : (
-              <text>{`row-${index}`}</text>
-            )}
-          </div>
-        ))}
+      <div ref={outerRef} style={{ width: 200, height: 100, overflow: "scroll" }}>
+        <div style={{ height: 120, flexShrink: 0 }}>
+          <text>outer-row-0</text>
+        </div>
+        <div
+          ref={innerRef}
+          style={{ width: 200, height: 100, flexShrink: 0, overflow: "scroll" }}
+        >
+          {Array.from({ length: 8 }, (_, index) => (
+            <div key={index} style={{ height: 40, flexShrink: 0 }}>
+              {index === 4 ? (
+                <div ref={targetRef} tabIndex={0} ariaLabel="nested target">
+                  <text>target</text>
+                </div>
+              ) : (
+                <text>{`inner-row-${index}`}</text>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     )
 
-    const scroller = scrollerRef.current!
-    expect(scroller.scrollTop).toBe(0)
-
-    targetRef.current!.scrollIntoView()
+    targetRef.current!.focus()
     testRoot.renderer.flush()
 
-    // The minimum scroll that brings the target's row fully into view.
-    expect(scroller.scrollTop).toBe(400)
-    expect(scroller.scrollTop + scroller.clientHeight).toBeLessThanOrEqual(
-      scroller.scrollHeight
-    )
+    expect(testRoot.renderer.getActiveElement()).toBe(targetRef.current!.id)
+    // Both scrollers move: the inner one to reveal the row, the outer one to
+    // reveal the inner scroller.
+    expect(innerRef.current!.scrollTop).toBeGreaterThan(0)
+    expect(outerRef.current!.scrollTop).toBeGreaterThan(0)
   })
 
   it("reports virtual list scroll geometry in DOM coordinates", () => {

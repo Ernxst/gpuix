@@ -364,6 +364,47 @@ function elementSubject(instance: Instance, props: Props): string {
   return identity.length === 0 ? `<${instance.type}>` : `<${instance.type} ${identity}>`
 }
 
+class UnsupportedScrollIntoViewOptionError extends Error {
+  override name = "UnsupportedScrollIntoViewOptionError"
+}
+
+/**
+ * Resolve `Element.scrollIntoView()`'s alignment to the one bit gpui can act
+ * on: align the scroll container to the element's top edge, or scroll by the
+ * smallest amount that reveals it.
+ *
+ * The DOM defaults to `block: "start"`, and `scrollIntoView(true)` spells the
+ * same thing. `"center"` and `"end"` have no gpui equivalent, so they are
+ * rejected rather than quietly downgraded to a nearest-edge reveal.
+ */
+function scrollIntoViewAlignsToTop(
+  instance: Instance,
+  props: Props,
+  options?: boolean | ScrollIntoViewOptions
+): boolean {
+  const reject = (spelling: string): never => {
+    throw new UnsupportedScrollIntoViewOptionError(
+      `[gpuix] ${elementSubject(instance, props)} cannot scrollIntoView with ${spelling}. ` +
+        'The native renderer aligns to a child\'s top edge (block: "start") or scrolls the ' +
+        'smallest amount that reveals it (block: "nearest").'
+    )
+  }
+
+  if (options === undefined || options === true) return true
+  if (options === false) return reject('block: "end"')
+
+  const { block, inline } = options
+  if (block !== undefined && block !== "start" && block !== "nearest") {
+    return reject(`block: ${JSON.stringify(block)}`)
+  }
+  if (inline !== undefined && inline !== "nearest") {
+    return reject(`inline: ${JSON.stringify(inline)}`)
+  }
+  // `behavior` is accepted and ignored: every scroll here is instant, as with
+  // PublicInstance.scrollTo().
+  return block !== "nearest"
+}
+
 function isPlainStyleObject(style: unknown): style is StyleDesc {
   if (style === null || typeof style !== "object") return false
   const prototype = Object.getPrototypeOf(style)
@@ -825,7 +866,7 @@ export const hostConfig = {
       get clientHeight(): number {
         return scrollMetrics()[5]!
       },
-      scrollTo: (optionsOrX: ScrollToOptions | number, y?: number) => {
+      scrollTo: (optionsOrX?: ScrollToOptions | number, y?: number) => {
         const metrics = scrollMetrics()
         const left =
           typeof optionsOrX === "number" ? optionsOrX : (optionsOrX?.left ?? metrics[0]!)
@@ -833,7 +874,11 @@ export const hostConfig = {
           typeof optionsOrX === "number" ? (y ?? metrics[1]!) : (optionsOrX?.top ?? metrics[1]!)
         scrollToOffset(left, top)
       },
-      scrollIntoView: () => rootContainerInstance.native.scrollElementIntoView?.(id),
+      scrollIntoView: (options?: boolean | ScrollIntoViewOptions) =>
+        rootContainerInstance.native.scrollElementIntoView?.(
+          id,
+          scrollIntoViewAlignsToTop(instance, props, options)
+        ),
       getBounds: () => {
         const getElementBounds = rootContainerInstance.native.getElementBounds
         if (!getElementBounds) {

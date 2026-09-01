@@ -1186,10 +1186,13 @@ export interface NativeRenderer {
   /** Web-shaped scroll geometry for a scrollable element:
    *  `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]`,
    *  or null when the element is not a scroll container. The offsets use the
-   *  DOM's positive convention, unlike `getScrollOffset`. */
+   *  DOM's positive convention, unlike `getScrollOffset`. Forces layout, like
+   *  reading `Element.scrollHeight` does. */
   getScrollMetrics?(elementId: number): Array<number> | null
-  /** Reveal an element inside every scrollable ancestor, without moving focus. */
-  scrollElementIntoView?(elementId: number): void
+  /** Reveal an element inside every scrollable ancestor, without moving focus.
+   *  `alignToTop` is the DOM's `block: "start"` and defaults to it; `false` is
+   *  `block: "nearest"`. */
+  scrollElementIntoView?(elementId: number, alignToTop?: boolean): void
 
   // ── Selection API ──────────────────────────────────────────────
   /** The current text selection joined in document order, or null. */
@@ -1377,32 +1380,50 @@ export interface PublicInstance {
    * Pixels this element's content is scrolled down, matching
    * `Element.scrollTop`: 0 at the top, growing positive as content scrolls up
    * out of view. Assigning scrolls the element and is clamped natively.
-   * Reads 0 for an element that is not a scroll container.
+   *
+   * Only `overflow: "scroll"` elements and `<virtual-list>` are scroll
+   * containers here. `overflow: "hidden"` is a scroll container on the web,
+   * programmatically scrollable with a `scrollHeight` past its viewport; in
+   * this renderer it reports `0` and drops assignments, like a plain element.
+   *
+   * Reading right after assigning returns the value you wrote, unclamped: the
+   * native clamp lands with the next frame.
    */
   scrollTop: number
-  /** Pixels scrolled right, matching `Element.scrollLeft`. */
+  /** Pixels scrolled right, matching `Element.scrollLeft`. Carries the same
+   *  scroll-container and read-after-write caveats as {@link scrollTop}. */
   scrollLeft: number
-  /** Scrollable content width, matching `Element.scrollWidth`. */
+  /** Scrollable content width, rounded to whole pixels as
+   *  `Element.scrollWidth` is. Equals {@link clientWidth} for anything this
+   *  renderer does not treat as a scroll container. */
   readonly scrollWidth: number
-  /** Scrollable content height, matching `Element.scrollHeight`. So
-   *  `scrollTop + clientHeight >= scrollHeight` means "scrolled to the bottom". */
+  /** Scrollable content height, rounded to whole pixels as
+   *  `Element.scrollHeight` is, so `scrollTop + clientHeight >= scrollHeight`
+   *  means "scrolled to the bottom". Equals {@link clientHeight} for anything
+   *  this renderer does not treat as a scroll container — including
+   *  `overflow: "hidden"`, which the web does report as scrollable. */
   readonly scrollHeight: number
-  /** Viewport width, matching `Element.clientWidth`. */
+  /** Viewport width, rounded to whole pixels as `Element.clientWidth` is. */
   readonly clientWidth: number
-  /** Viewport height, matching `Element.clientHeight`. */
+  /** Viewport height, rounded to whole pixels as `Element.clientHeight` is. */
   readonly clientHeight: number
   /**
    * Scroll to an absolute offset in DOM coordinates, matching
-   * `Element.scrollTo()`. `behavior` is accepted and ignored: every scroll
-   * here is instant.
+   * `Element.scrollTo()`. An omitted `left` / `top` keeps the current offset.
+   * `behavior` is accepted and ignored: every scroll here is instant.
    */
-  scrollTo(options: ScrollToOptions): void
+  scrollTo(options?: ScrollToOptions): void
   scrollTo(x: number, y: number): void
   /**
    * Reveal this element inside every scrollable ancestor, matching
-   * `Element.scrollIntoView()`. The scroll is the minimum that brings the
-   * element's row into view; alignment and behavior options are accepted for
-   * DOM-shaped call sites and ignored.
+   * `Element.scrollIntoView()`. Defaults to the DOM's `block: "start"`, and
+   * `scrollIntoView(true)` spells the same thing; `block: "nearest"` scrolls
+   * the smallest amount that reveals the element.
+   *
+   * `block: "center"`, `block: "end"`, `scrollIntoView(false)` and any
+   * `inline` other than `"nearest"` throw: gpui has no equivalent, and a
+   * silent downgrade would move the wrong distance. `behavior` is accepted and
+   * ignored, as in {@link scrollTo}.
    */
   scrollIntoView(options?: boolean | ScrollIntoViewOptions): void
   parentId: number | null

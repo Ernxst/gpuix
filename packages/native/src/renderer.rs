@@ -1264,7 +1264,10 @@ enum UiCommand {
         id: u64,
         response: SyncSender<Option<[f64; 6]>>,
     },
-    ScrollElementIntoView(u64),
+    ScrollElementIntoView {
+        id: u64,
+        align_to_top: bool,
+    },
     GetAutomationBounds {
         response: SyncSender<HashMap<u64, crate::automation::ElementBounds>>,
     },
@@ -1509,20 +1512,29 @@ async fn run_ui_commands(
                 response.send(top).ok();
                 Ok(())
             }
+            // Force layout before sampling, the way GetElementBounds does: a
+            // read from a mount effect must not report an unscrollable element.
             UiCommand::GetScrollMetrics { id, response } => {
-                let metrics = VIRTUAL_LIST_STATES
-                    .with(|cell| cell.borrow().get(&id).map(virtual_list_metrics))
-                    .or_else(|| {
-                        SCROLL_HANDLES
-                            .with(|cell| cell.borrow().get(&id).map(scroll_handle_metrics))
+                window.update(cx, move |_view, window, cx| {
+                    cx.notify();
+                    window.refresh();
+                    window.on_next_frame(move |_window, _cx| {
+                        let metrics = VIRTUAL_LIST_STATES
+                            .with(|cell| cell.borrow().get(&id).map(virtual_list_metrics))
+                            .or_else(|| {
+                                SCROLL_HANDLES
+                                    .with(|cell| cell.borrow().get(&id).map(scroll_handle_metrics))
+                            });
+                        response.send(metrics).ok();
                     });
-                response.send(metrics).ok();
-                Ok(())
+                })
             }
-            UiCommand::ScrollElementIntoView(id) => window.update(cx, move |view, window, cx| {
-                view.scroll_element_into_view(id, cx);
-                window.refresh();
-            }),
+            UiCommand::ScrollElementIntoView { id, align_to_top } => {
+                window.update(cx, move |view, window, cx| {
+                    view.scroll_element_into_view(id, align_to_top, cx);
+                    window.refresh();
+                })
+            }
             UiCommand::GetAutomationBounds { response } => {
                 window.update(cx, move |_view, window, cx| {
                     cx.notify();
@@ -3699,9 +3711,15 @@ impl GpuixRenderer {
     /// `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]`,
     /// or null when the element is not a scroll container. Unlike
     /// `getScrollOffset` the offsets use the DOM's positive convention.
+    ///
+    /// Forces layout first, like `Element.scrollHeight` does: without it a read
+    /// from a mount effect, before the first frame, sees no scroll geometry at
+    /// all and reports the element as unscrollable.
     #[napi]
     pub fn get_scroll_metrics(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
         let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        draw_window_for_automation_read()?;
         #[cfg(target_os = "macos")]
         return Ok(VIRTUAL_LIST_STATES
             .with(|cell| cell.borrow().get(&id).map(virtual_list_metrics))
@@ -3728,18 +3746,30 @@ impl GpuixRenderer {
     }
 
     /// Reveal one element inside every scrollable ancestor, as
-    /// `Element.scrollIntoView()` does, without moving focus.
+    /// `Element.scrollIntoView()` does, without moving focus. `alignToTop` is
+    /// the DOM's `block: "start"` and defaults to it; `false` is
+    /// `block: "nearest"`.
+    ///
+    /// Forces layout first: the reveal reads painted child geometry, which a
+    /// caller running before the first frame would not have.
     #[napi]
-    pub fn scroll_element_into_view(&self, element_id: f64) -> Result<()> {
+    pub fn scroll_element_into_view(
+        &self,
+        element_id: f64,
+        align_to_top: Option<bool>,
+    ) -> Result<()> {
         let id = to_element_id(element_id)?;
+        let align_to_top = align_to_top.unwrap_or(true);
+        #[cfg(target_os = "macos")]
+        draw_window_for_automation_read()?;
         #[cfg(target_os = "macos")]
         return update_window(move |view, window, cx| {
-            view.scroll_element_into_view(id, cx);
+            view.scroll_element_into_view(id, align_to_top, cx);
             window.refresh();
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ScrollElementIntoView(id));
+        return self.send_ui_command(UiCommand::ScrollElementIntoView { id, align_to_top });
 
         #[cfg(not(any(
             target_os = "macos",
@@ -4988,10 +5018,15 @@ impl WebGpuixRenderer {
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = scrollElementIntoView)]
-    pub fn scroll_element_into_view(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
+    pub fn scroll_element_into_view(
+        &self,
+        element_id: f64,
+        align_to_top: Option<bool>,
+    ) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
+        let align_to_top = align_to_top.unwrap_or(true);
         update_web_view(move |view, _window, cx| {
-            view.scroll_element_into_view(id, cx);
+            view.scroll_element_into_view(id, align_to_top, cx);
         })
     }
 
@@ -5844,10 +5879,21 @@ impl GpuixView {
     }
 
     /// Reveal one element inside every scrollable ancestor, as
-    /// `Element.scrollIntoView()` does. This is the reveal half of programmatic
-    /// focus, without moving focus.
-    pub(crate) fn scroll_element_into_view(&mut self, id: u64, cx: &mut gpui::Context<Self>) {
-        self.scroll_focused_element_into_view(id, cx);
+    /// `Element.scrollIntoView()` does, without moving focus. `align_to_top` is
+    /// the DOM's `block: "start"` (its default); `false` is `block: "nearest"`,
+    /// the alignment programmatic focus reveals with.
+    pub(crate) fn scroll_element_into_view(
+        &mut self,
+        id: u64,
+        align_to_top: bool,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let alignment = if align_to_top {
+            RevealAlignment::Start
+        } else {
+            RevealAlignment::Nearest
+        };
+        self.reveal_element(id, alignment, cx);
     }
 
     pub(crate) fn active_element_id(&self, window: &gpui::Window) -> Option<u64> {
@@ -6910,6 +6956,17 @@ impl GpuixView {
     }
 
     fn scroll_focused_element_into_view(&mut self, id: u64, cx: &mut gpui::Context<Self>) {
+        // Focus reveal is the DOM's `block: "nearest"`: scroll no further than
+        // needed to show the element that just took focus.
+        self.reveal_element(id, RevealAlignment::Nearest, cx);
+    }
+
+    fn reveal_element(
+        &mut self,
+        id: u64,
+        alignment: RevealAlignment,
+        cx: &mut gpui::Context<Self>,
+    ) {
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
         let mut current = id;
@@ -6928,28 +6985,54 @@ impl GpuixView {
         while let Some(ancestor) = nearest_scroll_ancestor(&tree, current) {
             match ancestor {
                 ScrollAncestor::Overflow(scroller_id) => {
-                    if let Some(anchor) =
-                        self.focus_scroll_anchors
-                            .get(&current)
-                            .and_then(|entry| match entry {
-                                FocusScrollAnchor::Overflow {
-                                    scroller_id: anchor_scroller_id,
-                                    anchor,
-                                } if *anchor_scroller_id == scroller_id => Some(anchor),
-                                _ => None,
-                            })
-                    {
+                    // The element-precise anchor only knows how to reveal by the
+                    // nearest edge, so top alignment goes through the scroller's
+                    // own child index instead.
+                    let anchor = (alignment == RevealAlignment::Nearest)
+                        .then(|| {
+                            self.focus_scroll_anchors
+                                .get(&current)
+                                .and_then(|entry| match entry {
+                                    FocusScrollAnchor::Overflow {
+                                        scroller_id: anchor_scroller_id,
+                                        anchor,
+                                    } if *anchor_scroller_id == scroller_id => Some(anchor),
+                                    _ => None,
+                                })
+                        })
+                        .flatten();
+                    if let Some(anchor) = anchor {
                         anchor.scroll_to_reveal();
                         requested = true;
                     } else if let Some(index) = painted_child_index(&tree, scroller_id, current) {
                         if let Some(handle) = self.scroll_handles.get(&scroller_id) {
-                            handle.scroll_to_item(index);
+                            match alignment {
+                                RevealAlignment::Nearest => handle.scroll_to_item(index),
+                                RevealAlignment::Start => handle.scroll_to_top_of_item(index),
+                            }
                             requested = true;
                         }
                     }
                     current = scroller_id;
                 }
                 ScrollAncestor::VirtualList(list_id) => {
+                    if alignment == RevealAlignment::Start {
+                        // `block: "start"` is exactly a logical scroll top of
+                        // (row, 0), which needs no painted geometry at all.
+                        if let Some(entry) = self.virtual_lists.get(&list_id) {
+                            if let Some(index) = virtual_row_ancestor(&tree, list_id, current)
+                                .and_then(|row_id| entry.logical_index_of(row_id))
+                            {
+                                entry.state.scroll_to(gpui::ListOffset {
+                                    item_ix: index,
+                                    offset_in_item: gpui::px(0.),
+                                });
+                                requested = true;
+                            }
+                        }
+                        current = list_id;
+                        continue;
+                    }
                     if let Some(entry) = self.virtual_lists.get(&list_id) {
                         let exact =
                             self.focus_scroll_anchors.get(&current).and_then(
@@ -7825,6 +7908,14 @@ enum ScrollAncestor {
     VirtualList(u64),
 }
 
+/// How far a reveal scrolls, mirroring the DOM's `scrollIntoView` `block`.
+/// `Start` is the DOM default; `Nearest` is what programmatic focus uses.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RevealAlignment {
+    Nearest,
+    Start,
+}
+
 /// Flip gpui's negative scroll offset into the DOM's positive one. Subtracting
 /// rather than negating keeps an unscrolled element at `0` instead of `-0`,
 /// which `Object.is` and `toBe` treat as a different number.
@@ -7839,6 +7930,9 @@ fn dom_scroll_offset(offset: gpui::Pixels) -> f64 {
 /// has moved up/left (negative), the DOM reports how far the viewport has moved
 /// down/right (positive). gpui's max offset is the overflow past the viewport, so
 /// the scroll extent is the viewport plus that overflow.
+///
+/// The four extents round: they are `long` in the DOM's `Element` IDL, unlike
+/// the two offsets, which are `unrestricted double` and keep their fraction.
 pub(crate) fn scroll_handle_metrics(handle: &gpui::ScrollHandle) -> [f64; 6] {
     let offset = handle.offset();
     let max = handle.max_offset();
@@ -7846,11 +7940,17 @@ pub(crate) fn scroll_handle_metrics(handle: &gpui::ScrollHandle) -> [f64; 6] {
     [
         dom_scroll_offset(offset.x),
         dom_scroll_offset(offset.y),
-        f64::from(f32::from(viewport.width + max.x)),
-        f64::from(f32::from(viewport.height + max.y)),
-        f64::from(f32::from(viewport.width)),
-        f64::from(f32::from(viewport.height)),
+        dom_extent(viewport.width + max.x),
+        dom_extent(viewport.height + max.y),
+        dom_extent(viewport.width),
+        dom_extent(viewport.height),
     ]
+}
+
+/// One of the `long`-typed `Element` extents: `scrollWidth`, `scrollHeight`,
+/// `clientWidth`, `clientHeight`. The DOM rounds these to whole pixels.
+fn dom_extent(pixels: gpui::Pixels) -> f64 {
+    f64::from(f32::from(pixels)).round()
 }
 
 /// The same geometry for a `<virtual-list>`, whose extent comes from measured
@@ -7863,10 +7963,10 @@ pub(crate) fn virtual_list_metrics(state: &gpui::ListState) -> [f64; 6] {
     [
         0.0,
         dom_scroll_offset(offset.y),
-        f64::from(f32::from(viewport.width)),
-        f64::from(f32::from(viewport.height + max.y)),
-        f64::from(f32::from(viewport.width)),
-        f64::from(f32::from(viewport.height)),
+        dom_extent(viewport.width),
+        dom_extent(viewport.height + max.y),
+        dom_extent(viewport.width),
+        dom_extent(viewport.height),
     ]
 }
 

@@ -1268,17 +1268,28 @@ ref.current.clientWidth          // viewport width
 
 ref.current.scrollTop = ref.current.scrollHeight   // jump to the bottom
 ref.current.scrollTo({ top: 240 })                 // instant; `behavior` is ignored
-ref.current.scrollIntoView()                       // reveal inside every scroll ancestor
+ref.current.scrollIntoView()                       // block: "start", the DOM default
+ref.current.scrollIntoView({ block: "nearest" })   // smallest revealing scroll
 
 // "Am I at the bottom?" — the standard DOM test
 const atBottom =
   ref.current.scrollTop + ref.current.clientHeight >= ref.current.scrollHeight
 ```
 
-An element that is not a scroll container reports its viewport for
-`clientWidth` / `clientHeight`, a matching scroll extent, and `0` offsets.
-`scrollIntoView()` scrolls the minimum needed to reveal the element's row;
-alignment options are accepted for DOM-shaped call sites and ignored.
+Only `overflow: "scroll"` elements and `<virtual-list>` are scroll containers
+here. Everything else — **including `overflow: "hidden"`, which the web does
+treat as a programmatically scrollable container** — reports its viewport for
+`clientWidth` / `clientHeight`, a matching scroll extent, and `0` offsets, and
+drops writes to `scrollTop` / `scrollLeft`.
+
+`scrollIntoView()` supports the DOM default `block: "start"` and
+`block: "nearest"`. `block: "center"`, `block: "end"`, `scrollIntoView(false)`
+and any `inline` other than `"nearest"` throw rather than scroll the wrong
+distance, because gpui has no equivalent alignment.
+
+Reading any of the six properties forces layout, exactly as reading
+`Element.scrollHeight` does on the web. Hoist the reads you need out of a hot
+scroll handler rather than repeating them.
 
 ## Virtual lists
 
