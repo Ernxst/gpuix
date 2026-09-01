@@ -470,7 +470,7 @@ impl TestGpuixRenderer {
         let window_handle = cx
             .open_offscreen_window(window_size, |_window, app| {
                 app.new(|cx| {
-                    GpuixView::new(
+                    let mut view = GpuixView::new(
                         tree_clone,
                         canvas_display_lists_for_view,
                         callback_clone,
@@ -479,7 +479,9 @@ impl TestGpuixRenderer {
                         selection_clone,
                         image_network_policy_for_view,
                         cx,
-                    )
+                    );
+                    view.accessibility_host_ids = Some(HashMap::new());
+                    view
                 })
             })
             .map_err(|e| Error::from_reason(format!("Failed to open test window: {}", e)))?;
@@ -859,10 +861,43 @@ impl TestGpuixRenderer {
     /// Read GPUI's real AccessKit tree from the last explicit draw.
     #[napi]
     pub fn get_accessibility_tree(&self) -> Result<String> {
-        with_test_state(self.state_id, |cx, window, _view| {
-            cx.update_window(window, |_, window, _app| {
-                window.debug_a11y_tree_json().ok_or_else(|| {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                let json = window.debug_a11y_tree_json().ok_or_else(|| {
                     Error::from_reason("Accessibility tree was not built for the drawn frame")
+                })?;
+                let view = view.read(app);
+                let host_ids = view
+                    .accessibility_host_ids
+                    .as_ref()
+                    .expect("test renderer enables accessibility host identities");
+                let mut snapshot: serde_json::Value =
+                    serde_json::from_str(&json).map_err(|error| {
+                        Error::from_reason(format!("Accessibility tree parsing failed: {error}"))
+                    })?;
+                if let Some(nodes) = snapshot
+                    .get_mut("nodes")
+                    .and_then(serde_json::Value::as_object_mut)
+                {
+                    for node in nodes.values_mut() {
+                        let Some(accesskit_id) = node
+                            .get("accesskit_id")
+                            .and_then(serde_json::Value::as_str)
+                            .and_then(|id| id.parse::<u64>().ok())
+                        else {
+                            continue;
+                        };
+                        let Some(host_id) = host_ids.get(&accesskit_id) else {
+                            continue;
+                        };
+                        if let Some(node) = node.as_object_mut() {
+                            node.insert("host_id".into(), serde_json::json!(host_id));
+                        }
+                    }
+                }
+                serde_json::to_string(&snapshot).map_err(|error| {
+                    Error::from_reason(format!("Accessibility tree serialization failed: {error}"))
                 })
             })
             .map_err(|error| Error::from_reason(error.to_string()))?
