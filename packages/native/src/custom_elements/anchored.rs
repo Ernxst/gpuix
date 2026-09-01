@@ -299,7 +299,8 @@ impl CustomElement for AnchoredElement {
                 ctx.id
             )))
             .flex_col();
-        content = crate::automation::track_own_bounds(content, ctx.id);
+        content =
+            crate::automation::track_own_bounds(content, ctx.id, ctx.paint_bounds_listener.clone());
         content = super::wire_standard_events(content, &ctx, cx);
         if let Some(style) = ctx.style {
             content = crate::renderer::apply_interactive_styles(content, style);

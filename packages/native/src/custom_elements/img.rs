@@ -1798,7 +1798,8 @@ impl CustomElement for ImgElement {
 
         let el = apply_image_accessibility(&ctx, el);
         let el = super::wire_standard_events(el, &ctx, cx);
-        crate::automation::track_own_bounds(el, ctx.id).into_any_element()
+        crate::automation::track_own_bounds(el, ctx.id, ctx.paint_bounds_listener.clone())
+            .into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
@@ -1949,7 +1950,8 @@ impl CustomElement for SvgElement {
             icon = crate::renderer::apply_interactive_styles(icon, style);
         }
         let icon = super::wire_standard_events(icon, &ctx, cx);
-        crate::automation::track_own_bounds(icon, ctx.id).into_any_element()
+        crate::automation::track_own_bounds(icon, ctx.id, ctx.paint_bounds_listener.clone())
+            .into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
