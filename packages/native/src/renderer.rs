@@ -9690,12 +9690,7 @@ fn to_gpui_window_options(
         _ if options.transparent.unwrap_or(false) => gpui::WindowBackgroundAppearance::Transparent,
         _ => gpui::WindowBackgroundAppearance::Opaque,
     };
-    let window_min_size = match (options.min_width, options.min_height) {
-        (Some(width), Some(height)) => {
-            Some(gpui::size(gpui::px(width as f32), gpui::px(height as f32)))
-        }
-        _ => None,
-    };
+    let window_min_size = effective_window_min_size(options);
     let window_bounds = if options.fullscreen.unwrap_or(false) {
         gpui::WindowBounds::Fullscreen(bounds)
     } else {
@@ -9715,6 +9710,17 @@ fn to_gpui_window_options(
         show: options.show.unwrap_or(true),
         ..Default::default()
     }
+}
+
+fn effective_window_min_size(options: &WindowOptions) -> Option<gpui::WindowMinSize> {
+    if options.min_width.is_none() && options.min_height.is_none() {
+        return None;
+    }
+
+    Some(gpui::WindowMinSize {
+        width: options.min_width.map(|width| gpui::px(width as f32)),
+        height: options.min_height.map(|height| gpui::px(height as f32)),
+    })
 }
 
 #[cfg(test)]
@@ -10091,9 +10097,13 @@ mod window_options_tests {
     use super::*;
 
     fn mapped(options: WindowOptions) -> gpui::WindowOptions {
+        mapped_with_bounds(options, 800.0, 600.0)
+    }
+
+    fn mapped_with_bounds(options: WindowOptions, width: f32, height: f32) -> gpui::WindowOptions {
         let bounds = gpui::Bounds {
             origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
-            size: gpui::size(gpui::px(800.0), gpui::px(600.0)),
+            size: gpui::size(gpui::px(width), gpui::px(height)),
         };
         to_gpui_window_options(&options, bounds)
     }
@@ -10157,8 +10167,98 @@ mod window_options_tests {
     }
 
     #[test]
+    fn min_width_constrains_the_initial_window_without_min_height() {
+        let options = WindowOptions {
+            min_width: Some(320.0),
+            min_height: None,
+            ..WindowOptions::default()
+        };
+
+        let gpui_options = mapped_with_bounds(options, 200.0, 100.0);
+        assert_eq!(
+            gpui_options.window_min_size,
+            Some(gpui::WindowMinSize {
+                width: Some(gpui::px(320.0)),
+                height: None,
+            })
+        );
+    }
+
+    #[test]
+    fn min_height_constrains_the_initial_window_without_min_width() {
+        let options = WindowOptions {
+            min_width: None,
+            min_height: Some(240.0),
+            ..WindowOptions::default()
+        };
+
+        let gpui_options = mapped_with_bounds(options, 200.0, 100.0);
+        assert_eq!(
+            gpui_options.window_min_size,
+            Some(gpui::WindowMinSize {
+                width: None,
+                height: Some(gpui::px(240.0)),
+            })
+        );
+    }
+
+    #[test]
+    fn min_width_constrains_resize_without_min_height() {
+        let mut app = gpui::TestApp::new();
+        let mut window = app.open_window_with_options(
+            mapped_with_bounds(
+                WindowOptions {
+                    min_width: Some(320.0),
+                    min_height: None,
+                    ..WindowOptions::default()
+                },
+                480.0,
+                300.0,
+            ),
+            |_, _| gpui::EmptyView,
+        );
+
+        // TestPlatform has no default minimum height; an omitted minHeight
+        // must therefore leave the requested 12px height unconstrained.
+        window.simulate_resize(gpui::size(gpui::px(100.0), gpui::px(12.0)));
+        window.update(|_, window, cx| window.bounds_changed(cx));
+
+        assert_eq!(
+            window.update(|_, window, _| window.viewport_size()),
+            gpui::size(gpui::px(320.0), gpui::px(12.0)),
+        );
+    }
+
+    #[test]
+    fn min_height_constrains_resize_without_min_width() {
+        let mut app = gpui::TestApp::new();
+        let mut window = app.open_window_with_options(
+            mapped_with_bounds(
+                WindowOptions {
+                    min_width: None,
+                    min_height: Some(240.0),
+                    ..WindowOptions::default()
+                },
+                480.0,
+                300.0,
+            ),
+            |_, _| gpui::EmptyView,
+        );
+
+        // TestPlatform has no default minimum width; an omitted minWidth
+        // must therefore leave the requested 12px width unconstrained.
+        window.simulate_resize(gpui::size(gpui::px(12.0), gpui::px(100.0)));
+        window.update(|_, window, cx| window.bounds_changed(cx));
+
+        assert_eq!(
+            window.update(|_, window, _| window.viewport_size()),
+            gpui::size(gpui::px(12.0), gpui::px(240.0)),
+        );
+    }
+
+    #[test]
     fn existing_options_are_still_mapped() {
-        let gpui_options = mapped(WindowOptions {
+        let gpui_options = mapped_with_bounds(WindowOptions {
             title: Some("Background".to_string()),
             resizable: Some(false),
             window_background: Some("blurred".to_string()),
@@ -10166,7 +10266,7 @@ mod window_options_tests {
             min_height: Some(240.0),
             focus: Some(false),
             ..WindowOptions::default()
-        });
+        }, 200.0, 100.0);
         let titlebar = gpui_options.titlebar.expect("titlebar options");
         assert_eq!(titlebar.title.as_deref(), Some("Background"));
         assert!(!gpui_options.is_resizable);
@@ -10176,7 +10276,7 @@ mod window_options_tests {
         );
         assert_eq!(
             gpui_options.window_min_size,
-            Some(gpui::size(gpui::px(320.0), gpui::px(240.0)))
+            Some(gpui::WindowMinSize::new(gpui::px(320.0), gpui::px(240.0)))
         );
     }
 }
