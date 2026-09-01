@@ -1153,7 +1153,10 @@ export interface NativeRenderer {
   postAppKitClick?(x: number, y: number): void
 
   // ── Focus API ──────────────────────────────────────────────────
-  focusElement?(elementId: number): void
+  /** `preventScroll` mirrors the `FocusOptions` member of
+   *  `HTMLElement.focus()`: take focus without revealing the element inside
+   *  its scroll ancestors. */
+  focusElement?(elementId: number, preventScroll?: boolean): void
   /** @internal Complete Tab's default focus traversal after synthetic dispatch. */
   resolveTabKeyDown?(defaultPrevented: boolean): void
   /** The focused host element id, analogous to `document.activeElement`, or null. */
@@ -1347,8 +1350,16 @@ export interface PublicInstance {
   id: number
   type: ElementType
   props: Props
-  /** Moves focus to this host element, matching HTMLElement.focus(). */
-  focus(): void
+  /**
+   * Moves focus to this host element, matching `HTMLElement.focus()`, and
+   * reveals it inside its scroll ancestors unless `preventScroll` is set.
+   *
+   * Focus needs a native focus handle, which an element gets from `tabIndex`,
+   * `autoFocus`, or a focus-shaped listener (`onKeyDown`, `onKeyUp`, `onFocus`,
+   * `onBlur`). An `onKeyDown`-only element is therefore focusable here even
+   * though the same element would not be focusable on the web.
+   */
+  focus(options?: FocusOptions): void
   /** Removes focus when this host element currently owns it. */
   blur(): void
   setPointerCapture(): void

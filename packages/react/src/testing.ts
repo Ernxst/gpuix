@@ -147,7 +147,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   simulateMenuAction(id: string): void
   hasMainMenu(): boolean
   simulateKeystrokes(keystrokes: string): void
-  focusElement(elementId: number): void
+  focusElement(elementId: number, preventScroll?: boolean): void
   getActiveElement(): number | null
   blur(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
@@ -1042,9 +1042,11 @@ export class TestRenderer implements NativeRenderer {
     this.dispatchNativeEvents()
   }
 
-  focusElement(elementId: number): void {
+  /** `preventScroll` mirrors `HTMLElement.focus({ preventScroll })`: take focus
+   *  without revealing the element inside its scroll ancestors. */
+  focusElement(elementId: number, preventScroll?: boolean): void {
     this.native.flush()
-    this.native.focusElement(elementId)
+    this.native.focusElement(elementId, preventScroll)
     // Programmatic focus is reported when GPUI commits the next frame.
     this.native.flush()
     this.dispatchNativeEvents()

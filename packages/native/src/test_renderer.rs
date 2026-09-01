@@ -1249,9 +1249,13 @@ impl TestGpuixRenderer {
     /// The element must have a FocusHandle (created by sync_focus_handles when
     /// the element has keyDown, keyUp, focus, or blur listeners).
     /// Call flush() before this so the element tree and focus handles exist.
+    /// `preventScroll` mirrors the `FocusOptions` member of
+    /// `HTMLElement.focus()`: focus without revealing the element inside its
+    /// scroll ancestors.
     #[napi]
-    pub fn focus_element(&self, id: f64) -> Result<()> {
+    pub fn focus_element(&self, id: f64, prevent_scroll: Option<bool>) -> Result<()> {
         let id = to_element_id(id)?;
+        let reveal = !prevent_scroll.unwrap_or(false);
 
         with_test_state(self.state_id, |cx, window, view| {
             let view = view.clone();
@@ -1261,7 +1265,7 @@ impl TestGpuixRenderer {
                     window.simulate_active_status_change(true, app);
                 }
                 view.update(app, |view, cx| {
-                    view.focus_element_and_reveal(id, window, cx);
+                    view.focus_element(id, reveal, window, cx);
                 });
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;

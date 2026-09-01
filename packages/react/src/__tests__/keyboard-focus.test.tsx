@@ -53,6 +53,39 @@ describeNative("keyboard focus", () => {
     expect(testRoot.renderer.getActiveElement()).toBeNull()
   })
 
+  it("honors focus({ preventScroll: true }) like HTMLElement.focus", () => {
+    const scrollerRef = React.createRef<PublicInstance>()
+    const targetRef = React.createRef<PublicInstance>()
+
+    testRoot.render(
+      <div ref={scrollerRef} style={{ width: 200, height: 100, overflow: "scroll" }}>
+        {Array.from({ length: 8 }, (_, index) => (
+          <div key={index} style={{ height: 40, flexShrink: 0 }}>
+            {index === 4 ? (
+              <div ref={targetRef} tabIndex={0} ariaLabel="deep focus target">
+                <text>target</text>
+              </div>
+            ) : (
+              <text>{`row-${index}`}</text>
+            )}
+          </div>
+        ))}
+      </div>
+    )
+
+    const scrollerId = scrollerRef.current!.id
+    targetRef.current!.focus({ preventScroll: true })
+    testRoot.renderer.flush()
+
+    expect(testRoot.renderer.getActiveElement()).toBe(targetRef.current!.id)
+    expect(testRoot.renderer.getScrollOffset(scrollerId)).toEqual([0, 0])
+
+    targetRef.current!.focus()
+    testRoot.renderer.flush()
+
+    expect(testRoot.renderer.getScrollOffset(scrollerId)![1]).toBeLessThan(0)
+  })
+
   it("tabs from a cold start and wraps backwards past the first control", () => {
     testRoot.render(
       <div style={{ width: 400, height: 200 }}>

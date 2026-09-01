@@ -1267,7 +1267,10 @@ enum UiCommand {
         id: u64,
         response: SyncSender<Option<crate::automation::ElementBounds>>,
     },
-    FocusElement(u64),
+    FocusElement {
+        id: u64,
+        reveal: bool,
+    },
     ResolveTabKeyDown {
         default_prevented: bool,
     },
@@ -1519,10 +1522,12 @@ async fn run_ui_commands(
                     });
                 })
             }
-            UiCommand::FocusElement(id) => window.update(cx, move |view, window, cx| {
-                view.focus_element_and_reveal(id, window, cx);
-                window.refresh();
-            }),
+            UiCommand::FocusElement { id, reveal } => {
+                window.update(cx, move |view, window, cx| {
+                    view.focus_element(id, reveal, window, cx);
+                    window.refresh();
+                })
+            }
             UiCommand::ResolveTabKeyDown { default_prevented } => {
                 window.update(cx, move |view, window, cx| {
                     view.resolve_tab_key_down(default_prevented, window, cx);
@@ -3264,17 +3269,21 @@ impl GpuixRenderer {
         ))
     }
 
+    /// Move focus to an element. `preventScroll` mirrors the `FocusOptions`
+    /// member of `HTMLElement.focus()`: focus without revealing the element
+    /// inside its scroll ancestors.
     #[napi]
-    pub fn focus_element(&self, element_id: f64) -> Result<()> {
+    pub fn focus_element(&self, element_id: f64, prevent_scroll: Option<bool>) -> Result<()> {
         let id = to_element_id(element_id)?;
+        let reveal = !prevent_scroll.unwrap_or(false);
         #[cfg(target_os = "macos")]
         return update_window(move |view, window, cx| {
-            view.focus_element_and_reveal(id, window, cx);
+            view.focus_element(id, reveal, window, cx);
             window.refresh();
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::FocusElement(id));
+        return self.send_ui_command(UiCommand::FocusElement { id, reveal });
 
         #[cfg(not(any(
             target_os = "macos",
@@ -4734,10 +4743,15 @@ impl WebGpuixRenderer {
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusElement)]
-    pub fn focus_element(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
+    pub fn focus_element(
+        &self,
+        element_id: f64,
+        prevent_scroll: Option<bool>,
+    ) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
+        let reveal = !prevent_scroll.unwrap_or(false);
         update_web_view(move |view, window, cx| {
-            view.focus_element_and_reveal(id, window, cx);
+            view.focus_element(id, reveal, window, cx);
         })
     }
 
@@ -5727,15 +5741,20 @@ impl GpuixView {
             .find_map(|(id, handle)| handle.is_focused(window).then_some(*id))
     }
 
-    pub(crate) fn focus_element_and_reveal(
+    /// Move focus to `id`, revealing it inside its scroll ancestors unless the
+    /// caller passed `HTMLElement.focus({ preventScroll: true })`.
+    pub(crate) fn focus_element(
         &mut self,
         id: u64,
+        reveal: bool,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
         if let Some(handle) = self.focus_handles.get(&id) {
             handle.focus(window, cx);
-            self.scroll_focused_element_into_view(id, cx);
+            if reveal {
+                self.scroll_focused_element_into_view(id, cx);
+            }
         }
         cx.notify();
     }
