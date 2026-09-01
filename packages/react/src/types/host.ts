@@ -1126,6 +1126,8 @@ export interface NativeRenderer {
 
   // ── Focus API ──────────────────────────────────────────────────
   focusElement?(elementId: number): void
+  /** The focused host element id, analogous to `document.activeElement`, or null. */
+  getActiveElement?(): number | null
   blur?(): void
 
   // ── Pointer capture API ────────────────────────────────────────

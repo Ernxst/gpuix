@@ -250,6 +250,70 @@ render(React.createElement(App), {
 setTimeout(() => renderer.quit(), 50)
 `
 
+const READABLE_FOCUS_PROGRAM = `
+import React from "react"
+import { render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
+
+let renderer
+let target
+
+function App() {
+  renderer = useGpuixRequired()
+  return React.createElement(
+    "div",
+    { style: { width: 320, height: 160 } },
+    React.createElement(
+      "div",
+      {
+        ref: (element) => { target = element },
+        tabIndex: -1,
+        style: { width: 120, height: 40 },
+      },
+      React.createElement("text", null, "Role-less focus target")
+    )
+  )
+}
+
+const timeout = setTimeout(() => {
+  throw new Error("READABLE_FOCUS_TIMEOUT")
+}, 2_000)
+
+render(React.createElement(App), {
+  title: "GPUIX readable focus smoke",
+  width: 320,
+  height: 160,
+  menus: [],
+  focus: false,
+  show: true,
+})
+
+setTimeout(() => {
+  if (!target) throw new Error("focus target ref was not attached")
+  if (renderer.getElementBounds(target.id) === null) {
+    throw new Error("focus target did not paint")
+  }
+
+  if (renderer.getActiveElement?.() !== null) {
+    throw new Error("expected no active element before focus")
+  }
+
+  renderer.focusElement(target.id)
+  const focused = renderer.getActiveElement?.()
+  if (focused !== target.id) {
+    throw new Error("expected active element " + target.id + ", received " + focused)
+  }
+
+  renderer.blur()
+  if (renderer.getActiveElement?.() !== null) {
+    throw new Error("expected no active element after blur")
+  }
+
+  clearTimeout(timeout)
+  console.log("READABLE_FOCUS_OK", target.id)
+  renderer.quit()
+}, 50)
+`
+
 const FAILING_UNMOUNT_QUIT_PROGRAM = `
 import React from "react"
 import { render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
@@ -789,6 +853,23 @@ describeNative("render()", () => {
       expect(result.output).not.toContain("React unmount failed")
       expect(result.output.match(/^QUIT_REACT_UNMOUNTED$/gm), result.output).toHaveLength(1)
       expect(result.output.match(/^QUIT_TERMINATED$/gm), result.output).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 10_000)
+
+  it("reports the active role-less element from a running renderer", async () => {
+    const file = join(srcDir, "__tests__", "readable-focus.tmp.tsx")
+    writeFileSync(file, READABLE_FOCUS_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file], 3_000)
+      expect(result.code, result.output).toBe(0)
+      expect(result.signal).toBeNull()
+      expect(result.output).not.toContain("READABLE_FOCUS_TIMEOUT")
+      expect(result.output.match(/^READABLE_FOCUS_OK \d+$/gm), result.output).toHaveLength(1)
     } finally {
       try {
         unlinkSync(file)

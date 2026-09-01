@@ -120,6 +120,11 @@ export declare class GpuixRenderer {
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
+  /**
+   * The focused host element id, analogous to `document.activeElement`, or null.
+   * This reads GPUI focus directly, so role-less focusable elements are included.
+   */
+  getActiveElement(): number | null
   /** Route the active pressed-pointer sequence to this retained element. */
   setPointerCapture(elementId: number): void
   /** Release capture only when this retained element currently owns it. */
