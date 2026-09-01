@@ -1,6 +1,6 @@
 import React from "react"
 import { describe, expect, it } from "vitest"
-import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
+import { createTestRoot, isNativeTestRendererAvailable, textContent } from "../testing.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -69,7 +69,7 @@ describeNative("createTestRoot bound queries", () => {
       expect(screen.queryAllByTestId("missing")).toEqual([])
 
       const scoped = screen.within(summary)
-      expect(scoped.getByTestId("value").text).toBe("Power")
+      expect(textContent(screen.renderer, scoped.getByTestId("value"))).toBe("Power")
       expect(scoped.queryByTestId("details")).toBeUndefined()
       expect(() => scoped.getByTestId("details")).toThrowError(
         'Unable to find an element with test ID "details" within <div testId="summary"'
@@ -91,7 +91,7 @@ describeNative("createTestRoot bound queries", () => {
       )
 
       expect(() => screen.getByText("Moss")).toThrowError(
-        /Unable to find an element with text "Moss" within <div testId="page" text="OreOre rate">\.\nNear misses:\n  <text data-testid="value" text="Ore">\n  <text data-testid="value" text="Ore rate">/
+        /Unable to find an element with text "Moss" within <div testId="page" text="OreOre rate">\. Near misses:\n  <text text="Ore">\n  <text text="Ore rate">/
       )
       expect(() => screen.getByText(/Ore/)).toThrowError("Found multiple elements with text /Ore/")
       expect(() => screen.queryByText(/Ore/)).toThrowError("Found multiple elements with text /Ore/")
