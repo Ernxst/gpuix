@@ -1661,6 +1661,27 @@ a `div` when it should receive keyboard focus:
 | `tabIndex={-1}` | Skipped by Tab, but focusable by click or renderer API |
 | `autoFocus` | Takes focus once, when its native focus handle is created |
 
+### Element keyboard callbacks
+
+`onKeyDown` fires for the focused element and then through React's capture and
+bubble phases. `onKeyUp` follows the same path when the key is released. Adding
+either callback creates the element's native focus handle.
+
+```tsx
+<div
+  autoFocus
+  tabIndex={0}
+  onKeyDown={(event) => {
+    console.log(event.key, event.keyChar, event.modifiers, event.isHeld)
+  }}
+  onKeyUp={(event) => {
+    console.log(`${event.key} released`)
+  }}
+>
+  Focused target
+</div>
+```
+
 `Tab` calls GPUI's `window.focus_next()`. `Shift+Tab` calls
 `window.focus_prev()`. Before that default runs, GPUIX dispatches the keydown
 through React's capture and bubble phases. Call `preventDefault()` from either
@@ -1676,6 +1697,12 @@ phase to keep focus on the current element, matching the browser:
   Editor
 </div>
 ```
+
+### Imperative focus
+
+`focusNext()` and `focusPrevious()` map directly to GPUI's
+`window.focus_next()` and `window.focus_prev()`. They supplement the default Tab
+policy; applications do not need to reimplement traversal to retain it.
 
 Use a ref for imperative focus:
 
@@ -3192,9 +3219,12 @@ use a directory link, configure Vitest to dedupe `react`, `react-dom`,
 `react-reconciler`, and `scheduler`; that is only a fallback, not a supported
 way to consume the unpublished fork under Bun.
 
-`hasNativeTestRenderer` was removed. Use
-`isNativeTestRendererAvailable()` when a test must check whether the native
-renderer can initialize.
+The native package exports `TestGpuixRenderer` on every platform. Construction
+on Linux or a build without GPU test support throws a clear availability error;
+`hasTestGpuixRenderer()` reports whether construction is supported. In React
+tests, use `isNativeTestRendererAvailable()` when a suite must check whether the
+native renderer can initialize. The old `hasNativeTestRenderer` export remains
+removed.
 
 `createTestRoot()` returns synchronous queries bound to its renderer. Text
 queries match retained `<text>` content, test ID queries match both `testId`

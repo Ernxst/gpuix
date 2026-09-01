@@ -3,6 +3,7 @@
 
 import { spawn } from "node:child_process"
 import { unlinkSync, writeFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import React, { useState } from "react"
@@ -93,6 +94,25 @@ function collectOutput(child: ReturnType<typeof spawn>) {
     },
   }
 }
+
+describe("TestGpuixRenderer availability", () => {
+  it("exports a constructor and a flag that is true only when construction works", () => {
+    const native = createRequire(import.meta.url)("@gpuix/native") as {
+      TestGpuixRenderer?: new (width?: number, height?: number) => unknown
+      hasTestGpuixRenderer?: () => boolean
+    }
+    expect(typeof native.TestGpuixRenderer).toBe("function")
+    expect(native.hasTestGpuixRenderer?.()).toBe(isNativeTestRendererAvailable())
+    if (isNativeTestRendererAvailable()) {
+      const renderer = new native.TestGpuixRenderer!(1, 1)
+      expect(renderer).toBeTruthy()
+    } else {
+      expect(() => new native.TestGpuixRenderer!()).toThrow(
+        /macOS and Windows only.*wgpu cannot read a rendered image back yet.*GpuixRenderer still works/s
+      )
+    }
+  })
+})
 
 function runChild(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {

@@ -2635,6 +2635,7 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "web-time",
+ "windows 0.61.3",
  "zed-reqwest",
 ]
 

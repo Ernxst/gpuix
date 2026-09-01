@@ -1272,6 +1272,26 @@ impl TestGpuixRenderer {
     }
 
     #[napi]
+    pub fn focus_next(&self) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, |_, window, app| window.focus_next(app))
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn focus_previous(&self) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, |_, window, app| window.focus_prev(app))
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
     pub fn resolve_tab_key_down(&self, default_prevented: bool) -> Result<()> {
         with_test_state(self.state_id, |cx, window, view| {
             let view = view.clone();

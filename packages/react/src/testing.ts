@@ -148,6 +148,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   hasMainMenu(): boolean
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number): void
+  focusNext(): void
+  focusPrevious(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   setPointerCapture(elementId: number): void
   releasePointerCapture(elementId: number): void
@@ -257,13 +259,19 @@ function initializeNativeTestRenderer(): NativeTestRendererConstructor | null {
   try {
     const native = requireNative("@gpuix/native") as {
       TestGpuixRenderer?: NativeTestRendererConstructor
+      hasTestGpuixRenderer?: () => boolean
     }
-    if (native.TestGpuixRenderer) {
+    const hasRealRenderer = native.hasTestGpuixRenderer?.()
+    if (hasRealRenderer !== false && native.TestGpuixRenderer) {
       NativeTestRenderer = native.TestGpuixRenderer
       // Construct once here so availability includes native initialization, not
       // merely whether the binding exports its constructor. The first
       // TestRenderer reuses this instance.
       probedNativeTestRenderer = new native.TestGpuixRenderer()
+    } else if (native.TestGpuixRenderer) {
+      nativeTestRendererLoadError = new Error(
+        "TestGpuixRenderer is macOS and Windows only. Linux builds have no test-support because wgpu cannot read a rendered image back yet. GpuixRenderer still works on Linux."
+      )
     } else {
       nativeTestRendererLoadError = new Error(
         "@gpuix/native does not export TestGpuixRenderer. Build with test-support to run tests."
@@ -1044,6 +1052,20 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.native.focusElement(elementId)
     // Programmatic focus is reported when GPUI commits the next frame.
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
+  focusNext(): void {
+    this.native.flush()
+    this.native.focusNext()
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
+  focusPrevious(): void {
+    this.native.flush()
+    this.native.focusPrevious()
     this.native.flush()
     this.dispatchNativeEvents()
   }
