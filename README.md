@@ -2710,6 +2710,11 @@ GPUIX adds another native state style, without copying a literal union into an
 application. Escape B is useful when the shared helper should remain strictly
 cross-renderer.
 
+`NativeStateStyleKey` contains only the five interaction states above.
+`transition` remains a root-level `StyleDesc` declaration: native parsing
+rejects it inside a state style, and its native transition object is not a
+compatible replacement for React's CSS `transition` string.
+
 ```tsx
 <div
   style={{

@@ -400,7 +400,6 @@ export type GridTemplate = number | GridTrack[]
 
 /** Keys that apply a native interaction state rather than a base style declaration. */
 export type NativeStateStyleKey =
-  | "transition"
   | "hover"
   | "hoverWithin"
   | "active"
@@ -408,7 +407,7 @@ export type NativeStateStyleKey =
   | "focusVisible"
 
 /** Base declarations accepted inside a native interaction-state style. */
-export type NativeStateStyle = Omit<StyleDesc, NativeStateStyleKey>
+export type NativeStateStyle = Omit<StyleDesc, NativeStateStyleKey | "transition">
 
 /**
  * A native GPUIX style descriptor.
