@@ -8234,28 +8234,7 @@ pub(crate) fn build_host_container(
                         let (x, y) = point_to_xy(scroll_event.position);
                         p.x = Some(x);
                         p.y = Some(y);
-                        p.modifiers = Some(scroll_event.modifiers.into());
-                        p.precise = Some(scroll_event.delta.precise());
-                        p.delta_z = Some(0.0);
-                        match scroll_event.delta {
-                            gpui::ScrollDelta::Pixels(delta) => {
-                                p.delta_x = Some(f64::from(f32::from(delta.x)));
-                                p.delta_y = Some(f64::from(f32::from(delta.y)));
-                                p.delta_mode = Some(0);
-                            }
-                            gpui::ScrollDelta::Lines(delta) => {
-                                p.delta_x = Some(f64::from(delta.x));
-                                p.delta_y = Some(f64::from(delta.y));
-                                p.delta_mode = Some(1);
-                            }
-                        }
-
-                        p.touch_phase = Some(match scroll_event.touch_phase {
-                            gpui::TouchPhase::Started => "started".to_string(),
-                            gpui::TouchPhase::Moved => "moved".to_string(),
-                            gpui::TouchPhase::Ended => "ended".to_string(),
-                            gpui::TouchPhase::Cancelled => "cancelled".to_string(),
-                        });
+                        apply_wheel_delta(p, scroll_event);
                     });
                 });
             }
@@ -9217,6 +9196,43 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
 /// Helper to convert a GPUI Point<Pixels> to (f64, f64).
 pub(crate) fn point_to_xy(p: gpui::Point<gpui::Pixels>) -> (f64, f64) {
     (f64::from(f32::from(p.x)), f64::from(f32::from(p.y)))
+}
+
+/// Fill the DOM `WheelEvent` fields of a payload from a GPUI wheel event.
+///
+/// A `ScrollDelta` is the negation of the DOM delta: it says how far the
+/// content moves, while `WheelEvent` says how far the view scrolls. GPUI's own
+/// browser platform negates on the way in
+/// (`gpui_web::events::register_wheel`), so this negates on the way out and
+/// `deltaY > 0` means "scrolled down" on every platform.
+pub(crate) fn apply_wheel_delta(p: &mut EventPayload, event: &gpui::ScrollWheelEvent) {
+    p.modifiers = Some(event.modifiers.into());
+    p.precise = Some(event.delta.precise());
+    p.delta_z = Some(0.0);
+    // Subtract rather than negate: `-0.0` would survive into JSON, and a
+    // motionless axis reports 0 in the DOM.
+    let dom_delta = |value: f32| f64::from(0.0f32 - value);
+    match event.delta {
+        gpui::ScrollDelta::Pixels(delta) => {
+            p.delta_x = Some(dom_delta(f32::from(delta.x)));
+            p.delta_y = Some(dom_delta(f32::from(delta.y)));
+            p.delta_mode = Some(0);
+        }
+        gpui::ScrollDelta::Lines(delta) => {
+            p.delta_x = Some(dom_delta(delta.x));
+            p.delta_y = Some(dom_delta(delta.y));
+            p.delta_mode = Some(1);
+        }
+    }
+    p.touch_phase = Some(
+        match event.touch_phase {
+            gpui::TouchPhase::Started => "started",
+            gpui::TouchPhase::Moved => "moved",
+            gpui::TouchPhase::Ended => "ended",
+            gpui::TouchPhase::Cancelled => "cancelled",
+        }
+        .to_string(),
+    );
 }
 
 /// Convert GPUI MouseButton to our u32 encoding: 0=left, 1=middle, 2=right.

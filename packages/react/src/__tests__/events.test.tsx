@@ -2087,10 +2087,12 @@ describeNative("events", () => {
           cancelable: event.cancelable,
         }))
       ).toEqual([
+        // A GPUI ScrollDelta is the negation of a DOM delta, so a downward
+        // wheel (-50 to GPUI) reaches the handler as deltaY: 50.
         {
           type: "wheel",
           deltaX: 0,
-          deltaY: -50,
+          deltaY: 50,
           deltaZ: 0,
           deltaMode: 0,
           bubbles: true,
@@ -2098,14 +2100,38 @@ describeNative("events", () => {
         },
         {
           type: "wheel",
-          deltaX: 2,
-          deltaY: -3,
+          deltaX: -2,
+          deltaY: 3,
           deltaZ: 0,
           deltaMode: 1,
           bubbles: true,
           cancelable: true,
         },
       ])
+    })
+
+    it("delivers wheel deltas to a canvas", () => {
+      const wheels: Array<{ type: string; deltaY: number | undefined }> = []
+
+      testRoot.render(
+        <canvas
+          width={200}
+          height={200}
+          testId="wheel-canvas"
+          style={{ width: 200, height: 200 }}
+          onWheel={(event) => wheels.push({ type: event.type, deltaY: event.deltaY })}
+        />
+      )
+      const canvas = testRoot.renderer.findByTestId("wheel-canvas")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(canvas.id)!
+      testRoot.renderer.nativeSimulateScrollWheel(
+        x + width / 2,
+        y + height / 2,
+        0,
+        -50
+      )
+
+      expect(wheels).toEqual([{ type: "wheel", deltaY: 50 }])
     })
 
     it("fires non-bubbling scroll after the position changes", () => {
@@ -3509,7 +3535,7 @@ describeNative("events", () => {
       testRoot.render(<Canvas />)
       testRoot.renderer.nativeSimulateScrollWheel(100, 60, 0, -80)
 
-      expect(deltas).toEqual([-80])
+      expect(deltas).toEqual([80])
     })
 
     it("lets an absolute sibling pass the wheel to a scroller below it", () => {

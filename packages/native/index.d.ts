@@ -653,11 +653,13 @@ export interface EventPayload {
   isHeld?: boolean
   /**
    * Wheel delta on the X axis, in `deltaMode` units.
+   * DOM signs: positive scrolls the view right, as in `WheelEvent`.
    * Populated for: wheel.
    */
   deltaX?: number
   /**
    * Wheel delta on the Y axis, in `deltaMode` units.
+   * DOM signs: positive scrolls the view down, as in `WheelEvent`.
    * Populated for: wheel.
    */
   deltaY?: number

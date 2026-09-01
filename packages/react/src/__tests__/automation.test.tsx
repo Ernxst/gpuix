@@ -1610,12 +1610,13 @@ describeNative("automation", () => {
     render(<Surface />)
     const app = await connectTest(renderer)
 
+    // wheel() takes platform deltas; the handler reads DOM deltas.
     await app.getByTestId("surface").wheel(0, -60)
     await app.getByTestId("surface").wheel(0, -60, { modifiers: "cmd" })
 
     expect(seen).toEqual([
-      { deltaY: -60, cmd: false },
-      { deltaY: -60, cmd: true },
+      { deltaY: 60, cmd: false },
+      { deltaY: 60, cmd: true },
     ])
     await app.close()
   })

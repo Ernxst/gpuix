@@ -891,7 +891,8 @@ export function TimelineApp(props: TimelineAppProps = {}) {
         (pointerX - state.geometry.gridLeft + state.viewport.scrollX) /
         state.viewport.pxPerSecond
       const pxPerSecond = clamp(
-        state.viewport.pxPerSecond * Math.exp(deltaY * 0.005),
+        // Wheel up (negative deltaY, like the DOM) zooms in.
+        state.viewport.pxPerSecond * Math.exp(-deltaY * 0.005),
         MIN_PX_PER_SECOND,
         MAX_PX_PER_SECOND
       )
@@ -906,8 +907,8 @@ export function TimelineApp(props: TimelineAppProps = {}) {
     }
 
     // shift swaps the axis, like every other editor.
-    const panX = event.modifiers?.shift ? -deltaY : -deltaX
-    const panY = event.modifiers?.shift ? 0 : -deltaY
+    const panX = event.modifiers?.shift ? deltaY : deltaX
+    const panY = event.modifiers?.shift ? 0 : deltaY
     setViewport((current) => ({
       ...current,
       scrollX: clamp(current.scrollX + panX, 0, state.maxScrollX),

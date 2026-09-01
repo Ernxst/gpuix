@@ -1199,10 +1199,12 @@ container on the wheel frame, and the JavaScript callback that would move the
 header arrives a frame later, so the header tears away during a fast pan.
 
 When two panes must stay locked to the pixel, own the offset in React: put one
-`onScroll` listener on a non-scrolling parent, keep `scrollX` and `scrollY` in
+`onWheel` listener on a non-scrolling parent, keep `scrollX` and `scrollY` in
 state, and translate each pane's content with an absolutely positioned wrapper.
-Zed does the same; the editor owns its scroll position and paints the gutter and
-the text from it.
+`onWheel` bubbles, so the parent sees every wheel over the panes; `onScroll`
+would not, because it reports a scroll container's own position and does not
+bubble, exactly as in the DOM. Zed does the same; the editor owns its scroll
+position and paints the gutter and the text from it.
 
 ```tsx
 function Pane({ offsetX, children }: { offsetX: number; children: React.ReactNode }) {
@@ -2540,13 +2542,19 @@ text imports no longer need a runtime flag.
 | Key up | `onKeyUp` | `key`, `keyChar`, `modifiers` |
 | Focus | `onFocus` | — |
 | Blur | `onBlur` | — |
-| Scroll | `onScroll` | `deltaX`, `deltaY`, `precise`, `touchPhase`, `modifiers` |
+| Wheel | `onWheel` | `x`, `y`, `deltaX`, `deltaY`, `deltaZ`, `deltaMode`, `precise`, `touchPhase`, `modifiers` |
+| Scroll | `onScroll` | — read `scrollLeft` / `scrollTop` from `currentTarget` |
 | Change | `onChange` | `value` — `<input>` and `<textarea>` only |
 | Submit | `onSubmit` | `value` — `<input>` and `<textarea>` only |
 | Toggle file | `onToggleFile` | `value` (file path) — `<diff>` only |
 | Show more | `onShowMore` | `value` (hidden line count) — `<diff>` only |
 | Line click | `onLineClick` | `value`, `oldLine`, `newLine` — `<diff>` only |
 | Link click | `onLinkClick` | `value` (URL) — `<markdown>` only |
+
+`onWheel` reports the input gesture and bubbles; `onScroll` reports that a
+scroll container's own position changed and does not bubble, as in the DOM.
+Wheel deltas use DOM signs and units: `deltaY` is positive scrolling down, and
+`deltaMode` is `0` for pixels or `1` for lines.
 
 Mouse event payloads expose pointer capture. Capture keeps move and up routed
 to the pressed element across redraws and outside its bounds until mouse up,

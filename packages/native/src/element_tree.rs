@@ -74,10 +74,12 @@ pub struct EventPayload {
 
     // ── Wheel ────────────────────────────────────────────────────────
     /// Wheel delta on the X axis, in `deltaMode` units.
+    /// DOM signs: positive scrolls the view right, as in `WheelEvent`.
     /// Populated for: wheel.
     pub delta_x: Option<f64>,
 
     /// Wheel delta on the Y axis, in `deltaMode` units.
+    /// DOM signs: positive scrolls the view down, as in `WheelEvent`.
     /// Populated for: wheel.
     pub delta_y: Option<f64>,
 
