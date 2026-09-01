@@ -15,7 +15,7 @@
  * pixel. A native `overflow: "scroll"` grid cannot do that: GPUI moves the grid
  * on the wheel frame, and the JS callback that would move the other two panes
  * arrives a frame later, so the ruler tears away from the clips during a fast
- * pan. Instead one `onScroll` listener collects wheel deltas, `scrollX` and
+ * pan. Instead one `onWheel` listener collects wheel deltas, `scrollX` and
  * `scrollY` live in React, and all three panes translate their content from the
  * same numbers. Zed does the same: the editor owns its scroll position and
  * paints the gutter and the text from it.
@@ -1164,7 +1164,7 @@ export function TimelineApp(props: TimelineAppProps = {}) {
         </div>
       </div>
 
-      {/* Timeline panel. One onScroll listener pans every pane. */}
+      {/* Timeline panel. One onWheel listener pans every pane. */}
       <div
         testId="timeline-panel"
         style={{
@@ -1176,7 +1176,7 @@ export function TimelineApp(props: TimelineAppProps = {}) {
           borderColor: C.border,
           backgroundColor: C.panel,
         }}
-        onScroll={onWheel}
+        onWheel={onWheel}
       >
         {/* Ruler row */}
         <div style={{ display: 'flex', flexDirection: 'row', height: RULER_HEIGHT }}>

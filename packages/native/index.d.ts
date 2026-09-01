@@ -652,23 +652,34 @@ export interface EventPayload {
    */
   isHeld?: boolean
   /**
-   * Scroll delta on the X axis (pixels or lines, see `precise`).
-   * Populated for: scroll.
+   * Wheel delta on the X axis, in `deltaMode` units.
+   * Populated for: wheel.
    */
   deltaX?: number
   /**
-   * Scroll delta on the Y axis (pixels or lines, see `precise`).
-   * Populated for: scroll.
+   * Wheel delta on the Y axis, in `deltaMode` units.
+   * Populated for: wheel.
    */
   deltaY?: number
   /**
+   * Wheel delta on the Z axis, in `deltaMode` units.
+   * GPUI currently supplies two-dimensional wheel input, so this is 0.
+   * Populated for: wheel.
+   */
+  deltaZ?: number
+  /**
+   * DOM WheelEvent deltaMode: 0=pixels, 1=lines, 2=pages.
+   * Populated for: wheel.
+   */
+  deltaMode?: number
+  /**
    * true = pixel-precise (trackpad), false = line-based (mouse wheel).
-   * Populated for: scroll.
+   * Populated for: wheel.
    */
   precise?: boolean
   /**
-   * Touch phase for scroll: "started", "moved", "ended".
-   * Populated for: scroll (trackpad gestures).
+   * Touch phase for wheel: "started", "moved", "ended".
+   * Populated for: wheel (trackpad gestures).
    */
   touchPhase?: string
   /**

@@ -72,21 +72,30 @@ pub struct EventPayload {
     /// Populated for: keyDown.
     pub is_held: Option<bool>,
 
-    // ── Scroll ───────────────────────────────────────────────────────
-    /// Scroll delta on the X axis (pixels or lines, see `precise`).
-    /// Populated for: scroll.
+    // ── Wheel ────────────────────────────────────────────────────────
+    /// Wheel delta on the X axis, in `deltaMode` units.
+    /// Populated for: wheel.
     pub delta_x: Option<f64>,
 
-    /// Scroll delta on the Y axis (pixels or lines, see `precise`).
-    /// Populated for: scroll.
+    /// Wheel delta on the Y axis, in `deltaMode` units.
+    /// Populated for: wheel.
     pub delta_y: Option<f64>,
 
+    /// Wheel delta on the Z axis, in `deltaMode` units.
+    /// GPUI currently supplies two-dimensional wheel input, so this is 0.
+    /// Populated for: wheel.
+    pub delta_z: Option<f64>,
+
+    /// DOM WheelEvent deltaMode: 0=pixels, 1=lines, 2=pages.
+    /// Populated for: wheel.
+    pub delta_mode: Option<u32>,
+
     /// true = pixel-precise (trackpad), false = line-based (mouse wheel).
-    /// Populated for: scroll.
+    /// Populated for: wheel.
     pub precise: Option<bool>,
 
-    /// Touch phase for scroll: "started", "moved", "ended".
-    /// Populated for: scroll (trackpad gestures).
+    /// Touch phase for wheel: "started", "moved", "ended".
+    /// Populated for: wheel (trackpad gestures).
     pub touch_phase: Option<String>,
 
     // ── Hover ────────────────────────────────────────────────────────
@@ -152,6 +161,8 @@ impl Default for EventPayload {
             is_held: None,
             delta_x: None,
             delta_y: None,
+            delta_z: None,
+            delta_mode: None,
             precise: None,
             touch_phase: None,
             hovered: None,

@@ -32,7 +32,7 @@ function LiveScrollWheel() {
       <div
         testId="scroll-target"
         style={{ height: 220, overflow: "scroll", backgroundColor: "#262626", padding: 12 }}
-        onScroll={(event: EventPayload) =>
+        onWheel={(event: EventPayload) =>
           setLastWheel(
             `${event.touchPhase ?? "unknown"}: ${event.deltaX ?? 0}, ${event.deltaY ?? 0}; alt=${event.modifiers?.alt ?? false}`
           )

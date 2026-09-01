@@ -5163,6 +5163,10 @@ pub(crate) struct GpuixView {
     /// Created lazily for elements with overflow: "scroll" (or per-axis scroll).
     /// Handles persist across renders so GPUI maintains scroll offset state.
     pub(crate) scroll_handles: HashMap<u64, gpui::ScrollHandle>,
+    /// Last painted offsets for scrollable elements with `onScroll`.
+    /// Paint is the first point after GPUI has clamped and applied a wheel or
+    /// programmatic position change, so comparing here reports position changes.
+    scroll_event_offsets: Arc<Mutex<HashMap<u64, gpui::Point<gpui::Pixels>>>>,
     /// Minimal-scroll anchors for focusable elements and nested scrollers.
     /// Each anchor targets the nearest ordinary overflow ancestor; virtual
     /// lists use their item-aware `ListState` path instead.
@@ -5403,6 +5407,7 @@ impl GpuixView {
             focus_subscriptions: HashMap::new(),
             custom_registry: CustomElementRegistry::with_defaults(),
             scroll_handles: HashMap::new(),
+            scroll_event_offsets: Arc::new(Mutex::new(HashMap::new())),
             focus_scroll_anchors: HashMap::new(),
             motion_states: HashMap::new(),
             interactive_style_states: HashMap::new(),
@@ -5626,6 +5631,7 @@ impl GpuixView {
             focus_handles: &self.focus_handles,
             focus_scroll_anchors: &self.focus_scroll_anchors,
             scroll_handles: &mut self.scroll_handles,
+            scroll_event_offsets: &self.scroll_event_offsets,
             custom_registry: &mut self.custom_registry,
             virtual_lists: &mut self.virtual_lists,
             motion_states: &mut self.motion_states,
@@ -5754,6 +5760,7 @@ pub(crate) struct BuildCtx<'a> {
     pub focus_handles: &'a HashMap<u64, gpui::FocusHandle>,
     focus_scroll_anchors: &'a HashMap<u64, FocusScrollAnchor>,
     pub scroll_handles: &'a mut HashMap<u64, gpui::ScrollHandle>,
+    scroll_event_offsets: &'a Arc<Mutex<HashMap<u64, gpui::Point<gpui::Pixels>>>>,
     pub custom_registry: &'a mut CustomElementRegistry,
     virtual_lists: &'a mut HashMap<u64, VirtualListEntry>,
     pub motion_states: &'a mut HashMap<u64, crate::motion::MotionState>,
@@ -6952,6 +6959,10 @@ impl gpui::Render for GpuixView {
         // from scroll to non-scroll) is handled inside build_host_container().
         self.scroll_handles
             .retain(|id, _| tree.elements.contains_key(id));
+        self.scroll_event_offsets
+            .lock()
+            .unwrap()
+            .retain(|id, _| tree.elements.contains_key(id));
         self.virtual_lists
             .retain(|id, _| tree.elements.contains_key(id));
         self.motion_states
@@ -6993,6 +7004,7 @@ impl gpui::Render for GpuixView {
                     focus_handles: &self.focus_handles,
                     focus_scroll_anchors: &self.focus_scroll_anchors,
                     scroll_handles: &mut self.scroll_handles,
+                    scroll_event_offsets: &self.scroll_event_offsets,
                     custom_registry: &mut self.custom_registry,
                     virtual_lists: &mut self.virtual_lists,
                     motion_states: &mut self.motion_states,
@@ -7931,6 +7943,34 @@ fn is_hover_target_descendant(tree: &RetainedTree, descendant: u64, ancestor: u6
     false
 }
 
+fn scroll_position_tracker(
+    id: u64,
+    handle: gpui::ScrollHandle,
+    offsets: Arc<Mutex<HashMap<u64, gpui::Point<gpui::Pixels>>>>,
+    callback: Option<EventCallback>,
+) -> gpui::AnyElement {
+    use gpui::prelude::*;
+
+    gpui::canvas(
+        |bounds, _, _| bounds,
+        move |_, _, _, _| {
+            let offset = handle.offset();
+            let changed = {
+                let mut offsets = offsets.lock().unwrap();
+                offsets
+                    .insert(id, offset)
+                    .is_some_and(|previous| previous != offset)
+            };
+            if changed {
+                emit_event_full(&callback, id, "scroll", |_| {});
+            }
+        },
+    )
+    .absolute()
+    .size_full()
+    .into_any_element()
+}
+
 /// The one builder for `<div>` and `<text>`.
 ///
 /// Both get the same stable GPUI id, so gpui keeps their interactive element
@@ -8029,6 +8069,7 @@ pub(crate) fn build_host_container(
     // wide child fills the parent instead of overflowing. Zed's code-block path:
     // flex + min_w_0 on the scroller, flex_none on the child.
     let mut overflow_x_only = false;
+    let mut scroll_tracker = None;
     if let Some(style) = style {
         // Resolve each axis: axis-specific overrides shorthand.
         let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
@@ -8061,15 +8102,34 @@ pub(crate) fn build_host_container(
             let handle = ctx
                 .scroll_handles
                 .entry(element.id)
-                .or_insert_with(gpui::ScrollHandle::new);
-            el = el.track_scroll(handle);
+                .or_insert_with(gpui::ScrollHandle::new)
+                .clone();
+            el = el.track_scroll(&handle);
+
+            if element.events.contains("scroll") {
+                ctx.scroll_event_offsets
+                    .lock()
+                    .unwrap()
+                    .entry(element.id)
+                    .or_insert_with(|| handle.offset());
+                scroll_tracker = Some(scroll_position_tracker(
+                    element.id,
+                    handle,
+                    ctx.scroll_event_offsets.clone(),
+                    ctx.event_callback.clone(),
+                ));
+            } else {
+                ctx.scroll_event_offsets.lock().unwrap().remove(&element.id);
+            }
         } else {
             // Element is no longer scrollable — remove stale handle.
             ctx.scroll_handles.remove(&element.id);
+            ctx.scroll_event_offsets.lock().unwrap().remove(&element.id);
         }
     } else {
         // No style at all — remove stale handle if it existed.
         ctx.scroll_handles.remove(&element.id);
+        ctx.scroll_event_offsets.lock().unwrap().remove(&element.id);
     }
 
     // If a FocusHandle was pre-created for this element (by sync_focus_handles),
@@ -8085,6 +8145,9 @@ pub(crate) fn build_host_container(
         selection_start_flag(style),
         paint_bounds_listener,
     ));
+    if let Some(scroll_tracker) = scroll_tracker {
+        el = el.child(scroll_tracker);
+    }
 
     let native_disabled =
         crate::accessibility::is_native_disabled(element) || ctx.inherited.accessibility_hidden;
@@ -8164,22 +8227,28 @@ pub(crate) fn build_host_container(
                 });
             }
 
-            // ── Scroll wheel ─────────────────────────────────────
-            "scroll" => {
+            // ── Wheel ────────────────────────────────────────────
+            "wheel" => {
                 el = el.on_scroll_wheel(move |scroll_event, _window, _cx| {
-                    emit_event_full(&callback, id, "scroll", |p| {
+                    emit_event_full(&callback, id, "wheel", |p| {
                         let (x, y) = point_to_xy(scroll_event.position);
                         p.x = Some(x);
                         p.y = Some(y);
                         p.modifiers = Some(scroll_event.modifiers.into());
                         p.precise = Some(scroll_event.delta.precise());
-
-                        // Convert ScrollDelta to pixel values.
-                        // For Lines delta, we use a default line height of 20px.
-                        let line_height = gpui::px(20.0);
-                        let pixel_delta = scroll_event.delta.pixel_delta(line_height);
-                        p.delta_x = Some(f64::from(f32::from(pixel_delta.x)));
-                        p.delta_y = Some(f64::from(f32::from(pixel_delta.y)));
+                        p.delta_z = Some(0.0);
+                        match scroll_event.delta {
+                            gpui::ScrollDelta::Pixels(delta) => {
+                                p.delta_x = Some(f64::from(f32::from(delta.x)));
+                                p.delta_y = Some(f64::from(f32::from(delta.y)));
+                                p.delta_mode = Some(0);
+                            }
+                            gpui::ScrollDelta::Lines(delta) => {
+                                p.delta_x = Some(f64::from(delta.x));
+                                p.delta_y = Some(f64::from(delta.y));
+                                p.delta_mode = Some(1);
+                            }
+                        }
 
                         p.touch_phase = Some(match scroll_event.touch_phase {
                             gpui::TouchPhase::Started => "started".to_string(),

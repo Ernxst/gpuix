@@ -144,6 +144,7 @@ export function renderSlot({
     onFocus: composeHandlers(childProps.onFocus, props.onFocus),
     onBlur: composeHandlers(childProps.onBlur, props.onBlur),
     onScroll: composeHandlers(childProps.onScroll, props.onScroll),
+    onWheel: composeHandlers(childProps.onWheel, props.onWheel),
     onChange: composeHandlers(childProps.onChange, props.onChange),
     onSubmit: composeHandlers(childProps.onSubmit, props.onSubmit),
   }
