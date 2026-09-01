@@ -689,6 +689,62 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     compatibility.unmount()
   })
 
+  it("diagnoses className on mount and update and points to the style prop", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const strictCreate = createTestRoot({ strictStyles: true })
+    strictCreate.render(
+      <div
+        testId="strict-class-name"
+        {...({ className: "rounded-lg" } as Record<string, string>)}
+      />
+    )
+
+    const strictUpdate = createTestRoot({ strictStyles: true })
+    strictUpdate.render(<div testId="strict-class-name-update" />)
+    strictUpdate.render(
+      <div
+        testId="strict-class-name-update"
+        {...({ className: "text-sm" } as Record<string, string>)}
+      />
+    )
+
+    expect(error.mock.calls.flat()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "UnsupportedClassNamePropError",
+          message: expect.stringMatching(/className.*style prop/),
+        }),
+      ])
+    )
+    strictCreate.unmount()
+    strictUpdate.unmount()
+    error.mockRestore()
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const compatibility = createTestRoot({ strictStyles: false })
+    compatibility.render(<div testId="compat-class-name" />)
+    compatibility.render(
+      <div
+        testId="compat-class-name"
+        {...({ className: "bg-slate-900" } as Record<string, string>)}
+      />
+    )
+    compatibility.render(
+      <div
+        testId="compat-class-name"
+        {...({ className: "bg-slate-800" } as Record<string, string>)}
+      />
+    )
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /<div testId="compat-class-name">.*does not support className.*style prop/
+      )
+    )
+    compatibility.unmount()
+  })
+
   it("validates outline and focus-visible fields with their full property paths", () => {
     const renderer = new TestRenderer()
     renderer.createElement(101, "div")
