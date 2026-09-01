@@ -41,6 +41,15 @@ const corruptCanvasImageFixture = fileURLToPath(
   new URL("../../canvas-goldens/__fixtures__/canvas-image-corrupt.png", import.meta.url)
 )
 
+function distinctCanvasImagePath(index: number): string {
+  const separator = canvasImageFixture.lastIndexOf("/")
+  return (
+    canvasImageFixture.slice(0, separator + 1) +
+    "./".repeat(index + 1) +
+    canvasImageFixture.slice(separator + 1)
+  )
+}
+
 async function waitForCanvasImages(
   renderer: TestRenderer,
   elementId: number,
@@ -60,6 +69,26 @@ async function waitForCanvasImages(
   }
   throw new Error(
     `Canvas ${elementId} did not paint ${expected} images: ` +
+      JSON.stringify(renderer.getCanvasState(elementId))
+  )
+}
+
+async function waitForCanvasState(
+  renderer: TestRenderer,
+  elementId: number,
+  predicate: (
+    state: NonNullable<ReturnType<TestRenderer["getCanvasState"]>>
+  ) => boolean,
+  description: string
+) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    renderer.flush()
+    const state = renderer.getCanvasState(elementId)
+    if (state && predicate(state)) return state
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  throw new Error(
+    `Canvas ${elementId} did not ${description}: ` +
       JSON.stringify(renderer.getCanvasState(elementId))
   )
 }
@@ -373,11 +402,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       shared.src = canvasImageFixture
       for (let index = 0; index < 64; index += 1) {
         const image = new Image()
-        const separator = canvasImageFixture.lastIndexOf("/")
-        image.src =
-          canvasImageFixture.slice(0, separator + 1) +
-          "./".repeat(index + 1) +
-          canvasImageFixture.slice(separator + 1)
+        image.src = distinctCanvasImagePath(index)
         const x = (index % 8) * 32
         const y = Math.floor(index / 8) * 24
         actualContext.drawImage(image, x, y, 32, 24)
@@ -420,6 +445,210 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       expectedRoot.unmount()
       actualRenderer.dispose()
       expectedRenderer.dispose()
+    }
+  }, 20_000)
+
+  it("bounds atlas occupancy across canvas image churn", async () => {
+    const testRoot = createTestRoot({ width: 64, height: 48 })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    const images: HTMLImageElement[] = []
+    const actualPath = path.join(SHOTS_DIR, "canvas-atlas-revisit-actual.png")
+    const expectedPath = path.join(SHOTS_DIR, "canvas-atlas-before-eviction.png")
+    try {
+      testRoot.render(<canvas ref={canvasRef} width={64} height={48} />)
+      const context = canvasRef.current!.getContext("2d")!
+      const id = canvasRef.current!.id
+
+      for (let index = 0; index < 80; index += 1) {
+        const image = new Image()
+        image.src = distinctCanvasImagePath(index)
+        images.push(image)
+        await image.decode()
+        context.clearRect(0, 0, 64, 48)
+        context.drawImage(image, 0, 0)
+        flushRecordingContext2D(context)
+        testRoot.renderer.flush()
+        if (index === 0) {
+          await waitForCanvasImages(testRoot.renderer, id, 1)
+          testRoot.renderer.captureScreenshot(expectedPath)
+        }
+      }
+
+      const state = await waitForCanvasState(
+        testRoot.renderer,
+        id,
+        (candidate) => candidate.paintedImageCount === 80,
+        "paint 80 distinct images"
+      )
+      expect(state).toMatchObject({
+        imageCount: 1,
+        loadedImageCount: 1,
+        paintedImageCount: 80,
+        atlasTileCount: 64,
+        releasedAtlasTileCount: 16,
+      })
+
+      context.clearRect(0, 0, 64, 48)
+      context.drawImage(images[0], 0, 0)
+      flushRecordingContext2D(context)
+      const revisited = await waitForCanvasState(
+        testRoot.renderer,
+        id,
+        (candidate) => candidate.releasedAtlasTileCount === 17,
+        "re-upload the least-recently-used image"
+      )
+      expect(revisited).toMatchObject({
+        imageCount: 1,
+        loadedImageCount: 1,
+        paintedImageCount: 80,
+        atlasTileCount: 64,
+        releasedAtlasTileCount: 17,
+      })
+
+      testRoot.renderer.flush()
+      testRoot.renderer.captureScreenshot(actualPath)
+      const comparison = testRoot.renderer.compareImages(expectedPath, actualPath, 0)
+      expect(comparison.differingPixelRatio).toBeLessThanOrEqual(0.03)
+      expect(comparison.maxChannelDelta).toBeLessThanOrEqual(16)
+      expect(comparison.maxChannelDeltaOutsideGoldenContour).toBe(0)
+      expect(comparison.erodedGeometryMismatchRatio).toBe(0)
+    } finally {
+      testRoot.unmount()
+    }
+  }, 20_000)
+
+  it("bounds atlas occupancy across opacity churn of a live image", async () => {
+    const width = 64
+    const height = 48
+    const testRoot = createTestRoot({ width, height })
+    const expectedRoot = createTestRoot({ width, height })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    const expectedRef = createRef<CanvasPublicInstance>()
+    const actualPath = path.join(SHOTS_DIR, "canvas-atlas-opacity-actual.png")
+    const expectedPath = path.join(SHOTS_DIR, "canvas-atlas-opacity-expected.png")
+    try {
+      testRoot.render(<canvas ref={canvasRef} width={width} height={height} />)
+      expectedRoot.render(<canvas ref={expectedRef} width={width} height={height} />)
+      const context = canvasRef.current!.getContext("2d")!
+      const expectedContext = expectedRef.current!.getContext("2d")!
+      const image = new Image()
+      image.src = canvasImageFixture
+      await image.decode()
+      const id = canvasRef.current!.id
+
+      for (let index = 0; index < 80; index += 1) {
+        context.clearRect(0, 0, width, height)
+        context.globalAlpha = (index + 1) / 100
+        context.drawImage(image, 0, 0)
+        flushRecordingContext2D(context)
+        testRoot.renderer.flush()
+      }
+
+      const state = await waitForCanvasState(
+        testRoot.renderer,
+        id,
+        (candidate) => candidate.paintedImageCount === 80,
+        "paint 80 opacity variants of one live image"
+      )
+      expect(state).toMatchObject({
+        imageCount: 1,
+        loadedImageCount: 1,
+        paintedImageCount: 80,
+        atlasTileCount: 64,
+        releasedAtlasTileCount: 16,
+      })
+
+      expectedContext.globalAlpha = 0.8
+      expectedContext.drawImage(image, 0, 0)
+      flushRecordingContext2D(expectedContext)
+      await waitForCanvasImages(expectedRoot.renderer, expectedRef.current!.id, 1)
+
+      testRoot.renderer.requestFrame(() => {})
+      testRoot.renderer.flush()
+      expect(testRoot.renderer.getCanvasState(id)).toMatchObject({
+        atlasTileCount: 64,
+        releasedAtlasTileCount: 16,
+      })
+
+      testRoot.renderer.captureScreenshot(actualPath)
+      expectedRoot.renderer.captureScreenshot(expectedPath)
+      const comparison = testRoot.renderer.compareImages(expectedPath, actualPath, 0)
+      expect(comparison.differingPixelRatio).toBeLessThanOrEqual(0.03)
+      expect(comparison.maxChannelDelta).toBeLessThanOrEqual(16)
+      expect(comparison.maxChannelDeltaOutsideGoldenContour).toBe(0)
+      expect(comparison.erodedGeometryMismatchRatio).toBe(0)
+    } finally {
+      testRoot.unmount()
+      expectedRoot.unmount()
+    }
+  }, 20_000)
+
+  it("keeps every in-use atlas tile when live images exceed the budget", async () => {
+    const width = 260
+    const height = 80
+    const testRoot = createTestRoot({ width, height })
+    const expectedRoot = createTestRoot({ width, height })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    const expectedRef = createRef<CanvasPublicInstance>()
+    const images: HTMLImageElement[] = []
+    const actualPath = path.join(SHOTS_DIR, "canvas-atlas-live-set-actual.png")
+    const expectedPath = path.join(SHOTS_DIR, "canvas-atlas-live-set-expected.png")
+    try {
+      testRoot.render(<canvas ref={canvasRef} width={width} height={height} />)
+      expectedRoot.render(<canvas ref={expectedRef} width={width} height={height} />)
+      const context = canvasRef.current!.getContext("2d")!
+      const expectedContext = expectedRef.current!.getContext("2d")!
+      const id = canvasRef.current!.id
+
+      const inactive = new Image()
+      inactive.src = distinctCanvasImagePath(0)
+      images.push(inactive)
+      await inactive.decode()
+      context.drawImage(inactive, 0, 0, 20, 16)
+      flushRecordingContext2D(context)
+      await waitForCanvasImages(testRoot.renderer, id, 1)
+
+      context.clearRect(0, 0, width, height)
+      const expectedImage = new Image()
+      expectedImage.src = canvasImageFixture
+      for (let index = 1; index <= 65; index += 1) {
+        const image = new Image()
+        image.src = distinctCanvasImagePath(index)
+        images.push(image)
+        const x = ((index - 1) % 13) * 20
+        const y = Math.floor((index - 1) / 13) * 16
+        context.drawImage(image, x, y, 20, 16)
+        expectedContext.drawImage(expectedImage, x, y, 20, 16)
+      }
+      flushRecordingContext2D(context)
+      flushRecordingContext2D(expectedContext)
+
+      const state = await waitForCanvasState(
+        testRoot.renderer,
+        id,
+        (candidate) =>
+          candidate.loadedImageCount === 65 && candidate.paintedImageCount === 66,
+        "paint 65 simultaneously live images"
+      )
+      expect(state).toMatchObject({
+        imageCount: 65,
+        loadedImageCount: 65,
+        paintedImageCount: 66,
+        atlasTileCount: 65,
+        releasedAtlasTileCount: 1,
+      })
+      await waitForCanvasImages(expectedRoot.renderer, expectedRef.current!.id, 1)
+      testRoot.renderer.captureScreenshot(actualPath)
+      expectedRoot.renderer.captureScreenshot(expectedPath)
+      expect(testRoot.renderer.compareImages(expectedPath, actualPath, 0)).toEqual({
+        differingPixelRatio: 0,
+        maxChannelDelta: 0,
+        maxChannelDeltaOutsideGoldenContour: 0,
+        erodedGeometryMismatchRatio: 0,
+      })
+    } finally {
+      testRoot.unmount()
+      expectedRoot.unmount()
     }
   }, 20_000)
 

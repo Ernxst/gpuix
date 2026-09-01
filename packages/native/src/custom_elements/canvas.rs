@@ -1463,6 +1463,20 @@ impl CustomElement for CanvasElement {
             window,
             cx,
         );
+        let live_image_ids = retained_list
+            .as_deref()
+            .into_iter()
+            .flat_map(|list| &list.items)
+            .filter_map(|item| match item {
+                crate::canvas::DisplayItem::DrawImage(image) => ctx
+                    .canvas_image_store
+                    .loaded_with_opacity(&image.source.key, image.opacity)
+                    .map(|data| data.id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        ctx.canvas_image_store
+            .sync_live_images(id, &live_image_ids, window);
         let geometry = self.geometry.clone();
         let prepared_cache = self.prepared.clone();
         let test_state = self.test_state.clone();
