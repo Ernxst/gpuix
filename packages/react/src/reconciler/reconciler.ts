@@ -8,8 +8,17 @@ import {
   detachCanvasImageLoader,
 } from "../canvas/image.js"
 import { GpuixContext } from "../hooks/use-gpuix.js"
-import type { Container, ElementIdAllocator, NativeRenderer } from "../types/host.js"
-import { wrapWithBatching } from "./batch-renderer.js"
+import type {
+  Container,
+  ElementIdAllocator,
+  NativeRenderer,
+  StyleDiagnostic,
+} from "../types/host.js"
+import {
+  enqueueRendererDiagnostic,
+  installRendererDiagnosticChannel,
+  wrapWithBatching,
+} from "./batch-renderer.js"
 import { attachRoot, detachRoot } from "./event-registry.js"
 import { hostConfig } from "./host-config.js"
 
@@ -49,14 +58,39 @@ const _r = reconciler as typeof reconciler & {
 }
 export const flushSync = _r.flushSyncFromReconciler ?? _r.flushSync
 
+export interface RootFailure {
+  readonly status: "failed"
+  readonly error: unknown
+  readonly componentStack: string | null
+  readonly diagnostic: StyleDiagnostic
+}
+
+export type RootStatus =
+  | { readonly status: "active" }
+  | RootFailure
+  | { readonly status: "unmounted" }
+
 export interface Root {
   render: (node: ReactNode) => void
   unmount: () => void
+  /** The root stays failed after cleanup so consumers can inspect the fatal cause. */
+  getStatus: () => RootStatus
 }
 
 export interface RootOptions {
   /** Reject invalid fields and emit actionable diagnostics. Defaults on in non-production Node runtimes. */
   strictStyles?: boolean
+  /** Receives the fatal state React records instead of rethrowing an uncaught root error. */
+  onUncaughtError?: (failure: RootFailure) => void
+}
+
+function describeThrownValue(error: unknown): string {
+  try {
+    if (error instanceof Error) return `${error.name}: ${error.message}`
+    return String(error)
+  } catch {
+    return "<unprintable thrown value>"
+  }
 }
 
 declare const Bun: {
@@ -97,6 +131,7 @@ function idAllocatorFor(renderer: NativeRenderer): ElementIdAllocator {
 
 export function createRoot(renderer: NativeRenderer, options: RootOptions = {}): Root {
   const strictStyles = options.strictStyles ?? strictStylesDefault()
+  installRendererDiagnosticChannel(renderer)
   renderer.setStrictStyles?.(strictStyles)
   attachCanvasImageLoader(renderer)
   let container: OpaqueRoot | null = null
@@ -112,6 +147,7 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
   }
   attachRoot(renderer, gpuixContainer)
   attachRoot(batchedRenderer, gpuixContainer)
+  let status: RootStatus = { status: "active" }
 
   const cleanup = (): void => {
     if (container) {
@@ -124,6 +160,37 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     detachRoot(renderer, gpuixContainer)
     detachRoot(batchedRenderer, gpuixContainer)
     detachCanvasImageLoader(renderer)
+    if (status.status === "active") status = { status: "unmounted" }
+  }
+
+  const handleUncaughtError = (
+    error: unknown,
+    errorInfo?: { componentStack?: string | null }
+  ): void => {
+    if (status.status === "failed") return
+
+    const diagnostic: StyleDiagnostic = {
+      // Host ids start at 1, so zero identifies the container itself.
+      elementId: 0,
+      elementType: "root",
+      property: "status",
+      value: '"failed"',
+      message:
+        `[gpuix] React root is dead after an uncaught render error: ` +
+        describeThrownValue(error),
+    }
+    const failure: RootFailure = {
+      status: "failed",
+      error,
+      componentStack: errorInfo?.componentStack ?? null,
+      diagnostic,
+    }
+    status = failure
+    enqueueRendererDiagnostic(renderer, diagnostic)
+    // Keep React's established `(error, errorInfo)` leading arguments for
+    // error observers while adding the otherwise-missing dead-root outcome.
+    console.error(error, errorInfo, diagnostic.message)
+    options.onUncaughtError?.(failure)
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -134,7 +201,7 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     false,
     null,
     "",
-    console.error,
+    handleUncaughtError,
     console.error,
     console.error,
     null
@@ -159,5 +226,6 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     },
 
     unmount: cleanup,
+    getStatus: (): RootStatus => status,
   }
 }

@@ -469,7 +469,18 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     console.log("[gpuix] remount: unmount previous tree")
     slot.root.unmount()
   }
-  const root = createRoot(host, { strictStyles })
+  let root!: Root
+  root = createRoot(host, {
+    strictStyles,
+    onUncaughtError: ({ error }) => {
+      // React 19 reports this from its commit path instead of rethrowing it,
+      // so neither flushSync's catch nor the process guards can observe it.
+      queueMicrotask(() => {
+        if (slot.root !== root) return
+        handleFatalRenderError(slot, error, "uncaught React root error")
+      })
+    },
+  })
   slot.root = root
   try {
     flushSync(() => {
@@ -479,6 +490,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     void terminateRenderSlot(slot, { quit: !injected })
     throw error
   }
+  if (root.getStatus().status === "failed") return root
   if (!injected && slot.renderer instanceof GpuixRenderer) {
     const native = slot.renderer
     slot.loop?.stop()

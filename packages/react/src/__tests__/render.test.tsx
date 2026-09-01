@@ -171,6 +171,33 @@ setTimeout(() => {
 }, 50)
 `
 
+const FATAL_ROOT_PROGRAM = `
+import React from "react"
+import { render } from ${JSON.stringify(join(srcDir, "reconciler/renderer.ts"))}
+
+const renderer = {
+  createElement() {},
+  destroyElement() { return [] },
+  appendChild() {},
+  removeChild() {},
+  insertBefore() {},
+  setStyle() {},
+  setText() {},
+  setEventListener() {},
+  setRoot() {},
+  setCustomProp() {},
+  commitMutations() {},
+  setStrictStyles() {},
+  requestFrame() {},
+}
+
+render(React.createElement("div", { accessibilityRole: "button" }), {
+  renderer,
+  strictStyles: true,
+  onTerminated: () => console.log("FATAL_ROOT_TERMINATED"),
+})
+`
+
 const PROGRAMMATIC_QUIT_PROGRAM = `
 import React, { useEffect } from "react"
 import { render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
@@ -674,6 +701,28 @@ describeNative("render()", () => {
       expect(result.output).toContain("INJECTED_FATAL_HOT_ERROR")
       expect(result.output.match(/^FATAL_REACT_UNMOUNTED$/gm), result.output).toHaveLength(1)
       expect(result.output.match(/^FATAL_TERMINATED$/gm), result.output).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 20_000)
+
+  it("exits with failure when React intercepts an uncaught root error", async () => {
+    const file = join(srcDir, "__tests__", "fatal-root.tmp.tsx")
+    writeFileSync(file, FATAL_ROOT_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file])
+      expect(result.code, result.output).toBe(1)
+      expect(result.signal).toBeNull()
+      expect(result.output).toContain(
+        "React root is dead after an uncaught render error"
+      )
+      expect(
+        result.output.match(/^FATAL_ROOT_TERMINATED$/gm),
+        result.output
+      ).toHaveLength(1)
     } finally {
       try {
         unlinkSync(file)
