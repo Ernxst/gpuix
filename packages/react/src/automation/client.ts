@@ -20,6 +20,7 @@ import {
   type ResultOf,
   type TreeNode,
 } from "./protocol.js"
+import { domKeyName } from "../reconciler/synthetic-event.js"
 import type { RendererCapabilities } from "../types/host.js"
 
 function importNodeModule<T>(specifier: string): Promise<T> {
@@ -992,19 +993,9 @@ export function browserKeystrokeInit(
   }
 
   const keyName = parts.join("-")
-  const key =
-    {
-      backspace: "Backspace",
-      delete: "Delete",
-      down: "ArrowDown",
-      enter: "Enter",
-      escape: "Escape",
-      left: "ArrowLeft",
-      right: "ArrowRight",
-      space: " ",
-      tab: "Tab",
-      up: "ArrowUp",
-    }[keyName.toLowerCase()] ?? keyName
+  // One key table for the whole package: the synthetic-event translation a
+  // handler observes and the browser event this sends must agree.
+  const key = domKeyName(keyName) ?? keyName
   return {
     key,
     altKey: modifiers.has("alt"),

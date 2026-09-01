@@ -1091,6 +1091,95 @@ describeNative("events", () => {
       expect(actions).toEqual(["dismiss", "next", "help", "platform", "back"])
     })
 
+    it("translates the key names other platforms produce", () => {
+      const keys: Array<string | undefined> = []
+
+      testRoot.render(
+        <div tabIndex={0} onKeyDown={(event) => keys.push(event.key)} />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      // Windows sends "menu"; the browser platform lowercases "ContextMenu",
+      // "PrintScreen", and "AltGraph"; Linux sends the XF86 editing keys.
+      for (const key of [
+        "menu",
+        "contextmenu",
+        "printscreen",
+        "altgraph",
+        "cut",
+        "copy",
+        "paste",
+      ]) {
+        handleGpuixEvent(
+          { elementId: target.id, eventType: "keyDown", key },
+          testRoot.renderer
+        )
+      }
+
+      expect(keys).toEqual([
+        "ContextMenu",
+        "ContextMenu",
+        "PrintScreen",
+        "AltGraph",
+        "Cut",
+        "Copy",
+        "Paste",
+      ])
+    })
+
+    it("reports the character a printable key produced", () => {
+      const keys: Array<string | undefined> = []
+
+      testRoot.render(
+        <div tabIndex={0} onKeyDown={(event) => keys.push(event.key)} />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      const presses: Array<{ key: string; keyChar?: string }> = [
+        // Shift+A and Shift+1: GPUI keeps the unshifted key name.
+        { key: "a", keyChar: "A" },
+        { key: "1", keyChar: "!" },
+        { key: "a", keyChar: "a" },
+        // Option-s on macOS types "ß".
+        { key: "s", keyChar: "ß" },
+        // Cmd-S produces no character at all.
+        { key: "s" },
+        // Enter carries a control character, and stays a named key.
+        { key: "enter", keyChar: "\n" },
+      ]
+      for (const press of presses) {
+        handleGpuixEvent(
+          { elementId: target.id, eventType: "keyDown", ...press },
+          testRoot.renderer
+        )
+      }
+
+      expect(keys).toEqual(["A", "!", "a", "ß", "s", "Enter"])
+    })
+
+    it("reports the shifted character through the native key path", () => {
+      const keys: Array<string | undefined> = []
+
+      testRoot.render(
+        <div
+          style={{ width: 100, height: 100 }}
+          tabIndex={0}
+          onKeyDown={(event) => keys.push(event.key)}
+        />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      testRoot.renderer.nativeSimulateKeystrokes(target.id, "shift-a")
+
+      expect(keys).toEqual(["A"])
+    })
+
     it("exposes key repetition as repeat", () => {
       const repeats: boolean[] = []
 

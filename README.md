@@ -1647,7 +1647,7 @@ a `div` when it should receive keyboard focus:
   onFocus={() => setActive(true)}
   onBlur={() => setActive(false)}
   onKeyDown={(event) => {
-    if (event.key === 'enter') submit()
+    if (event.key === 'Enter') submit()
   }}
 >
   Submit
@@ -1670,7 +1670,7 @@ phase to keep focus on the current element, matching the browser:
 <div
   tabIndex={0}
   onKeyDown={(event) => {
-    if (event.key === 'tab') event.preventDefault()
+    if (event.key === 'Tab') event.preventDefault()
   }}
 >
   Editor
