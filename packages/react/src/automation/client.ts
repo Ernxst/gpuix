@@ -21,6 +21,11 @@ import {
   type TreeNode,
 } from "./protocol.js"
 import type { RendererCapabilities } from "../types/host.js"
+import {
+  matches as matchesMatcher,
+  type Matcher,
+  type MatcherOptions,
+} from "../testing-matchers.js"
 
 function importNodeModule<T>(specifier: string): Promise<T> {
   return import(specifier)
@@ -440,10 +445,14 @@ function toKeystrokes(text: string): string {
     .join(" ")
 }
 
+export type LocatorMatcher = Matcher<TreeNode>
+export type LocatorMatcherOptions = MatcherOptions
+
 interface Selector {
-  testId?: string
-  text?: string
+  testId?: LocatorMatcher
+  text?: LocatorMatcher
   type?: string
+  matcherOptions?: LocatorMatcherOptions
   parent?: Selector
 }
 
@@ -454,13 +463,31 @@ function matches(
 ): boolean {
   if (selector.testId != null) {
     const testId = testIdSource === "data" ? node.dataTestId : node.testId
-    if (testId !== selector.testId) return false
+    if (testId === undefined) return false
+    if (!matchesMatcher(testId, node, selector.testId, selector.matcherOptions)) return false
   }
   if (selector.type != null && node.type !== selector.type) return false
-  if (selector.text != null && !(node.text ?? "").includes(selector.text)) {
+  if (
+    selector.text != null &&
+    !matchesMatcher(nodeText(node), node, selector.text, selector.matcherOptions)
+  ) {
     return false
   }
   return true
+}
+
+function nodeText(node: TreeNode): string {
+  return `${node.text ?? ""}${(node.children ?? [])
+    .map((child) => child.text ?? "")
+    .join("")}`
+}
+
+function hasMatchingTextChild(node: TreeNode, selector: Selector): boolean {
+  const matcher = selector.text
+  if (matcher == null) return false
+  return (node.children ?? []).some((child) =>
+    matchesMatcher(nodeText(child), child, matcher, selector.matcherOptions)
+  )
 }
 
 function collect(node: TreeNode | null, selector: Selector): TreeNode[] {
@@ -472,7 +499,12 @@ function collect(node: TreeNode | null, selector: Selector): TreeNode[] {
   const find = (testIdSource: "data" | "legacy"): TreeNode[] => {
     const found: TreeNode[] = []
     const walk = (current: TreeNode) => {
-      if (matches(current, selector, testIdSource)) found.push(current)
+      if (
+        matches(current, selector, testIdSource) &&
+        !hasMatchingTextChild(current, selector)
+      ) {
+        found.push(current)
+      }
       for (const child of current.children ?? []) walk(child)
     }
     for (const root of roots) {
@@ -528,12 +560,20 @@ export class Locator {
     private readonly selector: Selector
   ) {}
 
-  getByTestId(testId: string): Locator {
-    return new Locator(this.app, { testId, parent: this.selector })
+  getByTestId(testId: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return new Locator(this.app, {
+      testId,
+      matcherOptions: options,
+      parent: this.selector,
+    })
   }
 
-  getByText(text: string): Locator {
-    return new Locator(this.app, { text, parent: this.selector })
+  getByText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return new Locator(this.app, {
+      text,
+      matcherOptions: options,
+      parent: this.selector,
+    })
   }
 
   getByType(type: string): Locator {
@@ -772,12 +812,12 @@ export class App {
     return target instanceof Locator ? target.center() : target
   }
 
-  getByTestId(testId: string): Locator {
-    return new Locator(this, { testId })
+  getByTestId(testId: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return new Locator(this, { testId, matcherOptions: options })
   }
 
-  getByText(text: string): Locator {
-    return new Locator(this, { text })
+  getByText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return new Locator(this, { text, matcherOptions: options })
   }
 
   getByType(type: string): Locator {

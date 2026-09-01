@@ -54,6 +54,43 @@ function fakeRenderer(): TestAutomationRenderer {
 }
 
 describe("automation stdio", () => {
+  it("uses Testing Library matcher semantics for text and test IDs", async () => {
+    const renderer = fakeRenderer()
+    renderer.getAutomationTree = () =>
+      JSON.stringify({
+        id: 1,
+        type: "div",
+        testId: "  inc  ",
+        children: [{ id: 2, type: "text", text: "  clicks:\n0  " }],
+      })
+    const app = await connectTest(renderer)
+
+    expect(await app.getByText("clicks: 0").count()).toBe(1)
+    expect(await app.getByText("clicks").count()).toBe(0)
+    expect(await app.getByText("CLICKS", { exact: false }).count()).toBe(1)
+    expect(
+      await app
+        .getByText((content, element) => content === "clicks: 0" && element.id === 2)
+        .count()
+    ).toBe(1)
+    expect(
+      await app
+        .getByText("CLICKS:0", {
+          normalizer: (content) => content.trim().replace(/\s+/g, "").toUpperCase(),
+        })
+        .count()
+    ).toBe(1)
+
+    expect(await app.getByTestId("inc").count()).toBe(1)
+    expect(await app.getByTestId("IN", { exact: false }).count()).toBe(1)
+    expect(
+      await app
+        .getByTestId((content, element) => content === "inc" && element.id === 1)
+        .count()
+    ).toBe(1)
+    await app.close()
+  })
+
   it("forwards platform scroll fields without advancing the renderer", async () => {
     const renderer = fakeRenderer()
     let received: unknown[] | undefined

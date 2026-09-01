@@ -17,6 +17,12 @@ import { fileURLToPath } from "node:url"
 import { createElement, createRef, type ReactNode } from "react"
 import type { EventPayload, MenuSpec } from "@gpuix/native"
 import {
+  matches as matchesMatcher,
+  type Matcher,
+  type MatcherOptions as TestingMatcherOptions,
+  type NormalizerFn,
+} from "./testing-matchers.js"
+import {
   normalizeScrollWheelOptions,
   type NativeScrollWheelOptions,
   type ScrollWheelInput,
@@ -310,8 +316,10 @@ export interface TestElement {
   customProps?: Record<string, unknown>
 }
 
-export type TextMatcher = RegExp | string
-export type TestIdMatcher = RegExp | string
+export type MatcherOptions = TestingMatcherOptions
+export type { NormalizerFn }
+export type TextMatcher = Matcher<TestElement>
+export type TestIdMatcher = Matcher<TestElement>
 export type AccessibleNameMatcher =
   | RegExp
   | string
@@ -326,18 +334,18 @@ export interface ByRoleOptions {
 
 /** Text queries over the GPU-IX desktop test renderer. */
 export interface TextQueries {
-  getByText: (text: TextMatcher) => TestElement
-  queryByText: (text: TextMatcher) => TestElement | null
-  getAllByText: (text: TextMatcher) => TestElement[]
-  queryAllByText: (text: TextMatcher) => TestElement[]
+  getByText: (text: TextMatcher, options?: MatcherOptions) => TestElement
+  queryByText: (text: TextMatcher, options?: MatcherOptions) => TestElement | null
+  getAllByText: (text: TextMatcher, options?: MatcherOptions) => TestElement[]
+  queryAllByText: (text: TextMatcher, options?: MatcherOptions) => TestElement[]
 }
 
 /** Test ID queries over the GPU-IX desktop test renderer. */
 export interface TestIdQueries {
-  getByTestId: (testId: TestIdMatcher) => TestElement
-  queryByTestId: (testId: TestIdMatcher) => TestElement | null
-  getAllByTestId: (testId: TestIdMatcher) => TestElement[]
-  queryAllByTestId: (testId: TestIdMatcher) => TestElement[]
+  getByTestId: (testId: TestIdMatcher, options?: MatcherOptions) => TestElement
+  queryByTestId: (testId: TestIdMatcher, options?: MatcherOptions) => TestElement | null
+  getAllByTestId: (testId: TestIdMatcher, options?: MatcherOptions) => TestElement[]
+  queryAllByTestId: (testId: TestIdMatcher, options?: MatcherOptions) => TestElement[]
 }
 
 /** Computed accessibility-tree queries over the GPU-IX desktop test renderer. */
@@ -1228,9 +1236,9 @@ function getQueries(
   includeScope: boolean
 ): TestQueries {
   return {
-    getByText: (text) => {
+    getByText: (text, options) => {
       const scope = resolveScope()
-      const matches = findAllByText(renderer, scope, text, includeScope)
+      const matches = findAllByText(renderer, scope, text, includeScope, options)
 
       if (matches.length === 0) throw noTextMatchError(renderer, scope, text, includeScope)
       if (matches.length > 1) throw multipleTextMatchesError(renderer, text, matches)
@@ -1240,26 +1248,27 @@ function getQueries(
 
       return match
     },
-    queryByText: (text) => {
+    queryByText: (text, options) => {
       const scope = resolveScope()
-      const matches = findAllByText(renderer, scope, text, includeScope)
+      const matches = findAllByText(renderer, scope, text, includeScope, options)
 
       if (matches.length > 1) throw multipleTextMatchesError(renderer, text, matches)
 
       return matches[0] ?? null
     },
-    getAllByText: (text) => {
+    getAllByText: (text, options) => {
       const scope = resolveScope()
-      const matches = findAllByText(renderer, scope, text, includeScope)
+      const matches = findAllByText(renderer, scope, text, includeScope, options)
 
       if (matches.length === 0) throw noTextMatchError(renderer, scope, text, includeScope)
 
       return matches
     },
-    queryAllByText: (text) => findAllByText(renderer, resolveScope(), text, includeScope),
-    getByTestId: (testId) => {
+    queryAllByText: (text, options) =>
+      findAllByText(renderer, resolveScope(), text, includeScope, options),
+    getByTestId: (testId, options) => {
       const scope = resolveScope()
-      const matches = findAllByTestId(renderer, scope, testId, includeScope)
+      const matches = findAllByTestId(renderer, scope, testId, includeScope, options)
 
       if (matches.length === 0) throw noTestIdMatchError(renderer, scope, testId)
       if (matches.length > 1) throw multipleTestIdMatchesError(renderer, testId, matches)
@@ -1269,22 +1278,23 @@ function getQueries(
 
       return match
     },
-    queryByTestId: (testId) => {
-      const matches = findAllByTestId(renderer, resolveScope(), testId, includeScope)
+    queryByTestId: (testId, options) => {
+      const matches = findAllByTestId(renderer, resolveScope(), testId, includeScope, options)
 
       if (matches.length > 1) throw multipleTestIdMatchesError(renderer, testId, matches)
 
       return matches[0] ?? null
     },
-    getAllByTestId: (testId) => {
+    getAllByTestId: (testId, options) => {
       const scope = resolveScope()
-      const matches = findAllByTestId(renderer, scope, testId, includeScope)
+      const matches = findAllByTestId(renderer, scope, testId, includeScope, options)
 
       if (matches.length === 0) throw noTestIdMatchError(renderer, scope, testId)
 
       return matches
     },
-    queryAllByTestId: (testId) => findAllByTestId(renderer, resolveScope(), testId, includeScope),
+    queryAllByTestId: (testId, options) =>
+      findAllByTestId(renderer, resolveScope(), testId, includeScope, options),
     getByRole: (role, options = {}) => {
       const scope = resolveScope()
       const matches = findAllByRole(renderer, scope, role, options, includeScope)
@@ -1327,12 +1337,13 @@ function findAllByText(
   renderer: TestRenderer,
   scope: TestElement,
   text: TextMatcher,
-  includeScope: boolean
+  includeScope: boolean,
+  options?: MatcherOptions
 ): TestElement[] {
   return getElements(renderer, scope, includeScope).filter(
     (element) =>
-      matchesText(textContent(renderer, element), text) &&
-      !hasMatchingChild(renderer, element, text)
+      matchesMatcher(nodeText(renderer, element), element, text, options) &&
+      !hasMatchingTextChild(renderer, element, text, options)
   )
 }
 
@@ -1340,12 +1351,14 @@ function findAllByTestId(
   renderer: TestRenderer,
   scope: TestElement,
   testId: TestIdMatcher,
-  includeScope: boolean
+  includeScope: boolean,
+  options?: MatcherOptions
 ): TestElement[] {
   return getElements(renderer, scope, includeScope).filter(
     (element) =>
-      (element.dataTestId !== undefined && matchesTestId(element.dataTestId, testId)) ||
-      (element.testId !== undefined && matchesTestId(element.testId, testId))
+      (element.dataTestId !== undefined &&
+        matchesMatcher(element.dataTestId, element, testId, options)) ||
+      (element.testId !== undefined && matchesMatcher(element.testId, element, testId, options))
   )
 }
 
@@ -1472,13 +1485,20 @@ function matchesAccessibleName(
   return matches
 }
 
-function hasMatchingChild(
+function nodeText(renderer: TestRenderer, element: TestElement): string {
+  return `${element.text ?? ""}${getChildren(renderer, element)
+    .map((child) => child.text ?? "")
+    .join("")}`
+}
+
+function hasMatchingTextChild(
   renderer: TestRenderer,
   element: TestElement,
-  text: TextMatcher
+  text: TextMatcher,
+  options?: MatcherOptions
 ): boolean {
   return getChildren(renderer, element).some((child) =>
-    matchesText(textContent(renderer, child), text)
+    matchesMatcher(nodeText(renderer, child), child, text, options)
   )
 }
 
@@ -1503,24 +1523,6 @@ function getElement(renderer: TestRenderer, id: number, relationship: string): T
   return element
 }
 
-function matchesText(content: string, text: TextMatcher): boolean {
-  if (!(text instanceof RegExp)) return content === text
-
-  text.lastIndex = 0
-  const matches = text.test(content)
-  text.lastIndex = 0
-  return matches
-}
-
-function matchesTestId(value: string, testId: TestIdMatcher): boolean {
-  if (!(testId instanceof RegExp)) return value === testId
-
-  testId.lastIndex = 0
-  const matches = testId.test(value)
-  testId.lastIndex = 0
-  return matches
-}
-
 function noTextMatchError(
   renderer: TestRenderer,
   scope: TestElement,
@@ -1528,10 +1530,9 @@ function noTextMatchError(
   includeScope: boolean
 ): Error {
   const nearMisses = getElements(renderer, scope, includeScope)
-    .map((element) => ({ element, content: textContent(renderer, element) }))
-    .filter(({ element, content }) => element.text !== null && content.length > 0)
+    .filter((element) => element.text !== null && element.text.length > 0)
     .slice(0, 5)
-    .map(({ element }) => `  ${describeElement(renderer, element)}`)
+    .map((element) => `  ${describeElement(renderer, element)}`)
   const nearby =
     nearMisses.length === 0 ? "No text was rendered in this scope." : nearMisses.join("\n")
 
@@ -1640,6 +1641,7 @@ function describeElement(renderer: TestRenderer, element: TestElement): string {
 }
 
 function describeMatcher(text: TextMatcher): string {
+  if (typeof text === "function") return `[function ${text.name || "anonymous"}]`
   return text instanceof RegExp ? text.toString() : JSON.stringify(text)
 }
 

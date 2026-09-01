@@ -3032,6 +3032,11 @@ focused editor contents. `press('enter')` sends one key. `waitFor()` polls until
 exactly one match exists. `textContent()` returns the node's own text plus every
 descendant's, like DOM `textContent`.
 
+Text and test-ID locators use Testing Library matcher semantics: strings are
+exact after trimming and collapsing whitespace, `{ exact: false }` enables a
+case-insensitive substring match, and regular expressions, predicate matchers,
+and custom `{ normalizer }` functions are supported.
+
 ### Mouse, wheel, and drag
 
 | Call | What it does |
@@ -3206,6 +3211,10 @@ methods throw when more than one element matches; required `getBy...` /
 `getAllBy...` methods also throw when none match. Their `queryBy...` /
 `queryAllBy...` counterparts return `null` / `[]` for a miss. `within(element)`
 returns the same query families scoped to that element's descendants.
+
+Text and test-ID queries trim and collapse whitespace before exact matching.
+They also accept regular expressions, predicate matchers, `{ exact: false }`,
+and a custom `{ normalizer }`, following Testing Library's matcher semantics.
 
 Role queries currently search the visible accessibility tree. `hidden` defaults
 to `false`, and `{ hidden: false }` is supported explicitly. `{ hidden: true }`

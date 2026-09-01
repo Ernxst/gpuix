@@ -79,6 +79,57 @@ describeNative("createTestRoot bound queries", () => {
     }
   })
 
+  it("uses Testing Library matcher normalization, options, and predicates", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text testId="  Primary   Action  ">{"  Save\n  factory  "}</text>
+          <text data-testid="secondary-action">Delete factory</text>
+          <div testId="wrapper">
+            <text>Nested only</text>
+          </div>
+        </div>
+      )
+
+      const save = screen.getByText("Save factory")
+      expect(save.text).toBe("  Save\n  factory  ")
+      expect(screen.queryByText("Save")).toBeNull()
+      expect(screen.getByText("save", { exact: false }).text).toContain("Save")
+      expect(
+        screen.getByText(
+          (content, element) =>
+            content === "Save factory" && element.text === "  Save\n  factory  "
+        )
+      ).toBe(save)
+      expect(
+        screen.getByText("save factory", {
+          normalizer: (content) => content.trim().replace(/\s+/g, " ").toLowerCase(),
+        })
+      ).toBe(save)
+
+      expect(screen.queryByTestId("primary")).toBeNull()
+      expect(screen.getByTestId("primary", { exact: false }).testId).toContain("Primary")
+      expect(
+        screen.getByTestId(
+          (content, element) =>
+            content === "secondary-action" && element.dataTestId === "secondary-action"
+        ).dataTestId
+      ).toBe("secondary-action")
+      expect(
+        screen.getByTestId("PRIMARY ACTION", {
+          normalizer: (content) => content.trim().replace(/\s+/g, " ").toUpperCase(),
+        }).testId
+      ).toBe("  Primary   Action  ")
+
+      expect(screen.getAllByText("Nested only")).toHaveLength(1)
+      expect(screen.getByTestId("wrapper").text).toBeNull()
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("keeps singular and required query errors when queries are bound", () => {
     const screen = createTestRoot()
 
