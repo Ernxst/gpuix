@@ -3,6 +3,45 @@ import type { NativeRenderer, PublicInstance } from "../types/host.js"
 
 export type GpuixEventPhase = 1 | 2 | 3
 
+const DOM_KEY_NAMES: Readonly<Record<string, string>> = {
+  alt: "Alt",
+  back: "BrowserBack",
+  backspace: "Backspace",
+  capslock: "CapsLock",
+  compose: "Compose",
+  control: "Control",
+  delete: "Delete",
+  down: "ArrowDown",
+  end: "End",
+  enter: "Enter",
+  escape: "Escape",
+  forward: "BrowserForward",
+  function: "Fn",
+  home: "Home",
+  insert: "Insert",
+  left: "ArrowLeft",
+  pagedown: "PageDown",
+  pageup: "PageUp",
+  platform: "Meta",
+  process: "Process",
+  right: "ArrowRight",
+  shift: "Shift",
+  space: " ",
+  tab: "Tab",
+  up: "ArrowUp",
+}
+
+function domKeyName(key: string | undefined): string | undefined {
+  if (key === undefined) return undefined
+
+  const gpuiKey = key.toLowerCase()
+  const namedKey = DOM_KEY_NAMES[gpuiKey]
+  if (namedKey !== undefined) return namedKey
+
+  const functionKey = /^f([1-9]|[12]\d|3[0-5])$/.exec(gpuiKey)
+  return functionKey === null ? key : `F${functionKey[1]}`
+}
+
 /**
  * The React-facing event delivered for a native GPUIX payload.
  *
@@ -24,6 +63,8 @@ export type GpuixSyntheticEvent = EventPayload & {
   readonly metaKey: boolean
   readonly shiftKey: boolean
   readonly button: number
+  readonly key?: string
+  readonly repeat: boolean
 
   preventDefault(): void
   stopPropagation(): void
@@ -71,6 +112,8 @@ export function createGpuixSyntheticEvent(
     metaKey: modifiers?.cmd ?? false,
     shiftKey: modifiers?.shift ?? false,
     button: nativeEvent.button ?? 0,
+    key: domKeyName(nativeEvent.key),
+    repeat: nativeEvent.isHeld ?? false,
     preventDefault(): void {
       if (!isPlainFocusEvent) defaultPrevented = true
     },
