@@ -20,6 +20,7 @@ use serde::Deserialize;
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 
 pub(crate) const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+const CANVAS_ATLAS_TILE_BUDGET: usize = 64;
 const URL_CACHE_CAPACITY: usize = 32;
 const MAX_REDIRECTS: usize = 5;
 const IMAGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -1112,20 +1113,86 @@ struct CanvasImageTestStats {
     released_atlas_tiles: usize,
 }
 
+struct CanvasAtlasResident {
+    image: Arc<gpui::RenderImage>,
+    last_painted: u64,
+}
+
 #[derive(Default)]
 struct CanvasImageStore {
     entries: HashMap<String, CanvasImageEntry>,
     observer_keys: HashMap<u64, String>,
+    atlas_residents: HashMap<gpui::ImageId, CanvasAtlasResident>,
+    live_atlas_ids: HashMap<u64, HashSet<gpui::ImageId>>,
+    atlas_clock: u64,
     revision: u64,
     test_stats: HashMap<u64, CanvasImageTestStats>,
+}
+
+impl CanvasImageStore {
+    fn forget_atlas_resident(&mut self, image_id: gpui::ImageId) {
+        if self.atlas_residents.remove(&image_id).is_none() {
+            return;
+        }
+        for stats in self.test_stats.values_mut() {
+            if stats.atlas_ids.remove(&image_id) {
+                stats.released_atlas_tiles += 1;
+            }
+        }
+    }
+
+    fn remove_entry(&mut self, key: &str) -> Vec<Arc<gpui::RenderImage>> {
+        let images = self
+            .entries
+            .remove(key)
+            .map(|mut entry| entry.take_loaded_images())
+            .unwrap_or_default();
+        for image in &images {
+            self.forget_atlas_resident(image.id);
+        }
+        images
+    }
+
+    fn take_atlas_evictions(&mut self) -> Vec<Arc<gpui::RenderImage>> {
+        let mut evictions = Vec::new();
+        while self.atlas_residents.len() > CANVAS_ATLAS_TILE_BUDGET {
+            let candidate = self
+                .atlas_residents
+                .iter()
+                .filter(|(image_id, _)| {
+                    !self
+                        .live_atlas_ids
+                        .values()
+                        .any(|live_ids| live_ids.contains(*image_id))
+                })
+                .min_by_key(|(_, resident)| resident.last_painted)
+                .map(|(image_id, _)| *image_id);
+            let Some(image_id) = candidate else {
+                break;
+            };
+            let resident = self
+                .atlas_residents
+                .remove(&image_id)
+                .expect("the selected canvas atlas resident must still exist");
+            for stats in self.test_stats.values_mut() {
+                if stats.atlas_ids.remove(&image_id) {
+                    stats.released_atlas_tiles += 1;
+                }
+            }
+            evictions.push(resident.image);
+        }
+        evictions
+    }
 }
 
 /// Renderer-local image cache for retained canvas display lists.
 ///
 /// Entries are keyed by the serialised source rather than a JS object handle,
 /// so two canvases drawing the same URL/path/data source share one decode and
-/// one `RenderImage`. The last user explicitly evicts the image from GPUI's
-/// window atlas instead of waiting for the renderer to disappear.
+/// one `RenderImage`. Decoded images may outlive their canvas references for
+/// observers and cheap reuse, while GPU residency is a separate 64-tile LRU.
+/// Exact image variants referenced by a live display list are never eviction
+/// candidates; a live set larger than the budget is allowed to exceed it.
 #[derive(Clone, Default)]
 pub(crate) struct SharedCanvasImageStore {
     state: Arc<Mutex<CanvasImageStore>>,
@@ -1217,19 +1284,18 @@ impl SharedCanvasImageStore {
             let Some(key) = state.observer_keys.remove(&observer_id) else {
                 return;
             };
-            let Some(entry) = state.entries.get_mut(&key) else {
-                return;
+            let empty = {
+                let Some(entry) = state.entries.get_mut(&key) else {
+                    return;
+                };
+                entry.observers.remove(&observer_id);
+                entry.users.is_empty() && entry.observers.is_empty()
             };
-            entry.observers.remove(&observer_id);
-            if !entry.users.is_empty() || !entry.observers.is_empty() {
+            if !empty {
                 return;
             }
             state.revision = state.revision.saturating_add(1);
-            state
-                .entries
-                .remove(&key)
-                .map(|mut entry| entry.take_loaded_images())
-                .unwrap_or_default()
+            state.remove_entry(&key)
         };
         for image in release {
             let _ = window.drop_image(image);
@@ -1272,22 +1338,31 @@ impl SharedCanvasImageStore {
                     entry.users.is_empty() && entry.observers.is_empty()
                 })
                 {
-                    if let Some(mut entry) = state.entries.remove(&key) {
-                        dropped.extend(entry.take_loaded_images());
-                    }
+                    dropped.extend(state.remove_entry(&key));
                     state.revision = state.revision.saturating_add(1);
                 }
             }
 
             for (key, source) in &desired {
-                let entry = state.entries.entry(key.clone()).or_default();
-                entry.source.get_or_insert_with(|| source.clone());
-                entry.users.insert(element_id);
-                if !entry.loading && (entry.result.is_none() || entry.reload_due) {
-                    dropped.extend(entry.take_loaded_images());
-                    entry.reload_due = false;
-                    entry.loading = true;
-                    load.push((key.clone(), entry.source.clone().unwrap()));
+                let reload = {
+                    let entry = state.entries.entry(key.clone()).or_default();
+                    entry.source.get_or_insert_with(|| source.clone());
+                    entry.users.insert(element_id);
+                    if !entry.loading && (entry.result.is_none() || entry.reload_due) {
+                        let images = entry.take_loaded_images();
+                        entry.reload_due = false;
+                        entry.loading = true;
+                        Some((entry.source.clone().unwrap(), images))
+                    } else {
+                        None
+                    }
+                };
+                if let Some((source, images)) = reload {
+                    for image in &images {
+                        state.forget_atlas_resident(image.id);
+                    }
+                    dropped.extend(images);
+                    load.push((key.clone(), source));
                 }
             }
 
@@ -1303,10 +1378,11 @@ impl SharedCanvasImageStore {
             let stats = state.test_stats.entry(element_id).or_default();
             stats.source_count = desired.len();
             stats.loaded_count = loaded_count;
+            dropped.extend(state.take_atlas_evictions());
         }
 
         for image in dropped {
-            self.drop_image_for(element_id, image, window);
+            let _ = window.drop_image(image);
         }
         for (key, source) in load {
             self.start_load(key, source, policy.clone(), cx);
@@ -1378,6 +1454,7 @@ impl SharedCanvasImageStore {
         let mut releases = Vec::new();
         {
             let mut state = self.state.lock().unwrap();
+            state.live_atlas_ids.retain(|id, _| is_live(*id));
             let keys = state.entries.keys().cloned().collect::<Vec<_>>();
             for key in keys {
                 let (removed_users, empty) = {
@@ -1401,45 +1478,36 @@ impl SharedCanvasImageStore {
                     state.test_stats.entry(*user).or_default().loaded_count = 0;
                 }
                 if empty {
-                    if let Some(mut entry) = state.entries.remove(&key) {
-                        releases.extend(
-                            entry
-                                .take_loaded_images()
-                                .into_iter()
-                                .map(|image| (removed_users.clone(), image)),
-                        );
-                    }
+                    releases.extend(state.remove_entry(&key));
                     state.revision = state.revision.saturating_add(1);
                 }
             }
+            releases.extend(state.take_atlas_evictions());
         }
-        for (users, image) in releases {
-            if users.is_empty() {
-                let _ = window.drop_image(image);
-                continue;
-            }
-            for user in users {
-                self.drop_image_for(user, image.clone(), window);
-            }
+        for image in releases {
+            let _ = window.drop_image(image);
         }
     }
 
-    fn drop_image_for(
+    pub(crate) fn sync_live_images(
         &self,
-        _element_id: u64,
-        image: Arc<gpui::RenderImage>,
+        element_id: u64,
+        image_ids: &[gpui::ImageId],
         window: &mut gpui::Window,
     ) {
-        #[cfg(any(test, feature = "test-support"))]
-        let image_id = image.id;
-        let _ = window.drop_image(image);
-        #[cfg(any(test, feature = "test-support"))]
-        {
+        let evictions = {
             let mut state = self.state.lock().unwrap();
-            let stats = state.test_stats.entry(_element_id).or_default();
-            if stats.atlas_ids.remove(&image_id) {
-                stats.released_atlas_tiles += 1;
+            if image_ids.is_empty() {
+                state.live_atlas_ids.remove(&element_id);
+            } else {
+                state
+                    .live_atlas_ids
+                    .insert(element_id, image_ids.iter().copied().collect());
             }
+            state.take_atlas_evictions()
+        };
+        for image in evictions {
+            let _ = window.drop_image(image);
         }
     }
 
@@ -1447,13 +1515,29 @@ impl SharedCanvasImageStore {
         &self,
         element_id: u64,
         image: &Arc<gpui::RenderImage>,
-        _window: &gpui::Window,
+        window: &mut gpui::Window,
     ) {
-        let mut state = self.state.lock().unwrap();
-        let stats = state.test_stats.entry(element_id).or_default();
-        stats.painted_ids.insert(image.id);
-        #[cfg(any(test, feature = "test-support"))]
-        stats.atlas_ids.insert(image.id);
+        let evictions = {
+            let mut state = self.state.lock().unwrap();
+            state.atlas_clock = state.atlas_clock.saturating_add(1);
+            let last_painted = state.atlas_clock;
+            state
+                .atlas_residents
+                .entry(image.id)
+                .and_modify(|resident| resident.last_painted = last_painted)
+                .or_insert_with(|| CanvasAtlasResident {
+                    image: image.clone(),
+                    last_painted,
+                });
+            let stats = state.test_stats.entry(element_id).or_default();
+            stats.painted_ids.insert(image.id);
+            #[cfg(any(test, feature = "test-support"))]
+            stats.atlas_ids.insert(image.id);
+            state.take_atlas_evictions()
+        };
+        for image in evictions {
+            let _ = window.drop_image(image);
+        }
     }
 
     pub(crate) fn test_state(&self, element_id: u64) -> Option<serde_json::Value> {

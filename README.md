@@ -447,6 +447,20 @@ callback creates frame demand without dirtying the window; drawing still happens
 only through the normal GPUI frame path. A hot remount drops callbacks owned by
 the previous tree.
 
+### Canvas image residency
+
+Decoded canvas images are shared by source within one renderer, but their GPU
+atlas residency is bounded separately. The renderer keeps the 64 most recently
+painted image tiles (about 16 MiB for 256 x 256 RGBA map tiles). An exact image
+variant in a live display list is never evicted, so a live set larger than 64
+may temporarily exceed the budget rather than paint a missing tile.
+
+Replacing a display list, including by fully clearing and redrawing a canvas,
+makes image and opacity variants absent from the new list eligible for
+least-recently-used eviction. Drawing an evicted variant again re-uploads its
+retained decode. The native test renderer exposes the current and cumulative
+values as `atlasTileCount` and `releasedAtlasTileCount` in `getCanvasState()`.
+
 | Option | Values | Purpose |
 |---|---|---|
 | `titlebarTransparent` | boolean | Hide the native titlebar so the app draws chrome under the traffic lights |
