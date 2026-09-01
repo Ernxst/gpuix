@@ -1108,11 +1108,19 @@ fn parse_transition(
     let parsed_easing = easing_value
         .map(|value| serde_json::from_value::<TransitionEasing>(value.clone()))
         .transpose();
+    let valid_spring = parsed_easing
+        .as_ref()
+        .ok()
+        .and_then(|easing| easing.as_ref())
+        .is_some_and(
+            |easing| matches!(easing, TransitionEasing::Spring(spring) if spring.is_valid()),
+        );
     // A spring-shaped easing does not acquire a fixed duration merely because
     // one of its own fields is malformed. Report the easing itself and keep
     // duration optional for the whole tagged-object branch.
     let spring_shaped = easing_value.is_some_and(serde_json::Value::is_object);
     let duration_ms = match object.get("durationMs") {
+        _ if valid_spring => 0.0,
         None if spring_shaped => 0.0,
         Some(value) => match value.as_f64() {
             Some(value) if valid_transition_milliseconds(value) => value,
@@ -2222,7 +2230,7 @@ mod tests {
     }
 
     #[test]
-    fn spring_easing_may_omit_duration_but_malformed_springs_reject_the_transition() {
+    fn spring_easing_ignores_duration_but_malformed_springs_reject_the_transition() {
         let spring = parse_style_value(&json!({
             "opacity": 0.5,
             "transition": {
@@ -2232,6 +2240,21 @@ mod tests {
         }));
         assert!(spring.problems.is_empty(), "{:?}", spring.problems);
         assert!(spring.style.transition.is_some());
+
+        let spring_with_extreme_duration = parse_style_value(&json!({
+            "opacity": 0.5,
+            "transition": {
+                "properties": ["opacity"],
+                "durationMs": 1e300,
+                "easing": { "type": "spring" }
+            }
+        }));
+        assert!(
+            spring_with_extreme_duration.problems.is_empty(),
+            "{:?}",
+            spring_with_extreme_duration.problems
+        );
+        assert!(spring_with_extreme_duration.style.transition.is_some());
 
         for easing in [
             json!({ "type": "bounce" }),

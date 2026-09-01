@@ -28,8 +28,9 @@ const customTransitionStyle = (expanded: boolean) => ({
 })
 
 describeNative("native style transitions", () => {
-  it("samples a spring easing through state styles with duration omitted", () => {
-    const root = createTestRoot()
+  it("ignores an extreme duration for spring easing through state styles", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const root = createTestRoot({ strictStyles: true })
     try {
       root.renderer.clockPause()
       root.render(
@@ -43,6 +44,7 @@ describeNative("native style transitions", () => {
               hover: { width: 200, opacity: 0.8 },
               transition: {
                 properties: ["width", "opacity"],
+                durationMs: 1e300,
                 easing: { type: "spring" },
               },
             }}
@@ -60,8 +62,11 @@ describeNative("native style transitions", () => {
       expect(root.renderer.getResolvedStyle(target.id)?.width).toBeGreaterThan(200)
       root.renderer.advanceAsyncClock(4_000)
       expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({ width: 200, opacity: 0.8 })
+      expect(warn).not.toHaveBeenCalled()
+      expect(root.renderer.drainStyleDiagnostics()).toEqual([])
     } finally {
       root.unmount()
+      warn.mockRestore()
     }
   })
 
