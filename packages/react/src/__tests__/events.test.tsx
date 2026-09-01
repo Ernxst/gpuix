@@ -1360,6 +1360,32 @@ describeNative("events", () => {
       ])
     })
 
+    it("delivers the canvas hover enter pair before its first mouse move", () => {
+      const events: string[] = []
+
+      testRoot.render(
+        <div
+          onMouseEnter={() => events.push("parent-enter")}
+          style={{ width: 260, height: 120, padding: 12 }}
+        >
+          <canvas
+            width={220}
+            height={80}
+            testId="ordered-hover-canvas"
+            onMouseEnter={() => events.push("child-enter")}
+            onMouseMove={() => events.push("child-move")}
+            style={{ width: 220, height: 80 }}
+          />
+        </div>
+      )
+
+      const child = testRoot.renderer.findByTestId("ordered-hover-canvas")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+
+      expect(events).toEqual(["parent-enter", "child-enter", "child-move"])
+    })
+
     it("keeps common ancestors hovered while moving between painted siblings", () => {
       const events: string[] = []
 
