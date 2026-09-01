@@ -1,6 +1,18 @@
 import React from "react"
+import type { CSSProperties } from "react"
 import { describe, expect, it } from "vitest"
+import type { NativeStateStyleKey, StyleDesc } from "../index.js"
 import { createTestRoot } from "../testing.js"
+
+type SharedStyle = {
+  [Property in keyof CSSProperties & keyof StyleDesc]?: Exclude<
+    CSSProperties[Property],
+    undefined
+  > &
+    Exclude<StyleDesc[Property], undefined>
+}
+
+type WidenedShared = SharedStyle & Pick<StyleDesc, NativeStateStyleKey>
 
 describe("resolved test-renderer styles", () => {
   it("reads the hoverWithin style applied by the issue #52 repro", () => {
@@ -123,6 +135,35 @@ describe("resolved test-renderer styles", () => {
       root.renderer.focusElement(target.id)
       expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
         backgroundColor: "#c2415d",
+      })
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("resolves a widened shared focusVisible style after keyboard focus", () => {
+    const root = createTestRoot()
+    const style: WidenedShared = {
+      width: 160,
+      height: 40,
+      backgroundColor: "#333333",
+      focusVisible: { outlineColor: "#67e8f9", outlineWidth: 4, outlineOffset: 5 },
+    }
+
+    try {
+      root.render(
+        <div style={{ width: 400, height: 120, padding: 40 }}>
+          <div autoFocus tabIndex={0} style={{ width: 1, height: 1 }} />
+          <div testId="focus-visible-target" tabIndex={0} style={style} />
+        </div>
+      )
+
+      const target = root.renderer.findByTestId("focus-visible-target")!
+      root.renderer.simulateKeystrokes("tab")
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        outlineColor: "#67e8f9",
+        outlineWidth: 4,
+        outlineOffset: 5,
       })
     } finally {
       root.unmount()

@@ -251,6 +251,8 @@ export type {
   MotionProps,
   MotionStyle,
   MotionTransition,
+  NativeStateStyle,
+  NativeStateStyleKey,
   NativeRenderer,
   PublicInstance,
   StyleTransition,
