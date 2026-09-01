@@ -110,6 +110,9 @@ impl PendingStyleDiagnostics {
 enum DiagnosticKind {
     Style,
     Property,
+    IgnoredProperty,
+    AppliedProperty,
+    AppliedPropertyAs(&'static str),
     Canvas,
 }
 
@@ -179,10 +182,23 @@ pub(crate) fn pending_accessibility_diagnostics(
         .map(crate::accessibility::element_problems)
         .unwrap_or_default()
         .into_iter()
-        .map(|problem| PendingStyleDiagnostic {
+        .map(|accessibility_problem| PendingStyleDiagnostic {
             element_id,
-            problem,
-            kind: DiagnosticKind::Property,
+            problem: accessibility_problem.problem,
+            kind: match accessibility_problem.effect {
+                crate::accessibility::AccessibilityProblemEffect::Rejected => {
+                    DiagnosticKind::Property
+                }
+                crate::accessibility::AccessibilityProblemEffect::Ignored => {
+                    DiagnosticKind::IgnoredProperty
+                }
+                crate::accessibility::AccessibilityProblemEffect::Applied => {
+                    DiagnosticKind::AppliedProperty
+                }
+                crate::accessibility::AccessibilityProblemEffect::AppliedAs(computed_value) => {
+                    DiagnosticKind::AppliedPropertyAs(computed_value)
+                }
+            },
         })
         .collect()
 }
@@ -389,20 +405,41 @@ fn style_diagnostic_context(
         .unwrap_or_default();
     let subject = match diagnostic.kind {
         DiagnosticKind::Style => "style",
-        DiagnosticKind::Property => "property",
+        DiagnosticKind::Property
+        | DiagnosticKind::IgnoredProperty
+        | DiagnosticKind::AppliedProperty
+        | DiagnosticKind::AppliedPropertyAs(_) => "property",
         DiagnosticKind::Canvas => "canvas command",
     };
     let data_test_id_label = data_test_id
         .as_ref()
         .map(|data_test_id| format!(" data-testid={data_test_id:?}"))
         .unwrap_or_default();
-    let message = format!(
-        "[gpuix] Invalid {subject} on <{element_type}{author_id_label}{data_test_id_label}{test_id_label}> (element {}): property {:?} rejected value {}: {}",
-        diagnostic.element_id,
-        diagnostic.problem.property,
-        diagnostic.problem.value,
-        diagnostic.problem.reason,
+    let accessibility_subject = format!(
+        "[gpuix] Accessibility issue on <{element_type}{author_id_label}{data_test_id_label}{test_id_label}> (element {}): property {:?}",
+        diagnostic.element_id, diagnostic.problem.property,
     );
+    let message = match diagnostic.kind {
+        DiagnosticKind::IgnoredProperty => format!(
+            "{accessibility_subject} ignored value {}: {}",
+            diagnostic.problem.value, diagnostic.problem.reason,
+        ),
+        DiagnosticKind::AppliedProperty => format!(
+            "{accessibility_subject} applied value {}: {}",
+            diagnostic.problem.value, diagnostic.problem.reason,
+        ),
+        DiagnosticKind::AppliedPropertyAs(computed_value) => format!(
+            "{accessibility_subject} applied value {} as {computed_value}: {}",
+            diagnostic.problem.value, diagnostic.problem.reason,
+        ),
+        _ => format!(
+            "[gpuix] Invalid {subject} on <{element_type}{author_id_label}{data_test_id_label}{test_id_label}> (element {}): property {:?} rejected value {}: {}",
+            diagnostic.element_id,
+            diagnostic.problem.property,
+            diagnostic.problem.value,
+            diagnostic.problem.reason,
+        ),
+    };
     (message, element_type, author_id, data_test_id, test_id)
 }
 

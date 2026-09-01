@@ -15,42 +15,365 @@ afterEach(() => {
 })
 
 describeNative("style diagnostics", { timeout: 12_000 }, () => {
-  it("reports malformed, incompatible, hidden-focus, and unsupported-host accessibility props", () => {
+  it("keeps accessibility diagnostics honest about whether each value landed", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })
 
-    testRoot.render(
+    const cases = (validRoleAdded: boolean, nativeDisabled: boolean) => (
       <div>
-        <div {...({ role: "bogus" } as Record<string, string>)} ariaLabel="Bad role" />
-        <div ariaLabel="Missing role" />
-        <a role="link" ariaLabel="Link" ariaSelected />
-        <button role="button" ariaLabel="Current button" ariaCurrent="page" />
-        <a
+        <div
+          testId="invalid-role"
+          {...({ role: "bogus" } as Record<string, string>)}
+          ariaLabel="Bad role"
+        />
+        <div
+          testId="roleless-ledger"
+          role={validRoleAdded ? "button" : undefined}
+          ariaLabel="Production ledger"
+        />
+        <div
+          testId="roleless-description"
+          role={validRoleAdded ? "button" : undefined}
+          ariaDescription="Deployment summary"
+        />
+        <div
+          testId="roleless-selected"
+          role={validRoleAdded ? "option" : undefined}
+          ariaSelected
+        />
+        <div testId="unsupported-selected" role="button" ariaLabel="Save" ariaSelected />
+        <div testId="mixed-switch" role="switch" ariaLabel="Mode" ariaChecked="mixed" />
+        <div
+          testId="double-disabled"
+          role="button"
+          ariaLabel="Double disabled"
+          disabled={nativeDisabled}
+          ariaDisabled
+        />
+        <div
+          testId="hidden-focus"
+          role="button"
+          ariaLabel="Hidden focus"
+          ariaHidden
+          tabIndex={0}
+        />
+        <markdown
+          testId="unsupported-host"
+          role="heading"
+          ariaLabel="Unsupported host"
+          source="Unsupported host contents"
+        />
+        <div
+          testId="malformed-label"
+          role="button"
+          ariaDescription="Malformed label marker"
+          ariaLabel={42 as unknown as string}
+        />
+        <div
+          testId="malformed-current"
           role="link"
           ariaLabel="Malformed current"
-          {...({ ariaCurrent: "chapter" } as Record<string, string>)}
+          ariaCurrent={"chapter" as unknown as "page"}
         />
-        <div role="switch" ariaLabel="Mode" ariaChecked="mixed" />
-        <h2 role="heading" ariaLabel="Heading" ariaLevel={0} />
-        <div role="slider" ariaLabel="Speed" ariaValueNow={Number.NaN} />
-        <div ariaHidden tabIndex={0} />
-        <markdown role="heading" ariaLabel="Unsupported host" source="# Notes" />
+        <div
+          testId="malformed-hidden"
+          role="button"
+          ariaLabel="Malformed hidden"
+          ariaHidden={"yes" as unknown as boolean}
+        />
+        <div testId="malformed-level" role="heading" ariaLabel="Malformed level" ariaLevel={0} />
+        <div
+          testId="malformed-value"
+          role="slider"
+          ariaLabel="Malformed value"
+          ariaValueNow={Number.POSITIVE_INFINITY}
+        />
+        <div
+          testId="malformed-checked"
+          role="checkbox"
+          ariaLabel="Malformed checked"
+          ariaChecked={"yes" as unknown as boolean}
+        />
       </div>
     )
 
-    const messages = warn.mock.calls.map(([message]) => String(message)).join("\n")
-    expect(messages).toContain("unsupported accessibility role")
-    expect(messages).toContain("requires an explicit supported role")
-    expect(messages).toContain("ariaSelected")
-    expect(messages).toContain("ariaCurrent")
-    expect(messages).toContain("role=Button")
-    expect(messages).toContain("expected one of \"page\"")
-    expect(messages).toContain("ariaChecked")
-    expect(messages).toContain("binary")
-    expect(messages).toContain("positive integer")
-    expect(messages).toContain("finite number")
-    expect(messages).toContain("must not contain or be a focusable control")
-    expect(messages).toContain("does not support accessibility semantics")
+    try {
+      testRoot.render(cases(false, true))
+
+      const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+      expect(diagnostics).toHaveLength(15)
+      const byTestId = (testId: string) => {
+        const diagnostic = diagnostics.find((candidate) => candidate.testId === testId)
+        expect(diagnostic, testId).toBeDefined()
+        return diagnostic!
+      }
+      const expectDiagnostic = (
+        testId: string,
+        elementType: string,
+        property: string,
+        value: string,
+        effect: "applied" | "ignored" | "rejected",
+        reason: string,
+        appliedAs?: string
+      ) => {
+        const element = testRoot.renderer.findByTestId(testId)!
+        const prefix =
+          effect === "rejected"
+            ? `[gpuix] Invalid property on <${elementType} testId="${testId}"> (element ${element.id}): `
+            : `[gpuix] Accessibility issue on <${elementType} testId="${testId}"> (element ${element.id}): `
+        const computedValue = appliedAs === undefined ? "" : ` as ${appliedAs}`
+        expect(byTestId(testId)).toMatchObject({
+          elementId: element.id,
+          elementType,
+          testId,
+          property,
+          value,
+          message: `${prefix}property "${property}" ${effect} value ${value}${computedValue}: ${reason}`,
+        })
+      }
+
+      expectDiagnostic(
+        "invalid-role",
+        "div",
+        "role",
+        '"bogus"',
+        "rejected",
+        "unsupported accessibility role; expected a WAI-ARIA role with an AccessKit mapping"
+      )
+      expectDiagnostic(
+        "roleless-ledger",
+        "div",
+        "ariaLabel",
+        '"Production ledger"',
+        "ignored",
+        "a name requires an explicit supported role, so it is omitted from the accessibility tree"
+      )
+      expectDiagnostic(
+        "roleless-description",
+        "div",
+        "ariaDescription",
+        '"Deployment summary"',
+        "ignored",
+        "a description requires an explicit supported role, so it is omitted from the accessibility tree"
+      )
+      expectDiagnostic(
+        "roleless-selected",
+        "div",
+        "ariaSelected",
+        "true",
+        "ignored",
+        "the property requires an explicit supported role, so it is omitted from the accessibility tree"
+      )
+      expectDiagnostic(
+        "unsupported-selected",
+        "div",
+        "ariaSelected",
+        "true",
+        "ignored",
+        "role=Button does not support ariaSelected, so it is omitted from the accessibility tree"
+      )
+      expectDiagnostic(
+        "mixed-switch",
+        "div",
+        "ariaChecked",
+        '"mixed"',
+        "applied",
+        'role="switch" is binary; WAI-ARIA computes ariaChecked="mixed" as false',
+        "false"
+      )
+      expectDiagnostic(
+        "double-disabled",
+        "div",
+        "ariaDisabled",
+        "true",
+        "ignored",
+        "disabled takes precedence and already sets disabled=true, so ariaDisabled does not change the accessibility tree"
+      )
+      expectDiagnostic(
+        "hidden-focus",
+        "div",
+        "ariaHidden",
+        "true",
+        "applied",
+        "removes the focusable control from the accessibility tree; an ariaHidden subtree must not contain or be a focusable control"
+      )
+      expectDiagnostic(
+        "unsupported-host",
+        "markdown",
+        "role",
+        '"heading"',
+        "rejected",
+        "<markdown> does not support accessibility semantics; use a <div>, <text>, <input>, <textarea>, or <img> semantic root"
+      )
+      expectDiagnostic(
+        "malformed-label",
+        "div",
+        "ariaLabel",
+        "42",
+        "rejected",
+        "expected a string"
+      )
+      expectDiagnostic(
+        "malformed-current",
+        "div",
+        "ariaCurrent",
+        '"chapter"',
+        "rejected",
+        'expected one of "page", "step", "location", "date", "time", "true", or "false"'
+      )
+      expectDiagnostic(
+        "malformed-hidden",
+        "div",
+        "ariaHidden",
+        '"yes"',
+        "rejected",
+        "expected a boolean"
+      )
+      expectDiagnostic(
+        "malformed-level",
+        "div",
+        "ariaLevel",
+        "0",
+        "rejected",
+        "expected a positive integer"
+      )
+      expectDiagnostic(
+        "malformed-value",
+        "div",
+        "ariaValueNow",
+        '"Infinity"',
+        "rejected",
+        "expected a finite number"
+      )
+      expectDiagnostic(
+        "malformed-checked",
+        "div",
+        "ariaChecked",
+        '"yes"',
+        "rejected",
+        'expected a boolean or "mixed"'
+      )
+
+      const nodes = Object.values(testRoot.renderer.getAccessibilityTree().nodes)
+      const ariaByLabel = (label: string) =>
+        nodes.find((node) => node.aria.label === label)?.aria
+      const malformedLabel = nodes.find(
+        (node) => node.aria.description === "Malformed label marker"
+      )?.aria
+
+      expect(ariaByLabel("Bad role")).toBeUndefined()
+      expect(ariaByLabel("Production ledger")).toBeUndefined()
+      expect(nodes.some((node) => node.aria.description === "Deployment summary")).toBe(false)
+      expect(nodes.some((node) => node.aria.role === "ListBoxOption")).toBe(false)
+      expect(ariaByLabel("Save")).toMatchObject({ role: "Button" })
+      expect(ariaByLabel("Save")?.selected).toBeUndefined()
+      expect(ariaByLabel("Mode")).toMatchObject({ role: "Switch", toggled: "False" })
+      expect(ariaByLabel("Double disabled")).toMatchObject({ role: "Button", disabled: true })
+      expect(ariaByLabel("Hidden focus")).toBeUndefined()
+      expect(ariaByLabel("Unsupported host")).toBeUndefined()
+      expect(malformedLabel).toMatchObject({ role: "Button" })
+      expect(malformedLabel?.label).toBeUndefined()
+      expect(ariaByLabel("Malformed current")?.current).toBeUndefined()
+      expect(ariaByLabel("Malformed hidden")).toMatchObject({ role: "Button" })
+      expect(ariaByLabel("Malformed level")?.level).toBeUndefined()
+      expect(ariaByLabel("Malformed value")?.numeric_value).toBeUndefined()
+      expect(ariaByLabel("Malformed checked")?.toggled).toBeUndefined()
+
+      testRoot.render(cases(true, false))
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+      const updatedNodes = Object.values(testRoot.renderer.getAccessibilityTree().nodes)
+      const updatedAriaByLabel = (label: string) =>
+        updatedNodes.find((node) => node.aria.label === label)?.aria
+      expect(updatedAriaByLabel("Production ledger")).toMatchObject({ role: "Button" })
+      expect(
+        updatedNodes.find((node) => node.aria.description === "Deployment summary")?.aria
+      ).toMatchObject({ role: "Button", description: "Deployment summary" })
+      expect(
+        updatedNodes.find((node) => node.aria.role === "ListBoxOption")?.aria
+      ).toMatchObject({ role: "ListBoxOption", selected: true })
+      expect(updatedAriaByLabel("Double disabled")).toMatchObject({
+        role: "Button",
+        disabled: true,
+      })
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("omits every well-formed state that its role does not support", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    try {
+      testRoot.render(
+        <div
+          testId="unsupported-state-set"
+          role="img"
+          ariaLabel="Unsupported state set"
+          ariaChecked
+          ariaExpanded
+          ariaCurrent="page"
+          ariaSelected
+          ariaValue="42 percent"
+          ariaValueMin={0}
+          ariaValueMax={100}
+          ariaValueNow={42}
+          ariaLevel={2}
+          ariaRowIndex={1}
+          ariaColIndex={1}
+          ariaRowCount={2}
+          ariaColCount={2}
+          ariaRowSpan={1}
+          ariaColSpan={1}
+          disabled
+          ariaDisabled
+        />
+      )
+
+      const element = testRoot.renderer.findByTestId("unsupported-state-set")!
+      const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+      const properties = [
+        "ariaChecked",
+        "ariaColCount",
+        "ariaColIndex",
+        "ariaColSpan",
+        "ariaCurrent",
+        "ariaDisabled",
+        "ariaExpanded",
+        "ariaLevel",
+        "ariaRowCount",
+        "ariaRowIndex",
+        "ariaRowSpan",
+        "ariaSelected",
+        "ariaValue",
+        "ariaValueMax",
+        "ariaValueMin",
+        "ariaValueNow",
+        "disabled",
+      ]
+      expect(diagnostics.map((diagnostic) => diagnostic.property).sort()).toEqual(
+        properties
+      )
+      for (const diagnostic of diagnostics) {
+        expect(diagnostic).toMatchObject({
+          elementId: element.id,
+          elementType: "div",
+          testId: "unsupported-state-set",
+        })
+        expect(diagnostic.message).toBe(
+          `[gpuix] Accessibility issue on <div testId="unsupported-state-set"> (element ${element.id}): ` +
+            `property "${diagnostic.property}" ignored value ${diagnostic.value}: ` +
+            `role=Image does not support ${diagnostic.property}, so it is omitted from the accessibility tree`
+        )
+      }
+
+      const node = Object.values(testRoot.renderer.getAccessibilityTree().nodes).find(
+        (candidate) => candidate.aria.label === "Unsupported state set"
+      )
+      expect(node?.aria).toEqual({ role: "Image", label: "Unsupported state set" })
+    } finally {
+      testRoot.unmount()
+    }
   })
 
   it("reports malformed fields and deduplicates repeated native diagnostics", () => {
@@ -144,7 +467,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     }
   })
 
-  it("drains a rendered accessibility diagnostic with assertion metadata", () => {
+  it("drains an ignored accessibility diagnostic with assertion metadata", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })
 
@@ -161,9 +484,9 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         property: "ariaLabel",
         value: '"Production ledger"',
         message:
-          `[gpuix] Invalid property on <div testId="roleless-ledger"> (element ${element.id}): ` +
-          'property "ariaLabel" rejected value "Production ledger": ' +
-          "requires an explicit supported role",
+          `[gpuix] Accessibility issue on <div testId="roleless-ledger"> (element ${element.id}): ` +
+          'property "ariaLabel" ignored value "Production ledger": ' +
+          "a name requires an explicit supported role, so it is omitted from the accessibility tree",
       })
     } finally {
       testRoot.unmount()
