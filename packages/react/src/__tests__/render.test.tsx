@@ -96,20 +96,27 @@ function collectOutput(child: ReturnType<typeof spawn>) {
 }
 
 describe("TestGpuixRenderer availability", () => {
-  it("exports a constructor and a flag that is true only when construction works", () => {
+  // The flag reports a compile-time fact and availability reports a runtime
+  // probe, so they are not equal in general: a build with the renderer can
+  // still fail to initialize on a machine without a usable GPU. Only the
+  // one-way implications below are contractual.
+  it("exports a constructor that explains itself when it cannot construct", () => {
     const native = createRequire(import.meta.url)("@gpuix/native") as {
       TestGpuixRenderer?: new (width?: number, height?: number) => unknown
       hasTestGpuixRenderer?: () => boolean
     }
     expect(typeof native.TestGpuixRenderer).toBe("function")
-    expect(native.hasTestGpuixRenderer?.()).toBe(isNativeTestRendererAvailable())
-    if (isNativeTestRendererAvailable()) {
+    if (native.hasTestGpuixRenderer?.() === false) {
+      expect(isNativeTestRendererAvailable()).toBe(false)
+      // Must be the stub's own reason, never "is not a constructor".
+      expect(() => new native.TestGpuixRenderer!()).toThrow(/TestGpuixRenderer/)
+    } else if (isNativeTestRendererAvailable()) {
       const renderer = new native.TestGpuixRenderer!(1, 1)
       expect(renderer).toBeTruthy()
     } else {
-      expect(() => new native.TestGpuixRenderer!()).toThrow(
-        /macOS and Windows only.*wgpu cannot read a rendered image back yet.*GpuixRenderer still works/s
-      )
+      // Compiled in, but this environment could not initialize it. That is an
+      // environment failure, not a broken flag; require only a recorded reason.
+      expect(nativeTestRendererError).toBeInstanceOf(Error)
     }
   })
 })

@@ -269,8 +269,13 @@ function initializeNativeTestRenderer(): NativeTestRendererConstructor | null {
       // TestRenderer reuses this instance.
       probedNativeTestRenderer = new native.TestGpuixRenderer()
     } else if (native.TestGpuixRenderer) {
-      nativeTestRendererLoadError = new Error(
-        "TestGpuixRenderer is macOS and Windows only. Linux builds have no test-support because wgpu cannot read a rendered image back yet. GpuixRenderer still works on Linux."
+      // hasTestGpuixRenderer() === false. Construct the stub anyway and let it
+      // throw into the catch below, so the reason comes from the native build
+      // itself. A copy of the message here could not tell "Linux has no
+      // test-support" apart from "this build turned test-support off".
+      const stub = new native.TestGpuixRenderer()
+      throw new Error(
+        `hasTestGpuixRenderer() is false but TestGpuixRenderer constructed (${typeof stub}).`
       )
     } else {
       nativeTestRendererLoadError = new Error(

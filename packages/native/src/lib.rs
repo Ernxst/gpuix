@@ -49,11 +49,22 @@ pub use style::*;
         any(target_os = "macos", target_os = "windows")
     ))
 ))]
-const TEST_GPUIX_RENDERER_UNAVAILABLE: &str = concat!(
-    "TestGpuixRenderer is macOS and Windows only. ",
-    "Linux builds have no test-support because wgpu cannot read a rendered image back yet. ",
-    "GpuixRenderer still works on Linux."
-);
+const TEST_GPUIX_RENDERER_UNAVAILABLE: &str =
+    if cfg!(any(target_os = "macos", target_os = "windows")) {
+        // The platform supports it, so the only way to get here is a build that
+        // turned the default `test-support` feature off.
+        concat!(
+            "TestGpuixRenderer is unavailable: this @gpuix/native was built without the ",
+            "test-support feature. Rebuild with default features to get the GPU test renderer. ",
+            "GpuixRenderer is unaffected."
+        )
+    } else {
+        concat!(
+            "TestGpuixRenderer is macOS and Windows only. ",
+            "Linux builds have no test-support because wgpu cannot read a rendered image back yet. ",
+            "GpuixRenderer still works on Linux."
+        )
+    };
 
 /// True only when this binary compiled the real GPU test renderer.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -95,12 +106,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unavailable_message_explains_linux() {
-        assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains("macOS and Windows only"));
-        assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains(
-            "Linux builds have no test-support because wgpu cannot read a rendered image back yet"
-        ));
-        assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains("GpuixRenderer still works on Linux"));
+    fn unavailable_message_explains_this_build() {
+        assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains("TestGpuixRenderer"));
+        if cfg!(any(target_os = "macos", target_os = "windows")) {
+            assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains("without the test-support feature"));
+            assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains("Rebuild with default features"));
+            assert!(!TEST_GPUIX_RENDERER_UNAVAILABLE.contains("Linux"));
+        } else {
+            assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains("macOS and Windows only"));
+            assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains(
+                "Linux builds have no test-support because wgpu cannot read a rendered image back yet"
+            ));
+            assert!(TEST_GPUIX_RENDERER_UNAVAILABLE.contains("GpuixRenderer still works on Linux"));
+        }
     }
 
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
