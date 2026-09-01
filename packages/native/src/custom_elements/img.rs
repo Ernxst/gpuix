@@ -2,9 +2,9 @@
 /// tintable SVG icons.
 ///
 /// `<img>` accepts a discriminated source, plus DOM-compatible string sugar:
-/// HTTP(S) strings are URLs and every other string is a path. Every source
-/// becomes bounded bytes before GPUI decodes it. `<svg>` remains the lightweight
-/// monochrome icon element.
+/// HTTP(S) strings are URLs, `data:` URLs are RFC 2397 image bytes, and every
+/// other string is a path. Every source becomes bounded bytes before GPUI
+/// decodes it. `<svg>` remains the lightweight monochrome icon element.
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -197,7 +197,13 @@ impl ImgObjectFit {
 pub(crate) enum ImageSource {
     Path(String),
     Url(String),
-    Data { mime_type: String, bytes: Arc<[u8]> },
+    Data {
+        /// Structured sources name a supported decoder. A `data:` URL whose
+        /// Fetch MIME type is missing or unsupported deliberately leaves this
+        /// empty so image decoding follows the browser's byte-sniffing path.
+        mime_type: Option<String>,
+        bytes: Arc<[u8]>,
+    },
 }
 
 // Data sources keep one Arc while their retained prop is unchanged. Identity
@@ -260,7 +266,13 @@ enum WireImageSource {
 impl ImageSource {
     pub(crate) fn parse(value: &serde_json::Value) -> Result<Self, String> {
         if let Some(source) = value.as_str() {
-            return if source.starts_with("http://") || source.starts_with("https://") {
+            return if is_data_url(source) {
+                let (mime_type, bytes) = parse_data_url(source)?;
+                Ok(Self::Data {
+                    mime_type,
+                    bytes: bytes.into(),
+                })
+            } else if source.starts_with("http://") || source.starts_with("https://") {
                 parse_image_url(source)?;
                 Ok(Self::Url(source.to_string()))
             } else if source.trim().is_empty() {
@@ -292,7 +304,7 @@ impl ImageSource {
                 supported_image_format(&mime_type)?;
                 ensure_size(bytes.len(), "data source")?;
                 Ok(Self::Data {
-                    mime_type,
+                    mime_type: Some(mime_type),
                     bytes: bytes.into(),
                 })
             }
@@ -304,9 +316,146 @@ impl ImageSource {
             Self::Path(path) => format!("path {path:?}"),
             Self::Url(url) => format!("URL {:?}", redacted_url(url)),
             Self::Data { mime_type, bytes } => {
-                format!("{mime_type} data ({} bytes)", bytes.len())
+                let source = mime_type.as_deref().unwrap_or("sniffed");
+                format!("{source} data ({} bytes)", bytes.len())
             }
         }
+    }
+}
+
+fn is_data_url(source: &str) -> bool {
+    source
+        .get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("data:"))
+}
+
+/// Process a `data:` URL using Fetch's deployed-content-compatible grammar.
+/// The decoder hint is absent when Fetch's MIME record is not one GPUI can
+/// decode directly; then `load_image` image-sniffs the bytes as browsers do.
+fn parse_data_url(source: &str) -> Result<(Option<String>, Vec<u8>), String> {
+    let payload = source
+        .get(5..)
+        .ok_or_else(|| "invalid data URL: missing data: scheme".to_string())?;
+    let (media_type, data) = payload
+        .split_once(',')
+        .ok_or_else(|| "invalid data URL: missing comma before data".to_string())?;
+
+    let media_type = media_type.trim_matches(|character: char| character.is_ascii_whitespace());
+    let (media_type, base64) = split_terminal_base64_marker(media_type);
+    let media_type = if media_type.starts_with(';') {
+        format!("text/plain{media_type}")
+    } else {
+        media_type.to_string()
+    };
+    let mime_type = normalize_mime_type(&media_type);
+    let mime_type = supported_image_format(&mime_type).ok().map(|_| mime_type);
+
+    let data = percent_decode_data_url(data);
+    let bytes = if base64 {
+        decode_forgiving_base64(&data)?
+    } else {
+        data
+    };
+    ensure_size(bytes.len(), "data URL")?;
+    Ok((mime_type, bytes))
+}
+
+/// Fetch asks URL to percent-decode the body. Invalid percent escapes remain
+/// literal, rather than making the URL processor fail on their own.
+fn percent_decode_data_url(data: &str) -> Vec<u8> {
+    let bytes = data.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'%' {
+            decoded.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+        let high = bytes
+            .get(index + 1)
+            .and_then(|digit| (*digit as char).to_digit(16));
+        let low = bytes
+            .get(index + 2)
+            .and_then(|digit| (*digit as char).to_digit(16));
+        if let (Some(high), Some(low)) = (high, low) {
+            decoded.push((high << 4 | low) as u8);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    decoded
+}
+
+/// Fetch recognizes the `base64` signal only as the terminal `; *base64`
+/// production. An earlier parameter named base64 is ordinary metadata.
+fn split_terminal_base64_marker(media_type: &str) -> (&str, bool) {
+    let Some(marker_start) = media_type.len().checked_sub("base64".len()) else {
+        return (media_type, false);
+    };
+    let (before_marker, marker) = media_type.split_at(marker_start);
+    if !marker.eq_ignore_ascii_case("base64") {
+        return (media_type, false);
+    }
+    let before_marker = before_marker.trim_end_matches(' ');
+    let Some(media_type) = before_marker.strip_suffix(';') else {
+        return (media_type, false);
+    };
+    (media_type, true)
+}
+
+/// Infra's forgiving-base64 algorithm deliberately differs from canonical
+/// RFC 4648 decoding: it rejects partial padding, but discards unused bits.
+fn decode_forgiving_base64(data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut encoded = data
+        .iter()
+        .copied()
+        .filter(|byte| !matches!(byte, b'\t' | b'\n' | b'\x0c' | b'\r' | b' '))
+        .collect::<Vec<_>>();
+    if encoded.len() % 4 == 0 {
+        if encoded.ends_with(b"==") {
+            encoded.truncate(encoded.len() - 2);
+        } else if encoded.ends_with(b"=") {
+            encoded.truncate(encoded.len() - 1);
+        }
+    }
+    if encoded.len() % 4 == 1 {
+        return Err("invalid data URL: invalid base64 payload length".into());
+    }
+
+    let mut output = Vec::with_capacity(encoded.len() * 3 / 4);
+    let mut buffer = 0u32;
+    let mut bits = 0u8;
+    for byte in encoded {
+        let value = base64_value(byte)
+            .ok_or_else(|| "invalid data URL: invalid base64 payload".to_string())?;
+        buffer = buffer << 6 | u32::from(value);
+        bits += 6;
+        if bits == 24 {
+            output.extend_from_slice(&buffer.to_be_bytes()[1..]);
+            buffer = 0;
+            bits = 0;
+        }
+    }
+    match bits {
+        0 => {}
+        12 => output.push((buffer >> 4) as u8),
+        18 => output.extend_from_slice(&[(buffer >> 10) as u8, (buffer >> 2) as u8]),
+        _ => unreachable!("base64 length modulo four rules out this remainder"),
+    }
+    Ok(output)
+}
+
+fn base64_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
     }
 }
 
@@ -1004,7 +1153,7 @@ async fn load_source(
         ImageSource::Url(url) => load_url(url, client, policy).await,
         ImageSource::Data { mime_type, bytes } => Ok(LoadedBytes {
             bytes: bytes.clone(),
-            mime_type: Some(mime_type.clone()),
+            mime_type: mime_type.clone(),
         }),
     }
 }
@@ -2013,6 +2162,16 @@ mod tests {
             ),
             Ok(ImageSource::Data { .. })
         ));
+        assert!(matches!(
+            ImageSource::parse(&serde_json::json!("data:image/png;base64,iVBORw0KGgo=")),
+            Ok(ImageSource::Data { mime_type, bytes })
+                if mime_type.as_deref() == Some("image/png") && bytes.as_ref() == b"\x89PNG\r\n\x1a\n"
+        ));
+        assert!(matches!(
+            ImageSource::parse(&serde_json::json!("data:image/svg+xml,%3Csvg%2F%3E")),
+            Ok(ImageSource::Data { mime_type, bytes })
+                if mime_type.as_deref() == Some("image/svg+xml") && bytes.as_ref() == b"<svg/>"
+        ));
 
         assert!(ImageSource::parse(&serde_json::json!("   "))
             .unwrap_err()
@@ -2030,6 +2189,31 @@ mod tests {
         }))
         .unwrap_err()
         .contains("credentials"));
+        assert!(
+            ImageSource::parse(&serde_json::json!("data:image/png;base64,%%%"))
+                .unwrap_err()
+                .contains("data URL")
+        );
+    }
+
+    #[test]
+    fn follows_fetch_data_url_metadata_processing() {
+        let (_, defaulted) = parse_data_url("data:;base64,iVBORw0KGgo=").unwrap();
+        assert_eq!(defaulted, b"\x89PNG\r\n\x1a\n");
+
+        let (_, non_terminal_marker) =
+            parse_data_url("data:image/png;base64;charset=utf-8,iVBORw0KGgo=").unwrap();
+        assert_eq!(non_terminal_marker, b"iVBORw0KGgo=");
+
+        let (_, spaced_terminal_marker) =
+            parse_data_url("data:image/png;   base64,iVBORw0KGgo=").unwrap();
+        assert_eq!(spaced_terminal_marker, b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn forgiving_base64_matches_infra() {
+        assert!(decode_forgiving_base64(b"Zg=").is_err());
+        assert_eq!(decode_forgiving_base64(b"YR").unwrap(), b"a");
     }
 
     #[test]

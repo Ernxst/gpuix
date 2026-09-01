@@ -8,6 +8,7 @@ import type {
 type SerializableImageSource =
   | Extract<ImageSource, { kind: "path" | "url" }>
   | { kind: "data"; mimeType: ImageMimeType; bytes: readonly number[] }
+  | string
 
 type ImageState = "unloaded" | "loading" | "loaded" | "broken" | "closed"
 
@@ -45,6 +46,7 @@ function sourceFromString(src: string): SerializableImageSource {
   if (src.startsWith("http://") || src.startsWith("https://")) {
     return { kind: "url", url: src }
   }
+  if (src.slice(0, 5).toLowerCase() === "data:") return src
   return { kind: "path", path: src }
 }
 

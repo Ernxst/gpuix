@@ -48,6 +48,18 @@ const FIXTURES = [
   { name: "webp", mimeType: "image/webp" as const, bytes: WEBP_BYTES },
   { name: "svg", mimeType: "image/svg+xml" as const, bytes: SVG_BYTES },
 ]
+
+function dataUrl({ mimeType, bytes }: (typeof FIXTURES)[number]) {
+  return `data:${mimeType};base64,${bytes.toString("base64")}`
+}
+
+function withNonCanonicalTrailingBits(bytes: Buffer) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  const encoded = bytes.toString("base64")
+  const index = encoded.lastIndexOf("=") - 1
+  const value = alphabet.indexOf(encoded[index]!)
+  return encoded.slice(0, index) + alphabet[value ^ 1]! + encoded.slice(index + 1)
+}
 const FIXTURE_PATHS = new Map(
   FIXTURES.map(({ name }) => [name, `/tmp/gpuix-image-source-${name}.${name === "jpeg" ? "jpg" : name}`])
 )
@@ -361,6 +373,24 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
       expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
     }
   }, 20_000)
+
+  it("GPU-renders PNG, JPEG, WebP, and SVG data URL sources", async () => {
+    for (const fixture of FIXTURES) {
+      const screenshot = await captureLoadedSource(dataUrl(fixture), `data-url-${fixture.name}`)
+      expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
+    }
+  }, 20_000)
+
+  it("follows Fetch metadata and forgiving-base64 rules for PNG data URLs", async () => {
+    const sources = [
+      `data:;base64,${PNG_BYTES.toString("base64")}`,
+      `data:image/png;base64,${withNonCanonicalTrailingBits(PNG_BYTES)}`,
+    ]
+    for (const [index, source] of sources.entries()) {
+      const screenshot = await captureLoadedSource(source, `data-url-fetch-${index}`)
+      expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
+    }
+  }, 15_000)
 
   it("preserves authored SVG colours by default and explicitly resolves inherited currentColor", async () => {
     const source: ImageSource = {

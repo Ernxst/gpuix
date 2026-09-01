@@ -40,6 +40,7 @@ const canvasImageFixture = fileURLToPath(
 const corruptCanvasImageFixture = fileURLToPath(
   new URL("../../canvas-goldens/__fixtures__/canvas-image-corrupt.png", import.meta.url)
 )
+const canvasImageDataUrl = `data:image/png;base64,${readFileSync(canvasImageFixture).toString("base64")}`
 
 function distinctCanvasImagePath(index: number): string {
   const separator = canvasImageFixture.lastIndexOf("/")
@@ -211,6 +212,47 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       expect(bitmap.height).toBe(48)
       expect(Reflect.get(globalThis, "Image")).toBe(previousImage)
       bitmap.close()
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("decodes data URL Images and reports malformed data URLs through DOM image errors", async () => {
+    const testRoot = createTestRoot({ width: 120, height: 80 })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    const onload = vi.fn()
+    const onerror = vi.fn()
+    try {
+      testRoot.render(<canvas ref={canvasRef} width={120} height={80} />)
+
+      const image = new Image()
+      image.onload = onload
+      image.src = canvasImageDataUrl
+      await image.decode()
+      expect(image.complete).toBe(true)
+      expect(image.naturalWidth).toBe(64)
+      expect(image.naturalHeight).toBe(48)
+      expect(onload).toHaveBeenCalledTimes(1)
+      const context = canvasRef.current!.getContext("2d")!
+      context.drawImage(image, 0, 0)
+      flushRecordingContext2D(context)
+      await expect(
+        waitForCanvasImages(testRoot.renderer, canvasRef.current!.id, 1)
+      ).resolves.toMatchObject({
+        imageCount: 1,
+        loadedImageCount: 1,
+        paintedImageCount: 1,
+        atlasTileCount: 1,
+      })
+
+      const malformed = new Image()
+      malformed.onerror = onerror
+      malformed.src = "data:image/png;base64,%%%"
+      await expect(malformed.decode()).rejects.toMatchObject({ name: "EncodingError" })
+      expect(malformed.complete).toBe(true)
+      expect(malformed.naturalWidth).toBe(0)
+      expect(malformed.naturalHeight).toBe(0)
+      expect(onerror).toHaveBeenCalledTimes(1)
     } finally {
       testRoot.unmount()
     }
