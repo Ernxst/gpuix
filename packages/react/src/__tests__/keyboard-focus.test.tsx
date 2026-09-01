@@ -134,6 +134,41 @@ describeNative("keyboard focus", () => {
     expect(focusedLabel()).toBe("second")
   })
 
+  it("continues Tab traversal after a keydown handler throws", () => {
+    testRoot.render(
+      <div style={{ width: 240, height: 120 }}>
+        <a
+          href="/first"
+          ariaLabel="first"
+          testId="throwing-tab-target"
+          onKeyDown={() => {
+            throw new Error("tab handler failed")
+          }}
+        >
+          <text>First</text>
+        </a>
+        <a href="/second" ariaLabel="second">
+          <text>Second</text>
+        </a>
+        <a href="/third" ariaLabel="third">
+          <text>Third</text>
+        </a>
+      </div>
+    )
+
+    const first = testRoot.renderer.findByTestId("throwing-tab-target")!
+    testRoot.renderer.focusElement(first.id)
+    expect(focusedLabel()).toBe("first")
+
+    expect(() => testRoot.renderer.simulateKeystrokes("tab")).toThrow(
+      "tab handler failed"
+    )
+    expect(focusedLabel()).toBe("second")
+
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("third")
+  })
+
   it("delivers focus and blur handlers for click, programmatic, and keyboard focus moves", () => {
     const events: string[] = []
     const record = (label: string, event: GpuixSyntheticEvent): void => {

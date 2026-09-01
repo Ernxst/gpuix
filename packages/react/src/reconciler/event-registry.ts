@@ -236,6 +236,12 @@ export function handleGpuixEvent(
   const path = TARGET_ONLY_EVENTS.has(payload.eventType) ? [target] : eventPath(container, target)
   const controller = createGpuixSyntheticEvent(payload, target, renderer)
   const { event } = controller
+  let keyboardDispatchFinished = false
+
+  const finishDispatch = (result: GpuixEventDispatchResult): GpuixEventDispatchResult => {
+    keyboardDispatchFinished = true
+    return finishKeyboardDispatch(container, payload, result)
+  }
 
   const invoke = (instance: Instance, handlerKey: string, phase: 1 | 2 | 3): void => {
     const handler = container.eventHandlers.get(instance.id)?.get(handlerKey)
@@ -244,33 +250,46 @@ export function handleGpuixEvent(
     handler(event)
   }
 
-  // Capture travels from the root toward, but not including, the target.
-  for (let index = path.length - 1; index >= 1; index -= 1) {
-    invoke(path[index]!, `${payload.eventType}Capture`, 1)
-    if (event.isPropagationStopped()) {
-      return finishKeyboardDispatch(container, payload, {
+  try {
+    // Capture travels from the root toward, but not including, the target.
+    for (let index = path.length - 1; index >= 1; index -= 1) {
+      invoke(path[index]!, `${payload.eventType}Capture`, 1)
+      if (event.isPropagationStopped()) {
+        return finishDispatch({
+          defaultPrevented: event.defaultPrevented,
+          propagationStopped: true,
+        })
+      }
+    }
+
+    // Both listeners on the target run at AT_TARGET. stopPropagation does not
+    // suppress another listener on that same target.
+    invoke(target, `${payload.eventType}Capture`, 2)
+    invoke(target, payload.eventType, 2)
+
+    if (!event.isPropagationStopped() && !NON_BUBBLING_EVENTS.has(payload.eventType)) {
+      for (let index = 1; index < path.length; index += 1) {
+        invoke(path[index]!, payload.eventType, 3)
+        if (event.isPropagationStopped()) break
+      }
+    }
+
+    return finishDispatch({
+      defaultPrevented: event.defaultPrevented,
+      propagationStopped: event.isPropagationStopped(),
+    })
+  } finally {
+    if (
+      !keyboardDispatchFinished &&
+      payload.eventType === "keyDown" &&
+      activationKey(payload) === "tab"
+    ) {
+      finishDispatch({
         defaultPrevented: event.defaultPrevented,
-        propagationStopped: true,
+        propagationStopped: event.isPropagationStopped(),
       })
     }
   }
-
-  // Both listeners on the target run at AT_TARGET. stopPropagation does not
-  // suppress another listener on that same target.
-  invoke(target, `${payload.eventType}Capture`, 2)
-  invoke(target, payload.eventType, 2)
-
-  if (!event.isPropagationStopped() && !NON_BUBBLING_EVENTS.has(payload.eventType)) {
-    for (let index = 1; index < path.length; index += 1) {
-      invoke(path[index]!, payload.eventType, 3)
-      if (event.isPropagationStopped()) break
-    }
-  }
-
-  return finishKeyboardDispatch(container, payload, {
-    defaultPrevented: event.defaultPrevented,
-    propagationStopped: event.isPropagationStopped(),
-  })
 }
 
 export function registerEventHandler(
