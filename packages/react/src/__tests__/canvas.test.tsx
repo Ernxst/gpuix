@@ -188,14 +188,14 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     }
   })
 
-  it("exports Image and createImageBitmap without installing globals", async () => {
+  it("mirrors DOM Image dimensions and createImageBitmap without installing globals", async () => {
     const testRoot = createTestRoot({ width: 120, height: 80 })
     const canvasRef = createRef<CanvasPublicInstance>()
     const previousImage = Reflect.get(globalThis, "Image")
     const onload = vi.fn()
     try {
       testRoot.render(<canvas ref={canvasRef} width={120} height={80} />)
-      const image = new Image(999, 777)
+      const image = new Image()
       image.onload = onload
       image.src = canvasImageFixture
       const context = canvasRef.current!.getContext("2d")!
@@ -205,6 +205,8 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       await image.decode()
       const bitmap = await createImageBitmap(image)
       expect(image.complete).toBe(true)
+      expect(image.width).toBe(64)
+      expect(image.height).toBe(48)
       expect(image.naturalWidth).toBe(64)
       expect(image.naturalHeight).toBe(48)
       expect(onload).toHaveBeenCalledTimes(1)
@@ -212,6 +214,39 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       expect(bitmap.height).toBe(48)
       expect(Reflect.get(globalThis, "Image")).toBe(previousImage)
       bitmap.close()
+
+      const constrained = new Image(320, 200)
+      constrained.src = canvasImageFixture
+      await constrained.decode()
+
+      const assigned = new Image()
+      assigned.width = 240
+      assigned.height = 160
+      assigned.src = canvasImageFixture
+      await assigned.decode()
+
+      const zeroConstrained = new Image(0, 0)
+      zeroConstrained.src = canvasImageFixture
+      await zeroConstrained.decode()
+
+      expect({
+        width: constrained.width,
+        height: constrained.height,
+        naturalWidth: constrained.naturalWidth,
+        naturalHeight: constrained.naturalHeight,
+      }).toEqual({ width: 320, height: 200, naturalWidth: 64, naturalHeight: 48 })
+      expect({
+        width: assigned.width,
+        height: assigned.height,
+        naturalWidth: assigned.naturalWidth,
+        naturalHeight: assigned.naturalHeight,
+      }).toEqual({ width: 240, height: 160, naturalWidth: 64, naturalHeight: 48 })
+      expect({
+        width: zeroConstrained.width,
+        height: zeroConstrained.height,
+        naturalWidth: zeroConstrained.naturalWidth,
+        naturalHeight: zeroConstrained.naturalHeight,
+      }).toEqual({ width: 0, height: 0, naturalWidth: 64, naturalHeight: 48 })
     } finally {
       testRoot.unmount()
     }
