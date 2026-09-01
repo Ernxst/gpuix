@@ -463,6 +463,12 @@ fn find_calc_operator(value: &str) -> Option<(usize, CalcOperator)> {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StyleDesc {
+    /// Internal parent-layout default. An overflow-x scrollport makes a direct
+    /// child with no authored flex longhands non-shrinking without inserting a
+    /// containing block between the authored parent and child.
+    #[serde(skip)]
+    pub(crate) default_flex_none: bool,
+
     pub display: Option<String>,
     pub visibility: Option<String>,
 

@@ -6851,6 +6851,16 @@ pub(crate) fn build_element(
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
 ) -> gpui::AnyElement {
+    build_element_with_parent_layout(id, false, ctx, window, cx)
+}
+
+fn build_element_with_parent_layout(
+    id: u64,
+    default_flex_none: bool,
+    ctx: &mut BuildCtx,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<GpuixView>,
+) -> gpui::AnyElement {
     use gpui::IntoElement;
 
     let Some(element) = ctx.tree.elements.get(&id) else {
@@ -6966,8 +6976,11 @@ pub(crate) fn build_element(
     // Percentage terms stay deferred through GPUI/Taffy, where the layout
     // algorithm supplies the containing block's content size. Only `ch` is
     // reduced here, using the inherited font chain above.
-    let resolved_style =
+    let mut resolved_style =
         layered_style.map(|style| resolve_length_expressions(style, window, &font));
+    if default_flex_none {
+        default_flex_none_for_parent_layout(resolved_style.get_or_insert_default());
+    }
     let style = resolved_style.as_ref();
     let focused = ctx
         .focus_handles
@@ -7059,6 +7072,21 @@ pub(crate) fn build_element(
 
     ctx.inherited = parent_inherited;
     built
+}
+
+fn default_flex_none_for_parent_layout(style: &mut StyleDesc) {
+    style.default_flex_none = true;
+    for refinement in [
+        &mut style.hover,
+        &mut style.hover_within,
+        &mut style.active,
+        &mut style.focus,
+        &mut style.focus_visible,
+    ] {
+        if let Some(refinement) = refinement.as_deref_mut() {
+            default_flex_none_for_parent_layout(refinement);
+        }
+    }
 }
 
 fn build_virtual_list(
@@ -7963,12 +7991,12 @@ pub(crate) fn build_host_container(
         // Children
         let child_ids: Vec<u64> = element.children.clone();
         for child_id in child_ids {
-            let child = build_element(child_id, ctx, window, cx);
-            el = if overflow_x_only {
-                el.child(gpui::div().flex_none().child(child))
+            let child = if overflow_x_only {
+                build_element_with_parent_layout(child_id, true, ctx, window, cx)
             } else {
-                el.child(child)
+                build_element(child_id, ctx, window, cx)
             };
+            el = el.child(child);
         }
     }
 
@@ -8378,6 +8406,16 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     }
     if let Some(basis) = style.flex_basis {
         el = el.flex_basis(gpui::px(basis as f32));
+    }
+    // The former wrapper carried flex-none independently from the authored
+    // child. On the child itself it is only a default: any authored flex
+    // longhand keeps GPUI's normal values for the other longhands.
+    if style.default_flex_none
+        && style.flex_grow.is_none()
+        && style.flex_shrink.is_none()
+        && style.flex_basis.is_none()
+    {
+        el = el.flex_none();
     }
     match style.align_items.as_deref() {
         Some("center") => el = el.items_center(),
