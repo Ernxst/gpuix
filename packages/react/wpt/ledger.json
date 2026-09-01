@@ -20,68 +20,90 @@
     {
       "id": "compositing/2d.composite.globalAlpha.canvas",
       "status": "skip",
-      "gap": "drawImage needs a GPUIX-imported image source",
-      "diagnosis": "Canvas drawImage expects an Image or ImageBitmap imported from @gpuix/react"
+      "gaps": [
+        "GPUIX canvas host has no width member"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "compositing/2d.composite.globalAlpha.canvaspattern",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "compositing/2d.composite.globalAlpha.canvascopy",
       "status": "skip",
-      "gap": "Unsupported API: non-source-over compositing",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "compositing/2d.composite.operation.get",
       "status": "skip",
-      "gap": "Recording context declines globalCompositeOperation: GPUI canvas primitives use a fixed source-over blend",
+      "gaps": [
+        "Recording context declines globalCompositeOperation: GPUI canvas primitives use a fixed source-over blend"
+      ],
       "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "compositing/2d.composite.operation.unrecognised",
       "status": "skip",
-      "gap": "Unsupported API: non-source-over compositing",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "compositing/2d.composite.operation.darker",
       "status": "skip",
-      "gap": "Unsupported API: non-source-over compositing",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "compositing/2d.composite.operation.over",
       "status": "skip",
-      "gap": "Unsupported API: non-source-over compositing",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "compositing/2d.composite.operation.clear",
       "status": "skip",
-      "gap": "Unsupported API: non-source-over compositing",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "compositing/2d.composite.operation.highlight",
       "status": "skip",
-      "gap": "Unsupported API: non-source-over compositing",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "compositing/2d.composite.operation.nullsuffix",
       "status": "skip",
-      "gap": "Unsupported API: non-source-over compositing",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "compositing/2d.composite.operation.casesensitive",
       "status": "skip",
-      "gap": "Unsupported API: non-source-over compositing",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "compositing/2d.composite.operation.default",
@@ -90,43 +112,63 @@
     {
       "id": "compositing/2d.composite.globalAlpha.image",
       "status": "skip",
-      "gap": "Unsupported API: DOM image sources",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: DOM image sources"
+      ],
+      "diagnosis": "await is only valid in async functions and the top level bodies of modules"
     },
     {
       "id": "compositing/2d.composite.globalAlpha.canvas#2",
       "status": "skip",
-      "gap": "Unsupported API: WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
-      "diagnosis": ""
+      "gaps": [
+        "WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
+        "Unsupported API: OffscreenCanvas"
+      ],
+      "diagnosis": "OffscreenCanvas is not defined"
     },
     {
       "id": "compositing/2d.composite.globalAlpha.imagepattern",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns",
+        "Unsupported API: DOM image sources"
+      ],
+      "diagnosis": "await is only valid in async functions and the top level bodies of modules"
     },
     {
       "id": "compositing/2d.composite.globalAlpha.canvaspattern#2",
       "status": "skip",
-      "gap": "Unsupported API: WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
-      "diagnosis": ""
+      "gaps": [
+        "WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
+        "Unsupported API: canvas patterns",
+        "Unsupported API: OffscreenCanvas"
+      ],
+      "diagnosis": "OffscreenCanvas is not defined"
     },
     {
       "id": "compositing/2d.composite.globalAlpha.canvascopy#2",
       "status": "skip",
-      "gap": "Unsupported API: WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
-      "diagnosis": ""
+      "gaps": [
+        "WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
+        "Unsupported API: non-source-over compositing",
+        "Unsupported API: OffscreenCanvas"
+      ],
+      "diagnosis": "OffscreenCanvas is not defined"
     },
     {
       "id": "compositing/2d.composite.grid",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "compositing/2d.composite",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
@@ -136,29 +178,44 @@
     {
       "id": "conformance_requirements/2d.conformance.requirements.basics",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "void methods return undefined"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping",
+        "Unsupported API: canvas gradients",
+        "Unsupported API: CPU canvas pixel buffers",
+        "Unsupported API: canvas text"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "conformance_requirements/2d.conformance.requirements.missingargs",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": "Missing arguments cause TypeError"
     },
     {
       "id": "conformance_requirements/2d.conformance.requirements.drawings",
       "status": "skip",
-      "gap": "WPT fixture has no external image or element sources",
+      "gaps": [
+        "WPT fixture has no external image or element sources"
+      ],
       "diagnosis": "WPT DOM fixture only exposes #c, requested #yellow.png"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.clearRect.basic",
-      "status": "pass"
+      "status": "skip",
+      "gaps": [
+        "Native screenshot composites the canvas over an opaque window, so alpha below 255 cannot be read back"
+      ],
+      "diagnosis": "1 of 1 pixel expectations need alpha < 255"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.clearRect.path",
-      "status": "skip",
-      "gap": "Native canvas stream rejects clearRect value",
+      "status": "fail",
+      "gaps": [
+        "Native canvas stream rejects a spec-valid clearRect value"
+      ],
       "diagnosis": "[gpuix] Invalid canvas command on <canvas> (element 1): property \"clearRect\" rejected value op[3]: partial clearRect does not intersect prior canvas content and would punch through to GPUI content behind the canvas"
     },
     {
@@ -167,33 +224,51 @@
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.clearRect.negative",
-      "status": "pass"
+      "status": "skip",
+      "gaps": [
+        "Native screenshot composites the canvas over an opaque window, so alpha below 255 cannot be read back"
+      ],
+      "diagnosis": "4 of 4 pixel expectations need alpha < 255"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.clearRect.transform",
-      "status": "pass"
+      "status": "skip",
+      "gaps": [
+        "Native screenshot composites the canvas over an opaque window, so alpha below 255 cannot be read back"
+      ],
+      "diagnosis": "1 of 1 pixel expectations need alpha < 255"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.clearRect.globalalpha",
-      "status": "pass"
+      "status": "skip",
+      "gaps": [
+        "Native screenshot composites the canvas over an opaque window, so alpha below 255 cannot be read back"
+      ],
+      "diagnosis": "1 of 1 pixel expectations need alpha < 255"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.clearRect.globalcomposite",
       "status": "skip",
-      "gap": "Unsupported API: non-source-over compositing",
-      "diagnosis": "clearRect is not affected by globalCompositeOperation"
+      "gaps": [
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.clearRect.clip",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "clearRect is affected by clipping regions"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.clearRect.shadow",
       "status": "skip",
-      "gap": "Unsupported API: canvas shadows",
-      "diagnosis": "clearRect does not draw shadows"
+      "gaps": [
+        "Unsupported API: canvas shadows"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.shadowColor is not implementable: GPUI canvas primitives expose no shadow primitive"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.clearRect.nonfinite",
@@ -222,14 +297,18 @@
     {
       "id": "drawing-rectangles-to-the-canvas/2d.fillRect.clip",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "fillRect is affected by clipping regions"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.fillRect.shadow",
       "status": "skip",
-      "gap": "Unsupported API: canvas shadows",
-      "diagnosis": "fillRect draws shadows"
+      "gaps": [
+        "Unsupported API: canvas shadows"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.shadowColor is not implementable: GPUI canvas primitives expose no shadow primitive"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.fillRect.nonfinite",
@@ -245,11 +324,19 @@
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeRect.zero.1",
-      "status": "pass"
+      "status": "skip",
+      "gaps": [
+        "Native screenshot composites the canvas over an opaque window, so alpha below 255 cannot be read back"
+      ],
+      "diagnosis": "1 of 1 pixel expectations need alpha < 255"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeRect.zero.2",
-      "status": "pass"
+      "status": "skip",
+      "gaps": [
+        "Native screenshot composites the canvas over an opaque window, so alpha below 255 cannot be read back"
+      ],
+      "diagnosis": "1 of 1 pixel expectations need alpha < 255"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeRect.zero.3",
@@ -257,11 +344,19 @@
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeRect.zero.4",
-      "status": "pass"
+      "status": "skip",
+      "gaps": [
+        "Native screenshot composites the canvas over an opaque window, so alpha below 255 cannot be read back"
+      ],
+      "diagnosis": "1 of 1 pixel expectations need alpha < 255"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeRect.zero.5",
-      "status": "pass"
+      "status": "fail",
+      "gaps": [
+        "Native retained-canvas paint divergence (strokeStyle, lineWidth, lineJoin, strokeRect)"
+      ],
+      "diagnosis": "pixel (50, 25) channel 1: got 0,0,0,255, expected 0,255,0,255 ±0"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeRect.negative",
@@ -273,25 +368,35 @@
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeRect.globalalpha",
-      "status": "pass"
+      "status": "skip",
+      "gaps": [
+        "Native screenshot composites the canvas over an opaque window, so alpha below 255 cannot be read back"
+      ],
+      "diagnosis": "1 of 1 pixel expectations need alpha < 255"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeRect.globalcomposite",
       "status": "skip",
-      "gap": "Unsupported API: non-source-over compositing",
-      "diagnosis": "strokeRect is not affected by globalCompositeOperation"
+      "gaps": [
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeRect.clip",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "strokeRect is affected by clipping regions"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeRect.shadow",
       "status": "skip",
-      "gap": "Unsupported API: canvas shadows",
-      "diagnosis": "strokeRect draws shadows"
+      "gaps": [
+        "Unsupported API: canvas shadows"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.shadowColor is not implementable: GPUI canvas primitives expose no shadow primitive"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeRect.nonfinite",
@@ -300,97 +405,129 @@
     {
       "id": "drawing-rectangles-to-the-canvas/2d.fillStyle.colorObject",
       "status": "skip",
-      "gap": "Recording context declines fillStyle: gradient and pattern objects are not encoded by stream version 1",
+      "gaps": [
+        "Recording context declines fillStyle: gradient and pattern objects are not encoded by stream version 1"
+      ],
       "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.fillStyle is not implemented: gradient and pattern objects are not encoded by stream version 1"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.fillStyle.colorObject.transparency",
       "status": "skip",
-      "gap": "Recording context declines fillStyle: gradient and pattern objects are not encoded by stream version 1",
+      "gaps": [
+        "Recording context declines fillStyle: gradient and pattern objects are not encoded by stream version 1"
+      ],
       "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.fillStyle is not implemented: gradient and pattern objects are not encoded by stream version 1"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeStyle.colorObject",
       "status": "skip",
-      "gap": "Recording context declines strokeStyle: gradient and pattern objects are not encoded by stream version 1",
+      "gaps": [
+        "Recording context declines strokeStyle: gradient and pattern objects are not encoded by stream version 1"
+      ],
       "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.strokeStyle is not implemented: gradient and pattern objects are not encoded by stream version 1"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeStyle.colorObject.transparency",
       "status": "skip",
-      "gap": "Recording context declines strokeStyle: gradient and pattern objects are not encoded by stream version 1",
+      "gaps": [
+        "Recording context declines strokeStyle: gradient and pattern objects are not encoded by stream version 1"
+      ],
       "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.strokeStyle is not implemented: gradient and pattern objects are not encoded by stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.parse",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.parse.invalid",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.parse.system",
-      "status": "skip",
-      "gap": "Recording context state or serialization differs from the WPT expectation",
+      "status": "fail",
+      "gaps": [
+        "Recording context state or serialization differs from the WPT expectation"
+      ],
       "diagnosis": "expected 'ThreeDDarkShadow' to match /^#(?!(FF0000|ff0000|f00)$)/"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.parse.current.basic",
       "status": "skip",
-      "gap": "Unsupported API: DOM canvas attributes and CSS",
-      "diagnosis": "currentColor is computed from the canvas element"
+      "gaps": [
+        "Unsupported API: DOM canvas attributes and CSS"
+      ],
+      "diagnosis": "GPUIX canvas host has no setAttribute member"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.parse.current.changed",
       "status": "skip",
-      "gap": "Unsupported API: DOM canvas attributes and CSS",
-      "diagnosis": "currentColor is computed when the attribute is set, not when it is painted"
+      "gaps": [
+        "Unsupported API: DOM canvas attributes and CSS"
+      ],
+      "diagnosis": "GPUIX canvas host has no setAttribute member"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.parse.current.removed",
       "status": "skip",
-      "gap": "Unsupported API: DOM canvas attributes and CSS",
-      "diagnosis": "currentColor is solid black when the canvas element is not in a document"
+      "gaps": [
+        "Unsupported API: DOM canvas attributes and CSS"
+      ],
+      "diagnosis": "Cannot read properties of undefined (reading 'parentNode')"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.invalidstring",
-      "status": "skip",
-      "gap": "Native canvas stream rejects fillStyle value",
+      "status": "fail",
+      "gaps": [
+        "Native canvas stream rejects a spec-valid fillStyle value"
+      ],
       "diagnosis": "[gpuix] Invalid canvas command on <canvas> (element 1): property \"fillStyle\" rejected value op[3]: unsupported Canvas 2D color \"invalid\""
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.invalidtype",
       "status": "skip",
-      "gap": "Recording context declines fillStyle: gradient and pattern objects are not encoded by stream version 1",
+      "gaps": [
+        "Recording context declines fillStyle: gradient and pattern objects are not encoded by stream version 1"
+      ],
       "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.fillStyle is not implemented: gradient and pattern objects are not encoded by stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.get.solid",
-      "status": "skip",
-      "gap": "Recording context state or serialization differs from the WPT expectation",
+      "status": "fail",
+      "gaps": [
+        "Recording context state or serialization differs from the WPT expectation"
+      ],
       "diagnosis": "expected '#fa0' to be '#ffaa00' // Object.is equality"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.get.semitransparent",
-      "status": "skip",
-      "gap": "Recording context state or serialization differs from the WPT expectation",
+      "status": "fail",
+      "gaps": [
+        "Recording context state or serialization differs from the WPT expectation"
+      ],
       "diagnosis": "expected 'rgba(255,255,255,0.45)' to match /^rgba\\(255, 255, 255, 0\\.4\\d+\\)$/"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.get.halftransparent",
-      "status": "skip",
-      "gap": "Recording context state or serialization differs from the WPT expectation",
+      "status": "fail",
+      "gaps": [
+        "Recording context state or serialization differs from the WPT expectation"
+      ],
       "diagnosis": "expected 'rgba(255,255,255,0.5)' to be 'rgba(255, 255, 255, 0.5)' // Object.is equality"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.get.transparent",
-      "status": "skip",
-      "gap": "Recording context state or serialization differs from the WPT expectation",
+      "status": "fail",
+      "gaps": [
+        "Recording context state or serialization differs from the WPT expectation"
+      ],
       "diagnosis": "expected 'rgba(0,0,0,0)' to be 'rgba(0, 0, 0, 0)' // Object.is equality"
     },
     {
@@ -400,7 +537,9 @@
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.toStringFunctionCallback",
       "status": "skip",
-      "gap": "Recording context declines fillStyle: gradient and pattern objects are not encoded by stream version 1",
+      "gaps": [
+        "Recording context declines fillStyle: gradient and pattern objects are not encoded by stream version 1"
+      ],
       "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.fillStyle is not implemented: gradient and pattern objects are not encoded by stream version 1"
     },
     {
@@ -410,739 +549,995 @@
     {
       "id": "fill-and-stroke-styles/2d.gradient.object.type",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "window.CanvasGradient exists and has the right properties"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.object.return",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "createLinearGradient() and createRadialGradient() returns objects implementing CanvasGradient"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.solid",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.color",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.alpha",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.coloralpha",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.outside",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.zerosize.fill",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.zerosize.stroke",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.zerosize.fillRect",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.zerosize.strokeRect",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.zerosize.fillText",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients",
+        "Unsupported API: canvas text"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.zerosize.strokeText",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients",
+        "Unsupported API: canvas text"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.vertical",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.multiple",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients",
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.overlap",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients",
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.overlap2",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.empty",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.object.update",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.object.compare",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.object.crosscanvas",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.object.current",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients",
+        "Unsupported API: DOM canvas attributes and CSS"
+      ],
+      "diagnosis": "GPUIX canvas host has no setAttribute member"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.object.invalidoffset",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.object.invalidcolor",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.linear.nonfinite",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "createLinearGradient() throws TypeError if arguments are not finite"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "Expected TypeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.linear.transform.1",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "Linear gradient coordinates are relative to the coordinate space at the time of filling"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.linear.transform.2",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "Linear gradient coordinates are relative to the coordinate space at the time of filling"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.linear.transform.3",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "Linear gradient transforms do not experience broken caching effects"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.negative",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "createRadialGradient() throws INDEX_SIZE_ERR if either radius is negative"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "Expected IndexSizeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.nonfinite",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "createRadialGradient() throws TypeError if arguments are not finite"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "Expected TypeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.inside1",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.inside2",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.inside3",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.outside1",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.outside2",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.outside3",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.touch1",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.touch2",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.touch3",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.equal",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.cone.behind",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.cone.front",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.cone.bottom",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.cone.top",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.cone.beside",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.cone.cylinder",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.cone.shape1",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.cone.shape2",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.transform.1",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "Radial gradient coordinates are relative to the coordinate space at the time of filling"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.transform.2",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "Radial gradient coordinates are relative to the coordinate space at the time of filling"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.radial.transform.3",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "Radial gradient transforms do not experience broken caching effects"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createRadialGradient is not implementable: GPUI has no radial-gradient BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.conic.positive.rotation",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "Conic gradient with positive rotation"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createConicGradient is not implementable: GPUI has no conic-gradient background primitive"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.conic.negative.rotation",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "Conic gradient with negative rotation"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createConicGradient is not implementable: GPUI has no conic-gradient background primitive"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.conic.invalid.inputs",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "Conic gradient function with invalid inputs"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "Expected TypeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createConicGradient is not implementable: GPUI has no conic-gradient background primitive"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.basic.type",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.basic.image",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.basic.canvas",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.basic.zerocanvas",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns",
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.basic.nocontext",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.transform.identity",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.transform.infinity",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.transform.invalid",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.undefined",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "Expected TypeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createPattern is not implementable: GPUI has no repeating-image BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.null",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "Expected TypeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createPattern is not implementable: GPUI has no repeating-image BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.string",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "Expected TypeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createPattern is not implementable: GPUI has no repeating-image BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.incomplete.nosrc",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns",
+        "Unsupported API: DOM image sources"
+      ],
+      "diagnosis": "Image is not defined"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.incomplete.immediate",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.incomplete.reload",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.incomplete.emptysrc",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture only exposes #c, requested #red.png"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.incomplete.removedsrc",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture only exposes #c, requested #red.png"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.broken",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture only exposes #c, requested #broken.png"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.nonexistent",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture only exposes #c, requested #no-such-image-really.png"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.svgimage.nonexistent",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture only exposes #c, requested #no-such-image-really.png"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.nonexistent-but-loading",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture cannot create <img>"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.nosrc",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture cannot create <img>"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.zerowidth",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture only exposes #c, requested #red-zerowidth.svg"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.image.zeroheight",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture only exposes #c, requested #red-zeroheight.svg"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.svgimage.zerowidth",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture only exposes #c, requested #red-zerowidth.svg"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.svgimage.zeroheight",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture only exposes #c, requested #red-zeroheight.svg"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.repeat.empty",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.repeat.null",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createPattern is not implementable: GPUI has no repeating-image BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.repeat.undefined",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "Expected SyntaxError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createPattern is not implementable: GPUI has no repeating-image BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.repeat.unrecognised",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "Expected SyntaxError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createPattern is not implementable: GPUI has no repeating-image BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.repeat.unrecognisednull",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "Expected SyntaxError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createPattern is not implementable: GPUI has no repeating-image BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.repeat.case",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "Expected SyntaxError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createPattern is not implementable: GPUI has no repeating-image BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.repeat.nullsuffix",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "Expected SyntaxError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createPattern is not implementable: GPUI has no repeating-image BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.modify.image1",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture only exposes #c, requested #green.png"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.modify.image2",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: canvas patterns"
+      ],
+      "diagnosis": "WPT DOM fixture only exposes #c, requested #green.png"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.modify.canvas1",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.modify.canvas2",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.crosscanvas",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.norepeat.basic",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.norepeat.outside",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.norepeat.outside_arc",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.norepeat.coord1",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.norepeat.coord2",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.norepeat.coord3",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.repeat.basic",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.repeat.outside",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.repeat.coord1",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.repeat.coord2",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.repeat.coord3",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.repeatx.basic",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.repeatx.outside",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.repeatx.coord1",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.repeaty.basic",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.repeaty.outside",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.repeaty.coord1",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.orientation.image",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "Image patterns do not get flipped when painted"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.paint.orientation.canvas",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "Canvas patterns do not get flipped when painted"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.animated.gif",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": "createPattern() of an animated GIF draws the first frame"
+      "gaps": [
+        "Unsupported API: canvas patterns",
+        "Unsupported API: asynchronous WPT driver"
+      ],
+      "diagnosis": "deferTest is not defined"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.CSSRGB",
       "status": "skip",
-      "gap": "Unsupported API: context reset",
-      "diagnosis": "CSSRGB works as color input"
+      "gaps": [
+        "Unsupported API: context reset"
+      ],
+      "diagnosis": "CSSRGB is not defined"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.CSSHSL",
       "status": "skip",
-      "gap": "WPT fixture lacks global CSSHSL",
+      "gaps": [
+        "WPT fixture lacks global CSSHSL"
+      ],
       "diagnosis": "CSSHSL is not defined"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.colormix",
       "status": "skip",
-      "gap": "Unsupported API: modern CSS color spaces",
-      "diagnosis": "color-mix works as color input"
+      "gaps": [
+        "Unsupported API: modern CSS color spaces"
+      ],
+      "diagnosis": "expected 'color-mix(in srgb, red, blue)' to be 'color(srgb 0.5 0 0.5)' // Object.is equality"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.colormix.currentcolor",
       "status": "skip",
-      "gap": "Unsupported API: DOM canvas attributes and CSS",
-      "diagnosis": "color-mix works as color input with currentcolor"
+      "gaps": [
+        "Unsupported API: DOM canvas attributes and CSS",
+        "Unsupported API: modern CSS color spaces"
+      ],
+      "diagnosis": "GPUIX canvas host has no setAttribute member"
     },
     {
       "id": "fill-and-stroke-styles/2d.strokeStyle.colormix",
       "status": "skip",
-      "gap": "Unsupported API: modern CSS color spaces",
-      "diagnosis": "color-mix works as color input"
+      "gaps": [
+        "Unsupported API: modern CSS color spaces"
+      ],
+      "diagnosis": "expected 'color-mix(in srgb, red, blue)' to be 'color(srgb 0.5 0 0.5)' // Object.is equality"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.colormix",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "color-mix works as CanvasGradient color input"
+      "gaps": [
+        "Unsupported API: canvas gradients",
+        "Unsupported API: modern CSS color spaces"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.relativecolor",
       "status": "skip",
-      "gap": "Unsupported API: modern CSS color spaces",
-      "diagnosis": "Relative color works as color input"
+      "gaps": [
+        "Unsupported API: modern CSS color spaces"
+      ],
+      "diagnosis": "expected 'rgb(from red g r b)' to be 'color(srgb 0 1 0)' // Object.is equality"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.relativecolor.currentcolor",
       "status": "skip",
-      "gap": "Unsupported API: DOM canvas attributes and CSS",
-      "diagnosis": "Relative color works as color input with currentcolor"
+      "gaps": [
+        "Unsupported API: DOM canvas attributes and CSS"
+      ],
+      "diagnosis": "GPUIX canvas host has no setAttribute member"
     },
     {
       "id": "fill-and-stroke-styles/2d.strokeStyle.relativecolor",
       "status": "skip",
-      "gap": "Unsupported API: modern CSS color spaces",
-      "diagnosis": "Relative color works as color input"
+      "gaps": [
+        "Unsupported API: modern CSS color spaces"
+      ],
+      "diagnosis": "expected 'rgb(from red g r b)' to be 'color(srgb 0 1 0)' // Object.is equality"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.relativecolor",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "Relative color works as CanvasGradient color input"
+      "gaps": [
+        "Unsupported API: canvas gradients"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.colorInterpolationMethod",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "CSS color spaces work as a CanvasGradient color interpolation methods"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.hueInterpolationMethod",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "CSS hue interpolation methods work for CanvasGradients"
     },
     {
@@ -1267,7 +1662,11 @@
     },
     {
       "id": "line-styles/2d.line.cross",
-      "status": "pass"
+      "status": "fail",
+      "gaps": [
+        "Native retained-canvas paint divergence (fillStyle, fillRect, lineWidth, lineJoin)"
+      ],
+      "diagnosis": "pixel (48, 1) channel 0: got 255,0,0,255, expected 0,255,0,255 ±0"
     },
     {
       "id": "line-styles/2d.line.union",
@@ -1276,8 +1675,10 @@
     {
       "id": "line-styles/2d.line.invalid.strokestyle",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "Verify correct behavior of canvas on an invalid strokeStyle()"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "path-objects/2d.path.initial",
@@ -1342,13 +1743,17 @@
     {
       "id": "path-objects/2d.path.quadraticCurveTo.ensuresubpath.1",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": "If there is no subpath, the first control point is added (and nothing is drawn up to it)"
     },
     {
       "id": "path-objects/2d.path.quadraticCurveTo.ensuresubpath.2",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": "If there is no subpath, the first control point is added"
     },
     {
@@ -1442,8 +1847,10 @@
     {
       "id": "path-objects/2d.path.arcTo.negative",
       "status": "skip",
-      "gap": "Unsupported API: Path2D objects",
-      "diagnosis": "arcTo() with negative radius throws an exception"
+      "gaps": [
+        "Unsupported API: Path2D objects"
+      ],
+      "diagnosis": "Path2D is not defined"
     },
     {
       "id": "path-objects/2d.path.arcTo.zero.1",
@@ -1491,7 +1898,11 @@
     },
     {
       "id": "path-objects/2d.path.arc.angle.3",
-      "status": "pass"
+      "status": "fail",
+      "gaps": [
+        "Native retained-canvas paint divergence (fillStyle, fillRect, beginPath, moveTo)"
+      ],
+      "diagnosis": "pixel (50, 25) channel 0: got 255,0,0,255, expected 0,255,0,255 ±0"
     },
     {
       "id": "path-objects/2d.path.arc.angle.4",
@@ -1499,7 +1910,11 @@
     },
     {
       "id": "path-objects/2d.path.arc.angle.5",
-      "status": "pass"
+      "status": "fail",
+      "gaps": [
+        "Native retained-canvas paint divergence (fillStyle, fillRect, beginPath, moveTo)"
+      ],
+      "diagnosis": "pixel (50, 25) channel 0: got 255,0,0,255, expected 0,255,0,255 ±0"
     },
     {
       "id": "path-objects/2d.path.arc.angle.6",
@@ -1539,7 +1954,11 @@
     },
     {
       "id": "path-objects/2d.path.arc.shape.1",
-      "status": "pass"
+      "status": "fail",
+      "gaps": [
+        "Native retained-canvas paint divergence (fillStyle, fillRect, lineWidth, strokeStyle)"
+      ],
+      "diagnosis": "pixel (20, 48) channel 0: got 255,0,0,255, expected 0,255,0,255 ±0"
     },
     {
       "id": "path-objects/2d.path.arc.shape.2",
@@ -1548,12 +1967,18 @@
     {
       "id": "path-objects/2d.path.arc.shape.3",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": "arc() from 0 to -pi/2 does not draw anything in the wrong quadrant"
     },
     {
       "id": "path-objects/2d.path.arc.shape.4",
-      "status": "pass"
+      "status": "fail",
+      "gaps": [
+        "Native retained-canvas paint divergence (fillStyle, fillRect, lineWidth, strokeStyle)"
+      ],
+      "diagnosis": "pixel (98, 48) channel 0: got 255,0,0,255, expected 0,255,0,255 ±0"
     },
     {
       "id": "path-objects/2d.path.arc.shape.5",
@@ -1562,18 +1987,26 @@
     {
       "id": "path-objects/2d.path.arc.selfintersect.1",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": "arc() with lineWidth > 2*radius is drawn sensibly"
     },
     {
       "id": "path-objects/2d.path.arc.selfintersect.2",
-      "status": "pass"
+      "status": "fail",
+      "gaps": [
+        "Native retained-canvas paint divergence (fillStyle, fillRect, lineWidth, strokeStyle)"
+      ],
+      "diagnosis": "pixel (2, 48) channel 0: got 255,0,0,255, expected 0,255,0,255 ±0"
     },
     {
       "id": "path-objects/2d.path.arc.negative",
       "status": "skip",
-      "gap": "Unsupported API: Path2D objects",
-      "diagnosis": "arc() with negative radius throws INDEX_SIZE_ERR"
+      "gaps": [
+        "Unsupported API: Path2D objects"
+      ],
+      "diagnosis": "Path2D is not defined"
     },
     {
       "id": "path-objects/2d.path.arc.zeroradius",
@@ -1585,7 +2018,11 @@
     },
     {
       "id": "path-objects/2d.path.arc.scale.2",
-      "status": "pass"
+      "status": "fail",
+      "gaps": [
+        "Native retained-canvas paint divergence (fillStyle, fillRect, scale, strokeStyle)"
+      ],
+      "diagnosis": "pixel (98, 1) channel 0: got 255,0,0,255, expected 0,255,0,255 ±0"
     },
     {
       "id": "path-objects/2d.path.arc.nonfinite",
@@ -1594,8 +2031,10 @@
     {
       "id": "path-objects/2d.path.closed.arc",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "line caps should not be drawn on closed arcs"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "assert_not_equals is not defined"
     },
     {
       "id": "path-objects/2d.path.open.arc",
@@ -1623,7 +2062,11 @@
     },
     {
       "id": "path-objects/2d.path.rect.zero.1",
-      "status": "pass"
+      "status": "fail",
+      "gaps": [
+        "Native retained-canvas paint divergence (fillStyle, fillRect, strokeStyle, lineWidth)"
+      ],
+      "diagnosis": "pixel (50, 25) channel 0: got 255,0,0,255, expected 0,255,0,255 ±0"
     },
     {
       "id": "path-objects/2d.path.rect.zero.2",
@@ -1644,7 +2087,9 @@
     {
       "id": "path-objects/2d.path.rect.zero.6",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
@@ -1658,7 +2103,9 @@
     {
       "id": "path-objects/2d.path.rect.selfintersect",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
@@ -1668,338 +2115,450 @@
     {
       "id": "path-objects/2d.path.roundrect.newsubpath",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.closed",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.end.1",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.end.2",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.end.3",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.end.4",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.zero.1",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.zero.2",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.zero.3",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.zero.4",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.zero.5",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.zero.6",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.negative",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.winding",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.selfintersect",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.nonfinite",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "roundRect() with Infinity/NaN is ignored"
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.4.radii.1.double",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when four radii are given to roundRect(), the first radius, specified as a double, applies to the top-left corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.4.radii.1.dompoint",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when four radii are given to roundRect(), the first radius, specified as a DOMPoint, applies to the top-left corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "DOMPoint is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.4.radii.1.dompointinit",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when four radii are given to roundRect(), the first radius, specified as a DOMPointInit, applies to the top-left corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.4.radii.2.double",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when four radii are given to roundRect(), the second radius, specified as a double, applies to the top-right corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.4.radii.2.dompoint",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when four radii are given to roundRect(), the second radius, specified as a DOMPoint, applies to the top-right corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "DOMPoint is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.4.radii.2.dompointinit",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when four radii are given to roundRect(), the second radius, specified as a DOMPointInit, applies to the top-right corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.4.radii.3.double",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when four radii are given to roundRect(), the third radius, specified as a double, applies to the bottom-right corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.4.radii.3.dompoint",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when four radii are given to roundRect(), the third radius, specified as a DOMPoint, applies to the bottom-right corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "DOMPoint is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.4.radii.3.dompointinit",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when four radii are given to roundRect(), the third radius, specified as a DOMPointInit, applies to the bottom-right corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.4.radii.4.double",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when four radii are given to roundRect(), the fourth radius, specified as a double, applies to the bottom-left corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.4.radii.4.dompoint",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when four radii are given to roundRect(), the fourth radius, specified as a DOMPoint, applies to the bottom-left corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "DOMPoint is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.4.radii.4.dompointinit",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when four radii are given to roundRect(), the fourth radius, specified as a DOMPointInit, applies to the bottom-left corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.3.radii.1.double",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when three radii are given to roundRect(), the first radius, specified as a double, applies to the top-left corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.3.radii.1.dompoint",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when three radii are given to roundRect(), the first radius, specified as a DOMPoint, applies to the top-left corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "DOMPoint is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.3.radii.1.dompointinit",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when three radii are given to roundRect(), the first radius, specified as a DOMPointInit, applies to the top-left corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.3.radii.2.double",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when three radii are given to roundRect(), the second radius, specified as a double, applies to the top-right and bottom-left corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.3.radii.2.dompoint",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when three radii are given to roundRect(), the second radius, specified as a DOMPoint, applies to the top-right and bottom-left corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "DOMPoint is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.3.radii.2.dompointinit",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when three radii are given to roundRect(), the second radius, specified as a DOMPoint, applies to the top-right and bottom-left corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.3.radii.3.double",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when three radii are given to roundRect(), the third radius, specified as a double, applies to the bottom-right corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.3.radii.3.dompoint",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when three radii are given to roundRect(), the third radius, specified as a DOMPoint, applies to the bottom-right corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "DOMPoint is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.3.radii.3.dompointinit",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when three radii are given to roundRect(), the third radius, specified as a DOMPointInit, applies to the bottom-right corner."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.2.radii.1.double",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when two radii are given to roundRect(), the first radius, specified as a double, applies to the top-left and bottom-right corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.2.radii.1.dompoint",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when two radii are given to roundRect(), the first radius, specified as a DOMPoint, applies to the top-left and bottom-right corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "DOMPoint is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.2.radii.1.dompointinit",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when two radii are given to roundRect(), the first radius, specified as a DOMPointInit, applies to the top-left and bottom-right corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.2.radii.2.double",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when two radii are given to roundRect(), the second radius, specified as a double, applies to the top-right and bottom-left corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.2.radii.2.dompoint",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when two radii are given to roundRect(), the second radius, specified as a DOMPoint, applies to the top-right and bottom-left corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "DOMPoint is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.2.radii.2.dompointinit",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when two radii are given to roundRect(), the second radius, specified as a DOMPointInit, applies to the top-right and bottom-left corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.1.radius.double",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when one radius is given to roundRect(), specified as a double, it applies to all corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.1.radius.double.single.argument",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when one radius is given to roundRect() as a non-array argument, specified as a double, it applies to all corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.1.radius.dompoint",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when one radius is given to roundRect(), specified as a DOMPoint, it applies to all corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "DOMPoint is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.1.radius.dompoint.single.argument",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when one radius is given to roundRect() as a non-array argument, specified as a DOMPoint, it applies to all corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "DOMPoint is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.1.radius.dompointinit",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when one radius is given to roundRect(), specified as a DOMPointInit, applies to all corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.1.radius.dompointinit.single.argument",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Verify that when one radius is given to roundRect() as a non-array argument, specified as a DOMPointInit, applies to all corners."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.radius.intersecting.1",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Check that roundRects with intersecting corner arcs are rendered correctly."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.radius.intersecting.2",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Check that roundRects with intersecting corner arcs are rendered correctly."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.radius.none",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Check that roundRect throws an RangeError if radii is an empty array."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "assert_throws_js is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.radius.noargument",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Check that roundRect draws a rectangle when no radii are provided."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.roundrect.radius.toomany",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "Check that roundRect throws an IndeSizeError if radii has more than four items."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "assert_throws_js is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.radius.negative",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "roundRect() with negative radius throws an exception"
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "assert_throws_js is not defined"
     },
     {
       "id": "path-objects/2d.path.roundrect.badinput",
       "status": "skip",
-      "gap": "Unsupported API: roundRect opcode",
-      "diagnosis": "roundRect() throws or does not throw errors given the strange inputs."
+      "gaps": [
+        "Unsupported API: roundRect opcode"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.roundRect is not implemented: roundRect is not encoded by canvas stream version 1"
     },
     {
       "id": "path-objects/2d.path.ellipse.basics",
@@ -2016,8 +2575,10 @@
     {
       "id": "path-objects/2d.path.fill.winding.evenodd.2",
       "status": "skip",
-      "gap": "Unsupported API: Path2D objects",
-      "diagnosis": "evenodd winding number rule works in fill"
+      "gaps": [
+        "Unsupported API: Path2D objects"
+      ],
+      "diagnosis": "Path2D is not defined"
     },
     {
       "id": "path-objects/2d.path.fill.winding.add",
@@ -2045,7 +2606,11 @@
     },
     {
       "id": "path-objects/2d.path.stroke.overlap",
-      "status": "pass"
+      "status": "fail",
+      "gaps": [
+        "Native retained-canvas paint divergence (fillStyle, fillRect, strokeStyle, lineWidth)"
+      ],
+      "diagnosis": "pixel (50, 25) channel 1: got 0,191,0,255, expected 0,127,0,255 ±1"
     },
     {
       "id": "path-objects/2d.path.stroke.union",
@@ -2074,31 +2639,41 @@
     {
       "id": "path-objects/2d.path.stroke.prune.line",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": "Zero-length line segments from lineTo are removed before stroking"
     },
     {
       "id": "path-objects/2d.path.stroke.prune.closed",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": "Zero-length line segments from closed paths are removed before stroking"
     },
     {
       "id": "path-objects/2d.path.stroke.prune.curve",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": "Zero-length line segments from quadraticCurveTo and bezierCurveTo are removed before stroking"
     },
     {
       "id": "path-objects/2d.path.stroke.prune.arc",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": "Zero-length line segments from arcTo and arc are removed before stroking"
     },
     {
       "id": "path-objects/2d.path.stroke.prune.rect",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": "Zero-length line segments from rect and strokeRect are removed before stroking"
     },
     {
@@ -2120,680 +2695,932 @@
     {
       "id": "path-objects/2d.path.clip.empty",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "path-objects/2d.path.clip.basic.1",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "path-objects/2d.path.clip.basic.2",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "path-objects/2d.path.clip.intersect",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "path-objects/2d.path.clip.winding.evenodd.1",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "evenodd winding number rule works in clip"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "path-objects/2d.path.clip.winding.evenodd.2",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "evenodd winding number rule works in clip"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping",
+        "Unsupported API: Path2D objects"
+      ],
+      "diagnosis": "Path2D is not defined"
     },
     {
       "id": "path-objects/2d.path.clip.winding.1",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "path-objects/2d.path.clip.winding.2",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "path-objects/2d.path.clip.unaffected",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.basic.1",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() detects whether the point is inside the path"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.basic.2",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() detects whether the point is inside the path"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.edge",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() counts points on the path as being inside"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.empty",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() works when there is no path"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.subpath",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() uses the current path, not just the subpath"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.outside",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() works on paths outside the canvas"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.unclosed",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() works on unclosed subpaths"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.arc",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() works on arcs"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.bigarc",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() works on unclosed arcs larger than 2pi"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.bezier",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() works on Bezier curves"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.winding",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() uses the non-zero winding number rule"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.transform.1",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() handles transformations correctly"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.transform.2",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() handles transformations correctly"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.transform.3",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() handles transformations correctly"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.transform.4",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() handles transformations correctly"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.nonfinite",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInPath() returns false for non-finite arguments"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInStroke.scaleddashes",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "isPointInStroke() should return correct results on dashed paths at high scale factors"
+      "gaps": [
+        "Unsupported API: geometry hit-testing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInStroke is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInPath.basic",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "Verify the winding rule in isPointInPath works for for rect path."
+      "gaps": [
+        "Unsupported API: geometry hit-testing",
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "path-objects/2d.path.isPointInpath.multi.path",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "Verify the winding rule in isPointInPath works for path object."
+      "gaps": [
+        "Unsupported API: geometry hit-testing",
+        "Unsupported API: Path2D objects",
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "path-objects/2d.path.isPointInpath.invalid",
       "status": "skip",
-      "gap": "Unsupported API: geometry hit-testing",
-      "diagnosis": "Verify isPointInPath throws exceptions with invalid inputs."
+      "gaps": [
+        "Unsupported API: geometry hit-testing",
+        "Unsupported API: Path2D objects",
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "path-objects/2d.path.clip.scale",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "clip() with non-identity transform applies the correct clip region"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create2.basic",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(sw, sh) exists and returns something"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create1.basic",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(imgdata) exists and returns something"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create2.type",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(sw, sh) returns an ImageData object containing a Uint8ClampedArray object"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "expected undefined not to be undefined // Object.is equality"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create1.type",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(imgdata) returns an ImageData object containing a Uint8ClampedArray object"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "expected undefined not to be undefined // Object.is equality"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create2.this",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": "createImageData(sw, sh) should throw when called with the wrong |this|"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create1.this",
       "status": "skip",
-      "gap": "Unsupported API: WPT assertion syntax not implemented by this harness",
+      "gaps": [
+        "WPT assertion syntax not implemented by this harness"
+      ],
       "diagnosis": "createImageData(imgdata) should throw when called with the wrong |this|"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create2.initial",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(sw, sh) returns transparent black data of the right size"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create1.initial",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(imgdata) returns transparent black data of the right size"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create2.large",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(sw, sh) works for sizes much larger than the canvas"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create2.negative",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(sw, sh) takes the absolute magnitude of the size arguments"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create2.zero",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(sw, sh) throws INDEX_SIZE_ERR if size is zero"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "Expected IndexSizeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create2.nonfinite",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData() throws TypeError if arguments are not finite"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "Expected TypeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create1.zero",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(null) throws TypeError"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "Expected TypeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create2.double",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(w, h) double is converted to long"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.double",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(w, h) double is converted to long"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create2.round",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "createImageData(w, h) is rounded the same as getImageData(0, 0, w, h)"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.createImageBitmap.srgb.rgba.unorm8",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "Verify round-trip of 8-bit sRGB data ImageData through ImageBitmap"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers",
+        "Unsupported API: DOM image sources"
+      ],
+      "diagnosis": "await is only valid in async functions and the top level bodies of modules"
     },
     {
       "id": "pixel-manipulation/2d.imageData.createImageBitmap.srgb.rgba.float16",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "Verify round-trip of 16-bit float sRGB data ImageData through ImageBitmap"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers",
+        "Unsupported API: DOM image sources"
+      ],
+      "diagnosis": "await is only valid in async functions and the top level bodies of modules"
     },
     {
       "id": "pixel-manipulation/2d.imageData.createImageBitmap.p3.rgba.unorm8",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "Verify round-trip of 8-bit P3 data ImageData through ImageBitmap"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers",
+        "Unsupported API: DOM image sources",
+        "Unsupported API: modern CSS color spaces"
+      ],
+      "diagnosis": "await is only valid in async functions and the top level bodies of modules"
     },
     {
       "id": "pixel-manipulation/2d.imageData.create.and.resize",
       "status": "skip",
-      "gap": "Unsupported API: DOM image sources",
-      "diagnosis": "Verify no crash when resizing an image bitmap to zero."
+      "gaps": [
+        "Unsupported API: DOM image sources"
+      ],
+      "diagnosis": "Image is not defined"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.basic",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() exists and returns something"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.type",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() returns an ImageData object containing a Uint8ClampedArray object"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "expected undefined not to be undefined // Object.is equality"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.zero",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() throws INDEX_SIZE_ERR if size is zero"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "Expected IndexSizeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.nonfinite",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() throws TypeError if arguments are not finite"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "Expected TypeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.source.outside",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() returns transparent black outside the canvas"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.source.negative",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() works with negative width and height, and returns top-to-bottom left-to-right"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.source.size",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() returns bigger ImageData for bigger source rectangle"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.nonpremul",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() returns non-premultiplied colors"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.range",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() returns values in the range [0, 255]"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.clamp",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() clamps colors to the range [0, 255]"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.length",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() returns a correctly-sized Uint8ClampedArray"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.order.cols",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() returns leftmost columns first"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.order.rows",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() returns topmost rows first"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.order.rgb",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() returns R then G then B"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.order.alpha",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "getImageData() returns A in the fourth component"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.unaffected",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "getImageData() is not affected by context state"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping",
+        "Unsupported API: CPU canvas pixel buffers",
+        "Unsupported API: canvas shadows",
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.large.crash",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "Test that canvas crash when image data cannot be allocated."
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "Expected TypeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.rounding",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "Test the handling of non-integer source coordinates in getImageData()."
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.get.invalid",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "Verify getImageData() behavior in invalid cases."
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.properties",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "ImageData objects have the right properties"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.readonly",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "ImageData objects properties are read-only"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.ctor.size",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "ImageData has a usable constructor"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "expected undefined not to be undefined // Object.is equality"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.ctor.basics",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "Testing different type of ImageData constructor"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "ImageData is not defined"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.ctor.pixelFormat",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "Testing ImageData constructor pixelFormat behaviors"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "ImageData is not defined"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.ctor.array",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "ImageData has a usable constructor"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "expected undefined not to be undefined // Object.is equality"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.ctor.array.bounds",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "ImageData has a usable constructor"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "expected undefined not to be undefined // Object.is equality"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.set",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "ImageData.data can be modified"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.undefined",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "ImageData.data converts undefined to 0"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.nan",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "ImageData.data converts NaN to 0"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.string",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "ImageData.data converts strings to numbers with ToNumber"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.clamp",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "ImageData.data clamps numbers to [0, 255]"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.object.round",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "ImageData.data rounds numbers with round-to-zero"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.null",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() with null imagedata throws TypeError"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "Expected TypeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.putImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.nonfinite",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() throws TypeError if arguments are not finite"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.basic",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() puts image data from getImageData() onto the canvas"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.basic.rgba.float16",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() puts 16-bit floating point image data from getImageData() onto the canvas"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers",
+        "Unsupported API: modern CSS color spaces"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.created",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() puts image data from createImageData() onto the canvas"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.wrongtype",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() does not accept non-ImageData objects"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "Expected TypeError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.putImageData is not implementable: the direct-GPU canvas deliberately has no CPU pixel buffer"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.cross",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() accepts image data got from a different canvas"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.cross#2",
       "status": "skip",
-      "gap": "Unsupported API: WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
-      "diagnosis": "putImageData() accepts image data got from a different canvas"
+      "gaps": [
+        "WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
+        "Unsupported API: CPU canvas pixel buffers",
+        "Unsupported API: OffscreenCanvas"
+      ],
+      "diagnosis": "OffscreenCanvas is not defined"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.alpha",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() puts non-solid image data correctly"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.modified",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() puts modified image data correctly"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.dirty.zero",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() with zero-sized dirty rectangle puts nothing"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.dirty.rect1",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() only modifies areas inside the dirty rectangle, using width and height"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.dirty.rect2",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() only modifies areas inside the dirty rectangle, using x and y"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.dirty.negative",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() handles negative-sized dirty rectangles correctly"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.dirty.outside",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() handles dirty rectangles outside the canvas correctly"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.unchanged",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData(getImageData(...), ...) has no effect"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.unaffected",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() is not affected by context state"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers",
+        "Unsupported API: canvas shadows",
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.clip",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "putImageData() is not affected by clipping regions"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping",
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "pixel-manipulation/2d.imageData.put.path",
       "status": "skip",
-      "gap": "Unsupported API: CPU canvas pixel buffers",
-      "diagnosis": "putImageData() does not affect the current path"
+      "gaps": [
+        "Unsupported API: CPU canvas pixel buffers"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.getImageData is not implementable: GPUI has no per-element GPU readback"
     },
     {
       "id": "reset/2d.reset.basic",
       "status": "skip",
-      "gap": "Unsupported API: context reset",
-      "diagnosis": "reset clears to transparent black"
+      "gaps": [
+        "Unsupported API: context reset",
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.canvas is not implementable: the GPUIX host ref is not an HTMLCanvasElement"
     },
     {
       "id": "reset/2d.reset.after-rasterization",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "Reset after rasterizing a frame discards frame content."
     },
     {
       "id": "reset/2d.reset.state",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "check that the state is reset"
     },
     {
       "id": "reset/2d.reset.state.transformation_matrix",
       "status": "skip",
-      "gap": "Unsupported API: context reset",
-      "diagnosis": "check that the state is reset"
+      "gaps": [
+        "Unsupported API: context reset"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.reset is not implemented: reset is not encoded by canvas stream version 1"
     },
     {
       "id": "reset/2d.reset.state.clip",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "check that the clip is reset"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping",
+        "Unsupported API: context reset"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "reset/2d.reset.state.line_dash",
       "status": "skip",
-      "gap": "Unsupported API: context reset",
-      "diagnosis": "check that the line dash is reset"
+      "gaps": [
+        "Unsupported API: context reset"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.reset is not implemented: reset is not encoded by canvas stream version 1"
     },
     {
       "id": "reset/2d.reset.render.drop_shadow",
       "status": "skip",
-      "gap": "Unsupported API: context reset",
-      "diagnosis": "check that drop shadows are correctly rendered after reset"
+      "gaps": [
+        "Unsupported API: context reset",
+        "Unsupported API: canvas shadows"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.shadowOffsetX is not implementable: GPUI canvas primitives expose no shadow primitive"
     },
     {
       "id": "reset/2d.reset.render.text",
       "status": "skip",
-      "gap": "Unsupported API: context reset",
-      "diagnosis": "check that text is correctly rendered after reset"
+      "gaps": [
+        "Unsupported API: context reset",
+        "Unsupported API: canvas text"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.font is not implemented: canvas text state is reserved for wave D through GPUIX's text funnel"
     },
     {
       "id": "reset/2d.reset.render.line",
       "status": "skip",
-      "gap": "Unsupported API: context reset",
-      "diagnosis": "check that lines are correctly rendered after reset"
+      "gaps": [
+        "Unsupported API: context reset",
+        "Unsupported API: dash offset"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.lineDashOffset is not implementable: GPUI's dash sampler always starts at offset zero"
     },
     {
       "id": "reset/2d.reset.render.miter_limit",
       "status": "skip",
-      "gap": "Unsupported API: context reset",
-      "diagnosis": "check that the lines are correctly rendered with the default miter limit after reset"
+      "gaps": [
+        "Unsupported API: context reset"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.reset is not implemented: reset is not encoded by canvas stream version 1"
     },
     {
       "id": "reset/2d.reset.render.global_composite_operation",
       "status": "skip",
-      "gap": "Unsupported API: context reset",
-      "diagnosis": "check that canvas correctly renders rectangles with the default global composite operation after reset"
+      "gaps": [
+        "Unsupported API: context reset",
+        "Unsupported API: non-source-over compositing"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "reset/2d.reset.render.misc",
       "status": "skip",
-      "gap": "Unsupported API: context reset",
-      "diagnosis": "check that canvas correctly renders rectangles after reset (states not covered by other tests)"
+      "gaps": [
+        "Unsupported API: context reset",
+        "Unsupported API: canvas filters"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.filter is not implementable: GPUI canvas primitives expose no filter pipeline"
     },
     {
       "id": "the-canvas-state/2d.state.saverestore.transformation",
@@ -2802,14 +3629,18 @@
     {
       "id": "the-canvas-state/2d.state.saverestore.clip",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "save()/restore() affects the clipping path"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "the-canvas-state/2d.state.saverestore.clip.2",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "save()/restore() affects the clipping path"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "the-canvas-state/2d.state.saverestore.path",
@@ -2833,36 +3664,50 @@
     },
     {
       "id": "the-canvas-state/2d.state.saverestore",
-      "status": "pass"
+      "status": "skip",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
+      "diagnosis": ""
     },
     {
       "id": "the-canvas-state/2d.canvas.host.initial.reset.2dstate",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "Resetting the canvas state resets {{ variant_name }}"
     },
     {
       "id": "the-canvas/2d.canvas.host.reference",
       "status": "skip",
-      "gap": "Unsupported API: HTML canvas backing-store state",
-      "diagnosis": "canvas refers back to its canvas"
+      "gaps": [
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.canvas is not implementable: the GPUIX host ref is not an HTMLCanvasElement"
     },
     {
       "id": "the-canvas/2d.canvas.host.readonly",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "Canvas objects are readonly"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": ""
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.parse",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "Parsing of non-negative integers"
     },
     {
@@ -2872,20 +3717,27 @@
     {
       "id": "the-canvas/2d.canvas.host.type.delete#2",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "OffscreenCanvas interface object is [[Configurable]]"
     },
     {
       "id": "the-canvas/2d.canvas.host.type.name",
-      "status": "skip",
-      "gap": "Recording context state or serialization differs from the WPT expectation",
+      "status": "fail",
+      "gaps": [
+        "Recording context state or serialization differs from the WPT expectation"
+      ],
       "diagnosis": "expected '[object Object]' to be '[object HTMLCanvasElement]' // Object.is equality"
     },
     {
       "id": "the-canvas/2d.canvas.host.type.name#2",
       "status": "skip",
-      "gap": "Unsupported API: WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
-      "diagnosis": "OffscreenCanvas type and toString"
+      "gaps": [
+        "WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
+        "Unsupported API: OffscreenCanvas"
+      ],
+      "diagnosis": "expected '[object Object]' to be '[object OffscreenCanvas]' // Object.is equality"
     },
     {
       "id": "the-canvas/2d.canvas.context.exists",
@@ -2894,20 +3746,26 @@
     {
       "id": "the-canvas/2d.canvas.context.extraargs.create",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "The 2D context doesn't throw with extra getContext arguments (new context)"
     },
     {
       "id": "the-canvas/2d.canvas.context.invalid.args",
-      "status": "skip",
-      "gap": "Spec-required exception not raised by the recording context",
+      "status": "fail",
+      "gaps": [
+        "Spec-required exception not raised by the recording context"
+      ],
       "diagnosis": "Expected TypeError, but no exception was thrown"
     },
     {
       "id": "the-canvas/2d.canvas.context.invalid.args#2",
       "status": "skip",
-      "gap": "Unsupported API: WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
-      "diagnosis": "Calling getContext with invalid arguments."
+      "gaps": [
+        "WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host"
+      ],
+      "diagnosis": "Expected TypeError, but no exception was thrown"
     },
     {
       "id": "the-canvas/2d.canvas.context.extraargs.cache",
@@ -2923,148 +3781,207 @@
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.color",
-      "status": "pass"
+      "status": "skip",
+      "gaps": [
+        "Native screenshot composites the canvas over an opaque window, so alpha below 255 cannot be read back"
+      ],
+      "diagnosis": "1 of 1 pixel expectations need alpha < 255"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.different",
       "status": "skip",
-      "gap": "Unsupported API: HTML canvas backing-store state",
-      "diagnosis": "Changing size resets canvas to transparent black"
+      "gaps": [
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.same",
       "status": "skip",
-      "gap": "Unsupported API: HTML canvas backing-store state",
-      "diagnosis": "Setting size (not changing the value) resets canvas to transparent black"
+      "gaps": [
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.path",
       "status": "skip",
-      "gap": "Unsupported API: HTML canvas backing-store state",
-      "diagnosis": "Resetting the canvas state resets the current path"
+      "gaps": [
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.clip",
       "status": "skip",
-      "gap": "Unsupported API: arbitrary path clipping",
-      "diagnosis": "Resetting the canvas state resets the current clip region"
+      "gaps": [
+        "Unsupported API: arbitrary path clipping",
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.transform",
       "status": "skip",
-      "gap": "Unsupported API: HTML canvas backing-store state",
-      "diagnosis": "Resetting the canvas state resets the current transformation matrix"
+      "gaps": [
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.gradient",
       "status": "skip",
-      "gap": "Unsupported API: canvas gradients",
-      "diagnosis": "Resetting the canvas state does not invalidate any existing gradients"
+      "gaps": [
+        "Unsupported API: canvas gradients",
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.pattern",
       "status": "skip",
-      "gap": "Unsupported API: canvas patterns",
-      "diagnosis": "Resetting the canvas state does not invalidate any existing patterns"
+      "gaps": [
+        "Unsupported API: canvas patterns",
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.idl.set.zero",
       "status": "skip",
-      "gap": "Unsupported API: HTML canvas backing-store state",
-      "diagnosis": "Setting width/height IDL attributes to 0"
+      "gaps": [
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.idl",
       "status": "skip",
-      "gap": "Unsupported API: HTML canvas backing-store state",
-      "diagnosis": "Getting/setting width/height IDL attributes"
+      "gaps": [
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.invalid.attributes.idl",
       "status": "skip",
-      "gap": "Unsupported API: WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
-      "diagnosis": "Getting/setting width/height IDL attributes"
+      "gaps": [
+        "WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "Expected TypeError, got Error: GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.invalid.attributes.idl#2",
       "status": "skip",
-      "gap": "Unsupported API: HTML canvas backing-store state",
-      "diagnosis": "Getting/setting width/height IDL attributes"
+      "gaps": [
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.default",
       "status": "skip",
-      "gap": "Unsupported API: HTML canvas backing-store state",
-      "diagnosis": "Default width/height when attributes are missing"
+      "gaps": [
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.removed",
       "status": "skip",
-      "gap": "Unsupported API: HTML canvas backing-store state",
-      "diagnosis": "Removing content attributes reverts to default size"
+      "gaps": [
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.reflect.setidl",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "Setting IDL attributes updates IDL and content attributes"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.reflect.setidlzero",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "Setting IDL attributes to 0 updates IDL and content attributes"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.reflect.setcontent",
       "status": "skip",
-      "gap": "Unsupported API: DOM canvas attributes and CSS",
-      "diagnosis": "Setting content attributes updates IDL and content attributes"
+      "gaps": [
+        "Unsupported API: DOM canvas attributes and CSS",
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no setAttribute member"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.large",
       "status": "skip",
-      "gap": "Unsupported API: HTML canvas backing-store state",
-      "diagnosis": ""
+      "gaps": [
+        "Unsupported API: HTML canvas backing-store state"
+      ],
+      "diagnosis": "GPUIX canvas host has no width member"
     },
     {
       "id": "the-canvas/2d.canvas.context.prototype",
       "status": "skip",
-      "gap": "WPT fixture lacks global CanvasRenderingContext2D",
+      "gaps": [
+        "WPT fixture lacks global CanvasRenderingContext2D"
+      ],
       "diagnosis": "CanvasRenderingContext2D is not defined"
     },
     {
       "id": "the-canvas/2d.canvas.context.prototype#2",
       "status": "skip",
-      "gap": "Unsupported API: WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
-      "diagnosis": "checks OffscreenCanvasRenderingContext2D prototype"
+      "gaps": [
+        "WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host"
+      ],
+      "diagnosis": "OffscreenCanvasRenderingContext2D is not defined"
     },
     {
       "id": "the-canvas/2d.canvas.host.scaled",
-      "status": "pass"
+      "status": "skip",
+      "gaps": [
+        "WPT reference-image comparison is not implemented by this harness"
+      ],
+      "diagnosis": "Reference expectation: size 100 50\ncr.set_source_rgb(0, 0, 1)\ncr.rectangle(0, 0, 100, 50)\ncr.fill()\ncr.set_source_rgb(0, 1, 1)\ncr.rectangle(0, "
     },
     {
       "id": "the-canvas/2d.canvas.context.type.exists",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "The 2D context interface is a property of '{{ root }}'"
     },
     {
       "id": "the-canvas/2d.canvas.context.type.extend",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "Interface methods can be added"
     },
     {
       "id": "the-canvas/2d.canvas.context.type.replace",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "Interface methods can be overridden"
     },
     {
       "id": "the-canvas/2d.canvas.context.type.prototype",
       "status": "skip",
-      "gap": "Unsupported API: WPT Jinja variant expansion is not implemented by this harness",
+      "gaps": [
+        "WPT Jinja variant expansion is not implemented by this harness"
+      ],
       "diagnosis": "window.CanvasRenderingContext2D.prototype are not [[Writable]] and not [[Configurable]], and its methods are [[Configurable]]."
     },
     {
