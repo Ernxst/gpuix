@@ -171,6 +171,63 @@ setTimeout(() => {
 }, 50)
 `
 
+const INJECTED_ROOT_FAILURE_PROGRAM = `
+import React from "react"
+import { render } from ${JSON.stringify(join(srcDir, "reconciler/renderer.ts"))}
+
+const renderer = {
+  createElement() {},
+  destroyElement() { return [] },
+  appendChild() {},
+  removeChild() {},
+  insertBefore() {},
+  setStyle() {},
+  setText() {},
+  setEventListener() {},
+  setRoot() {},
+  setCustomProp() {},
+  commitMutations() {},
+  setStrictStyles() {},
+  requestFrame() {},
+}
+
+const root = render(React.createElement("div", { accessibilityRole: "button" }), {
+  renderer,
+  strictStyles: true,
+  onTerminated: () => console.log("INJECTED_ROOT_TERMINATED"),
+})
+
+await new Promise((resolve) => setTimeout(resolve, 0))
+
+const status = root.getStatus()
+if (status.status !== "failed") {
+  throw new Error("expected failed root status, got " + JSON.stringify(status))
+}
+const diagnostics = renderer.drainStyleDiagnostics?.() ?? []
+if (!diagnostics.some((diagnostic) =>
+  diagnostic.elementId === 0 &&
+  diagnostic.elementType === "root" &&
+  diagnostic.property === "status" &&
+  diagnostic.value === '"failed"' &&
+  diagnostic.message.includes("React root is dead after an uncaught render error")
+)) {
+  throw new Error("missing dead-root diagnostic: " + JSON.stringify(diagnostics))
+}
+console.log("INJECTED_ROOT_SURVIVED_WITH_FAILED_STATE")
+`
+
+const OWNED_ROOT_FAILURE_PROGRAM = `
+import React from "react"
+import { render } from ${JSON.stringify(join(srcDir, "reconciler/renderer.ts"))}
+
+render(React.createElement("div", { accessibilityRole: "button" }), {
+  title: "GPUIX owned root failure smoke",
+  menus: [],
+  strictStyles: true,
+  onTerminated: () => console.log("OWNED_ROOT_TERMINATED"),
+})
+`
+
 const PROGRAMMATIC_QUIT_PROGRAM = `
 import React, { useEffect } from "react"
 import { render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
@@ -670,6 +727,48 @@ describeNative("render()", () => {
       expect(result.output).toContain("INJECTED_FATAL_HOT_ERROR")
       expect(result.output.match(/^FATAL_REACT_UNMOUNTED$/gm), result.output).toHaveLength(1)
       expect(result.output.match(/^FATAL_TERMINATED$/gm), result.output).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 20_000)
+
+  it("keeps an injected embedder alive with observable failed-root state", async () => {
+    const file = join(srcDir, "__tests__", "injected-root-failure.tmp.tsx")
+    writeFileSync(file, INJECTED_ROOT_FAILURE_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file])
+      expect(result.code, result.output).toBe(0)
+      expect(result.signal).toBeNull()
+      expect(
+        result.output.match(/^INJECTED_ROOT_SURVIVED_WITH_FAILED_STATE$/gm),
+        result.output
+      ).toHaveLength(1)
+      expect(result.output).not.toContain("INJECTED_ROOT_TERMINATED")
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 20_000)
+
+  it("exits with failure when an owned renderer's root becomes dead", async () => {
+    const file = join(srcDir, "__tests__", "owned-root-failure.tmp.tsx")
+    writeFileSync(file, OWNED_ROOT_FAILURE_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file])
+      expect(result.code, result.output).toBe(1)
+      expect(result.signal).toBeNull()
+      expect(result.output).toContain(
+        "React root is dead after an uncaught render error"
+      )
+      expect(
+        result.output.match(/^OWNED_ROOT_TERMINATED$/gm),
+        result.output
+      ).toHaveLength(1)
     } finally {
       try {
         unlinkSync(file)
