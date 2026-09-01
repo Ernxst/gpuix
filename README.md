@@ -318,8 +318,8 @@ the unchanged payload is exposed as `nativeEvent`. The synthetic surface adds:
 - `preventDefault()` / `defaultPrevented` and `stopPropagation()`
 
 `handleGpuixEvent()` returns the synchronous prevention result. A prevented
-Enter or Space key event cancels the keyboard-generated click that follows;
-future native defaults must likewise check this result before running.
+Enter or Space key event cancels the keyboard-generated click that follows. A
+prevented Tab or Shift+Tab keydown likewise keeps focus on the current element.
 
 ## Packages
 
@@ -1662,8 +1662,20 @@ a `div` when it should receive keyboard focus:
 | `autoFocus` | Takes focus once, when its native focus handle is created |
 
 `Tab` calls GPUI's `window.focus_next()`. `Shift+Tab` calls
-`window.focus_prev()`. This navigation stays in Rust and does not make a
-JavaScript round trip.
+`window.focus_prev()`. Before that default runs, GPUIX dispatches the keydown
+through React's capture and bubble phases. Call `preventDefault()` from either
+phase to keep focus on the current element, matching the browser:
+
+```tsx
+<div
+  tabIndex={0}
+  onKeyDown={(event) => {
+    if (event.key === 'tab') event.preventDefault()
+  }}
+>
+  Editor
+</div>
+```
 
 Use a ref for imperative focus:
 

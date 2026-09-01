@@ -30,7 +30,7 @@ use napi_derive::napi;
 #[cfg(target_os = "macos")]
 use objc::{class, msg_send, sel, sel_impl};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(any(target_os = "macos", target_family = "wasm"))]
 use std::rc::Rc;
 #[cfg(all(target_os = "macos", feature = "test-support"))]
@@ -1267,6 +1267,9 @@ enum UiCommand {
         response: SyncSender<Option<crate::automation::ElementBounds>>,
     },
     FocusElement(u64),
+    ResolveTabKeyDown {
+        default_prevented: bool,
+    },
     GetActiveElement {
         response: SyncSender<Option<u64>>,
     },
@@ -1519,6 +1522,11 @@ async fn run_ui_commands(
                 view.focus_element_and_reveal(id, window, cx);
                 window.refresh();
             }),
+            UiCommand::ResolveTabKeyDown { default_prevented } => {
+                window.update(cx, move |view, window, cx| {
+                    view.resolve_tab_key_down(default_prevented, window, cx);
+                })
+            }
             UiCommand::GetActiveElement { response } => {
                 window.update(cx, move |view, window, _cx| {
                     response.send(view.active_element_id(window)).ok();
@@ -3276,6 +3284,27 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Complete the DOM default for a Tab keydown after React capture and
+    /// bubble handlers have had a chance to call preventDefault().
+    #[napi]
+    pub fn resolve_tab_key_down(&self, default_prevented: bool) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.resolve_tab_key_down(default_prevented, window, cx);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ResolveTabKeyDown { default_prevented });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// The focused host element id, analogous to `document.activeElement`, or null.
     /// This reads GPUI focus directly, so role-less focusable elements are included.
     #[napi]
@@ -4689,6 +4718,16 @@ impl WebGpuixRenderer {
         })
     }
 
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = resolveTabKeyDown)]
+    pub fn resolve_tab_key_down(
+        &self,
+        default_prevented: bool,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        update_web_window(move |view, window, cx| {
+            view.resolve_tab_key_down(default_prevented, window, cx);
+        })
+    }
+
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getActiveElement)]
     pub fn get_active_element(&self) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
         let active = update_web_window(|view, window, _cx| view.active_element_id(window))?;
@@ -5087,6 +5126,11 @@ pub(crate) struct GpuixView {
     /// Created lazily for elements with keyboard or focus/blur listeners.
     /// Handles persist across renders so GPUI maintains focus state.
     pub(crate) focus_handles: HashMap<u64, gpui::FocusHandle>,
+    /// Tab defaults wait for the matching React keydown dispatch. Serializing
+    /// them keeps each queued keypress targeted at the focus left by the one
+    /// before it, just like a browser event loop.
+    pending_tab_key_down: Option<FocusDirection>,
+    queued_tab_key_downs: VecDeque<FocusDirection>,
     /// Active focus/blur subscriptions keyed by element and event type.
     pub(crate) focus_subscriptions: HashMap<(u64, String), gpui::Subscription>,
     /// Registry for custom element types (input, editor, diff, etc.).
@@ -5327,6 +5371,8 @@ impl GpuixView {
             root_focus_handle: cx.focus_handle().tab_stop(false),
             focus_lost_subscription: None,
             focus_handles: HashMap::new(),
+            pending_tab_key_down: None,
+            queued_tab_key_downs: VecDeque::new(),
             focus_subscriptions: HashMap::new(),
             custom_registry: CustomElementRegistry::with_defaults(),
             scroll_handles: HashMap::new(),
@@ -6212,10 +6258,7 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        if !self.focus_unrendered_virtual_target(FocusDirection::Next, window, cx) {
-            window.focus_next(cx);
-            self.scroll_current_focus_into_view(window, cx);
-        }
+        self.enqueue_tab_key_down(FocusDirection::Next, window, cx);
     }
 
     fn focus_previous_action(
@@ -6224,10 +6267,83 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        if !self.focus_unrendered_virtual_target(FocusDirection::Previous, window, cx) {
-            window.focus_prev(cx);
-            self.scroll_current_focus_into_view(window, cx);
+        self.enqueue_tab_key_down(FocusDirection::Previous, window, cx);
+    }
+
+    fn enqueue_tab_key_down(
+        &mut self,
+        direction: FocusDirection,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.queued_tab_key_downs.push_back(direction);
+        self.dispatch_next_tab_key_down(window, cx);
+    }
+
+    fn dispatch_next_tab_key_down(
+        &mut self,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.pending_tab_key_down.is_some() {
+            return;
         }
+        let Some(direction) = self.queued_tab_key_downs.pop_front() else {
+            return;
+        };
+        let target_id = self
+            .active_element_id(window)
+            .or_else(|| self.tree.lock().unwrap().root_id);
+        let Some(target_id) = target_id else {
+            self.move_focus(direction, window, cx);
+            return;
+        };
+        if self.event_callback.is_none() {
+            self.move_focus(direction, window, cx);
+            return;
+        }
+
+        self.pending_tab_key_down = Some(direction);
+        let shift = matches!(direction, FocusDirection::Previous);
+        emit_event_full(&self.event_callback, target_id, "keyDown", |payload| {
+            payload.key = Some("tab".to_string());
+            payload.is_held = Some(false);
+            payload.modifiers = Some(crate::element_tree::EventModifiers {
+                shift,
+                ..Default::default()
+            });
+        });
+    }
+
+    pub(crate) fn resolve_tab_key_down(
+        &mut self,
+        default_prevented: bool,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(direction) = self.pending_tab_key_down.take() else {
+            return;
+        };
+        if !default_prevented {
+            self.move_focus(direction, window, cx);
+        }
+        self.dispatch_next_tab_key_down(window, cx);
+    }
+
+    fn move_focus(
+        &mut self,
+        direction: FocusDirection,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.focus_unrendered_virtual_target(direction, window, cx) {
+            return;
+        }
+        match direction {
+            FocusDirection::Next => window.focus_next(cx),
+            FocusDirection::Previous => window.focus_prev(cx),
+        }
+        self.scroll_current_focus_into_view(window, cx);
     }
 
     fn scroll_current_focus_into_view(

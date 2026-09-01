@@ -146,6 +146,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   hasMainMenu(): boolean
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number): void
+  resolveTabKeyDown(defaultPrevented: boolean): void
   setPointerCapture(elementId: number): void
   releasePointerCapture(elementId: number): void
   simulateWindowActivation(active: boolean): void
@@ -644,11 +645,15 @@ export class TestRenderer implements NativeRenderer {
    *  the only way to test that `autoFocus` (or a click) actually moved focus. */
   simulateKeystrokes(keystrokes: string): void {
     this.native.flush()
-    this.native.simulateKeystrokes(keystrokes)
-    // Focus listeners run in GPUI's draw-time focus phase.
-    this.native.flush()
-    this.dispatchNativeEvents()
-    this.native.flush()
+    for (const keystroke of keystrokes.split(/\s+/).filter(Boolean)) {
+      this.native.simulateKeystrokes(keystroke)
+      // A Tab keydown now resolves its focus default through React. Drain each
+      // physical keypress before sending the next one so `tab a` delivers `a`
+      // to the newly focused element, as a real platform event stream does.
+      this.native.flush()
+      this.dispatchNativeEvents()
+      this.native.flush()
+    }
   }
 
   /** Dispatch one key-down event to the element that already holds focus. */
@@ -1020,6 +1025,13 @@ export class TestRenderer implements NativeRenderer {
     // Programmatic focus is reported when GPUI commits the next frame.
     this.native.flush()
     this.dispatchNativeEvents()
+  }
+
+  resolveTabKeyDown(defaultPrevented: boolean): void {
+    this.native.resolveTabKeyDown(defaultPrevented)
+    // Production reports the resulting focus transition on a later frame.
+    // Draw it now so the enclosing drain loop observes blur/focus in order.
+    this.native.flush()
   }
 
   // ── Scroll API ──────────────────────────────────────────────────

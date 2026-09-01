@@ -141,16 +141,13 @@ function dispatchHoverEvent(
 
 function activationKey(payload: EventPayload): string | null {
   if (payload.eventType !== "keyDown" && payload.eventType !== "keyUp") return null
-  if (
-    payload.modifiers?.alt ||
-    payload.modifiers?.ctrl ||
-    payload.modifiers?.cmd ||
-    payload.modifiers?.shift
-  ) {
+  if (payload.modifiers?.alt || payload.modifiers?.ctrl || payload.modifiers?.cmd) {
     return null
   }
 
   const key = payload.key?.toLowerCase()
+  if (key === "tab") return "tab"
+  if (payload.modifiers?.shift) return null
   if (key === "enter") return "enter"
   return key === "space" || key === "spacebar" || key === " " ? "space" : null
 }
@@ -164,6 +161,10 @@ function rememberKeyboardPrevention(
 
   const key = activationKey(payload)
   if (!key) {
+    container.preventedKeyboardActivations.delete(payload.elementId)
+    return
+  }
+  if (key === "tab" && payload.eventType === "keyUp") {
     container.preventedKeyboardActivations.delete(payload.elementId)
     return
   }
@@ -183,6 +184,19 @@ function shouldSuppressKeyboardClick(container: Container, payload: EventPayload
   return container.preventedKeyboardActivations.delete(payload.elementId)
 }
 
+function finishKeyboardDispatch(
+  container: Container,
+  payload: EventPayload,
+  result: GpuixEventDispatchResult
+): GpuixEventDispatchResult {
+  rememberKeyboardPrevention(container, payload, result.defaultPrevented)
+  if (payload.eventType === "keyDown" && activationKey(payload) === "tab") {
+    const defaultPrevented = container.preventedKeyboardActivations.delete(payload.elementId)
+    container.native.resolveTabKeyDown?.(defaultPrevented)
+  }
+  return result
+}
+
 /**
  * Dispatch a native payload synchronously through the retained host ancestry.
  *
@@ -196,7 +210,12 @@ export function handleGpuixEvent(
   renderer: NativeRenderer
 ): GpuixEventDispatchResult {
   const container = eventRegistrySlot().containersByRenderer.get(renderer)
-  if (!container) return { defaultPrevented: false, propagationStopped: false }
+  if (!container) {
+    if (payload.eventType === "keyDown" && activationKey(payload) === "tab") {
+      renderer.resolveTabKeyDown?.(false)
+    }
+    return { defaultPrevented: false, propagationStopped: false }
+  }
 
   if (payload.eventType === "hoverTarget") {
     return dispatchHoverTransition(container, payload, renderer)
@@ -207,11 +226,22 @@ export function handleGpuixEvent(
   }
 
   const target = container.eventTargets.get(payload.elementId)
-  if (!target) return { defaultPrevented: false, propagationStopped: false }
+  if (!target) {
+    return finishKeyboardDispatch(container, payload, {
+      defaultPrevented: false,
+      propagationStopped: false,
+    })
+  }
 
   const path = TARGET_ONLY_EVENTS.has(payload.eventType) ? [target] : eventPath(container, target)
   const controller = createGpuixSyntheticEvent(payload, target, renderer)
   const { event } = controller
+  let keyboardDispatchFinished = false
+
+  const finishDispatch = (result: GpuixEventDispatchResult): GpuixEventDispatchResult => {
+    keyboardDispatchFinished = true
+    return finishKeyboardDispatch(container, payload, result)
+  }
 
   const invoke = (instance: Instance, handlerKey: string, phase: 1 | 2 | 3): void => {
     const handler = container.eventHandlers.get(instance.id)?.get(handlerKey)
@@ -220,34 +250,45 @@ export function handleGpuixEvent(
     handler(event)
   }
 
-  // Capture travels from the root toward, but not including, the target.
-  for (let index = path.length - 1; index >= 1; index -= 1) {
-    invoke(path[index]!, `${payload.eventType}Capture`, 1)
-    if (event.isPropagationStopped()) {
-      rememberKeyboardPrevention(container, payload, event.defaultPrevented)
-      return {
-        defaultPrevented: event.defaultPrevented,
-        propagationStopped: true,
+  try {
+    // Capture travels from the root toward, but not including, the target.
+    for (let index = path.length - 1; index >= 1; index -= 1) {
+      invoke(path[index]!, `${payload.eventType}Capture`, 1)
+      if (event.isPropagationStopped()) {
+        return finishDispatch({
+          defaultPrevented: event.defaultPrevented,
+          propagationStopped: true,
+        })
       }
     }
-  }
 
-  // Both listeners on the target run at AT_TARGET. stopPropagation does not
-  // suppress another listener on that same target.
-  invoke(target, `${payload.eventType}Capture`, 2)
-  invoke(target, payload.eventType, 2)
+    // Both listeners on the target run at AT_TARGET. stopPropagation does not
+    // suppress another listener on that same target.
+    invoke(target, `${payload.eventType}Capture`, 2)
+    invoke(target, payload.eventType, 2)
 
-  if (!event.isPropagationStopped() && !NON_BUBBLING_EVENTS.has(payload.eventType)) {
-    for (let index = 1; index < path.length; index += 1) {
-      invoke(path[index]!, payload.eventType, 3)
-      if (event.isPropagationStopped()) break
+    if (!event.isPropagationStopped() && !NON_BUBBLING_EVENTS.has(payload.eventType)) {
+      for (let index = 1; index < path.length; index += 1) {
+        invoke(path[index]!, payload.eventType, 3)
+        if (event.isPropagationStopped()) break
+      }
     }
-  }
 
-  rememberKeyboardPrevention(container, payload, event.defaultPrevented)
-  return {
-    defaultPrevented: event.defaultPrevented,
-    propagationStopped: event.isPropagationStopped(),
+    return finishDispatch({
+      defaultPrevented: event.defaultPrevented,
+      propagationStopped: event.isPropagationStopped(),
+    })
+  } finally {
+    if (
+      !keyboardDispatchFinished &&
+      payload.eventType === "keyDown" &&
+      activationKey(payload) === "tab"
+    ) {
+      finishDispatch({
+        defaultPrevented: event.defaultPrevented,
+        propagationStopped: event.isPropagationStopped(),
+      })
+    }
   }
 }
 
