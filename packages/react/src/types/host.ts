@@ -834,8 +834,8 @@ export interface Props {
   ariaColSpan?: number
   /** DOM-compatible alias for ariaColSpan. */
   "aria-colspan"?: number
-  /** Native disabled state: unavailable, non-activating, and removed from tab order. */
-  disabled?: Booleanish
+  /** Native disabled state: unavailable, non-activating, and removed from tab order. HTML boolean attribute semantics. */
+  disabled?: boolean
   /** Unavailable and non-activating, but intentionally retained in tab order. */
   ariaDisabled?: Booleanish
   /** DOM-compatible alias for ariaDisabled. */
