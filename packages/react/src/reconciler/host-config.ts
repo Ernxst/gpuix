@@ -48,6 +48,7 @@ interface HostNodeState {
 
 const hostNodeStates = new WeakMap<HostNode, HostNodeState>()
 const virtualListsPendingValidation = new WeakMap<Container, Set<Instance>>()
+const warnedVirtualListRowContracts = new WeakSet<Instance>()
 
 class InlineTextChildError extends Error {
   override name = "InlineTextChildError"
@@ -88,27 +89,25 @@ function nextId(container: Container): number {
   return ++container.ids.nextElementId
 }
 
-function shouldValidateVirtualListRows(): boolean {
-  return typeof process === "undefined" || process.env?.NODE_ENV !== "production"
-}
-
 function validateVirtualListRowContract(instance: Instance, state: HostNodeState): void {
   if (
     instance.type !== "virtual-list" ||
-    !shouldValidateVirtualListRows() ||
     state.children.length !== 1 ||
     (instance.props as Props & VirtualListProps).itemCount === 1
   ) {
     return
   }
 
-  throw new VirtualListRowContractError(
+  const message =
     "GPUIX <virtual-list> received exactly one immediate child. Its immediate children are rows, so wrapping a collection in one container creates one virtual row and defeats virtualization. Render rows as direct children. For windowed data, pass itemCount, windowStart, and estimatedItemHeight, then render that slice directly. Pass itemCount={1} only when the list intentionally contains one row."
-  )
+  if (state.container.strictStyles) throw new VirtualListRowContractError(message)
+  if (warnedVirtualListRowContracts.has(instance)) return
+  warnedVirtualListRowContracts.add(instance)
+  console.warn(message)
 }
 
 function scheduleVirtualListValidation(instance: Instance, state: HostNodeState): void {
-  if (instance.type !== "virtual-list" || !shouldValidateVirtualListRows()) return
+  if (instance.type !== "virtual-list") return
 
   let pending = virtualListsPendingValidation.get(state.container)
   if (!pending) {
