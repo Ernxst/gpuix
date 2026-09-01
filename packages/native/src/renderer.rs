@@ -7862,8 +7862,9 @@ fn apply_click_handler<E>(
 where
     E: gpui::StatefulInteractiveElement,
 {
-    if !tracks_pointer_event(element, ctx.tree, "click")
-        || action_disabled_in_ancestry(ctx.tree, element.id)
+    let tracks_click = tracks_pointer_event(element, ctx.tree, "click");
+    let tracks_double_click = tracks_pointer_event(element, ctx.tree, "doubleClick");
+    if (!tracks_click && !tracks_double_click) || action_disabled_in_ancestry(ctx.tree, element.id)
     {
         return el;
     }
@@ -8281,7 +8282,9 @@ pub(crate) fn build_host_container(
     // inert background-painted child to reach an ancestor listener.
     el = apply_click_handler(el, element, ctx);
 
-    if tracks_pointer_event(element, ctx.tree, "auxClick") {
+    if tracks_pointer_event(element, ctx.tree, "auxClick")
+        || tracks_pointer_event(element, ctx.tree, "contextMenu")
+    {
         let callback = ctx.event_callback.clone();
         let id = element.id;
         el = el.on_aux_click(move |click_event, _window, cx| {
@@ -8292,6 +8295,18 @@ pub(crate) fn build_host_container(
                 p.modifiers = Some(click_event.modifiers().into());
                 p.click_count = Some(click_event.click_count() as u32);
                 p.is_right_click = Some(click_event.is_right_click());
+                p.button = Some(match click_event {
+                    gpui::ClickEvent::Mouse(event) => mouse_button_to_u32(event.down.button),
+                    gpui::ClickEvent::Keyboard(_) | gpui::ClickEvent::Touch(_) => 0,
+                });
+                p.input_source = Some(
+                    match click_event {
+                        gpui::ClickEvent::Mouse(_) => "mouse",
+                        gpui::ClickEvent::Keyboard(_) => "keyboard",
+                        gpui::ClickEvent::Touch(_) => "touch",
+                    }
+                    .to_string(),
+                );
             });
             cx.stop_propagation();
         });

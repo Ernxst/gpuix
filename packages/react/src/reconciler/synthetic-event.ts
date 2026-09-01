@@ -116,6 +116,7 @@ export type GpuixSyntheticEvent = EventPayload & {
   readonly metaKey: boolean
   readonly shiftKey: boolean
   readonly button: number
+  readonly detail: number
   readonly key?: string
   readonly repeat: boolean
 
@@ -169,6 +170,7 @@ export function createGpuixSyntheticEvent(
     metaKey: modifiers?.cmd ?? false,
     shiftKey: modifiers?.shift ?? false,
     button: nativeEvent.button ?? 0,
+    detail: nativeEvent.eventType === "contextMenu" ? 0 : (nativeEvent.clickCount ?? 0),
     key: domKeyName(nativeEvent.key, nativeEvent.keyChar),
     repeat: nativeEvent.isHeld ?? false,
     preventDefault(): void {

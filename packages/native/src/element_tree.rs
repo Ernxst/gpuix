@@ -42,10 +42,10 @@ pub struct EventPayload {
     pub button: Option<u32>,
 
     /// Number of consecutive clicks (1=single, 2=double, 3=triple).
-    /// Populated for: mouseDown, mouseUp, click.
+    /// Populated for: mouseDown, mouseUp, click, auxClick.
     pub click_count: Option<u32>,
 
-    /// Whether this is a right-click (convenience for click events).
+    /// Whether this is a right-click (convenience for click and context-menu events).
     /// true when button==2 or ClickEvent::is_right_click().
     pub is_right_click: Option<bool>,
 

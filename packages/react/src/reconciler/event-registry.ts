@@ -209,6 +209,29 @@ export function handleGpuixEvent(
   payload: EventPayload,
   renderer: NativeRenderer
 ): GpuixEventDispatchResult {
+  const result = dispatchGpuixEvent(payload, renderer)
+
+  if (
+    payload.eventType === "click" &&
+    payload.clickCount === 2 &&
+    (payload.button ?? 0) === 0 &&
+    payload.isRightClick !== true
+  ) {
+    dispatchGpuixEvent({ ...payload, eventType: "doubleClick" }, renderer)
+  } else if (
+    payload.eventType === "auxClick" &&
+    (payload.isRightClick === true || payload.button === 2)
+  ) {
+    dispatchGpuixEvent({ ...payload, eventType: "contextMenu" }, renderer)
+  }
+
+  return result
+}
+
+function dispatchGpuixEvent(
+  payload: EventPayload,
+  renderer: NativeRenderer
+): GpuixEventDispatchResult {
   const container = eventRegistrySlot().containersByRenderer.get(renderer)
   if (!container) {
     if (payload.eventType === "keyDown" && activationKey(payload) === "tab") {

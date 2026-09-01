@@ -445,6 +445,78 @@ describeNative("events", () => {
       `)
     })
 
+    it("delivers double click after the second click with detail 2", () => {
+      const calls: Array<{ type: string; detail: number }> = []
+
+      testRoot.render(
+        <div
+          testId="double-click-target"
+          style={{ width: 200, height: 80 }}
+          onClick={(event) => calls.push({ type: "click", detail: event.detail })}
+          onDoubleClick={(event) =>
+            calls.push({ type: "doubleClick", detail: event.detail })
+          }
+        />
+      )
+      const target = testRoot.renderer.findByTestId("double-click-target")!
+
+      handleGpuixEvent(
+        {
+          elementId: target.id,
+          eventType: "click",
+          button: 0,
+          clickCount: 2,
+          isRightClick: false,
+          inputSource: "mouse",
+        },
+        testRoot.renderer
+      )
+
+      expect(calls).toEqual([
+        { type: "click", detail: 2 },
+        { type: "doubleClick", detail: 2 },
+      ])
+    })
+
+    it("delivers a cancelable context menu after right mouse up", () => {
+      const calls: Array<{
+        type: string
+        button: number
+        detail: number
+        cancelable: boolean
+        defaultPrevented: boolean
+      }> = []
+
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 80 }}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            calls.push({
+              type: "contextMenu",
+              button: event.button,
+              detail: event.detail,
+              cancelable: event.cancelable,
+              defaultPrevented: event.defaultPrevented,
+            })
+          }}
+        />
+      )
+
+      testRoot.renderer.nativeSimulateClick(40, 40)
+      testRoot.renderer.nativeSimulateClick(40, 40, 2)
+
+      expect(calls).toEqual([
+        {
+          type: "contextMenu",
+          button: 2,
+          detail: 0,
+          cancelable: true,
+          defaultPrevented: true,
+        },
+      ])
+    })
+
     it("dispatches one event through capture, target, and bubble with DOM-shaped targets", () => {
       const calls: Array<{
         name: string
