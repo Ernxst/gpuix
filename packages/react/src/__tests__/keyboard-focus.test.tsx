@@ -51,6 +51,49 @@ describeNative("keyboard focus", () => {
     expect(focusedLabel()).toBe("two")
   })
 
+  it("delivers focus and blur handlers for click, programmatic, and keyboard focus moves", () => {
+    const focusEvents: string[] = []
+    const blurEvents: string[] = []
+    testRoot.render(
+      <div style={{ width: 400, height: 200 }}>
+        <a
+          href="/one"
+          testId="one"
+          onFocus={() => focusEvents.push("one")}
+          onBlur={() => blurEvents.push("one")}
+          style={{ width: 200, height: 40 }}
+        >
+          <text>One</text>
+        </a>
+        <a
+          href="/two"
+          onFocus={() => focusEvents.push("two")}
+          onBlur={() => blurEvents.push("two")}
+          style={{ width: 200, height: 40 }}
+        >
+          <text>Two</text>
+        </a>
+      </div>
+    )
+
+    const first = testRoot.renderer.findByTestId("one")!
+    testRoot.renderer.focusElement(first.id)
+    expect(focusEvents).toEqual(["one"])
+    expect(blurEvents).toEqual([])
+
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusEvents).toEqual(["one", "two"])
+    expect(blurEvents).toEqual(["one"])
+
+    const bounds = testRoot.renderer.getElementBounds(first.id)!
+    testRoot.renderer.nativeSimulateClick(
+      bounds[0]! + bounds[2]! / 2,
+      bounds[1]! + bounds[3]! / 2
+    )
+    expect(focusEvents).toEqual(["one", "two", "one"])
+    expect(blurEvents).toEqual(["one", "two"])
+  })
+
   it("scrolls a plain overflow container only when tab focus leaves the viewport", () => {
     testRoot.render(
       <div

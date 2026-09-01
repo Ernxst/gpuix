@@ -632,6 +632,8 @@ export class TestRenderer implements NativeRenderer {
   simulateKeystrokes(keystrokes: string): void {
     this.native.flush()
     this.native.simulateKeystrokes(keystrokes)
+    // Focus listeners run in GPUI's draw-time focus phase.
+    this.native.flush()
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -693,6 +695,8 @@ export class TestRenderer implements NativeRenderer {
   ): void {
     this.native.flush()
     this.native.simulateClick(x, y, button, modifiers)
+    // A click may move focus; draw before draining its focus event.
+    this.native.flush()
     this.dispatchNativeEvents()
     // Flush again after React state updates so the Rust RetainedTree
     // is fully rebuilt and GPUI has re-laid-out before any screenshot.
@@ -992,6 +996,8 @@ export class TestRenderer implements NativeRenderer {
   focusElement(elementId: number): void {
     this.native.flush()
     this.native.focusElement(elementId)
+    // Programmatic focus is reported when GPUI commits the next frame.
+    this.native.flush()
     this.dispatchNativeEvents()
   }
 
