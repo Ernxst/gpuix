@@ -3289,10 +3289,18 @@ renderer.captureScreenshot('/tmp/test.png')
 const text = renderer.getAllText()
 ```
 
-`userEvent.keyboard(element, keystrokes)` uses GPUI's space-separated
-keystroke syntax. `type(element, text)` converts literal spaces, newlines, and
-tabs for that syntax. `dblclick` currently rejects with an issue #216 message
-until the native dispatcher can carry `click_count`.
+`userEvent.keyboard(element, keystrokes)` focuses the element and uses GPUI's
+space-separated keystroke syntax — not user-event's `{Shift>}A{/Shift}` bracket
+syntax, and it takes the target element rather than reading the focused one.
+Each physical keypress is committed through React before the next is sent, so a
+`tab` in the middle of a string moves focus and the rest of the string lands on
+the newly focused element. `type(element, text)` converts literal spaces,
+newlines, and tabs for that syntax. `clear(element)` selects all with the
+platform chord (`cmd-a` on macOS, `ctrl-a` elsewhere) and deletes.
+`unhover(element)` moves the pointer to the nearest point off the element, or
+out of the window at `(-1, -1)` when the element fills it. `dblClick` currently
+rejects with an issue #216 message until the native dispatcher can carry
+`click_count`.
 
 `TestElement.style` is the declared descriptor and keeps nested state styles
 unchanged. Use `getResolvedStyle(elementId)` after simulating input to read the

@@ -95,6 +95,78 @@ describeNative("createTestRoot userEvent", () => {
     }
   })
 
+  it("commits each keystroke before sending the next", async () => {
+    const screen = createTestRoot({ width: 480, height: 240 })
+
+    function Harness() {
+      const [first, setFirst] = useState("")
+      const [second, setSecond] = useState("")
+
+      return (
+        <div style={{ width: 480, height: 240, gap: 8 }}>
+          <input
+            testId="first"
+            value={first}
+            style={{ width: 180, height: 40 }}
+            onChange={(event) => setFirst(event.value ?? "")}
+          />
+          <input
+            testId="second"
+            value={second}
+            style={{ width: 180, height: 40 }}
+            onChange={(event) => setSecond(event.value ?? "")}
+          />
+          <text>{`first:${first} second:${second}`}</text>
+        </div>
+      )
+    }
+
+    try {
+      screen.render(<Harness />)
+
+      // The tab inside the string has to move focus through React before the
+      // next character is sent, as a real platform event stream would.
+      await screen.userEvent.type(screen.getByTestId("first"), "a\tb")
+      expect(screen.getByText("first:a second:b")).toBeDefined()
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("leaves the window to unhover an element that fills it", async () => {
+    const screen = createTestRoot({ width: 200, height: 120 })
+
+    function Harness() {
+      const [hovered, setHovered] = useState(false)
+
+      return (
+        <div
+          testId="surface"
+          style={{ width: 200, height: 120 }}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+        >
+          <text>{`hovered:${hovered}`}</text>
+        </div>
+      )
+    }
+
+    try {
+      screen.render(<Harness />)
+      const surface = screen.getByTestId("surface")
+      const move = vi.spyOn(screen.renderer, "nativeSimulateMouseMove")
+
+      await screen.userEvent.hover(surface)
+      expect(screen.getByText("hovered:true")).toBeDefined()
+
+      await screen.userEvent.unhover(surface)
+      expect(move).toHaveBeenLastCalledWith(-1, -1)
+      expect(screen.getByText("hovered:false")).toBeDefined()
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("re-resolves parentElement and children after a rerender", () => {
     const screen = createTestRoot()
 
@@ -108,7 +180,10 @@ describeNative("createTestRoot userEvent", () => {
       const child = screen.getByTestId("child")
 
       expect(parent.parentElement).toBeNull()
-      expect(parent.children).toEqual([child])
+      // children and parentElement are non-enumerable getters, so toEqual on
+      // TestElements cannot see tree position. Assert identity and order.
+      expect(parent.children).toHaveLength(1)
+      expect(parent.children[0]).toBe(child)
       expect(child.parentElement).toBe(parent)
       expect(Object.isFrozen(parent.children)).toBe(true)
 
@@ -122,7 +197,10 @@ describeNative("createTestRoot userEvent", () => {
       const currentChild = screen.getByTestId("child")
       const sibling = screen.getByTestId("sibling")
 
-      expect(parent.children).toEqual([currentChild, sibling])
+      expect(parent.children).toHaveLength(2)
+      expect(parent.children[0]).toBe(currentChild)
+      expect(parent.children[1]).toBe(sibling)
+      expect(parent.children.map((element) => element.testId)).toEqual(["child", "sibling"])
       expect(parent.children).not.toContain(child)
       expect(child.parentElement).toBe(currentParent)
 
@@ -133,14 +211,14 @@ describeNative("createTestRoot userEvent", () => {
     }
   })
 
-  it("reports the pending click-count dependency for dblclick", async () => {
+  it("reports the pending click-count dependency for dblClick", async () => {
     const screen = createTestRoot()
 
     try {
       screen.render(<button testId="action" style={{ width: 120, height: 40 }} />)
       await expect(
-        screen.userEvent.dblclick(screen.getByTestId("action"))
-      ).rejects.toThrow(/dblclick.*#216/i)
+        screen.userEvent.dblClick(screen.getByTestId("action"))
+      ).rejects.toThrow(/dblClick.*#216/i)
     } finally {
       screen.unmount()
     }

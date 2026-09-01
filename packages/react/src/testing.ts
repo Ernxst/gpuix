@@ -27,6 +27,8 @@ import {
 } from "./testing-matchers.js"
 import {
   normalizeScrollWheelOptions,
+  selectAllKeystroke,
+  toKeystrokes,
   type NativeScrollWheelOptions,
   type ScrollWheelInput,
 } from "./automation/client.js"
@@ -1688,13 +1690,22 @@ export interface UserEventTabOptions {
 /** Vitest browser-mode-shaped interactions over retained TestElements. */
 export interface TestUserEvent {
   click: (element: TestElement) => Promise<void>
-  dblclick: (element: TestElement) => Promise<void>
+  dblClick: (element: TestElement) => Promise<void>
   hover: (element: TestElement) => Promise<void>
+  /** Moves the pointer off the element. An element that fills the window can
+   *  only be left by leaving the window, so the pointer goes to (-1, -1). */
   unhover: (element: TestElement) => Promise<void>
   type: (element: TestElement, text: string) => Promise<void>
   clear: (element: TestElement) => Promise<void>
   tab: (options?: UserEventTabOptions) => Promise<void>
-  /** Sends GPUI's space-separated keystroke syntax to a focused element. */
+  /**
+   * Focuses the element, then sends GPUI's space-separated keystroke syntax
+   * (`"cmd-enter"`, `"a b"`, `"shift-tab"`) one physical keypress at a time.
+   *
+   * This is not user-event's `keyboard()`: it takes the target element, and it
+   * does not read user-event's `{Shift>}A{/Shift}` bracket syntax. GPUI's own
+   * keystroke strings are what the native dispatcher speaks.
+   */
   keyboard: (element: TestElement, keystrokes: string) => Promise<void>
 }
 
@@ -1720,6 +1731,9 @@ function centerOf({ x, y, width, height }: TestElementBounds): { x: number; y: n
   return { x: x + width / 2, y: y + height / 2 }
 }
 
+/** The nearest point off the element. An element that covers the whole window
+ *  has no such point inside it, so the pointer leaves the window instead —
+ *  which is what a real pointer would have to do to stop hovering. */
 function pointOutside(
   renderer: TestRenderer,
   { x, y, width, height }: TestElementBounds
@@ -1732,21 +1746,15 @@ function pointOutside(
   return { x: -1, y: -1 }
 }
 
-function textToKeystrokes(text: string): string {
-  return [...text]
-    .map((character) => {
-      if (character === " ") return "space"
-      if (character === "\n") return "enter"
-      if (character === "\t") return "tab"
-      return character
-    })
-    .join(" ")
-}
-
 function createTestUserEvent(renderer: TestRenderer): TestUserEvent {
   const keyboard = async (element: TestElement, keystrokes: string): Promise<void> => {
     const current = getElement(renderer, element.id, "userEvent keyboard target")
-    renderer.nativeSimulateKeystrokes(current.id, keystrokes)
+    // Focus first, then let simulateKeystrokes drain each physical keypress:
+    // a keystroke that moves focus, such as `tab`, must be committed through
+    // React before the next key is sent, or the rest of the string lands on
+    // the element that was focused when the call started.
+    renderer.focusElement(current.id)
+    renderer.simulateKeystrokes(keystrokes)
   }
 
   return {
@@ -1754,9 +1762,9 @@ function createTestUserEvent(renderer: TestRenderer): TestUserEvent {
       const point = centerOf(resolveElementBounds(renderer, element))
       renderer.nativeSimulateClick(point.x, point.y)
     },
-    dblclick: async () => {
+    dblClick: async () => {
       throw new Error(
-        "userEvent.dblclick is not available until click_count support lands; see issue #216"
+        "userEvent.dblClick is not available until click_count support lands; see issue #216"
       )
     },
     hover: async (element) => {
@@ -1767,8 +1775,8 @@ function createTestUserEvent(renderer: TestRenderer): TestUserEvent {
       const point = pointOutside(renderer, resolveElementBounds(renderer, element))
       renderer.nativeSimulateMouseMove(point.x, point.y)
     },
-    type: async (element, text) => keyboard(element, textToKeystrokes(text)),
-    clear: async (element) => keyboard(element, "cmd-a backspace"),
+    type: async (element, text) => keyboard(element, toKeystrokes(text)),
+    clear: async (element) => keyboard(element, `${selectAllKeystroke()} backspace`),
     tab: async (options = {}) => {
       renderer.simulateKeystrokes(options.shift === true ? "shift-tab" : "tab")
     },
