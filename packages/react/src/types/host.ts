@@ -976,7 +976,8 @@ export type ImageSource =
 export interface ImgProps extends Props {
   /**
    * An explicit source, or DOM-compatible sugar: `http(s)://` strings are URL
-   * sources and every other string is a filesystem path.
+   * sources, RFC 2397 `data:` strings are decoded in memory, and every other
+   * string is a filesystem path.
    */
   src?: ImageSource | string
   objectFit?: "fill" | "contain" | "cover" | "scaleDown" | "none"

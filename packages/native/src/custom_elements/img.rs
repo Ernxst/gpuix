@@ -2,9 +2,9 @@
 /// tintable SVG icons.
 ///
 /// `<img>` accepts a discriminated source, plus DOM-compatible string sugar:
-/// HTTP(S) strings are URLs and every other string is a path. Every source
-/// becomes bounded bytes before GPUI decodes it. `<svg>` remains the lightweight
-/// monochrome icon element.
+/// HTTP(S) strings are URLs, `data:` URLs are RFC 2397 image bytes, and every
+/// other string is a path. Every source becomes bounded bytes before GPUI
+/// decodes it. `<svg>` remains the lightweight monochrome icon element.
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use web_time::Instant;
 
+use base64::Engine as _;
 use futures::AsyncReadExt as _;
 use gpui::http_client::HttpRequestExt as _;
 use serde::Deserialize;
@@ -260,7 +261,13 @@ enum WireImageSource {
 impl ImageSource {
     pub(crate) fn parse(value: &serde_json::Value) -> Result<Self, String> {
         if let Some(source) = value.as_str() {
-            return if source.starts_with("http://") || source.starts_with("https://") {
+            return if is_data_url(source) {
+                let (mime_type, bytes) = parse_data_url(source)?;
+                Ok(Self::Data {
+                    mime_type,
+                    bytes: bytes.into(),
+                })
+            } else if source.starts_with("http://") || source.starts_with("https://") {
                 parse_image_url(source)?;
                 Ok(Self::Url(source.to_string()))
             } else if source.trim().is_empty() {
@@ -308,6 +315,91 @@ impl ImageSource {
             }
         }
     }
+}
+
+fn is_data_url(source: &str) -> bool {
+    source
+        .get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("data:"))
+}
+
+/// Parse the RFC 2397 `data:[<mediatype>][;base64],<data>` form used by DOM
+/// image sources. `+` stays literal (this is URL data, not form data), while
+/// percent escapes are decoded before the optional forgiving base64 decode.
+fn parse_data_url(source: &str) -> Result<(String, Vec<u8>), String> {
+    let payload = source
+        .get(5..)
+        .ok_or_else(|| "invalid data URL: missing data: scheme".to_string())?;
+    let (media_type, data) = payload
+        .split_once(',')
+        .ok_or_else(|| "invalid data URL: missing comma before data".to_string())?;
+
+    let mut metadata = media_type.split(';');
+    let mime_type = normalize_mime_type(metadata.next().unwrap_or_default());
+    supported_image_format(&mime_type)?;
+    let mut base64 = false;
+    for parameter in metadata {
+        if parameter.eq_ignore_ascii_case("base64") {
+            if base64 {
+                return Err("invalid data URL: duplicate base64 marker".into());
+            }
+            base64 = true;
+        }
+    }
+
+    let data = percent_decode_data_url(data)?;
+    let bytes = if base64 {
+        decode_forgiving_base64(&data)?
+    } else {
+        data
+    };
+    ensure_size(bytes.len(), "data URL")?;
+    Ok((mime_type, bytes))
+}
+
+fn percent_decode_data_url(data: &str) -> Result<Vec<u8>, String> {
+    let bytes = data.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'%' {
+            decoded.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+        let high = bytes
+            .get(index + 1)
+            .and_then(|digit| (*digit as char).to_digit(16));
+        let low = bytes
+            .get(index + 2)
+            .and_then(|digit| (*digit as char).to_digit(16));
+        let (Some(high), Some(low)) = (high, low) else {
+            return Err("invalid data URL: malformed percent escape".into());
+        };
+        decoded.push((high << 4 | low) as u8);
+        index += 3;
+    }
+    Ok(decoded)
+}
+
+/// WHATWG's forgiving-base64 decode removes ASCII whitespace and accepts a
+/// missing final padding run. The standard alphabet remains required.
+fn decode_forgiving_base64(data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut encoded = data
+        .iter()
+        .copied()
+        .filter(|byte| !matches!(byte, b'\t' | b'\n' | b'\x0c' | b'\r' | b' '))
+        .collect::<Vec<_>>();
+    match encoded.len() % 4 {
+        0 => {}
+        1 => return Err("invalid data URL: invalid base64 payload length".into()),
+        2 => encoded.extend_from_slice(b"=="),
+        3 => encoded.push(b'='),
+        _ => unreachable!(),
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|error| format!("invalid data URL: invalid base64 payload: {error}"))
 }
 
 fn parse_image_url(url: &str) -> Result<gpui::http_client::Url, String> {
@@ -2013,6 +2105,16 @@ mod tests {
             ),
             Ok(ImageSource::Data { .. })
         ));
+        assert!(matches!(
+            ImageSource::parse(&serde_json::json!("data:image/png;base64,iVBORw0KGgo=")),
+            Ok(ImageSource::Data { mime_type, bytes })
+                if mime_type == "image/png" && bytes.as_ref() == b"\x89PNG\r\n\x1a\n"
+        ));
+        assert!(matches!(
+            ImageSource::parse(&serde_json::json!("data:image/svg+xml,%3Csvg%2F%3E")),
+            Ok(ImageSource::Data { mime_type, bytes })
+                if mime_type == "image/svg+xml" && bytes.as_ref() == b"<svg/>"
+        ));
 
         assert!(ImageSource::parse(&serde_json::json!("   "))
             .unwrap_err()
@@ -2030,6 +2132,11 @@ mod tests {
         }))
         .unwrap_err()
         .contains("credentials"));
+        assert!(
+            ImageSource::parse(&serde_json::json!("data:image/png;base64,%%%"))
+                .unwrap_err()
+                .contains("data URL")
+        );
     }
 
     #[test]

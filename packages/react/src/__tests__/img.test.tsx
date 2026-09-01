@@ -48,6 +48,10 @@ const FIXTURES = [
   { name: "webp", mimeType: "image/webp" as const, bytes: WEBP_BYTES },
   { name: "svg", mimeType: "image/svg+xml" as const, bytes: SVG_BYTES },
 ]
+
+function dataUrl({ mimeType, bytes }: (typeof FIXTURES)[number]) {
+  return `data:${mimeType};base64,${bytes.toString("base64")}`
+}
 const FIXTURE_PATHS = new Map(
   FIXTURES.map(({ name }) => [name, `/tmp/gpuix-image-source-${name}.${name === "jpeg" ? "jpg" : name}`])
 )
@@ -358,6 +362,13 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
         { kind: "data", mimeType: fixture.mimeType, bytes: fixture.bytes },
         `data-${fixture.name}`
       )
+      expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
+    }
+  }, 20_000)
+
+  it("GPU-renders PNG, JPEG, WebP, and SVG data URL sources", async () => {
+    for (const fixture of FIXTURES) {
+      const screenshot = await captureLoadedSource(dataUrl(fixture), `data-url-${fixture.name}`)
       expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
     }
   }, 20_000)
