@@ -407,7 +407,10 @@ export type NativeStateStyleKey =
   | "focusVisible"
 
 /** Base declarations accepted inside a native interaction-state style. */
-export type NativeStateStyle = Omit<StyleDesc, NativeStateStyleKey | "transition">
+export type NativeStateStyle = Omit<
+  StyleDesc,
+  NativeStateStyleKey | "transition" | "hoverGroup"
+>
 
 /**
  * A native GPUIX style descriptor.
@@ -517,6 +520,9 @@ export interface StyleDesc {
 
   /** Native, interruptible interpolation for the named properties. */
   transition?: StyleTransition
+
+  /** Marks this element as the ancestor for descendant `hoverWithin` styles. */
+  hoverGroup?: string
 
   // Native state styles — applied by GPUI without a JS round trip.
   // Nesting is one level deep: a state style cannot contain another state style.
@@ -846,9 +852,6 @@ export interface Props {
   "aria-hidden"?: Booleanish
   /** Value or focus action requested by assistive technology. Activate uses onClick. */
   onAccessibilityAction?: (event: GpuixSyntheticEvent) => void
-
-  /** Establishes a native hover group for descendant `style.hoverWithin` states. */
-  hoverGroup?: string
 
   // ── Mouse events ───────────────────────────────────────────────
   /** Primary button only, like the DOM. Use `onAuxClick` for the others. */

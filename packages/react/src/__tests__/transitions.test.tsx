@@ -347,9 +347,14 @@ describeNative("native style transitions", () => {
           }}
         >
           <div
-            hoverGroup="transition-group"
             testId="transition-group"
-            style={{ width: 240, height: 180, padding: 30, backgroundColor: "#242438" }}
+            style={{
+              hoverGroup: "transition-group",
+              width: 240,
+              height: 180,
+              padding: 30,
+              backgroundColor: "#242438",
+            }}
           >
             <div
               testId="hover-within-target"
@@ -409,13 +414,15 @@ describeNative("native style transitions", () => {
     }
   })
 
-  it("warns and does not introduce hoverWithin painting on custom elements", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-    const root = createTestRoot({ strictStyles: false })
+  it("interpolates hoverWithin refinements on custom elements", () => {
+    const root = createTestRoot()
     try {
       root.renderer.clockPause()
       root.render(
-        <div hoverGroup="custom-hover-within-group" testId="custom-hover-within-group">
+        <div
+          testId="custom-hover-within-group"
+          style={{ hoverGroup: "custom-hover-within-group" }}
+        >
           <code
             code="not part of this gap"
             testId="custom-hover-within-target"
@@ -440,14 +447,12 @@ describeNative("native style transitions", () => {
       const [x, y, width, height] = root.renderer.getElementBounds(group.id)!
 
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
-      root.renderer.advanceAsyncClock(100)
       expect(root.renderer.getResolvedStyle(target.id)?.opacity).toBe(0.2)
-      expect(warn).toHaveBeenCalledOnce()
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("does not support style.hoverWithin")
-      )
+      root.renderer.advanceAsyncClock(50)
+      expect(root.renderer.getResolvedStyle(target.id)?.opacity).toBe(0.5)
+      root.renderer.advanceAsyncClock(50)
+      expect(root.renderer.getResolvedStyle(target.id)?.opacity).toBe(0.8)
     } finally {
-      warn.mockRestore()
       root.unmount()
     }
   })
@@ -718,7 +723,10 @@ describeNative("native style transitions", () => {
       root.renderer.clockPause()
       root.renderer.setReducedMotion(true)
       root.render(
-        <div hoverGroup="reduced-group" testId="reduced-group" style={{ width: 260, height: 120 }}>
+        <div
+          testId="reduced-group"
+          style={{ hoverGroup: "reduced-group", width: 260, height: 120 }}
+        >
           <div
             testId="reduced-hover-within-target"
             style={{
@@ -779,7 +787,7 @@ describeNative("native style transitions", () => {
     try {
       root.renderer.clockPause()
       root.render(
-        <div hoverGroup="idle-group" style={{ width: 300, height: 160 }}>
+        <div style={{ hoverGroup: "idle-group", width: 300, height: 160 }}>
           <div
             style={{
               width: 80,
@@ -862,7 +870,6 @@ describeNative("native style transitions", () => {
   it("throws for unsupported transition declarations in strict roots", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const root = createTestRoot({ strictStyles: true })
-    const hoverWithinRoot = createTestRoot({ strictStyles: true })
     const internalColourRoot = createTestRoot({ strictStyles: true })
 
     try {
@@ -892,19 +899,6 @@ describeNative("native style transitions", () => {
         })
       )
 
-      hoverWithinRoot.render(
-        <markdown
-          source="unsupported hoverWithin"
-          style={{ opacity: 0.2, hoverWithin: { opacity: 0.8 } }}
-        />
-      )
-      expect(error.mock.calls.flat()).toContainEqual(
-        expect.objectContaining({
-          name: "UnsupportedStyleTransitionError",
-          message: expect.stringContaining("does not support style.hoverWithin"),
-        })
-      )
-
       internalColourRoot.render(
         <markdown
           source="unsupported internal colour"
@@ -930,7 +924,6 @@ describeNative("native style transitions", () => {
     } finally {
       error.mockRestore()
       root.unmount()
-      hoverWithinRoot.unmount()
       internalColourRoot.unmount()
     }
   })

@@ -69,9 +69,9 @@ function HoverWithinCaptureProbe({ capture }: { capture: "child" | "group" }) {
     >
       <div
         testId="capture-row"
-        hoverGroup="capture-row"
         onMouseDown={capture === "group" ? capturePointer : undefined}
         style={{
+          hoverGroup: "capture-row",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -119,8 +119,8 @@ function HoverWithinSiblingProbe({
       }}
     >
       <div
-        hoverGroup="destination-row"
         style={{
+          hoverGroup: "destination-row",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -739,6 +739,118 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     renderer.captureScreenshot(after)
 
     expectScreenshotsDiffer(before, after)
+  })
+
+  it("applies hoverWithin to a custom element when group padding is hovered", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "100%",
+          height: "100%",
+          backgroundColor: "#101010",
+        }}
+      >
+        <div
+          testId="custom-hover-group"
+          style={{
+            hoverGroup: "custom-hover-group",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 320,
+            height: 180,
+            padding: 40,
+            backgroundColor: "#20283a",
+          }}
+        >
+          <code
+            code="padding activates this code block"
+            testId="custom-hover-within-target"
+            style={{
+              width: 180,
+              height: 60,
+              pointerEvents: "none",
+              opacity: 0.2,
+              hoverWithin: { opacity: 0.8 },
+            }}
+          />
+        </div>
+      </div>
+    )
+
+    const groupBounds = boundsFor(renderer, "custom-hover-group")
+    const target = renderer.findByTestId("custom-hover-within-target")!
+    const before = path.join(SHOTS_DIR, "custom-hover-within-before.png")
+    const after = path.join(SHOTS_DIR, "custom-hover-within-after.png")
+
+    renderer.nativeSimulateMouseMove(10, 10)
+    expect(renderer.getResolvedStyle(target.id)?.opacity).toBe(0.2)
+    renderer.captureScreenshot(before)
+    renderer.nativeSimulateMouseMove(groupBounds[0] + 10, groupBounds[1] + 10)
+    expect(renderer.getResolvedStyle(target.id)?.opacity).toBe(0.8)
+    renderer.captureScreenshot(after)
+
+    expectScreenshotsDiffer(before, after)
+  })
+
+  it("resolves hoverWithin against the nearest nested hoverGroup", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div
+        testId="outer-hover-group"
+        style={{
+          hoverGroup: "outer-hover-group",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 360,
+          height: 220,
+          padding: 30,
+          backgroundColor: "#111827",
+        }}
+      >
+        <div
+          testId="inner-hover-group"
+          style={{
+            hoverGroup: "inner-hover-group",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 220,
+            height: 120,
+            padding: 20,
+            backgroundColor: "#1f2937",
+          }}
+        >
+          <span
+            testId="nested-hover-within-target"
+            style={{
+              width: 120,
+              height: 40,
+              backgroundColor: "#334155",
+              hoverWithin: { backgroundColor: "#f59e0b" },
+            }}
+          />
+        </div>
+      </div>
+    )
+
+    const outer = boundsFor(renderer, "outer-hover-group")
+    const inner = boundsFor(renderer, "inner-hover-group")
+    const target = renderer.findByTestId("nested-hover-within-target")!
+
+    renderer.nativeSimulateMouseMove(outer[0] + 10, outer[1] + 10)
+    expect(renderer.getResolvedStyle(target.id)).toMatchObject({
+      backgroundColor: "#334155",
+    })
+    renderer.nativeSimulateMouseMove(inner[0] + 10, inner[1] + 10)
+    expect(renderer.getResolvedStyle(target.id)).toMatchObject({
+      backgroundColor: "#f59e0b",
+    })
   })
 
   it("keeps hover and click interaction isolated between two live offscreen roots", () => {

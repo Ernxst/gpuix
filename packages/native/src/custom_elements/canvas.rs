@@ -1376,15 +1376,22 @@ impl CanvasElement {
         let transition_hover = ctx
             .style
             .is_some_and(|style| style.transition.is_some() && style.hover.is_some());
+        let tracks_hover_group = ctx.style.is_some_and(|style| style.hover_group.is_some());
         let tracks_mouse_hover = ctx.tracks_mouse_hover;
-        if tracks_mouse_hover || transition_hover {
+        if tracks_mouse_hover || transition_hover || tracks_hover_group {
             element = element.on_hover(cx.listener(move |view, hovered: &bool, window, cx| {
                 let transition_changed = transition_hover
                     && view
                         .transition_states
                         .get_mut(&id)
                         .is_some_and(|state| state.set_hovered(*hovered));
-                if transition_changed {
+                let hover_group_changed = tracks_hover_group
+                    && view
+                        .interactive_style_states
+                        .entry(id)
+                        .or_default()
+                        .set_hovered(*hovered);
+                if transition_changed || hover_group_changed {
                     cx.notify();
                 }
                 if tracks_mouse_hover {

@@ -182,13 +182,16 @@ fn point_is_inside(bounds: crate::automation::ElementBounds, point: (f64, f64)) 
 }
 
 fn nearest_hover_group(tree: &RetainedTree, element_id: u64) -> Option<u64> {
-    let mut current = Some(element_id);
+    let mut current = tree
+        .elements
+        .get(&element_id)
+        .and_then(|element| element.parent);
     while let Some(id) = current {
         let element = tree.elements.get(&id)?;
         if element
-            .custom_props
-            .get("hoverGroup")
-            .and_then(serde_json::Value::as_str)
+            .style
+            .as_deref()
+            .and_then(|style| style.hover_group.as_deref())
             .is_some()
         {
             return Some(id);

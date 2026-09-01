@@ -558,6 +558,12 @@ pub struct StyleDesc {
     pub selection_color: Option<String>,
 
     pub transition: Option<StyleTransition>,
+    pub hover_group: Option<String>,
+
+    /// Nearest ancestor hover group, resolved by the renderer for this frame.
+    /// This is paint context rather than an authored declaration.
+    #[serde(skip)]
+    pub(crate) hover_within_group: Option<gpui::SharedString>,
 
     pub hover: Option<Box<StyleDesc>>,
     pub hover_within: Option<Box<StyleDesc>>,
@@ -1207,6 +1213,20 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                     property!("transition"),
                     value,
                     "nested transitions are not supported; declare transition on the base style",
+                );
+            }
+            continue;
+        }
+        if key == "hoverGroup" {
+            if prefix.is_empty() {
+                parsed.style.hover_group =
+                    decode::<String>(&property!("hoverGroup"), value, &mut parsed.problems);
+            } else {
+                reject(
+                    &mut parsed.problems,
+                    property!("hoverGroup"),
+                    value,
+                    "hoverGroup marks the base element and cannot be nested in a state style",
                 );
             }
             continue;
@@ -2123,6 +2143,26 @@ mod tests {
     }
 
     #[test]
+    fn hover_group_is_a_top_level_style_marker() {
+        let top_level = parse_style_value(&json!({ "hoverGroup": "destination-row" }));
+        assert!(top_level.problems.is_empty());
+        assert_eq!(
+            top_level.style.hover_group.as_deref(),
+            Some("destination-row")
+        );
+
+        let nested = parse_style_value(&json!({
+            "hover": { "hoverGroup": "nested-group" }
+        }));
+        assert_eq!(nested.problems.len(), 1);
+        assert_eq!(nested.problems[0].property, "hover.hoverGroup");
+        assert_eq!(
+            nested.problems[0].reason,
+            "hoverGroup marks the base element and cannot be nested in a state style"
+        );
+    }
+
+    #[test]
     fn parses_mixed_grid_track_lists_and_preserves_integer_shorthand() {
         let parsed = parse_style_value(&json!({
             "gridTemplateColumns": [
@@ -2398,6 +2438,7 @@ mod tests {
                 "delayMs": 20,
                 "easing": "ease"
             },
+            "hoverGroup": "destination-row",
             "hover": { "color": "blue" },
             "hoverWithin": { "backgroundColor": "magenta" },
             "active": { "color": "green" },

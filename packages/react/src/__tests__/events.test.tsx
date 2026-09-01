@@ -1140,11 +1140,10 @@ describeNative("events", () => {
       testRoot.render(
         <a
           href="/factory"
-          hoverGroup="anchor"
           testId="anchor-events"
           onMouseEnter={enter}
           onMouseLeave={leave}
-          style={{ width: 200, height: 100 }}
+          style={{ hoverGroup: "anchor", width: 200, height: 100 }}
         >
           <span
             testId="anchor-painted-child"

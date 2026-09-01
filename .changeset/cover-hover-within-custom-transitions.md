@@ -12,8 +12,7 @@ same retained track as its existing React-driven transitions.
 
 Element-internal painting remains outside the transition surface: canvas display
 lists, syntax-highlight token colours, diff gutters, and markdown text runs are
-not independently interpolated. Custom `color` transition properties and
-`hoverWithin` refinements are diagnosed; wrap the element in a `div` or `text`
-when those states need to animate.
+not independently interpolated. Custom `color` transition properties are
+diagnosed; `hoverWithin` refinements use the supported outer-container subset.
 
 Refs #87
