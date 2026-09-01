@@ -263,6 +263,18 @@ export interface MotionStyle {
   borderRadius?: number
 }
 
+export interface MotionSpringEase {
+  type: "spring"
+  /** Spring stiffness. Defaults to 100. */
+  stiffness?: number
+  /** Spring damping. Defaults to 10. */
+  damping?: number
+  /** Spring mass. Defaults to 1. */
+  mass?: number
+  /** Initial value velocity in units per second. Defaults to 0. */
+  velocity?: number
+}
+
 export type MotionEase =
   | "linear"
   | "ease"
@@ -270,6 +282,7 @@ export type MotionEase =
   | "easeOut"
   | "easeInOut"
   | [number, number, number, number]
+  | MotionSpringEase
 
 export interface MotionTransition {
   /** Duration in seconds. */
@@ -307,12 +320,23 @@ export type TransitionProperty =
   | "borderBottomLeftRadius"
   | "borderBottomRightRadius"
 
-export interface StyleTransition {
+interface StyleTransitionBase {
   properties: TransitionProperty[]
-  durationMs: number
   delayMs?: number
-  easing?: MotionEase
 }
+
+export interface StyleTweenTransition extends StyleTransitionBase {
+  durationMs: number
+  easing?: Exclude<MotionEase, MotionSpringEase>
+}
+
+export interface StyleSpringTransition extends StyleTransitionBase {
+  /** Ignored for springs when supplied. */
+  durationMs?: number
+  easing: MotionSpringEase
+}
+
+export type StyleTransition = StyleTweenTransition | StyleSpringTransition
 
 /**
  * CSS `cursor` keywords GPUI can paint. An unlisted keyword is ignored, like
