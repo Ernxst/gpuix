@@ -1835,6 +1835,104 @@ where
     )
 }
 
+/// GPUI's `Img` stores the role and ARIA properties applied through
+/// `StatefulInteractiveElement`, but unlike `Div` it does not expose them from
+/// `Element::a11y_role` and `Element::write_a11y_info`. AccessKit therefore
+/// filters the image before it can read the authored name. Keep the real image
+/// as the layout, paint, and interaction owner while a non-rendered div carries
+/// the same accessibility projection for those two element hooks.
+struct AccessibleImg {
+    image: gpui::Stateful<gpui::Img>,
+    accessibility: gpui::Stateful<gpui::Div>,
+}
+
+impl gpui::Element for AccessibleImg {
+    type RequestLayoutState = <gpui::Stateful<gpui::Img> as gpui::Element>::RequestLayoutState;
+    type PrepaintState = <gpui::Stateful<gpui::Img> as gpui::Element>::PrepaintState;
+
+    fn id(&self) -> Option<gpui::ElementId> {
+        gpui::Element::id(&self.image)
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        gpui::Element::source_location(&self.image)
+    }
+
+    fn a11y_role(&self) -> Option<gpui::Role> {
+        gpui::Element::a11y_role(&self.accessibility)
+    }
+
+    fn write_a11y_info(&self, node: &mut gpui::accesskit::Node) {
+        gpui::Element::write_a11y_info(&self.accessibility, node);
+    }
+
+    fn request_layout(
+        &mut self,
+        id: Option<&gpui::GlobalElementId>,
+        inspector_id: Option<&gpui::InspectorElementId>,
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) -> (gpui::LayoutId, Self::RequestLayoutState) {
+        gpui::Element::request_layout(&mut self.image, id, inspector_id, window, cx)
+    }
+
+    fn prepaint(
+        &mut self,
+        id: Option<&gpui::GlobalElementId>,
+        inspector_id: Option<&gpui::InspectorElementId>,
+        bounds: gpui::Bounds<gpui::Pixels>,
+        request_layout: &mut Self::RequestLayoutState,
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) -> Self::PrepaintState {
+        gpui::Element::prepaint(
+            &mut self.image,
+            id,
+            inspector_id,
+            bounds,
+            request_layout,
+            window,
+            cx,
+        )
+    }
+
+    fn paint(
+        &mut self,
+        id: Option<&gpui::GlobalElementId>,
+        inspector_id: Option<&gpui::InspectorElementId>,
+        bounds: gpui::Bounds<gpui::Pixels>,
+        request_layout: &mut Self::RequestLayoutState,
+        prepaint: &mut Self::PrepaintState,
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) {
+        gpui::Element::paint(
+            &mut self.image,
+            id,
+            inspector_id,
+            bounds,
+            request_layout,
+            prepaint,
+            window,
+            cx,
+        );
+    }
+}
+
+impl gpui::InteractiveElement for AccessibleImg {
+    fn interactivity(&mut self) -> &mut gpui::Interactivity {
+        gpui::InteractiveElement::interactivity(&mut self.image)
+    }
+}
+
+impl gpui::IntoElement for AccessibleImg {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
 impl CustomElement for ImgElement {
     fn render(
         &mut self,
@@ -1940,6 +2038,15 @@ impl CustomElement for ImgElement {
 
         let el = apply_image_accessibility(&ctx, el);
         let el = super::wire_standard_events(el, &ctx, cx);
+        let accessibility = gpui::div().id(gpui::SharedString::from(format!(
+            "__gpuix_img_accessibility_{}",
+            ctx.id
+        )));
+        let accessibility = apply_image_accessibility(&ctx, accessibility);
+        let el = AccessibleImg {
+            image: el,
+            accessibility,
+        };
         crate::automation::track_own_bounds(el, ctx.id, ctx.paint_bounds_listener.clone())
             .into_any_element()
     }
