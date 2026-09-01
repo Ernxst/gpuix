@@ -1267,6 +1267,9 @@ enum UiCommand {
         response: SyncSender<Option<crate::automation::ElementBounds>>,
     },
     FocusElement(u64),
+    GetActiveElement {
+        response: SyncSender<Option<u64>>,
+    },
     SetPointerCapture {
         id: u64,
         response: SyncSender<std::result::Result<(), String>>,
@@ -1516,6 +1519,11 @@ async fn run_ui_commands(
                 view.focus_element_and_reveal(id, window, cx);
                 window.refresh();
             }),
+            UiCommand::GetActiveElement { response } => {
+                window.update(cx, move |view, window, _cx| {
+                    response.send(view.active_element_id(window)).ok();
+                })
+            }
             UiCommand::SetPointerCapture { id, response } => {
                 let result = window.update(cx, move |view, window, _cx| {
                     view.set_pointer_capture(id, window)
@@ -3268,6 +3276,31 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// The focused host element id, analogous to `document.activeElement`, or null.
+    /// This reads GPUI focus directly, so role-less focusable elements are included.
+    #[napi]
+    pub fn get_active_element(&self) -> Result<Option<f64>> {
+        #[cfg(target_os = "macos")]
+        return update_window(|view, window, _cx| {
+            view.active_element_id(window).map(|id| id as f64)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetActiveElement { response })?;
+            return Ok(recv_ui_response(receiver, "the active element query")?.map(|id| id as f64));
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// Route the active pressed-pointer sequence to this retained element.
     #[napi]
     pub fn set_pointer_capture(&self, element_id: f64) -> Result<()> {
@@ -4656,6 +4689,14 @@ impl WebGpuixRenderer {
         })
     }
 
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getActiveElement)]
+    pub fn get_active_element(&self) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let active = update_web_window(|view, window, _cx| view.active_element_id(window))?;
+        Ok(active.map_or(wasm_bindgen::JsValue::NULL, |id| {
+            wasm_bindgen::JsValue::from_f64(id as f64)
+        }))
+    }
+
     pub fn blur(&self) -> Result<(), wasm_bindgen::JsValue> {
         update_web_window(|_view, window, _cx| window.blur())
     }
@@ -5578,6 +5619,12 @@ impl GpuixView {
             f64::from(f32::from(offset.x)),
             f64::from(f32::from(offset.y)),
         ])
+    }
+
+    pub(crate) fn active_element_id(&self, window: &gpui::Window) -> Option<u64> {
+        self.focus_handles
+            .iter()
+            .find_map(|(id, handle)| handle.is_focused(window).then_some(*id))
     }
 
     pub(crate) fn focus_element_and_reveal(

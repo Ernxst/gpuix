@@ -1597,6 +1597,18 @@ function focusButton() {
 <div ref={buttonRef} tabIndex={-1}>Focused on demand</div>
 ```
 
+Read focus through `getActiveElement()`, the renderer equivalent of
+`document.activeElement`. It returns the focused host element's numeric id, or
+`null` when nothing has focus:
+
+```tsx
+const activeId = renderer.getActiveElement()
+const buttonHasFocus = activeId === buttonRef.current?.id
+```
+
+The read comes from GPUI's focus handles rather than the accessibility tree, so
+it also reports role-less elements such as `<div tabIndex={0}>`.
+
 Adding `onKeyDown`, `onKeyUp`, `onFocus`, or `onBlur` creates a persistent focus
 handle. Add `tabIndex` as well when the element must be reachable with Tab.
 Removing `tabIndex` removes the element from the tab order.
