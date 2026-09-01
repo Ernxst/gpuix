@@ -162,4 +162,200 @@ describeNative("createTestRoot bound queries", () => {
       screen.unmount()
     }
   })
+
+  it("supports the consuming app's role-query workflow", () => {
+    const root = createTestRoot()
+    const coalCurrent = { name: "Coal Current" }
+
+    try {
+      root.render(
+        <div>
+          <section role="region" ariaLabel="Production ledger">
+            <text>State</text>
+          </section>
+          <a role="link" ariaLabel={coalCurrent.name} testId="site" />
+          <h2 role="heading" ariaLabel="Build list" ariaLevel={2} testId="heading" />
+        </div>
+      )
+
+      const ledger = root.getByRole("region", { name: "Production ledger" })
+      const site = root.getByRole("link", { name: coalCurrent.name })
+      const heading = root.getByRole("heading", { name: "Build list", level: 2 })
+      root.within(ledger).getByText("State")
+
+      expect(site).toBe(root.getByTestId("site"))
+      expect(heading).toBe(root.getByTestId("heading"))
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("maps computed accessibility nodes back to retained host elements", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(<div role="button" ariaLabel="Save factory" testId="save" />)
+
+      const retained = root.getByTestId("save")
+      const tree = root.renderer.getAccessibilityTree()
+      const computedButton = Object.values(tree.nodes).find(
+        (node) => node.aria.role === "Button" && node.aria.label === "Save factory"
+      )
+
+      expect(computedButton?.host_id).toBe(retained.id)
+      expect(root.renderer.getElement(computedButton!.host_id!)).toBe(retained)
+
+      expect(tree.root).not.toBeNull()
+      const windowNode = tree.root === null ? undefined : tree.nodes[tree.root]
+      expect(windowNode?.aria.role).toBe("Window")
+      expect(windowNode).not.toHaveProperty("host_id")
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("matches computed roles and accessible names with every matcher form", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div>
+          <div testId="first" role="checkbox" ariaLabel="Coal input" ariaChecked />
+          <div testId="second" role="checkbox" ariaLabel="Iron input" ariaChecked={false} />
+          <div testId="heading-2" role="heading" ariaLabel="Build list" ariaLevel={2} />
+          <div testId="heading-3" role="heading" ariaLabel="Build list" ariaLevel={3} />
+          <input testId="search" role="textbox" ariaLabel="Recipe search" />
+          <img testId="preview" role="img" ariaLabel="Recipe preview" />
+        </div>
+      )
+
+      expect(root.getByRole("checkbox", { name: "Coal input" })).toBe(
+        root.getByTestId("first")
+      )
+      expect(root.getByRole("checkbox", { name: /iron/i })).toBe(root.getByTestId("second"))
+      expect(
+        root.getByRole("checkbox", {
+          name: (name, element) => name.endsWith("input") && element.testId === "first",
+        })
+      ).toBe(root.getByTestId("first"))
+      expect(root.getByRole("heading", { name: "Build list", level: 2 })).toBe(
+        root.getByTestId("heading-2")
+      )
+      expect(root.getByRole("heading", { name: "Build list", level: 3 })).toBe(
+        root.getByTestId("heading-3")
+      )
+      expect(root.getByRole("textbox", { name: "Recipe search" })).toBe(
+        root.getByTestId("search")
+      )
+      expect(root.getByRole("img", { name: "Recipe preview" })).toBe(
+        root.getByTestId("preview")
+      )
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("implements singular, all, nullable, and descendants-only role queries", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div role="region" ariaLabel="Outer" testId="outer">
+          <div role="button" ariaLabel="Save" testId="save" />
+          <div role="button" ariaLabel="Delete" testId="delete" />
+        </div>
+      )
+
+      expect(root.getAllByRole("button")).toEqual([
+        root.getByTestId("save"),
+        root.getByTestId("delete"),
+      ])
+      expect(root.queryAllByRole("button")).toHaveLength(2)
+      expect(root.queryByRole("link")).toBeNull()
+      expect(root.queryAllByRole("link")).toEqual([])
+      expect(() => root.getByRole("button")).toThrowError(
+        'Found multiple elements with the role "button"'
+      )
+      expect(() => root.queryByRole("button")).toThrowError(
+        'Found multiple elements with the role "button"'
+      )
+
+      const scoped = root.within(root.getByTestId("outer"))
+      expect(scoped.queryByRole("region", { name: "Outer" })).toBeNull()
+      expect(scoped.getByRole("button", { name: "Save" })).toBe(root.getByTestId("save"))
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("re-resolves root and scoped role queries after rerenders", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div testId="panel">
+          <div role="button" ariaLabel="Before" />
+        </div>
+      )
+      const scoped = root.within(root.getByTestId("panel"))
+
+      root.render(
+        <div testId="panel">
+          <div>
+            <div role="button" ariaLabel="After" testId="after" />
+          </div>
+        </div>
+      )
+
+      expect(root.queryByRole("button", { name: "Before" })).toBeNull()
+      expect(scoped.getByRole("button", { name: "After" })).toBe(root.getByTestId("after"))
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("defaults hidden to false and rejects hidden true until snapshots expose hidden nodes", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div>
+          <div role="button" ariaLabel="Hidden action" ariaHidden />
+          <div role="button" ariaLabel="Visible action" testId="visible" />
+        </div>
+      )
+
+      expect(root.queryByRole("button", { name: "Hidden action" })).toBeNull()
+      expect(root.getByRole("button", { name: "Visible action", hidden: false })).toBe(
+        root.getByTestId("visible")
+      )
+      expect(() => root.queryAllByRole("button", { hidden: true })).toThrowError(
+        "hidden: true requires native hidden-node snapshot support, not yet implemented; see issue #209"
+      )
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("reports the requested role, name matcher, and accessible roles on a miss", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div>
+          <div role="button" ariaLabel="Save factory" testId="save" />
+          <div role="heading" ariaLabel="Production" ariaLevel={2} testId="heading" />
+        </div>
+      )
+
+      expect(() => root.getByRole("link", { name: /coal/i })).toThrowError(
+        /Unable to find an accessible element with the role "link" and name \/coal\/i[\s\S]*Here are the accessible roles:[\s\S]*button:[\s\S]*Name "Save factory"[\s\S]*heading:[\s\S]*Name "Production"/
+      )
+      expect(() => root.getAllByRole("heading", { level: 3 })).toThrowError(
+        'role "heading" and level 3'
+      )
+    } finally {
+      root.unmount()
+    }
+  })
 })

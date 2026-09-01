@@ -31,6 +31,7 @@ use napi_derive::napi;
 use objc::{class, msg_send, sel, sel_impl};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{Hash as _, Hasher as _};
 #[cfg(any(target_os = "macos", target_family = "wasm"))]
 use std::rc::Rc;
 #[cfg(all(target_os = "macos", feature = "test-support"))]
@@ -5181,6 +5182,10 @@ pub(crate) struct GpuixView {
     /// Resolved `highlight` state, keyed by the element that declared it.
     /// Empty in every app that does not use search.
     highlights: HashMap<u64, HighlightCacheEntry>,
+    /// AccessKit node hashes resolved back to retained host ids for the native
+    /// test snapshot. The accessibility snapshot remains the semantic source;
+    /// this map contributes identity only.
+    pub(crate) accessibility_host_ids: Option<HashMap<u64, u64>>,
 }
 
 /// The interaction state GPUI has actually delivered for one retained element.
@@ -5394,6 +5399,7 @@ impl GpuixView {
             selection_scroll_task: None,
             clock: crate::automation::AutomationClock::new(),
             highlights: HashMap::new(),
+            accessibility_host_ids: None,
         }
     }
 
@@ -5581,6 +5587,15 @@ impl GpuixView {
                 .map(|(context, _)| context);
         }
 
+        let accessibility_host_ids = self.accessibility_host_ids.as_mut();
+        let gpui_element_path = accessibility_host_ids.as_ref().map(|_| {
+            vec![
+                gpui::ElementId::View(window.current_view()),
+                gpui::ElementId::Name(
+                    format!("__gpuix_virtual_row_{}_{}", list_id, expected_child_id).into(),
+                ),
+            ]
+        });
         let mut build_ctx = BuildCtx {
             tree: &tree,
             canvas_display_lists: &self.canvas_display_lists,
@@ -5603,6 +5618,8 @@ impl GpuixView {
             inherited,
             highlights: &mut self.highlights,
             highlight_events: &mut highlight_events,
+            accessibility_host_ids,
+            gpui_element_path,
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
@@ -5738,6 +5755,8 @@ pub(crate) struct BuildCtx<'a> {
     /// would re-enter the build and emit again. They are flushed once the root
     /// build has returned.
     highlight_events: &'a mut Vec<(u64, usize)>,
+    accessibility_host_ids: Option<&'a mut HashMap<u64, u64>>,
+    gpui_element_path: Option<Vec<gpui::ElementId>>,
 }
 
 /// Style properties that cascade into descendants.
@@ -6935,8 +6954,15 @@ impl gpui::Render for GpuixView {
                 .is_some_and(|element| element.custom_props.contains_key("highlight"))
         });
         let mut highlight_events = Vec::new();
+        if let Some(host_ids) = self.accessibility_host_ids.as_mut() {
+            host_ids.clear();
+        }
         let result = match tree.root_id {
             Some(root_id) => {
+                let accessibility_host_ids = self.accessibility_host_ids.as_mut();
+                let gpui_element_path = accessibility_host_ids
+                    .as_ref()
+                    .map(|_| vec![gpui::ElementId::View(window.current_view())]);
                 let mut ctx = BuildCtx {
                     tree: &tree,
                     canvas_display_lists: &self.canvas_display_lists,
@@ -6959,6 +6985,8 @@ impl gpui::Render for GpuixView {
                     inherited: Inherited::root(&theme),
                     highlights: &mut self.highlights,
                     highlight_events: &mut highlight_events,
+                    accessibility_host_ids,
+                    gpui_element_path,
                 };
                 build_element(root_id, &mut ctx, window, cx)
             }
@@ -7091,6 +7119,83 @@ pub(crate) fn build_element(
     build_element_with_parent_layout(id, false, ctx, window, cx)
 }
 
+fn retained_gpui_element_id(
+    element: &crate::retained_tree::RetainedElement,
+) -> Option<gpui::ElementId> {
+    let id = element.id;
+    match element.element_type.as_str() {
+        "div" | "text" => Some(gpui::ElementId::Integer(id)),
+        "img" => Some(gpui::ElementId::Name(format!("__gpuix_img_{id}").into())),
+        "svg" => Some(gpui::ElementId::Name(format!("__gpuix_svg_{id}").into())),
+        "input" | "textarea" => Some(gpui::ElementId::Name(format!("__gpuix_editor_{id}").into())),
+        "anchored" => Some(gpui::ElementId::Name(
+            format!("__gpuix_anchored_{id}").into(),
+        )),
+        "code" => Some(gpui::ElementId::Name(format!("__gpuix_code_{id}").into())),
+        "diff" => Some(gpui::ElementId::Name(format!("__gpuix_diff_{id}").into())),
+        "markdown" => Some(gpui::ElementId::Name(
+            format!("__gpuix_markdown_{id}").into(),
+        )),
+        "canvas" => Some(gpui::ElementId::Name(format!("__gpuix_{id}").into())),
+        _ => None,
+    }
+}
+
+fn record_accessibility_host_identity(
+    host_id: u64,
+    path: &[gpui::ElementId],
+    identities: &mut HashMap<u64, u64>,
+) {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    identities.insert(hasher.finish(), host_id);
+}
+
+/// Records test-snapshot provenance only when the test renderer opted in.
+///
+/// Keeping element-id resolution inside this gate matters: custom element ids
+/// allocate formatted names, and production renderers never consume this map.
+fn track_accessibility_host_identity(
+    host_id: u64,
+    path: Option<&mut Vec<gpui::ElementId>>,
+    identities: Option<&mut HashMap<u64, u64>>,
+    element_id: impl FnOnce() -> Option<gpui::ElementId>,
+) -> bool {
+    let Some(path) = path else {
+        return false;
+    };
+    let Some(identities) = identities else {
+        return false;
+    };
+    let Some(element_id) = element_id() else {
+        return false;
+    };
+
+    path.push(element_id);
+    record_accessibility_host_identity(host_id, path, identities);
+    true
+}
+
+#[cfg(test)]
+mod accessibility_host_identity_tests {
+    use super::*;
+
+    #[test]
+    fn disabled_snapshot_provenance_skips_element_id_resolution() {
+        let mut path = None;
+        let mut resolved_element_id = false;
+
+        let tracked = track_accessibility_host_identity(7, path.as_mut(), None, || {
+            resolved_element_id = true;
+            Some(gpui::ElementId::Integer(7))
+        });
+
+        assert!(!tracked);
+        assert!(!resolved_element_id);
+        assert!(path.is_none());
+    }
+}
+
 fn build_element_with_parent_layout(
     id: u64,
     default_flex_none: bool,
@@ -7103,6 +7208,13 @@ fn build_element_with_parent_layout(
     let Some(element) = ctx.tree.elements.get(&id) else {
         return gpui::Empty.into_any_element();
     };
+
+    let tracks_accessibility_host_identity = track_accessibility_host_identity(
+        element.id,
+        ctx.gpui_element_path.as_mut(),
+        ctx.accessibility_host_ids.as_deref_mut(),
+        || retained_gpui_element_id(element),
+    );
 
     let declared_style = element.style.as_deref();
     let parent_inherited = ctx.inherited.clone();
@@ -7314,6 +7426,12 @@ fn build_element_with_parent_layout(
         }
     };
 
+    if tracks_accessibility_host_identity {
+        ctx.gpui_element_path
+            .as_mut()
+            .expect("tracked accessibility identity has a path")
+            .pop();
+    }
     ctx.inherited = parent_inherited;
     built
 }

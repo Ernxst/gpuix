@@ -3197,13 +3197,21 @@ way to consume the unpublished fork under Bun.
 renderer can initialize.
 
 `createTestRoot()` returns synchronous queries bound to its renderer. Text
-queries match retained `<text>` content, while test ID queries match both
-`testId` and the standard `data-testid` prop. The singular `getBy...` and
-`queryBy...` methods throw when more than one element matches; required
-`getBy...` / `getAllBy...` methods also throw when none match. Their
-`queryBy...` / `queryAllBy...` counterparts return `null` / `[]` for a miss.
-`within(element)` returns the same query families scoped to that element's
-descendants.
+queries match retained `<text>` content, test ID queries match both `testId`
+and the standard `data-testid` prop, and role queries match GPUI's computed
+accessibility role, accessible name, and heading level. Role names are ARIA
+names such as `button`, `heading`, and `region`; `name` accepts a string,
+regular expression, or predicate. The singular `getBy...` and `queryBy...`
+methods throw when more than one element matches; required `getBy...` /
+`getAllBy...` methods also throw when none match. Their `queryBy...` /
+`queryAllBy...` counterparts return `null` / `[]` for a miss. `within(element)`
+returns the same query families scoped to that element's descendants.
+
+Role queries currently search the visible accessibility tree. `hidden` defaults
+to `false`, and `{ hidden: false }` is supported explicitly. `{ hidden: true }`
+throws `hidden: true requires native hidden-node snapshot support, not yet
+implemented; see issue #209` until the native snapshot can retain computed
+semantics for `ariaHidden` subtrees.
 
 These are Testing Library-shaped call sites, not DOM locators: they return a
 `TestElement` immediately and do not add browser accessibility or asynchronous
@@ -3221,8 +3229,14 @@ screen.getAllByText(/Built/)
 screen.queryByText('Missing')
 screen.queryAllByText(/Missing/)
 
+const ledger = screen.getByRole('region', { name: 'Production ledger' })
+screen.getByRole('link', { name: /coal current/i })
+screen.getByRole('heading', { name: 'Build list', level: 2 })
+screen.queryAllByRole('button')
+
 const panel = screen.getByTestId('power-panel')
 screen.within(panel).getByText('Rate')
+screen.within(ledger).getByText('State')
 screen.queryAllByTestId(/^optional-/)
 
 // Re-render through the same bound screen.
