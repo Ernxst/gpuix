@@ -1555,7 +1555,7 @@ async fn run_ui_commands(
                 })
             }
             UiCommand::DispatchMouse { input, response } => {
-                let result = window
+                let result = gpui::AnyWindowHandle::from(window)
                     .update(cx, move |_view, window, cx| match input {
                         MouseInput::Click {
                             x,
@@ -3775,7 +3775,7 @@ impl GpuixRenderer {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
 
         #[cfg(target_os = "macos")]
-        return update_window(move |_view, window, cx| {
+        return update_window_without_view(move |window, cx| {
             crate::automation::dispatch_click(window, cx, x, y, button, modifiers);
         });
 
@@ -3829,7 +3829,7 @@ impl GpuixRenderer {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
 
         #[cfg(target_os = "macos")]
-        return update_window(move |_view, window, cx| {
+        return update_window_without_view(move |window, cx| {
             crate::automation::dispatch_mouse_down(window, cx, x, y, button, modifiers);
         });
 
@@ -3867,7 +3867,7 @@ impl GpuixRenderer {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
 
         #[cfg(target_os = "macos")]
-        return update_window(move |_view, window, cx| {
+        return update_window_without_view(move |window, cx| {
             crate::automation::dispatch_mouse_up(window, cx, x, y, button, modifiers);
         });
 
@@ -3904,7 +3904,7 @@ impl GpuixRenderer {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
 
         #[cfg(target_os = "macos")]
-        return update_window(move |_view, window, cx| {
+        return update_window_without_view(move |window, cx| {
             crate::automation::dispatch_mouse_move(window, cx, x, y, pressed_button, modifiers);
         });
 
@@ -3952,7 +3952,7 @@ impl GpuixRenderer {
             })?;
             let mut collector = gpui::FrameTimingCollector::default();
             let disable_trace_when_done = gpui::set_trace_enabled(true);
-            let result = update_window(move |_view, window, cx| {
+            let result = update_window_without_view(move |window, cx| {
                 crate::automation::dispatch_scroll_wheel(
                     window, cx, x, y, delta_x, delta_y, options,
                 )
@@ -3974,7 +3974,7 @@ impl GpuixRenderer {
         }
 
         #[cfg(all(target_os = "macos", not(feature = "test-support")))]
-        return update_window(move |_view, window, cx| {
+        return update_window_without_view(move |window, cx| {
             crate::automation::dispatch_scroll_wheel(window, cx, x, y, delta_x, delta_y, options)
                 .map_err(Error::from_reason)
         })?;
@@ -4343,7 +4343,7 @@ fn web_string_array(values: impl IntoIterator<Item = String>) -> wasm_bindgen::J
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-fn update_web_window<R>(
+fn update_web_view<R>(
     update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) -> R,
 ) -> Result<R, wasm_bindgen::JsValue> {
     WEB_APP.with(|app| {
@@ -4365,8 +4365,30 @@ fn update_web_window<R>(
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn update_web_window<R>(
+    update: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> R,
+) -> Result<R, wasm_bindgen::JsValue> {
+    WEB_APP.with(|app| {
+        let app = app.borrow();
+        let app = app
+            .as_ref()
+            .ok_or_else(|| wasm_bindgen::JsValue::from_str("GPUIX web is not initialized"))?;
+        app.update(|cx| {
+            WEB_WINDOW.with(|window| {
+                let window = (*window.borrow()).ok_or_else(|| {
+                    wasm_bindgen::JsValue::from_str("GPUIX web window is not ready")
+                })?;
+                gpui::AnyWindowHandle::from(window)
+                    .update(cx, move |_view, window, cx| update(window, cx))
+                    .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))
+            })
+        })
+    })
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 fn notify_web() {
-    if let Err(error) = update_web_window(|_view, _window, cx| cx.notify()) {
+    if let Err(error) = update_web_window(|window, _cx| window.refresh()) {
         if WEB_WINDOW.with(|window| window.borrow().is_some()) {
             log::error!("Failed to invalidate the GPUIX web window: {error:?}");
         }
@@ -4669,13 +4691,13 @@ impl WebGpuixRenderer {
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getWindowInsets)]
     pub fn get_window_insets(&self) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-        let insets = update_web_window(|_view, window, _cx| window.insets())?;
+        let insets = update_web_window(|window, _cx| window.insets())?;
         window_insets_js(insets)
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowTitle)]
     pub fn set_window_title(&self, title: String) -> Result<(), wasm_bindgen::JsValue> {
-        update_web_window(move |view, _window, cx| {
+        update_web_view(move |view, _window, cx| {
             view.window_title = title;
             cx.notify();
         })
@@ -4684,21 +4706,21 @@ impl WebGpuixRenderer {
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusElement)]
     pub fn focus_element(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
-        update_web_window(move |view, window, cx| {
+        update_web_view(move |view, window, cx| {
             view.focus_element_and_reveal(id, window, cx);
         })
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getActiveElement)]
     pub fn get_active_element(&self) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-        let active = update_web_window(|view, window, _cx| view.active_element_id(window))?;
+        let active = update_web_view(|view, window, _cx| view.active_element_id(window))?;
         Ok(active.map_or(wasm_bindgen::JsValue::NULL, |id| {
             wasm_bindgen::JsValue::from_f64(id as f64)
         }))
     }
 
     pub fn blur(&self) -> Result<(), wasm_bindgen::JsValue> {
-        update_web_window(|_view, window, _cx| window.blur())
+        update_web_window(|window, _cx| window.blur())
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getSelectedText)]
@@ -4887,9 +4909,9 @@ impl WebGpuixRenderer {
         modifiers: Option<String>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
-        update_web_window(move |_view, window, cx| {
+        update_web_window(move |window, cx| {
             crate::automation::dispatch_click(window, cx, x, y, button.unwrap_or(0), modifiers);
-            cx.notify();
+            window.refresh();
         })
     }
 
@@ -4902,7 +4924,7 @@ impl WebGpuixRenderer {
         modifiers: Option<String>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
-        update_web_window(move |_view, window, cx| {
+        update_web_window(move |window, cx| {
             crate::automation::dispatch_mouse_down(
                 window,
                 cx,
@@ -4911,7 +4933,7 @@ impl WebGpuixRenderer {
                 button.unwrap_or(0),
                 modifiers,
             );
-            cx.notify();
+            window.refresh();
         })
     }
 
@@ -4924,9 +4946,9 @@ impl WebGpuixRenderer {
         modifiers: Option<String>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
-        update_web_window(move |_view, window, cx| {
+        update_web_window(move |window, cx| {
             crate::automation::dispatch_mouse_up(window, cx, x, y, button.unwrap_or(0), modifiers);
-            cx.notify();
+            window.refresh();
         })
     }
 
@@ -4939,9 +4961,9 @@ impl WebGpuixRenderer {
         modifiers: Option<String>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
-        update_web_window(move |_view, window, cx| {
+        update_web_window(move |window, cx| {
             crate::automation::dispatch_mouse_move(window, cx, x, y, pressed_button, modifiers);
-            cx.notify();
+            window.refresh();
         })
     }
 
@@ -4955,7 +4977,7 @@ impl WebGpuixRenderer {
         modifiers: Option<String>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
-        update_web_window(move |_view, window, cx| {
+        update_web_window(move |window, cx| {
             let options = crate::automation::ScrollWheelOptions {
                 phase: None,
                 momentum_phase: None,
@@ -4978,14 +5000,14 @@ impl WebGpuixRenderer {
                 Some(options),
             )
             .map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
-            cx.notify();
+            window.refresh();
             Ok(())
         })?
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = clockPause)]
     pub fn clock_pause(&self) -> Result<f64, wasm_bindgen::JsValue> {
-        update_web_window(|view, _window, cx| {
+        update_web_view(|view, _window, cx| {
             let now_ms = view.clock.pause();
             cx.notify();
             now_ms
@@ -4994,7 +5016,7 @@ impl WebGpuixRenderer {
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = clockSet)]
     pub fn clock_set(&self, now_ms: f64) -> Result<f64, wasm_bindgen::JsValue> {
-        update_web_window(move |view, _window, cx| {
+        update_web_view(move |view, _window, cx| {
             let now_ms = view.clock.set_ms(now_ms);
             cx.notify();
             now_ms
@@ -5003,7 +5025,7 @@ impl WebGpuixRenderer {
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = clockFastForward)]
     pub fn clock_fast_forward(&self, delta_ms: f64) -> Result<f64, wasm_bindgen::JsValue> {
-        update_web_window(move |view, _window, cx| {
+        update_web_view(move |view, _window, cx| {
             let now_ms = view.clock.fast_forward_ms(delta_ms);
             cx.notify();
             now_ms
@@ -5012,7 +5034,7 @@ impl WebGpuixRenderer {
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = clockResume)]
     pub fn clock_resume(&self) -> Result<f64, wasm_bindgen::JsValue> {
-        update_web_window(|view, _window, cx| {
+        update_web_view(|view, _window, cx| {
             let now_ms = view.clock.resume();
             cx.notify();
             now_ms
@@ -5028,7 +5050,7 @@ impl WebGpuixRenderer {
             PENDING_DEBUG_OVERLAY.with(|pending| *pending.borrow_mut() = Some(mode));
             return Ok(debug_frame_overlay_mode_name(mode).to_string());
         }
-        update_web_window(move |_view, window, cx| {
+        update_web_view(move |_view, window, cx| {
             window.set_debug_frame_overlay_mode(mode);
             cx.notify();
             debug_frame_overlay_mode_name(window.debug_frame_overlay_mode()).to_string()
@@ -5044,7 +5066,7 @@ impl WebGpuixRenderer {
             )
             .to_string());
         }
-        update_web_window(|_view, window, _cx| {
+        update_web_view(|_view, window, _cx| {
             debug_frame_overlay_mode_name(window.debug_frame_overlay_mode()).to_string()
         })
     }

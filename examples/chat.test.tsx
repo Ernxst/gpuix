@@ -131,15 +131,21 @@ describeNative('chat example', () => {
         env: { GPUIX_BACKGROUND: '1' },
       })
       try {
+        const clickable = clickApp.getByTestId('appkit-click-anchor')
         const child = await clickApp.getByTestId('appkit-click-painted-child').element()
         const { bounds } = await clickApp.call('getBounds', { elementId: child.id })
         expect(bounds).not.toBeNull()
+
+        await clickable.click()
+        await clickApp.getByText('AppKit clicks: 1').waitFor({ timeoutMs: 10_000 })
+        await clickable.hover()
+        await clickApp.getByText('Pointer is over the clickable element').waitFor({ timeoutMs: 10_000 })
 
         await clickApp.call('appKitClick', {
           x: bounds!.x + bounds!.width / 2,
           y: bounds!.y + bounds!.height / 2,
         })
-        await clickApp.getByText('AppKit clicks: 1').waitFor({ timeoutMs: 10_000 })
+        await clickApp.getByText('AppKit clicks: 2').waitFor({ timeoutMs: 10_000 })
       } finally {
         await clickApp.close()
       }
