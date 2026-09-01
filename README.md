@@ -438,6 +438,22 @@ callback creates frame demand without dirtying the window; drawing still happens
 only through the normal GPUI frame path. A hot remount drops callbacks owned by
 the previous tree.
 
+### Canvas bitmap and layout dimensions
+
+On desktop, `<canvas width>` and `<canvas height>` define the logical coordinate
+space for recorded drawing commands; `style.width` and `style.height` define the
+layout box. GPUIX deliberately rasterizes that logical drawing at the layout
+box's device-pixel resolution. This is a desktop-superset divergence from the
+DOM canvas, whose fixed-size bitmap caps the detail available when the element
+is enlarged.
+
+The browser high-DPI idiom is therefore unnecessary in desktop-only code: do
+not multiply the canvas dimensions by `window.devicePixelRatio` merely to make
+GPUIX drawing sharp. A component shared with the browser can keep its one DOM
+path without a renderer check, however. DPR-scaled bitmap dimensions paired
+with the matching `context.scale(dpr, dpr)` map back to the same GPUIX layout
+geometry, while GPUIX still rasterizes at the layout box's physical resolution.
+
 ### Canvas image residency
 
 Decoded canvas images are shared by source within one renderer, but their GPU
