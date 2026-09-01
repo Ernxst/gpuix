@@ -1313,17 +1313,25 @@ impl CanvasElement {
                     }
                 }
                 "mouseMove" => {
-                    element = element.on_mouse_move(move |event, _window, _cx| {
-                        let (x, y) = local_point(&geometry, event.position);
-                        crate::renderer::emit_event_full(&callback, id, "mouseMove", |payload| {
-                            payload.x = Some(x);
-                            payload.y = Some(y);
-                            payload.modifiers = Some(event.modifiers.into());
-                            payload.pressed_button = event
-                                .pressed_button
-                                .map(crate::renderer::mouse_button_to_u32);
-                        });
-                    });
+                    element = element.on_mouse_move(cx.listener(
+                        move |view, event: &gpui::MouseMoveEvent, _window, _cx| {
+                            view.update_hover_target_before_mouse_move(id);
+                            let (x, y) = local_point(&geometry, event.position);
+                            crate::renderer::emit_event_full(
+                                &callback,
+                                id,
+                                "mouseMove",
+                                |payload| {
+                                    payload.x = Some(x);
+                                    payload.y = Some(y);
+                                    payload.modifiers = Some(event.modifiers.into());
+                                    payload.pressed_button = event
+                                        .pressed_button
+                                        .map(crate::renderer::mouse_button_to_u32);
+                                },
+                            );
+                        },
+                    ));
                 }
                 "mouseDownOutside" => {
                     element = element.on_mouse_down_out(move |event, _window, _cx| {

@@ -5375,18 +5375,33 @@ impl GpuixView {
         self.hover_target_dispatch_pending = true;
         cx.defer_in(window, |view, _window, _cx| {
             view.hover_target_dispatch_pending = false;
-            if view.hover_target == view.reported_hover_target {
-                return;
-            }
-
-            let event_id = view.hover_target.or(view.reported_hover_target);
-            view.reported_hover_target = view.hover_target;
-            if let Some(event_id) = event_id {
-                emit_event_full(&view.event_callback, event_id, "hoverTarget", |payload| {
-                    payload.hovered = Some(view.hover_target.is_some());
-                });
-            }
+            view.dispatch_hover_target_change();
         });
+    }
+
+    /// Publish the target implied by a GPUI mouse-move callback before the
+    /// move itself. GPUI defers `on_hover` until paint, while the DOM delivers
+    /// the entered ancestry before the first `mousemove`. `on_mouse_move`
+    /// runs only for the winning hovered or captured hitbox, so its host id is
+    /// safe to use here; the later GPUI hover callback reconciles to the same
+    /// target and becomes a no-op.
+    pub(crate) fn update_hover_target_before_mouse_move(&mut self, id: u64) {
+        self.hover_target = Some(id);
+        self.dispatch_hover_target_change();
+    }
+
+    fn dispatch_hover_target_change(&mut self) {
+        if self.hover_target == self.reported_hover_target {
+            return;
+        }
+
+        let event_id = self.hover_target.or(self.reported_hover_target);
+        self.reported_hover_target = self.hover_target;
+        if let Some(event_id) = event_id {
+            emit_event_full(&self.event_callback, event_id, "hoverTarget", |payload| {
+                payload.hovered = Some(self.hover_target.is_some());
+            });
+        }
     }
 
     pub(crate) fn set_pointer_capture(
