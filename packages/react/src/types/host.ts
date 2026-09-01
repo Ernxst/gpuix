@@ -775,6 +775,9 @@ export type AriaCurrent =
 /** AccessKit actions delivered through `onAccessibilityAction`. */
 export type AccessibilityAction = "increment" | "decrement" | "focus"
 
+/** Keep a semantic node in the accessibility tree while omitting its visual box. */
+export type VisuallyHidden = true
+
 // Props passed to elements.
 // Element IDs are auto-generated numeric IDs (not user-settable).
 // Use React refs to get an element's ID: ref.current.id
@@ -874,6 +877,8 @@ export interface Props {
   ariaHidden?: Booleanish
   /** DOM-compatible alias for ariaHidden. */
   "aria-hidden"?: Booleanish
+  /** Keep this semantic node accessible without painting or reserving layout space. */
+  visuallyHidden?: VisuallyHidden
   /** Value or focus action requested by assistive technology. Activate uses onClick. */
   onAccessibilityAction?: (event: GpuixSyntheticEvent) => void
 

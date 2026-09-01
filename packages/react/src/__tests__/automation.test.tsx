@@ -769,23 +769,72 @@ describeNative("automation", () => {
     expect(renderer.getPaintedText()).toEqual(["BUILT", "loud"])
   })
 
-  it("gives a roled text host its flattened name without a duplicate Label", () => {
+  it("gives visible and visually hidden roled text its flattened name without a duplicate Label", () => {
     const { render, renderer } = createTestRoot()
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gpuix-visually-hidden-"))
+    const baselinePath = path.join(dir, "baseline.png")
+    const hiddenPath = path.join(dir, "visually-hidden.png")
 
-    render(
-      <div>
-        <text role="heading" ariaLevel={2}>
+    const frame = (includeVisuallyHidden: boolean) => (
+      <div
+        style={{
+          display: "flex",
+          width: 480,
+          height: 100,
+          backgroundColor: "#101522",
+        }}
+      >
+        <text
+          role="heading"
+          ariaLevel={2}
+          style={{ width: 220, height: 60, color: "#ffffff" }}
+        >
           Production <text>totals</text>
         </text>
-        <text role="heading" ariaLevel={3} ariaLabel="Explicit totals name">
+        {includeVisuallyHidden ? (
+          <text
+            visuallyHidden
+            role="heading"
+            ariaLevel={1}
+            style={{
+              width: 180,
+              height: 60,
+              color: "#ffffff",
+              backgroundColor: "#ff0000",
+            }}
+          >
+            Production ledger
+          </text>
+        ) : null}
+        <text
+          testId="trailing-heading"
+          role="heading"
+          ariaLevel={3}
+          ariaLabel="Explicit totals name"
+          style={{ width: 220, height: 60, color: "#ffffff" }}
+        >
           Ignored contents
         </text>
       </div>
     )
+
+    render(frame(false))
+    renderer.flush()
+    renderer.drawPendingFrame()
+    const trailingBefore = renderer.getElementBounds(
+      renderer.findByTestId("trailing-heading")!.id
+    )
+    renderer.captureScreenshot(baselinePath)
+
+    render(frame(true))
     renderer.flush()
     renderer.drawPendingFrame()
     const tree = renderer.getAccessibilityTree()
     const nodes = Object.values(tree.nodes)
+    const trailingAfter = renderer.getElementBounds(
+      renderer.findByTestId("trailing-heading")!.id
+    )
+    renderer.captureScreenshot(hiddenPath)
 
     expect(nodes.find((node) => node.aria.label === "Production totals")).toMatchObject({
       aria: { role: "Heading", label: "Production totals", level: 2 },
@@ -793,7 +842,28 @@ describeNative("automation", () => {
     expect(nodes.find((node) => node.aria.label === "Explicit totals name")).toMatchObject({
       aria: { role: "Heading", label: "Explicit totals name", level: 3 },
     })
+    expect(nodes.find((node) => node.aria.label === "Production ledger")).toMatchObject({
+      aria: { role: "Heading", label: "Production ledger", level: 1 },
+    })
     expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
+    expect(renderer.getPaintedText()).not.toContain("Production ledger")
+    expect(trailingAfter).toEqual(trailingBefore)
+    expect(fs.readFileSync(hiddenPath).equals(fs.readFileSync(baselinePath))).toBe(true)
+
+    render(
+      <div ariaHidden>
+        <text visuallyHidden role="heading" ariaLevel={1}>
+          Hidden subtree heading
+        </text>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+    expect(
+      Object.values(renderer.getAccessibilityTree().nodes).some(
+        (node) => node.aria.label === "Hidden subtree heading"
+      )
+    ).toBe(false)
   })
 
   it.each([

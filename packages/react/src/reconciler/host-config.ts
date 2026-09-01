@@ -333,6 +333,7 @@ const warnedUnsupportedStyleTransitions = new WeakSet<Instance>()
 const warnedInvalidStyleProps = new WeakSet<Instance>()
 const warnedUnsupportedAccessibilityRoleProps = new WeakSet<Instance>()
 const warnedUnsupportedAriaProps = new WeakSet<Instance>()
+const warnedVisuallyHiddenProps = new WeakSet<Instance>()
 
 class UnsupportedStyleTransitionError extends Error {
   override name = "UnsupportedStyleTransitionError"
@@ -344,6 +345,14 @@ class InvalidStylePropError extends Error {
 
 class UnsupportedAccessibilityRolePropError extends Error {
   override name = "UnsupportedAccessibilityRolePropError"
+}
+
+class InvalidVisuallyHiddenPropError extends Error {
+  override name = "InvalidVisuallyHiddenPropError"
+}
+
+class ContradictoryAccessibilityVisibilityError extends Error {
+  override name = "ContradictoryAccessibilityVisibilityError"
 }
 
 function elementSubject(instance: Instance, props: Props): string {
@@ -450,6 +459,43 @@ function diagnoseUnsupportedAriaProp(
   console.warn(message)
 }
 
+function booleanishTrue(value: unknown): boolean {
+  return value === true || (typeof value === "string" && value.toLowerCase() === "true")
+}
+
+function diagnoseVisuallyHiddenProp(
+  instance: Instance,
+  container: Container,
+  props: Props
+): void {
+  const value = (props as Props & { visuallyHidden?: unknown }).visuallyHidden
+  let message: string | undefined
+  let ErrorType: typeof InvalidVisuallyHiddenPropError | typeof ContradictoryAccessibilityVisibilityError =
+    InvalidVisuallyHiddenPropError
+
+  if (value !== undefined && value !== true) {
+    message =
+      `[gpuix] ${elementSubject(instance, props)} received an invalid visuallyHidden prop. ` +
+      "visuallyHidden accepts true only; omit the prop when the element should paint."
+  } else if (value === true) {
+    const ariaHidden = Object.prototype.hasOwnProperty.call(props, "ariaHidden")
+      ? props.ariaHidden
+      : props["aria-hidden"]
+    if (booleanishTrue(ariaHidden)) {
+      ErrorType = ContradictoryAccessibilityVisibilityError
+      message =
+        `[gpuix] ${elementSubject(instance, props)} cannot combine visuallyHidden with ariaHidden=true. ` +
+        "ariaHidden removes the accessibility node that visuallyHidden exists to preserve; remove one property."
+    }
+  }
+
+  if (message === undefined) return
+  if (container.strictStyles) throw new ErrorType(message)
+  if (warnedVisuallyHiddenProps.has(instance)) return
+  warnedVisuallyHiddenProps.add(instance)
+  console.warn(message)
+}
+
 function supportsStyleTransitions(type: ElementType): boolean {
   return STYLE_TRANSITION_TYPES.has(type) || DIV_ALIASES.has(type)
 }
@@ -519,6 +565,7 @@ const UNIVERSAL_PROPS = new Set([
   "ariaColSpan",
   "ariaDisabled",
   "ariaHidden",
+  "visuallyHidden",
   "disabled",
   // `highlight` is scoped by where it sits in the tree, so it has to reach a
   // plain `div`. Without it here, custom props are dropped for built-ins and
@@ -840,6 +887,7 @@ export const hostConfig = {
     diagnoseUnsupportedStyleTransition(instance, rootContainerInstance, props)
     diagnoseUnsupportedAccessibilityRoleProp(instance, rootContainerInstance, props)
     diagnoseUnsupportedAriaProp(instance, rootContainerInstance, props)
+    diagnoseVisuallyHiddenProp(instance, rootContainerInstance, props)
     return instance
   },
 
@@ -986,6 +1034,7 @@ export const hostConfig = {
     diagnoseUnsupportedStyleTransition(instance, container, newProps)
     diagnoseUnsupportedAccessibilityRoleProp(instance, container, newProps)
     diagnoseUnsupportedAriaProp(instance, container, newProps)
+    diagnoseVisuallyHiddenProp(instance, container, newProps)
     // Always resend style — per-element JSON is small, and this avoids
     // bugs from same-reference mutations or style removal.
     container.renderer.setStyle(instance.id, styleForRenderer(instance, container, newProps) ?? {})

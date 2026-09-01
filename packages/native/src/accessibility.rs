@@ -29,6 +29,7 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaColSpan",
     "ariaDisabled",
     "ariaHidden",
+    "visuallyHidden",
     "disabled",
 ];
 
@@ -36,6 +37,17 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
 struct AccessibilityRole {
     role: gpui::Role,
     name_from_contents: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VisuallyHiddenMode {
+    Always,
+}
+
+impl VisuallyHiddenMode {
+    fn parse(value: &serde_json::Value) -> Option<Self> {
+        (value == &serde_json::Value::Bool(true)).then_some(Self::Always)
+    }
 }
 
 impl fmt::Debug for AccessibilityRole {
@@ -507,6 +519,22 @@ fn supports_accessibility_host(element_type: &str) -> bool {
     matches!(element_type, "div" | "text" | "input" | "textarea" | "img")
 }
 
+pub(crate) fn is_visually_hidden(element: &RetainedElement) -> bool {
+    element
+        .custom_props
+        .get("visuallyHidden")
+        .and_then(VisuallyHiddenMode::parse)
+        .is_some()
+        && !is_hidden(element)
+        && supports_accessibility_host(&element.element_type)
+        && element
+            .custom_props
+            .get("role")
+            .and_then(AccessibilityRole::parse)
+            .and_then(AccessibilityRole::into_gpui)
+            .is_some()
+}
+
 /// Validate the complete retained accessibility declaration after a mutation
 /// batch. Cross-property checks intentionally happen here, not while props are
 /// arriving, so JSX property order cannot change the diagnostics.
@@ -559,6 +587,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<AccessibilityPr
             "ariaExpanded" | "ariaSelected" | "ariaDisabled" | "ariaHidden" => {
                 parse_booleanish(value).is_none()
             }
+            "visuallyHidden" => VisuallyHiddenMode::parse(value).is_none(),
             "disabled" => !(value.is_boolean() || value.is_string()),
             "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
                 value.as_f64().is_none_or(|number| !number.is_finite())
@@ -583,6 +612,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<AccessibilityPr
                 | "ariaRowSpan"
                 | "ariaColSpan" => "a positive integer",
                 "disabled" => "a boolean or string",
+                "visuallyHidden" => "the boolean true",
                 _ => "a boolean",
             };
             problems.push(rejected_problem(
@@ -662,6 +692,26 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<AccessibilityPr
                 }
                 _ => {}
             }
+        }
+    }
+
+    if let Some(value) = element
+        .custom_props
+        .get("visuallyHidden")
+        .filter(|value| VisuallyHiddenMode::parse(value).is_some())
+    {
+        if is_hidden(element) {
+            problems.push(rejected_problem(
+                "visuallyHidden",
+                value,
+                "ariaHidden removes the accessibility node that visuallyHidden exists to preserve; remove one property",
+            ));
+        } else if role.and_then(AccessibilityRole::into_gpui).is_none() {
+            problems.push(rejected_problem(
+                "visuallyHidden",
+                value,
+                "visuallyHidden requires an explicit supported role so the accessibility-only element produces a node",
+            ));
         }
     }
 
@@ -1044,6 +1094,36 @@ mod tests {
         heading.custom_props.insert("ariaLevel".into(), 0.into());
         let heading_problem = &element_problems(&heading)[0];
         assert!(heading_problem.problem.reason.contains("positive integer"));
+
+        let mut visually_hidden = RetainedElement::new(12, "text".to_string(), 1);
+        visually_hidden
+            .custom_props
+            .insert("role".into(), "heading".into());
+        visually_hidden
+            .custom_props
+            .insert("visuallyHidden".into(), true.into());
+        assert!(is_visually_hidden(&visually_hidden));
+        assert!(element_problems(&visually_hidden).is_empty());
+
+        visually_hidden
+            .custom_props
+            .insert("ariaHidden".into(), true.into());
+        assert!(!is_visually_hidden(&visually_hidden));
+        let conflicting = element_problems(&visually_hidden);
+        assert_eq!(conflicting.len(), 1);
+        assert_eq!(conflicting[0].problem.property, "visuallyHidden");
+        assert!(conflicting[0].problem.reason.contains("ariaHidden removes"));
+
+        let mut malformed_visually_hidden = RetainedElement::new(13, "text".to_string(), 1);
+        malformed_visually_hidden
+            .custom_props
+            .insert("role".into(), "heading".into());
+        malformed_visually_hidden
+            .custom_props
+            .insert("visuallyHidden".into(), "untilFocus".into());
+        let malformed = element_problems(&malformed_visually_hidden);
+        assert_eq!(malformed.len(), 1);
+        assert!(malformed[0].problem.reason.contains("boolean true"));
     }
 
     #[test]
