@@ -113,6 +113,7 @@
       "id": "compositing/2d.composite.globalAlpha.image",
       "status": "skip",
       "gaps": [
+        "WPT case uses top-level await, which this harness cannot run inside a function body",
         "Unsupported API: DOM image sources"
       ],
       "diagnosis": "await is only valid in async functions and the top level bodies of modules"
@@ -130,6 +131,7 @@
       "id": "compositing/2d.composite.globalAlpha.imagepattern",
       "status": "skip",
       "gaps": [
+        "WPT case uses top-level await, which this harness cannot run inside a function body",
         "Unsupported API: canvas patterns",
         "Unsupported API: DOM image sources"
       ],
@@ -406,33 +408,33 @@
       "id": "drawing-rectangles-to-the-canvas/2d.fillStyle.colorObject",
       "status": "skip",
       "gaps": [
-        "Recording context declines fillStyle: gradient and pattern objects are not encoded by stream version 1"
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body"
       ],
-      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.fillStyle is not implemented: gradient and pattern objects are not encoded by stream version 1"
+      "diagnosis": "ctx.fillStyle works with color objects"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.fillStyle.colorObject.transparency",
       "status": "skip",
       "gaps": [
-        "Recording context declines fillStyle: gradient and pattern objects are not encoded by stream version 1"
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body"
       ],
-      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.fillStyle is not implemented: gradient and pattern objects are not encoded by stream version 1"
+      "diagnosis": "ctx.fillStyle with color objects has transparency"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeStyle.colorObject",
       "status": "skip",
       "gaps": [
-        "Recording context declines strokeStyle: gradient and pattern objects are not encoded by stream version 1"
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body"
       ],
-      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.strokeStyle is not implemented: gradient and pattern objects are not encoded by stream version 1"
+      "diagnosis": "ctx.strokeStyle works with color objects"
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeStyle.colorObject.transparency",
       "status": "skip",
       "gaps": [
-        "Recording context declines strokeStyle: gradient and pattern objects are not encoded by stream version 1"
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body"
       ],
-      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.strokeStyle is not implemented: gradient and pattern objects are not encoded by stream version 1"
+      "diagnosis": "ctx.strokeStyle with color objects has transparency"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.parse",
@@ -486,7 +488,7 @@
       "id": "fill-and-stroke-styles/2d.fillStyle.invalidstring",
       "status": "fail",
       "gaps": [
-        "Native canvas stream rejects a spec-valid fillStyle value"
+        "Native canvas stream rejects an unparsable fillStyle instead of ignoring the assignment"
       ],
       "diagnosis": "[gpuix] Invalid canvas command on <canvas> (element 1): property \"fillStyle\" rejected value op[3]: unsupported Canvas 2D color \"invalid\""
     },
@@ -1446,17 +1448,18 @@
       "id": "fill-and-stroke-styles/2d.fillStyle.CSSRGB",
       "status": "skip",
       "gaps": [
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body",
         "Unsupported API: context reset"
       ],
-      "diagnosis": "CSSRGB is not defined"
+      "diagnosis": "CSSRGB works as color input"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.CSSHSL",
       "status": "skip",
       "gaps": [
-        "WPT fixture lacks global CSSHSL"
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body"
       ],
-      "diagnosis": "CSSHSL is not defined"
+      "diagnosis": "CSSHSL works as color input"
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.colormix",
@@ -3070,6 +3073,7 @@
       "id": "pixel-manipulation/2d.imageData.createImageBitmap.srgb.rgba.unorm8",
       "status": "skip",
       "gaps": [
+        "WPT case uses top-level await, which this harness cannot run inside a function body",
         "Unsupported API: CPU canvas pixel buffers",
         "Unsupported API: DOM image sources"
       ],
@@ -3079,6 +3083,7 @@
       "id": "pixel-manipulation/2d.imageData.createImageBitmap.srgb.rgba.float16",
       "status": "skip",
       "gaps": [
+        "WPT case uses top-level await, which this harness cannot run inside a function body",
         "Unsupported API: CPU canvas pixel buffers",
         "Unsupported API: DOM image sources"
       ],
@@ -3088,6 +3093,7 @@
       "id": "pixel-manipulation/2d.imageData.createImageBitmap.p3.rgba.unorm8",
       "status": "skip",
       "gaps": [
+        "WPT case uses top-level await, which this harness cannot run inside a function body",
         "Unsupported API: CPU canvas pixel buffers",
         "Unsupported API: DOM image sources",
         "Unsupported API: modern CSS color spaces"
@@ -3724,9 +3730,9 @@
     },
     {
       "id": "the-canvas/2d.canvas.host.type.name",
-      "status": "fail",
+      "status": "skip",
       "gaps": [
-        "Recording context state or serialization differs from the WPT expectation"
+        "GPUIX canvas host is a JS object rather than an HTMLCanvasElement, so its DOM class name cannot match"
       ],
       "diagnosis": "expected '[object Object]' to be '[object HTMLCanvasElement]' // Object.is equality"
     },
@@ -3791,17 +3797,19 @@
       "id": "the-canvas/2d.canvas.host.initial.reset.different",
       "status": "skip",
       "gaps": [
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "Changing size resets canvas to transparent black"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.same",
       "status": "skip",
       "gaps": [
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "Setting size (not changing the value) resets canvas to transparent black"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.path",

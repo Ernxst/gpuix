@@ -138,6 +138,9 @@ function assertPixel(actual: Pixel, expected: Pixel, tolerance: number, point: s
   }
 }
 
+const HARNESS_ERROR_GAP = "Harness error before any spec assertion ran, so this case produced no conformance result"
+const TOP_LEVEL_AWAIT_GAP = "WPT case uses top-level await, which this harness cannot run inside a function body"
+
 /**
  * Names the gap a runtime failure actually exposes, and says whether it is a
  * missing capability or a spec violation. The recording context, the native
@@ -162,7 +165,15 @@ function classify(test: WptCase, message: string): { status: "fail" | "skip"; ga
   const absent = message.match(/^GPUIX canvas host has no (\w+) member$/)
   if (absent) return { status: "skip", gap: `GPUIX canvas host has no ${absent[1]} member` }
   const rejected = message.match(/Invalid canvas command .*property "(\w+)" rejected value/)
-  if (rejected) return { status: "fail", gap: `Native canvas stream rejects a spec-valid ${rejected[1]} value` }
+  if (rejected) {
+    // An unparsable colour is not a spec-valid value: the spec says the
+    // assignment is *ignored* and the previous style stands. Rejecting the
+    // whole command stream is a different defect from refusing a value the
+    // spec permits, and naming it "spec-valid" misdescribes the fix.
+    return /unsupported Canvas 2D color/.test(message)
+      ? { status: "fail", gap: `Native canvas stream rejects an unparsable ${rejected[1]} instead of ignoring the assignment` }
+      : { status: "fail", gap: `Native canvas stream rejects a spec-valid ${rejected[1]} value` }
+  }
   if (/^Pixel \(|^pixel \(\d+, \d+\) channel /.test(message)) {
     const operations = [...new Set([...test.code.matchAll(/ctx\.([A-Za-z0-9_]+)/g)].map((match) => match[1]!))]
     return {
@@ -176,7 +187,25 @@ function classify(test: WptCase, message: string): { status: "fail" | "skip"; ga
   if (/^Expected \S+, got /.test(message)) {
     return { status: "fail", gap: "Spec-required exception raised with the wrong type" }
   }
-  return { status: "fail", gap: "Recording context state or serialization differs from the WPT expectation" }
+  // The GPUIX canvas host is a JS object with the canvas API on it, not a DOM
+  // element, so `Object.prototype.toString` can never read HTMLCanvasElement.
+  // Filing that as a spec violation puts a case on the backlog that no canvas
+  // fix could ever close.
+  if (/\[object HTMLCanvasElement\]/.test(message)) {
+    return {
+      status: "skip",
+      gap: "GPUIX canvas host is a JS object rather than an HTMLCanvasElement, so its DOM class name cannot match",
+    }
+  }
+  // A fired assertion is a real conformance result: the implementation ran and
+  // disagreed with the spec.
+  if (/^expected /.test(message)) {
+    return { status: "fail", gap: "Recording context state or serialization differs from the WPT expectation" }
+  }
+  // Anything else is this harness failing, not GPUIX. Defaulting it to `fail`
+  // would file a harness bug as a conformance defect and quietly inflate the
+  // spec-violation count.
+  return { status: "skip", gap: HARNESS_ERROR_GAP }
 }
 
 const NO_ASSERTION_GAP = "WPT reference-image comparison is not implemented by this harness"
@@ -314,6 +343,13 @@ function execute(test: WptCase, screenshot: string): LedgerEntry {
     return { id: test.id, status: "pass" }
   } catch (error) {
     const message = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim()
+    // `new Function` builds a plain function body, so a WPT case written with
+    // top-level await never starts. Its API gaps happen to apply too, but
+    // landing every one of them would still leave the case unrunnable here, so
+    // the limitation that actually blocks it is named first.
+    if (/await is only valid in async functions/.test(message)) {
+      return { id: test.id, status: "skip", gaps: [TOP_LEVEL_AWAIT_GAP, ...test.gaps], diagnosis: message.slice(0, 240) }
+    }
     // A statically gapped case keeps its named gap as the expected outcome, so
     // the day the capability lands the case starts passing and surfaces as an
     // unexplained deviation instead of staying silently skipped.

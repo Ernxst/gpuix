@@ -28,10 +28,23 @@ bun run canvas:wpt
 
 - `pass` - the case ran and every assertion held.
 - `fail` - GPUIX implements the surface the case exercises and gets it wrong:
-  a failed assertion, a spec-valid value the native stream rejected, a missing
-  exception, a pixel that does not match. These are conformance defects.
-- `skip` - a capability GPUIX does not claim, or a fixture this harness does
-  not provide. Every skip names the gap or gaps responsible.
+  a failed assertion, a value the native stream rejected instead of accepting
+  or ignoring it, a missing exception, a pixel that does not match. These are
+  conformance defects.
+- `skip` - a capability GPUIX does not claim, a fixture this harness does not
+  provide, or a case this harness cannot execute or score honestly (a Jinja
+  variant, top-level await, a pixel assertion made mid-drawing). Every skip
+  names the gap or gaps responsible, harness limitations first: they block the
+  case whatever GPUIX implements.
+
+It currently reads **593 cases: 181 pass, 18 fail, 394 skip, 0 unexplained**.
+The 18 failures are not one backlog: **10 are paint divergences** in the native
+retained-canvas renderer (arc geometry, line joins, zero-size rects, overlapping
+stroke alpha) and **8 are serialization or exception-class defects** in the
+recording context and the canvas opcode stream (`fillStyle` getter
+serialization, unresolved system colours, a missing `TypeError` from
+`getContext`, and two values the native stream refuses). Reading the total as a
+renderer backlog overstates what the renderer owes by nearly half.
 
 A case that a gap blocks statically is still executed: the gap is its *expected*
 outcome, so the day the capability lands the case starts passing and shows up as
@@ -46,7 +59,7 @@ ranked gap table; set `WPT_REPORT=<file>` for the same triage as JSON.
 
 ## Why this is not part of `bun run test`, and what that costs you
 
-Each of the 516 runnable cases boots and disposes a native retained-canvas
+Each of the 508 runnable cases boots and disposes a native retained-canvas
 renderer, so the sweep takes several minutes (3-8 on a loaded laptop) - much
 longer than the whole React suite it would join.
 `packages/react`'s `test` and `test:watch` scripts therefore exclude

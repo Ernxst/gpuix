@@ -721,44 +721,52 @@
       "name": "2d.fillStyle.colorObject",
       "suite": "drawing-rectangles-to-the-canvas",
       "desc": "ctx.fillStyle works with color objects",
-      "code": "ctx.fillStyle = {r: 1, g: 0, b: 0};\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 255, 0, 0, 255, 0);\nctx.fillStyle = {r: 0, g: 0, b: 1};\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 0, 0, 255, 255, 0);\nctx.fillStyle = {r: 0.2, g: 0.4, b: 0.6};\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 51, 102, 153, 255, 0);\nctx.fillStyle = {r: 0, g: 1, b: 0};\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 0, 255, 0, 255, 0);\nctx.fillStyle = {r: -1, g: 0, b: 0};\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 0, 0, 0, 255, 0);\nctx.fillStyle = {r: 0, g: 2, b: 0};\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 0, 255, 0, 255, 0);",
+      "code": "",
       "expected": "green",
       "size": null,
-      "gaps": [],
-      "runnable": true
+      "gaps": [
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body"
+      ],
+      "runnable": false
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.fillStyle.colorObject.transparency",
       "name": "2d.fillStyle.colorObject.transparency",
       "suite": "drawing-rectangles-to-the-canvas",
       "desc": "ctx.fillStyle with color objects has transparency",
-      "code": "ctx.fillStyle = {r: 0, g: 1, b: 0, a: 0};\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 0, 0, 0, 0, 0);\nctx.clearRect(0, 0, 100, 50);\nctx.fillStyle = {r: 0, g: 1, b: 0, a: -1};\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 0, 0, 0, 0, 0);\nctx.clearRect(0, 0, 100, 50);\nctx.fillStyle = {r: 0, g: 1, b: 0, a: 0.5};\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 0, 255, 0, 128, 0);\nctx.clearRect(0, 0, 100, 50);\nctx.fillStyle = {r: 0, g: 1, b: 0, a: 1};\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 0, 255, 0, 255, 0);",
+      "code": "",
       "expected": "green",
       "size": null,
-      "gaps": [],
-      "runnable": true
+      "gaps": [
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body"
+      ],
+      "runnable": false
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeStyle.colorObject",
       "name": "2d.strokeStyle.colorObject",
       "suite": "drawing-rectangles-to-the-canvas",
       "desc": "ctx.strokeStyle works with color objects",
-      "code": "ctx.lineWidth = 50;\nctx.strokeStyle = {r: 1, g: 0, b: 0};\nctx.strokeRect(25, 24, 50, 2);\nassertPixel(50, 25, 255, 0, 0, 255, 0);\nctx.strokeStyle = {r: 0, g: 0, b: 1};\nctx.strokeRect(25, 24, 50, 2);\nassertPixel(50, 25, 0, 0, 255, 255, 0);\nctx.strokeStyle = {r: 0.2, g: 0.4, b: 0.6};\nctx.strokeRect(25, 24, 50, 2);\nassertPixel(50, 25, 51, 102, 153, 255, 0);\nctx.strokeStyle = {r: 0, g: 1, b: 0};\nctx.strokeRect(25, 24, 50, 2);\nassertPixel(50, 25, 0, 255, 0, 255, 0);\nctx.strokeStyle = {r: -1, g: 0, b: 0};\nctx.strokeRect(25, 24, 50, 2);\nassertPixel(50, 25, 0, 0, 0, 255, 0);\nctx.strokeStyle = {r: 0, g: 2, b: 0};\nctx.strokeRect(25, 24, 50, 2);\nassertPixel(50, 25, 0, 255, 0, 255, 0);",
+      "code": "",
       "expected": "green",
       "size": null,
-      "gaps": [],
-      "runnable": true
+      "gaps": [
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body"
+      ],
+      "runnable": false
     },
     {
       "id": "drawing-rectangles-to-the-canvas/2d.strokeStyle.colorObject.transparency",
       "name": "2d.strokeStyle.colorObject.transparency",
       "suite": "drawing-rectangles-to-the-canvas",
       "desc": "ctx.strokeStyle with color objects has transparency",
-      "code": "ctx.lineWidth = 50;\nctx.strokeStyle = {r: 0, g: 1, b: 0, a: 0};\nctx.strokeRect(25, 24, 50, 2);\nassertPixel(50, 25, 0, 0, 0, 0, 0);\nctx.strokeStyle = {r: 0, g: 1, b: 0, a: -1};\nctx.strokeRect(25, 24, 50, 2);\nassertPixel(50, 25, 0, 0, 0, 0, 0);\nctx.clearRect(0, 0, 100, 50);\nctx.strokeStyle = {r: 0, g: 1, b: 0, a: 0.5};\nctx.strokeRect(25, 24, 50, 2);\nassertPixel(50, 25, 0, 255, 0, 128, 0);\nctx.clearRect(0, 0, 100, 50);\nctx.strokeStyle = {r: 0, g: 1, b: 0, a: 1};\nctx.strokeRect(25, 24, 50, 2);\nassertPixel(50, 25, 0, 255, 0, 255, 0);",
+      "code": "",
       "expected": "green",
       "size": null,
-      "gaps": [],
-      "runnable": true
+      "gaps": [
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body"
+      ],
+      "runnable": false
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.parse",
@@ -2391,24 +2399,27 @@
       "name": "2d.fillStyle.CSSRGB",
       "suite": "fill-and-stroke-styles",
       "desc": "CSSRGB works as color input",
-      "code": "ctx.fillStyle = new CSSRGB(1, 0, 1);\nassertStrictEqual(ctx.fillStyle, '#ff00ff');\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 255, 0, 255, 255, 0);\n\nconst color = new CSSRGB(0, CSS.percent(50), 0);\nctx.fillStyle = color;\nassertStrictEqual(ctx.fillStyle, '#008000');\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 0, 128, 0, 255, 0);\ncolor.g = 0;\nctx.fillStyle = color;\nassertStrictEqual(ctx.fillStyle, '#000000');\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 0, 0, 0, 255, 0);\n\ncolor.alpha = 0;\nctx.fillStyle = color;\nassertStrictEqual(ctx.fillStyle, 'rgba(0, 0, 0, 0)');\nctx.reset();\ncolor.alpha = 0.5;\nctx.fillStyle = color;\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 0, 0, 0, 128, 0);\n\ncolor.alpha = 1;\ncolor.g = 1;\nctx.fillStyle = color;\nctx.fillRect(0, 0, 100, 50);",
+      "code": "",
       "expected": "green",
       "size": null,
       "gaps": [
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body",
         "Unsupported API: context reset"
       ],
-      "runnable": true
+      "runnable": false
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.CSSHSL",
       "name": "2d.fillStyle.CSSHSL",
       "suite": "fill-and-stroke-styles",
       "desc": "CSSHSL works as color input",
-      "code": "ctx.fillStyle = new CSSHSL(CSS.deg(180), 0.5, 0.5);\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 64, 191, 191, 255, 3);\n\nconst color = new CSSHSL(CSS.deg(180), 1, 1);\nctx.fillStyle = color;\nassertStrictEqual(ctx.fillStyle, '#ffffff');\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 255, 255, 255, 255, 0);\ncolor.l = 0.5;\nctx.fillStyle = color;\nassertStrictEqual(ctx.fillStyle, '#00ffff');\nctx.fillRect(0, 0, 100, 50);\nassertPixel(50, 25, 0, 255, 255, 255, 0);\n\ncolor.h = CSS.deg(120);\ncolor.s = 1;\ncolor.l = 0.5;\nctx.fillStyle = color;\nctx.fillRect(0, 0, 100, 50);",
+      "code": "",
       "expected": "green",
       "size": null,
-      "gaps": [],
-      "runnable": true
+      "gaps": [
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body"
+      ],
+      "runnable": false
     },
     {
       "id": "fill-and-stroke-styles/2d.fillStyle.colormix",
@@ -6804,26 +6815,28 @@
       "name": "2d.canvas.host.initial.reset.different",
       "suite": "the-canvas",
       "desc": "Changing size resets canvas to transparent black",
-      "code": "ctx.fillStyle = '#f00';\nctx.fillRect(0, 0, 50, 50);\nassertPixel(20, 20, 255, 0, 0, 255, 0);\ncanvas.width = 50;\nassertPixel(20, 20, 0, 0, 0, 0, 0);",
+      "code": "",
       "expected": null,
       "size": null,
       "gaps": [
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "runnable": true
+      "runnable": false
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.same",
       "name": "2d.canvas.host.initial.reset.same",
       "suite": "the-canvas",
       "desc": "Setting size (not changing the value) resets canvas to transparent black",
-      "code": "canvas.width = 100;\nctx.fillStyle = '#f00';\nctx.fillRect(0, 0, 50, 50);\nassertPixel(20, 20, 255, 0, 0, 255, 0);\ncanvas.width = 100;\nassertPixel(20, 20, 0, 0, 0, 0, 0);",
+      "code": "",
       "expected": null,
       "size": null,
       "gaps": [
+        "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion against a single screenshot taken after the whole case body",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "runnable": true
+      "runnable": false
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.path",

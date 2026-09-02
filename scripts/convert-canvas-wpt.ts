@@ -63,6 +63,27 @@ const API_GAPS: readonly [string, RegExp][] = [
 
 const JINJA_GAP = "WPT Jinja variant expansion is not implemented by this harness"
 const ASSERT_SYNTAX_GAP = "WPT assertion syntax not implemented by this harness"
+const DEFERRED_PIXEL_GAP =
+  "WPT case asserts pixels between drawing operations; this harness compares every pixel assertion " +
+  "against a single screenshot taken after the whole case body"
+
+/**
+ * True when the case checks a pixel and then keeps drawing. The harness defers
+ * every pixel assertion to one screenshot taken after the body has run, so such
+ * a case would be checked against the final canvas rather than the state at the
+ * assertion. Today every one of these is skipped for an unrelated missing
+ * capability, so the mis-comparison is inert - but it would manufacture
+ * divergences the moment that capability landed. The case is unconvertible
+ * under this harness's screenshot model rather than silently mis-scored.
+ */
+function assertsPixelBeforeDrawing(code: string): boolean {
+  const statements = code.split("\n")
+  const firstAssertion = statements.findIndex((line) => /\bassertPixel\(/.test(line))
+  if (firstAssertion < 0) return false
+  return statements
+    .slice(firstAssertion + 1)
+    .some((line) => !/^\s*assert\w*\(/.test(line) && /\b(?:ctx|canvas)\.\w+\s*(?:\(|=[^=])/.test(line))
+}
 
 /**
  * WPT's own `@nonfinite` expansion (tools/gentest.py `expand_nonfinite`): every
@@ -123,6 +144,7 @@ function rewrite(code: string): { code: string; unconvertible: string | null } {
   output = output.replace(/@assert (.*);/g, "assertTrue($1);")
   if (/@[A-Za-z_.]+/.test(output)) return { code: "", unconvertible: ASSERT_SYNTAX_GAP }
   if (/\{[{%#]/.test(output)) return { code: "", unconvertible: JINJA_GAP }
+  if (assertsPixelBeforeDrawing(output)) return { code: "", unconvertible: DEFERRED_PIXEL_GAP }
   return { code: output, unconvertible: null }
 }
 
@@ -153,7 +175,16 @@ for (const file of readdirSync(yamlDirectory).filter((name) => name.endsWith(".y
     const hasCode = typeof test.code === "string"
     const source = hasCode ? (test.code as string) : ""
     const converted = hasCode ? rewrite(source) : { code: "", unconvertible: JINJA_GAP }
-    const gaps = converted.unconvertible ? [converted.unconvertible] : staticGaps(source, test.canvas_types)
+    // A Jinja or unexpanded-`@assert` body cannot be scanned for API gaps - the
+    // code it would run does not exist yet. A case held back only by the
+    // screenshot model converted cleanly, so its API gaps are known and stay
+    // recorded behind the harness limitation that blocks it first.
+    const gaps =
+      converted.unconvertible === null
+        ? staticGaps(source, test.canvas_types)
+        : converted.unconvertible === DEFERRED_PIXEL_GAP
+          ? [DEFERRED_PIXEL_GAP, ...staticGaps(source, test.canvas_types)]
+          : [converted.unconvertible]
     const baseId = `${suite}/${test.name}`
     const occurrence = (ids.get(baseId) ?? 0) + 1
     ids.set(baseId, occurrence)
