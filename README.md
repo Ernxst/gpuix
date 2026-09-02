@@ -815,8 +815,12 @@ on the returned handle to end it. One thrown tick is reported and retried;
 repeated failures quit instead of abandoning the native window.
 
 On **Windows and Linux**, GPUI runs its normal blocking native event loop on one
-dedicated Rust UI thread. Node sends in-process commands to that thread, so
-`startFrameLoop` returns a no-op handle and does not create a JavaScript timer.
+dedicated Rust UI thread. Node sends in-process commands to that thread, so a
+timer tick neither pumps that loop nor requests a frame. `startFrameLoop` still
+runs there: its ticks observe whether the UI thread is alive, and `tick()`
+returns `false` once the last window closes, which stops the loop and runs
+`onTerminated`. Call it on every platform — `render()` does. Skipping it on
+Windows or Linux leaves the process running after the window is gone.
 All platforms use GPUI's native platform, window, renderer, input, scroll,
 clipboard, keyboard, and IME implementations. The embedded macOS run-loop
 extension comes from the pinned GPUIX fork. CI runs the full React and example
@@ -1199,10 +1203,12 @@ container on the wheel frame, and the JavaScript callback that would move the
 header arrives a frame later, so the header tears away during a fast pan.
 
 When two panes must stay locked to the pixel, own the offset in React: put one
-`onScroll` listener on a non-scrolling parent, keep `scrollX` and `scrollY` in
+`onWheel` listener on a non-scrolling parent, keep `scrollX` and `scrollY` in
 state, and translate each pane's content with an absolutely positioned wrapper.
-Zed does the same; the editor owns its scroll position and paints the gutter and
-the text from it.
+`onWheel` bubbles, so the parent sees every wheel over the panes; `onScroll`
+would not, because it reports a scroll container's own position and does not
+bubble, exactly as in the DOM. Zed does the same; the editor owns its scroll
+position and paints the gutter and the text from it.
 
 ```tsx
 function Pane({ offsetX, children }: { offsetX: number; children: React.ReactNode }) {
@@ -1647,7 +1653,7 @@ a `div` when it should receive keyboard focus:
   onFocus={() => setActive(true)}
   onBlur={() => setActive(false)}
   onKeyDown={(event) => {
-    if (event.key === 'enter') submit()
+    if (event.key === 'Enter') submit()
   }}
 >
   Submit
@@ -1661,6 +1667,27 @@ a `div` when it should receive keyboard focus:
 | `tabIndex={-1}` | Skipped by Tab, but focusable by click or renderer API |
 | `autoFocus` | Takes focus once, when its native focus handle is created |
 
+### Element keyboard callbacks
+
+`onKeyDown` fires for the focused element and then through React's capture and
+bubble phases. `onKeyUp` follows the same path when the key is released. Adding
+either callback creates the element's native focus handle.
+
+```tsx
+<div
+  autoFocus
+  tabIndex={0}
+  onKeyDown={(event) => {
+    console.log(event.key, event.keyChar, event.modifiers, event.isHeld)
+  }}
+  onKeyUp={(event) => {
+    console.log(`${event.key} released`)
+  }}
+>
+  Focused target
+</div>
+```
+
 `Tab` calls GPUI's `window.focus_next()`. `Shift+Tab` calls
 `window.focus_prev()`. Before that default runs, GPUIX dispatches the keydown
 through React's capture and bubble phases. Call `preventDefault()` from either
@@ -1670,11 +1697,24 @@ phase to keep focus on the current element, matching the browser:
 <div
   tabIndex={0}
   onKeyDown={(event) => {
-    if (event.key === 'tab') event.preventDefault()
+    if (event.key === 'Tab') event.preventDefault()
   }}
 >
   Editor
 </div>
+```
+
+### Imperative focus
+
+`focusNext()` and `focusPrevious()` take the same path as the default `Tab` and
+`Shift+Tab`: they first reveal the next focusable row when it is a virtual item
+that has not been painted yet, then move GPUI focus with `window.focus_next()`
+or `window.focus_prev()`, then scroll the newly focused element into view. They
+do not dispatch a `keydown`, so a `preventDefault()` handler cannot cancel them.
+
+```ts
+renderer.focusNext()
+renderer.focusPrevious()
 ```
 
 Use a ref for imperative focus:
@@ -2584,7 +2624,9 @@ text imports no longer need a runtime flag.
 | Event | Props | Payload fields |
 |-------|-------|----------------|
 | Click | `onClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` — primary button only |
+| Double click | `onDoubleClick` | Same fields, after the second `onClick`; primary button only |
 | Aux click | `onAuxClick` | Same fields, for the non-primary buttons |
+| Context menu | `onContextMenu` | Same fields as `onMouseDown`, on the right-button press; cancelable |
 | Mouse down | `onMouseDown` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse up | `onMouseUp` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse enter | `onMouseEnter` | `hovered` |
@@ -2595,13 +2637,19 @@ text imports no longer need a runtime flag.
 | Key up | `onKeyUp` | `key`, `keyChar`, `modifiers` |
 | Focus | `onFocus` | — |
 | Blur | `onBlur` | — |
-| Scroll | `onScroll` | `deltaX`, `deltaY`, `precise`, `touchPhase`, `modifiers` |
+| Wheel | `onWheel` | `x`, `y`, `deltaX`, `deltaY`, `deltaZ`, `deltaMode`, `precise`, `touchPhase`, `modifiers` |
+| Scroll | `onScroll` | — read `scrollLeft` / `scrollTop` from `currentTarget` |
 | Change | `onChange` | `value` — `<input>` and `<textarea>` only |
 | Submit | `onSubmit` | `value` — `<input>` and `<textarea>` only |
 | Toggle file | `onToggleFile` | `value` (file path) — `<diff>` only |
 | Show more | `onShowMore` | `value` (hidden line count) — `<diff>` only |
 | Line click | `onLineClick` | `value`, `oldLine`, `newLine` — `<diff>` only |
 | Link click | `onLinkClick` | `value` (URL) — `<markdown>` only |
+
+`onWheel` reports the input gesture and bubbles; `onScroll` reports that a
+scroll container's own position changed and does not bubble, as in the DOM.
+Wheel deltas use DOM signs and units: `deltaY` is positive scrolling down, and
+`deltaMode` is `0` for pixels or `1` for lines.
 
 Mouse event payloads expose pointer capture. Capture keeps move and up routed
 to the pressed element across redraws and outside its bounds until mouse up,
@@ -2654,6 +2702,12 @@ so it ends when the pointer leaves the element.
 `onClick` is the primary button too, like the DOM. Use **`onAuxClick`** for the
 others, and read `event.isRightClick`. `onMouseDown` and `onMouseUp` see every
 button through `event.button` (`0` left, `1` middle, `2` right).
+
+`onDoubleClick` follows the second `onClick` of a primary-button pair; a
+repeated keyboard activation is two clicks and never a double click.
+`onContextMenu` fires on the right-button **press**, so the order is
+`onMouseDown`, `onContextMenu`, `onAuxClick`, as on macOS and in the DOM. It is
+cancelable: call `event.preventDefault()` to suppress your own menu.
 
 ## Supported Styles
 
@@ -3247,9 +3301,12 @@ use a directory link, configure Vitest to dedupe `react`, `react-dom`,
 `react-reconciler`, and `scheduler`; that is only a fallback, not a supported
 way to consume the unpublished fork under Bun.
 
-`hasNativeTestRenderer` was removed. Use
-`isNativeTestRendererAvailable()` when a test must check whether the native
-renderer can initialize.
+The native package exports `TestGpuixRenderer` on every platform. Construction
+on Linux or a build without GPU test support throws a clear availability error;
+`hasTestGpuixRenderer()` reports whether construction is supported. In React
+tests, use `isNativeTestRendererAvailable()` when a suite must check whether the
+native renderer can initialize. The old `hasNativeTestRenderer` export remains
+removed.
 
 `createTestRoot()` returns synchronous queries bound to its renderer. Text
 queries match retained `<text>` content, test ID queries match both `testId`

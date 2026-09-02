@@ -91,7 +91,7 @@ function FramePacing() {
       <div
         testId="scroll-target"
         style={{ flexGrow: 1, overflow: "scroll", backgroundColor: "#262626", padding: 12 }}
-        onScroll={handleScroll}
+        onWheel={handleScroll}
       >
         <div style={{ height: 2400 }}>
           <text style={{ color: "#d4d4d4" }}>

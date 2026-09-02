@@ -71,8 +71,9 @@
     "typecheck": "tsc --noEmit && bun run typecheck:test",
     "typecheck:test": "tsc --project tsconfig.test.json",
     "dev": "tsc --watch",
-    "test": "bun run build && bun run typecheck:test && vitest run",
-    "test:watch": "bun run build && vitest",
+    "test": "bun run build && bun run typecheck:test && vitest run --exclude src/__tests__/canvas-wpt.test.tsx",
+    "canvas:wpt": "vitest run src/__tests__/canvas-wpt.test.tsx",
+    "test:watch": "bun run build && vitest --exclude src/__tests__/canvas-wpt.test.tsx",
     "prepack": "bun run build"
   },
   "dependencies": {

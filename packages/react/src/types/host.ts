@@ -886,9 +886,15 @@ export interface Props {
   /** Primary button only, like the DOM. Use `onAuxClick` for the others. */
   onClick?: (event: GpuixSyntheticEvent) => void
   onClickCapture?: (event: GpuixSyntheticEvent) => void
+  /** Primary-button double click, dispatched after the second `onClick`. */
+  onDoubleClick?: (event: GpuixSyntheticEvent) => void
+  onDoubleClickCapture?: (event: GpuixSyntheticEvent) => void
   /** Non-primary click, like the DOM `auxclick`. */
   onAuxClick?: (event: GpuixSyntheticEvent) => void
   onAuxClickCapture?: (event: GpuixSyntheticEvent) => void
+  /** Cancelable secondary-click context-menu request. */
+  onContextMenu?: (event: GpuixSyntheticEvent) => void
+  onContextMenuCapture?: (event: GpuixSyntheticEvent) => void
   onMouseDown?: (event: GpuixSyntheticEvent) => void
   onMouseDownCapture?: (event: GpuixSyntheticEvent) => void
   onMouseUp?: (event: GpuixSyntheticEvent) => void
@@ -915,6 +921,8 @@ export interface Props {
   // ── Scroll events ──────────────────────────────────────────────
   onScroll?: (event: GpuixSyntheticEvent) => void
   onScrollCapture?: (event: GpuixSyntheticEvent) => void
+  onWheel?: (event: GpuixSyntheticEvent) => void
+  onWheelCapture?: (event: GpuixSyntheticEvent) => void
 
   // ── Text editor events ─────────────────────────────────────────
   onChange?: (event: GpuixSyntheticEvent) => void
@@ -1159,6 +1167,10 @@ export interface NativeRenderer {
 
   // ── Focus API ──────────────────────────────────────────────────
   focusElement?(elementId: number): void
+  /** Move focus to the next GPUI tab stop without changing Tab's default policy. */
+  focusNext?(): void
+  /** Move focus to the previous GPUI tab stop without changing Tab's default policy. */
+  focusPrevious?(): void
   /** @internal Complete Tab's default focus traversal after synthetic dispatch. */
   resolveTabKeyDown?(defaultPrevented: boolean): void
   /** The focused host element id, analogous to `document.activeElement`, or null. */
@@ -1352,6 +1364,10 @@ export interface PublicInstance {
   id: number
   type: ElementType
   props: Props
+  /** Horizontal scroll position in pixels from the left edge. */
+  readonly scrollLeft: number
+  /** Vertical scroll position in pixels from the top edge. */
+  readonly scrollTop: number
   setPointerCapture(): void
   releasePointerCapture(): void
   parentId: number | null

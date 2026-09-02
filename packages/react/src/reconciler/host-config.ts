@@ -174,8 +174,12 @@ const EVENT_PROPS = [
   // Mouse events
   ["onClickCapture", "click", "capture"],
   ["onClick", "click", "bubble"],
+  ["onDoubleClickCapture", "doubleClick", "capture"],
+  ["onDoubleClick", "doubleClick", "bubble"],
   ["onAuxClickCapture", "auxClick", "capture"],
   ["onAuxClick", "auxClick", "bubble"],
+  ["onContextMenuCapture", "contextMenu", "capture"],
+  ["onContextMenu", "contextMenu", "bubble"],
   ["onMouseDownCapture", "mouseDown", "capture"],
   ["onMouseDown", "mouseDown", "bubble"],
   ["onMouseUpCapture", "mouseUp", "capture"],
@@ -198,6 +202,8 @@ const EVENT_PROPS = [
   // Scroll events
   ["onScrollCapture", "scroll", "capture"],
   ["onScroll", "scroll", "bubble"],
+  ["onWheelCapture", "wheel", "capture"],
+  ["onWheel", "wheel", "bubble"],
 ] as const
 
 const EVENT_PROP_NAMES = new Set<string>(EVENT_PROPS.map(([name]) => name))
@@ -827,6 +833,14 @@ export const hostConfig = {
       setPointerCapture: () => rootContainerInstance.native.setPointerCapture?.(id),
       releasePointerCapture: () =>
         rootContainerInstance.native.releasePointerCapture?.(id),
+      get scrollLeft() {
+        const getScrollOffset = rootContainerInstance.native.getScrollOffset
+        return -(getScrollOffset?.call(rootContainerInstance.native, id)?.[0] ?? 0)
+      },
+      get scrollTop() {
+        const getScrollOffset = rootContainerInstance.native.getScrollOffset
+        return -(getScrollOffset?.call(rootContainerInstance.native, id)?.[1] ?? 0)
+      },
       getBounds: () => {
         const getElementBounds = rootContainerInstance.native.getElementBounds
         if (!getElementBounds) {

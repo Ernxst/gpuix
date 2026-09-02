@@ -1268,6 +1268,8 @@ enum UiCommand {
         response: SyncSender<Option<crate::automation::ElementBounds>>,
     },
     FocusElement(u64),
+    FocusNext,
+    FocusPrevious,
     ResolveTabKeyDown {
         default_prevented: bool,
     },
@@ -1523,6 +1525,12 @@ async fn run_ui_commands(
                 view.focus_element_and_reveal(id, window, cx);
                 window.refresh();
             }),
+            UiCommand::FocusNext => window.update(cx, |view, window, cx| {
+                view.move_focus(FocusDirection::Next, window, cx)
+            }),
+            UiCommand::FocusPrevious => window.update(cx, |view, window, cx| {
+                view.move_focus(FocusDirection::Previous, window, cx)
+            }),
             UiCommand::ResolveTabKeyDown { default_prevented } => {
                 window.update(cx, move |view, window, cx| {
                     view.resolve_tab_key_down(default_prevented, window, cx);
@@ -1685,6 +1693,9 @@ async fn run_ui_commands(
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
         };
         if let Err(error) = result {
+            if cx.update(|cx| cx.windows().is_empty()) {
+                break;
+            }
             log::error!("Failed to handle GPUI UI command: {error:#}");
         }
     }
@@ -2303,6 +2314,38 @@ impl GpuixRenderer {
         Ok(())
     }
 
+    // GPUI declares PerMonitorV2 only in the host exe manifest (zed#8936).
+    // A napi .node is loaded by node.exe/bun.exe, so that manifest never applies.
+    // Call on gpuix-ui only, before WindowsPlatform::new. Never on the Node thread:
+    // the V2 fallback is SetThreadDpiAwarenessContext, which would change bun itself.
+    #[cfg(target_os = "windows")]
+    fn enable_per_monitor_dpi() {
+        use windows::Win32::UI::HiDpi::{
+            AreDpiAwarenessContextsEqual, GetThreadDpiAwarenessContext,
+            SetProcessDpiAwarenessContext, SetThreadDpiAwarenessContext,
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        };
+
+        // SAFETY: All functions are process/thread DPI configuration calls. This
+        // runs before this thread creates a window, as required by Win32.
+        unsafe {
+            let current = GetThreadDpiAwarenessContext();
+            if AreDpiAwarenessContextsEqual(current, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+                .as_bool()
+            {
+                return;
+            }
+            if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_ok() {
+                return;
+            }
+            if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE).is_ok() {
+                return;
+            }
+            // Process awareness is already locked (node/bun manifest). This thread has no HWND yet.
+            SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+    }
+
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     fn init_threaded(&self, options: Option<WindowOptions>) -> Result<()> {
         let options = options.unwrap_or_default();
@@ -2341,8 +2384,12 @@ impl GpuixRenderer {
         std::thread::Builder::new()
             .name("gpuix-ui".to_string())
             .spawn(move || {
+                #[cfg(target_os = "windows")]
+                Self::enable_per_monitor_dpi();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let app = gpui_platform::application().with_http_client(default_http_client());
+                    let app = gpui_platform::application()
+                        .with_http_client(default_http_client())
+                        .with_quit_mode(gpui::QuitMode::LastWindowClosed);
                     app.run(move |cx| {
                         cx.set_reduce_motion(reduced_motion);
                         init_key_bindings(cx);
@@ -2794,7 +2841,11 @@ impl GpuixRenderer {
                     "Renderer not initialized. Call init() first.",
                 ));
             }
-            RendererLifecycle::Terminated => return Ok(false),
+            RendererLifecycle::Terminated => {
+                #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+                self.ui_commands.lock().unwrap().take();
+                return Ok(false);
+            }
             RendererLifecycle::Running => {}
         }
 
@@ -2835,7 +2886,11 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let _ = (dispatch_frame_request, after_precheck);
-            return Ok(true);
+            let running = *self.lifecycle.lock().unwrap() == RendererLifecycle::Running;
+            if !running {
+                self.ui_commands.lock().unwrap().take();
+            }
+            return Ok(running);
         }
 
         #[cfg(not(any(
@@ -2939,10 +2994,19 @@ impl GpuixRenderer {
         renderer_capabilities(self.active_frame_clock_kind())
     }
 
-    /// Whether JavaScript must drive the native event loop with tick().
+    /// Whether JavaScript must call tick() until it returns false.
+    ///
+    /// macOS: tick() pumps AppKit. Windows/Linux: tick() reports whether the
+    /// UI thread is still inside `Platform::run`. Both return false after the
+    /// last window closes so the JS frame loop can finish termination.
     #[napi]
     pub fn requires_tick(&self) -> bool {
-        cfg!(target_os = "macos")
+        cfg!(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        ))
     }
 
     /// Registers a coalesced display-link frame request callback when supported.
@@ -3275,6 +3339,44 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusElement(id));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Move focus to the next GPUIX tab stop without dispatching a key event.
+    #[napi]
+    pub fn focus_next(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|view, window, cx| view.move_focus(FocusDirection::Next, window, cx));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::FocusNext);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Move focus to the previous GPUIX tab stop without dispatching a key event.
+    #[napi]
+    pub fn focus_previous(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|view, window, cx| {
+            view.move_focus(FocusDirection::Previous, window, cx)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::FocusPrevious);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -4741,6 +4843,16 @@ impl WebGpuixRenderer {
         })
     }
 
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusNext)]
+    pub fn focus_next(&self) -> Result<(), wasm_bindgen::JsValue> {
+        update_web_view(|view, window, cx| view.move_focus(FocusDirection::Next, window, cx))
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusPrevious)]
+    pub fn focus_previous(&self) -> Result<(), wasm_bindgen::JsValue> {
+        update_web_view(|view, window, cx| view.move_focus(FocusDirection::Previous, window, cx))
+    }
+
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = resolveTabKeyDown)]
     pub fn resolve_tab_key_down(
         &self,
@@ -5163,6 +5275,10 @@ pub(crate) struct GpuixView {
     /// Created lazily for elements with overflow: "scroll" (or per-axis scroll).
     /// Handles persist across renders so GPUI maintains scroll offset state.
     pub(crate) scroll_handles: HashMap<u64, gpui::ScrollHandle>,
+    /// Last painted offsets for scrollable elements with `onScroll`.
+    /// Paint is the first point after GPUI has clamped and applied a wheel or
+    /// programmatic position change, so comparing here reports position changes.
+    scroll_event_offsets: Arc<Mutex<HashMap<u64, gpui::Point<gpui::Pixels>>>>,
     /// Minimal-scroll anchors for focusable elements and nested scrollers.
     /// Each anchor targets the nearest ordinary overflow ancestor; virtual
     /// lists use their item-aware `ListState` path instead.
@@ -5403,6 +5519,7 @@ impl GpuixView {
             focus_subscriptions: HashMap::new(),
             custom_registry: CustomElementRegistry::with_defaults(),
             scroll_handles: HashMap::new(),
+            scroll_event_offsets: Arc::new(Mutex::new(HashMap::new())),
             focus_scroll_anchors: HashMap::new(),
             motion_states: HashMap::new(),
             interactive_style_states: HashMap::new(),
@@ -5626,6 +5743,7 @@ impl GpuixView {
             focus_handles: &self.focus_handles,
             focus_scroll_anchors: &self.focus_scroll_anchors,
             scroll_handles: &mut self.scroll_handles,
+            scroll_event_offsets: &self.scroll_event_offsets,
             custom_registry: &mut self.custom_registry,
             virtual_lists: &mut self.virtual_lists,
             motion_states: &mut self.motion_states,
@@ -5754,6 +5872,7 @@ pub(crate) struct BuildCtx<'a> {
     pub focus_handles: &'a HashMap<u64, gpui::FocusHandle>,
     focus_scroll_anchors: &'a HashMap<u64, FocusScrollAnchor>,
     pub scroll_handles: &'a mut HashMap<u64, gpui::ScrollHandle>,
+    scroll_event_offsets: &'a Arc<Mutex<HashMap<u64, gpui::Point<gpui::Pixels>>>>,
     pub custom_registry: &'a mut CustomElementRegistry,
     virtual_lists: &'a mut HashMap<u64, VirtualListEntry>,
     pub motion_states: &'a mut HashMap<u64, crate::motion::MotionState>,
@@ -6371,7 +6490,7 @@ impl GpuixView {
         self.dispatch_next_tab_key_down(window, cx);
     }
 
-    fn move_focus(
+    pub(crate) fn move_focus(
         &mut self,
         direction: FocusDirection,
         window: &mut gpui::Window,
@@ -6952,6 +7071,10 @@ impl gpui::Render for GpuixView {
         // from scroll to non-scroll) is handled inside build_host_container().
         self.scroll_handles
             .retain(|id, _| tree.elements.contains_key(id));
+        self.scroll_event_offsets
+            .lock()
+            .unwrap()
+            .retain(|id, _| tree.elements.contains_key(id));
         self.virtual_lists
             .retain(|id, _| tree.elements.contains_key(id));
         self.motion_states
@@ -6993,6 +7116,7 @@ impl gpui::Render for GpuixView {
                     focus_handles: &self.focus_handles,
                     focus_scroll_anchors: &self.focus_scroll_anchors,
                     scroll_handles: &mut self.scroll_handles,
+                    scroll_event_offsets: &self.scroll_event_offsets,
                     custom_registry: &mut self.custom_registry,
                     virtual_lists: &mut self.virtual_lists,
                     motion_states: &mut self.motion_states,
@@ -7707,7 +7831,7 @@ enum ScrollAncestor {
 }
 
 #[derive(Clone, Copy)]
-enum FocusDirection {
+pub(crate) enum FocusDirection {
     Next,
     Previous,
 }
@@ -7865,8 +7989,9 @@ fn apply_click_handler<E>(
 where
     E: gpui::StatefulInteractiveElement,
 {
-    if !tracks_pointer_event(element, ctx.tree, "click")
-        || action_disabled_in_ancestry(ctx.tree, element.id)
+    let tracks_click = tracks_pointer_event(element, ctx.tree, "click");
+    let tracks_double_click = tracks_pointer_event(element, ctx.tree, "doubleClick");
+    if (!tracks_click && !tracks_double_click) || action_disabled_in_ancestry(ctx.tree, element.id)
     {
         return el;
     }
@@ -7946,6 +8071,34 @@ fn is_hover_target_descendant(tree: &RetainedTree, descendant: u64, ancestor: u6
     false
 }
 
+fn scroll_position_tracker(
+    id: u64,
+    handle: gpui::ScrollHandle,
+    offsets: Arc<Mutex<HashMap<u64, gpui::Point<gpui::Pixels>>>>,
+    callback: Option<EventCallback>,
+) -> gpui::AnyElement {
+    use gpui::prelude::*;
+
+    gpui::canvas(
+        |bounds, _, _| bounds,
+        move |_, _, _, _| {
+            let offset = handle.offset();
+            let changed = {
+                let mut offsets = offsets.lock().unwrap();
+                offsets
+                    .insert(id, offset)
+                    .is_some_and(|previous| previous != offset)
+            };
+            if changed {
+                emit_event_full(&callback, id, "scroll", |_| {});
+            }
+        },
+    )
+    .absolute()
+    .size_full()
+    .into_any_element()
+}
+
 /// The one builder for `<div>` and `<text>`.
 ///
 /// Both get the same stable GPUI id, so gpui keeps their interactive element
@@ -8006,6 +8159,7 @@ pub(crate) fn build_host_container(
     // wide child fills the parent instead of overflowing. Zed's code-block path:
     // flex + min_w_0 on the scroller, flex_none on the child.
     let mut overflow_x_only = false;
+    let mut scroll_tracker = None;
     if let Some(style) = style {
         // Resolve each axis: axis-specific overrides shorthand.
         let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
@@ -8038,15 +8192,34 @@ pub(crate) fn build_host_container(
             let handle = ctx
                 .scroll_handles
                 .entry(element.id)
-                .or_insert_with(gpui::ScrollHandle::new);
-            el = el.track_scroll(handle);
+                .or_insert_with(gpui::ScrollHandle::new)
+                .clone();
+            el = el.track_scroll(&handle);
+
+            if element.events.contains("scroll") {
+                ctx.scroll_event_offsets
+                    .lock()
+                    .unwrap()
+                    .entry(element.id)
+                    .or_insert_with(|| handle.offset());
+                scroll_tracker = Some(scroll_position_tracker(
+                    element.id,
+                    handle,
+                    ctx.scroll_event_offsets.clone(),
+                    ctx.event_callback.clone(),
+                ));
+            } else {
+                ctx.scroll_event_offsets.lock().unwrap().remove(&element.id);
+            }
         } else {
             // Element is no longer scrollable — remove stale handle.
             ctx.scroll_handles.remove(&element.id);
+            ctx.scroll_event_offsets.lock().unwrap().remove(&element.id);
         }
     } else {
         // No style at all — remove stale handle if it existed.
         ctx.scroll_handles.remove(&element.id);
+        ctx.scroll_event_offsets.lock().unwrap().remove(&element.id);
     }
 
     // If a FocusHandle was pre-created for this element (by sync_focus_handles),
@@ -8062,6 +8235,9 @@ pub(crate) fn build_host_container(
         selection_start_flag(style),
         paint_bounds_listener,
     ));
+    if let Some(scroll_tracker) = scroll_tracker {
+        el = el.child(scroll_tracker);
+    }
 
     let native_disabled =
         crate::accessibility::is_native_disabled(element) || ctx.inherited.accessibility_hidden;
@@ -8143,29 +8319,14 @@ pub(crate) fn build_host_container(
                 });
             }
 
-            // ── Scroll wheel ─────────────────────────────────────
-            "scroll" => {
+            // ── Wheel ────────────────────────────────────────────
+            "wheel" => {
                 el = el.on_scroll_wheel(move |scroll_event, _window, _cx| {
-                    emit_event_full(&callback, id, "scroll", |p| {
+                    emit_event_full(&callback, id, "wheel", |p| {
                         let (x, y) = point_to_xy(scroll_event.position);
                         p.x = Some(x);
                         p.y = Some(y);
-                        p.modifiers = Some(scroll_event.modifiers.into());
-                        p.precise = Some(scroll_event.delta.precise());
-
-                        // Convert ScrollDelta to pixel values.
-                        // For Lines delta, we use a default line height of 20px.
-                        let line_height = gpui::px(20.0);
-                        let pixel_delta = scroll_event.delta.pixel_delta(line_height);
-                        p.delta_x = Some(f64::from(f32::from(pixel_delta.x)));
-                        p.delta_y = Some(f64::from(f32::from(pixel_delta.y)));
-
-                        p.touch_phase = Some(match scroll_event.touch_phase {
-                            gpui::TouchPhase::Started => "started".to_string(),
-                            gpui::TouchPhase::Moved => "moved".to_string(),
-                            gpui::TouchPhase::Ended => "ended".to_string(),
-                            gpui::TouchPhase::Cancelled => "cancelled".to_string(),
-                        });
+                        apply_wheel_delta(p, scroll_event);
                     });
                 });
             }
@@ -8223,17 +8384,30 @@ pub(crate) fn build_host_container(
                 p.modifiers = Some(click_event.modifiers().into());
                 p.click_count = Some(click_event.click_count() as u32);
                 p.is_right_click = Some(click_event.is_right_click());
+                p.button = Some(match click_event {
+                    gpui::ClickEvent::Mouse(event) => mouse_button_to_u32(event.down.button),
+                    gpui::ClickEvent::Keyboard(_) | gpui::ClickEvent::Touch(_) => 0,
+                });
+                p.input_source = Some(
+                    match click_event {
+                        gpui::ClickEvent::Mouse(_) => "mouse",
+                        gpui::ClickEvent::Keyboard(_) => "keyboard",
+                        gpui::ClickEvent::Touch(_) => "touch",
+                    }
+                    .to_string(),
+                );
             });
             cx.stop_propagation();
         });
     }
 
-    if tracks_pointer_event(element, ctx.tree, "mouseDown") {
-        for &button in &[
-            gpui::MouseButton::Left,
-            gpui::MouseButton::Middle,
-            gpui::MouseButton::Right,
-        ] {
+    // `contextMenu` rides the mouse-down listener: macOS opens a context menu
+    // on the press, so the DOM order is mousedown, contextmenu, mouseup,
+    // auxclick. React synthesizes it from the right-button payload.
+    let tracks_mouse_down = tracks_pointer_event(element, ctx.tree, "mouseDown");
+    let tracks_context_menu = tracks_pointer_event(element, ctx.tree, "contextMenu");
+    if tracks_mouse_down || tracks_context_menu {
+        for &button in mouse_down_button_set(tracks_mouse_down) {
             let callback = ctx.event_callback.clone();
             let id = element.id;
             el = el.on_mouse_down(button, move |mouse_event, _window, cx| {
@@ -9219,6 +9393,43 @@ pub(crate) fn point_to_xy(p: gpui::Point<gpui::Pixels>) -> (f64, f64) {
     (f64::from(f32::from(p.x)), f64::from(f32::from(p.y)))
 }
 
+/// Fill the DOM `WheelEvent` fields of a payload from a GPUI wheel event.
+///
+/// A `ScrollDelta` is the negation of the DOM delta: it says how far the
+/// content moves, while `WheelEvent` says how far the view scrolls. GPUI's own
+/// browser platform negates on the way in
+/// (`gpui_web::events::register_wheel`), so this negates on the way out and
+/// `deltaY > 0` means "scrolled down" on every platform.
+pub(crate) fn apply_wheel_delta(p: &mut EventPayload, event: &gpui::ScrollWheelEvent) {
+    p.modifiers = Some(event.modifiers.into());
+    p.precise = Some(event.delta.precise());
+    p.delta_z = Some(0.0);
+    // Subtract rather than negate: `-0.0` would survive into JSON, and a
+    // motionless axis reports 0 in the DOM.
+    let dom_delta = |value: f32| f64::from(0.0f32 - value);
+    match event.delta {
+        gpui::ScrollDelta::Pixels(delta) => {
+            p.delta_x = Some(dom_delta(f32::from(delta.x)));
+            p.delta_y = Some(dom_delta(f32::from(delta.y)));
+            p.delta_mode = Some(0);
+        }
+        gpui::ScrollDelta::Lines(delta) => {
+            p.delta_x = Some(dom_delta(delta.x));
+            p.delta_y = Some(dom_delta(delta.y));
+            p.delta_mode = Some(1);
+        }
+    }
+    p.touch_phase = Some(
+        match event.touch_phase {
+            gpui::TouchPhase::Started => "started",
+            gpui::TouchPhase::Moved => "moved",
+            gpui::TouchPhase::Ended => "ended",
+            gpui::TouchPhase::Cancelled => "cancelled",
+        }
+        .to_string(),
+    );
+}
+
 /// Convert GPUI MouseButton to our u32 encoding: 0=left, 1=middle, 2=right.
 pub(crate) fn mouse_button_to_u32(button: gpui::MouseButton) -> u32 {
     match button {
@@ -9226,6 +9437,55 @@ pub(crate) fn mouse_button_to_u32(button: gpui::MouseButton) -> u32 {
         gpui::MouseButton::Middle => 1,
         gpui::MouseButton::Right => 2,
         gpui::MouseButton::Navigate(_) => 3,
+    }
+}
+
+/// The buttons a subtree's mouse-down listener has to cover.
+///
+/// `contextMenu` rides the mouse-down listener, and the tracking walk reaches
+/// ancestors, so a subtree that tracks `contextMenu` without `mouseDown` would
+/// otherwise put an all-button listener on every descendant: an IPC round trip
+/// per left press, and a `stop_propagation` taken on behalf of a listener that
+/// only ever wanted the right button. Such a subtree takes the right button
+/// alone.
+pub(crate) fn mouse_down_button_set(tracks_mouse_down: bool) -> &'static [gpui::MouseButton] {
+    if tracks_mouse_down {
+        &[
+            gpui::MouseButton::Left,
+            gpui::MouseButton::Middle,
+            gpui::MouseButton::Right,
+        ]
+    } else {
+        &[gpui::MouseButton::Right]
+    }
+}
+
+#[cfg(test)]
+mod mouse_down_button_set_tests {
+    use super::*;
+
+    #[test]
+    fn context_menu_without_mouse_down_takes_the_right_button_alone() {
+        assert_eq!(
+            mouse_down_button_set(false),
+            &[gpui::MouseButton::Right],
+            "a subtree that tracks only `contextMenu` must not listen for the \
+             left or middle button: each one costs an IPC round trip and a \
+             `stop_propagation` no React listener asked for"
+        );
+    }
+
+    #[test]
+    fn tracked_mouse_down_takes_every_button() {
+        assert_eq!(
+            mouse_down_button_set(true),
+            &[
+                gpui::MouseButton::Left,
+                gpui::MouseButton::Middle,
+                gpui::MouseButton::Right,
+            ],
+            "`onMouseDown` sees every button through `event.button`"
+        );
     }
 }
 
@@ -10084,11 +10344,11 @@ pub(crate) fn renderer_capabilities(frame_clock_kind: &str) -> RendererCapabilit
     let (platform, requires_tick, screenshot) = if cfg!(target_os = "macos") {
         ("macos", true, cfg!(feature = "test-support"))
     } else if cfg!(target_os = "windows") {
-        ("windows", false, cfg!(feature = "test-support"))
+        ("windows", true, cfg!(feature = "test-support"))
     } else if cfg!(target_os = "linux") {
-        ("linux", false, false)
+        ("linux", true, false)
     } else if cfg!(target_os = "freebsd") {
-        ("freebsd", false, false)
+        ("freebsd", true, false)
     } else {
         ("unknown", false, false)
     };

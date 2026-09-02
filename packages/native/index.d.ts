@@ -90,7 +90,13 @@ export declare class GpuixRenderer {
    * backwards compatibility; new callers should branch on this object.
    */
   capabilities(): RendererCapabilities
-  /** Whether JavaScript must drive the native event loop with tick(). */
+  /**
+   * Whether JavaScript must call tick() until it returns false.
+   *
+   * macOS: tick() pumps AppKit. Windows/Linux: tick() reports whether the
+   * UI thread is still inside `Platform::run`. Both return false after the
+   * last window closes so the JS frame loop can finish termination.
+   */
   requiresTick(): boolean
   /**
    * Registers a coalesced display-link frame request callback when supported.
@@ -120,6 +126,10 @@ export declare class GpuixRenderer {
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
+  /** Move focus to the next GPUIX tab stop without dispatching a key event. */
+  focusNext(): void
+  /** Move focus to the previous GPUIX tab stop without dispatching a key event. */
+  focusPrevious(): void
   /**
    * Complete the DOM default for a Tab keydown after React capture and
    * bubble handlers have had a chance to call preventDefault().
@@ -345,8 +355,10 @@ export declare class TestGpuixRenderer {
    * which triggers the same event handlers as production.
    * IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
    * `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
+   * `click_count` models a repeat within one click sequence: a platform
+   * sends 2 for the second click of a double click (default 1).
    */
-  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null, clickCount?: number | undefined | null): void
   /**
    * Simulate key strokes through GPUI's input pipeline.
    * Format: space-separated keys, e.g. "a", "enter", "cmd-shift-p".
@@ -380,6 +392,8 @@ export declare class TestGpuixRenderer {
    * Call flush() before this so the element tree and focus handles exist.
    */
   focusElement(id: number): void
+  focusNext(): void
+  focusPrevious(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   setPointerCapture(id: number): void
   releasePointerCapture(id: number): void
@@ -616,11 +630,11 @@ export interface EventPayload {
   button?: number
   /**
    * Number of consecutive clicks (1=single, 2=double, 3=triple).
-   * Populated for: mouseDown, mouseUp, click.
+   * Populated for: mouseDown, mouseUp, click, auxClick.
    */
   clickCount?: number
   /**
-   * Whether this is a right-click (convenience for click events).
+   * Whether this is a right-click (convenience for click and context-menu events).
    * true when button==2 or ClickEvent::is_right_click().
    */
   isRightClick?: boolean
@@ -652,23 +666,36 @@ export interface EventPayload {
    */
   isHeld?: boolean
   /**
-   * Scroll delta on the X axis (pixels or lines, see `precise`).
-   * Populated for: scroll.
+   * Wheel delta on the X axis, in `deltaMode` units.
+   * DOM signs: positive scrolls the view right, as in `WheelEvent`.
+   * Populated for: wheel.
    */
   deltaX?: number
   /**
-   * Scroll delta on the Y axis (pixels or lines, see `precise`).
-   * Populated for: scroll.
+   * Wheel delta on the Y axis, in `deltaMode` units.
+   * DOM signs: positive scrolls the view down, as in `WheelEvent`.
+   * Populated for: wheel.
    */
   deltaY?: number
   /**
+   * Wheel delta on the Z axis, in `deltaMode` units.
+   * GPUI currently supplies two-dimensional wheel input, so this is 0.
+   * Populated for: wheel.
+   */
+  deltaZ?: number
+  /**
+   * DOM WheelEvent deltaMode: 0=pixels, 1=lines, 2=pages.
+   * Populated for: wheel.
+   */
+  deltaMode?: number
+  /**
    * true = pixel-precise (trackpad), false = line-based (mouse wheel).
-   * Populated for: scroll.
+   * Populated for: wheel.
    */
   precise?: boolean
   /**
-   * Touch phase for scroll: "started", "moved", "ended".
-   * Populated for: scroll (trackpad gestures).
+   * Touch phase for wheel: "started", "moved", "ended".
+   * Populated for: wheel (trackpad gestures).
    */
   touchPhase?: string
   /**
@@ -727,6 +754,9 @@ export interface GpuixStyleDiagnostic {
   property: string
   value: string
 }
+
+/** True only when this binary compiled the real GPU test renderer. */
+export declare function hasTestGpuixRenderer(): boolean
 
 /**
  * One highlight wash painted in the last frame, with the boxes it drew.

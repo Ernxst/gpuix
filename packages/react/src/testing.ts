@@ -148,6 +148,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   hasMainMenu(): boolean
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number): void
+  focusNext(): void
+  focusPrevious(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   setPointerCapture(elementId: number): void
   releasePointerCapture(elementId: number): void
@@ -156,7 +158,13 @@ interface NativeTestRendererApi extends NativeRenderer {
   activateWindow(): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
-  simulateClick(x: number, y: number, button?: number, modifiers?: string): void
+  simulateClick(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string,
+    clickCount?: number
+  ): void
   simulateScrollWheel(
     x: number,
     y: number,
@@ -257,13 +265,24 @@ function initializeNativeTestRenderer(): NativeTestRendererConstructor | null {
   try {
     const native = requireNative("@gpuix/native") as {
       TestGpuixRenderer?: NativeTestRendererConstructor
+      hasTestGpuixRenderer?: () => boolean
     }
-    if (native.TestGpuixRenderer) {
+    const hasRealRenderer = native.hasTestGpuixRenderer?.()
+    if (hasRealRenderer !== false && native.TestGpuixRenderer) {
       NativeTestRenderer = native.TestGpuixRenderer
       // Construct once here so availability includes native initialization, not
       // merely whether the binding exports its constructor. The first
       // TestRenderer reuses this instance.
       probedNativeTestRenderer = new native.TestGpuixRenderer()
+    } else if (native.TestGpuixRenderer) {
+      // hasTestGpuixRenderer() === false. Construct the stub anyway and let it
+      // throw into the catch below, so the reason comes from the native build
+      // itself. A copy of the message here could not tell "Linux has no
+      // test-support" apart from "this build turned test-support off".
+      const stub = new native.TestGpuixRenderer()
+      throw new Error(
+        `hasTestGpuixRenderer() is false but TestGpuixRenderer constructed (${typeof stub}).`
+      )
     } else {
       nativeTestRendererLoadError = new Error(
         "@gpuix/native does not export TestGpuixRenderer. Build with test-support to run tests."
@@ -725,15 +744,18 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** End-to-end: simulate a click through GPUI hit testing →
-   *  dispatch resulting events to React. */
+   *  dispatch resulting events to React.
+   *  `clickCount` is the platform's repeat count: pass 2 for the second
+   *  click of a double click. */
   nativeSimulateClick(
     x: number,
     y: number,
     button?: number,
-    modifiers?: string
+    modifiers?: string,
+    clickCount?: number
   ): void {
     this.native.flush()
-    this.native.simulateClick(x, y, button, modifiers)
+    this.native.simulateClick(x, y, button, modifiers, clickCount)
     // A click may move focus; draw before draining its focus event.
     this.native.flush()
     this.dispatchNativeEvents()
@@ -768,7 +790,12 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** End-to-end: simulate scroll wheel through GPUI →
-   *  dispatch resulting events to React. */
+   *  dispatch resulting events to React.
+   *
+   *  `deltaX` and `deltaY` are **platform deltas**, not DOM deltas: they enter
+   *  GPUI where the trackpad driver does, so they say how far the content
+   *  moves. Scrolling down is negative here. The `onWheel` payload the handler
+   *  receives is the DOM negation, where scrolling down is positive. */
   nativeSimulateScrollWheel(
     x: number,
     y: number,
@@ -789,7 +816,10 @@ export class TestRenderer implements NativeRenderer {
 
   /** Dispatch a wheel without the surrounding flushes, for perf sampling.
    *  Call `flush()` yourself, or the sample is the React update only and
-   *  none of the GPUI build, layout and paint that follows. */
+   *  none of the GPUI build, layout and paint that follows.
+   *
+   *  Takes platform deltas, like `nativeSimulateScrollWheel`: scrolling down is
+   *  negative on the way in and positive in the `onWheel` payload. */
   dispatchScrollWheel(
     x: number,
     y: number,
@@ -1044,6 +1074,20 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.native.focusElement(elementId)
     // Programmatic focus is reported when GPUI commits the next frame.
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
+  focusNext(): void {
+    this.native.flush()
+    this.native.focusNext()
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
+  focusPrevious(): void {
+    this.native.flush()
+    this.native.focusPrevious()
     this.native.flush()
     this.dispatchNativeEvents()
   }
