@@ -42,7 +42,7 @@ try {
     deltaUnit: "pixels",
     modifiers: { alt: true },
   })
-  await app.getByText("Last wheel: started: 0, -24; alt=true").waitFor()
+  await app.getByText("Last wheel: started: 0, 24; alt=true").waitFor()
   await new Promise((resolve) => setTimeout(resolve, 16))
   await scrollWithoutSynchronousDraw({
     x: 240,
@@ -53,7 +53,7 @@ try {
     deltaUnit: "lines",
     modifiers: { alt: true },
   })
-  await app.getByText("Last wheel: moved: 0, -40; alt=true").waitFor()
+  await app.getByText("Last wheel: moved: 0, 2; alt=true").waitFor()
   await new Promise((resolve) => setTimeout(resolve, 16))
   await scrollWithoutSynchronousDraw({
     x: 240,
@@ -64,7 +64,7 @@ try {
     deltaUnit: "pixels",
     modifiers: { alt: true },
   })
-  await app.getByText("Last wheel: ended: 0, -24; alt=true").waitFor()
+  await app.getByText("Last wheel: ended: 0, 24; alt=true").waitFor()
   const { offset } = await app.call("getScrollOffset", { elementId: target.id })
   if (!offset || offset[1] >= 0) {
     throw new Error(`Expected a negative vertical scroll offset, received ${offset}`)

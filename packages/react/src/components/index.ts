@@ -22,6 +22,8 @@ export interface MotionDivProps extends MotionProps {
   children?: ReactNode
   style?: StyleDesc
   onClick?: Props["onClick"]
+  onDoubleClick?: Props["onDoubleClick"]
+  onContextMenu?: Props["onContextMenu"]
   onMouseDown?: Props["onMouseDown"]
   onMouseUp?: Props["onMouseUp"]
   onMouseEnter?: Props["onMouseEnter"]
@@ -33,6 +35,7 @@ export interface MotionDivProps extends MotionProps {
   onFocus?: Props["onFocus"]
   onBlur?: Props["onBlur"]
   onScroll?: Props["onScroll"]
+  onWheel?: Props["onWheel"]
   autoFocus?: boolean
 }
 

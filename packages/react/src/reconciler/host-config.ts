@@ -174,8 +174,12 @@ const EVENT_PROPS = [
   // Mouse events
   ["onClickCapture", "click", "capture"],
   ["onClick", "click", "bubble"],
+  ["onDoubleClickCapture", "doubleClick", "capture"],
+  ["onDoubleClick", "doubleClick", "bubble"],
   ["onAuxClickCapture", "auxClick", "capture"],
   ["onAuxClick", "auxClick", "bubble"],
+  ["onContextMenuCapture", "contextMenu", "capture"],
+  ["onContextMenu", "contextMenu", "bubble"],
   ["onMouseDownCapture", "mouseDown", "capture"],
   ["onMouseDown", "mouseDown", "bubble"],
   ["onMouseUpCapture", "mouseUp", "capture"],
@@ -198,6 +202,8 @@ const EVENT_PROPS = [
   // Scroll events
   ["onScrollCapture", "scroll", "capture"],
   ["onScroll", "scroll", "bubble"],
+  ["onWheelCapture", "wheel", "capture"],
+  ["onWheel", "wheel", "bubble"],
 ] as const
 
 const EVENT_PROP_NAMES = new Set<string>(EVENT_PROPS.map(([name]) => name))
@@ -333,6 +339,7 @@ const warnedUnsupportedStyleTransitions = new WeakSet<Instance>()
 const warnedInvalidStyleProps = new WeakSet<Instance>()
 const warnedUnsupportedAccessibilityRoleProps = new WeakSet<Instance>()
 const warnedUnsupportedAriaProps = new WeakSet<Instance>()
+const warnedVisuallyHiddenProps = new WeakSet<Instance>()
 
 class UnsupportedStyleTransitionError extends Error {
   override name = "UnsupportedStyleTransitionError"
@@ -344,6 +351,14 @@ class InvalidStylePropError extends Error {
 
 class UnsupportedAccessibilityRolePropError extends Error {
   override name = "UnsupportedAccessibilityRolePropError"
+}
+
+class InvalidVisuallyHiddenPropError extends Error {
+  override name = "InvalidVisuallyHiddenPropError"
+}
+
+class ContradictoryAccessibilityVisibilityError extends Error {
+  override name = "ContradictoryAccessibilityVisibilityError"
 }
 
 function elementSubject(instance: Instance, props: Props): string {
@@ -450,6 +465,43 @@ function diagnoseUnsupportedAriaProp(
   console.warn(message)
 }
 
+function booleanishTrue(value: unknown): boolean {
+  return value === true || (typeof value === "string" && value.toLowerCase() === "true")
+}
+
+function diagnoseVisuallyHiddenProp(
+  instance: Instance,
+  container: Container,
+  props: Props
+): void {
+  const value = (props as Props & { visuallyHidden?: unknown }).visuallyHidden
+  let message: string | undefined
+  let ErrorType: typeof InvalidVisuallyHiddenPropError | typeof ContradictoryAccessibilityVisibilityError =
+    InvalidVisuallyHiddenPropError
+
+  if (value !== undefined && value !== true) {
+    message =
+      `[gpuix] ${elementSubject(instance, props)} received an invalid visuallyHidden prop. ` +
+      "visuallyHidden accepts true only; omit the prop when the element should paint."
+  } else if (value === true) {
+    const ariaHidden = Object.prototype.hasOwnProperty.call(props, "ariaHidden")
+      ? props.ariaHidden
+      : props["aria-hidden"]
+    if (booleanishTrue(ariaHidden)) {
+      ErrorType = ContradictoryAccessibilityVisibilityError
+      message =
+        `[gpuix] ${elementSubject(instance, props)} cannot combine visuallyHidden with ariaHidden=true. ` +
+        "ariaHidden removes the accessibility node that visuallyHidden exists to preserve; remove one property."
+    }
+  }
+
+  if (message === undefined) return
+  if (container.strictStyles) throw new ErrorType(message)
+  if (warnedVisuallyHiddenProps.has(instance)) return
+  warnedVisuallyHiddenProps.add(instance)
+  console.warn(message)
+}
+
 function supportsStyleTransitions(type: ElementType): boolean {
   return STYLE_TRANSITION_TYPES.has(type) || DIV_ALIASES.has(type)
 }
@@ -519,6 +571,7 @@ const UNIVERSAL_PROPS = new Set([
   "ariaColSpan",
   "ariaDisabled",
   "ariaHidden",
+  "visuallyHidden",
   "disabled",
   // `highlight` is scoped by where it sits in the tree, so it has to reach a
   // plain `div`. Without it here, custom props are dropped for built-ins and
@@ -606,7 +659,38 @@ function nativeRole(type: string, props: Props): Props["role"] | undefined {
   if (props.role !== undefined) return props.role
   if (type === "button") return "button"
   if (type === "a") return "link"
+  if (type === "img") return nativeImageRole(props)
   return undefined
+}
+
+/** An explicitly authored accessible name, from either prop spelling. */
+function authoredAriaLabel(props: Props): string | undefined {
+  const label = props.ariaLabel ?? props["aria-label"]
+  return typeof label === "string" ? label : undefined
+}
+
+/**
+ * HTML-AAM maps `<img>` to the `img` role, and to `presentation` when an empty
+ * `alt` marks the image as decorative. ARIA's presentational conflict
+ * resolution keeps the image role when the author named the image or put it in
+ * the tab order.
+ */
+function nativeImageRole(props: Props): "img" | "presentation" {
+  const { alt } = props as Props & { alt?: unknown }
+  const decorative =
+    alt === "" && authoredAriaLabel(props) === undefined && props.tabIndex === undefined
+  return decorative ? "presentation" : "img"
+}
+
+/**
+ * `alt` is the image's name source in HTML, and any authored ARIA name wins
+ * over it exactly as it does in the DOM's name computation.
+ */
+function nativeImageLabel(type: string, props: Props): string | undefined {
+  if (type !== "img") return undefined
+  const { alt } = props as Props & { alt?: unknown }
+  if (typeof alt !== "string" || alt === "") return undefined
+  return authoredAriaLabel(props) === undefined ? alt : undefined
 }
 
 function customPropEntries(type: string, props: Props): Array<[string, CustomPropInput]> {
@@ -624,6 +708,8 @@ function customPropEntries(type: string, props: Props): Array<[string, CustomPro
   if (activationKind) entries.push(["activationKind", activationKind])
   const role = nativeRole(type, props)
   if (role !== undefined) entries.push(["role", role])
+  const imageLabel = nativeImageLabel(type, props)
+  if (imageLabel !== undefined) entries.push(["ariaLabel", imageLabel])
 
   const virtualListProps = props as Props & VirtualListProps
   if (type !== "virtual-list" || virtualListProps.estimatedItemHeight !== undefined) {
@@ -757,6 +843,14 @@ export const hostConfig = {
       setPointerCapture: () => rootContainerInstance.native.setPointerCapture?.(id),
       releasePointerCapture: () =>
         rootContainerInstance.native.releasePointerCapture?.(id),
+      get scrollLeft() {
+        const getScrollOffset = rootContainerInstance.native.getScrollOffset
+        return -(getScrollOffset?.call(rootContainerInstance.native, id)?.[0] ?? 0)
+      },
+      get scrollTop() {
+        const getScrollOffset = rootContainerInstance.native.getScrollOffset
+        return -(getScrollOffset?.call(rootContainerInstance.native, id)?.[1] ?? 0)
+      },
       getBounds: () => {
         const getElementBounds = rootContainerInstance.native.getElementBounds
         if (!getElementBounds) {
@@ -817,6 +911,7 @@ export const hostConfig = {
     diagnoseUnsupportedStyleTransition(instance, rootContainerInstance, props)
     diagnoseUnsupportedAccessibilityRoleProp(instance, rootContainerInstance, props)
     diagnoseUnsupportedAriaProp(instance, rootContainerInstance, props)
+    diagnoseVisuallyHiddenProp(instance, rootContainerInstance, props)
     return instance
   },
 
@@ -963,6 +1058,7 @@ export const hostConfig = {
     diagnoseUnsupportedStyleTransition(instance, container, newProps)
     diagnoseUnsupportedAccessibilityRoleProp(instance, container, newProps)
     diagnoseUnsupportedAriaProp(instance, container, newProps)
+    diagnoseVisuallyHiddenProp(instance, container, newProps)
     // Always resend style — per-element JSON is small, and this avoids
     // bugs from same-reference mutations or style removal.
     container.renderer.setStyle(instance.id, styleForRenderer(instance, container, newProps) ?? {})
