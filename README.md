@@ -1722,8 +1722,20 @@ grapheme-safe deletion and mouse positioning.
 
 `Enter` emits `onSubmit`. In a `<textarea>`, `Shift+Enter` inserts a newline.
 The editor updates natively first, then reports the complete value to React.
-`value` changes can replace the native content, but keeping the same prop value
-does not reject an edit like a browser-controlled input.
+
+**A controlled editor is as controlled as a browser's.** An `<input>` or
+`<textarea>` with a `value` prop shows that prop and nothing else: after each
+`onChange`, an edit the handler did not store is put back, exactly as React
+DOM's `restoreControlledState` does it. A handler that sets no state makes a
+read-only field, and one that filters what it stores — stripping digits, say —
+keeps the characters it accepted and rewinds the rest:
+
+```tsx
+<input value={value} onChange={(event) => setValue((event.value ?? '').replace(/[0-9]/g, ''))} />
+```
+
+Leave `value` off — or pass `undefined` — for an uncontrolled editor: the text
+is the editor's own, nothing rewinds it, and `onChange` is a notification.
 
 The focused caret stays solid during edits and then blinks every 500ms while
 idle. It stops scheduling repaint frames on blur or while the window is
@@ -1763,7 +1775,8 @@ report `"forward"` in its place.
 Assigning `value` writes straight to the native editor: it fires no `onChange`.
 React's `value` prop still wins the moment it *changes* — the next commit of a
 different `value` overwrites what you wrote, a commit of an unchanged one leaves
-it alone. On a controlled input, set React state instead.
+it alone. On a controlled input the next edit undoes it as well, since the
+restore above puts `props.value` back. Set React state instead.
 
 Select-all-on-focus and caret restoration after a reformatting `onChange` are
 the two idioms this exists for:

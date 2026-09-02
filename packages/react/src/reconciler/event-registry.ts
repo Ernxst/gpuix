@@ -42,6 +42,51 @@ const TARGET_ONLY_EVENTS = new Set([
 
 const NON_BUBBLING_EVENTS = new Set(["focus", "blur", "scroll"])
 
+/** The host types whose text lives in a native editor rather than in a prop. */
+const TEXT_EDITING_TYPES = new Set(["input", "textarea"])
+
+/**
+ * React DOM's `restoreControlledState`, ported to the native editor.
+ *
+ * A controlled `<input>` shows `props.value` and nothing else: when a handler
+ * declines the edit — an `onChange` that sets no state, or one that filters the
+ * text it stores — the browser puts the field back. Nothing else does it. React
+ * cannot re-send an unchanged prop (the reconciler diffs props before the FFI,
+ * and a handler that changes no state does not even re-render), so without this
+ * the editor keeps text the application rejected.
+ *
+ * The comparison is the emitted value against the prop, not against a fresh
+ * read of the editor: they agree exactly when React accepted the edit, and that
+ * is the common case, so an accepted keystroke costs no native call at all.
+ *
+ * **The microtask is the whole timing contract.** React must be given its
+ * chance to answer the change before we decide the edit was refused. An update
+ * scheduled by a handler flushes either on the way out of the caller's
+ * `flushSync` or in the microtask React queued while the handler ran — both
+ * land before a microtask queued *after* the handlers returned. Restoring
+ * synchronously here would rewind every accepted keystroke a frame before
+ * React's own value arrived.
+ */
+function restoreControlledEditor(payload: EventPayload, renderer: NativeRenderer): void {
+  if (payload.eventType !== "change") return
+  const container = eventRegistrySlot().containersByRenderer.get(renderer)
+  const target = container?.eventTargets.get(payload.elementId)
+  if (!container || !target || !TEXT_EDITING_TYPES.has(target.type)) return
+
+  queueMicrotask(() => {
+    // The editor may have unmounted, or its id been reused, while we waited.
+    if (container.eventTargets.get(payload.elementId) !== target) return
+    const declared = (target.props as { value?: unknown }).value
+    // `value == null` is React's own test for an uncontrolled field: no prop
+    // owns the text, so there is nothing to restore it to. This is what keeps
+    // typing and imperative `ref.value` writes on an uncontrolled input.
+    if (declared === null || declared === undefined) return
+    const value = String(declared)
+    if (value === payload.value) return
+    renderer.setInputValue?.(payload.elementId, value)
+  })
+}
+
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
   const containersByRenderer = eventRegistrySlot().containersByRenderer
   const owner = containersByRenderer.get(renderer)
@@ -235,6 +280,10 @@ export function handleGpuixEvent(
       renderer
     )
   }
+
+  // After the handlers, never before: the queued check has to see the props
+  // React settled on, not the ones it is about to replace.
+  restoreControlledEditor(payload, renderer)
 
   return result
 }
