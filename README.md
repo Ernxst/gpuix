@@ -1757,12 +1757,14 @@ because it projects the element as an accessibility node rather than styling it:
 The projection carries the element's own semantics and its flattened text, and
 nothing else. A role that names itself from its contents takes that text as its
 accessible name; any other role takes it as the node's value, the same slot the
-painted text would have used:
+painted text would have used. Plain text keeps its whole subtree either way, so
+the live-region wrapper the web spells `<div role="status" class="sr-only">`
+works as written:
 
 ```tsx
-<text visuallyHidden role="status">
+<div visuallyHidden role="status">
   Saved 3 files
-</text>
+</div>
 ```
 
 GPUIX rejects with a property diagnostic — and renders the element as authored —
@@ -1771,9 +1773,9 @@ when it is asked to hide more than the projection carries:
 - `ariaHidden` on the same element, which would remove the node it preserves
 - an interactive element (`<input>`, `<textarea>`, `tabIndex`, `autoFocus`, or a
   click/key/focus handler), whose control the projection would destroy
-- any host other than `<text>` whose subtree is more than plain text under a role
-  that names itself from its contents, because the rest of that subtree would
-  leave the accessibility tree along with the element's box
+- any host other than `<text>` whose subtree is more than plain text, because a
+  descendant with semantics of its own owns a node that would leave the
+  accessibility tree along with the element's box
 
 A visually hidden subtree with its own roled nodes is not supported yet; on the
 web `sr-only` keeps the whole subtree exposed. Track it as a follow-up before

@@ -919,6 +919,26 @@ describeNative("automation", () => {
     expect(renderer.getPaintedText()).not.toContain("Production ledger")
   })
 
+  it("projects the canonical sr-only live region wrapper", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ display: "flex", width: 480, height: 100 }}>
+        <div visuallyHidden role="status">
+          Saved 3 files
+        </div>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    expect(nodes.find((node) => node.aria.role === "Status")).toMatchObject({
+      aria: { role: "Status", value: "Saved 3 files" },
+    })
+    expect(renderer.getPaintedText()).not.toContain("Saved 3 files")
+  })
+
   it.each([
     [
       "A: names a link wrapper from descendant text",

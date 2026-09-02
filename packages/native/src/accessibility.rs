@@ -583,26 +583,26 @@ fn visually_hidden_rejection(
     }
     // A `<text>` host owns its inline runs: they are flattened into its
     // accessible name rather than dropped. Another host keeps its children only
-    // when the same flattening already covers them — a role that names itself
-    // from its contents over a subtree of plain `<text>` loses nothing, because
-    // React makes a child element out of every JSX string. Anything else (a
-    // roled child, a painted host) would leave the accessibility tree with the
-    // element's box, so the subtree stays out of scope for now.
+    // when the same flattening already covers them — a subtree of plain `<text>`
+    // loses nothing under any role, because React makes a child element out of
+    // every JSX string and the projection carries the flattened result as the
+    // node's name or its value. A roled descendant owns a node of its own, which
+    // would leave the accessibility tree with the element's box, so a structured
+    // subtree stays out of scope for now.
     if element.element_type != "text"
         && !element.children.is_empty()
-        && !(role_supports_name_from_contents(element) && subtree_is_flattened_text(tree, element))
+        && !subtree_is_flattened_text(tree, element)
     {
         return Some(
-            "visuallyHidden exposes only this element, so its children would leave the accessibility tree; visually hide plain text under a role that names itself from its contents instead",
+            "visuallyHidden exposes only this element, so its roled children would leave the accessibility tree; visually hide an element whose subtree is plain text instead",
         );
     }
     None
 }
 
-/// Whether every descendant is an unroled `<text>` element, so the projection's
-/// name computation flattens the whole subtree into the surviving node and
-/// nothing is dropped. A descendant missing from the tree counts as unknown,
-/// which is not flattenable.
+/// Whether every descendant is an unroled `<text>` element, so the projection
+/// flattens the whole subtree into the surviving node and nothing is dropped. A
+/// descendant missing from the tree counts as unknown, which is not flattenable.
 fn subtree_is_flattened_text(tree: &RetainedTree, element: &RetainedElement) -> bool {
     let mut pending: Vec<u64> = element.children.clone();
     while let Some(id) = pending.pop() {
@@ -1253,16 +1253,17 @@ mod tests {
         assert!(is_visually_hidden(&tree, &wrapper));
         assert!(element_problems(&tree, &wrapper).is_empty());
 
-        // The same subtree under a role that names itself from an author string
-        // would drop the text, and a roled child owns a node of its own.
-        let mut unnamed_wrapper = visually_hidden(RetainedElement::new(28, "div".to_string(), 1));
-        unnamed_wrapper
+        // The canonical sr-only live region: the same subtree under a role that
+        // is named from an author string keeps its text as the node's value.
+        let mut live_region = visually_hidden(RetainedElement::new(28, "div".to_string(), 1));
+        live_region
             .custom_props
             .insert("role".into(), "status".into());
-        unnamed_wrapper.children.push(24);
-        assert!(!is_visually_hidden(&tree, &unnamed_wrapper));
-        assert!(only_reason(&tree, &unnamed_wrapper).contains("children would leave"));
+        live_region.children.push(24);
+        assert!(is_visually_hidden(&tree, &live_region));
+        assert!(element_problems(&tree, &live_region).is_empty());
 
+        // A roled descendant owns a node of its own, which the projection drops.
         let mut roled_child = visually_hidden(RetainedElement::new(29, "div".to_string(), 1));
         roled_child
             .custom_props
