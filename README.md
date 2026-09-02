@@ -3894,7 +3894,9 @@ across repeated assertions — jest-dom has the same wart; drop the `g`.
 **`toHaveValue(value)` takes a string, and only a string.** jest-dom's
 zero-argument form and its numeric and string-array forms are not implemented:
 there is no `type="number"` input and no multi-select to coerce for, and "has
-any value" is `expect(renderer.getInputValue(field.id)).not.toBe('')`.
+any value" is `expect(renderer.getInputValue(field.id) ?? '').not.toBe('')` —
+keep the `?? ''`, because an editor that was never built reads `null` and
+`expect(null).not.toBe('')` would pass with no value in sight.
 
 `toHaveValue` and `toHaveDisplayValue` read the **live editor value** for an
 `<input>` or `<textarea>`, the way `HTMLInputElement.value` does, so typed text
@@ -3906,11 +3908,15 @@ await screen.userEvent.type(field, 'hi')
 expect(field).toHaveValue('hi')
 ```
 
-Everything else falls back to the retained `value` prop, which for a non-editing
-element *is* the value. Each assertion costs one native read and a forced draw —
-worth it in a test, and the reason the queries do not do the same:
-`getByDisplayValue` and `TestElement.semantics.value` stay the
-declaration-flavoured surface, matching the prop the author set.
+Only those two host types pay for that read — it crosses to native and forces a
+draw, milliseconds against microseconds for the retained tree, and nothing else
+has an editor to read. Every other element answers from its retained `value`
+prop, and so does an `<input>` whose editor was never materialised: an
+off-screen `<virtual-list>` row is in the tree with its declared value but has
+built no editor to hold one, and the prop is the only value there is. The
+queries never take the native path at all — `getByDisplayValue` and
+`TestElement.semantics.value` stay the declaration-flavoured surface, matching
+the prop the author set.
 
 `toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
 node, which exists only where the element projects accessibility semantics. An

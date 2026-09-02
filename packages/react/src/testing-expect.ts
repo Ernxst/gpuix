@@ -164,20 +164,28 @@ function accessibilityNodeOf(
   return Object.values(tree.nodes).find((node) => node.host_id === element.id)
 }
 
+/** The host types backed by the native text editor. */
+const TEXT_EDITING_TYPES = new Set(["input", "textarea"])
+
 /**
  * The value a browser would report for this element.
  *
  * For a text-editing host — `<input>`, `<textarea>` — that is the editor's own
  * buffer, so text the user typed and an imperative `ref.value = x` write are
- * both seen, exactly as `HTMLInputElement.value` sees them. The retained
- * `value` prop only answers for an element that does not edit text, which is
- * where the prop *is* the value.
+ * both seen, exactly as `HTMLInputElement.value` sees them.
  *
- * The read crosses to native and forces a draw, the same cost
- * `renderer.getInputValue` always carries; that is a fair price in test code
- * and the reason the queries keep reading the declared prop instead.
+ * The buffer read crosses to native and forces a draw — milliseconds, against
+ * microseconds for the retained tree — so only those two types pay it. Nothing
+ * else has a buffer to read: they are the only types that register a text
+ * editing state, and a `<div>` would spend the draw to be told `null`.
+ *
+ * The `??` still matters for an `<input>` whose editor was never materialised —
+ * an off-screen `<virtual-list>` row, say, which is in the retained tree with
+ * its declared `value` but has built no editor to hold one. There the prop is
+ * the only value there is, and it is the right answer.
  */
 function currentValue(renderer: TestRenderer, element: TestElement): string | undefined {
+  if (!TEXT_EDITING_TYPES.has(element.type)) return element.semantics?.value
   return renderer.getInputValue(element.id) ?? element.semantics?.value
 }
 
@@ -352,7 +360,9 @@ export const gpuixMatchers = {
    * jest-dom's zero-argument form (`toHaveValue()`, "has any value") and its
    * numeric and string-array forms are not implemented. There is no
    * `type="number"` input and no multi-select to coerce for, and "has any
-   * value" is `expect(renderer.getInputValue(field.id)).not.toBe("")`.
+   * value" is `expect(renderer.getInputValue(field.id) ?? "").not.toBe("")` —
+   * the `?? ""` matters, because an editor that was never built reads `null`,
+   * and `expect(null).not.toBe("")` would pass without a value in sight.
    */
   toHaveValue(
     this: MatcherContext,
