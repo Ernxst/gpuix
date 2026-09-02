@@ -366,6 +366,23 @@ export interface ElementSemantics {
   disabled?: true
 }
 
+/**
+ * A painted box in the DOM's `DOMRect` shape: window-relative logical pixels,
+ * the `viewport`-relative analogue on the desktop. The derived fields are
+ * computed exactly as a browser computes them — `right = x + width`,
+ * `bottom = y + height`, `top = y`, `left = x`.
+ */
+export interface TestElementRect {
+  x: number
+  y: number
+  width: number
+  height: number
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
 export interface TestElement {
   readonly id: number
   readonly type: string
@@ -376,6 +393,18 @@ export interface TestElement {
   readonly children: readonly TestElement[]
   /** Current retained parent, or null for the root element. */
   readonly parentElement: TestElement | null
+  /**
+   * The element's painted box, in the DOM's `getBoundingClientRect()` shape.
+   *
+   * Re-resolved against the current tree on every call, so an element captured
+   * before a rerender reports the bounds it paints now. Unlike a browser, which
+   * always has a rect for a connected element, bounds here are recorded during
+   * paint: an element that painted nothing in the last frame — scrolled out of
+   * a virtual list, `visibility: "hidden"` (which a browser would still give a
+   * rect), never committed — has no rect at all, and this throws rather than
+   * reporting a box of zeros.
+   */
+  readonly getBoundingClientRect: () => TestElementRect
   /** The standard `data-testid` attribute: the one locator prop. */
   dataTestId?: string
   /** The author-defined `id` attribute, distinct from the numeric renderer ID. */
@@ -1066,6 +1095,11 @@ export class TestRenderer implements NativeRenderer {
             return getElement(renderer, parentId, `parent of ${describeElement(renderer, element)}`)
           },
         },
+        getBoundingClientRect: {
+          value(): TestElementRect {
+            return boundingClientRectOf(renderer, element)
+          },
+        },
       })
       map.set(node.id, element)
       elementRenderers.set(element, renderer)
@@ -1463,6 +1497,29 @@ export function rendererOf(element: TestElement): TestRenderer {
   }
 
   return renderer
+}
+
+/**
+ * Backs `TestElement.getBoundingClientRect()`. Re-resolves the element first,
+ * so a rect read from a pre-rerender reference is the current one, then reads
+ * the same painted bounds `renderer.getElementBounds` reports.
+ */
+function boundingClientRectOf(renderer: TestRenderer, element: TestElement): TestElementRect {
+  const current = getElement(renderer, element.id, "bounding client rect target")
+  const bounds = renderer.getElementBounds(current.id)
+  if (bounds === null) throw noPaintedBoundsError(renderer, current)
+
+  const [x, y, width, height] = bounds
+  return {
+    x,
+    y,
+    width,
+    height,
+    top: y,
+    right: x + width,
+    bottom: y + height,
+    left: x,
+  }
 }
 
 // ── waitFor ──────────────────────────────────────────────────────────
@@ -2166,6 +2223,12 @@ function missingRootError(): Error {
 
 function missingElementError(id: number, relationship: string): Error {
   return new Error(`Unable to find ${relationship}: element #${id} is absent`)
+}
+
+function noPaintedBoundsError(renderer: TestRenderer, element: TestElement): Error {
+  return new Error(
+    `Unable to read the bounding client rect of ${describeElement(renderer, element)}: it painted no bounds in the last frame`
+  )
 }
 
 export interface TestRoot extends TestQueries {
