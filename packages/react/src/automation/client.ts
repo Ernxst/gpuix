@@ -462,10 +462,15 @@ export function selectAllKeystroke(): string {
 export type LocatorMatcher = Matcher<TreeNode>
 export type LocatorMatcherOptions = MatcherOptions
 
+/** The `semantics` fields a locator can select on. */
+type SemanticsField = "label" | "placeholder" | "value"
+
 interface Selector {
   testId?: LocatorMatcher
   text?: LocatorMatcher
   type?: string
+  /** A declared `semantics` field and the matcher it must satisfy. */
+  semantics?: { field: SemanticsField; matcher: LocatorMatcher }
   matcherOptions?: LocatorMatcherOptions
   parent?: Selector
 }
@@ -477,6 +482,13 @@ function matches(node: TreeNode, selector: Selector): boolean {
     if (!matchesMatcher(testId, node, selector.testId, selector.matcherOptions)) return false
   }
   if (selector.type != null && node.type !== selector.type) return false
+  if (selector.semantics != null) {
+    const declared = node.semantics?.[selector.semantics.field]
+    if (declared === undefined) return false
+    if (!matchesMatcher(declared, node, selector.semantics.matcher, selector.matcherOptions)) {
+      return false
+    }
+  }
   if (
     selector.text != null &&
     !matchesMatcher(nodeText(node), node, selector.text, selector.matcherOptions)
@@ -572,6 +584,33 @@ export class Locator {
   getByText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
     return new Locator(this.app, {
       text,
+      matcherOptions: options,
+      parent: this.selector,
+    })
+  }
+
+  /** A descendant whose declared `ariaLabel` matches. */
+  getByLabelText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return this.bySemantics("label", text, options)
+  }
+
+  /** A descendant whose `placeholder` prop matches. */
+  getByPlaceholderText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return this.bySemantics("placeholder", text, options)
+  }
+
+  /** A descendant whose `value` prop matches. */
+  getByDisplayValue(value: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return this.bySemantics("value", value, options)
+  }
+
+  private bySemantics(
+    field: SemanticsField,
+    matcher: LocatorMatcher,
+    options: LocatorMatcherOptions
+  ): Locator {
+    return new Locator(this.app, {
+      semantics: { field, matcher },
       matcherOptions: options,
       parent: this.selector,
     })
@@ -830,6 +869,30 @@ export class App {
 
   getByText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
     return new Locator(this, { text, matcherOptions: options })
+  }
+
+  /** A node whose declared `ariaLabel` matches. */
+  getByLabelText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return new Locator(this, {
+      semantics: { field: "label", matcher: text },
+      matcherOptions: options,
+    })
+  }
+
+  /** A node whose `placeholder` prop matches. */
+  getByPlaceholderText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return new Locator(this, {
+      semantics: { field: "placeholder", matcher: text },
+      matcherOptions: options,
+    })
+  }
+
+  /** A node whose `value` prop matches. */
+  getByDisplayValue(value: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return new Locator(this, {
+      semantics: { field: "value", matcher: value },
+      matcherOptions: options,
+    })
   }
 
   getByType(type: string): Locator {

@@ -41,6 +41,7 @@ export type {
   AutomationServerEvent,
   ElementBounds,
   MethodName,
+  NodeSemantics,
   ParamsOf,
   ResultOf,
   TreeNode,

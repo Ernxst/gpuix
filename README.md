@@ -3182,6 +3182,9 @@ two disagree.
 |---|---|
 | `app.getByTestId('send')` | The `data-testid` prop |
 | `app.getByText('New chat')` | A node's own text |
+| `app.getByLabelText('Recipe search')` | The `ariaLabel` prop |
+| `app.getByPlaceholderText('Search recipes')` | The `placeholder` prop |
+| `app.getByDisplayValue('iron plate')` | The `value` prop |
 | `app.getByType('textarea')` | The host element type |
 | `locator.getByText('...')` | A descendant of another locator |
 
@@ -3196,6 +3199,37 @@ case-insensitive substring match, and regular expressions, predicate matchers,
 `{ trim }`, `{ collapseWhitespace }`, and custom `{ normalizer }` functions are
 supported. A node has one test ID, its `data-testid` prop — the same rule the
 in-process queries use.
+
+### The `semantics` block
+
+Every tree node carries a small `semantics` block, in the locator tree and in
+the in-process `TestElement` alike. The locator tree omits `style`, `events`,
+and `customProps` so a 5k-row list is not 100ms of JSON, which used to leave an
+input's value unreachable from a locator entirely; `semantics` is the part worth
+paying for.
+
+| Field | Source | Notes |
+|---|---|---|
+| `role` | the `role` prop | The declaration, verbatim |
+| `label` | the `ariaLabel` prop | |
+| `value` | the `value` prop | `<input>` and `<textarea>` |
+| `placeholder` | the `placeholder` prop | `<input>` and `<textarea>` |
+| `disabled` | `disabled` or `ariaDisabled` | Present only when `true` |
+
+Absent fields are omitted, and a node that declares none of them has no
+`semantics` key at all.
+
+Two boundaries are worth stating plainly. `semantics.role` is the **authored**
+role, not GPUI's computed accessibility role — implicit roles and
+name-from-contents live in the accessibility snapshot, which is what
+`getByRole` reads. And `semantics.value` is the retained `value` prop, so a
+controlled input reports its current value while an uncontrolled one reports the
+last value the author set rather than the live editing buffer.
+
+```ts
+const node = await app.getByLabelText('Recipe search').element()
+node.semantics // { label: 'Recipe search', placeholder: 'Search recipes', value: 'iron plate' }
+```
 
 ### Mouse, wheel, and drag
 
@@ -3369,7 +3403,10 @@ queries match retained `<text>` content, test ID queries match one test ID per
 element, and role queries match GPUI's computed
 accessibility role, accessible name, and heading level. Role names are ARIA
 names such as `button`, `heading`, and `region`; `name` accepts a string,
-regular expression, or predicate. The singular `getBy...` and `queryBy...`
+regular expression, or predicate. Label, placeholder, and display-value queries
+read the [`semantics` block](#the-semantics-block): `getByLabelText` matches the
+declared `ariaLabel`, `getByPlaceholderText` the `placeholder` prop, and
+`getByDisplayValue` the `value` prop. The singular `getBy...` and `queryBy...`
 methods throw when more than one element matches; required `getBy...` /
 `getAllBy...` methods also throw when none match. Their `queryBy...` /
 `queryAllBy...` counterparts return `null` / `[]` for a miss. `within(element)`
@@ -3387,6 +3424,11 @@ An element has exactly one test ID, as in Testing Library: its `data-testid`
 attribute. The retained-tree queries, `renderer.findByTestId`, and the
 automation locators all resolve it that way, so every path returns the same
 nodes.
+
+Testing Library's `ByAltText` and `ByTitle` have no desktop counterpart: there
+is no `alt` attribute and no tooltip-bearing `title`. Label an `<img>` with
+`ariaLabel` and find it with `getByLabelText` or
+`getByRole('img', { name })`.
 
 Role queries currently search the visible accessibility tree. `hidden` defaults
 to `false`, and `{ hidden: false }` is supported explicitly. `{ hidden: true }`
@@ -3424,6 +3466,11 @@ const ledger = screen.getByRole('region', { name: 'Production ledger' })
 screen.getByRole('link', { name: /coal current/i })
 screen.getByRole('heading', { name: 'Build list', level: 2 })
 screen.queryAllByRole('button')
+
+const search = screen.getByLabelText('Recipe search')
+screen.getByPlaceholderText('Search recipes')
+screen.getByDisplayValue(/iron/)
+search.semantics // { label: 'Recipe search', placeholder: 'Search recipes', value: 'iron plate' }
 
 const panel = screen.getByTestId('power-panel')
 screen.within(panel).getByText('Rate')
