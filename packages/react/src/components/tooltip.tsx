@@ -214,7 +214,7 @@ export const TooltipTrigger = forwardRef<PublicInstance, TooltipTriggerProps>(
         },
         onKeyDown: (event) => {
           onKeyDown?.(event)
-          if (event.key === "escape") context.close()
+          if (event.key === "Escape") context.close()
         },
       },
       ref

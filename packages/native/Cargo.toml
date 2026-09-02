@@ -1,6 +1,6 @@
 [package]
 name = "gpuix-native"
-version = "0.6.0-fork.1"
+version = "0.6.0-fork.2"
 edition = "2021"
 description = "GPUI bindings for Node.js via napi-rs"
 license = "Apache-2.0"
@@ -76,6 +76,11 @@ cocoa = "=0.26.0"
 objc = "0.2"
 # Production uses the embedded AppKit loop; tests use the native Metal renderer.
 gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, features = ["font-kit"] }
+
+# Same crate GPUI uses. A .node cannot ship an exe manifest, so Windows DPI
+# awareness is set at runtime in renderer.rs instead of via windows-manifest.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_HiDpi"] }
 
 [features]
 # test-support is default so published binaries include TestGpuixRenderer,

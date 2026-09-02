@@ -11,6 +11,7 @@
     "build": "bun run build:native && bun run build:react",
     "build:native": "cd packages/native && bun run build",
     "build:react": "cd packages/react && bun run build",
+    "canvas:wpt": "cd packages/react && bun run canvas:wpt",
     "canvas:goldens": "bun scripts/canvas-goldens.ts",
     "example:counter": "cd examples && bun --hot counter.tsx",
     "dev": "bun scripts/dev.ts",
