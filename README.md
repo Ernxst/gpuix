@@ -469,10 +469,14 @@ geometry, while GPUIX still rasterizes at the layout box's physical resolution.
 
 ### Canvas pixel readback
 
-There is none, and the types say so. `toDataURL()` is declared to return
-`undefined`, and `getImageData()` / `putImageData()` are diagnosed the same
-way: `HTMLCanvasElement.toDataURL()` encodes the canvas **bitmap**, and GPUI
-has no per-element readback to encode.
+There is none. `HTMLCanvasElement.toDataURL()` encodes the canvas **bitmap**,
+and GPUI has no per-element readback to encode.
+
+`toDataURL()`, `getImageData()` and `putImageData()` all report that the same
+way at runtime. Only `toDataURL()` is also *typed* for it, declared to return
+`undefined`, because GPUIX owns that signature. The 2D context members keep
+lib.dom's `CanvasRenderingContext2D` types, so `getImageData()` still looks
+like it returns an `ImageData`; there, the diagnostic is the only signal.
 
 The one readback that does exist, `captureScreenshot()`, is not a substitute.
 It grabs the whole window's composited pixels, it is built only into

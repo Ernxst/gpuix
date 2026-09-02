@@ -894,37 +894,47 @@ function installTextEditingMembers(
   const setSelection = (start: number, end: number, backward: boolean): void => {
     container.native.setInputSelection?.(id, start, end, backward)
   }
-  const isBackward = (): boolean => readSelection()[2] === 1
+
+  // Non-enumerable and configurable, matching the prototype accessors these
+  // mirror on a real `HTMLInputElement`. Every read crosses to native and
+  // forces a draw, so an enumerable own property would make an incidental
+  // spread, `Object.keys()`, or deep-equal over a ref cost four of them.
+  const nativeAccessor = (
+    descriptor: PropertyDescriptor
+  ): PropertyDescriptor & ThisType<undefined> => ({
+    enumerable: false,
+    configurable: true,
+    ...descriptor,
+  })
 
   Object.defineProperties(instance, {
-    value: {
-      enumerable: true,
+    value: nativeAccessor({
       get: readValue,
       set: (value: unknown) => {
         container.native.setInputValue?.(id, value == null ? "" : String(value))
       },
-    },
-    selectionStart: {
-      enumerable: true,
+    }),
+    selectionStart: nativeAccessor({
       get: () => readSelection()[0]!,
       // The DOM's setter drags `selectionEnd` along rather than letting the
-      // start overtake it.
+      // start overtake it. One read covers both the end and the direction.
       set: (value: number) => {
         const start = selectionOffset(value)
-        setSelection(start, Math.max(readSelection()[1]!, start), isBackward())
+        const current = readSelection()
+        setSelection(start, Math.max(current[1]!, start), current[2] === 1)
       },
-    },
-    selectionEnd: {
-      enumerable: true,
+    }),
+    selectionEnd: nativeAccessor({
       get: () => readSelection()[1]!,
       set: (value: number) => {
-        setSelection(readSelection()[0]!, selectionOffset(value), isBackward())
+        const current = readSelection()
+        setSelection(current[0]!, selectionOffset(value), current[2] === 1)
       },
-    },
-    selectionDirection: {
-      enumerable: true,
-      get: (): "forward" | "backward" => (isBackward() ? "backward" : "forward"),
-    },
+    }),
+    selectionDirection: nativeAccessor({
+      get: (): "forward" | "backward" =>
+        readSelection()[2] === 1 ? "backward" : "forward",
+    }),
   })
 
   instance.setSelectionRange = (

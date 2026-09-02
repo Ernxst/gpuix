@@ -306,23 +306,18 @@ impl TextEditorElement {
     fn editing_state(&self, cx: &App) -> TextEditingState {
         match &self.state {
             Some(state) => state.read(cx).editing_state(),
-            None => {
-                let end = self.value.encode_utf16().count();
-                TextEditingState {
-                    value: self.value.clone(),
-                    selection_start: end,
-                    selection_end: end,
-                    selection_backward: false,
-                }
-            }
+            None => pending_editing_state(&self.value, self.multiline),
         }
     }
 
-    fn set_selection(&self, start: usize, end: usize, backward: bool, cx: &mut App) {
-        let Some(state) = &self.state else { return };
+    /// False before the first frame builds the editor: there is no state to
+    /// write to, and the caller asked for something that did not happen.
+    fn set_selection(&self, start: usize, end: usize, backward: bool, cx: &mut App) -> bool {
+        let Some(state) = &self.state else { return false };
         state.update(cx, |state, cx| {
             state.set_selection_utf16(start, end, backward, cx)
         });
+        true
     }
 
     /// An imperative `input.value = …`. This deliberately does not touch
@@ -333,9 +328,13 @@ impl TextEditorElement {
     ///
     /// Like the DOM's setter, this fires no `change` event and, for a value
     /// that actually differs, moves the caret to the end.
-    fn set_value(&self, value: String, cx: &mut App) {
-        let Some(state) = &self.state else { return };
+    ///
+    /// False before the first frame builds the editor, as in
+    /// {@link set_selection}.
+    fn set_value(&self, value: String, cx: &mut App) -> bool {
+        let Some(state) = &self.state else { return false };
         state.update(cx, |state, cx| state.set_external_text(value, cx));
+        true
     }
 }
 
@@ -537,13 +536,11 @@ impl CustomElement for TextEditorElement {
     }
 
     fn set_text_selection(&self, start: usize, end: usize, backward: bool, cx: &mut App) -> bool {
-        TextEditorElement::set_selection(self, start, end, backward, cx);
-        true
+        TextEditorElement::set_selection(self, start, end, backward, cx)
     }
 
     fn set_text_value(&self, value: String, cx: &mut App) -> bool {
-        TextEditorElement::set_value(self, value, cx);
-        true
+        TextEditorElement::set_value(self, value, cx)
     }
 
     fn destroy(&mut self) {
@@ -656,6 +653,28 @@ fn ordered_selection(start: usize, end: usize) -> (usize, usize) {
         (end, end)
     } else {
         (start, end)
+    }
+}
+
+/// What an editor will report before its first frame has built any state: the
+/// `value` prop with the caret at its end, which is where the editor puts the
+/// caret when it is finally created.
+///
+/// Reports the value the editor is *about* to hold, not the raw prop. A
+/// single-line editor folds newlines into spaces, so `"a\nb"` is `"a b"` — and
+/// a caret at its end is 3, not 3-with-a-newline-in-the-middle.
+fn pending_editing_state(value: &str, multiline: bool) -> TextEditingState {
+    let value = if multiline {
+        value.to_string()
+    } else {
+        single_line_text(value)
+    };
+    let end = value.encode_utf16().count();
+    TextEditingState {
+        value,
+        selection_start: end,
+        selection_end: end,
+        selection_backward: false,
     }
 }
 
@@ -2074,6 +2093,25 @@ mod tests {
     #[test]
     fn single_line_newlines_become_one_space() {
         assert_eq!(single_line_text("a\r\nb\nc\rd"), "a b c d");
+    }
+
+    #[test]
+    fn pending_state_reports_the_text_the_editor_will_hold() {
+        // A single-line editor folds newlines, so the caret at the end of
+        // "a\nb" is 3 in the folded "a b" it is about to show.
+        let single = pending_editing_state("a\nb", false);
+        assert_eq!(single.value, "a b");
+        assert_eq!(single.selection_start, 3);
+        assert_eq!(single.selection_end, 3);
+        assert!(!single.selection_backward);
+
+        let multi = pending_editing_state("a\nb", true);
+        assert_eq!(multi.value, "a\nb");
+        assert_eq!(multi.selection_start, 3);
+
+        // Offsets are UTF-16 code units, so an astral character counts twice.
+        assert_eq!(pending_editing_state("a😀", false).selection_start, 3);
+        assert_eq!(pending_editing_state("", false).selection_start, 0);
     }
 
     #[test]

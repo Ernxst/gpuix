@@ -1104,6 +1104,21 @@ fn draw_window_for_automation_read() -> Result<()> {
     })
 }
 
+/// Draw the committed tree from inside the UI thread's command pump: the
+/// non-macOS counterpart of `draw_window_for_automation_read`.
+///
+/// Leases the window untyped, exactly as that helper does. Drawing renders
+/// `GpuixView`, so holding a typed lease on it across the draw would panic.
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+fn draw_ui_window_for_read(
+    window: gpui::WindowHandle<GpuixView>,
+    cx: &mut gpui::App,
+) -> anyhow::Result<()> {
+    gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| {
+        window.draw(cx).clear(cx);
+    })
+}
+
 /// Queue a real AppKit mouse click. This is deliberately distinct from the
 /// deterministic `simulate_click` test helper: live smoke tests need to cover
 /// the NSEvent → GPUI platform ingress before the renderer's callback bridge.
@@ -1633,7 +1648,12 @@ async fn run_ui_commands(
                 response.send(()).ok();
                 result
             }
+            // Each of these draws the committed tree first, as the macOS arms
+            // do. The frame is what syncs a changed `value` prop into the
+            // editor, and that sync parks the caret at the end of the new text:
+            // a caret written before it would be overwritten moments later.
             UiCommand::GetTextEditingState { id, response } => {
+                draw_ui_window_for_read(window, cx)?;
                 window.update(cx, move |view, _window, cx| {
                     response
                         .send(view.custom_registry.text_editing_state(id, cx))
@@ -1645,11 +1665,15 @@ async fn run_ui_commands(
                 start,
                 end,
                 backward,
-            } => window.update(cx, move |view, _window, cx| {
-                view.custom_registry
-                    .set_text_selection(id, start, end, backward, cx);
-            }),
+            } => {
+                draw_ui_window_for_read(window, cx)?;
+                window.update(cx, move |view, _window, cx| {
+                    view.custom_registry
+                        .set_text_selection(id, start, end, backward, cx);
+                })
+            }
             UiCommand::SetTextValue { id, value } => {
+                draw_ui_window_for_read(window, cx)?;
                 window.update(cx, move |view, _window, cx| {
                     view.custom_registry.set_text_value(id, value, cx);
                 })
@@ -4813,6 +4837,19 @@ fn update_web_window<R>(
     })
 }
 
+/// Draw the committed tree before reading or writing state a frame owns: the
+/// browser counterpart of `draw_window_for_automation_read`.
+///
+/// The browser's own rAF loop would get there eventually, but "eventually" is
+/// after the caller returns, and a caret written before that sync would be
+/// overwritten by it.
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn draw_web_window_for_read() -> Result<(), wasm_bindgen::JsValue> {
+    update_web_window(|window, cx| {
+        window.draw(cx).clear(cx);
+    })
+}
+
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 fn notify_web() {
     if let Err(error) = update_web_window(|window, _cx| window.refresh()) {
@@ -5200,6 +5237,7 @@ impl WebGpuixRenderer {
         element_id: f64,
     ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
+        draw_web_window_for_read()?;
         let state = update_web_view(move |view, _window, cx| {
             view.custom_registry.text_editing_state(id, cx)
         })?;
@@ -5215,6 +5253,7 @@ impl WebGpuixRenderer {
         element_id: f64,
     ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
+        draw_web_window_for_read()?;
         let state = update_web_view(move |view, _window, cx| {
             view.custom_registry.text_editing_state(id, cx)
         })?;
@@ -5234,6 +5273,7 @@ impl WebGpuixRenderer {
         value: String,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
+        draw_web_window_for_read()?;
         update_web_view(move |view, _window, cx| {
             view.custom_registry.set_text_value(id, value, cx);
         })
@@ -5250,6 +5290,7 @@ impl WebGpuixRenderer {
         let id = web_element_id(element_id)?;
         let start = to_selection_offset(start);
         let end = to_selection_offset(end);
+        draw_web_window_for_read()?;
         update_web_view(move |view, _window, cx| {
             view.custom_registry
                 .set_text_selection(id, start, end, backward, cx);
