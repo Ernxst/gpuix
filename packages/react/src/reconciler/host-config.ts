@@ -830,6 +830,16 @@ export const hostConfig = {
       id,
       type,
       props,
+      focus: (options?: FocusOptions) =>
+        rootContainerInstance.native.focusElement?.(id, options?.preventScroll === true),
+      blur: () => {
+        // Only this element's own focus is ours to drop. A renderer that cannot
+        // report the active element cannot prove that, so it does nothing
+        // rather than blurring whatever happens to be focused.
+        const native = rootContainerInstance.native
+        if (!native.getActiveElement || native.getActiveElement() !== id) return
+        native.blur?.()
+      },
       setPointerCapture: () => rootContainerInstance.native.setPointerCapture?.(id),
       releasePointerCapture: () =>
         rootContainerInstance.native.releasePointerCapture?.(id),

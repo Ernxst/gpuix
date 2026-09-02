@@ -125,7 +125,12 @@ export declare class GpuixRenderer {
   /** Same numbers as the on-screen overlay: current, p90, p99, max, frames. */
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
   setWindowTitle(title: string): void
-  focusElement(elementId: number): void
+  /**
+   * Move focus to an element. `preventScroll` mirrors the `FocusOptions`
+   * member of `HTMLElement.focus()`: focus without revealing the element
+   * inside its scroll ancestors.
+   */
+  focusElement(elementId: number, preventScroll?: boolean | undefined | null): void
   /** Move focus to the next GPUIX tab stop without dispatching a key event. */
   focusNext(): void
   /** Move focus to the previous GPUIX tab stop without dispatching a key event. */
@@ -390,8 +395,14 @@ export declare class TestGpuixRenderer {
    * The element must have a FocusHandle (created by sync_focus_handles when
    * the element has keyDown, keyUp, focus, or blur listeners).
    * Call flush() before this so the element tree and focus handles exist.
+   * `preventScroll` mirrors the `FocusOptions` member of
+   * `HTMLElement.focus()`: focus without revealing the element inside its
+   * scroll ancestors.
    */
-  focusElement(id: number): void
+  focusElement(id: number, preventScroll?: boolean | undefined | null): void
+  /** The focused host element id, analogous to `document.activeElement`, or null. */
+  getActiveElement(): number | null
+  blur(): void
   focusNext(): void
   focusPrevious(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
