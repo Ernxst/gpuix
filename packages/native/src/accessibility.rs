@@ -277,67 +277,192 @@ fn parse_aria_current(value: &serde_json::Value) -> Option<gpui::accesskit::Aria
     }
 }
 
-/// The text a `aria-labelledby` / `aria-describedby` target contributes.
-///
-/// An authored `ariaLabel` replaces the subtree it names, at the target and at
-/// every descendant, and painted text is read where there is no such label. A
-/// node named directly by a reference contributes even when it is hidden — the
-/// `<span ariaHidden id="label">` pattern relies on that — while a hidden
-/// descendant of one never does.
-///
-/// This is deliberately not the renderer's build-time flattener. That one lives
-/// on `BuildCtx` and reads the element's own cached `InlineText`, neither of
-/// which exists for an element the build is not currently visiting. The
-/// divergence is therefore real and bounded: this walk does not apply
-/// `text-transform`, does not substitute an `<img>`'s `alt`, and does not read
-/// an `<input>`'s value, so referencing one of those yields its text content
-/// rather than its computed value. Referencing a plain text subtree, which is
-/// what labelling patterns use, agrees with the renderer exactly.
-fn referenced_text(
-    tree: &RetainedTree,
-    element: &RetainedElement,
-    follow_references: bool,
-) -> String {
-    let mut pending = vec![(element, true)];
-    let mut words: Vec<String> = Vec::new();
+/// Why a subtree is being flattened. Whitespace, hiding and descent are the
+/// same for both; what an authored label does at the root is not.
+#[derive(Clone, Copy)]
+enum NameSubject {
+    /// A role that names itself from its contents. accname never reaches the
+    /// contents step for an element that carries its own label or reference
+    /// list, so that precedence belongs to the caller and neither is read at
+    /// the root; a hidden root contributes nothing.
+    ///
+    /// Every *descendant* is named the way step 2F names it: a reference list
+    /// or a label replaces the subtree it names, so `<div role="button"><img
+    /// alt="Save"/></div>` is named "Save", as it is in the DOM. Only a
+    /// descendant whose role carries that name counts, because a role-less one
+    /// is dropped on its way to the platform and the name has to read the tree
+    /// the platform reads.
+    Contents,
+    /// The node an `aria-labelledby` / `aria-describedby` entry points at. It
+    /// contributes even when it is hidden — the `<div ariaHidden id="label">`
+    /// pattern relies on that — and an authored label replaces the subtree it
+    /// names, at the target and at every descendant. `follow_references` is
+    /// false once accname is already resolving a reference: one level is both
+    /// what the spec computes and what keeps a cycle finite.
+    Reference { follow_references: bool },
+}
 
-    while let Some((node, is_target)) = pending.pop() {
-        if !is_target && is_hidden(node) {
-            continue;
+/// Flatten `element`'s subtree into the string an accessible name reads.
+///
+/// Whitespace follows CSS rather than the tree. A React text node has no box of
+/// its own, so contiguous ones concatenate: `Item{count}` is two adjacent nodes
+/// in the retained tree and names `Items`, the way a browser flattens two
+/// adjacent DOM text nodes. Every element here is a flex item of its parent and
+/// flex blockifies its children, so an element separates from its siblings with
+/// a space. The one exception is a `<text>` inside a `<text>`: those merge into
+/// a single shaped line, which is an inline box by any other name.
+///
+/// The result is whitespace-normalized at the end, as the accname flat string
+/// is, over the whitespace CSS collapses: the ASCII set. A no-break space is a
+/// glyph an author chose, and survives here as it does on screen.
+///
+/// This walk does not apply `text-transform` and does not read an `<input>`'s
+/// value, so flattening one of those yields its text content rather than its
+/// computed value.
+fn flattened_text(tree: &RetainedTree, element: &RetainedElement, subject: NameSubject) -> String {
+    let mut flat = String::new();
+    collect_flattened_text(tree, element, subject, true, &mut flat);
+
+    let mut normalized = String::with_capacity(flat.len());
+    for word in flat.split_ascii_whitespace() {
+        if !normalized.is_empty() {
+            normalized.push(' ');
         }
-        // A reference list on the target replaces its contents, but accname
-        // stops following once it is already resolving a reference. One level
-        // is both what the spec computes and what keeps a cycle finite.
-        if is_target && follow_references {
-            if let Some(text) = node
-                .custom_props
-                .get("ariaLabelledBy")
-                .and_then(|value| resolve_references(tree, value, false))
-            {
-                return text;
-            }
+        normalized.push_str(word);
+    }
+    normalized
+}
+
+/// Whether an authored name on `node` reaches the accessibility tree at all.
+///
+/// `apply` sets one only for a node whose declared role supports it, and
+/// `element_problems` tells the author when a role-less label was dropped. A
+/// name computed from contents reads the tree the platform reads, so a label
+/// the tree never carries contributes nothing to it either: the browser
+/// ignores `aria-label` on a generic just the same.
+fn carries_authored_name(node: &RetainedElement) -> bool {
+    node.custom_props
+        .get("role")
+        .and_then(AccessibilityRole::parse)
+        .is_some_and(|role| role.supports("ariaLabel"))
+}
+
+/// Whether `node` runs into its siblings instead of separating from them.
+fn is_inline(tree: &RetainedTree, node: &RetainedElement) -> bool {
+    // A React text node is a DOM text node: no box, no separation. Contiguous
+    // ones share one anonymous item, exactly as CSS wraps a flex container's
+    // text runs.
+    if node.content.is_some() {
+        return true;
+    }
+    // Nested `<text>` is this renderer's inline box. The outer `<text>` flattens
+    // it into one layout rather than laying it out as an item of its own.
+    node.element_type == "text"
+        && node
+            .parent
+            .and_then(|parent| tree.elements.get(&parent))
+            .is_some_and(|parent| parent.element_type == "text")
+}
+
+fn collect_flattened_text(
+    tree: &RetainedTree,
+    node: &RetainedElement,
+    subject: NameSubject,
+    is_root: bool,
+    flat: &mut String,
+) {
+    // Separators are emitted unconditionally around a box and collapsed away by
+    // the normalization pass, so an empty subtree cannot leave one behind. A
+    // hidden box still emits them: `5<div ariaHidden/>kg` drops the box's own
+    // text and keeps its boundary, exactly as the layout does.
+    let separates = !is_inline(tree, node);
+    if separates {
+        flat.push(' ');
+    }
+    let is_reference_target = is_root && matches!(subject, NameSubject::Reference { .. });
+    if is_reference_target || !is_hidden(node) {
+        contribute_flattened_text(tree, node, subject, is_root, flat);
+    }
+    if separates {
+        flat.push(' ');
+    }
+}
+
+fn contribute_flattened_text(
+    tree: &RetainedTree,
+    node: &RetainedElement,
+    subject: NameSubject,
+    is_root: bool,
+    flat: &mut String,
+) {
+    // An authored name — a reference list, then a label — replaces the subtree
+    // it names, at every node accname would name in its own right. The root of
+    // a contents walk is not one of those: its caller already decided that its
+    // contents are what name it. A descendant is one only when the tree would
+    // carry the name it declares.
+    let carries_name = if is_root {
+        !matches!(subject, NameSubject::Contents)
+    } else {
+        carries_authored_name(node)
+    };
+    // A reference is never followed from inside a reference: one level is what
+    // the spec resolves, and it is what makes a descendant pointing back at an
+    // ancestor terminate rather than recur.
+    let follows_references = carries_name
+        && match subject {
+            NameSubject::Contents => !is_root,
+            NameSubject::Reference { follow_references } => is_root && follow_references,
+        };
+    if follows_references {
+        if let Some(text) = node
+            .custom_props
+            .get("ariaLabelledBy")
+            .and_then(|value| resolve_references(tree, value, false))
+        {
+            flat.push_str(&text);
+            return;
         }
+    }
+    if carries_name {
         if let Some(label) = node
             .custom_props
             .get("ariaLabel")
             .and_then(serde_json::Value::as_str)
             .filter(|label| !label.trim().is_empty())
         {
-            words.extend(label.split_whitespace().map(str::to_owned));
-            continue;
+            flat.push_str(label);
+            return;
         }
-        if let Some(content) = &node.content {
-            words.extend(content.split_whitespace().map(str::to_owned));
-        }
-        pending.extend(
-            node.children
-                .iter()
-                .rev()
-                .filter_map(|id| tree.elements.get(id))
-                .map(|child| (child, false)),
-        );
     }
-    words.join(" ")
+    if let Some(content) = &node.content {
+        flat.push_str(content);
+    }
+    for child in node.children.iter().filter_map(|id| tree.elements.get(id)) {
+        collect_flattened_text(tree, child, subject, false, flat);
+    }
+}
+
+/// The text a `aria-labelledby` / `aria-describedby` target contributes.
+fn referenced_text(
+    tree: &RetainedTree,
+    element: &RetainedElement,
+    follow_references: bool,
+) -> String {
+    flattened_text(tree, element, NameSubject::Reference { follow_references })
+}
+
+/// The subtree flattened to the string a role that names itself from its
+/// contents reads, or `None` when the subtree holds no text.
+///
+/// The renderer's build has the element's shaped `InlineText` in hand at this
+/// point, but reads the tree here instead: the two disagreed about whitespace,
+/// and only one of them can be the accname computation.
+pub(crate) fn flattened_contents_text(
+    tree: &RetainedTree,
+    element: &RetainedElement,
+) -> Option<String> {
+    let text = flattened_text(tree, element, NameSubject::Contents);
+    (!text.is_empty()).then_some(text)
 }
 
 /// Resolve an `aria-labelledby` / `aria-describedby` IDREF list to the text its
@@ -1155,6 +1280,245 @@ mod tests {
     /// has to exist. Tests that hide a subtree build a populated one.
     fn detached_tree() -> RetainedTree {
         RetainedTree::new()
+    }
+
+    /// Mirror the reconciler: an element node carries no text of its own, and
+    /// every authored string arrives as a separate `<text>` node beneath it.
+    fn append_element(tree: &mut RetainedTree, parent: Option<u64>, id: u64, element_type: &str) {
+        tree.create_element(id, element_type.to_string());
+        if let Some(parent) = parent {
+            tree.append_child(parent, id);
+        }
+    }
+
+    fn append_text_node(tree: &mut RetainedTree, parent: u64, id: u64, content: &str) {
+        append_element(tree, Some(parent), id, "text");
+        tree.set_text(id, content.to_string());
+    }
+
+    fn contents_name(tree: &RetainedTree, id: u64) -> Option<String> {
+        flattened_contents_text(tree, tree.elements.get(&id).expect("element exists"))
+    }
+
+    #[test]
+    fn concatenates_adjacent_text_nodes() {
+        // `<div role="button">Item{count}</div>`: React splits the interpolation
+        // into two host nodes, and neither has a box to separate from.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_text_node(&mut tree, 1, 2, "Item");
+        append_text_node(&mut tree, 1, 3, "s");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("Items"));
+    }
+
+    #[test]
+    fn concatenates_a_nested_text_run_with_its_parent_line() {
+        // `<text>Save<text style={{fontWeight:"bold"}}>All</text></text>` is one
+        // shaped line, so the nested run is an inline box.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "text");
+        append_text_node(&mut tree, 1, 2, "Save");
+        append_element(&mut tree, Some(1), 3, "text");
+        append_text_node(&mut tree, 3, 4, "All");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("SaveAll"));
+    }
+
+    #[test]
+    fn separates_sibling_element_boxes_with_a_space() {
+        // `<div><text>Production</text><text>ledger</text></div>`: two items of
+        // the same flex container, which CSS blockifies.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_element(&mut tree, Some(1), 2, "text");
+        append_text_node(&mut tree, 2, 3, "Production");
+        append_element(&mut tree, Some(1), 4, "text");
+        append_text_node(&mut tree, 4, 5, "ledger");
+
+        assert_eq!(
+            contents_name(&tree, 1).as_deref(),
+            Some("Production ledger")
+        );
+    }
+
+    #[test]
+    fn mixes_inline_runs_with_block_boundaries() {
+        // `<div role="button">Item{count}<text>left</text><div>in stock</div></div>`.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_text_node(&mut tree, 1, 2, "Item");
+        append_text_node(&mut tree, 1, 3, "s");
+        append_element(&mut tree, Some(1), 4, "text");
+        append_text_node(&mut tree, 4, 5, "left");
+        append_element(&mut tree, Some(1), 6, "div");
+        append_text_node(&mut tree, 6, 7, "in stock");
+
+        assert_eq!(
+            contents_name(&tree, 1).as_deref(),
+            Some("Items left in stock")
+        );
+    }
+
+    #[test]
+    fn normalizes_authored_whitespace() {
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_text_node(&mut tree, 1, 2, "  Production \n  ledger  ");
+
+        assert_eq!(
+            contents_name(&tree, 1).as_deref(),
+            Some("Production ledger")
+        );
+    }
+
+    #[test]
+    fn keeps_the_space_authored_between_two_text_nodes() {
+        // `Item {count}` — the trailing space belongs to the first node, so the
+        // words stay apart while `Item{count}` runs together.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_text_node(&mut tree, 1, 2, "Item ");
+        append_text_node(&mut tree, 1, 3, "5");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("Item 5"));
+    }
+
+    #[test]
+    fn skips_a_hidden_descendant_without_joining_its_neighbours() {
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_text_node(&mut tree, 1, 2, "Item");
+        append_element(&mut tree, Some(1), 3, "text");
+        append_text_node(&mut tree, 3, 4, "hidden");
+        tree.set_custom_prop(3, "ariaHidden".into(), true.into());
+        append_element(&mut tree, Some(1), 5, "text");
+        append_text_node(&mut tree, 5, 6, "left");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("Item left"));
+    }
+
+    #[test]
+    fn keeps_the_boundary_of_a_hidden_box_between_two_text_runs() {
+        // `5<div ariaHidden/>kg`: the box contributes no text and still stands
+        // between its neighbours, so they cannot run together.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_text_node(&mut tree, 1, 2, "5");
+        append_element(&mut tree, Some(1), 3, "div");
+        append_text_node(&mut tree, 3, 4, "hidden");
+        tree.set_custom_prop(3, "ariaHidden".into(), true.into());
+        append_text_node(&mut tree, 1, 5, "kg");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("5 kg"));
+    }
+
+    #[test]
+    fn leaves_a_hidden_text_run_out_without_a_boundary_of_its_own() {
+        // A hidden text node has no box either way, so its neighbours meet.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "text");
+        append_text_node(&mut tree, 1, 2, "Item");
+        append_element(&mut tree, Some(1), 3, "text");
+        append_text_node(&mut tree, 3, 4, "hidden");
+        tree.set_custom_prop(3, "ariaHidden".into(), true.into());
+        append_text_node(&mut tree, 1, 5, "s");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("Items"));
+    }
+
+    #[test]
+    fn keeps_a_no_break_space_an_author_wrote() {
+        // CSS collapses the ASCII whitespace and leaves U+00A0 alone, which is
+        // the whole point of typing one.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_text_node(&mut tree, 1, 2, "  5\u{a0}kg  ");
+        append_element(&mut tree, Some(1), 3, "text");
+        append_text_node(&mut tree, 3, 4, "\u{a0}left");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("5\u{a0}kg \u{a0}left"));
+    }
+
+    #[test]
+    fn substitutes_a_descendant_label_for_the_subtree_it_names() {
+        // accname step 2F names every descendant in its own right, so an
+        // `<img alt>` inside a button names the button.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_element(&mut tree, Some(1), 2, "img");
+        tree.set_custom_prop(2, "role".into(), "img".into());
+        tree.set_custom_prop(2, "ariaLabel".into(), "Save".into());
+        append_element(&mut tree, Some(1), 3, "text");
+        tree.set_custom_prop(3, "role".into(), "img".into());
+        tree.set_custom_prop(3, "ariaLabel".into(), "All".into());
+        append_text_node(&mut tree, 3, 4, "ignored glyph");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("Save All"));
+    }
+
+    #[test]
+    fn ignores_a_descendant_label_that_no_role_carries() {
+        // `apply` sets a label only for a node whose role supports one, and the
+        // author is told the rest are dropped. A name from contents reads the
+        // same tree: the label is not there, so the painted text is the name.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_element(&mut tree, Some(1), 2, "div");
+        tree.set_custom_prop(2, "ariaLabel".into(), "Save".into());
+        append_element(&mut tree, Some(1), 3, "text");
+        append_text_node(&mut tree, 3, 4, "All");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("All"));
+    }
+
+    #[test]
+    fn resolves_a_descendant_reference_list_for_the_subtree_it_names() {
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_element(&mut tree, Some(1), 2, "text");
+        tree.set_custom_prop(2, "id".into(), "save".into());
+        append_text_node(&mut tree, 2, 3, "Save");
+        append_element(&mut tree, Some(1), 4, "div");
+        tree.set_custom_prop(4, "role".into(), "button".into());
+        append_element(&mut tree, Some(4), 5, "img");
+        tree.set_custom_prop(5, "role".into(), "img".into());
+        tree.set_custom_prop(5, "ariaLabelledBy".into(), "save".into());
+        append_text_node(&mut tree, 5, 6, "glyph");
+        append_element(&mut tree, Some(4), 7, "text");
+        append_text_node(&mut tree, 7, 8, "All");
+
+        assert_eq!(contents_name(&tree, 4).as_deref(), Some("Save All"));
+    }
+
+    #[test]
+    fn stops_at_one_level_when_a_descendant_references_its_own_ancestor() {
+        // The reference resolves against the subtree being walked. Following
+        // one level is what the spec resolves and what makes this terminate.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        tree.set_custom_prop(1, "id".into(), "root".into());
+        tree.set_custom_prop(1, "role".into(), "button".into());
+        append_element(&mut tree, Some(1), 2, "text");
+        tree.set_custom_prop(2, "role".into(), "img".into());
+        tree.set_custom_prop(2, "ariaLabelledBy".into(), "root".into());
+        append_text_node(&mut tree, 2, 3, "glyph");
+        append_text_node(&mut tree, 1, 4, "All");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("glyph All All"));
+    }
+
+    #[test]
+    fn leaves_the_root_of_a_contents_walk_to_its_caller() {
+        // The element's own label outranks its contents, and that precedence is
+        // applied before the walk. Reading it here would name every projected
+        // value with the label instead of the text it stands in for.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        tree.set_custom_prop(1, "ariaLabel".into(), "Authored name".into());
+        append_text_node(&mut tree, 1, 2, "Painted text");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("Painted text"));
     }
 
     #[test]
