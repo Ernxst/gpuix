@@ -1722,8 +1722,20 @@ grapheme-safe deletion and mouse positioning.
 
 `Enter` emits `onSubmit`. In a `<textarea>`, `Shift+Enter` inserts a newline.
 The editor updates natively first, then reports the complete value to React.
-`value` changes can replace the native content, but keeping the same prop value
-does not reject an edit like a browser-controlled input.
+
+**A controlled editor is as controlled as a browser's.** An `<input>` or
+`<textarea>` with a `value` prop shows that prop and nothing else: after each
+`onChange`, an edit the handler did not store is put back, exactly as React
+DOM's `restoreControlledState` does it. A handler that sets no state makes a
+read-only field, and one that filters what it stores — stripping digits, say —
+keeps the characters it accepted and rewinds the rest:
+
+```tsx
+<input value={value} onChange={(event) => setValue((event.value ?? '').replace(/[0-9]/g, ''))} />
+```
+
+Leave `value` off — or pass `undefined` — for an uncontrolled editor: the text
+is the editor's own, nothing rewinds it, and `onChange` is a notification.
 
 The focused caret stays solid during edits and then blinks every 500ms while
 idle. It stops scheduling repaint frames on blur or while the window is
@@ -1763,7 +1775,10 @@ report `"forward"` in its place.
 Assigning `value` writes straight to the native editor: it fires no `onChange`.
 React's `value` prop still wins the moment it *changes* — the next commit of a
 different `value` overwrites what you wrote, a commit of an unchanged one leaves
-it alone. On a controlled input, set React state instead.
+it alone. On a controlled input, an edit the handler then **declines** wipes it
+too, because the restore above puts `props.value` back; an edit the handler
+stores keeps it, since the prop it stores is the edited text. Set React state
+instead.
 
 Select-all-on-focus and caret restoration after a reformatting `onChange` are
 the two idioms this exists for:
@@ -3502,7 +3517,9 @@ role, not GPUI's computed accessibility role — implicit roles and
 name-from-contents live in the accessibility snapshot, which is what
 `getByRole` reads. And `semantics.value` is the retained `value` prop, so a
 controlled input reports its current value while an uncontrolled one reports the
-last value the author set rather than the live editing buffer.
+last value the author set rather than the live editing buffer. The
+[`toHaveValue` and `toHaveDisplayValue` matchers](#matchers) read that live
+buffer; `semantics.value` and `getByDisplayValue` stay the declaration.
 
 ```ts
 const node = await app.getByLabelText('Recipe search').element()
@@ -3843,8 +3860,8 @@ declare module 'vitest' {
 | `toBeDisabled()` | `disabled` or `ariaDisabled` is declared on it |
 | `toHaveFocus()` | It holds the window's keyboard focus |
 | `toHaveTextContent(matcher, options?)` | Its text plus every descendant's |
-| `toHaveValue(value)` | Its retained `value` prop, exactly |
-| `toHaveDisplayValue(matcher, options?)` | Its `value` prop, through the Testing Library matcher |
+| `toHaveValue(value)` | Its current value, exactly |
+| `toHaveDisplayValue(matcher, options?)` | Its current value, through the Testing Library matcher |
 | `toHaveAccessibleName(matcher?)` | Its computed accessible name |
 
 Every matcher re-resolves the element against its renderer first, so an element
@@ -3892,7 +3909,29 @@ across repeated assertions — jest-dom has the same wart; drop the `g`.
 **`toHaveValue(value)` takes a string, and only a string.** jest-dom's
 zero-argument form and its numeric and string-array forms are not implemented:
 there is no `type="number"` input and no multi-select to coerce for, and "has
-any value" is `expect(element.semantics?.value).toBeDefined()`.
+any value" is `expect(renderer.getInputValue(field.id) ?? '').not.toBe('')` —
+keep the `?? ''`, because an editor that was never built reads `null` and
+`expect(null).not.toBe('')` would pass with no value in sight.
+
+`toHaveValue` and `toHaveDisplayValue` read the **live editor value** for an
+`<input>` or `<textarea>`, the way `HTMLInputElement.value` does, so typed text
+and an imperative `ref.value = 'x'` write are both visible on an uncontrolled
+input:
+
+```ts
+await screen.userEvent.type(field, 'hi')
+expect(field).toHaveValue('hi')
+```
+
+Only those two host types pay for that read — it crosses to native and forces a
+draw, milliseconds against microseconds for the retained tree, and nothing else
+has an editor to read. Every other element answers from its retained `value`
+prop, and so does an `<input>` whose editor was never materialised: an
+off-screen `<virtual-list>` row is in the tree with its declared value but has
+built no editor to hold one, and the prop is the only value there is. The
+queries never take the native path at all — `getByDisplayValue` and
+`TestElement.semantics.value` stay the declaration-flavoured surface, matching
+the prop the author set.
 
 `toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
 node, which exists only where the element projects accessibility semantics. An

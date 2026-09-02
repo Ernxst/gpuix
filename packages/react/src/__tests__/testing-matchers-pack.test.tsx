@@ -1,9 +1,10 @@
 /** The jest-dom-shaped matcher pack, wired the way a consumer wires it. */
 
 import React, { useState } from "react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
+import type { InputPublicInstance } from "../types/host.js"
 
 expect.extend(gpuixMatchers)
 
@@ -188,6 +189,130 @@ describeNative("gpuix matcher pack", () => {
       expect(() => expect(screen.getByTestId("panel")).toHaveValue("")).toThrowError(
         /value is not declared/
       )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("reads the value the user typed into an uncontrolled input", async () => {
+    const screen = createTestRoot({ width: 400, height: 160 })
+
+    try {
+      screen.render(
+        <div style={{ width: 400, height: 160 }}>
+          <input data-testid="field" style={{ width: 300, height: 40 }} />
+        </div>
+      )
+      const field = screen.getByTestId("field")
+
+      await screen.userEvent.type(field, "hi")
+
+      // The canonical RTL idiom. The typed text only ever lived in the native
+      // editor, so a matcher reading the retained prop would fail here.
+      expect(field).toHaveValue("hi")
+      expect(field).toHaveDisplayValue("hi")
+      expect(field).toHaveDisplayValue(/^h/)
+      expect(field).not.toHaveValue("")
+      // The declaration-flavoured surface is unchanged: no `value` prop was
+      // ever written, and `semantics` still says so.
+      expect(field.semantics?.value).toBeUndefined()
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("reads the value an imperative ref write put in the editor", () => {
+    const screen = createTestRoot({ width: 400, height: 160 })
+    const ref = React.createRef<InputPublicInstance>()
+
+    try {
+      screen.render(
+        <div style={{ width: 400, height: 160 }}>
+          <input
+            ref={ref}
+            data-testid="field"
+            value="hello"
+            style={{ width: 300, height: 40 }}
+          />
+        </div>
+      )
+      const field = screen.getByTestId("field")
+      expect(field).toHaveValue("hello")
+
+      ref.current!.value = "goodbye"
+
+      expect(field).toHaveValue("goodbye")
+      expect(field).toHaveDisplayValue("goodbye")
+      expect(field).not.toHaveValue("hello")
+      // `HTMLInputElement.value =` does not rewrite the attribute either.
+      expect(field.semantics?.value).toBe("hello")
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("reports no value at all for an element that edits no text", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div data-testid="panel" role="button" ariaLabel="Ledger">
+            <text>Ledger</text>
+          </div>
+        </div>
+      )
+      const panel = screen.getByTestId("panel")
+
+      // A `<div>` has no editor and never declares a value, so both halves of
+      // the read come back empty — and the matchers say "not declared" rather
+      // than matching the "" an empty editor would have reported.
+      expect(screen.renderer.getInputValue(panel.id)).toBeNull()
+
+      // Nor is the native read even attempted: it costs a forced draw, and no
+      // type but `<input>`/`<textarea>` has an editor it could return.
+      const read = vi.spyOn(screen.renderer, "getInputValue")
+      expect(panel).not.toHaveValue("")
+      expect(read).not.toHaveBeenCalled()
+      read.mockRestore()
+
+      expect(panel).not.toHaveDisplayValue("")
+      expect(() => expect(panel).toHaveDisplayValue(/.*/)).toThrowError(
+        /value is not declared/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("falls back to the declared value for an input whose editor was never built", () => {
+    const screen = createTestRoot({ width: 400, height: 200 })
+
+    try {
+      screen.render(
+        <virtual-list overdraw={0} estimatedItemHeight={40} style={{ width: 400, height: 160 }}>
+          {Array.from({ length: 60 }, (_, index) => (
+            <div key={index} style={{ height: 40, flexShrink: 0 }}>
+              <input
+                data-testid={`row-${index}`}
+                value={`row-${index}`}
+                style={{ width: 300, height: 30 }}
+              />
+            </div>
+          ))}
+        </virtual-list>
+      )
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      // A row far below the viewport is retained but never rendered, so no
+      // native editor exists to hold its text. This is the reachable fallback:
+      // the declared prop is the only value there is, and it is the right one.
+      const offscreen = screen.getByTestId("row-50")
+      expect(screen.renderer.getInputValue(offscreen.id)).toBeNull()
+      expect(offscreen).toHaveValue("row-50")
+      expect(offscreen).toHaveDisplayValue("row-50")
+      expect(offscreen).not.toHaveValue("")
     } finally {
       screen.unmount()
     }

@@ -679,6 +679,46 @@ fn pending_editing_state(value: &str, multiline: bool) -> TextEditingState {
     }
 }
 
+/// How many unanswered edits an editor remembers. React normally answers each
+/// one within a frame, so the bound only exists to stop a component that never
+/// re-renders from growing the queue forever.
+const MAX_PENDING_ECHOES: usize = 32;
+
+/// Remember an edit this editor reported, so the `value` prop React sends back
+/// can be recognised as that same edit returning.
+fn record_pending_echo(pending: &mut VecDeque<String>, value: String) {
+    pending.push_back(value);
+    while pending.len() > MAX_PENDING_ECHOES {
+        pending.pop_front();
+    }
+}
+
+/// True when `value` is React echoing an edit this editor already made, in
+/// which case the editor already holds it and must not be rewritten — a
+/// rewrite would park the caret at the end mid-typing.
+///
+/// The matched edit and every edit queued before it are dropped: a value React
+/// sent back is proof that it saw that edit, and an older edit can no longer
+/// arrive after a newer one.
+fn take_pending_echo(pending: &mut VecDeque<String>, value: &str) -> bool {
+    match pending.iter().rposition(|queued| queued == value) {
+        Some(index) => {
+            pending.drain(..=index);
+            true
+        }
+        None => {
+            pending.clear();
+            false
+        }
+    }
+}
+
+/// Forget every unanswered edit, because the editor's text was just replaced by
+/// something other than React's answer to them.
+fn invalidate_pending_echoes(pending: &mut VecDeque<String>) {
+    pending.clear();
+}
+
 struct TextEditorState {
     element_id: u64,
     callback: Option<EventCallback>,
@@ -791,19 +831,20 @@ impl TextEditorState {
     }
 
     fn sync_prop_value(&mut self, value: String, cx: &mut Context<Self>) {
-        if let Some(index) = self
-            .pending_values
-            .iter()
-            .rposition(|pending| pending == &value)
-        {
-            self.pending_values.drain(..=index);
+        if take_pending_echo(&mut self.pending_values, &value) {
             return;
         }
-        self.pending_values.clear();
         self.set_external_text(value, cx);
     }
 
     fn set_external_text(&mut self, value: String, cx: &mut Context<Self>) {
+        // Before the equality check, and unconditionally: whoever wrote this
+        // value decided what the editor holds, so an edit React has not
+        // answered yet is no longer an edit it could be echoing. Leaving the
+        // echoes queued would make the *next* prop equal to one of them look
+        // like a round trip and be dropped — the value React asked for would
+        // never reach the editor.
+        invalidate_pending_echoes(&mut self.pending_values);
         if self.content == value {
             return;
         }
@@ -824,10 +865,7 @@ impl TextEditorState {
 
     fn emit_change(&mut self) {
         if self.emits_change {
-            self.pending_values.push_back(self.content.clone());
-            while self.pending_values.len() > 32 {
-                self.pending_values.pop_front();
-            }
+            record_pending_echo(&mut self.pending_values, self.content.clone());
             emit_event_full(&self.callback, self.element_id, "change", |payload| {
                 payload.value = Some(self.content.clone());
             });
@@ -2029,6 +2067,57 @@ mod tests {
             binding.match_keystrokes(std::slice::from_ref(&keystroke)) == Some(false)
                 && binding.action().partial_eq(action)
         })
+    }
+
+    fn echoes(values: &[&str]) -> VecDeque<String> {
+        let mut pending = VecDeque::new();
+        for value in values {
+            record_pending_echo(&mut pending, (*value).to_string());
+        }
+        pending
+    }
+
+    #[test]
+    fn an_echo_drops_itself_and_everything_older() {
+        let mut pending = echoes(&["a", "ab", "abc"]);
+
+        // React answered the second edit, so the first can no longer arrive.
+        assert!(take_pending_echo(&mut pending, "ab"));
+        assert_eq!(pending, echoes(&["abc"]));
+    }
+
+    #[test]
+    fn a_value_no_edit_produced_is_a_write_to_apply() {
+        let mut pending = echoes(&["a", "ab"]);
+
+        // React sent text of its own, so nothing queued is still in flight.
+        assert!(!take_pending_echo(&mut pending, "zz"));
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn a_replaced_value_stops_swallowing_the_prop_that_matches_it() {
+        // The editor produced "abc1", the handler refused it, and the restore
+        // wrote "abc" back — which is what invalidates the outstanding echo.
+        let mut pending = echoes(&["abc1"]);
+        invalidate_pending_echoes(&mut pending);
+
+        // Now the application decides "abc1" is what it wants after all. That
+        // prop must reach the editor; treating it as the old echo would leave
+        // the editor showing "abc" forever.
+        assert!(!take_pending_echo(&mut pending, "abc1"));
+    }
+
+    #[test]
+    fn the_echo_queue_is_bounded() {
+        let mut pending = VecDeque::new();
+        for index in 0..MAX_PENDING_ECHOES + 8 {
+            record_pending_echo(&mut pending, index.to_string());
+        }
+
+        assert_eq!(pending.len(), MAX_PENDING_ECHOES);
+        // The oldest edits were dropped, not the newest.
+        assert_eq!(pending.back().map(String::as_str), Some("39"));
     }
 
     #[test]
