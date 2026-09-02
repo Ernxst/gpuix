@@ -340,6 +340,7 @@ const warnedInvalidStyleProps = new WeakSet<Instance>()
 const warnedUnsupportedClassNameProps = new WeakSet<Instance>()
 const warnedUnsupportedAccessibilityRoleProps = new WeakSet<Instance>()
 const warnedUnsupportedAriaProps = new WeakSet<Instance>()
+const warnedUnsupportedScrollIntoViewOptions = new WeakSet<Instance>()
 const warnedVisuallyHiddenProps = new WeakSet<Instance>()
 
 class UnsupportedStyleTransitionError extends Error {
@@ -377,6 +378,58 @@ function elementSubject(instance: Instance, props: Props): string {
     .filter((attribute): attribute is string => attribute !== undefined)
     .join(" ")
   return identity.length === 0 ? `<${instance.type}>` : `<${instance.type} ${identity}>`
+}
+
+class UnsupportedScrollIntoViewOptionError extends Error {
+  override name = "UnsupportedScrollIntoViewOptionError"
+}
+
+/**
+ * Resolve `Element.scrollIntoView()`'s alignment to the one bit gpui can act
+ * on: align the scroll container to the element's top edge, or scroll by the
+ * smallest amount that reveals it.
+ *
+ * The DOM defaults to `block: "start"`, and `scrollIntoView(true)` spells the
+ * same thing. `"center"` and `"end"` have no gpui equivalent: under
+ * `strictStyles` they throw, and otherwise they warn once per element and
+ * reveal by the nearest edge, the way every other unsupported input on this
+ * host config degrades. A component shared with the web must not crash on
+ * native for an alignment the reveal can only approximate.
+ */
+function scrollIntoViewAlignsToTop(
+  instance: Instance,
+  container: Container,
+  props: Props,
+  options?: boolean | ScrollIntoViewOptions
+): boolean {
+  const reject = (spelling: string): boolean => {
+    const message =
+      `[gpuix] ${elementSubject(instance, props)} cannot scrollIntoView with ${spelling}. ` +
+      'The native renderer aligns to a child\'s top edge (block: "start") or scrolls the ' +
+      'smallest amount that reveals it (block: "nearest").'
+    if (container.strictStyles) throw new UnsupportedScrollIntoViewOptionError(message)
+    if (!warnedUnsupportedScrollIntoViewOptions.has(instance)) {
+      warnedUnsupportedScrollIntoViewOptions.add(instance)
+      console.warn(message)
+    }
+    // The nearest edge always reveals the element, so the scroll still
+    // happens; only where it comes to rest differs.
+    return false
+  }
+
+  if (options === undefined || options === true) return true
+  if (options === false) return reject('block: "end"')
+
+  const { block, inline } = options
+  if (block !== undefined && block !== "start" && block !== "nearest") {
+    return reject(`block: ${JSON.stringify(block)}`)
+  }
+  if (inline !== undefined && inline !== "nearest") {
+    return reject(`inline: ${JSON.stringify(inline)}`)
+  }
+  // `behavior` is accepted and ignored: every scroll here is instant, as with
+  // PublicInstance.scrollTo().
+  return block !== "nearest"
 }
 
 function isPlainStyleObject(style: unknown): style is StyleDesc {
@@ -850,6 +903,26 @@ export const hostConfig = {
       )
     }
     const id = nextId(rootContainerInstance)
+    // [scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight].
+    // An element that is not a scroll container still has a viewport in the DOM,
+    // and content that cannot scroll makes its scroll extent equal to that viewport.
+    const scrollMetrics = (): readonly number[] => {
+      const native = rootContainerInstance.native
+      const getScrollMetrics = native.getScrollMetrics
+      const metrics = getScrollMetrics ? getScrollMetrics.call(native, id) : null
+      if (metrics) return metrics
+      const getElementBounds = native.getElementBounds
+      const bounds = getElementBounds ? getElementBounds.call(native, id) : null
+      const width = bounds?.[2] ?? 0
+      const height = bounds?.[3] ?? 0
+      return [0, 0, width, height, width, height]
+    }
+    const scrollToOffset = (left: number, top: number): void => {
+      // gpui stores how far the content moved up/left; the DOM reports how far
+      // the viewport moved down/right. Subtracting rather than negating keeps a
+      // reset at 0 instead of -0. Clamping stays native.
+      rootContainerInstance.native.scrollTo?.(id, 0 - left, 0 - top)
+    }
     const instance: Instance = {
       id,
       type,
@@ -867,14 +940,43 @@ export const hostConfig = {
       setPointerCapture: () => rootContainerInstance.native.setPointerCapture?.(id),
       releasePointerCapture: () =>
         rootContainerInstance.native.releasePointerCapture?.(id),
-      get scrollLeft() {
-        const getScrollOffset = rootContainerInstance.native.getScrollOffset
-        return -(getScrollOffset?.call(rootContainerInstance.native, id)?.[0] ?? 0)
+      get scrollLeft(): number {
+        return scrollMetrics()[0]!
       },
-      get scrollTop() {
-        const getScrollOffset = rootContainerInstance.native.getScrollOffset
-        return -(getScrollOffset?.call(rootContainerInstance.native, id)?.[1] ?? 0)
+      set scrollLeft(value: number) {
+        scrollToOffset(value, scrollMetrics()[1]!)
       },
+      get scrollTop(): number {
+        return scrollMetrics()[1]!
+      },
+      set scrollTop(value: number) {
+        scrollToOffset(scrollMetrics()[0]!, value)
+      },
+      get scrollWidth(): number {
+        return scrollMetrics()[2]!
+      },
+      get scrollHeight(): number {
+        return scrollMetrics()[3]!
+      },
+      get clientWidth(): number {
+        return scrollMetrics()[4]!
+      },
+      get clientHeight(): number {
+        return scrollMetrics()[5]!
+      },
+      scrollTo: (optionsOrX?: ScrollToOptions | number, y?: number) => {
+        const metrics = scrollMetrics()
+        const left =
+          typeof optionsOrX === "number" ? optionsOrX : (optionsOrX?.left ?? metrics[0]!)
+        const top =
+          typeof optionsOrX === "number" ? (y ?? metrics[1]!) : (optionsOrX?.top ?? metrics[1]!)
+        scrollToOffset(left, top)
+      },
+      scrollIntoView: (options?: boolean | ScrollIntoViewOptions) =>
+        rootContainerInstance.native.scrollElementIntoView?.(
+          id,
+          scrollIntoViewAlignsToTop(instance, rootContainerInstance, props, options)
+        ),
       getBounds: () => {
         const getElementBounds = rootContainerInstance.native.getElementBounds
         if (!getElementBounds) {

@@ -1256,6 +1256,55 @@ renderer.scrollToItem(elementId, index)   // scroll child into view
 renderer.getScrollOffset(elementId)       // returns [x, y] or null
 ```
 
+The ref itself also carries the `Element` scroll API, so a component shared with
+the web reads and writes scroll position the same way in both renderers. These
+use the **DOM's sign convention** — `scrollTop` is `0` at the top and grows
+positive as content scrolls up out of view — while the renderer methods above
+keep gpui's negative offsets:
+
+```tsx
+const ref = useRef<PublicInstance>(null)
+
+ref.current.scrollTop            // pixels scrolled down (positive)
+ref.current.scrollLeft           // pixels scrolled right (positive)
+ref.current.scrollHeight         // scrollable content height
+ref.current.scrollWidth          // scrollable content width
+ref.current.clientHeight         // viewport height
+ref.current.clientWidth          // viewport width
+
+ref.current.scrollTop = ref.current.scrollHeight   // jump to the bottom
+ref.current.scrollTo({ top: 240 })                 // instant; `behavior` is ignored
+ref.current.scrollIntoView()                       // block: "start", the DOM default
+ref.current.scrollIntoView({ block: "nearest" })   // smallest revealing scroll
+
+// "Am I at the bottom?" — the standard DOM test
+const atBottom =
+  ref.current.scrollTop + ref.current.clientHeight >= ref.current.scrollHeight
+```
+
+Only `overflow: "scroll"` elements and `<virtual-list>` are scroll containers
+here. Everything else — **including `overflow: "hidden"`, which the web does
+treat as a programmatically scrollable container** — reports its viewport for
+`clientWidth` / `clientHeight`, a matching scroll extent, and `0` offsets, and
+drops writes to `scrollTop` / `scrollLeft`.
+
+`scrollIntoView()` supports the DOM default `block: "start"` and
+`block: "nearest"`. `block: "center"`, `block: "end"`, `scrollIntoView(false)`
+and any `inline` other than `"nearest"` have no gpui equivalent: they warn once
+and reveal by the nearest edge, or throw under `strictStyles`. `block: "start"`
+aligns the **scroll container's own child** that contains the target, not the
+target itself, so a deeply nested element rests at the top of its row rather
+than at the top of the viewport.
+
+Reading any of the six properties forces layout in the native renderer, as
+reading `Element.scrollHeight` does on the web; the browser-mirror renderer
+samples the last frame instead. Hoist the reads you need out of a hot scroll
+handler rather than repeating them: each read costs a forced draw, and on an
+element that is **not** a scroll container it costs two, because the metrics
+call returns nothing and the fallback measures the element's bounds — the
+three-property "am I at the bottom?" idiom above is six draws there. A
+per-frame metrics cache would collapse that; it is not implemented yet.
+
 ## Virtual lists
 
 Use `<virtual-list>` for **long, variable-height collections** such as message
@@ -3520,6 +3569,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Scroll wheel events with delta and touch phase
 - [x] Scrollable containers (`overflow: "scroll"`) with persistent scroll state
 - [x] Programmatic scroll API (`scrollTo`, `scrollToItem`, `getScrollOffset`)
+- [x] `Element`-shaped scroll properties on refs (`scrollTop`, `scrollHeight`, `clientHeight`, `scrollIntoView()`)
 - [x] Keyboard events (keyDown, keyUp) with focus management
 - [x] Focus/blur events with automatic FocusHandle creation
 - [x] GPU-backed test renderer with screenshot capture

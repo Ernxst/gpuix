@@ -209,6 +209,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
   getScrollOffset(elementId: number): number[] | null
   getListScrollTop(elementId: number): number[] | null
+  getScrollMetrics(elementId: number): number[] | null
+  scrollElementIntoView(elementId: number, alignToTop?: boolean): void
   setDebugFrameOverlay(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay(): string
   cycleDebugFrameOverlay(): string
@@ -1155,6 +1157,26 @@ export class TestRenderer implements NativeRenderer {
     const result = this.native.getListScrollTop(elementId)
     if (!result) return null
     return [result[0], result[1], result[2]]
+  }
+
+  /** Web-shaped scroll geometry for a scrollable element:
+   *  `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]`,
+   *  or null when the element is not a scroll container. The offsets use the
+   *  DOM's positive convention, unlike `getScrollOffset`. */
+  getScrollMetrics(elementId: number): number[] | null {
+    // No flush here: the native read forces layout itself, exactly as the
+    // production renderer does. Flushing in this wrapper would hide a missing
+    // forced layout from every test that reads scroll geometry.
+    return this.native.getScrollMetrics(elementId)
+  }
+
+  /** Reveal an element inside every scrollable ancestor, without moving focus.
+   *  `alignToTop` is the DOM's `block: "start"` and defaults to it; `false` is
+   *  `block: "nearest"`. */
+  scrollElementIntoView(elementId: number, alignToTop?: boolean): void {
+    this.native.scrollElementIntoView(elementId, alignToTop)
+    // The reveal is applied during the next prepaint, like scrollToItem.
+    this.native.flush()
   }
 
   // ── Selection API ───────────────────────────────────────────────

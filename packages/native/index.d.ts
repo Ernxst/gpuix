@@ -187,6 +187,27 @@ export declare class GpuixRenderer {
    * Returns [x, y] or null if the element has no scroll handle.
    */
   getScrollOffset(elementId: number): Array<number> | null
+  /**
+   * Web-shaped scroll geometry for a scrollable element, as
+   * `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]`,
+   * or null when the element is not a scroll container. Unlike
+   * `getScrollOffset` the offsets use the DOM's positive convention.
+   *
+   * Forces layout first, like `Element.scrollHeight` does: without it a read
+   * from a mount effect, before the first frame, sees no scroll geometry at
+   * all and reports the element as unscrollable.
+   */
+  getScrollMetrics(elementId: number): Array<number> | null
+  /**
+   * Reveal one element inside every scrollable ancestor, as
+   * `Element.scrollIntoView()` does, without moving focus. `alignToTop` is
+   * the DOM's `block: "start"` and defaults to it; `false` is
+   * `block: "nearest"`.
+   *
+   * Forces layout first: the reveal reads painted child geometry, which a
+   * caller running before the first frame would not have.
+   */
+  scrollElementIntoView(elementId: number, alignToTop?: boolean | undefined | null): void
   getAutomationTree(): string
   getElementBounds(id: number): Array<number> | null
   getAllText(): Array<string>
@@ -502,6 +523,25 @@ export declare class TestGpuixRenderer {
    * Returns [x, y] or null if the element has no scroll handle.
    */
   getScrollOffset(elementId: number): Array<number> | null
+  /**
+   * Web-shaped scroll geometry for a scrollable element, as
+   * `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]`,
+   * or null when the element is not a scroll container. Unlike
+   * `getScrollOffset` the offsets use the DOM's positive convention.
+   *
+   * Forces layout first, like the production renderer and like
+   * `Element.scrollHeight`: a read from a mount effect, before the first
+   * frame, must not report the element as unscrollable.
+   */
+  getScrollMetrics(elementId: number): Array<number> | null
+  /**
+   * Reveal one element inside every scrollable ancestor, as
+   * `Element.scrollIntoView()` does, without moving focus. `alignToTop` is
+   * the DOM's `block: "start"` and defaults to it; `false` is
+   * `block: "nearest"`.
+   * Forces layout first; call flush() after to apply the scroll and re-render.
+   */
+  scrollElementIntoView(elementId: number, alignToTop?: boolean | undefined | null): void
   /**
    * Capture a screenshot of the current rendered state and save as PNG.
    * Supported on macOS through Metal and Windows through DirectX.
