@@ -37,6 +37,14 @@ icons (ISC, Copyright (c) 2026 Lucide Icons and Contributors). The OpenAI mark
 is ported from **[Comet](https://github.com/zeronsh/comet)** (MIT, Copyright (c)
 2026 Wing).
 
+## Canvas conformance tests
+
+`packages/react/wpt/yaml/` vendors eleven canvas suites from the
+**[W3C web-platform-tests](https://github.com/web-platform-tests/wpt/tree/master/html/canvas/tools/yaml)**
+project (3-Clause BSD, Copyright © web-platform-tests contributors). The
+committed converter follows WPT's YAML assertion grammar and produces a
+network-free JSON case table for GPUIX's native canvas harness.
+
 ## Bundled syntax definitions
 
 Syntax highlighting uses **[Syntect](https://github.com/trishume/syntect)** (MIT)

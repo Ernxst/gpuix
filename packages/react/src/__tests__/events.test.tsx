@@ -338,6 +338,30 @@ describe("frame loop", () => {
     loop.stop()
   })
 
+  it("keeps ticking until a later false, then exits once", async () => {
+    let ticks = 0
+    let terminated = 0
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          ticks += 1
+          return ticks < 3
+        },
+      },
+      {
+        frameMs: 5,
+        onTerminated: () => {
+          terminated += 1
+        },
+      }
+    )
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(ticks).toBe(3)
+    expect(terminated).toBe(1)
+    loop.stop()
+  })
+
   it("recovers after tick throws instead of abandoning the AppKit pump", async () => {
     let ticks = 0
     let terminated = 0
@@ -443,6 +467,225 @@ describeNative("events", () => {
           "Count: 2",
         ]
       `)
+    })
+
+    it("delivers double click after the second click with detail 2", () => {
+      const calls: Array<{ type: string; detail: number }> = []
+
+      testRoot.render(
+        <div
+          testId="double-click-target"
+          style={{ width: 200, height: 80 }}
+          onClick={(event) => calls.push({ type: "click", detail: event.detail })}
+          onDoubleClick={(event) =>
+            calls.push({ type: "doubleClick", detail: event.detail })
+          }
+        />
+      )
+      // The platform reports the repeat count on the second press.
+      testRoot.renderer.nativeSimulateClick(40, 40)
+      testRoot.renderer.nativeSimulateClick(40, 40, 0, undefined, 2)
+
+      expect(calls).toEqual([
+        { type: "click", detail: 1 },
+        { type: "click", detail: 2 },
+        { type: "doubleClick", detail: 2 },
+      ])
+    })
+
+    it("does not turn a repeated keyboard activation into a double click", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <div
+          testId="keyboard-activation-target"
+          style={{ width: 200, height: 80 }}
+          onClick={() => calls.push("click")}
+          onDoubleClick={() => calls.push("doubleClick")}
+        />
+      )
+      const target = testRoot.renderer.findByTestId("keyboard-activation-target")!
+
+      handleGpuixEvent(
+        {
+          elementId: target.id,
+          eventType: "click",
+          button: 0,
+          clickCount: 2,
+          isRightClick: false,
+          inputSource: "keyboard",
+        },
+        testRoot.renderer
+      )
+
+      expect(calls).toEqual(["click"])
+    })
+
+    it("delivers a cancelable context menu on the right mouse press", () => {
+      const order: string[] = []
+      const calls: Array<{
+        type: string
+        button: number
+        detail: number
+        cancelable: boolean
+        defaultPrevented: boolean
+      }> = []
+
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 80 }}
+          onMouseDown={() => order.push("mouseDown")}
+          onMouseUp={() => order.push("mouseUp")}
+          onAuxClick={() => order.push("auxClick")}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            order.push("contextMenu")
+            calls.push({
+              type: "contextMenu",
+              button: event.button,
+              detail: event.detail,
+              cancelable: event.cancelable,
+              defaultPrevented: event.defaultPrevented,
+            })
+          }}
+        />
+      )
+
+      testRoot.renderer.nativeSimulateClick(40, 40)
+      testRoot.renderer.nativeSimulateClick(40, 40, 2)
+
+      // macOS fires contextmenu on the press, between mousedown and auxclick.
+      // The right-button mouseup is missing: GPUI's aux-click listener stops
+      // propagation before the mouse-up listener runs. That divergence
+      // predates this event and is not what this test locks in.
+      expect(order).toEqual([
+        "mouseDown",
+        "mouseUp",
+        "mouseDown",
+        "contextMenu",
+        "auxClick",
+      ])
+      expect(calls).toEqual([
+        {
+          type: "contextMenu",
+          button: 2,
+          detail: 0,
+          cancelable: true,
+          defaultPrevented: true,
+        },
+      ])
+    })
+
+    it("delivers double click and context menu on a canvas that declares neither click", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <canvas
+          width={200}
+          height={80}
+          testId="canvas-synthetic-clicks"
+          style={{ width: 200, height: 80 }}
+          onDoubleClick={() => calls.push("doubleClick")}
+          onContextMenu={() => calls.push("contextMenu")}
+        />
+      )
+      const canvas = testRoot.renderer.findByTestId("canvas-synthetic-clicks")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(canvas.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      testRoot.renderer.nativeSimulateClick(centerX, centerY)
+      testRoot.renderer.nativeSimulateClick(centerX, centerY, 0, undefined, 2)
+      testRoot.renderer.nativeSimulateClick(centerX, centerY, 2)
+
+      expect(calls).toEqual(["doubleClick", "contextMenu"])
+    })
+
+    it("delivers double click and context menu on a custom element beside canvas", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <code
+          code="const synthesized = true"
+          testId="code-synthetic-clicks"
+          style={{ width: 200, height: 80 }}
+          onDoubleClick={() => calls.push("doubleClick")}
+          onContextMenu={() => calls.push("contextMenu")}
+        />
+      )
+      const code = testRoot.renderer.findByTestId("code-synthetic-clicks")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(code.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      testRoot.renderer.nativeSimulateClick(centerX, centerY)
+      testRoot.renderer.nativeSimulateClick(centerX, centerY, 0, undefined, 2)
+      testRoot.renderer.nativeSimulateClick(centerX, centerY, 2)
+
+      expect(calls).toEqual(["doubleClick", "contextMenu"])
+    })
+
+    it("dispatches an ancestor mouse down once per right press on a custom element", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 240, height: 120, padding: 20 }}
+          onMouseDown={(event) => calls.push(`div:mouseDown:${event.button}`)}
+        >
+          <code
+            code="const synthesized = true"
+            testId="code-context-menu-child"
+            style={{ width: 200, height: 80 }}
+            onContextMenu={() => calls.push("code:contextMenu")}
+          />
+        </div>
+      )
+      const code = testRoot.renderer.findByTestId("code-context-menu-child")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(code.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      testRoot.renderer.nativeSimulateMouseDown(centerX, centerY, 2)
+
+      // One press is one bubbled `onMouseDown`, as in the browser. Unless the
+      // custom element stops native propagation the ancestor's own GPUI
+      // listener fires as well, and React dispatches the ancestor handler
+      // twice: once bubbling from the custom element, once at the ancestor.
+      expect(calls).toEqual(["div:mouseDown:2", "code:contextMenu"])
+    })
+
+    it("reaches an ancestor context menu from a right press on an inert child", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 240, height: 120, padding: 20 }}
+          onContextMenu={() => calls.push("contextMenu")}
+        >
+          <div testId="context-menu-inert-child" style={{ width: 200, height: 80 }} />
+        </div>
+      )
+      const child = testRoot.renderer.findByTestId("context-menu-inert-child")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      // The child declares nothing. It carries a mouse-down listener only
+      // because `contextMenu` tracking walks ancestors, and this locks that
+      // walk: without it the right press reaches no handler at all.
+      //
+      // It does not guard the right-button narrowing of that listener. A left
+      // press is silent either way, because the ancestor has no `onMouseDown`
+      // and the extra native payload is drained inside
+      // `nativeSimulateMouseDown` with nowhere to be observed. The button set
+      // itself is guarded in Rust, by
+      // `renderer::mouse_down_button_set_tests`.
+      testRoot.renderer.nativeSimulateMouseDown(centerX, centerY)
+      expect(calls).toEqual([])
+
+      testRoot.renderer.nativeSimulateMouseDown(centerX, centerY, 2)
+      expect(calls).toEqual(["contextMenu"])
     })
 
     it("dispatches one event through capture, target, and bubble with DOM-shaped targets", () => {
@@ -1062,6 +1305,146 @@ describeNative("events", () => {
   })
 
   describe("keyboard events", () => {
+    it("delivers UI Events key values to DOM-idiom handlers", () => {
+      const actions: string[] = []
+
+      testRoot.render(
+        <div
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") actions.push("dismiss")
+            if (event.key === "ArrowDown") actions.push("next")
+            if (event.key === "F1") actions.push("help")
+            if (event.key === "Meta") actions.push("platform")
+            if (event.key === "BrowserBack") actions.push("back")
+          }}
+        />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      for (const key of ["escape", "down", "f1", "platform", "back"]) {
+        handleGpuixEvent(
+          { elementId: target.id, eventType: "keyDown", key },
+          testRoot.renderer
+        )
+      }
+
+      expect(actions).toEqual(["dismiss", "next", "help", "platform", "back"])
+    })
+
+    it("translates the key names other platforms produce", () => {
+      const keys: Array<string | undefined> = []
+
+      testRoot.render(
+        <div tabIndex={0} onKeyDown={(event) => keys.push(event.key)} />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      // Windows sends "menu"; the browser platform lowercases "ContextMenu",
+      // "PrintScreen", and "AltGraph"; Linux sends the XF86 editing keys.
+      for (const key of [
+        "menu",
+        "contextmenu",
+        "printscreen",
+        "altgraph",
+        "cut",
+        "copy",
+        "paste",
+      ]) {
+        handleGpuixEvent(
+          { elementId: target.id, eventType: "keyDown", key },
+          testRoot.renderer
+        )
+      }
+
+      expect(keys).toEqual([
+        "ContextMenu",
+        "ContextMenu",
+        "PrintScreen",
+        "AltGraph",
+        "Cut",
+        "Copy",
+        "Paste",
+      ])
+    })
+
+    it("reports the character a printable key produced", () => {
+      const keys: Array<string | undefined> = []
+
+      testRoot.render(
+        <div tabIndex={0} onKeyDown={(event) => keys.push(event.key)} />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      const presses: Array<{ key: string; keyChar?: string }> = [
+        // Shift+A and Shift+1: GPUI keeps the unshifted key name.
+        { key: "a", keyChar: "A" },
+        { key: "1", keyChar: "!" },
+        { key: "a", keyChar: "a" },
+        // Option-s on macOS types "ß".
+        { key: "s", keyChar: "ß" },
+        // Cmd-S produces no character at all.
+        { key: "s" },
+        // Enter carries a control character, and stays a named key.
+        { key: "enter", keyChar: "\n" },
+      ]
+      for (const press of presses) {
+        handleGpuixEvent(
+          { elementId: target.id, eventType: "keyDown", ...press },
+          testRoot.renderer
+        )
+      }
+
+      expect(keys).toEqual(["A", "!", "a", "ß", "s", "Enter"])
+    })
+
+    it("reports the shifted character through the native key path", () => {
+      const keys: Array<string | undefined> = []
+
+      testRoot.render(
+        <div
+          style={{ width: 100, height: 100 }}
+          tabIndex={0}
+          onKeyDown={(event) => keys.push(event.key)}
+        />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      testRoot.renderer.nativeSimulateKeystrokes(target.id, "shift-a")
+
+      expect(keys).toEqual(["A"])
+    })
+
+    it("exposes key repetition as repeat", () => {
+      const repeats: boolean[] = []
+
+      testRoot.render(
+        <div tabIndex={0} onKeyDown={(event) => repeats.push(event.repeat)} />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      handleGpuixEvent(
+        { elementId: target.id, eventType: "keyDown", key: "a", isHeld: false },
+        testRoot.renderer
+      )
+      handleGpuixEvent(
+        { elementId: target.id, eventType: "keyDown", key: "a", isHeld: true },
+        testRoot.renderer
+      )
+
+      expect(repeats).toEqual([false, true])
+    })
+
     it("should handle onKeyDown and update state", () => {
       function KeyTracker() {
         const [lastKey, setLastKey] = useState("none")
@@ -1087,12 +1470,11 @@ describeNative("events", () => {
         .findByType("div")
         .find((d) => d.events.has("keyDown"))!
 
-      // GPUI uses "down" not "arrowDown"
       testRoot.renderer.nativeSimulateKeystrokes(div.id, "down")
 
       expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
         [
-          "Key: down",
+          "Key: ArrowDown",
         ]
       `)
 
@@ -1100,7 +1482,7 @@ describeNative("events", () => {
 
       expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
         [
-          "Key: escape",
+          "Key: Escape",
         ]
       `)
     })
@@ -1845,9 +2227,9 @@ describeNative("events", () => {
             style={{ width: 200, height: 200 }}
             tabIndex={0}
             onKeyDown={(e: EventPayload) => {
-              if (e.key === "down") {
+              if (e.key === "ArrowDown") {
                 setSelected((s) => Math.min(s + 1, items.length - 1))
-              } else if (e.key === "up") {
+              } else if (e.key === "ArrowUp") {
                 setSelected((s) => Math.max(s - 1, 0))
               }
             }}
@@ -1917,14 +2299,14 @@ describeNative("events", () => {
   })
 
   describe("scroll events", () => {
-    it("should handle onScroll and receive exact delta values", () => {
-      const receivedEvents: EventPayload[] = []
+    it("delivers pixel and line wheel deltas with DOM units", () => {
+      const receivedEvents: GpuixSyntheticEvent[] = []
 
       function ScrollBox() {
         return (
           <div
             style={{ width: 200, height: 200 }}
-            onScroll={(e: EventPayload) => receivedEvents.push(e)}
+            onWheel={(event) => receivedEvents.push(event)}
           >
             <text>scrollable</text>
           </div>
@@ -1933,44 +2315,160 @@ describeNative("events", () => {
 
       testRoot.render(<ScrollBox />)
       testRoot.renderer.nativeSimulateScrollWheel(100, 100, 0, -50)
+      testRoot.renderer.nativeSimulateScrollWheel(100, 100, 2, -3, {
+        deltaUnit: "lines",
+      })
 
-      expect(receivedEvents.length).toBeGreaterThanOrEqual(1)
-      const scrollEvent = receivedEvents.find(
-        (e) => e.eventType === "scroll"
-      )
-      expect(scrollEvent).toBeDefined()
-      expect(scrollEvent!.eventType).toBe("scroll")
-      expect(scrollEvent!.deltaX).toBe(0)
-      expect(scrollEvent!.deltaY).toBe(-50)
-      expect(scrollEvent!.touchPhase).toBe("moved")
+      expect(
+        receivedEvents.map((event) => ({
+          type: event.type,
+          deltaX: event.deltaX,
+          deltaY: event.deltaY,
+          deltaZ: event.deltaZ,
+          deltaMode: event.deltaMode,
+          bubbles: event.bubbles,
+          cancelable: event.cancelable,
+        }))
+      ).toEqual([
+        // A GPUI ScrollDelta is the negation of a DOM delta, so a downward
+        // wheel (-50 to GPUI) reaches the handler as deltaY: 50.
+        {
+          type: "wheel",
+          deltaX: 0,
+          deltaY: 50,
+          deltaZ: 0,
+          deltaMode: 0,
+          bubbles: true,
+          cancelable: true,
+        },
+        {
+          type: "wheel",
+          deltaX: -2,
+          deltaY: 3,
+          deltaZ: 0,
+          deltaMode: 1,
+          bubbles: true,
+          cancelable: true,
+        },
+      ])
     })
 
-    it("should update state on scroll", () => {
-      function ScrollCounter() {
-        const [scrollCount, setScrollCount] = useState(0)
+    it("delivers wheel deltas to a canvas", () => {
+      const wheels: Array<{ type: string; deltaY: number | undefined }> = []
+
+      testRoot.render(
+        <canvas
+          width={200}
+          height={200}
+          testId="wheel-canvas"
+          style={{ width: 200, height: 200 }}
+          onWheel={(event) => wheels.push({ type: event.type, deltaY: event.deltaY })}
+        />
+      )
+      const canvas = testRoot.renderer.findByTestId("wheel-canvas")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(canvas.id)!
+      testRoot.renderer.nativeSimulateScrollWheel(
+        x + width / 2,
+        y + height / 2,
+        0,
+        -50
+      )
+
+      expect(wheels).toEqual([{ type: "wheel", deltaY: 50 }])
+    })
+
+    it("delivers wheel deltas to a custom element beside canvas", () => {
+      const wheels: Array<{ type: string; deltaY: number | undefined }> = []
+
+      testRoot.render(
+        <code
+          code="const wheel = true"
+          testId="wheel-code"
+          style={{ width: 200, height: 120 }}
+          onWheel={(event) => wheels.push({ type: event.type, deltaY: event.deltaY })}
+        />
+      )
+      const code = testRoot.renderer.findByTestId("wheel-code")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(code.id)!
+      testRoot.renderer.nativeSimulateScrollWheel(
+        x + width / 2,
+        y + height / 2,
+        0,
+        -50
+      )
+
+      expect(wheels).toEqual([{ type: "wheel", deltaY: 50 }])
+    })
+
+    it("fires non-bubbling scroll after the position changes", () => {
+      const parentEvents: string[] = []
+      const childEvents: Array<{
+        type: string
+        scrollTop: number
+        bubbles: boolean
+        cancelable: boolean
+        deltaY: number | undefined
+      }> = []
+
+      function ScrollBox() {
         return (
-          <div
-            style={{ width: 200, height: 200 }}
-            onScroll={() => setScrollCount((c) => c + 1)}
-          >
-            <text>{`Scrolls: ${scrollCount}`}</text>
+          <div onScroll={() => parentEvents.push("parent")}>
+            <div
+              style={{ width: 200, height: 100, overflowY: "scroll" }}
+              onScroll={(event) =>
+                childEvents.push({
+                  type: event.type,
+                  scrollTop: event.currentTarget.scrollTop,
+                  bubbles: event.bubbles,
+                  cancelable: event.cancelable,
+                  deltaY: event.deltaY,
+                })
+              }
+            >
+              <div style={{ height: 400 }}>
+                <text>scrollable</text>
+              </div>
+            </div>
           </div>
         )
       }
 
-      testRoot.render(<ScrollCounter />)
-      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
-        [
-          "Scrolls: 0",
-        ]
-      `)
+      testRoot.render(<ScrollBox />)
+      testRoot.renderer.nativeSimulateScrollWheel(100, 50, 0, -40)
+      testRoot.renderer.flush()
+      testRoot.renderer.dispatchNativeEvents()
 
-      testRoot.renderer.nativeSimulateScrollWheel(100, 100, 0, -30)
-      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
-        [
-          "Scrolls: 1",
-        ]
-      `)
+      expect(childEvents).toEqual([
+        {
+          type: "scroll",
+          scrollTop: 40,
+          bubbles: false,
+          cancelable: false,
+          deltaY: undefined,
+        },
+      ])
+      expect(parentEvents).toEqual([])
+    })
+
+    it("does not fire scroll when a wheel cannot move the scroller", () => {
+      const scrollPositions: number[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 100, overflowY: "scroll" }}
+          onScroll={(event) => scrollPositions.push(event.currentTarget.scrollTop)}
+        >
+          <div style={{ height: 400 }}>
+            <text>scrollable</text>
+          </div>
+        </div>
+      )
+
+      testRoot.renderer.nativeSimulateScrollWheel(100, 50, 0, 40)
+      testRoot.renderer.flush()
+      testRoot.renderer.dispatchNativeEvents()
+
+      expect(scrollPositions).toEqual([])
     })
   })
 
@@ -2025,8 +2523,8 @@ describeNative("events", () => {
       testRoot.renderer.nativeSimulateKeyDown(div.id, "enter")
       testRoot.renderer.nativeSimulateKeyUp(div.id, "enter")
 
-      expect(events).toContain("down:enter")
-      expect(events).toContain("up:enter")
+      expect(events).toContain("down:Enter")
+      expect(events).toContain("up:Enter")
     })
 
     it("should handle onKeyUp state update", () => {
@@ -2707,7 +3205,7 @@ describeNative("events", () => {
                 setAction("save")
               } else if (mods?.cmd && mods?.shift && e.key === "p") {
                 setAction("command-palette")
-              } else if (e.key === "escape") {
+              } else if (e.key === "Escape") {
                 setAction("cancel")
               }
             }}
@@ -2841,7 +3339,7 @@ describeNative("events", () => {
               }}
               tabIndex={0}
               onKeyDown={(e: EventPayload) => {
-                if (e.key === "enter") setState("enter")
+                if (e.key === "Enter") setState("enter")
               }}
             >
               <text style={{ color: "#e8edff", fontSize: 18 }}>{`State: ${state}`}</text>
@@ -3282,7 +3780,7 @@ describeNative("events", () => {
         return (
           <div
             style={{ width: 320, height: 200, position: "relative" }}
-            onScroll={(e: EventPayload) => deltas.push(e.deltaY ?? 0)}
+            onWheel={(e: EventPayload) => deltas.push(e.deltaY ?? 0)}
           >
             <div
               style={{
@@ -3303,7 +3801,7 @@ describeNative("events", () => {
       testRoot.render(<Canvas />)
       testRoot.renderer.nativeSimulateScrollWheel(100, 60, 0, -80)
 
-      expect(deltas).toEqual([-80])
+      expect(deltas).toEqual([80])
     })
 
     it("lets an absolute sibling pass the wheel to a scroller below it", () => {
@@ -3353,7 +3851,7 @@ describeNative("events", () => {
         return (
           <div
             style={{ width: 320, height: 200, position: "relative" }}
-            onScroll={(e: EventPayload) => deltas.push(e.deltaY ?? 0)}
+            onWheel={(e: EventPayload) => deltas.push(e.deltaY ?? 0)}
           >
             <div
               style={{
@@ -3385,7 +3883,7 @@ describeNative("events", () => {
         return (
           <div
             style={{ width: 200, height: 200, backgroundColor: "#101010" }}
-            onScroll={(e: EventPayload) => held.push(e.modifiers?.cmd)}
+            onWheel={(e: EventPayload) => held.push(e.modifiers?.cmd)}
           >
             <text>surface</text>
           </div>
@@ -3583,6 +4081,8 @@ describeNative("events", () => {
 
       // Scroll should fire the onScroll event AND move the content
       testRoot.renderer.nativeSimulateScrollWheel(150, 50, 0, -40)
+      testRoot.renderer.flush()
+      testRoot.renderer.dispatchNativeEvents()
 
       // Event should have fired
       expect(receivedScrollEvents.length).toBeGreaterThanOrEqual(1)
@@ -3590,7 +4090,7 @@ describeNative("events", () => {
         (e) => e.eventType === "scroll"
       )
       expect(scrollEvent).toBeDefined()
-      expect(scrollEvent!.deltaY).toBe(-40)
+      expect(scrollEvent!.deltaY).toBeUndefined()
 
       // Content should have scrolled
       const container = testRoot.renderer

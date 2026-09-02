@@ -228,15 +228,15 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
       onKeyDown: (event) => {
         onKeyDown?.(event)
         if (disabled) return
-        if (event.key === "escape") {
+        if (event.key === "Escape") {
           context.setOpen(false)
-        } else if (event.key === "down" || (event.key === "n" && event.modifiers?.ctrl)) {
+        } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
           if (!context.open) context.setOpen(true)
           context.moveActive(1)
-        } else if (event.key === "up" || (event.key === "p" && event.modifiers?.ctrl)) {
+        } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
           if (!context.open) context.setOpen(true)
           context.moveActive(-1)
-        } else if (event.key === "enter" || event.key === "space") {
+        } else if (event.key === "Enter" || event.key === " ") {
           context.setOpen(!context.open)
         }
       },
@@ -284,14 +284,14 @@ export const SelectContent = forwardRef<PublicInstance, SelectContentProps>(
         }}
         onKeyDown={(event) => {
           onKeyDown?.(event)
-          if (event.key === "escape") {
+          if (event.key === "Escape") {
             onEscapeKeyDown?.(event)
             context.setOpen(false)
-          } else if (event.key === "down" || (event.key === "n" && event.modifiers?.ctrl)) {
+          } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
             context.moveActive(1)
-          } else if (event.key === "up" || (event.key === "p" && event.modifiers?.ctrl)) {
+          } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
             context.moveActive(-1)
-          } else if ((event.key === "enter" || event.key === "space") && context.activeValue) {
+          } else if ((event.key === "Enter" || event.key === " ") && context.activeValue) {
             context.selectValue(context.activeValue)
           }
         }}

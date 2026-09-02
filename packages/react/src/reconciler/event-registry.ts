@@ -40,7 +40,7 @@ const TARGET_ONLY_EVENTS = new Set([
   "visibleRange",
 ])
 
-const NON_BUBBLING_EVENTS = new Set(["focus", "blur"])
+const NON_BUBBLING_EVENTS = new Set(["focus", "blur", "scroll"])
 
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
   const containersByRenderer = eventRegistrySlot().containersByRenderer
@@ -206,6 +206,33 @@ function finishKeyboardDispatch(
  * keyboard-generated click that follows a prevented Enter or Space event.
  */
 export function handleGpuixEvent(
+  payload: EventPayload,
+  renderer: NativeRenderer
+): GpuixEventDispatchResult {
+  const result = dispatchGpuixEvent(payload, renderer)
+
+  if (
+    payload.eventType === "click" &&
+    payload.clickCount === 2 &&
+    (payload.button ?? 0) === 0 &&
+    payload.isRightClick !== true &&
+    // Two keyboard activations are two clicks, never a double click.
+    payload.inputSource !== "keyboard"
+  ) {
+    dispatchGpuixEvent({ ...payload, eventType: "doubleClick" }, renderer)
+  } else if (payload.eventType === "mouseDown" && payload.button === 2) {
+    // macOS opens a context menu on the press, so contextmenu follows
+    // mousedown and precedes mouseup and auxclick, as it does in the DOM.
+    dispatchGpuixEvent(
+      { ...payload, eventType: "contextMenu", isRightClick: true },
+      renderer
+    )
+  }
+
+  return result
+}
+
+function dispatchGpuixEvent(
   payload: EventPayload,
   renderer: NativeRenderer
 ): GpuixEventDispatchResult {
