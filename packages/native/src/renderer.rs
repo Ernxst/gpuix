@@ -78,10 +78,6 @@ pub(crate) struct PendingStyleDiagnostics {
 }
 
 impl PendingStyleDiagnostics {
-    pub(crate) fn push(&mut self, diagnostic: PendingStyleDiagnostic) {
-        self.diagnostics.push(diagnostic);
-    }
-
     pub(crate) fn extend(&mut self, diagnostics: impl IntoIterator<Item = PendingStyleDiagnostic>) {
         self.diagnostics.extend(diagnostics);
     }
@@ -10578,25 +10574,23 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
 
 /// Resolve every `setStyle` payload in the batch, in op order.
 ///
-/// This is the last fallible step, so it runs before the apply loop and borrows
-/// only the style table. The borrow checker then proves no element was touched
-/// when it returns `Err`, which is what makes a batch atomic. An earlier
-/// version interned inside the apply loop, so a malformed style at the end of a
-/// batch left everything before it applied and then threw.
+/// Infallible. Decoding already proved every payload is syntactically valid
+/// JSON, and a payload that is not a style *object* — `null` or a JSON string
+/// included — degrades to the empty style with a recorded problem rather than
+/// rejecting the batch. It still runs before the apply loop and borrows only
+/// the style table, so the interned styles line up with the ops that use them.
 fn resolve_styles(
     styles: &mut StyleTable,
     ops: &[BatchOp<'_>],
     collect_diagnostics: bool,
-) -> BatchResult<Vec<(Arc<StyleDesc>, Vec<StyleProblem>)>> {
+) -> Vec<(Arc<StyleDesc>, Vec<StyleProblem>)> {
     let mut resolved = Vec::new();
-    for (index, op) in ops.iter().enumerate() {
+    for op in ops {
         if let BatchOp::SetStyle { style, .. } = op {
-            // The reconciler always sends an object. Anything else, `null` and a
-            // JSON string included, is handed to `StyleDesc` and rejected there.
             // Keeping the raw bytes here is what makes the content hash work.
             let raw = style.get().trim().as_bytes();
             let value: serde_json::Value = serde_json::from_slice(raw)
-                .map_err(|error| format!("Batch op {index} setStyle parse error: {error}"))?;
+                .expect("a RawValue payload is always valid JSON");
             let parsed = crate::style::parse_style_value(&value);
             let shared = styles.intern_parsed(raw, parsed.style);
             let problems = if collect_diagnostics {
@@ -10607,7 +10601,7 @@ fn resolve_styles(
             resolved.push((shared, problems));
         }
     }
-    Ok(resolved)
+    resolved
 }
 
 #[cfg(test)]
@@ -10666,10 +10660,10 @@ mod resolve_styles_tests {
 /// Shared between GpuixRenderer::apply_batch and TestGpuixRenderer::apply_batch.
 /// Returns accumulated destroyed IDs (as f64) from all destroyElement ops.
 ///
-/// ATOMIC: the batch is decoded and every style is resolved before a single
-/// element is touched. If any op is malformed the tree is left unchanged and an
-/// error is returned. Nothing after that point can fail, so JS and Rust cannot
-/// desync when a batch is retried.
+/// ATOMIC: decoding is the only fallible phase, and it happens before a single
+/// element or style is touched. If any op is malformed the tree is left
+/// unchanged and an error is returned. Nothing after that point can fail, so JS
+/// and Rust cannot desync when a batch is retried.
 ///
 /// Batch format: JSON array of tuples [opcode, ...args].
 /// See GpuixRenderer::apply_batch for opcode documentation.
@@ -10686,11 +10680,8 @@ pub(crate) fn apply_batch_to_tree_with_diagnostics(
     // Phase 1: decode. No mutation.
     let parsed = parse_batch_ops(bytes)?;
 
-    // Phase 2: resolve styles. Touches the style table only; a failure here
-    // sweeps back out whatever this call interned.
-    let styles = resolve_styles(&mut tree.styles, &parsed, collect_diagnostics)
-        .inspect_err(|_| tree.styles.sweep())?;
-    let mut styles = styles.into_iter();
+    // Phase 2: resolve styles. Touches the style table only, and cannot fail.
+    let mut styles = resolve_styles(&mut tree.styles, &parsed, collect_diagnostics).into_iter();
 
     // Phase 3: apply. Cannot fail.
     let mut destroyed_ids: Vec<f64> = Vec::new();
@@ -11334,82 +11325,32 @@ mod batch_tests {
         apply_batch_to_tree(tree, json.as_bytes())
     }
 
-    /// Everything a mutation can reach, so an unwanted partial apply shows up
-    /// as a diff instead of hiding in a field the test forgot to read.
-    fn describe(tree: &RetainedTree) -> String {
-        let mut ids: Vec<_> = tree.elements.keys().copied().collect();
-        ids.sort_unstable();
-        let mut out = format!("root={:?}\n", tree.root_id);
-        for id in ids {
-            let element = &tree.elements[&id];
-            let mut events: Vec<_> = element.events.iter().cloned().collect();
-            events.sort();
-            let mut props: Vec<_> = element.custom_props.iter().collect();
-            props.sort_by(|(a, _), (b, _)| a.cmp(b));
-            out += &format!(
-                "{id} type={} text={:?} style={:?} children={:?} parent={:?} events={events:?} props={props:?} rev={}/{}\n",
-                element.element_type,
-                element.content,
-                element.style.as_deref(),
-                element.children,
-                element.parent,
-                element.subtree_revision,
-                element.search_revision,
-            );
-        }
-        out
-    }
-
-    /// Style-value problems degrade, but a malformed `setStyle` op is still
-    /// fallible and must be rejected before the apply loop touches an element.
-    #[test]
-    fn a_malformed_style_applies_nothing_at_all() {
-        let mut tree = RetainedTree::new();
-        apply(&mut tree, r#"[["createElement",1,"div"],["setRoot",1]]"#).expect("valid batch");
-        let before = describe(&tree);
-        let styles_before = tree.styles.len();
-
-        let error = apply(
-            &mut tree,
-            r#"[["createElement",2,"div"],["setText",2,"changed"],["setStyle",2]]"#,
-        )
-        .expect_err("a malformed style must reject the batch");
-
-        assert_eq!(describe(&tree), before, "the tree must be untouched");
-        assert_eq!(
-            tree.styles.len(),
-            styles_before,
-            "the failed batch must not leave styles interned"
-        );
-        assert!(error.contains("Batch op 2"), "{error}");
-        assert!(error.contains("style"), "{error}");
-    }
-
-    /// A style that fails halfway through a long batch is unfindable without
-    /// its index; serde reports a byte offset, which names nothing.
-    #[test]
-    fn a_style_error_names_its_op_index() {
-        let mut tree = RetainedTree::new();
-        let error = apply(
-            &mut tree,
-            r#"[["createElement",1,"div"],["setStyle",1,{"color":"red"}],["setStyle",1]]"#,
-        )
-        .expect_err("a bad style rejects the batch");
-        assert!(error.contains("Batch op 2"), "{error}");
-    }
-
     #[test]
     fn a_string_encoded_style_no_longer_applies() {
         let mut tree = RetainedTree::new();
-        apply(
+        let outcome = apply_batch_to_tree_with_diagnostics(
             &mut tree,
-            r#"[["createElement",1,"div"],["setStyle",1,"{\"color\":\"red\"}"]]"#,
+            br#"[["createElement",1,"div"],["setStyle",1,"{\"color\":\"red\"}"]]"#,
+            true,
         )
         .expect("a non-object style degrades like any other");
         assert_eq!(
             tree.elements[&1].style.as_deref(),
             Some(&StyleDesc::default()),
             "a JSON-string style is no longer unwrapped into an object"
+        );
+        // Degrading silently would hide the version skew that sent it.
+        let problems: Vec<_> = outcome
+            .diagnostics
+            .iter()
+            .map(|diagnostic| (&diagnostic.problem.property, &diagnostic.problem.reason))
+            .collect();
+        assert!(
+            problems
+                .iter()
+                .any(|(property, reason)| *property == "<style>"
+                    && reason.contains("expected a style object")),
+            "{problems:?}"
         );
     }
 

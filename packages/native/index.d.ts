@@ -294,11 +294,6 @@ export declare class TestGpuixRenderer {
    */
   capabilities(): RendererCapabilities
   /**
-   * Destroy an element and all descendants. Returns destroyed IDs
-   * so JS can clean up event handlers.
-   */
-  destroyElement(id: number): Array<number>
-  /**
    * How many elements the retained tree holds, reachable from the root or
    * not. `getTreeJson` walks from the root, so it cannot see a node that was
    * detached and never destroyed. This is the only way a test can prove a
@@ -313,14 +308,6 @@ export declare class TestGpuixRenderer {
   setAllowPrivateNetworkImages(enabled: boolean): void
   drainStyleDiagnostics(): Array<GpuixStyleDiagnostic>
   takeStyleDiagnosticsForReporting(): Array<GpuixStyleDiagnostic>
-  setText(id: number, content: string): void
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void
-  /** Set the root element (called from appendChildToContainer). */
-  setRoot(id: number): void
-  /** Set a custom prop on an element (for non-div/text elements like input, editor, diff). */
-  setCustomProp(id: number, key: string, valueJson: string): void
-  /** Get a custom prop value from an element. */
-  getCustomProp(id: number, key: string): string | null
   /**
    * Signal that a batch of mutations is complete.
    * In tests, this is a no-op — flush() handles the actual re-render.

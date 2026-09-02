@@ -518,7 +518,7 @@ impl<'de, S: Deserialize<'de>> Visitor<'de> for OpVisitor<S> {
             "setRoot" => Op::SetRoot {
                 id: next(&mut seq)?,
             },
-            "setCustomPropValue" | "setCustomProp" => Op::SetCustomProp {
+            "setCustomPropValue" => Op::SetCustomProp {
                 id: next(&mut seq)?,
                 key: next(&mut seq)?,
                 value: next(&mut seq)?,
@@ -902,7 +902,7 @@ fn build_pointer_style_tree<P: Clone + From<StyleDesc>>(
                         .insert(array[2].as_str().unwrap_or_default().to_owned());
                 }
             }
-            "setCustomPropValue" | "setCustomProp" => {
+            "setCustomPropValue" => {
                 if let Some(element) = tree.get_mut(&id(1)) {
                     element.custom_props.insert(
                         array[2].as_str().unwrap_or_default().to_owned(),
