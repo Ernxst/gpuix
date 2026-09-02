@@ -130,6 +130,8 @@ export function renderSlot({
     ...props,
     style: mergeStyles(childProps.style, props.style),
     onClick: composeHandlers(childProps.onClick, props.onClick),
+    onDoubleClick: composeHandlers(childProps.onDoubleClick, props.onDoubleClick),
+    onContextMenu: composeHandlers(childProps.onContextMenu, props.onContextMenu),
     onMouseDown: composeHandlers(childProps.onMouseDown, props.onMouseDown),
     onMouseUp: composeHandlers(childProps.onMouseUp, props.onMouseUp),
     onMouseEnter: composeHandlers(childProps.onMouseEnter, props.onMouseEnter),
@@ -144,6 +146,7 @@ export function renderSlot({
     onFocus: composeHandlers(childProps.onFocus, props.onFocus),
     onBlur: composeHandlers(childProps.onBlur, props.onBlur),
     onScroll: composeHandlers(childProps.onScroll, props.onScroll),
+    onWheel: composeHandlers(childProps.onWheel, props.onWheel),
     onChange: composeHandlers(childProps.onChange, props.onChange),
     onSubmit: composeHandlers(childProps.onSubmit, props.onSubmit),
   }

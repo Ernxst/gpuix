@@ -120,12 +120,12 @@ describeNative("keyboard focus", () => {
         overdraw={0}
         estimatedItemHeight={40}
         onKeyDownCapture={(event) => {
-          if (preventCapture && event.key === "tab" && !event.shiftKey) {
+          if (preventCapture && event.key === "Tab" && !event.shiftKey) {
             event.preventDefault()
           }
         }}
         onKeyDown={(event) => {
-          if (preventBubble && event.key === "tab" && event.shiftKey) {
+          if (preventBubble && event.key === "Tab" && event.shiftKey) {
             event.preventDefault()
           }
         }}
@@ -177,7 +177,7 @@ describeNative("keyboard focus", () => {
           href="/second"
           ariaLabel="second"
           onKeyDown={(event) => {
-            if (event.key === "tab") event.preventDefault()
+            if (event.key === "Tab") event.preventDefault()
           }}
         >
           <text>Second</text>
@@ -402,6 +402,38 @@ describeNative("keyboard focus", () => {
     testRoot.renderer.simulateKeystrokes("tab")
     expect(focusedLabel()).toBe("virtual-row-6")
     expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(-160)
+  })
+
+  it("focusNext reveals the next unpainted virtual row", () => {
+    testRoot.render(
+      <virtual-list
+        overdraw={0}
+        estimatedItemHeight={40}
+        style={{ width: 240, height: 120 }}
+      >
+        {Array.from({ length: 12 }, (_, index) => (
+          <a
+            key={index}
+            href={`/${index}`}
+            ariaLabel={`imperative-row-${index}`}
+            testId={`imperative-row-${index}`}
+            style={{ width: 200, height: 40, flexShrink: 0 }}
+          >
+            <text>{`Imperative row ${index}`}</text>
+          </a>
+        ))}
+      </virtual-list>
+    )
+
+    const list = testRoot.renderer.findByType("virtual-list")[0]!
+    const lastPainted = testRoot.renderer.findByTestId("imperative-row-2")!
+    testRoot.renderer.focusElement(lastPainted.id)
+    expect(focusedLabel()).toBe("imperative-row-2")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(0)
+
+    testRoot.renderer.focusNext()
+    expect(focusedLabel()).toBe("imperative-row-3")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(-40)
   })
 
   it("keeps an oversized focused row fixed when both edges are outside the viewport", () => {

@@ -256,11 +256,11 @@ export const ComboboxInput = forwardRef<PublicInstance, ComboboxInputProps>(
         onKeyDown={(event: GpuixSyntheticEvent) => {
           onKeyDown?.(event)
           if (disabled) return
-          if (event.key === "escape") {
+          if (event.key === "Escape") {
             context.setOpen(false)
-          } else if (event.key === "down" || (event.key === "n" && event.modifiers?.ctrl)) {
+          } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
             context.moveActive(1)
-          } else if (event.key === "up" || (event.key === "p" && event.modifiers?.ctrl)) {
+          } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
             context.moveActive(-1)
           }
         }}
@@ -305,8 +305,8 @@ export const ComboboxTrigger = forwardRef<PublicInstance, ComboboxTriggerProps>(
         onKeyDown: (event) => {
           onKeyDown?.(event)
           if (disabled) return
-          if (event.key === "down" || event.key === "up") context.setOpen(true)
-          if (event.key === "escape") context.setOpen(false)
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") context.setOpen(true)
+          if (event.key === "Escape") context.setOpen(false)
         },
       },
       ref

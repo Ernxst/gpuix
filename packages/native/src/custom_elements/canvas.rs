@@ -1221,11 +1221,25 @@ impl CanvasElement {
         cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::Stateful<gpui::Div> {
         let id = ctx.id;
+        // `doubleClick` and `contextMenu` are synthesized in React from the
+        // click and mouse-down payloads, so they ride those listeners. The
+        // flags keep a canvas that declares both from attaching two.
+        let mut click_attached = false;
+        let mut mouse_down_attached = false;
+        // A canvas that declares only `onContextMenu` takes the right button
+        // alone, so a left press neither costs an IPC round trip nor stops
+        // propagation on behalf of a listener that would ignore it.
+        let mouse_down_buttons =
+            crate::renderer::mouse_down_button_set(ctx.events.contains("mouseDown"));
         for event_type in ctx.events {
             let callback = ctx.event_callback.clone();
             let geometry = self.geometry.clone();
             match event_type.as_str() {
-                "click" => {
+                "click" | "doubleClick" => {
+                    if click_attached {
+                        continue;
+                    }
+                    click_attached = true;
                     element = element.on_click(move |event, _window, cx| {
                         let (x, y) = local_point(&geometry, event.position());
                         crate::renderer::emit_event_full(&callback, id, "click", |payload| {
@@ -1265,15 +1279,15 @@ impl CanvasElement {
                         });
                     });
                 }
-                "mouseDown" => {
-                    for &button in &[
-                        gpui::MouseButton::Left,
-                        gpui::MouseButton::Middle,
-                        gpui::MouseButton::Right,
-                    ] {
+                "mouseDown" | "contextMenu" => {
+                    if mouse_down_attached {
+                        continue;
+                    }
+                    mouse_down_attached = true;
+                    for &button in mouse_down_buttons {
                         let callback = callback.clone();
                         let geometry = geometry.clone();
-                        element = element.on_mouse_down(button, move |event, _window, _cx| {
+                        element = element.on_mouse_down(button, move |event, _window, cx| {
                             let (x, y) = local_point(&geometry, event.position);
                             crate::renderer::emit_event_full(
                                 &callback,
@@ -1288,6 +1302,11 @@ impl CanvasElement {
                                     payload.modifiers = Some(event.modifiers.into());
                                 },
                             );
+                            // The div path stops here too. Without it an
+                            // ancestor's own GPUI listener also fires and
+                            // React dispatches its `onMouseDown` twice: once
+                            // bubbling from the canvas, once at target.
+                            cx.stop_propagation();
                         });
                     }
                 }
@@ -1350,26 +1369,13 @@ impl CanvasElement {
                         );
                     });
                 }
-                "scroll" => {
+                "wheel" => {
                     element = element.on_scroll_wheel(move |event, _window, _cx| {
                         let (x, y) = local_point(&geometry, event.position);
-                        crate::renderer::emit_event_full(&callback, id, "scroll", |payload| {
+                        crate::renderer::emit_event_full(&callback, id, "wheel", |payload| {
                             payload.x = Some(x);
                             payload.y = Some(y);
-                            payload.modifiers = Some(event.modifiers.into());
-                            payload.precise = Some(event.delta.precise());
-                            let delta = event.delta.pixel_delta(gpui::px(20.0));
-                            payload.delta_x = Some(f64::from(f32::from(delta.x)));
-                            payload.delta_y = Some(f64::from(f32::from(delta.y)));
-                            payload.touch_phase = Some(
-                                match event.touch_phase {
-                                    gpui::TouchPhase::Started => "started",
-                                    gpui::TouchPhase::Moved => "moved",
-                                    gpui::TouchPhase::Ended => "ended",
-                                    gpui::TouchPhase::Cancelled => "cancelled",
-                                }
-                                .to_string(),
-                            );
+                            crate::renderer::apply_wheel_delta(payload, event);
                         });
                     });
                 }
@@ -1646,14 +1652,16 @@ impl CustomElement for CanvasElement {
     fn supported_events(&self) -> &'static [&'static str] {
         &[
             "click",
+            "doubleClick",
             "auxClick",
+            "contextMenu",
             "mouseDown",
             "mouseUp",
             "mouseMove",
             "mouseEnter",
             "mouseLeave",
             "mouseDownOutside",
-            "scroll",
+            "wheel",
         ]
     }
 

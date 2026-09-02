@@ -775,6 +775,9 @@ export type AriaCurrent =
 /** AccessKit actions delivered through `onAccessibilityAction`. */
 export type AccessibilityAction = "increment" | "decrement" | "focus"
 
+/** Keep a semantic node in the accessibility tree while omitting its visual box. */
+export type VisuallyHidden = true
+
 // Props passed to elements.
 // Element IDs are auto-generated numeric IDs (not user-settable).
 // Use React refs to get an element's ID: ref.current.id
@@ -874,6 +877,8 @@ export interface Props {
   ariaHidden?: Booleanish
   /** DOM-compatible alias for ariaHidden. */
   "aria-hidden"?: Booleanish
+  /** Keep this semantic node accessible without painting or reserving layout space. */
+  visuallyHidden?: VisuallyHidden
   /** Value or focus action requested by assistive technology. Activate uses onClick. */
   onAccessibilityAction?: (event: GpuixSyntheticEvent) => void
 
@@ -881,9 +886,15 @@ export interface Props {
   /** Primary button only, like the DOM. Use `onAuxClick` for the others. */
   onClick?: (event: GpuixSyntheticEvent) => void
   onClickCapture?: (event: GpuixSyntheticEvent) => void
+  /** Primary-button double click, dispatched after the second `onClick`. */
+  onDoubleClick?: (event: GpuixSyntheticEvent) => void
+  onDoubleClickCapture?: (event: GpuixSyntheticEvent) => void
   /** Non-primary click, like the DOM `auxclick`. */
   onAuxClick?: (event: GpuixSyntheticEvent) => void
   onAuxClickCapture?: (event: GpuixSyntheticEvent) => void
+  /** Cancelable secondary-click context-menu request. */
+  onContextMenu?: (event: GpuixSyntheticEvent) => void
+  onContextMenuCapture?: (event: GpuixSyntheticEvent) => void
   onMouseDown?: (event: GpuixSyntheticEvent) => void
   onMouseDownCapture?: (event: GpuixSyntheticEvent) => void
   onMouseUp?: (event: GpuixSyntheticEvent) => void
@@ -910,6 +921,8 @@ export interface Props {
   // ── Scroll events ──────────────────────────────────────────────
   onScroll?: (event: GpuixSyntheticEvent) => void
   onScrollCapture?: (event: GpuixSyntheticEvent) => void
+  onWheel?: (event: GpuixSyntheticEvent) => void
+  onWheelCapture?: (event: GpuixSyntheticEvent) => void
 
   // ── Text editor events ─────────────────────────────────────────
   onChange?: (event: GpuixSyntheticEvent) => void
@@ -1157,6 +1170,10 @@ export interface NativeRenderer {
    *  `HTMLElement.focus()`: take focus without revealing the element inside
    *  its scroll ancestors. */
   focusElement?(elementId: number, preventScroll?: boolean): void
+  /** Move focus to the next GPUI tab stop without changing Tab's default policy. */
+  focusNext?(): void
+  /** Move focus to the previous GPUI tab stop without changing Tab's default policy. */
+  focusPrevious?(): void
   /** @internal Complete Tab's default focus traversal after synthetic dispatch. */
   resolveTabKeyDown?(defaultPrevented: boolean): void
   /** The focused host element id, analogous to `document.activeElement`, or null. */
