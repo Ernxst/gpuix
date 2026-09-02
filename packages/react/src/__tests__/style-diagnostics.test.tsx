@@ -309,7 +309,11 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         <div style={{ width: 400, height: 200 }}>
           <input testId="hidden-control" role="textbox" ariaLabel="Hidden search" visuallyHidden />
           <div testId="hidden-wrapper" role="heading" ariaLevel={1} visuallyHidden>
-            <text>Production ledger</text>
+            <text role="link">Production ledger</text>
+          </div>
+          {/* Plain text under a name-from-contents role loses nothing. */}
+          <div testId="hidden-text-wrapper" role="heading" ariaLevel={2} visuallyHidden>
+            Retained ledger
           </div>
         </div>
       )
@@ -340,6 +344,10 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         aria: { role: "TextInput", label: "Hidden search" },
       })
       expect(testRoot.renderer.getPaintedText()).toContain("Production ledger")
+      expect(nodes.find((node) => node.aria.label === "Retained ledger")).toMatchObject({
+        aria: { role: "Heading", label: "Retained ledger", level: 2 },
+      })
+      expect(testRoot.renderer.getPaintedText()).not.toContain("Retained ledger")
       expect(warn).toHaveBeenCalled()
     } finally {
       testRoot.unmount()

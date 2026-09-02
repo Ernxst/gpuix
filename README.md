@@ -1755,17 +1755,29 @@ because it projects the element as an accessibility node rather than styling it:
 ```
 
 The projection carries the element's own semantics and its flattened text, and
-nothing else, so GPUIX rejects with a property diagnostic — and renders the
-element as authored — when it is asked to hide more than that:
+nothing else. A role that names itself from its contents takes that text as its
+accessible name; any other role takes it as the node's value, the same slot the
+painted text would have used:
+
+```tsx
+<text visuallyHidden role="status">
+  Saved 3 files
+</text>
+```
+
+GPUIX rejects with a property diagnostic — and renders the element as authored —
+when it is asked to hide more than the projection carries:
 
 - `ariaHidden` on the same element, which would remove the node it preserves
 - an interactive element (`<input>`, `<textarea>`, `tabIndex`, `autoFocus`, or a
   click/key/focus handler), whose control the projection would destroy
-- any host other than `<text>` that has children, because those children would
+- any host other than `<text>` whose subtree is more than plain text under a role
+  that names itself from its contents, because the rest of that subtree would
   leave the accessibility tree along with the element's box
 
-A visually hidden subtree is not supported yet; on the web `sr-only` keeps the
-whole subtree exposed. Track it as a follow-up before hiding a wrapper.
+A visually hidden subtree with its own roled nodes is not supported yet; on the
+web `sr-only` keeps the whole subtree exposed. Track it as a follow-up before
+hiding a structured wrapper.
 
 Unroled drawn text enters AccessKit as `Label` content. `<text>` exposes its
 flattened inline string as one label, while native `<code>`, `<markdown>`, and

@@ -160,7 +160,7 @@ pub(crate) fn pending_accessibility_diagnostics(
 ) -> Vec<PendingStyleDiagnostic> {
     tree.elements
         .get(&element_id)
-        .map(crate::accessibility::element_problems)
+        .map(|element| crate::accessibility::element_problems(tree, element))
         .unwrap_or_default()
         .into_iter()
         .map(|accessibility_problem| PendingStyleDiagnostic {
@@ -7238,7 +7238,7 @@ fn build_element_with_parent_layout(
         || retained_gpui_element_id(element),
     );
 
-    if crate::accessibility::is_visually_hidden(element) {
+    if crate::accessibility::is_visually_hidden(ctx.tree, element) {
         ctx.custom_registry.destroy(id);
         ctx.motion_states.remove(&id);
         ctx.transition_states.remove(&id);
@@ -8084,6 +8084,8 @@ pub(crate) fn build_host_container(
         ctx.focus_handles.get(&element.id),
         ctx.inherited.accessibility_hidden,
         name_from_contents.as_deref(),
+        // Painted text carries its own value on the node that draws it.
+        None,
     );
     if !native_disabled {
         if let Some(tab_index) = element
@@ -8425,7 +8427,16 @@ fn accessible_name_from_contents<'a>(
     if !owns_name {
         return None;
     }
+    flattened_accessibility_text(element, flattened_text, ctx)
+}
 
+/// The element's subtree flattened to the string the accessible name
+/// computation reads, or `None` when the subtree holds no text.
+fn flattened_accessibility_text<'a>(
+    element: &crate::retained_tree::RetainedElement,
+    flattened_text: Option<&'a crate::text::inline::InlineText>,
+    ctx: &BuildCtx,
+) -> Option<std::borrow::Cow<'a, str>> {
     let name = flattened_text.map_or_else(
         || {
             let mut descendants = vec![element];
@@ -8460,6 +8471,15 @@ fn build_visually_hidden_element(
 
     let flattened_text = (element.element_type == "text").then(|| flatten_text(element, ctx));
     let name_from_contents = accessible_name_from_contents(element, flattened_text.as_ref(), ctx);
+    // A role that does not name itself from its contents still keeps its text.
+    // Painted text reaches AccessKit as the value of the node that draws it, and
+    // the projection draws nothing, so the flattened string becomes this node's
+    // value the same way the painted `<text>` host sets one below. An ancestor
+    // that already owns this text as its own name suppresses the duplicate.
+    let content_value = (!ctx.inherited.text_accessibility_owned_by_role
+        && !crate::accessibility::role_supports_name_from_contents(element))
+    .then(|| flattened_accessibility_text(element, flattened_text.as_ref(), ctx))
+    .flatten();
     let element_id = retained_gpui_element_id(element)
         .expect("a validated visuallyHidden semantic host has a GPUI element id");
     // One pixel, out of flow, painting nothing. The web's `sr-only` clips to
@@ -8478,6 +8498,7 @@ fn build_visually_hidden_element(
         None,
         ctx.inherited.accessibility_hidden,
         name_from_contents.as_deref(),
+        content_value.as_deref(),
     )
     .into_any_element()
 }

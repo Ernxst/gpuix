@@ -4,7 +4,7 @@ use gpui::StatefulInteractiveElement;
 
 use crate::{
     renderer::{emit_event_full, EventCallback},
-    retained_tree::RetainedElement,
+    retained_tree::{RetainedElement, RetainedTree},
     style::StyleProblem,
 };
 
@@ -519,14 +519,14 @@ fn supports_accessibility_host(element_type: &str) -> bool {
     matches!(element_type, "div" | "text" | "input" | "textarea" | "img")
 }
 
-pub(crate) fn is_visually_hidden(element: &RetainedElement) -> bool {
+pub(crate) fn is_visually_hidden(tree: &RetainedTree, element: &RetainedElement) -> bool {
     element
         .custom_props
         .get("visuallyHidden")
         .and_then(VisuallyHiddenMode::parse)
         .is_some()
         && supports_accessibility_host(&element.element_type)
-        && visually_hidden_rejection(element).is_none()
+        && visually_hidden_rejection(tree, element).is_none()
 }
 
 /// A control, an authored tab stop, or an element wired to keyboard and focus
@@ -556,7 +556,10 @@ fn is_focusable(element: &RetainedElement) -> bool {
 /// a focus target, a child subtree — would be destroyed rather than hidden. The
 /// web's `sr-only` clips a fully live element instead, so declarations GPUIX
 /// cannot honour that way are rejected rather than silently narrowed.
-fn visually_hidden_rejection(element: &RetainedElement) -> Option<&'static str> {
+fn visually_hidden_rejection(
+    tree: &RetainedTree,
+    element: &RetainedElement,
+) -> Option<&'static str> {
     if is_hidden(element) {
         return Some(
             "ariaHidden removes the accessibility node that visuallyHidden exists to preserve; remove one property",
@@ -579,20 +582,48 @@ fn visually_hidden_rejection(element: &RetainedElement) -> Option<&'static str> 
         );
     }
     // A `<text>` host owns its inline runs: they are flattened into its
-    // accessible name rather than dropped. Every other host would lose its
-    // children entirely, so the subtree stays out of scope for now.
-    if element.element_type != "text" && !element.children.is_empty() {
+    // accessible name rather than dropped. Another host keeps its children only
+    // when the same flattening already covers them — a role that names itself
+    // from its contents over a subtree of plain `<text>` loses nothing, because
+    // React makes a child element out of every JSX string. Anything else (a
+    // roled child, a painted host) would leave the accessibility tree with the
+    // element's box, so the subtree stays out of scope for now.
+    if element.element_type != "text"
+        && !element.children.is_empty()
+        && !(role_supports_name_from_contents(element) && subtree_is_flattened_text(tree, element))
+    {
         return Some(
-            "visuallyHidden exposes only this element, so its children would leave the accessibility tree; put visuallyHidden on a childless <text> instead",
+            "visuallyHidden exposes only this element, so its children would leave the accessibility tree; visually hide plain text under a role that names itself from its contents instead",
         );
     }
     None
 }
 
+/// Whether every descendant is an unroled `<text>` element, so the projection's
+/// name computation flattens the whole subtree into the surviving node and
+/// nothing is dropped. A descendant missing from the tree counts as unknown,
+/// which is not flattenable.
+fn subtree_is_flattened_text(tree: &RetainedTree, element: &RetainedElement) -> bool {
+    let mut pending: Vec<u64> = element.children.clone();
+    while let Some(id) = pending.pop() {
+        let Some(descendant) = tree.elements.get(&id) else {
+            return false;
+        };
+        if descendant.element_type != "text" || has_semantics(descendant) {
+            return false;
+        }
+        pending.extend(descendant.children.iter().copied());
+    }
+    true
+}
+
 /// Validate the complete retained accessibility declaration after a mutation
 /// batch. Cross-property checks intentionally happen here, not while props are
 /// arriving, so JSX property order cannot change the diagnostics.
-pub(crate) fn element_problems(element: &RetainedElement) -> Vec<AccessibilityProblem> {
+pub(crate) fn element_problems(
+    tree: &RetainedTree,
+    element: &RetainedElement,
+) -> Vec<AccessibilityProblem> {
     let mut problems = Vec::new();
     let role_value = element.custom_props.get("role");
     let role = role_value.and_then(AccessibilityRole::parse);
@@ -754,7 +785,7 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<AccessibilityPr
         .get("visuallyHidden")
         .filter(|value| VisuallyHiddenMode::parse(value).is_some())
     {
-        if let Some(reason) = visually_hidden_rejection(element) {
+        if let Some(reason) = visually_hidden_rejection(tree, element) {
             problems.push(rejected_problem("visuallyHidden", value, reason));
         }
     }
@@ -787,6 +818,12 @@ pub(crate) fn element_problems(element: &RetainedElement) -> Vec<AccessibilityPr
 ///
 /// The GPUI element id remains the stable AccessKit identity. The author `id`
 /// is additional platform-visible metadata, never the identity source.
+///
+/// `name_from_contents` is the flattened text a role that names itself from its
+/// contents takes as its accessible name. `content_value` is the same text for a
+/// role that does not: painted text reaches AccessKit as the value of its own
+/// node, so a projection that keeps no such node carries the value here rather
+/// than dropping the content.
 pub(crate) fn apply<E>(
     mut el: E,
     element: &RetainedElement,
@@ -794,6 +831,7 @@ pub(crate) fn apply<E>(
     focus_handle: Option<&gpui::FocusHandle>,
     hidden: bool,
     name_from_contents: Option<&str>,
+    content_value: Option<&str>,
 ) -> E
 where
     E: StatefulInteractiveElement,
@@ -847,7 +885,11 @@ where
     if let Some(selected) = props.selected.filter(|_| props.supports("ariaSelected")) {
         el = el.aria_selected(selected);
     }
-    if let Some(value) = props.value.filter(|_| props.supports("ariaValue")) {
+    if let Some(value) = props
+        .value
+        .filter(|_| props.supports("ariaValue"))
+        .or(content_value)
+    {
         el = el.aria_value(value.to_owned());
     }
     if let Some(value_min) = props.value_min.filter(|_| props.supports("ariaValueMin")) {
@@ -930,6 +972,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Most declarations are validated without descendants, so the tree only
+    /// has to exist. Tests that hide a subtree build a populated one.
+    fn detached_tree() -> RetainedTree {
+        RetainedTree::new()
+    }
 
     #[test]
     fn parses_every_declared_accessibility_role() {
@@ -1027,7 +1075,7 @@ mod tests {
         assert_eq!(props.value_max, Some(100.0));
         assert_eq!(props.value_now, Some(42.0));
         assert!(props.disabled);
-        assert!(element_problems(&element).is_empty());
+        assert!(element_problems(&detached_tree(), &element).is_empty());
     }
 
     #[test]
@@ -1064,7 +1112,7 @@ mod tests {
                 "{description}"
             );
 
-            let problems = element_problems(&element);
+            let problems = element_problems(&detached_tree(), &element);
             match computed {
                 Some(value) => assert_eq!(
                     problems.as_slice(),
@@ -1088,7 +1136,7 @@ mod tests {
         let mut link = RetainedElement::new(7, "div".to_string(), 1);
         link.custom_props.insert("role".into(), "link".into());
         link.custom_props.insert("ariaSelected".into(), true.into());
-        let link_problem = &element_problems(&link)[0];
+        let link_problem = &element_problems(&detached_tree(), &link)[0];
         assert_eq!(link_problem.problem.property, "ariaSelected");
 
         let mut button = RetainedElement::new(10, "div".to_string(), 1);
@@ -1096,7 +1144,7 @@ mod tests {
         button
             .custom_props
             .insert("ariaCurrent".into(), "page".into());
-        let button_problem = &element_problems(&button)[0];
+        let button_problem = &element_problems(&detached_tree(), &button)[0];
         assert_eq!(button_problem.problem.property, "ariaCurrent");
 
         let mut malformed_current = RetainedElement::new(11, "div".to_string(), 1);
@@ -1106,7 +1154,7 @@ mod tests {
         malformed_current
             .custom_props
             .insert("ariaCurrent".into(), "chapter".into());
-        let malformed_current_problem = &element_problems(&malformed_current)[0];
+        let malformed_current_problem = &element_problems(&detached_tree(), &malformed_current)[0];
         assert!(malformed_current_problem
             .problem
             .reason
@@ -1117,13 +1165,13 @@ mod tests {
         switch
             .custom_props
             .insert("ariaChecked".into(), "mixed".into());
-        let switch_problem = &element_problems(&switch)[0];
+        let switch_problem = &element_problems(&detached_tree(), &switch)[0];
         assert!(switch_problem.problem.reason.contains("binary"));
 
         let mut heading = RetainedElement::new(9, "text".to_string(), 1);
         heading.custom_props.insert("role".into(), "heading".into());
         heading.custom_props.insert("ariaLevel".into(), 0.into());
-        let heading_problem = &element_problems(&heading)[0];
+        let heading_problem = &element_problems(&detached_tree(), &heading)[0];
         assert!(heading_problem.problem.reason.contains("positive integer"));
 
         let mut visually_hidden = RetainedElement::new(12, "text".to_string(), 1);
@@ -1133,14 +1181,14 @@ mod tests {
         visually_hidden
             .custom_props
             .insert("visuallyHidden".into(), true.into());
-        assert!(is_visually_hidden(&visually_hidden));
-        assert!(element_problems(&visually_hidden).is_empty());
+        assert!(is_visually_hidden(&detached_tree(), &visually_hidden));
+        assert!(element_problems(&detached_tree(), &visually_hidden).is_empty());
 
         visually_hidden
             .custom_props
             .insert("ariaHidden".into(), true.into());
-        assert!(!is_visually_hidden(&visually_hidden));
-        let conflicting = element_problems(&visually_hidden);
+        assert!(!is_visually_hidden(&detached_tree(), &visually_hidden));
+        let conflicting = element_problems(&detached_tree(), &visually_hidden);
         assert_eq!(conflicting.len(), 1);
         assert_eq!(conflicting[0].problem.property, "visuallyHidden");
         assert!(conflicting[0].problem.reason.contains("ariaHidden removes"));
@@ -1152,7 +1200,7 @@ mod tests {
         malformed_visually_hidden
             .custom_props
             .insert("visuallyHidden".into(), "untilFocus".into());
-        let malformed = element_problems(&malformed_visually_hidden);
+        let malformed = element_problems(&detached_tree(), &malformed_visually_hidden);
         assert_eq!(malformed.len(), 1);
         assert!(malformed[0].problem.reason.contains("boolean true"));
     }
@@ -1165,8 +1213,8 @@ mod tests {
                 .insert("visuallyHidden".into(), true.into());
             element
         };
-        let only_reason = |element: &RetainedElement| {
-            let problems = element_problems(element);
+        let only_reason = |tree: &RetainedTree, element: &RetainedElement| {
+            let problems = element_problems(tree, element);
             assert_eq!(problems.len(), 1, "{problems:?}");
             assert_eq!(problems[0].problem.property, "visuallyHidden");
             assert_eq!(problems[0].effect, AccessibilityProblemEffect::Rejected);
@@ -1175,35 +1223,59 @@ mod tests {
 
         let mut control = visually_hidden(RetainedElement::new(20, "input".to_string(), 1));
         control.custom_props.insert("role".into(), "textbox".into());
-        assert!(!is_visually_hidden(&control));
-        assert!(only_reason(&control).contains("destroy this control"));
+        assert!(!is_visually_hidden(&detached_tree(), &control));
+        assert!(only_reason(&detached_tree(), &control).contains("destroy this control"));
 
         let mut clickable = visually_hidden(RetainedElement::new(21, "text".to_string(), 1));
         clickable
             .custom_props
             .insert("role".into(), "heading".into());
         clickable.events.insert("click".into());
-        assert!(!is_visually_hidden(&clickable));
-        assert!(only_reason(&clickable).contains("destroy this control"));
+        assert!(!is_visually_hidden(&detached_tree(), &clickable));
+        assert!(only_reason(&detached_tree(), &clickable).contains("destroy this control"));
 
         let mut tab_stop = visually_hidden(RetainedElement::new(22, "div".to_string(), 1));
         tab_stop.custom_props.insert("role".into(), "img".into());
         tab_stop.custom_props.insert("tabIndex".into(), 0.into());
-        assert!(!is_visually_hidden(&tab_stop));
-        assert!(only_reason(&tab_stop).contains("destroy this control"));
+        assert!(!is_visually_hidden(&detached_tree(), &tab_stop));
+        assert!(only_reason(&detached_tree(), &tab_stop).contains("destroy this control"));
 
-        // A `<text>` keeps its inline runs: they flatten into its own name.
+        // React makes a child element out of every JSX string, so a wrapper over
+        // plain text keeps everything: the name computation flattens the subtree.
+        let mut tree = RetainedTree::new();
+        tree.create_element(24, "text".to_string());
+        tree.create_element(27, "text".to_string());
+        tree.set_custom_prop(27, "role".into(), "link".into());
+
         let mut wrapper = visually_hidden(RetainedElement::new(23, "div".to_string(), 1));
         wrapper.custom_props.insert("role".into(), "heading".into());
         wrapper.children.push(24);
-        assert!(!is_visually_hidden(&wrapper));
-        assert!(only_reason(&wrapper).contains("children would leave"));
+        assert!(is_visually_hidden(&tree, &wrapper));
+        assert!(element_problems(&tree, &wrapper).is_empty());
+
+        // The same subtree under a role that names itself from an author string
+        // would drop the text, and a roled child owns a node of its own.
+        let mut unnamed_wrapper = visually_hidden(RetainedElement::new(28, "div".to_string(), 1));
+        unnamed_wrapper
+            .custom_props
+            .insert("role".into(), "status".into());
+        unnamed_wrapper.children.push(24);
+        assert!(!is_visually_hidden(&tree, &unnamed_wrapper));
+        assert!(only_reason(&tree, &unnamed_wrapper).contains("children would leave"));
+
+        let mut roled_child = visually_hidden(RetainedElement::new(29, "div".to_string(), 1));
+        roled_child
+            .custom_props
+            .insert("role".into(), "heading".into());
+        roled_child.children.push(27);
+        assert!(!is_visually_hidden(&tree, &roled_child));
+        assert!(only_reason(&tree, &roled_child).contains("children would leave"));
 
         let mut runs = visually_hidden(RetainedElement::new(25, "text".to_string(), 1));
         runs.custom_props.insert("role".into(), "heading".into());
         runs.children.push(26);
-        assert!(is_visually_hidden(&runs));
-        assert!(element_problems(&runs).is_empty());
+        assert!(is_visually_hidden(&detached_tree(), &runs));
+        assert!(element_problems(&detached_tree(), &runs).is_empty());
     }
 
     #[test]
@@ -1225,7 +1297,7 @@ mod tests {
                 AccessibilityProps::from_element(&link).current,
                 Some(expected)
             );
-            assert!(element_problems(&link).is_empty(), "{token}");
+            assert!(element_problems(&detached_tree(), &link).is_empty(), "{token}");
         }
     }
 
@@ -1249,7 +1321,7 @@ mod tests {
                 .custom_props
                 .insert("ariaLabel".into(), "Notes".into());
 
-            let problems = element_problems(&element);
+            let problems = element_problems(&detached_tree(), &element);
             assert_eq!(problems.len(), 1, "<{element_type}>");
             assert!(
                 problems[0]

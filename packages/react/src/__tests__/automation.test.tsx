@@ -870,6 +870,55 @@ describeNative("automation", () => {
     ).toBe(false)
   })
 
+  it("keeps visually hidden text under a role that is not named from its contents", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ display: "flex", width: 480, height: 100 }}>
+        <text visuallyHidden role="status">
+          Saved 3 files
+        </text>
+        <text visuallyHidden role="img" ariaLabel="Bar chart">
+          2019 through 2024
+        </text>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    // A live region announces its content, so the sr-only status keeps its
+    // text the way painted text does: as the node's value.
+    expect(nodes.find((node) => node.aria.role === "Status")).toMatchObject({
+      aria: { role: "Status", value: "Saved 3 files" },
+    })
+    expect(nodes.find((node) => node.aria.role === "Image")).toMatchObject({
+      aria: { role: "Image", label: "Bar chart", value: "2019 through 2024" },
+    })
+    expect(renderer.getPaintedText()).not.toContain("Saved 3 files")
+    expect(renderer.getPaintedText()).not.toContain("2019 through 2024")
+  })
+
+  it("projects a visually hidden wrapper whose subtree is only text", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ display: "flex", width: 480, height: 100 }}>
+        <div visuallyHidden role="heading" ariaLevel={1}>
+          Production ledger
+        </div>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    expect(nodes.find((node) => node.aria.label === "Production ledger")).toMatchObject({
+      aria: { role: "Heading", label: "Production ledger", level: 1 },
+    })
+    expect(renderer.getPaintedText()).not.toContain("Production ledger")
+  })
+
   it.each([
     [
       "A: names a link wrapper from descendant text",
