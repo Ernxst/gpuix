@@ -2183,7 +2183,7 @@ without one GPUI contributes no accessibility node for the politeness to land
 on, so GPUIX reports `ariaLive` as ignored rather than inventing a role. Add
 `role="status"`, `role="alert"`, or `role="log"`. A `visuallyHidden` live region
 is the `sr-only` announcement pattern and works the same way — but do not give
-one an `ariaLabel`. An authored name outranks the region's own text, as accname
+any live region an `ariaLabel`. An authored name outranks the region's own text, as accname
 says it should, so the name then never changes, and Windows and Linux announce a
 live region by re-reading exactly that name. Let the text be the name.
 
