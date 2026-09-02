@@ -3236,6 +3236,7 @@ node.semantics // { label: 'Recipe search', placeholder: 'Search recipes', value
 | Call | What it does |
 |---|---|
 | `locator.hover()` | Moves the pointer to the center, so hover styles and tooltips fire |
+| `locator.dblclick()` | Two clicks over the center, the second with `clickCount: 2` |
 | `locator.wheel(dx, dy)` | One wheel event over the center |
 | `locator.dragBy(dx, dy)` | Presses on the center, travels, releases |
 | `locator.dragTo(target)` | Same, ending on another locator or a `{ x, y }` point |
@@ -3260,6 +3261,25 @@ testable:
 ```ts
 await app.getByTestId('canvas').wheel(0, 120, { modifiers: 'cmd' })
 await app.getByTestId('clip-8').click({ modifiers: 'shift' })
+```
+
+An unrecognised modifier name **throws**. Accepted names are `cmd` (`meta`,
+`super`, `win`, `platform`), `ctrl` (`control`), `alt` (`option`), `shift`, and
+`fn` (`function`). A typo used to be dropped silently, so `'comand'` dispatched
+a plain click and the test asserting the modifier path passed while exercising
+the unmodified one.
+
+`click`, `mouse.down`, and `mouse.up` also take **`clickCount`**, the platform's
+repeat count within one click sequence. `dblclick()` sends the whole sequence
+the way a platform does — two clicks, the second with `clickCount: 2` — and the
+app sees `click` (detail 1), `click` (detail 2), then `doubleClick` (detail 2),
+which is the DOM order. `dblclick()` does not accept `clickCount`, since it is
+the click count; pass one to `click()` directly for an unusual value. A count of
+`0` is **rejected**, not clamped: there is no press that is zero presses.
+
+```ts
+await app.getByTestId('cell-7').dblclick()
+await app.mouse.down(point, { clickCount: 2 })
 ```
 
 `click()` needs painted bounds. **Every element that accepts `data-testid` records
@@ -3516,9 +3536,11 @@ the newly focused element. `type(element, text)` converts literal spaces,
 newlines, and tabs for that syntax. `clear(element)` selects all with the
 platform chord (`cmd-a` on macOS, `ctrl-a` elsewhere) and deletes.
 `unhover(element)` moves the pointer to the nearest point off the element, or
-out of the window at `(-1, -1)` when the element fills it. `dblClick` currently
-rejects with an issue #216 message until the native dispatcher can carry
-`click_count`.
+out of the window at `(-1, -1)` when the element fills it. `dblClick(element)`
+sends two clicks over the center, the second carrying the platform's repeat
+count, so the component sees `onClick` (detail 1), `onClick` (detail 2), then
+`onDoubleClick` (detail 2) — the DOM order, where `dblclick` follows the second
+click rather than replacing it.
 
 ### Matchers
 

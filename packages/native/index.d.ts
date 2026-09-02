@@ -223,15 +223,19 @@ export declare class GpuixRenderer {
   simulateKeystrokes(keystrokes: string): void
   simulateKeyDown(keystroke: string, isHeld?: boolean | undefined | null): void
   simulateKeyUp(keystroke: string): void
-  /** `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt". */
-  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  /**
+   * `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
+   * `clickCount` is the platform's repeat count: 2 for the second click of
+   * a double click (default 1).
+   */
+  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null, clickCount?: number | undefined | null): void
   /**
    * macOS-only automation seam that posts NSEvents through the production
    * AppKit → GPUI event path instead of calling the direct test dispatcher.
    */
   postAppKitClick(x: number, y: number): void
-  simulateMouseDown(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
-  simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateMouseDown(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null, clickCount?: number | undefined | null): void
+  simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null, clickCount?: number | undefined | null): void
   simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
    * Dispatch a wheel event through the same GPUI hit test the trackpad uses.
@@ -440,13 +444,17 @@ export declare class TestGpuixRenderer {
   /**
    * Simulate a mouse down event at the given window coordinates.
    * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
+   * `click_count` is the platform's repeat count: 2 for the second press of
+   * a double click (default 1).
    */
-  simulateMouseDown(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateMouseDown(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null, clickCount?: number | undefined | null): void
   /**
    * Simulate a mouse up event at the given window coordinates.
    * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
+   * `click_count` is the platform's repeat count: 2 for the second release
+   * of a double click (default 1).
    */
-  simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null, clickCount?: number | undefined | null): void
   /**
    * Simulate a scroll wheel event at the given position.
    * delta_x and delta_y default to pixels (negative = scroll up/left).
