@@ -647,9 +647,16 @@ describeNative("events", () => {
       const centerX = x + width / 2
       const centerY = y + height / 2
 
-      // The child declares nothing. It carries a right-button mouse-down
-      // listener only because `contextMenu` tracking walks ancestors, and that
-      // is the whole button set it needs: a left press must stay off the wire.
+      // The child declares nothing. It carries a mouse-down listener only
+      // because `contextMenu` tracking walks ancestors, and this locks that
+      // walk: without it the right press reaches no handler at all.
+      //
+      // It does not guard the right-button narrowing of that listener. A left
+      // press is silent either way, because the ancestor has no `onMouseDown`
+      // and the extra native payload is drained inside
+      // `nativeSimulateMouseDown` with nowhere to be observed. The button set
+      // itself is guarded in Rust, by
+      // `renderer::mouse_down_button_set_tests`.
       testRoot.renderer.nativeSimulateMouseDown(centerX, centerY)
       expect(calls).toEqual([])
 

@@ -1229,15 +1229,8 @@ impl CanvasElement {
         // A canvas that declares only `onContextMenu` takes the right button
         // alone, so a left press neither costs an IPC round trip nor stops
         // propagation on behalf of a listener that would ignore it.
-        let mouse_down_buttons: &[gpui::MouseButton] = if ctx.events.contains("mouseDown") {
-            &[
-                gpui::MouseButton::Left,
-                gpui::MouseButton::Middle,
-                gpui::MouseButton::Right,
-            ]
-        } else {
-            &[gpui::MouseButton::Right]
-        };
+        let mouse_down_buttons =
+            crate::renderer::mouse_down_button_set(ctx.events.contains("mouseDown"));
         for event_type in ctx.events {
             let callback = ctx.event_callback.clone();
             let geometry = self.geometry.clone();
