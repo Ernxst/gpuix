@@ -723,10 +723,17 @@ function nativeTabIndex(type: string, props: Props): number | undefined {
   return typeof href === "string" ? 0 : undefined
 }
 
-/** Keep the original anchor semantics after host aliases become native divs. */
-function nativeActivationKind(type: string, props: Props): "anchor" | undefined {
+/**
+ * Keep the original anchor semantics after host aliases become native divs.
+ *
+ * Keyed on `href`, like {@link nativeTabIndex} and {@link nativeAnchorRole}. A
+ * bare `<a>` is a plain generic in the DOM — not focusable, not activatable —
+ * so giving it link keyboard behaviour (Enter activates, Space declines) would
+ * contradict the `generic` role it now computes.
+ */
+function nativeActivationKind(_type: string, props: Props): "anchor" | undefined {
   const href = (props as Props & { href?: unknown }).href
-  return type === "a" || typeof href === "string" ? "anchor" : undefined
+  return typeof href === "string" ? "anchor" : undefined
 }
 
 /** Restore the two semantic aliases after both normalize to a native div. */

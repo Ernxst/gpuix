@@ -249,6 +249,43 @@ describeNative("DOM parity on refs and events", () => {
 
       expect((seen! as unknown as GpuixSyntheticEvent).relatedTarget).toBeNull()
     })
+
+    it("stays null on focus and blur, as documented", () => {
+      // Pins the documented gap rather than the ideal. GPUI's focus
+      // subscriptions report only the element whose own focus changed; the
+      // other side lives in `WindowFocusEvent.previous_focus_path`, which is
+      // `pub(crate)`. Closing it needs a change in the GPUI fork first, and
+      // this test is what will fail when that lands.
+      const seen: Array<[string, unknown]> = []
+      testRoot.render(
+        <div style={{ width: 400, height: 200 }}>
+          <input
+            data-testid="first"
+            style={{ width: 200, height: 40 }}
+            onFocus={(event) => seen.push(["first-focus", event.relatedTarget])}
+            onBlur={(event) => seen.push(["first-blur", event.relatedTarget])}
+          />
+          <input
+            data-testid="second"
+            style={{ width: 200, height: 40 }}
+            onFocus={(event) => seen.push(["second-focus", event.relatedTarget])}
+          />
+        </div>
+      )
+
+      const first = testRoot.renderer.findByTestId("first")!
+      const second = testRoot.renderer.findByTestId("second")!
+      testRoot.renderer.focusElement(first.id)
+      testRoot.renderer.focusElement(second.id)
+
+      // Blur before focus, so the transition really does have two sides.
+      expect(seen.map(([name]) => name)).toEqual([
+        "first-focus",
+        "first-blur",
+        "second-focus",
+      ])
+      expect(seen.every(([, related]) => related === null)).toBe(true)
+    })
   })
 
   describe("anchor role", () => {
@@ -282,6 +319,23 @@ describeNative("DOM parity on refs and events", () => {
       )
 
       expect(anchorRoles()).toContain("Link")
+    })
+
+    it("gives link keyboard activation only to an anchor with an href", () => {
+      // The activation kind has to agree with the role: a bare `<a>` that
+      // computes `generic` must not also decline Space the way a link does.
+      testRoot.render(
+        <div>
+          <a href="/factory" data-testid="with-href" style={{ width: 120, height: 40 }} />
+          <a data-testid="without-href" style={{ width: 120, height: 40 }} />
+        </div>
+      )
+
+      const withHref = testRoot.renderer.findByTestId("with-href")!
+      const withoutHref = testRoot.renderer.findByTestId("without-href")!
+
+      expect(withHref.customProps?.activationKind).toBe("anchor")
+      expect(withoutHref.customProps?.activationKind).toBeUndefined()
     })
   })
 

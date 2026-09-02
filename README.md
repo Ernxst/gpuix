@@ -1905,9 +1905,10 @@ an alias. These aliases add semantics and focus behavior, but no visual
 defaults.
 
 Following HTML-AAM, the `link` role needs the `href`. A bare `<a>` computes
-`generic` and infers nothing: announcing it as a link would promise a
-destination that does not exist. Give a scripted anchor an explicit
-`role="link"` when it really does navigate.
+`generic` and infers nothing — no role, so no name derived from its descendant
+text and no `ariaCurrent` state, and no link keyboard activation either.
+Announcing it as a link would promise a destination that does not exist. Give a
+scripted anchor an explicit `role="link"` when it really does navigate.
 
 `<img>` follows HTML-AAM: it infers the `img` role and takes its accessible
 name from `alt`. `alt=""` marks the image decorative, so it infers
