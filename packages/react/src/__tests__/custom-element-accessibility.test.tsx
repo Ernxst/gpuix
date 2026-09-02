@@ -174,6 +174,34 @@ describeNative("accessibility props on custom elements", () => {
     }
   })
 
+  it("reports visuallyHidden on a custom element instead of dropping it", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <canvas
+          data-testid="chart"
+          role="img"
+          ariaLabel="Throughput chart"
+          visuallyHidden
+          width={120}
+          height={80}
+        />
+      )
+
+      const reported = screen.renderer
+        .drainStyleDiagnostics()
+        .find(
+          (candidate) =>
+            candidate.dataTestId === "chart" && candidate.property === "visuallyHidden"
+        )
+
+      expect(reported?.message).toContain("this element type cannot produce")
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("keeps ariaHidden custom elements out of the accessibility tree", () => {
     const screen = createTestRoot()
 

@@ -1831,6 +1831,11 @@ GPUIX resolves them the way HTML-AAM does:
 - `<li>` is a `listitem` only inside a `<ul>`, `<ol>`, or an element with
   `role="list"`.
 
+These three re-resolve whenever what they read actually changes: attaching the
+element to a parent, and an ancestor gaining or losing one of the roles above.
+A `<div role="list">` that becomes `role="group"` drops its `<li>` children back
+to generic, as it does in the DOM.
+
 An authored `ariaLevel` wins over the level a heading tag implies, so
 `<h2 ariaLevel={4}>` reports level 4. The aliases with no implicit role add no
 accessibility node, which keeps them out of name computation exactly as their
@@ -1976,10 +1981,18 @@ diagnostic instead of dropping them; declare them on a `<div>` that wraps it.
 `ariaHidden` is universal because it suppresses a whole subtree, including
 supported hosts inside an otherwise unsupported container.
 
-A bare `<svg>` infers the `graphics-document` role from SVG-AAM. `<canvas>`,
-`<code>`, `<diff>`, `<markdown>`, and `<anchored>` have no implicit role: they
-carry only what the author declares, exactly as their generic DOM counterparts
-do.
+A bare `<svg>` infers the `graphics-document` role from SVG-AAM, so a decorative
+icon produces a nameless node unless you opt out. Give it `role="presentation"`
+to drop the role, or `ariaHidden` to drop the whole subtree, exactly as in the
+DOM. `<canvas>`, `<code>`, `<diff>`, `<markdown>`, and `<anchored>` have no
+implicit role: they carry only what the author declares, exactly as their
+generic DOM counterparts do.
+
+`visuallyHidden` stays on `<div>`, `<text>`, `<input>`, `<textarea>`, and
+`<img>`. It replaces the element with an unpainted accessibility-only node,
+which an element that paints its own content through an adapter cannot produce;
+declaring it on one of the other hosts is reported rather than ignored. Wrap
+the element in a `<div>` or `<text>` and visually hide that instead.
 
 Semantic nodes use GPUIX's stable retained element identity for their AccessKit
 node ID. The author `id` remains platform-visible metadata and is not the node
