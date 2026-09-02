@@ -1752,6 +1752,12 @@ the `button` role and `<a>` infers the `link` role; other JSX aliases do not
 infer roles. An explicit `role` still defines custom controls or overrides an
 alias. These aliases add semantics and focus behavior, but no visual defaults.
 
+`<img>` follows HTML-AAM: it infers the `img` role and takes its accessible
+name from `alt`. `alt=""` marks the image decorative, so it infers
+`presentation` and produces no accessibility node — unless `ariaLabel` or
+`tabIndex` gives it semantics of its own. An authored `ariaLabel` wins over
+`alt`, matching the DOM name computation.
+
 ```tsx
 <button
   ariaLabel="Save factory"
@@ -2458,6 +2464,11 @@ tagged union when the source kind should stay explicit, especially for bytes.
   style={{ width: 240, height: 140 }}
 />
 ```
+
+`alt` is the accessible name, exactly as in HTML: `alt="Sales for March"` names
+the image, and `alt=""` marks it decorative and keeps it out of the
+accessibility tree. See [native accessibility](#native-accessibility) for the
+implicit role that carries it.
 
 `objectFit` matches CSS: `"contain"` (default), `"cover"`, `"fill"`,
 `"scaleDown"`, or `"none"`. `bytes` accepts an `ArrayBuffer`, `Uint8Array`

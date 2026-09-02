@@ -612,7 +612,38 @@ function nativeRole(type: string, props: Props): Props["role"] | undefined {
   if (props.role !== undefined) return props.role
   if (type === "button") return "button"
   if (type === "a") return "link"
+  if (type === "img") return nativeImageRole(props)
   return undefined
+}
+
+/** An explicitly authored accessible name, from either prop spelling. */
+function authoredAriaLabel(props: Props): string | undefined {
+  const label = props.ariaLabel ?? props["aria-label"]
+  return typeof label === "string" ? label : undefined
+}
+
+/**
+ * HTML-AAM maps `<img>` to the `img` role, and to `presentation` when an empty
+ * `alt` marks the image as decorative. ARIA's presentational conflict
+ * resolution keeps the image role when the author named the image or put it in
+ * the tab order.
+ */
+function nativeImageRole(props: Props): "img" | "presentation" {
+  const { alt } = props as Props & { alt?: unknown }
+  const decorative =
+    alt === "" && authoredAriaLabel(props) === undefined && props.tabIndex === undefined
+  return decorative ? "presentation" : "img"
+}
+
+/**
+ * `alt` is the image's name source in HTML, and any authored ARIA name wins
+ * over it exactly as it does in the DOM's name computation.
+ */
+function nativeImageLabel(type: string, props: Props): string | undefined {
+  if (type !== "img") return undefined
+  const { alt } = props as Props & { alt?: unknown }
+  if (typeof alt !== "string" || alt === "") return undefined
+  return authoredAriaLabel(props) === undefined ? alt : undefined
 }
 
 function customPropEntries(type: string, props: Props): Array<[string, CustomPropInput]> {
@@ -630,6 +661,8 @@ function customPropEntries(type: string, props: Props): Array<[string, CustomPro
   if (activationKind) entries.push(["activationKind", activationKind])
   const role = nativeRole(type, props)
   if (role !== undefined) entries.push(["role", role])
+  const imageLabel = nativeImageLabel(type, props)
+  if (imageLabel !== undefined) entries.push(["ariaLabel", imageLabel])
 
   const virtualListProps = props as Props & VirtualListProps
   if (type !== "virtual-list" || virtualListProps.estimatedItemHeight !== undefined) {
