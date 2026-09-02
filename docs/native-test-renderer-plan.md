@@ -7,12 +7,12 @@ description: Migrate from mocked TypeScript TestRenderer to real GPUI-backed tes
 
 > [!NOTE]
 > **Superseded in part.** The per-mutation API this plan sketches
-> (`createElement`, `setStyle`, `setText`, `setRoot`, `commitMutations`, and
-> peers, shown under "Architecture" and "Test Flow Example") no longer exists.
-> The renderer transport is one atomic `applyBatch(json)` call per React
-> commit; a test drives the renderer by constructing that batch. Everything
-> else here — the GPUI `TestPlatform` backing, the shared `RetainedTree`, the
-> flush/simulate/drain flow — still describes the shipped design.
+> (`createElement`, `setStyle`, `setText`, `setRoot`, and peers, shown under
+> "Architecture" and "Test Flow Example") no longer exists. The renderer
+> transport is one atomic `applyBatch(json)` call per React commit; a test
+> drives the renderer by constructing that batch. Everything else here — the
+> GPUI `TestPlatform` backing, the shared `RetainedTree`, `commitMutations`,
+> the flush/simulate/drain flow — still describes the shipped design.
 
 ## Goal
 
