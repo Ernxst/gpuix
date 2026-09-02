@@ -1086,6 +1086,146 @@ describeNative("events", () => {
   })
 
   describe("keyboard events", () => {
+    it("delivers UI Events key values to DOM-idiom handlers", () => {
+      const actions: string[] = []
+
+      testRoot.render(
+        <div
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") actions.push("dismiss")
+            if (event.key === "ArrowDown") actions.push("next")
+            if (event.key === "F1") actions.push("help")
+            if (event.key === "Meta") actions.push("platform")
+            if (event.key === "BrowserBack") actions.push("back")
+          }}
+        />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      for (const key of ["escape", "down", "f1", "platform", "back"]) {
+        handleGpuixEvent(
+          { elementId: target.id, eventType: "keyDown", key },
+          testRoot.renderer
+        )
+      }
+
+      expect(actions).toEqual(["dismiss", "next", "help", "platform", "back"])
+    })
+
+    it("translates the key names other platforms produce", () => {
+      const keys: Array<string | undefined> = []
+
+      testRoot.render(
+        <div tabIndex={0} onKeyDown={(event) => keys.push(event.key)} />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      // Windows sends "menu"; the browser platform lowercases "ContextMenu",
+      // "PrintScreen", and "AltGraph"; Linux sends the XF86 editing keys.
+      for (const key of [
+        "menu",
+        "contextmenu",
+        "printscreen",
+        "altgraph",
+        "cut",
+        "copy",
+        "paste",
+      ]) {
+        handleGpuixEvent(
+          { elementId: target.id, eventType: "keyDown", key },
+          testRoot.renderer
+        )
+      }
+
+      expect(keys).toEqual([
+        "ContextMenu",
+        "ContextMenu",
+        "PrintScreen",
+        "AltGraph",
+        "Cut",
+        "Copy",
+        "Paste",
+      ])
+    })
+
+    it("reports the character a printable key produced", () => {
+      const keys: Array<string | undefined> = []
+
+      testRoot.render(
+        <div tabIndex={0} onKeyDown={(event) => keys.push(event.key)} />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      const presses: Array<{ key: string; keyChar?: string }> = [
+        // Shift+A and Shift+1: GPUI keeps the unshifted key name.
+        { key: "a", keyChar: "A" },
+        { key: "1", keyChar: "!" },
+        { key: "a", keyChar: "a" },
+        // Option-s on macOS types "ß".
+        { key: "s", keyChar: "ß" },
+        // Cmd-S produces no character at all.
+        { key: "s" },
+        // Enter carries a control character, and stays a named key.
+        { key: "enter", keyChar: "\n" },
+      ]
+      for (const press of presses) {
+        handleGpuixEvent(
+          { elementId: target.id, eventType: "keyDown", ...press },
+          testRoot.renderer
+        )
+      }
+
+      expect(keys).toEqual(["A", "!", "a", "ß", "s", "Enter"])
+    })
+
+    it("reports the shifted character through the native key path", () => {
+      const keys: Array<string | undefined> = []
+
+      testRoot.render(
+        <div
+          style={{ width: 100, height: 100 }}
+          tabIndex={0}
+          onKeyDown={(event) => keys.push(event.key)}
+        />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      testRoot.renderer.nativeSimulateKeystrokes(target.id, "shift-a")
+
+      expect(keys).toEqual(["A"])
+    })
+
+    it("exposes key repetition as repeat", () => {
+      const repeats: boolean[] = []
+
+      testRoot.render(
+        <div tabIndex={0} onKeyDown={(event) => repeats.push(event.repeat)} />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown"))!
+
+      handleGpuixEvent(
+        { elementId: target.id, eventType: "keyDown", key: "a", isHeld: false },
+        testRoot.renderer
+      )
+      handleGpuixEvent(
+        { elementId: target.id, eventType: "keyDown", key: "a", isHeld: true },
+        testRoot.renderer
+      )
+
+      expect(repeats).toEqual([false, true])
+    })
+
     it("should handle onKeyDown and update state", () => {
       function KeyTracker() {
         const [lastKey, setLastKey] = useState("none")
@@ -1111,12 +1251,11 @@ describeNative("events", () => {
         .findByType("div")
         .find((d) => d.events.has("keyDown"))!
 
-      // GPUI uses "down" not "arrowDown"
       testRoot.renderer.nativeSimulateKeystrokes(div.id, "down")
 
       expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
         [
-          "Key: down",
+          "Key: ArrowDown",
         ]
       `)
 
@@ -1124,7 +1263,7 @@ describeNative("events", () => {
 
       expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
         [
-          "Key: escape",
+          "Key: Escape",
         ]
       `)
     })
@@ -1869,9 +2008,9 @@ describeNative("events", () => {
             style={{ width: 200, height: 200 }}
             tabIndex={0}
             onKeyDown={(e: EventPayload) => {
-              if (e.key === "down") {
+              if (e.key === "ArrowDown") {
                 setSelected((s) => Math.min(s + 1, items.length - 1))
-              } else if (e.key === "up") {
+              } else if (e.key === "ArrowUp") {
                 setSelected((s) => Math.max(s - 1, 0))
               }
             }}
@@ -2049,8 +2188,8 @@ describeNative("events", () => {
       testRoot.renderer.nativeSimulateKeyDown(div.id, "enter")
       testRoot.renderer.nativeSimulateKeyUp(div.id, "enter")
 
-      expect(events).toContain("down:enter")
-      expect(events).toContain("up:enter")
+      expect(events).toContain("down:Enter")
+      expect(events).toContain("up:Enter")
     })
 
     it("should handle onKeyUp state update", () => {
@@ -2731,7 +2870,7 @@ describeNative("events", () => {
                 setAction("save")
               } else if (mods?.cmd && mods?.shift && e.key === "p") {
                 setAction("command-palette")
-              } else if (e.key === "escape") {
+              } else if (e.key === "Escape") {
                 setAction("cancel")
               }
             }}
@@ -2865,7 +3004,7 @@ describeNative("events", () => {
               }}
               tabIndex={0}
               onKeyDown={(e: EventPayload) => {
-                if (e.key === "enter") setState("enter")
+                if (e.key === "Enter") setState("enter")
               }}
             >
               <text style={{ color: "#e8edff", fontSize: 18 }}>{`State: ${state}`}</text>

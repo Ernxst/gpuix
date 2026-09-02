@@ -96,6 +96,19 @@ describe("automation stdio", () => {
     })
   })
 
+  it("matches the desktop key value for shifted letters", () => {
+    // Desktop reports "A" for shift-a (events.test.tsx locks that), so the
+    // browser mirror must not report "a".
+    expect(browserKeystrokeInit("shift-a")).toMatchObject({
+      key: "A",
+      shiftKey: true,
+    })
+    // Named keys and modifier combinations that produce no character keep the
+    // unshifted name.
+    expect(browserKeystrokeInit("shift-tab")).toMatchObject({ key: "Tab" })
+    expect(browserKeystrokeInit("cmd-shift-a")).toMatchObject({ key: "a" })
+  })
+
   it("round-trips through data: lines with log noise", async () => {
     const backend = new InProcessBackend(fakeRenderer())
     let listener: ((chunk: string) => void) | undefined

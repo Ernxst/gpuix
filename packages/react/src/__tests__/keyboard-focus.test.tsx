@@ -61,12 +61,12 @@ describeNative("keyboard focus", () => {
         overdraw={0}
         estimatedItemHeight={40}
         onKeyDownCapture={(event) => {
-          if (preventCapture && event.key === "tab" && !event.shiftKey) {
+          if (preventCapture && event.key === "Tab" && !event.shiftKey) {
             event.preventDefault()
           }
         }}
         onKeyDown={(event) => {
-          if (preventBubble && event.key === "tab" && event.shiftKey) {
+          if (preventBubble && event.key === "Tab" && event.shiftKey) {
             event.preventDefault()
           }
         }}
@@ -118,7 +118,7 @@ describeNative("keyboard focus", () => {
           href="/second"
           ariaLabel="second"
           onKeyDown={(event) => {
-            if (event.key === "tab") event.preventDefault()
+            if (event.key === "Tab") event.preventDefault()
           }}
         >
           <text>Second</text>
