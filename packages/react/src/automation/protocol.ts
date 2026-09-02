@@ -56,6 +56,24 @@ export const boundsSchema = z.object({
 
 export type ElementBounds = z.infer<typeof boundsSchema>
 
+export const semanticsSchema = z.object({
+  role: z.string().optional(),
+  label: z.string().optional(),
+  value: z.string().optional(),
+  placeholder: z.string().optional(),
+  disabled: z.literal(true).optional(),
+})
+
+/**
+ * The declared semantics of a node, present at both tree detail levels.
+ *
+ * The locator tree drops `customProps` to stay cheap on a 5k-row list, so this
+ * block is the only way a locator can see an input's value, its placeholder, or
+ * its label. `role` is the authored `role` prop rather than GPUI's computed
+ * accessibility role, and `disabled` is present only when true.
+ */
+export type NodeSemantics = z.infer<typeof semanticsSchema>
+
 export const treeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
   z.object({
     id: z.number(),
@@ -66,6 +84,7 @@ export const treeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
     style: z.record(z.string(), z.unknown()).optional(),
     events: z.array(z.string()).optional(),
     customProps: z.record(z.string(), z.unknown()).optional(),
+    semantics: semanticsSchema.optional(),
     bounds: boundsSchema.optional(),
     children: z.array(treeNodeSchema).optional(),
   })
@@ -80,6 +99,7 @@ export interface TreeNode {
   style?: Record<string, unknown>
   events?: string[]
   customProps?: Record<string, unknown>
+  semantics?: NodeSemantics
   bounds?: ElementBounds
   children?: TreeNode[]
 }

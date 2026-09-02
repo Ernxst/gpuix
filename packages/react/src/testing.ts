@@ -326,6 +326,25 @@ export function isNativeTestRendererAvailable(): boolean {
 
 // ── Test element tree ────────────────────────────────────────────────
 
+/**
+ * The queryable semantics of one element, as the native tree emits them at
+ * both detail levels. Every field mirrors a prop the author declared.
+ *
+ * `role` is the authored `role` prop, not GPUI's computed accessibility role —
+ * role queries read the accessibility snapshot, which resolves implicit roles
+ * and name-from-contents. `value` is the retained `value` prop, so a controlled
+ * input reports its current value and an uncontrolled one reports the last
+ * value the author set rather than the live editing buffer. `disabled` is
+ * present only when true, from `disabled` or `ariaDisabled`.
+ */
+export interface ElementSemantics {
+  role?: string
+  label?: string
+  value?: string
+  placeholder?: string
+  disabled?: true
+}
+
 export interface TestElement {
   readonly id: number
   readonly type: string
@@ -341,6 +360,8 @@ export interface TestElement {
   /** The author-defined `id` attribute, distinct from the numeric renderer ID. */
   authorId?: string
   customProps?: Record<string, unknown>
+  /** Declared label, value, placeholder, role, and disabled state. */
+  semantics?: ElementSemantics
 }
 
 export type MatcherOptions = TestingMatcherOptions
@@ -415,7 +436,74 @@ export interface RoleQueries {
   ) => Promise<TestElement[]>
 }
 
-export interface TestQueries extends TextQueries, TestIdQueries, RoleQueries {}
+/**
+ * Label queries over the GPU-IX desktop test renderer.
+ *
+ * A desktop element has no `<label for>` and no `title`, so the label is the
+ * declared `ariaLabel` and nothing else. Testing Library's `ByAltText` and
+ * `ByTitle` have no desktop counterpart: label an `<img>` with `ariaLabel` and
+ * find it with this family or with `getByRole('img', { name })`.
+ */
+export interface LabelTextQueries {
+  getByLabelText: (text: TextMatcher, options?: MatcherOptions) => TestElement
+  queryByLabelText: (text: TextMatcher, options?: MatcherOptions) => TestElement | null
+  getAllByLabelText: (text: TextMatcher, options?: MatcherOptions) => TestElement[]
+  queryAllByLabelText: (text: TextMatcher, options?: MatcherOptions) => TestElement[]
+  findByLabelText: (
+    text: TextMatcher,
+    options?: MatcherOptions,
+    waitForOptions?: WaitForOptions
+  ) => Promise<TestElement>
+  findAllByLabelText: (
+    text: TextMatcher,
+    options?: MatcherOptions,
+    waitForOptions?: WaitForOptions
+  ) => Promise<TestElement[]>
+}
+
+/** Placeholder queries over `<input>` and `<textarea>` placeholder props. */
+export interface PlaceholderTextQueries {
+  getByPlaceholderText: (text: TextMatcher, options?: MatcherOptions) => TestElement
+  queryByPlaceholderText: (text: TextMatcher, options?: MatcherOptions) => TestElement | null
+  getAllByPlaceholderText: (text: TextMatcher, options?: MatcherOptions) => TestElement[]
+  queryAllByPlaceholderText: (text: TextMatcher, options?: MatcherOptions) => TestElement[]
+  findByPlaceholderText: (
+    text: TextMatcher,
+    options?: MatcherOptions,
+    waitForOptions?: WaitForOptions
+  ) => Promise<TestElement>
+  findAllByPlaceholderText: (
+    text: TextMatcher,
+    options?: MatcherOptions,
+    waitForOptions?: WaitForOptions
+  ) => Promise<TestElement[]>
+}
+
+/** Current-value queries over `<input>` and `<textarea>` value props. */
+export interface DisplayValueQueries {
+  getByDisplayValue: (value: TextMatcher, options?: MatcherOptions) => TestElement
+  queryByDisplayValue: (value: TextMatcher, options?: MatcherOptions) => TestElement | null
+  getAllByDisplayValue: (value: TextMatcher, options?: MatcherOptions) => TestElement[]
+  queryAllByDisplayValue: (value: TextMatcher, options?: MatcherOptions) => TestElement[]
+  findByDisplayValue: (
+    value: TextMatcher,
+    options?: MatcherOptions,
+    waitForOptions?: WaitForOptions
+  ) => Promise<TestElement>
+  findAllByDisplayValue: (
+    value: TextMatcher,
+    options?: MatcherOptions,
+    waitForOptions?: WaitForOptions
+  ) => Promise<TestElement[]>
+}
+
+export interface TestQueries
+  extends TextQueries,
+    TestIdQueries,
+    RoleQueries,
+    LabelTextQueries,
+    PlaceholderTextQueries,
+    DisplayValueQueries {}
 
 /** Current async load state for a live native `<img>` test element. */
 export interface ImageLoadState {
@@ -980,6 +1068,7 @@ export class TestRenderer implements NativeRenderer {
         ...(node.authorId ? { authorId: node.authorId } : {}),
         ...(node.dataTestId ? { dataTestId: node.dataTestId } : {}),
         ...(node.customProps ? { customProps: node.customProps } : {}),
+        ...(node.semantics ? { semantics: node.semantics } : {}),
       } as TestElement
       Object.defineProperties(element, {
         children: {
@@ -1015,6 +1104,7 @@ export class TestRenderer implements NativeRenderer {
       Object.freeze(element.style)
       Object.freeze(element.events)
       if (element.customProps) Object.freeze(element.customProps)
+      if (element.semantics) Object.freeze(element.semantics)
       Object.freeze(element)
     }
     this.elementMap = map
@@ -1487,6 +1577,56 @@ function getQueries(
 ): TestQueries {
   const waitFor = createWaitFor(renderer)
 
+  const allBySemantics = (
+    field: SemanticsField,
+    matcher: TextMatcher,
+    options?: MatcherOptions
+  ): TestElement[] =>
+    findAllBySemantics(renderer, resolveScope(), field, matcher, includeScope, options)
+
+  const requireSemantics = (
+    field: SemanticsField,
+    matcher: TextMatcher,
+    options: MatcherOptions | undefined,
+    expectOne: boolean
+  ): TestElement[] => {
+    const scope = resolveScope()
+    const matches = findAllBySemantics(renderer, scope, field, matcher, includeScope, options)
+
+    if (matches.length === 0) {
+      throw noSemanticsMatchError(renderer, scope, field, matcher, includeScope)
+    }
+    if (expectOne && matches.length > 1) {
+      throw multipleSemanticsMatchesError(renderer, field, matcher, matches)
+    }
+
+    return matches
+  }
+
+  const oneBySemantics = (
+    field: SemanticsField,
+    matcher: TextMatcher,
+    options?: MatcherOptions
+  ): TestElement => {
+    const [match] = requireSemantics(field, matcher, options, true)
+    if (match === undefined) {
+      throw noSemanticsMatchError(renderer, resolveScope(), field, matcher, includeScope)
+    }
+    return match
+  }
+
+  const maybeBySemantics = (
+    field: SemanticsField,
+    matcher: TextMatcher,
+    options?: MatcherOptions
+  ): TestElement | null => {
+    const matches = allBySemantics(field, matcher, options)
+    if (matches.length > 1) {
+      throw multipleSemanticsMatchesError(renderer, field, matcher, matches)
+    }
+    return matches[0] ?? null
+  }
+
   const queries: TestQueries = {
     getByText: (text, options) => {
       const scope = resolveScope()
@@ -1582,6 +1722,19 @@ function getQueries(
     },
     queryAllByRole: (role, options = {}) =>
       findAllByRole(renderer, resolveScope(), role, options, includeScope),
+    getByLabelText: (text, options) => oneBySemantics("label", text, options),
+    queryByLabelText: (text, options) => maybeBySemantics("label", text, options),
+    getAllByLabelText: (text, options) => requireSemantics("label", text, options, false),
+    queryAllByLabelText: (text, options) => allBySemantics("label", text, options),
+    getByPlaceholderText: (text, options) => oneBySemantics("placeholder", text, options),
+    queryByPlaceholderText: (text, options) => maybeBySemantics("placeholder", text, options),
+    getAllByPlaceholderText: (text, options) =>
+      requireSemantics("placeholder", text, options, false),
+    queryAllByPlaceholderText: (text, options) => allBySemantics("placeholder", text, options),
+    getByDisplayValue: (value, options) => oneBySemantics("value", value, options),
+    queryByDisplayValue: (value, options) => maybeBySemantics("value", value, options),
+    getAllByDisplayValue: (value, options) => requireSemantics("value", value, options, false),
+    queryAllByDisplayValue: (value, options) => allBySemantics("value", value, options),
     findByText: (text, options, waitForOptions) =>
       waitFor(() => queries.getByText(text, options), waitForOptions),
     findAllByText: (text, options, waitForOptions) =>
@@ -1594,6 +1747,18 @@ function getQueries(
       waitFor(() => queries.getByRole(role, options), waitForOptions),
     findAllByRole: (role, options, waitForOptions) =>
       waitFor(() => queries.getAllByRole(role, options), waitForOptions),
+    findByLabelText: (text, options, waitForOptions) =>
+      waitFor(() => queries.getByLabelText(text, options), waitForOptions),
+    findAllByLabelText: (text, options, waitForOptions) =>
+      waitFor(() => queries.getAllByLabelText(text, options), waitForOptions),
+    findByPlaceholderText: (text, options, waitForOptions) =>
+      waitFor(() => queries.getByPlaceholderText(text, options), waitForOptions),
+    findAllByPlaceholderText: (text, options, waitForOptions) =>
+      waitFor(() => queries.getAllByPlaceholderText(text, options), waitForOptions),
+    findByDisplayValue: (value, options, waitForOptions) =>
+      waitFor(() => queries.getByDisplayValue(value, options), waitForOptions),
+    findAllByDisplayValue: (value, options, waitForOptions) =>
+      waitFor(() => queries.getAllByDisplayValue(value, options), waitForOptions),
   }
 
   return queries
@@ -1624,6 +1789,76 @@ function findAllByTestId(
     const resolved = resolveTestId(element)
     return resolved !== undefined && matchesMatcher(resolved, element, testId, options)
   })
+}
+
+/** The `semantics` fields the label, placeholder, and value queries read. */
+type SemanticsField = "label" | "placeholder" | "value"
+
+/** How each field is named in a failure message, in Testing Library's words. */
+const SEMANTICS_FIELD_NOUNS: Readonly<Record<SemanticsField, string>> = {
+  label: "label text",
+  placeholder: "placeholder text",
+  value: "display value",
+}
+
+/** The declaration each field comes from, for the "here is what exists" list. */
+const SEMANTICS_FIELD_PROPS: Readonly<Record<SemanticsField, string>> = {
+  label: "ariaLabel",
+  placeholder: "placeholder",
+  value: "value",
+}
+
+function findAllBySemantics(
+  renderer: TestRenderer,
+  scope: TestElement,
+  field: SemanticsField,
+  matcher: TextMatcher,
+  includeScope: boolean,
+  options?: MatcherOptions
+): TestElement[] {
+  return getElements(renderer, scope, includeScope).filter((element) => {
+    const declared = element.semantics?.[field]
+    return declared !== undefined && matchesMatcher(declared, element, matcher, options)
+  })
+}
+
+function noSemanticsMatchError(
+  renderer: TestRenderer,
+  scope: TestElement,
+  field: SemanticsField,
+  matcher: TextMatcher,
+  includeScope: boolean
+): Error {
+  const declared = getElements(renderer, scope, includeScope).filter(
+    (element) => element.semantics?.[field] !== undefined
+  )
+  const available =
+    declared.length === 0
+      ? `  No element in this scope declares ${SEMANTICS_FIELD_PROPS[field]}.`
+      : declared
+          .slice(0, 5)
+          .map(
+            (element) =>
+              `  ${JSON.stringify(element.semantics?.[field])}\n    ${describeElement(renderer, element)}`
+          )
+          .join("\n")
+
+  return new Error(
+    `Unable to find an element with ${SEMANTICS_FIELD_NOUNS[field]} ${describeMatcher(matcher)} within ${describeElement(renderer, scope)}.\n\nHere is the ${SEMANTICS_FIELD_NOUNS[field]} that was declared:\n\n${available}`
+  )
+}
+
+function multipleSemanticsMatchesError(
+  renderer: TestRenderer,
+  field: SemanticsField,
+  matcher: TextMatcher,
+  matches: TestElement[]
+): Error {
+  return new Error(
+    `Found multiple elements with ${SEMANTICS_FIELD_NOUNS[field]} ${describeMatcher(matcher)}:\n${matches
+      .map((element) => `  ${describeElement(renderer, element)}`)
+      .join("\n")}`
+  )
 }
 
 interface AccessibleHost {
