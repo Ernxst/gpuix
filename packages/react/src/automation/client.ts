@@ -125,20 +125,23 @@ export interface TestAutomationRenderer {
     x: number,
     y: number,
     button?: number,
-    modifiers?: string
+    modifiers?: string,
+    clickCount?: number
   ): void
   postAppKitClick?(x: number, y: number): void
   nativeSimulateMouseDown(
     x: number,
     y: number,
     button?: number,
-    modifiers?: string
+    modifiers?: string,
+    clickCount?: number
   ): void
   nativeSimulateMouseUp(
     x: number,
     y: number,
     button?: number,
-    modifiers?: string
+    modifiers?: string,
+    clickCount?: number
   ): void
   nativeSimulateMouseMove(
     x: number,
@@ -230,7 +233,8 @@ export class InProcessBackend extends ValidatedAutomationBackend {
         params.x,
         params.y,
         params.button,
-        params.modifiers
+        params.modifiers,
+        params.clickCount
       )
       return { ok: true as const }
     },
@@ -246,7 +250,8 @@ export class InProcessBackend extends ValidatedAutomationBackend {
         params.x,
         params.y,
         params.button,
-        params.modifiers
+        params.modifiers,
+        params.clickCount
       )
       return { ok: true as const }
     },
@@ -255,7 +260,8 @@ export class InProcessBackend extends ValidatedAutomationBackend {
         params.x,
         params.y,
         params.button,
-        params.modifiers
+        params.modifiers,
+        params.clickCount
       )
       return { ok: true as const }
     },
@@ -529,8 +535,19 @@ export type PointTarget = { x: number; y: number } | Locator
 export interface MouseOptions {
   /** 0 = left (default), 1 = middle, 2 = right. */
   button?: number
-  /** Held modifiers in `press()` syntax: `"cmd"`, `"cmd-shift"`, `"alt"`. */
+  /**
+   * Held modifiers in `press()` syntax: `"cmd"`, `"cmd-shift"`, `"alt"`.
+   *
+   * An unknown name is an error, not a silently dropped modifier.
+   */
   modifiers?: string
+  /**
+   * The platform's repeat count within one click sequence. Defaults to 1.
+   *
+   * Pass 2 for the second click of a double click; prefer `dblclick()`, which
+   * sends the whole sequence the way a platform does.
+   */
+  clickCount?: number
 }
 
 export interface DragOptions extends MouseOptions {
@@ -622,6 +639,17 @@ export class Locator {
   async click(options: MouseOptions = {}): Promise<void> {
     const point = await this.center()
     await this.app.call("click", { ...point, ...options })
+  }
+
+  /**
+   * Two clicks over the centre, the second carrying the platform's repeat
+   * count — the DOM order, where `dblclick` follows the second `click` rather
+   * than replacing it.
+   */
+  async dblclick(options: MouseOptions = {}): Promise<void> {
+    const point = await this.center()
+    await this.app.call("click", { ...point, ...options, clickCount: 1 })
+    await this.app.call("click", { ...point, ...options, clickCount: 2 })
   }
 
   /** Move the pointer to the centre, so hover styles and tooltips fire. */
@@ -874,15 +902,28 @@ export class App {
 
 export interface LiveAutomationRenderer {
   capabilities?(): RendererCapabilities
-  simulateClick(x: number, y: number, button?: number, modifiers?: string): void
+  simulateClick(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string,
+    clickCount?: number
+  ): void
   postAppKitClick?(x: number, y: number): void
   simulateMouseDown(
     x: number,
     y: number,
     button?: number,
-    modifiers?: string
+    modifiers?: string,
+    clickCount?: number
   ): void
-  simulateMouseUp(x: number, y: number, button?: number, modifiers?: string): void
+  simulateMouseUp(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string,
+    clickCount?: number
+  ): void
   simulateMouseMove(
     x: number,
     y: number,
@@ -928,8 +969,8 @@ export function liveRendererAsTest(
     capabilities: renderer.capabilities?.bind(renderer),
     getSynchronousScrollDrawCount:
       renderer.getSynchronousScrollDrawCount?.bind(renderer),
-    nativeSimulateClick(x, y, button, modifiers) {
-      renderer.simulateClick(x, y, button, modifiers)
+    nativeSimulateClick(x, y, button, modifiers, clickCount) {
+      renderer.simulateClick(x, y, button, modifiers, clickCount)
       afterInput()
     },
     postAppKitClick(x, y) {
@@ -939,12 +980,12 @@ export function liveRendererAsTest(
       renderer.postAppKitClick(x, y)
       afterInput()
     },
-    nativeSimulateMouseDown(x, y, button, modifiers) {
-      renderer.simulateMouseDown(x, y, button, modifiers)
+    nativeSimulateMouseDown(x, y, button, modifiers, clickCount) {
+      renderer.simulateMouseDown(x, y, button, modifiers, clickCount)
       afterInput()
     },
-    nativeSimulateMouseUp(x, y, button, modifiers) {
-      renderer.simulateMouseUp(x, y, button, modifiers)
+    nativeSimulateMouseUp(x, y, button, modifiers, clickCount) {
+      renderer.simulateMouseUp(x, y, button, modifiers, clickCount)
       afterInput()
     },
     nativeSimulateMouseMove(x, y, pressedButton, modifiers) {

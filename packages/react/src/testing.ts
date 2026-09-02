@@ -191,8 +191,20 @@ interface NativeTestRendererApi extends NativeRenderer {
     pressedButton?: number,
     modifiers?: string
   ): void
-  simulateMouseDown(x: number, y: number, button: number, modifiers?: string): void
-  simulateMouseUp(x: number, y: number, button: number, modifiers?: string): void
+  simulateMouseDown(
+    x: number,
+    y: number,
+    button: number,
+    modifiers?: string,
+    clickCount?: number
+  ): void
+  simulateMouseUp(
+    x: number,
+    y: number,
+    button: number,
+    modifiers?: string,
+    clickCount?: number
+  ): void
   getTreeJson(): string
   getResolvedStyle(elementId: number): string | null
   getImageLoadState(elementId: number): string | null
@@ -917,15 +929,18 @@ export class TestRenderer implements NativeRenderer {
 
   /** End-to-end: simulate mouse down through GPUI hit testing →
    *  dispatch resulting events to React.
-   *  @param button - 0=left (default), 1=middle, 2=right */
+   *  @param button - 0=left (default), 1=middle, 2=right
+   *  @param clickCount - platform repeat count; 2 for a double click's second
+   *  press. */
   nativeSimulateMouseDown(
     x: number,
     y: number,
     button?: number,
-    modifiers?: string
+    modifiers?: string,
+    clickCount?: number
   ): void {
     this.native.flush()
-    this.native.simulateMouseDown(x, y, button ?? 0, modifiers)
+    this.native.simulateMouseDown(x, y, button ?? 0, modifiers, clickCount)
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -945,15 +960,18 @@ export class TestRenderer implements NativeRenderer {
 
   /** End-to-end: simulate mouse up through GPUI hit testing →
    *  dispatch resulting events to React.
-   *  @param button - 0=left (default), 1=middle, 2=right */
+   *  @param button - 0=left (default), 1=middle, 2=right
+   *  @param clickCount - platform repeat count; 2 for a double click's second
+   *  release. */
   nativeSimulateMouseUp(
     x: number,
     y: number,
     button?: number,
-    modifiers?: string
+    modifiers?: string,
+    clickCount?: number
   ): void {
     this.native.flush()
-    this.native.simulateMouseUp(x, y, button ?? 0, modifiers)
+    this.native.simulateMouseUp(x, y, button ?? 0, modifiers, clickCount)
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -2003,10 +2021,13 @@ function createTestUserEvent(renderer: TestRenderer): TestUserEvent {
       const point = centerOf(resolveElementBounds(renderer, element))
       renderer.nativeSimulateClick(point.x, point.y)
     },
-    dblClick: async () => {
-      throw new Error(
-        "userEvent.dblClick is not available until click_count support lands; see issue #216"
-      )
+    dblClick: async (element) => {
+      const point = centerOf(resolveElementBounds(renderer, element))
+      // Two real clicks, the second carrying the platform's repeat count — the
+      // DOM order, where `dblclick` follows the second `click` rather than
+      // replacing it.
+      renderer.nativeSimulateClick(point.x, point.y)
+      renderer.nativeSimulateClick(point.x, point.y, 0, undefined, 2)
     },
     hover: async (element) => {
       const point = centerOf(resolveElementBounds(renderer, element))

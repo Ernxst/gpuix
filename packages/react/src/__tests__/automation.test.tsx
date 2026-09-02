@@ -1781,6 +1781,71 @@ describeNative("automation", () => {
     await app.close()
   })
 
+  it("carries a click count through the automation dispatchers", async () => {
+    const calls: Array<{ type: string; detail: number }> = []
+
+    function Target() {
+      return (
+        <div
+          data-testid="target"
+          style={{ width: 200, height: 80, backgroundColor: "#101010" }}
+          onClick={(event) => calls.push({ type: "click", detail: event.detail })}
+          onDoubleClick={(event) =>
+            calls.push({ type: "doubleClick", detail: event.detail })
+          }
+          onMouseDown={(event) => calls.push({ type: "mouseDown", detail: event.detail })}
+        >
+          <text>target</text>
+        </div>
+      )
+    }
+
+    const { render, renderer } = createTestRoot()
+    render(<Target />)
+    const app = await connectTest(renderer)
+
+    await app.getByTestId("target").dblclick()
+    expect(calls).toEqual([
+      { type: "mouseDown", detail: 1 },
+      { type: "click", detail: 1 },
+      { type: "mouseDown", detail: 2 },
+      { type: "click", detail: 2 },
+      { type: "doubleClick", detail: 2 },
+    ])
+
+    // The press and release dispatchers carry it too, not only `click`.
+    calls.length = 0
+    const point = await app.getByTestId("target").center()
+    await app.mouse.down(point, { clickCount: 2 })
+    await app.mouse.up(point, { clickCount: 2 })
+    expect(calls).toEqual([
+      { type: "mouseDown", detail: 2 },
+      { type: "click", detail: 2 },
+      { type: "doubleClick", detail: 2 },
+    ])
+
+    await app.close()
+  })
+
+  it("rejects an unknown modifier name rather than dropping it", async () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div data-testid="target" style={{ width: 200, height: 80 }}>
+        <text>target</text>
+      </div>
+    )
+    const app = await connectTest(renderer)
+
+    await expect(
+      app.getByTestId("target").click({ modifiers: "comand" })
+    ).rejects.toThrow(/Unknown modifier 'comand'/)
+    await expect(
+      app.getByTestId("target").click({ modifiers: "cmd-shift" })
+    ).resolves.toBeUndefined()
+
+    await app.close()
+  })
+
   it("wheels over a locator and reports held modifiers", async () => {
     const seen: Array<{ deltaY: number; cmd: boolean }> = []
 

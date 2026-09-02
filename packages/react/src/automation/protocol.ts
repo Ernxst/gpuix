@@ -47,6 +47,9 @@ const buttonSchema = z.number().int().min(0).max(2).optional()
 /** Held modifiers, in the same hyphenated syntax as `press("cmd-a")`. */
 const modifiersSchema = z.string().optional()
 
+/** The platform's repeat count within one click sequence: 2 is a double click. */
+const clickCountSchema = z.number().int().min(1).optional()
+
 export const boundsSchema = z.object({
   x: z.number(),
   y: z.number(),
@@ -117,6 +120,7 @@ export const methods = {
       y: z.number(),
       button: buttonSchema,
       modifiers: modifiersSchema,
+      clickCount: clickCountSchema,
     }),
     result: okSchema,
   },
@@ -129,6 +133,7 @@ export const methods = {
     params: pointSchema.extend({
       button: buttonSchema,
       modifiers: modifiersSchema,
+      clickCount: clickCountSchema,
     }),
     result: okSchema,
   },
@@ -136,6 +141,7 @@ export const methods = {
     params: pointSchema.extend({
       button: buttonSchema,
       modifiers: modifiersSchema,
+      clickCount: clickCountSchema,
     }),
     result: okSchema,
   },
