@@ -1566,6 +1566,7 @@ export interface InputPublicInstance extends PublicInstance {
   select(): void
 }
 
+
 export interface CanvasPublicInstance extends PublicInstance {
   type: "canvas"
   getContext(
