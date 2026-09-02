@@ -1307,8 +1307,9 @@ export interface WaitForOptions {
   onTimeout?: (error: Error) => Error
 }
 
-/** Advances the clocks a `waitFor` loop owns, by one interval. */
-export type WaitForPump = (deltaMs: number) => void
+/** Advances the clocks a `waitFor` loop owns, by one interval. Internal: the
+ *  only pump a caller supplies is `waitForSync`'s, which stays private. */
+type WaitForPump = (deltaMs: number) => void
 
 /**
  * Retries `callback` until it stops throwing, pumping the frame and timer
