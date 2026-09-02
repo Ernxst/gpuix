@@ -11,7 +11,9 @@ use crate::{
 const ACCESSIBILITY_PROPS: &[&str] = &[
     "role",
     "ariaLabel",
+    "ariaLabelledBy",
     "ariaDescription",
+    "ariaDescribedBy",
     "ariaChecked",
     "ariaExpanded",
     "ariaCurrent",
@@ -275,11 +277,131 @@ fn parse_aria_current(value: &serde_json::Value) -> Option<gpui::accesskit::Aria
     }
 }
 
+/// The text a `aria-labelledby` / `aria-describedby` target contributes.
+///
+/// An authored `ariaLabel` replaces the subtree it names, at the target and at
+/// every descendant, and painted text is read where there is no such label. A
+/// node named directly by a reference contributes even when it is hidden — the
+/// `<span ariaHidden id="label">` pattern relies on that — while a hidden
+/// descendant of one never does.
+///
+/// This is deliberately not the renderer's build-time flattener. That one lives
+/// on `BuildCtx` and reads the element's own cached `InlineText`, neither of
+/// which exists for an element the build is not currently visiting. The
+/// divergence is therefore real and bounded: this walk does not apply
+/// `text-transform`, does not substitute an `<img>`'s `alt`, and does not read
+/// an `<input>`'s value, so referencing one of those yields its text content
+/// rather than its computed value. Referencing a plain text subtree, which is
+/// what labelling patterns use, agrees with the renderer exactly.
+fn referenced_text(
+    tree: &RetainedTree,
+    element: &RetainedElement,
+    follow_references: bool,
+) -> String {
+    let mut pending = vec![(element, true)];
+    let mut words: Vec<String> = Vec::new();
+
+    while let Some((node, is_target)) = pending.pop() {
+        if !is_target && is_hidden(node) {
+            continue;
+        }
+        // A reference list on the target replaces its contents, but accname
+        // stops following once it is already resolving a reference. One level
+        // is both what the spec computes and what keeps a cycle finite.
+        if is_target && follow_references {
+            if let Some(text) = node
+                .custom_props
+                .get("ariaLabelledBy")
+                .and_then(|value| resolve_references(tree, value, false))
+            {
+                return text;
+            }
+        }
+        if let Some(label) = node
+            .custom_props
+            .get("ariaLabel")
+            .and_then(serde_json::Value::as_str)
+            .filter(|label| !label.trim().is_empty())
+        {
+            words.extend(label.split_whitespace().map(str::to_owned));
+            continue;
+        }
+        if let Some(content) = &node.content {
+            words.extend(content.split_whitespace().map(str::to_owned));
+        }
+        pending.extend(
+            node.children
+                .iter()
+                .rev()
+                .filter_map(|id| tree.elements.get(id))
+                .map(|child| (child, false)),
+        );
+    }
+    words.join(" ")
+}
+
+/// Resolve an `aria-labelledby` / `aria-describedby` IDREF list to the text its
+/// targets contribute, joined by a single space in the order written.
+///
+/// An id that matches nothing contributes nothing rather than failing the whole
+/// list, which is what the accname spec's traversal does.
+fn resolve_id_references(tree: &RetainedTree, value: &serde_json::Value) -> Option<String> {
+    resolve_references(tree, value, true)
+}
+
+fn resolve_references(
+    tree: &RetainedTree,
+    value: &serde_json::Value,
+    follow_references: bool,
+) -> Option<String> {
+    let references = value.as_str()?;
+    // One pass resolves the whole list, rather than one pass per id. The cost is
+    // still O(tree) for each element that declares a reference list, so this
+    // bounds the constant rather than changing the order.
+    let mut targets: std::collections::HashMap<&str, Option<&RetainedElement>> =
+        references.split_whitespace().map(|id| (id, None)).collect();
+    if targets.is_empty() {
+        return None;
+    }
+    for element in tree.elements.values() {
+        let Some(author_id) = element.author_id.as_deref() else {
+            continue;
+        };
+        if let Some(slot) = targets.get_mut(author_id) {
+            // HTML requires document ids to be unique. `find_by_element_id`
+            // takes the earliest renderer id when malformed input repeats one,
+            // and this pass has to make the same choice: the map's iteration
+            // order is not stable across rehashes, so keeping whichever
+            // duplicate arrives first would make the name flip when unrelated
+            // elements are added.
+            if slot.is_none_or(|existing| element.id < existing.id) {
+                *slot = Some(element);
+            }
+        }
+    }
+
+    let mut parts = Vec::new();
+    for reference in references.split_whitespace() {
+        let Some(Some(target)) = targets.get(reference) else {
+            continue;
+        };
+        let text = referenced_text(tree, target, follow_references);
+        if !text.is_empty() {
+            parts.push(text);
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
 #[derive(Debug, Default)]
 struct AccessibilityProps<'a> {
     role: Option<AccessibilityRole>,
     label: Option<&'a str>,
+    /// Text resolved from `ariaLabelledBy`. Owned because it is built by joining
+    /// several referenced subtrees rather than borrowed from one prop.
+    labelled_by: Option<String>,
     description: Option<&'a str>,
+    described_by: Option<String>,
     checked: Option<gpui::Toggled>,
     expanded: Option<bool>,
     current: Option<gpui::accesskit::AriaCurrent>,
@@ -299,7 +421,7 @@ struct AccessibilityProps<'a> {
 }
 
 impl<'a> AccessibilityProps<'a> {
-    fn from_element(element: &'a RetainedElement) -> Self {
+    fn from_element(tree: &RetainedTree, element: &'a RetainedElement) -> Self {
         Self {
             role: element
                 .custom_props
@@ -309,10 +431,18 @@ impl<'a> AccessibilityProps<'a> {
                 .custom_props
                 .get("ariaLabel")
                 .and_then(serde_json::Value::as_str),
+            labelled_by: element
+                .custom_props
+                .get("ariaLabelledBy")
+                .and_then(|value| resolve_id_references(tree, value)),
             description: element
                 .custom_props
                 .get("ariaDescription")
                 .and_then(serde_json::Value::as_str),
+            described_by: element
+                .custom_props
+                .get("ariaDescribedBy")
+                .and_then(|value| resolve_id_references(tree, value)),
             checked: element.custom_props.get("ariaChecked").and_then(|value| {
                 if let Some(checked) = value.as_bool() {
                     Some(if checked {
@@ -697,7 +827,8 @@ pub(crate) fn element_problems(
 
     for (property, value) in &element.custom_props {
         let malformed = match property.as_str() {
-            "ariaLabel" | "ariaDescription" | "ariaValue" => !value.is_string(),
+            "ariaLabel" | "ariaDescription" | "ariaValue" | "ariaLabelledBy"
+            | "ariaDescribedBy" => !value.is_string(),
             "ariaChecked" => !(value.is_boolean() || value.as_str() == Some("mixed")),
             "ariaCurrent" => parse_aria_current(value).is_none(),
             "ariaExpanded" | "ariaSelected" | "ariaDisabled" | "ariaHidden" => {
@@ -715,6 +846,7 @@ pub(crate) fn element_problems(
         if malformed {
             let expected = match property.as_str() {
                 "ariaLabel" | "ariaDescription" | "ariaValue" => "a string",
+                "ariaLabelledBy" | "ariaDescribedBy" => "a string of space-separated element ids",
                 "ariaChecked" => "a boolean or \"mixed\"",
                 "ariaCurrent" => {
                     "one of \"page\", \"step\", \"location\", \"date\", \"time\", \"true\", or \"false\""
@@ -764,7 +896,9 @@ pub(crate) fn element_problems(
         if matches!(
             property.as_str(),
             "ariaLabel"
+                | "ariaLabelledBy"
                 | "ariaDescription"
+                | "ariaDescribedBy"
                 | "ariaChecked"
                 | "ariaExpanded"
                 | "ariaCurrent"
@@ -794,10 +928,10 @@ pub(crate) fn element_problems(
                 )),
                 None if role_value.is_none() => {
                     let reason = match property.as_str() {
-                        "ariaLabel" => {
+                        "ariaLabel" | "ariaLabelledBy" => {
                             "a name requires an explicit supported role, so it is omitted from the accessibility tree"
                         }
-                        "ariaDescription" => {
+                        "ariaDescription" | "ariaDescribedBy" => {
                             "a description requires an explicit supported role, so it is omitted from the accessibility tree"
                         }
                         _ => {
@@ -857,6 +991,7 @@ pub(crate) fn element_problems(
 /// than dropping the content.
 pub(crate) fn apply<E>(
     mut el: E,
+    tree: &RetainedTree,
     element: &RetainedElement,
     callback: &Option<EventCallback>,
     focus_handle: Option<&gpui::FocusHandle>,
@@ -873,8 +1008,9 @@ where
 
     // `from_element` withholds malformed values. The role checks below compute
     // the accessibility projection, including role-specific fallbacks such as
-    // ariaChecked="mixed" becoming false on a switch.
-    let props = AccessibilityProps::from_element(element);
+    // ariaChecked="mixed" becoming false on a switch. It needs the tree because
+    // `ariaLabelledBy` and `ariaDescribedBy` name other elements by id.
+    let props = AccessibilityProps::from_element(tree, element);
 
     if let Some(role) = props.role.and_then(AccessibilityRole::into_gpui) {
         el = el.role(role);
@@ -882,18 +1018,29 @@ where
     if let Some(author_id) = &element.author_id {
         el = el.accessibility_id(author_id.clone());
     }
+    // accname order: the referenced text wins over `ariaLabel`, which wins over
+    // the name the contents would compute.
     if let Some(label) = props
-        .label
+        .labelled_by
+        .clone()
         .filter(|_| props.supports("ariaLabel"))
-        .or(name_from_contents)
+        .or_else(|| {
+            props
+                .label
+                .filter(|_| props.supports("ariaLabel"))
+                .or(name_from_contents)
+                .map(str::to_owned)
+        })
     {
-        el = el.aria_label(label.to_owned());
+        el = el.aria_label(label);
     }
     if let Some(description) = props
-        .description
+        .described_by
+        .clone()
+        .or_else(|| props.description.map(str::to_owned))
         .filter(|_| props.supports("ariaDescription"))
     {
-        el = el.aria_description(description.to_owned());
+        el = el.aria_description(description);
     }
     if let Some(checked) = props.checked.filter(|_| props.supports("ariaChecked")) {
         let checked = if props
@@ -1091,7 +1238,7 @@ mod tests {
             .insert("ariaValueNow".into(), 42.into());
         element.custom_props.insert("disabled".into(), true.into());
 
-        let props = AccessibilityProps::from_element(&element);
+        let props = AccessibilityProps::from_element(&detached_tree(), &element);
         assert_eq!(
             props.role,
             Some(AccessibilityRole {
@@ -1138,7 +1285,7 @@ mod tests {
             element.custom_props.insert("disabled".into(), value);
 
             assert_eq!(
-                AccessibilityProps::from_element(&element).disabled,
+                AccessibilityProps::from_element(&detached_tree(), &element).disabled,
                 expected,
                 "{description}"
             );
@@ -1355,7 +1502,7 @@ mod tests {
             link.custom_props.insert("ariaCurrent".into(), token.into());
 
             assert_eq!(
-                AccessibilityProps::from_element(&link).current,
+                AccessibilityProps::from_element(&detached_tree(), &link).current,
                 Some(expected)
             );
             assert!(element_problems(&detached_tree(), &link).is_empty(), "{token}");
@@ -1385,6 +1532,60 @@ mod tests {
                 .reason
                 .contains("does not support accessibility semantics")
         );
+    }
+
+    #[test]
+    fn duplicate_author_ids_resolve_to_the_earliest_element() {
+        // HTML requires ids to be unique, and `find_by_element_id` answers a
+        // malformed duplicate with the earliest renderer id. The resolution pass
+        // walks a hash map whose order shifts as unrelated elements are added,
+        // so it has to make that same choice rather than take what it meets
+        // first. Both insertion orders must agree.
+        for order in [[40_u64, 41], [41, 40]] {
+            let mut tree = RetainedTree::new();
+            // The text names the renderer id, not the insertion order, so the
+            // expected answer stays "Earliest" whichever way the map is built.
+            for id in order {
+                tree.create_element(id, "text".to_string());
+                tree.set_custom_prop(id, "id".into(), "ledger-title".into());
+                tree.set_text(
+                    id,
+                    if id == 40 { "Earliest" } else { "Later" }.to_string(),
+                );
+            }
+
+            let mut element = RetainedElement::new(1, "div".to_string(), 1);
+            element.custom_props.insert("role".into(), "region".into());
+            element
+                .custom_props
+                .insert("ariaLabelledBy".into(), "ledger-title".into());
+
+            let props = AccessibilityProps::from_element(&tree, &element);
+
+            assert_eq!(
+                props.labelled_by.as_deref(),
+                Some("Earliest"),
+                "insertion order {order:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn reference_lists_have_to_be_strings() {
+        for property in ["ariaLabelledBy", "ariaDescribedBy"] {
+            let mut element = RetainedElement::new(1, "div".to_string(), 1);
+            element.custom_props.insert("role".into(), "region".into());
+            element.custom_props.insert(property.into(), 7.into());
+
+            let problems = element_problems(&detached_tree(), &element);
+
+            assert_eq!(problems.len(), 1, "{property}");
+            assert_eq!(
+                problems[0].problem.reason,
+                "expected a string of space-separated element ids",
+                "{property}"
+            );
+        }
     }
 
     #[test]

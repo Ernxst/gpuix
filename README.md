@@ -1863,6 +1863,7 @@ equivalents:
 | React prop | Native meaning |
 |---|---|
 | `ariaLabel`, `ariaDescription` | Accessible name and supplementary description; requires a supported explicit or inferred role |
+| `ariaLabelledBy`, `ariaDescribedBy` | Space-separated author `id`s whose text supplies the name or description; wins over `ariaLabel` / `ariaDescription` |
 | `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
 | `ariaExpanded`, `ariaSelected` | Boolean semantic states |
 | `ariaValue` | Human-readable value text |
@@ -1872,6 +1873,43 @@ equivalents:
 | `ariaDisabled` | Unavailable and non-activating, but retained in tab order |
 | `ariaHidden` | Excludes the element and its complete subtree from AccessKit |
 | `visuallyHidden` | Keeps the roled node and its name in AccessKit while painting nothing and reserving no layout space |
+
+`ariaLabelledBy` and `ariaDescribedBy` take space-separated author `id`s and are
+resolved against the retained tree each time it is built, so the name follows
+the referenced text as it changes. Each reference contributes its own
+`ariaLabel` when it has one and its flattened contents otherwise, joined by a
+single space in the order written. An id that matches nothing contributes
+nothing rather than voiding the whole list, and a list that resolves to nothing
+falls back to `ariaLabel`. Both props accept their DOM spellings,
+`aria-labelledby` and `aria-describedby`.
+
+```tsx
+<text id="ledger-title">Production ledger</text>
+<section ariaLabelledBy="ledger-title">
+  <text>State</text>
+</section>
+```
+
+A referenced node contributes even when it is `ariaHidden`, which is what the
+`sr-only`-style label pattern relies on; a hidden **descendant** of one does
+not. A reference on the referenced element is followed one level and no
+further, so a cycle terminates instead of recursing.
+
+The resolved name is what the accessibility tree carries, so everything reading
+that tree sees it: `getByRole(role, { name })`, `toHaveAccessibleName`, and the
+platform screen reader. `semantics.label` and `getByLabelText` read the
+retained `ariaLabel` verbatim and do **not** resolve references, so an element
+named only by reference has no `semantics.label` at all. Query a referenced
+name through `getByRole` or assert it with `toHaveAccessibleName`.
+
+`semantics.role`, by contrast, does report an inferred role: it reads the same
+resolved `role` the alias mapping above produces, so an `<li>` in a list
+reports `semantics.role === "listitem"` without an authored `role`.
+
+The resolution reads authored `ariaLabel`s and painted text. It does not apply
+`style.textTransform`, substitute an `<img>`'s `alt`, or read an `<input>`'s
+value, so referencing one of those contributes its text content rather than its
+computed value.
 
 `visuallyHidden` is the screen-reader-only announcement that CSS spells
 `sr-only`. It accepts `true` only, and requires an explicit supported `role`,

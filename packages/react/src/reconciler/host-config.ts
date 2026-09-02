@@ -507,7 +507,9 @@ function diagnoseUnsupportedAccessibilityRoleProp(
 
 const ARIA_PROP_ALIASES = {
   "aria-label": "ariaLabel",
+  "aria-labelledby": "ariaLabelledBy",
   "aria-description": "ariaDescription",
+  "aria-describedby": "ariaDescribedBy",
   "aria-checked": "ariaChecked",
   "aria-expanded": "ariaExpanded",
   "aria-current": "ariaCurrent",
@@ -634,7 +636,9 @@ const UNIVERSAL_PROPS = new Set([
   "motion",
   "role",
   "ariaLabel",
+  "ariaLabelledBy",
   "ariaDescription",
+  "ariaDescribedBy",
   "ariaChecked",
   "ariaExpanded",
   "ariaCurrent",
@@ -796,7 +800,12 @@ function isInsideList(instance: Instance): boolean {
 /** The accessible name authored on the element itself, as `<section>` needs it. */
 function hasAuthoredName(props: Props): boolean {
   const label = authoredAriaLabel(props)
-  return label !== undefined && label !== ""
+  if (label !== undefined && label !== "") return true
+  // A reference list names the section just as `ariaLabel` does. Whether those
+  // ids resolve is decided in Rust, which holds the tree; an authored reference
+  // is the most this side can see.
+  const labelledBy = props.ariaLabelledBy ?? props["aria-labelledby"]
+  return typeof labelledBy === "string" && labelledBy.trim() !== ""
 }
 
 /**

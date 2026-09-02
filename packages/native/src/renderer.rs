@@ -7878,6 +7878,7 @@ fn build_element_with_parent_layout(
             let render_ctx = CustomRenderContext {
                 id,
                 retained_element: element,
+                tree: ctx.tree,
                 events: &element.events,
                 tracks_mouse_hover: tracks_mouse_hover_events(element, ctx.tree),
                 event_callback: ctx.event_callback,
@@ -8706,6 +8707,7 @@ pub(crate) fn build_host_container(
     }
     el = crate::accessibility::apply(
         el,
+        ctx.tree,
         element,
         ctx.event_callback,
         ctx.focus_handles.get(&element.id),
@@ -9118,6 +9120,7 @@ fn build_visually_hidden_element(
         .h(gpui::px(1.0));
     crate::accessibility::apply(
         el,
+        ctx.tree,
         element,
         ctx.event_callback,
         None,
