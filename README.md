@@ -1879,10 +1879,50 @@ Removing `tabIndex` removes the element from the tab order.
 
 ## Native accessibility
 
-Semantic host elements feed GPUI's AccessKit tree directly. `<button>` infers
-the `button` role and `<a>` infers the `link` role; other JSX aliases do not
-infer roles. An explicit `role` still defines custom controls or overrides an
-alias. These aliases add semantics and focus behavior, but no visual defaults.
+Semantic host elements feed GPUI's AccessKit tree directly. Every JSX alias
+infers the implicit ARIA role HTML-AAM gives its element, so the same tree
+reports the same roles under GPUIX and under `react-dom`. An explicit `role`
+always wins, exactly as it overrides an implicit role in the DOM. These aliases
+add semantics and focus behavior, but no visual defaults.
+
+| Alias | Implicit role |
+|---|---|
+| `<main>` | `main` |
+| `<nav>` | `navigation` |
+| `<article>` | `article` |
+| `<aside>` | `complementary` |
+| `<h1>`–`<h6>` | `heading`, with the matching `ariaLevel` |
+| `<ul>`, `<ol>` | `list` |
+| `<li>` | `listitem` |
+| `<button>` | `button` |
+| `<a>` | `link` |
+| `<img>` | `img`, or `presentation` when decorative |
+| `<header>` | `banner` |
+| `<footer>` | `contentinfo` |
+| `<section>` | `region` |
+| `<p>`, `<span>`, `<strong>`, `<em>`, `<kbd>` | none |
+
+Three of those roles depend on where the element sits or how it is named, and
+GPUIX resolves them the way HTML-AAM does:
+
+- `<header>` and `<footer>` are the `banner` and `contentinfo` landmarks only
+  when nothing between them and the root is an `<article>`, `<aside>`,
+  `<main>`, `<nav>`, or `<section>`, or carries one of those elements' roles.
+  Inside sectioning content they are generic and add no node of their own.
+- `<section>` is a `region` landmark only when it has an accessible name. An
+  unnamed `<section>` is generic.
+- `<li>` is a `listitem` only inside a `<ul>`, `<ol>`, or an element with
+  `role="list"`.
+
+These three re-resolve whenever what they read actually changes: attaching the
+element to a parent, and an ancestor gaining or losing one of the roles above.
+A `<div role="list">` that becomes `role="group"` drops its `<li>` children back
+to generic, as it does in the DOM.
+
+An authored `ariaLevel` wins over the level a heading tag implies, so
+`<h2 ariaLevel={4}>` reports level 4. The aliases with no implicit role add no
+accessibility node, which keeps them out of name computation exactly as their
+generic DOM counterparts are.
 
 `<img>` follows HTML-AAM: it infers the `img` role and takes its accessible
 name from `alt`. `alt=""` marks the image decorative, so it infers
@@ -1899,13 +1939,14 @@ name from `alt`. `alt=""` marks the image decorative, so it infers
 </button>
 ```
 
-The role set is `button`, `checkbox`, `heading`, `img`, `link`, `option`,
-`slider`, `spinbutton`, `switch`, and `textbox`. Explicit role and state props
-map directly to their GPUI / AccessKit equivalents:
+`role` accepts the ARIA role vocabulary in `AccessibilityRoleRegistry`.
+Explicit role and state props map directly to their GPUI / AccessKit
+equivalents:
 
 | React prop | Native meaning |
 |---|---|
 | `ariaLabel`, `ariaDescription` | Accessible name and supplementary description; requires a supported explicit or inferred role |
+| `ariaLabelledBy`, `ariaDescribedBy` | Space-separated author `id`s whose text supplies the name or description; wins over `ariaLabel` / `ariaDescription` |
 | `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
 | `ariaExpanded`, `ariaSelected` | Boolean semantic states |
 | `ariaValue` | Human-readable value text |
@@ -1915,6 +1956,43 @@ map directly to their GPUI / AccessKit equivalents:
 | `ariaDisabled` | Unavailable and non-activating, but retained in tab order |
 | `ariaHidden` | Excludes the element and its complete subtree from AccessKit |
 | `visuallyHidden` | Keeps the roled node and its name in AccessKit while painting nothing and reserving no layout space |
+
+`ariaLabelledBy` and `ariaDescribedBy` take space-separated author `id`s and are
+resolved against the retained tree each time it is built, so the name follows
+the referenced text as it changes. Each reference contributes its own
+`ariaLabel` when it has one and its flattened contents otherwise, joined by a
+single space in the order written. An id that matches nothing contributes
+nothing rather than voiding the whole list, and a list that resolves to nothing
+falls back to `ariaLabel`. Both props accept their DOM spellings,
+`aria-labelledby` and `aria-describedby`.
+
+```tsx
+<text id="ledger-title">Production ledger</text>
+<section ariaLabelledBy="ledger-title">
+  <text>State</text>
+</section>
+```
+
+A referenced node contributes even when it is `ariaHidden`, which is what the
+`sr-only`-style label pattern relies on; a hidden **descendant** of one does
+not. A reference on the referenced element is followed one level and no
+further, so a cycle terminates instead of recursing.
+
+The resolved name is what the accessibility tree carries, so everything reading
+that tree sees it: `getByRole(role, { name })`, `toHaveAccessibleName`, and the
+platform screen reader. `semantics.label` and `getByLabelText` read the
+retained `ariaLabel` verbatim and do **not** resolve references, so an element
+named only by reference has no `semantics.label` at all. Query a referenced
+name through `getByRole` or assert it with `toHaveAccessibleName`.
+
+`semantics.role`, by contrast, does report an inferred role: it reads the same
+resolved `role` the alias mapping above produces, so an `<li>` in a list
+reports `semantics.role === "listitem"` without an authored `role`.
+
+The resolution reads authored `ariaLabel`s and painted text. It does not apply
+`style.textTransform`, substitute an `<img>`'s `alt`, or read an `<input>`'s
+value, so referencing one of those contributes its text content rather than its
+computed value.
 
 `visuallyHidden` is the screen-reader-only announcement that CSS spells
 `sr-only`. It accepts `true` only, and requires an explicit supported `role`,
@@ -1998,10 +2076,27 @@ target/currentTarget, and preventDefault behavior exactly once. The application
 remains responsible for applying requested value changes.
 
 Semantics are implemented on `<div>`/JSX aliases, `<text>`, `<input>`,
-`<textarea>`, and `<img>`. Other native custom hosts reject accessibility props
-with the standard property diagnostic instead of dropping them. `ariaHidden`
-is universal because it suppresses a whole subtree, including supported hosts
-inside an otherwise unsupported container.
+`<textarea>`, `<img>`, `<svg>`, `<canvas>`, `<code>`, `<diff>`, `<markdown>`,
+and `<anchored>`. A `role` on a custom element reaches AccessKit like any
+other, so `<canvas role="img" ariaLabel="Throughput chart">` names a chart and
+`<anchored role="dialog">` announces a popover. `<virtual-list>` is the one
+host that still rejects accessibility props with the standard property
+diagnostic instead of dropping them; declare them on a `<div>` that wraps it.
+`ariaHidden` is universal because it suppresses a whole subtree, including
+supported hosts inside an otherwise unsupported container.
+
+A bare `<svg>` infers the `graphics-document` role from SVG-AAM, so a decorative
+icon produces a nameless node unless you opt out. Give it `role="presentation"`
+to drop the role, or `ariaHidden` to drop the whole subtree, exactly as in the
+DOM. `<canvas>`, `<code>`, `<diff>`, `<markdown>`, and `<anchored>` have no
+implicit role: they carry only what the author declares, exactly as their
+generic DOM counterparts do.
+
+`visuallyHidden` stays on `<div>`, `<text>`, `<input>`, `<textarea>`, and
+`<img>`. It replaces the element with an unpainted accessibility-only node,
+which an element that paints its own content through an adapter cannot produce;
+declaring it on one of the other hosts is reported rather than ignored. Wrap
+the element in a `<div>` or `<text>` and visually hide that instead.
 
 Semantic nodes use GPUIX's stable retained element identity for their AccessKit
 node ID. The author `id` remains platform-visible metadata and is not the node

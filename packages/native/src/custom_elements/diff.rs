@@ -256,13 +256,17 @@ impl CustomElement for DiffElement {
             // diff would be the one state with no automation bounds and no
             // click or hover events.
             let empty = gpui::div()
-                .id(SharedString::from(format!("__gpuix_diff_empty_{}", ctx.id)))
+                // The same host id as the non-empty branch. `retained_gpui_element_id`
+                // predicts this name to attribute the accessibility node back to the
+                // host, and gpui keys the node off it, so a second name for one host
+                // element made an empty diff's semantics unattributable.
+                .id(SharedString::from(format!("__gpuix_diff_{}", ctx.id)))
                 .flex()
                 .items_center()
                 .justify_center()
                 .text_size(px(12.0))
                 .text_color(theme.text_faint);
-            return super::custom_surface(empty, &ctx, cx)
+            return super::apply_accessibility(super::custom_surface(empty, &ctx, cx), &ctx)
                 .child(ctx.chrome_text("No changes", None))
                 .into_any_element();
         }
@@ -380,7 +384,7 @@ impl CustomElement for DiffElement {
             container = container.min_h_0();
         }
 
-        super::custom_surface(container, &ctx, cx)
+        super::apply_accessibility(super::custom_surface(container, &ctx, cx), &ctx)
             .child(body)
             .into_any_element()
     }
