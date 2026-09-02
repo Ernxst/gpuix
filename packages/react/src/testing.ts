@@ -991,16 +991,14 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** Find the first element whose resolved test ID matches, on the same
-   *  `data-testid`-wins-per-element rule as the bound `*ByTestId` queries. */
+   *  `data-testid`-wins-per-element rule as the bound `*ByTestId` queries.
+   *
+   *  There is no native `data-testid` index shortcut: on a tree that mixes
+   *  `data-testid` and the legacy `testId`, the index answers with its own hit
+   *  while this scan answers with the first match in tree order, so a shortcut
+   *  taken only when no options are passed would return a different element
+   *  with and without them. */
   findByTestId(testId: TestIdMatcher, options?: MatcherOptions): TestElement | undefined {
-    // A raw string hit on the native index is always a `data-testid` match, so
-    // it already satisfies the resolution rule; a miss still falls through to
-    // the full scan, which is what normalizes and answers for legacy testIds.
-    if (typeof testId === "string" && options === undefined) {
-      const id = this.native.findByDataTestId(testId)
-      if (id != null) return this.getElement(id)
-    }
-
     return [...this.buildElementMap().values()].find((el) => {
       const resolved = resolveTestId(el)
       return resolved !== undefined && matchesMatcher(resolved, el, testId, options)

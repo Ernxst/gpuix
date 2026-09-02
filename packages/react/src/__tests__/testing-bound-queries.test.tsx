@@ -184,6 +184,31 @@ describeNative("createTestRoot bound queries", () => {
     }
   })
 
+  it("answers findByTestId the same with and without matcher options", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text testId="target">Legacy</text>
+          <text data-testid="target">Standard</text>
+        </div>
+      )
+
+      // Both elements resolve to the same test ID, so the answer is the first
+      // in tree order. Passing options must not move the query onto a native
+      // data-testid index that would answer with the second one instead.
+      const first = screen.renderer.findByTestId("target")
+      expect(first).toBeDefined()
+      expect(textContent(screen.renderer, first!)).toBe("Legacy")
+      expect(first?.dataTestId).toBeUndefined()
+      expect(screen.renderer.findByTestId("target", {})).toBe(first)
+      expect(screen.renderer.findByTestId("target", { exact: false })).toBe(first)
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("matches accessible names through the shared matcher", () => {
     const screen = createTestRoot()
 
