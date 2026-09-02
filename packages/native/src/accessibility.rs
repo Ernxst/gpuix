@@ -355,9 +355,9 @@ fn resolve_references(
     follow_references: bool,
 ) -> Option<String> {
     let references = value.as_str()?;
-    // One pass over the tree for the whole list. Resolving each id on its own
-    // rescans every element per reference, which turns a handful of labelled
-    // controls into a quadratic walk on a large tree.
+    // One pass resolves the whole list, rather than one pass per id. The cost is
+    // still O(tree) for each element that declares a reference list, so this
+    // bounds the constant rather than changing the order.
     let mut targets: std::collections::HashMap<&str, Option<&RetainedElement>> =
         references.split_whitespace().map(|id| (id, None)).collect();
     if targets.is_empty() {
@@ -368,7 +368,15 @@ fn resolve_references(
             continue;
         };
         if let Some(slot) = targets.get_mut(author_id) {
-            slot.get_or_insert(element);
+            // HTML requires document ids to be unique. `find_by_element_id`
+            // takes the earliest renderer id when malformed input repeats one,
+            // and this pass has to make the same choice: the map's iteration
+            // order is not stable across rehashes, so keeping whichever
+            // duplicate arrives first would make the name flip when unrelated
+            // elements are added.
+            if slot.is_none_or(|existing| element.id < existing.id) {
+                *slot = Some(element);
+            }
         }
     }
 
@@ -1524,6 +1532,42 @@ mod tests {
                 .reason
                 .contains("does not support accessibility semantics")
         );
+    }
+
+    #[test]
+    fn duplicate_author_ids_resolve_to_the_earliest_element() {
+        // HTML requires ids to be unique, and `find_by_element_id` answers a
+        // malformed duplicate with the earliest renderer id. The resolution pass
+        // walks a hash map whose order shifts as unrelated elements are added,
+        // so it has to make that same choice rather than take what it meets
+        // first. Both insertion orders must agree.
+        for order in [[40_u64, 41], [41, 40]] {
+            let mut tree = RetainedTree::new();
+            // The text names the renderer id, not the insertion order, so the
+            // expected answer stays "Earliest" whichever way the map is built.
+            for id in order {
+                tree.create_element(id, "text".to_string());
+                tree.set_custom_prop(id, "id".into(), "ledger-title".into());
+                tree.set_text(
+                    id,
+                    if id == 40 { "Earliest" } else { "Later" }.to_string(),
+                );
+            }
+
+            let mut element = RetainedElement::new(1, "div".to_string(), 1);
+            element.custom_props.insert("role".into(), "region".into());
+            element
+                .custom_props
+                .insert("ariaLabelledBy".into(), "ledger-title".into());
+
+            let props = AccessibilityProps::from_element(&tree, &element);
+
+            assert_eq!(
+                props.labelled_by.as_deref(),
+                Some("Earliest"),
+                "insertion order {order:?}"
+            );
+        }
     }
 
     #[test]

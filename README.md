@@ -1895,10 +1895,16 @@ A referenced node contributes even when it is `ariaHidden`, which is what the
 not. A reference on the referenced element is followed one level and no
 further, so a cycle terminates instead of recursing.
 
-The resolved name is what the accessibility tree carries, so `getByRole(role,
-{ name })` and the platform screen reader both see it. `semantics.label` and
-`getByLabelText` read the authored `ariaLabel` verbatim and do **not** resolve
-references — query a referenced name through `getByRole`.
+The resolved name is what the accessibility tree carries, so everything reading
+that tree sees it: `getByRole(role, { name })`, `toHaveAccessibleName`, and the
+platform screen reader. `semantics.label` and `getByLabelText` read the
+retained `ariaLabel` verbatim and do **not** resolve references, so an element
+named only by reference has no `semantics.label` at all. Query a referenced
+name through `getByRole` or assert it with `toHaveAccessibleName`.
+
+`semantics.role`, by contrast, does report an inferred role: it reads the same
+resolved `role` the alias mapping above produces, so an `<li>` in a list
+reports `semantics.role === "listitem"` without an authored `role`.
 
 The resolution reads authored `ariaLabel`s and painted text. It does not apply
 `style.textTransform`, substitute an `<img>`'s `alt`, or read an `<input>`'s
