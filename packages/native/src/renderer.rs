@@ -1104,21 +1104,6 @@ fn draw_window_for_automation_read() -> Result<()> {
     })
 }
 
-/// Draw the committed tree from inside the UI thread's command pump: the
-/// non-macOS counterpart of `draw_window_for_automation_read`.
-///
-/// Leases the window untyped, exactly as that helper does. Drawing renders
-/// `GpuixView`, so holding a typed lease on it across the draw would panic.
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-fn draw_ui_window_for_read(
-    window: gpui::WindowHandle<GpuixView>,
-    cx: &mut gpui::App,
-) -> anyhow::Result<()> {
-    gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| {
-        window.draw(cx).clear(cx);
-    })
-}
-
 /// Queue a real AppKit mouse click. This is deliberately distinct from the
 /// deterministic `simulate_click` test helper: live smoke tests need to cover
 /// the NSEvent → GPUI platform ingress before the renderer's callback bridge.
@@ -1379,6 +1364,25 @@ fn refresh_ui_window(
     window.update(cx, |_view, window, cx| {
         cx.notify();
         window.refresh();
+    })
+}
+
+/// Draw the committed tree from inside the UI thread's command pump: the
+/// non-macOS counterpart of `draw_window_for_automation_read`.
+///
+/// Takes the same `(WindowHandle<GpuixView>, &mut AsyncApp) -> anyhow::Result<()>`
+/// shape as `refresh_ui_window` above, because the pump hands every helper the
+/// async context and folds each arm's `Result` into one shared error log.
+///
+/// Leases the window untyped, as the macOS helper does. Drawing renders
+/// `GpuixView`, so holding a typed lease on it across the draw would panic.
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+fn draw_ui_window_for_read(
+    window: gpui::WindowHandle<GpuixView>,
+    cx: &mut gpui::AsyncApp,
+) -> anyhow::Result<()> {
+    gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| {
+        window.draw(cx).clear(cx);
     })
 }
 
@@ -1656,11 +1660,12 @@ async fn run_ui_commands(
             // editor, and that sync parks the caret at the end of the new text:
             // a caret written before it would be overwritten moments later.
             UiCommand::GetTextEditingState { id, response } => {
-                draw_ui_window_for_read(window, cx)?;
-                window.update(cx, move |view, _window, cx| {
-                    response
-                        .send(view.custom_registry.text_editing_state(id, cx))
-                        .ok();
+                draw_ui_window_for_read(window, cx).and_then(|()| {
+                    window.update(cx, move |view, _window, cx| {
+                        response
+                            .send(view.custom_registry.text_editing_state(id, cx))
+                            .ok();
+                    })
                 })
             }
             UiCommand::SetTextSelection {
@@ -1668,17 +1673,17 @@ async fn run_ui_commands(
                 start,
                 end,
                 backward,
-            } => {
-                draw_ui_window_for_read(window, cx)?;
+            } => draw_ui_window_for_read(window, cx).and_then(|()| {
                 window.update(cx, move |view, _window, cx| {
                     view.custom_registry
                         .set_text_selection(id, start, end, backward, cx);
                 })
-            }
+            }),
             UiCommand::SetTextValue { id, value } => {
-                draw_ui_window_for_read(window, cx)?;
-                window.update(cx, move |view, _window, cx| {
-                    view.custom_registry.set_text_value(id, value, cx);
+                draw_ui_window_for_read(window, cx).and_then(|()| {
+                    window.update(cx, move |view, _window, cx| {
+                        view.custom_registry.set_text_value(id, value, cx);
+                    })
                 })
             }
             UiCommand::ControlClock { control, response } => {
