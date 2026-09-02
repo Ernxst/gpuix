@@ -299,6 +299,29 @@ describeNative("toMatchScreenshot", () => {
     }
   })
 
+  it("bumps the call counter on named calls, as vitest does", async () => {
+    const directory = path.join(here, "__screenshots__", "testing-screenshot.test.tsx")
+    const screen = createTestRoot({ width: 200, height: 120 })
+    try {
+      screen.render(<Scene />)
+      await expect(expect(screen).toMatchScreenshot("named-first")).rejects.toThrowError(
+        /a new one was created/
+      )
+      // The named call above consumed slot 1, so the unnamed call is " 2".
+      await expect(expect(screen).toMatchScreenshot()).rejects.toThrowError(
+        /a new one was created/
+      )
+      const golden = path.join(
+        directory,
+        "toMatchScreenshot-bumps-the-call-counter-on-named-calls-as-vitest-does-2.png"
+      )
+      expect(existsSync(golden)).toBe(true)
+    } finally {
+      screen.unmount()
+      rmSync(path.join(here, "__screenshots__"), { recursive: true, force: true })
+    }
+  })
+
   it("overwrites the golden and passes when the runner is updating snapshots", async () => {
     await withScene(async (screen, directory) => {
       const golden = path.join(directory, "tile.png")

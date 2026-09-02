@@ -279,7 +279,7 @@ export function screenshotPathContext({
   // `shot.jpeg` as the name and adds `.png` to it.
   const extensionFromName = path.extname(name)
   const withoutExtension =
-    extensionFromName.toLowerCase() === ".png" ? path.basename(name, extensionFromName) : name
+    extensionFromName === ".png" ? path.basename(name, extensionFromName) : name
 
   return {
     arg: sanitizeArg(withoutExtension),
@@ -504,7 +504,12 @@ export async function toMatchScreenshot(
   const options: ToMatchScreenshotOptions =
     (typeof nameOrOptions === "object" ? nameOrOptions : maybeOptions) ?? {}
   const comparator = resolveComparatorOptions(options.comparatorOptions)
-  const name = typeof nameOrOptions === "string" ? nameOrOptions : nextAutomaticName(this)
+  // vitest bumps the per-test counter on every call, named or not, so an
+  // unnamed call after two named ones is "<test> 3" there — mirrored here by
+  // computing the automatic name unconditionally and discarding it when a
+  // string name was given.
+  const automaticName = nextAutomaticName(this)
+  const name = typeof nameOrOptions === "string" ? nameOrOptions : automaticName
   const pathContext = screenshotPathContext({
     name,
     testPath: this.testPath,

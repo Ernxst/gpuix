@@ -4151,8 +4151,11 @@ golden is in device pixels like the window one, and an element that painted
 nothing throws rather than comparing an empty box.
 
 Called without a name, the golden is named after the test and a per-test
-counter — `my-test-1.png`, `my-test-2.png` — exactly as in vitest. The default
-path is vitest's too:
+counter — `my-test-1.png`, `my-test-2.png` — exactly as in vitest, counter
+bumps on named calls included. The default path is vitest's shape minus its
+`-${browserName}-${platform}` suffix (there is one runtime here, so goldens
+carry bare names — a suite migrating existing `panel-chromium-darwin.png`
+files should rename them or pass `resolveScreenshotPath`):
 
 ```
 ${root}/${testFileDirectory}/__screenshots__/${testFileName}/${arg}${ext}
@@ -4194,6 +4197,8 @@ report; that directory is a server-side config value with no route to a matcher
 running in the worker, so the artifacts go to
 `<golden dir>/__diff_output__/<name>-actual.png` and `-diff.png` instead. The
 failure message names the golden, the capture, and the diff in vitest's layout.
+Gitignore `__diff_output__/` — it sits inside the committed screenshots tree,
+where vitest's attachments directory is ignored by default.
 
 **There is no capture-stability loop.** vitest re-screenshots a live page until
 two frames agree, because a browser can still be animating. `captureScreenshot`
