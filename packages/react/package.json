@@ -1,6 +1,6 @@
 {
   "name": "@gpuix/react",
-  "version": "0.6.0-fork.3",
+  "version": "0.7.0-fork.1",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
