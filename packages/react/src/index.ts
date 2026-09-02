@@ -247,6 +247,7 @@ export type {
   LinearGradientStop,
   EdgeInsets,
   ElementBounds,
+  ElementRect,
   HighlightMatch,
   HighlightSpec,
   MotionEase,

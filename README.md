@@ -314,8 +314,18 @@ the unchanged payload is exposed as `nativeEvent`. The synthetic surface adds:
   `getAttribute(name)`
 - flattened `altKey`, `ctrlKey`, `metaKey`, and `shiftKey` values
 - a primary-button default (`button === 0`)
+- `clientX` / `clientY` and `pageX` / `pageY`, the DOM spellings of `x` and
+  `y`. All four hold the same number: they differ in a browser only by the
+  document's own scroll offset, and this renderer has no scrolling document
+- `relatedTarget` on `mouseEnter` and `mouseLeave` — the element the pointer
+  left, or the one it moved to. Always `null` on `focus` and `blur`: GPUI's
+  focus subscriptions report only the element whose own focus changed, never
+  the other side of the transition
 - capture and bubble dispatch through the retained React ancestry
-- `preventDefault()` / `defaultPrevented` and `stopPropagation()`
+- `preventDefault()` / `defaultPrevented`, `stopPropagation()`, and
+  `stopImmediatePropagation()`. An element's capture and bubble listeners are
+  both AT_TARGET listeners, and as in the DOM `stopPropagation()` still lets
+  the second one run — `stopImmediatePropagation()` is the one that does not
 
 `handleGpuixEvent()` returns the synchronous prevention result. A prevented
 Enter or Space key event cancels the keyboard-generated click that follows. A
@@ -1300,10 +1310,19 @@ ref.current.scrollTo({ top: 240 })                 // instant; `behavior` is ign
 ref.current.scrollIntoView()                       // block: "start", the DOM default
 ref.current.scrollIntoView({ block: "nearest" })   // smallest revealing scroll
 
+ref.current.getBoundingClientRect()                // DOMRect-shaped measurement
+ref.current.getBounds()                            // the same box as {x, y, width, height}
+
 // "Am I at the bottom?" — the standard DOM test
 const atBottom =
   ref.current.scrollTop + ref.current.clientHeight >= ref.current.scrollHeight
 ```
+
+`getBoundingClientRect()` returns the `DOMRect` shape — `x`, `y`, `width`,
+`height`, `top`, `right`, `bottom`, `left` — as a plain object, never null: an
+element with no painted box reports an all-zero rect, as the DOM does. Use
+`getBounds()` when the distinction between "no box" and "a zero box" matters;
+it returns `null` for the former.
 
 Only `overflow: "scroll"` elements and `<virtual-list>` are scroll containers
 here. Everything else — **including `overflow: "hidden"`, which the web does
@@ -1895,15 +1914,15 @@ add semantics and focus behavior, but no visual defaults.
 | `<ul>`, `<ol>` | `list` |
 | `<li>` | `listitem` |
 | `<button>` | `button` |
-| `<a>` | `link` |
+| `<a href>` | `link` |
 | `<img>` | `img`, or `presentation` when decorative |
 | `<header>` | `banner` |
 | `<footer>` | `contentinfo` |
 | `<section>` | `region` |
 | `<p>`, `<span>`, `<strong>`, `<em>`, `<kbd>` | none |
 
-Three of those roles depend on where the element sits or how it is named, and
-GPUIX resolves them the way HTML-AAM does:
+Four of those roles depend on where the element sits, how it is named, or what
+it declares, and GPUIX resolves them the way HTML-AAM does:
 
 - `<header>` and `<footer>` are the `banner` and `contentinfo` landmarks only
   when nothing between them and the root is an `<article>`, `<aside>`,
@@ -1913,11 +1932,18 @@ GPUIX resolves them the way HTML-AAM does:
   unnamed `<section>` is generic.
 - `<li>` is a `listitem` only inside a `<ul>`, `<ol>`, or an element with
   `role="list"`.
+- `<a>` is a `link` only when it has an `href`. A bare `<a>` is generic and
+  infers nothing — no role, so no name derived from its descendant text and no
+  `ariaCurrent` state, and no link keyboard activation either. Announcing it as
+  a link would promise a destination that does not exist; give a scripted
+  anchor an explicit `role="link"` when it really does navigate.
 
-These three re-resolve whenever what they read actually changes: attaching the
-element to a parent, and an ancestor gaining or losing one of the roles above.
-A `<div role="list">` that becomes `role="group"` drops its `<li>` children back
-to generic, as it does in the DOM.
+The three context-dependent ones re-resolve whenever what they read actually
+changes: attaching the element to a parent, and an ancestor gaining or losing
+one of the roles above. A `<div role="list">` that becomes `role="group"` drops
+its `<li>` children back to generic, as it does in the DOM. The anchor reads
+only its own props, so an `href` appearing or disappearing is picked up by the
+ordinary prop diff instead.
 
 An authored `ariaLevel` wins over the level a heading tag implies, so
 `<h2 ariaLevel={4}>` reports level 4. The aliases with no implicit role add no

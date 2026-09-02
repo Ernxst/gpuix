@@ -914,7 +914,7 @@ export interface Props {
   /** Fires when user clicks OUTSIDE this element. Use for "click outside to close". */
   onMouseDownOutside?: (event: GpuixSyntheticEvent) => void
 
-  // ── Keyboard events (need focus: autoFocus, or a click on the element) ──
+  // ── Keyboard events (delivered to the focused element) ─────────
   onKeyDown?: (event: GpuixSyntheticEvent) => void
   onKeyDownCapture?: (event: GpuixSyntheticEvent) => void
   onKeyUp?: (event: GpuixSyntheticEvent) => void
@@ -958,8 +958,11 @@ export interface Props {
   highlight?: HighlightSpec | HighlightSpec[] | null
 
   // ── Focus props ────────────────────────────────────────────────
-  /** Take keyboard focus when the element first mounts. Required for `<input>`:
-   *  without it, or a click, the field never receives key events. */
+  /** Take keyboard focus when the element first mounts.
+   *
+   *  Never required to make an element reachable. `<input>` and `<textarea>`
+   *  get an implicit tab index of 0 and join the tab order on their own, so
+   *  Tab, a click, or `ref.current.focus()` all give them key events. */
   autoFocus?: boolean
   /** Native GPUI tab order. Use 0 for normal keyboard focus. */
   tabIndex?: number
@@ -1398,6 +1401,20 @@ export interface ElementBounds {
   height: number
 }
 
+/**
+ * The `DOMRect` shape `getBoundingClientRect()` returns: the same box as
+ * {@link ElementBounds} with the four edges the DOM also exposes.
+ *
+ * A plain object, not a `DOMRect` instance — there is no DOM here to construct
+ * one from — so it has no `toJSON()`.
+ */
+export interface ElementRect extends ElementBounds {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
 // Public instance exposed via refs. Type-specific interfaces deepen this seam
 // without putting browser-only methods on every native element.
 export interface PublicInstance {
@@ -1477,6 +1494,15 @@ export interface PublicInstance {
    * Returns null when the element has no painted bounds.
    */
   getBounds(): ElementBounds | null
+  /**
+   * The same box as {@link getBounds}, in the `DOMRect` shape
+   * `Element.getBoundingClientRect()` returns.
+   *
+   * Never null: an element with no painted box reports an all-zero rect, as
+   * the DOM does for an element with no boxes. Coordinates are relative to the
+   * window's content origin, which is this renderer's viewport.
+   */
+  getBoundingClientRect(): ElementRect
 }
 
 /**
@@ -1539,6 +1565,7 @@ export interface InputPublicInstance extends PublicInstance {
   /** Select all of the editor's text, matching `HTMLInputElement.select()`. */
   select(): void
 }
+
 
 export interface CanvasPublicInstance extends PublicInstance {
   type: "canvas"

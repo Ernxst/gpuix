@@ -674,10 +674,18 @@ describeNative("automation", () => {
 
     render(
       <div>
+        {/* `href` is what infers the link role, so these carry one while the
+            test asserts on ariaCurrent. */}
         {values.flatMap((current) => [
-          <a key={`camel-${current}`} ariaLabel={`Camel ${current}`} ariaCurrent={current} />,
+          <a
+            key={`camel-${current}`}
+            href={`/${current}`}
+            ariaLabel={`Camel ${current}`}
+            ariaCurrent={current}
+          />,
           <a
             key={`hyphen-${current}`}
+            href={`/${current}`}
             aria-label={`Hyphen ${current}`}
             aria-current={current}
           />,

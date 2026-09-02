@@ -108,13 +108,18 @@ function dispatchHoverTransition(
 
   const leaving = previousPath.slice(0, previousPath.length - shared)
   const entering = nextPath.slice(0, nextPath.length - shared).reverse()
+  // `MouseEvent.relatedTarget` names the other side of the transition: what a
+  // leave moved to, and where an enter came from. Each is the deepest hovered
+  // element on its side, and null when the pointer came from or went to
+  // nothing this tree painted.
+  const previousTarget = previousPath[0] ?? null
   container.hoverPath = nextPath
 
   for (const target of leaving) {
-    dispatchHoverEvent(container, payload, target, "mouseLeave", renderer)
+    dispatchHoverEvent(container, payload, target, "mouseLeave", renderer, nextTarget ?? null)
   }
   for (const target of entering) {
-    dispatchHoverEvent(container, payload, target, "mouseEnter", renderer)
+    dispatchHoverEvent(container, payload, target, "mouseEnter", renderer, previousTarget)
   }
 
   return { defaultPrevented: false, propagationStopped: false }
@@ -125,7 +130,8 @@ function dispatchHoverEvent(
   payload: EventPayload,
   target: Instance,
   eventType: "mouseEnter" | "mouseLeave",
-  renderer: NativeRenderer
+  renderer: NativeRenderer,
+  relatedTarget: Instance | null
 ): void {
   const handler = container.eventHandlers.get(target.id)?.get(eventType)
   if (!handler) return
@@ -133,7 +139,8 @@ function dispatchHoverEvent(
   const controller = createGpuixSyntheticEvent(
     { ...payload, elementId: target.id, eventType, hovered: eventType === "mouseEnter" },
     target,
-    renderer
+    renderer,
+    relatedTarget
   )
   controller.setCurrentTarget(target, 2)
   handler(controller.event)
@@ -290,9 +297,12 @@ function dispatchGpuixEvent(
     }
 
     // Both listeners on the target run at AT_TARGET. stopPropagation does not
-    // suppress another listener on that same target.
+    // suppress another listener on that same target; stopImmediatePropagation
+    // is the one that does.
     invoke(target, `${payload.eventType}Capture`, 2)
-    invoke(target, payload.eventType, 2)
+    if (!controller.isImmediatePropagationStopped()) {
+      invoke(target, payload.eventType, 2)
+    }
 
     if (!event.isPropagationStopped() && !NON_BUBBLING_EVENTS.has(payload.eventType)) {
       for (let index = 1; index < path.length; index += 1) {

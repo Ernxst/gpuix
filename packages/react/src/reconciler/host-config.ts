@@ -734,10 +734,17 @@ function nativeTabIndex(type: string, props: Props): number | undefined {
   return typeof href === "string" ? 0 : undefined
 }
 
-/** Keep the original anchor semantics after host aliases become native divs. */
-function nativeActivationKind(type: string, props: Props): "anchor" | undefined {
+/**
+ * Keep the original anchor semantics after host aliases become native divs.
+ *
+ * Keyed on `href`, like {@link nativeTabIndex} and {@link nativeAnchorRole}. A
+ * bare `<a>` is a plain generic in the DOM — not focusable, not activatable —
+ * so giving it link keyboard behaviour (Enter activates, Space declines) would
+ * contradict the `generic` role it now computes.
+ */
+function nativeActivationKind(_type: string, props: Props): "anchor" | undefined {
   const href = (props as Props & { href?: unknown }).href
-  return type === "a" || typeof href === "string" ? "anchor" : undefined
+  return typeof href === "string" ? "anchor" : undefined
 }
 
 /**
@@ -820,6 +827,14 @@ function nativeRole(
   instance: Instance
 ): Props["role"] | undefined {
   if (props.role !== undefined) return props.role
+  // HTML-AAM maps `<a>` to `link` only when it has an `href`. A placeholder
+  // anchor without one computes `generic`, and announcing it as a link tells a
+  // screen-reader user there is somewhere to go when there is not.
+  //
+  // This shadows the `a` entry in IMPLICIT_ROLES, exactly as the `li` arm
+  // below shadows its own: the table holds the role a type reaches when
+  // nothing conditions it away, and these arms are the conditions.
+  if (type === "a") return nativeAnchorRole(props)
   if (type === "img") return nativeImageRole(props)
   // `<section>` is a region landmark only when it has an accessible name;
   // an unnamed one is generic, so it contributes no node of its own.
@@ -888,6 +903,12 @@ function resyncContextDependentRoles(container: Container, instance: Instance): 
     }
     pending.push(...state.children)
   }
+}
+
+/** `<a href>` is a link; `<a>` alone is generic, which needs no role at all. */
+function nativeAnchorRole(props: Props): "link" | undefined {
+  const { href } = props as Props & { href?: unknown }
+  return typeof href === "string" ? "link" : undefined
 }
 
 /** An explicitly authored accessible name, from either prop spelling. */
@@ -1240,6 +1261,18 @@ export const hostConfig = {
         if (!bounds) return null
         return { x: bounds[0]!, y: bounds[1]!, width: bounds[2]!, height: bounds[3]! }
       },
+      getBoundingClientRect: () => {
+        // The DOM reports an all-zero rect for an element with no boxes rather
+        // than nothing at all, so an unpainted element does the same here.
+        const bounds = instance.getBounds() ?? { x: 0, y: 0, width: 0, height: 0 }
+        return {
+          ...bounds,
+          top: bounds.y,
+          right: bounds.x + bounds.width,
+          bottom: bounds.y + bounds.height,
+          left: bounds.x,
+        }
+      },
       __applyCanvasCommands: (ops, operands, strings) => {
         if (instance.type !== "canvas") {
           throw new TypeError(
@@ -1280,9 +1313,6 @@ export const hostConfig = {
         diagnoseUnsupportedCanvasElementMember(instance, diagnosticTarget, "toDataURL")
         return undefined
       }
-    }
-    if (TEXT_EDITING_TYPES.has(type)) {
-      installTextEditingMembers(instance, rootContainerInstance, id)
     }
     if (TEXT_EDITING_TYPES.has(type)) {
       installTextEditingMembers(instance, rootContainerInstance, id)
