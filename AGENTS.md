@@ -4,6 +4,12 @@
 
 Not **remorses**? Do not open a pull request. Open an issue. See [External contributors](#external-contributors).
 
+## README is the public API contract
+
+Document every user-facing feature, element, prop, event, renderer option,
+public method, and behavior change in `README.md` in the same change. A
+changeset does not replace API documentation.
+
 ## GPUIX is a thin layer on GPUI
 
 **Read the GPUI docs and the GPUI source before you write native code.** `zed/crates/gpui`

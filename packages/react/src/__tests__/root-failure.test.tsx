@@ -78,20 +78,58 @@ function expectFailedRoot(result: ReturnType<typeof captureStrictFailure>, messa
 }
 
 describe("root failure state", () => {
-  it("exposes a render-phase strict failure as a dead-root diagnostic", () => {
-    const result = captureStrictFailure(
-      React.createElement("div", { accessibilityRole: "button" })
-    )
-
-    expect(result.thrown).toBeUndefined()
-    expectFailedRoot(result, "React root is dead after an uncaught render error")
-    expect(result.status).toMatchObject({
-      status: "failed",
-      error: {
+  it("exposes render-phase strict failures as dead-root diagnostics", () => {
+    const cases = [
+      {
+        node: React.createElement("div", { accessibilityRole: "button" }),
         name: "UnsupportedAccessibilityRolePropError",
-        message: expect.stringContaining("does not support accessibilityRole"),
+        message: "does not support accessibilityRole",
       },
-    })
+      {
+        node: React.createElement("text", {
+          role: "heading",
+          visuallyHidden: true,
+          ariaHidden: true,
+        } as never),
+        name: "ContradictoryAccessibilityVisibilityError",
+        message: "cannot combine visuallyHidden with ariaHidden=true",
+      },
+    ]
+
+    for (const testCase of cases) {
+      const result = captureStrictFailure(testCase.node)
+      expect(result.thrown).toBeUndefined()
+      expectFailedRoot(result, "React root is dead after an uncaught render error")
+      expect(result.status).toMatchObject({
+        status: "failed",
+        error: {
+          name: testCase.name,
+          message: expect.stringContaining(testCase.message),
+        },
+      })
+    }
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const renderer = rendererStub()
+    const root = createRoot(renderer, { strictStyles: false })
+    try {
+      flushSync(() => {
+        root.render(
+          React.createElement("text", {
+            role: "heading",
+            visuallyHidden: true,
+            ariaHidden: true,
+          } as never)
+        )
+      })
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("cannot combine visuallyHidden with ariaHidden=true")
+      )
+    } finally {
+      root.unmount()
+      warn.mockRestore()
+    }
   })
 
   it("exposes a commit-phase strict failure as a dead-root diagnostic", () => {

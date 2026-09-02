@@ -90,7 +90,13 @@ export declare class GpuixRenderer {
    * backwards compatibility; new callers should branch on this object.
    */
   capabilities(): RendererCapabilities
-  /** Whether JavaScript must drive the native event loop with tick(). */
+  /**
+   * Whether JavaScript must call tick() until it returns false.
+   *
+   * macOS: tick() pumps AppKit. Windows/Linux: tick() reports whether the
+   * UI thread is still inside `Platform::run`. Both return false after the
+   * last window closes so the JS frame loop can finish termination.
+   */
   requiresTick(): boolean
   /**
    * Registers a coalesced display-link frame request callback when supported.
@@ -119,7 +125,16 @@ export declare class GpuixRenderer {
   /** Same numbers as the on-screen overlay: current, p90, p99, max, frames. */
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
   setWindowTitle(title: string): void
-  focusElement(elementId: number): void
+  /**
+   * Move focus to an element. `preventScroll` mirrors the `FocusOptions`
+   * member of `HTMLElement.focus()`: focus without revealing the element
+   * inside its scroll ancestors.
+   */
+  focusElement(elementId: number, preventScroll?: boolean | undefined | null): void
+  /** Move focus to the next GPUIX tab stop without dispatching a key event. */
+  focusNext(): void
+  /** Move focus to the previous GPUIX tab stop without dispatching a key event. */
+  focusPrevious(): void
   /**
    * Complete the DOM default for a Tab keydown after React capture and
    * bubble handlers have had a chance to call preventDefault().
@@ -172,6 +187,27 @@ export declare class GpuixRenderer {
    * Returns [x, y] or null if the element has no scroll handle.
    */
   getScrollOffset(elementId: number): Array<number> | null
+  /**
+   * Web-shaped scroll geometry for a scrollable element, as
+   * `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]`,
+   * or null when the element is not a scroll container. Unlike
+   * `getScrollOffset` the offsets use the DOM's positive convention.
+   *
+   * Forces layout first, like `Element.scrollHeight` does: without it a read
+   * from a mount effect, before the first frame, sees no scroll geometry at
+   * all and reports the element as unscrollable.
+   */
+  getScrollMetrics(elementId: number): Array<number> | null
+  /**
+   * Reveal one element inside every scrollable ancestor, as
+   * `Element.scrollIntoView()` does, without moving focus. `alignToTop` is
+   * the DOM's `block: "start"` and defaults to it; `false` is
+   * `block: "nearest"`.
+   *
+   * Forces layout first: the reveal reads painted child geometry, which a
+   * caller running before the first frame would not have.
+   */
+  scrollElementIntoView(elementId: number, alignToTop?: boolean | undefined | null): void
   getAutomationTree(): string
   getElementBounds(id: number): Array<number> | null
   getAllText(): Array<string>
@@ -345,8 +381,10 @@ export declare class TestGpuixRenderer {
    * which triggers the same event handlers as production.
    * IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
    * `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
+   * `click_count` models a repeat within one click sequence: a platform
+   * sends 2 for the second click of a double click (default 1).
    */
-  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null, clickCount?: number | undefined | null): void
   /**
    * Simulate key strokes through GPUI's input pipeline.
    * Format: space-separated keys, e.g. "a", "enter", "cmd-shift-p".
@@ -378,8 +416,16 @@ export declare class TestGpuixRenderer {
    * The element must have a FocusHandle (created by sync_focus_handles when
    * the element has keyDown, keyUp, focus, or blur listeners).
    * Call flush() before this so the element tree and focus handles exist.
+   * `preventScroll` mirrors the `FocusOptions` member of
+   * `HTMLElement.focus()`: focus without revealing the element inside its
+   * scroll ancestors.
    */
-  focusElement(id: number): void
+  focusElement(id: number, preventScroll?: boolean | undefined | null): void
+  /** The focused host element id, analogous to `document.activeElement`, or null. */
+  getActiveElement(): number | null
+  blur(): void
+  focusNext(): void
+  focusPrevious(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   setPointerCapture(id: number): void
   releasePointerCapture(id: number): void
@@ -477,6 +523,25 @@ export declare class TestGpuixRenderer {
    * Returns [x, y] or null if the element has no scroll handle.
    */
   getScrollOffset(elementId: number): Array<number> | null
+  /**
+   * Web-shaped scroll geometry for a scrollable element, as
+   * `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]`,
+   * or null when the element is not a scroll container. Unlike
+   * `getScrollOffset` the offsets use the DOM's positive convention.
+   *
+   * Forces layout first, like the production renderer and like
+   * `Element.scrollHeight`: a read from a mount effect, before the first
+   * frame, must not report the element as unscrollable.
+   */
+  getScrollMetrics(elementId: number): Array<number> | null
+  /**
+   * Reveal one element inside every scrollable ancestor, as
+   * `Element.scrollIntoView()` does, without moving focus. `alignToTop` is
+   * the DOM's `block: "start"` and defaults to it; `false` is
+   * `block: "nearest"`.
+   * Forces layout first; call flush() after to apply the scroll and re-render.
+   */
+  scrollElementIntoView(elementId: number, alignToTop?: boolean | undefined | null): void
   /**
    * Capture a screenshot of the current rendered state and save as PNG.
    * Supported on macOS through Metal and Windows through DirectX.
@@ -616,11 +681,11 @@ export interface EventPayload {
   button?: number
   /**
    * Number of consecutive clicks (1=single, 2=double, 3=triple).
-   * Populated for: mouseDown, mouseUp, click.
+   * Populated for: mouseDown, mouseUp, click, auxClick.
    */
   clickCount?: number
   /**
-   * Whether this is a right-click (convenience for click events).
+   * Whether this is a right-click (convenience for click and context-menu events).
    * true when button==2 or ClickEvent::is_right_click().
    */
   isRightClick?: boolean
@@ -652,23 +717,36 @@ export interface EventPayload {
    */
   isHeld?: boolean
   /**
-   * Scroll delta on the X axis (pixels or lines, see `precise`).
-   * Populated for: scroll.
+   * Wheel delta on the X axis, in `deltaMode` units.
+   * DOM signs: positive scrolls the view right, as in `WheelEvent`.
+   * Populated for: wheel.
    */
   deltaX?: number
   /**
-   * Scroll delta on the Y axis (pixels or lines, see `precise`).
-   * Populated for: scroll.
+   * Wheel delta on the Y axis, in `deltaMode` units.
+   * DOM signs: positive scrolls the view down, as in `WheelEvent`.
+   * Populated for: wheel.
    */
   deltaY?: number
   /**
+   * Wheel delta on the Z axis, in `deltaMode` units.
+   * GPUI currently supplies two-dimensional wheel input, so this is 0.
+   * Populated for: wheel.
+   */
+  deltaZ?: number
+  /**
+   * DOM WheelEvent deltaMode: 0=pixels, 1=lines, 2=pages.
+   * Populated for: wheel.
+   */
+  deltaMode?: number
+  /**
    * true = pixel-precise (trackpad), false = line-based (mouse wheel).
-   * Populated for: scroll.
+   * Populated for: wheel.
    */
   precise?: boolean
   /**
-   * Touch phase for scroll: "started", "moved", "ended".
-   * Populated for: scroll (trackpad gestures).
+   * Touch phase for wheel: "started", "moved", "ended".
+   * Populated for: wheel (trackpad gestures).
    */
   touchPhase?: string
   /**
@@ -727,6 +805,9 @@ export interface GpuixStyleDiagnostic {
   property: string
   value: string
 }
+
+/** True only when this binary compiled the real GPU test renderer. */
+export declare function hasTestGpuixRenderer(): boolean
 
 /**
  * One highlight wash painted in the last frame, with the boxes it drew.

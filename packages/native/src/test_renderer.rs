@@ -33,8 +33,8 @@ use crate::renderer::{
     parse_canvas_image_source, parse_debug_frame_overlay_mode, pending_accessibility_diagnostics,
     pending_custom_prop_diagnostic, set_application_menus, take_style_diagnostics_for_reporting,
     to_element_id, validate_canvas_target, AnimationFrameCallback, CanvasImageLoadState,
-    DebugFrameOverlayStats, EventCallback, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView,
-    MenuSpec, PendingStyleDiagnostics, WindowSize,
+    DebugFrameOverlayStats, EventCallback, FocusDirection, FrameTimestampOrigin,
+    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostics, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -1090,6 +1090,8 @@ impl TestGpuixRenderer {
     /// which triggers the same event handlers as production.
     /// IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
     /// `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
+    /// `click_count` models a repeat within one click sequence: a platform
+    /// sends 2 for the second click of a double click (default 1).
     #[napi]
     pub fn simulate_click(
         &self,
@@ -1097,9 +1099,11 @@ impl TestGpuixRenderer {
         y: f64,
         button: Option<u32>,
         modifiers: Option<String>,
+        click_count: Option<u32>,
     ) -> Result<()> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         let button = button.unwrap_or(0);
+        let click_count = click_count.unwrap_or(1) as usize;
         let result = with_test_state(self.state_id, |cx, window, _view| {
             // A real click is delivered to the active window. The offscreen
             // platform has no activation callback, so model that step here.
@@ -1120,7 +1124,7 @@ impl TestGpuixRenderer {
                     position,
                     modifiers,
                     button: gpui_button,
-                    click_count: 1,
+                    click_count,
                     first_mouse: false,
                 },
             );
@@ -1130,7 +1134,7 @@ impl TestGpuixRenderer {
                     position,
                     modifiers,
                     button: gpui_button,
-                    click_count: 1,
+                    click_count,
                 },
             );
             Ok(())
@@ -1249,9 +1253,13 @@ impl TestGpuixRenderer {
     /// The element must have a FocusHandle (created by sync_focus_handles when
     /// the element has keyDown, keyUp, focus, or blur listeners).
     /// Call flush() before this so the element tree and focus handles exist.
+    /// `preventScroll` mirrors the `FocusOptions` member of
+    /// `HTMLElement.focus()`: focus without revealing the element inside its
+    /// scroll ancestors.
     #[napi]
-    pub fn focus_element(&self, id: f64) -> Result<()> {
+    pub fn focus_element(&self, id: f64, prevent_scroll: Option<bool>) -> Result<()> {
         let id = to_element_id(id)?;
+        let reveal = !prevent_scroll.unwrap_or(false);
 
         with_test_state(self.state_id, |cx, window, view| {
             let view = view.clone();
@@ -1261,11 +1269,63 @@ impl TestGpuixRenderer {
                     window.simulate_active_status_change(true, app);
                 }
                 view.update(app, |view, cx| {
-                    view.focus_element_and_reveal(id, window, cx);
+                    view.focus_element(id, reveal, window, cx);
                 });
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// The focused host element id, analogous to `document.activeElement`, or null.
+    #[napi]
+    pub fn get_active_element(&self) -> Result<Option<f64>> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.read(app).active_element_id(window).map(|id| id as f64)
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
+    #[napi]
+    pub fn blur(&self) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, |_, window, _app| window.blur())
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn focus_next(&self) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.move_focus(FocusDirection::Next, window, cx);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn focus_previous(&self) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.move_focus(FocusDirection::Previous, window, cx);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
             cx.run_until_parked();
             Ok(())
         })
@@ -1652,6 +1712,57 @@ impl TestGpuixRenderer {
                 })
                 .map_err(|e| Error::from_reason(e.to_string()))?;
             Ok(result)
+        })
+    }
+
+    /// Web-shaped scroll geometry for a scrollable element, as
+    /// `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]`,
+    /// or null when the element is not a scroll container. Unlike
+    /// `getScrollOffset` the offsets use the DOM's positive convention.
+    ///
+    /// Forces layout first, like the production renderer and like
+    /// `Element.scrollHeight`: a read from a mount effect, before the first
+    /// frame, must not report the element as unscrollable.
+    #[napi]
+    pub fn get_scroll_metrics(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
+        let id = to_element_id(element_id)?;
+        self.flush()?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            let result = cx
+                .update_window(window, |_, _window, app| {
+                    view.update(app, |view, _cx| {
+                        view.scroll_metrics(id).map(|metrics| metrics.to_vec())
+                    })
+                })
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(result)
+        })
+    }
+
+    /// Reveal one element inside every scrollable ancestor, as
+    /// `Element.scrollIntoView()` does, without moving focus. `alignToTop` is
+    /// the DOM's `block: "start"` and defaults to it; `false` is
+    /// `block: "nearest"`.
+    /// Forces layout first; call flush() after to apply the scroll and re-render.
+    #[napi]
+    pub fn scroll_element_into_view(
+        &self,
+        element_id: f64,
+        align_to_top: Option<bool>,
+    ) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let align_to_top = align_to_top.unwrap_or(true);
+        self.flush()?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, cx| {
+                    view.scroll_element_into_view(id, align_to_top, cx);
+                });
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(())
         })
     }
 

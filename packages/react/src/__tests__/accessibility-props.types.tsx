@@ -33,6 +33,7 @@ const aliases = [
   <img aria-label="Preview" aria-hidden />,
   <div role="row" aria-rowindex={2} />,
   <div role="consumer-web-only-role" />,
+  <text visuallyHidden role="heading" aria-level={1}>Production ledger</text>,
 ]
 
 const aliasProps: Props = {
@@ -96,6 +97,11 @@ const unsupportedProps: Props = { "aria-busy": true }
 const invalidCurrent: Props = { ariaCurrent: "chapter" }
 // @ts-expect-error disabled is an HTML boolean attribute, not an ARIA Booleanish attribute.
 const invalidDisabled: Props = { disabled: "false" }
+const visuallyHidden: Props = { visuallyHidden: true }
+// @ts-expect-error visuallyHidden is true-only until a focus-revealed mode is implemented.
+const falseVisuallyHidden: Props = { visuallyHidden: false }
+// @ts-expect-error untilFocus is deliberately reserved as a future additive value.
+const futureVisuallyHidden: Props = { visuallyHidden: "untilFocus" }
 
 void aliases
 void aliasProps
@@ -104,3 +110,6 @@ void roleVocabulary
 void unsupportedProps
 void invalidCurrent
 void invalidDisabled
+void visuallyHidden
+void falseVisuallyHidden
+void futureVisuallyHidden

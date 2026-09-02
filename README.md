@@ -815,8 +815,12 @@ on the returned handle to end it. One thrown tick is reported and retried;
 repeated failures quit instead of abandoning the native window.
 
 On **Windows and Linux**, GPUI runs its normal blocking native event loop on one
-dedicated Rust UI thread. Node sends in-process commands to that thread, so
-`startFrameLoop` returns a no-op handle and does not create a JavaScript timer.
+dedicated Rust UI thread. Node sends in-process commands to that thread, so a
+timer tick neither pumps that loop nor requests a frame. `startFrameLoop` still
+runs there: its ticks observe whether the UI thread is alive, and `tick()`
+returns `false` once the last window closes, which stops the loop and runs
+`onTerminated`. Call it on every platform — `render()` does. Skipping it on
+Windows or Linux leaves the process running after the window is gone.
 All platforms use GPUI's native platform, window, renderer, input, scroll,
 clipboard, keyboard, and IME implementations. The embedded macOS run-loop
 extension comes from the pinned GPUIX fork. CI runs the full React and example
@@ -1199,10 +1203,12 @@ container on the wheel frame, and the JavaScript callback that would move the
 header arrives a frame later, so the header tears away during a fast pan.
 
 When two panes must stay locked to the pixel, own the offset in React: put one
-`onScroll` listener on a non-scrolling parent, keep `scrollX` and `scrollY` in
+`onWheel` listener on a non-scrolling parent, keep `scrollX` and `scrollY` in
 state, and translate each pane's content with an absolutely positioned wrapper.
-Zed does the same; the editor owns its scroll position and paints the gutter and
-the text from it.
+`onWheel` bubbles, so the parent sees every wheel over the panes; `onScroll`
+would not, because it reports a scroll container's own position and does not
+bubble, exactly as in the DOM. Zed does the same; the editor owns its scroll
+position and paints the gutter and the text from it.
 
 ```tsx
 function Pane({ offsetX, children }: { offsetX: number; children: React.ReactNode }) {
@@ -1249,6 +1255,55 @@ renderer.scrollTo(elementId, x, y)        // set offset directly
 renderer.scrollToItem(elementId, index)   // scroll child into view
 renderer.getScrollOffset(elementId)       // returns [x, y] or null
 ```
+
+The ref itself also carries the `Element` scroll API, so a component shared with
+the web reads and writes scroll position the same way in both renderers. These
+use the **DOM's sign convention** — `scrollTop` is `0` at the top and grows
+positive as content scrolls up out of view — while the renderer methods above
+keep gpui's negative offsets:
+
+```tsx
+const ref = useRef<PublicInstance>(null)
+
+ref.current.scrollTop            // pixels scrolled down (positive)
+ref.current.scrollLeft           // pixels scrolled right (positive)
+ref.current.scrollHeight         // scrollable content height
+ref.current.scrollWidth          // scrollable content width
+ref.current.clientHeight         // viewport height
+ref.current.clientWidth          // viewport width
+
+ref.current.scrollTop = ref.current.scrollHeight   // jump to the bottom
+ref.current.scrollTo({ top: 240 })                 // instant; `behavior` is ignored
+ref.current.scrollIntoView()                       // block: "start", the DOM default
+ref.current.scrollIntoView({ block: "nearest" })   // smallest revealing scroll
+
+// "Am I at the bottom?" — the standard DOM test
+const atBottom =
+  ref.current.scrollTop + ref.current.clientHeight >= ref.current.scrollHeight
+```
+
+Only `overflow: "scroll"` elements and `<virtual-list>` are scroll containers
+here. Everything else — **including `overflow: "hidden"`, which the web does
+treat as a programmatically scrollable container** — reports its viewport for
+`clientWidth` / `clientHeight`, a matching scroll extent, and `0` offsets, and
+drops writes to `scrollTop` / `scrollLeft`.
+
+`scrollIntoView()` supports the DOM default `block: "start"` and
+`block: "nearest"`. `block: "center"`, `block: "end"`, `scrollIntoView(false)`
+and any `inline` other than `"nearest"` have no gpui equivalent: they warn once
+and reveal by the nearest edge, or throw under `strictStyles`. `block: "start"`
+aligns the **scroll container's own child** that contains the target, not the
+target itself, so a deeply nested element rests at the top of its row rather
+than at the top of the viewport.
+
+Reading any of the six properties forces layout in the native renderer, as
+reading `Element.scrollHeight` does on the web; the browser-mirror renderer
+samples the last frame instead. Hoist the reads you need out of a hot scroll
+handler rather than repeating them: each read costs a forced draw, and on an
+element that is **not** a scroll container it costs two, because the metrics
+call returns nothing and the fallback measures the element's bounds — the
+three-property "am I at the bottom?" idiom above is six draws there. A
+per-frame metrics cache would collapse that; it is not implemented yet.
 
 ## Virtual lists
 
@@ -1647,7 +1702,7 @@ a `div` when it should receive keyboard focus:
   onFocus={() => setActive(true)}
   onBlur={() => setActive(false)}
   onKeyDown={(event) => {
-    if (event.key === 'enter') submit()
+    if (event.key === 'Enter') submit()
   }}
 >
   Submit
@@ -1661,6 +1716,27 @@ a `div` when it should receive keyboard focus:
 | `tabIndex={-1}` | Skipped by Tab, but focusable by click or renderer API |
 | `autoFocus` | Takes focus once, when its native focus handle is created |
 
+### Element keyboard callbacks
+
+`onKeyDown` fires for the focused element and then through React's capture and
+bubble phases. `onKeyUp` follows the same path when the key is released. Adding
+either callback creates the element's native focus handle.
+
+```tsx
+<div
+  autoFocus
+  tabIndex={0}
+  onKeyDown={(event) => {
+    console.log(event.key, event.keyChar, event.modifiers, event.isHeld)
+  }}
+  onKeyUp={(event) => {
+    console.log(`${event.key} released`)
+  }}
+>
+  Focused target
+</div>
+```
+
 `Tab` calls GPUI's `window.focus_next()`. `Shift+Tab` calls
 `window.focus_prev()`. Before that default runs, GPUIX dispatches the keydown
 through React's capture and bubble phases. Call `preventDefault()` from either
@@ -1670,11 +1746,24 @@ phase to keep focus on the current element, matching the browser:
 <div
   tabIndex={0}
   onKeyDown={(event) => {
-    if (event.key === 'tab') event.preventDefault()
+    if (event.key === 'Tab') event.preventDefault()
   }}
 >
   Editor
 </div>
+```
+
+### Imperative focus
+
+`focusNext()` and `focusPrevious()` take the same path as the default `Tab` and
+`Shift+Tab`: they first reveal the next focusable row when it is a virtual item
+that has not been painted yet, then move GPUI focus with `window.focus_next()`
+or `window.focus_prev()`, then scroll the newly focused element into view. They
+do not dispatch a `keydown`, so a `preventDefault()` handler cannot cancel them.
+
+```ts
+renderer.focusNext()
+renderer.focusPrevious()
 ```
 
 Use a ref for imperative focus:
@@ -1712,6 +1801,12 @@ the `button` role and `<a>` infers the `link` role; other JSX aliases do not
 infer roles. An explicit `role` still defines custom controls or overrides an
 alias. These aliases add semantics and focus behavior, but no visual defaults.
 
+`<img>` follows HTML-AAM: it infers the `img` role and takes its accessible
+name from `alt`. `alt=""` marks the image decorative, so it infers
+`presentation` and produces no accessibility node — unless `ariaLabel` or
+`tabIndex` gives it semantics of its own. An authored `ariaLabel` wins over
+`alt`, matching the DOM name computation.
+
 ```tsx
 <button
   ariaLabel="Save factory"
@@ -1736,6 +1831,50 @@ map directly to their GPUI / AccessKit equivalents:
 | `disabled` | Unavailable, non-activating, and removed from tab order |
 | `ariaDisabled` | Unavailable and non-activating, but retained in tab order |
 | `ariaHidden` | Excludes the element and its complete subtree from AccessKit |
+| `visuallyHidden` | Keeps the roled node and its name in AccessKit while painting nothing and reserving no layout space |
+
+`visuallyHidden` is the screen-reader-only announcement that CSS spells
+`sr-only`. It accepts `true` only, and requires an explicit supported `role`,
+because it projects the element as an accessibility node rather than styling it:
+
+```tsx
+<text visuallyHidden role="heading" ariaLevel={1}>
+  Production ledger
+</text>
+```
+
+The projection carries the element's own semantics and its flattened text, and
+nothing else. A role that names itself from its contents takes that text as its
+accessible name; any other role folds it onto the node's value, because a
+one-node projection has no child node to carry the text the way painted text
+does. Plain text keeps its whole subtree either way, so the wrapper the web
+spells `<div role="status" class="sr-only">` keeps its text in the accessibility
+tree:
+
+```tsx
+<div visuallyHidden role="status">
+  Saved 3 files
+</div>
+```
+
+GPUI exposes no `aria-live` equivalent, so nothing marks that node as a live
+region. Its text is readable wherever a screen reader reaches it, but a change
+to that text is not announced; live-region announcement is not implemented yet.
+
+GPUIX rejects with a property diagnostic — and renders the element as authored —
+when it is asked to hide more than the projection carries:
+
+- `ariaHidden` on the same element, which would remove the node it preserves
+- an interactive element (`<input>`, `<textarea>`, `tabIndex`, `autoFocus`, or a
+  click/key/focus handler), whose control the projection would destroy
+- any host other than `<text>` whose subtree is more than plain text: a
+  descendant with accessibility semantics of its own owns a node the projection
+  would drop, and a focusable or interactive descendant owns a control it would
+  destroy
+
+A visually hidden subtree with its own nodes or controls is not supported yet;
+on the web `sr-only` keeps the whole subtree exposed and live. Track it as a
+follow-up before hiding a structured wrapper.
 
 Unroled drawn text enters AccessKit as `Label` content. `<text>` exposes its
 flattened inline string as one label, while native `<code>`, `<markdown>`, and
@@ -2419,6 +2558,11 @@ tagged union when the source kind should stay explicit, especially for bytes.
 />
 ```
 
+`alt` is the accessible name, exactly as in HTML: `alt="Sales for March"` names
+the image, and `alt=""` marks it decorative and keeps it out of the
+accessibility tree. See [native accessibility](#native-accessibility) for the
+implicit role that carries it.
+
 `objectFit` matches CSS: `"contain"` (default), `"cover"`, `"fill"`,
 `"scaleDown"`, or `"none"`. `bytes` accepts an `ArrayBuffer`, `Uint8Array`
 (including Node.js `Buffer`), or a number array. Every source is capped at
@@ -2529,7 +2673,9 @@ text imports no longer need a runtime flag.
 | Event | Props | Payload fields |
 |-------|-------|----------------|
 | Click | `onClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` — primary button only |
+| Double click | `onDoubleClick` | Same fields, after the second `onClick`; primary button only |
 | Aux click | `onAuxClick` | Same fields, for the non-primary buttons |
+| Context menu | `onContextMenu` | Same fields as `onMouseDown`, on the right-button press; cancelable |
 | Mouse down | `onMouseDown` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse up | `onMouseUp` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse enter | `onMouseEnter` | `hovered` |
@@ -2540,13 +2686,19 @@ text imports no longer need a runtime flag.
 | Key up | `onKeyUp` | `key`, `keyChar`, `modifiers` |
 | Focus | `onFocus` | — |
 | Blur | `onBlur` | — |
-| Scroll | `onScroll` | `deltaX`, `deltaY`, `precise`, `touchPhase`, `modifiers` |
+| Wheel | `onWheel` | `x`, `y`, `deltaX`, `deltaY`, `deltaZ`, `deltaMode`, `precise`, `touchPhase`, `modifiers` |
+| Scroll | `onScroll` | — read `scrollLeft` / `scrollTop` from `currentTarget` |
 | Change | `onChange` | `value` — `<input>` and `<textarea>` only |
 | Submit | `onSubmit` | `value` — `<input>` and `<textarea>` only |
 | Toggle file | `onToggleFile` | `value` (file path) — `<diff>` only |
 | Show more | `onShowMore` | `value` (hidden line count) — `<diff>` only |
 | Line click | `onLineClick` | `value`, `oldLine`, `newLine` — `<diff>` only |
 | Link click | `onLinkClick` | `value` (URL) — `<markdown>` only |
+
+`onWheel` reports the input gesture and bubbles; `onScroll` reports that a
+scroll container's own position changed and does not bubble, as in the DOM.
+Wheel deltas use DOM signs and units: `deltaY` is positive scrolling down, and
+`deltaMode` is `0` for pixels or `1` for lines.
 
 Mouse event payloads expose pointer capture. Capture keeps move and up routed
 to the pressed element across redraws and outside its bounds until mouse up,
@@ -2599,6 +2751,12 @@ so it ends when the pointer leaves the element.
 `onClick` is the primary button too, like the DOM. Use **`onAuxClick`** for the
 others, and read `event.isRightClick`. `onMouseDown` and `onMouseUp` see every
 button through `event.button` (`0` left, `1` middle, `2` right).
+
+`onDoubleClick` follows the second `onClick` of a primary-button pair; a
+repeated keyboard activation is two clicks and never a double click.
+`onContextMenu` fires on the right-button **press**, so the order is
+`onMouseDown`, `onContextMenu`, `onAuxClick`, as on macOS and in the DOM. It is
+cancelable: call `event.preventDefault()` to suppress your own menu.
 
 ## Supported Styles
 
@@ -3199,9 +3357,12 @@ use a directory link, configure Vitest to dedupe `react`, `react-dom`,
 `react-reconciler`, and `scheduler`; that is only a fallback, not a supported
 way to consume the unpublished fork under Bun.
 
-`hasNativeTestRenderer` was removed. Use
-`isNativeTestRendererAvailable()` when a test must check whether the native
-renderer can initialize.
+The native package exports `TestGpuixRenderer` on every platform. Construction
+on Linux or a build without GPU test support throws a clear availability error;
+`hasTestGpuixRenderer()` reports whether construction is supported. In React
+tests, use `isNativeTestRendererAvailable()` when a suite must check whether the
+native renderer can initialize. The old `hasNativeTestRenderer` export remains
+removed.
 
 `createTestRoot()` returns synchronous queries bound to its renderer. Text
 queries match retained `<text>` content, test ID queries match one test ID per
@@ -3237,6 +3398,11 @@ semantics for `ariaHidden` subtrees.
 These are Testing Library-shaped call sites, not DOM locators: `getBy*` and
 `queryBy*` return a `TestElement` immediately, `findBy*` returns a promise that
 retries, and none of them add browser accessibility semantics.
+
+`TestElement.children` and `TestElement.parentElement` expose current retained
+relationships in the DOM shape. A previously returned element re-resolves
+those relationships after a rerender; accessing them after that element was
+removed throws instead of returning a stale snapshot.
 
 `TestElement.children` and `TestElement.parentElement` expose current retained
 relationships in the DOM shape. A previously returned element re-resolves
@@ -3477,6 +3643,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Scroll wheel events with delta and touch phase
 - [x] Scrollable containers (`overflow: "scroll"`) with persistent scroll state
 - [x] Programmatic scroll API (`scrollTo`, `scrollToItem`, `getScrollOffset`)
+- [x] `Element`-shaped scroll properties on refs (`scrollTop`, `scrollHeight`, `clientHeight`, `scrollIntoView()`)
 - [x] Keyboard events (keyDown, keyUp) with focus management
 - [x] Focus/blur events with automatic FocusHandle creation
 - [x] GPU-backed test renderer with screenshot capture

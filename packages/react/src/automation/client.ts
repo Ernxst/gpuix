@@ -20,6 +20,7 @@ import {
   type ResultOf,
   type TreeNode,
 } from "./protocol.js"
+import { domKeyName } from "../reconciler/synthetic-event.js"
 import type { RendererCapabilities } from "../types/host.js"
 import {
   matches as matchesMatcher,
@@ -628,7 +629,14 @@ export class Locator {
     await this.app.mouse.move(await this.center(), options)
   }
 
-  /** Send one wheel event over the centre of this element. */
+  /**
+   * Send one wheel event over the centre of this element.
+   *
+   * `deltaX` and `deltaY` are **platform deltas**, not DOM deltas: they are
+   * injected where the trackpad driver injects, so they say how far the content
+   * moves and scrolling down is negative. The `onWheel` payload the app
+   * observes is the DOM negation, where scrolling down is positive.
+   */
   async wheel(
     deltaX: number,
     deltaY: number,
@@ -717,6 +725,14 @@ export class App {
     down: (target: PointTarget, options?: MouseOptions) => Promise<void>
     up: (target: PointTarget, options?: MouseOptions) => Promise<void>
     click: (target: PointTarget, options?: MouseOptions) => Promise<void>
+    /**
+     * Send one wheel event over a point.
+     *
+     * `deltaX` and `deltaY` are **platform deltas**, not DOM deltas: they are
+     * injected where the trackpad driver injects, so they say how far the
+     * content moves and scrolling down is negative. The `onWheel` payload the
+     * app observes is the DOM negation, where scrolling down is positive.
+     */
     wheel: (
       target: PointTarget,
       deltaX: number,
@@ -752,6 +768,8 @@ export class App {
         const point = await this.resolvePoint(target)
         await this.call("click", { ...point, ...options })
       },
+      // Platform deltas in, DOM deltas out of `onWheel`: see the note on the
+      // `wheel` field above.
       wheel: async (target, deltaX, deltaY, options = {}) => {
         const point = await this.resolvePoint(target)
         await this.call("scrollWheel", {
@@ -1026,27 +1044,31 @@ export function browserKeystrokeInit(
   }
 
   const keyName = parts.join("-")
+  // One key table for the whole package: the synthetic-event translation a
+  // handler observes and the browser event this sends must agree.
+  const named = domKeyName(keyName) ?? keyName
+  const shiftKey = modifiers.has("shift")
+  const ctrlKey = modifiers.has("ctrl")
+  const metaKey = modifiers.has("cmd") || modifiers.has("meta")
+  const altKey = modifiers.has("alt")
+  // Desktop reads `key` from the character the layout produced, so `shift-a`
+  // is "A" there. A keystroke string carries no character, so shift is applied
+  // here to keep the browser mirror on the same `key` value. Only the letter
+  // case is recoverable: shifted punctuation ("shift-1" is "!" on a US layout)
+  // is layout-dependent and stays unmapped. GPUI produces no character under
+  // ctrl, cmd, or alt, so those combinations keep the unshifted name.
   const key =
-    {
-      backspace: "Backspace",
-      delete: "Delete",
-      down: "ArrowDown",
-      enter: "Enter",
-      escape: "Escape",
-      left: "ArrowLeft",
-      right: "ArrowRight",
-      space: " ",
-      tab: "Tab",
-      up: "ArrowUp",
-    }[keyName.toLowerCase()] ?? keyName
+    shiftKey && !ctrlKey && !metaKey && !altKey && Array.from(named).length === 1
+      ? named.toUpperCase()
+      : named
   return {
     key,
-    altKey: modifiers.has("alt"),
+    altKey,
     bubbles: true,
-    ctrlKey: modifiers.has("ctrl"),
-    metaKey: modifiers.has("cmd") || modifiers.has("meta"),
+    ctrlKey,
+    metaKey,
     repeat: isHeld,
-    shiftKey: modifiers.has("shift"),
+    shiftKey,
   }
 }
 
