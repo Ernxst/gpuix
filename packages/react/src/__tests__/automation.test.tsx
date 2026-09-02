@@ -1652,6 +1652,51 @@ describeNative("automation", () => {
     screen.unmount()
   })
 
+  it("locates by label, placeholder, and display value over the automation tree", async () => {
+    const screen = createTestRoot()
+    screen.render(
+      <div>
+        <input
+          data-testid="search"
+          ariaLabel="Recipe search"
+          placeholder="Search recipes"
+          value="iron plate"
+        />
+        <input
+          data-testid="notes"
+          ariaLabel="Build notes"
+          placeholder="Add a note"
+          value="needs coal"
+        />
+      </div>
+    )
+    const app = await connectTest(screen.renderer)
+
+    // The locator tree drops customProps, so these can only come from
+    // `semantics` — the point of promoting the block in the first place.
+    const node = await app.getByLabelText("Recipe search").element()
+    expect(node.customProps).toBeUndefined()
+    expect(node.semantics).toEqual({
+      label: "Recipe search",
+      placeholder: "Search recipes",
+      value: "iron plate",
+    })
+
+    expect((await app.getByPlaceholderText("Add a note").element()).id).toBe(
+      screen.getByTestId("notes").id
+    )
+    expect((await app.getByDisplayValue(/coal/).element()).id).toBe(
+      screen.getByTestId("notes").id
+    )
+    expect(await app.getByLabelText("Missing").count()).toBe(0)
+    expect(
+      await app.getByTestId("search").getByPlaceholderText("Add a note").count()
+    ).toBe(0)
+
+    await app.close()
+    screen.unmount()
+  })
+
   it("clicks a testId locator and waits for text", async () => {
     const { render, renderer } = createTestRoot()
     render(<Counter />)
