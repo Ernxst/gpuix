@@ -30,9 +30,9 @@ use crate::renderer::{
     dispatch_animation_frame_callback, dispatch_application_menu_action, drain_style_diagnostics,
     first_canvas_diagnostic_message, forget_canvas_diagnostics, fresh_canvas_diagnostics,
     has_application_menus, init_application_menu_support, install_application_menus,
-    parse_canvas_image_source, parse_debug_frame_overlay_mode, pending_accessibility_diagnostics,
-    pending_custom_prop_diagnostic, set_application_menus, take_style_diagnostics_for_reporting,
-    to_element_id, validate_canvas_target, AnimationFrameCallback, CanvasImageLoadState,
+    parse_canvas_image_source, parse_debug_frame_overlay_mode, set_application_menus,
+    take_style_diagnostics_for_reporting, to_element_id, validate_canvas_target,
+    AnimationFrameCallback, CanvasImageLoadState,
     DebugFrameOverlayStats, EventCallback, FocusDirection, FrameTimestampOrigin,
     GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostics, WindowSize,
 };
@@ -548,17 +548,6 @@ impl TestGpuixRenderer {
         crate::renderer::test_renderer_capabilities()
     }
 
-    /// Destroy an element and all descendants. Returns destroyed IDs
-    /// so JS can clean up event handlers.
-    #[napi]
-    pub fn destroy_element(&self, id: f64) -> Result<Vec<f64>> {
-        let id = to_element_id(id)?;
-        let destroyed = self.tree.lock().unwrap().destroy_element(id);
-        crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed);
-        forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed);
-        Ok(destroyed.iter().map(|&id| id as f64).collect())
-    }
-
     /// How many elements the retained tree holds, reachable from the root or
     /// not. `getTreeJson` walks from the root, so it cannot see a node that was
     /// detached and never destroyed. This is the only way a test can prove a
@@ -599,65 +588,6 @@ impl TestGpuixRenderer {
                 .expect("non-strict canvas preparation diagnostics cannot throw");
         }
         take_style_diagnostics_for_reporting(&self.style_diagnostics, &self.tree)
-    }
-
-    #[napi]
-    pub fn set_text(&self, id: f64, content: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree.lock().unwrap().set_text(id, content);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn set_event_listener(&self, id: f64, event_type: String, has_handler: bool) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree
-            .lock()
-            .unwrap()
-            .set_event_listener(id, event_type, has_handler);
-        Ok(())
-    }
-
-    /// Set the root element (called from appendChildToContainer).
-    #[napi]
-    pub fn set_root(&self, id: f64) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree.lock().unwrap().set_root(Some(id));
-        Ok(())
-    }
-
-    /// Set a custom prop on an element (for non-div/text elements like input, editor, diff).
-    #[napi]
-    pub fn set_custom_prop(&self, id: f64, key: String, value_json: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        let value: serde_json::Value = serde_json::from_str(&value_json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
-        let mut tree = self.tree.lock().unwrap();
-        let diagnostic = pending_custom_prop_diagnostic(&tree, id, &key, &value);
-        let accessibility_changed = crate::accessibility::is_accessibility_prop(&key);
-        tree.set_custom_prop(id, key, value);
-        let accessibility_diagnostics = accessibility_changed
-            .then(|| pending_accessibility_diagnostics(&tree, id))
-            .unwrap_or_default();
-        drop(tree);
-        if self.strict_styles.load(Ordering::Relaxed) {
-            let mut pending = self.style_diagnostics.lock().unwrap();
-            if let Some(diagnostic) = diagnostic {
-                pending.push(diagnostic);
-            }
-            pending.extend(accessibility_diagnostics);
-        }
-        Ok(())
-    }
-
-    /// Get a custom prop value from an element.
-    #[napi]
-    pub fn get_custom_prop(&self, id: f64, key: String) -> Result<Option<String>> {
-        let id = to_element_id(id)?;
-        let tree = self.tree.lock().unwrap();
-        Ok(tree
-            .get_custom_prop(id, &key)
-            .map(|v| serde_json::to_string(v).unwrap_or_default()))
     }
 
     /// Signal that a batch of mutations is complete.
