@@ -1104,21 +1104,6 @@ fn draw_window_for_automation_read() -> Result<()> {
     })
 }
 
-/// Draw the committed tree from inside the UI thread's command pump: the
-/// non-macOS counterpart of `draw_window_for_automation_read`.
-///
-/// Leases the window untyped, exactly as that helper does. Drawing renders
-/// `GpuixView`, so holding a typed lease on it across the draw would panic.
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-fn draw_ui_window_for_read(
-    window: gpui::WindowHandle<GpuixView>,
-    cx: &mut gpui::App,
-) -> anyhow::Result<()> {
-    gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| {
-        window.draw(cx).clear(cx);
-    })
-}
-
 /// Queue a real AppKit mouse click. This is deliberately distinct from the
 /// deterministic `simulate_click` test helper: live smoke tests need to cover
 /// the NSEvent → GPUI platform ingress before the renderer's callback bridge.
@@ -1191,18 +1176,21 @@ enum MouseInput {
         y: f64,
         button: u32,
         modifiers: gpui::Modifiers,
+        click_count: usize,
     },
     Down {
         x: f64,
         y: f64,
         button: u32,
         modifiers: gpui::Modifiers,
+        click_count: usize,
     },
     Up {
         x: f64,
         y: f64,
         button: u32,
         modifiers: gpui::Modifiers,
+        click_count: usize,
     },
     Move {
         x: f64,
@@ -1376,6 +1364,25 @@ fn refresh_ui_window(
     window.update(cx, |_view, window, cx| {
         cx.notify();
         window.refresh();
+    })
+}
+
+/// Draw the committed tree from inside the UI thread's command pump: the
+/// non-macOS counterpart of `draw_window_for_automation_read`.
+///
+/// Takes the same `(WindowHandle<GpuixView>, &mut AsyncApp) -> anyhow::Result<()>`
+/// shape as `refresh_ui_window` above, because the pump hands every helper the
+/// async context and folds each arm's `Result` into one shared error log.
+///
+/// Leases the window untyped, as the macOS helper does. Drawing renders
+/// `GpuixView`, so holding a typed lease on it across the draw would panic.
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+fn draw_ui_window_for_read(
+    window: gpui::WindowHandle<GpuixView>,
+    cx: &mut gpui::AsyncApp,
+) -> anyhow::Result<()> {
+    gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| {
+        window.draw(cx).clear(cx);
     })
 }
 
@@ -1653,11 +1660,12 @@ async fn run_ui_commands(
             // editor, and that sync parks the caret at the end of the new text:
             // a caret written before it would be overwritten moments later.
             UiCommand::GetTextEditingState { id, response } => {
-                draw_ui_window_for_read(window, cx)?;
-                window.update(cx, move |view, _window, cx| {
-                    response
-                        .send(view.custom_registry.text_editing_state(id, cx))
-                        .ok();
+                draw_ui_window_for_read(window, cx).and_then(|()| {
+                    window.update(cx, move |view, _window, cx| {
+                        response
+                            .send(view.custom_registry.text_editing_state(id, cx))
+                            .ok();
+                    })
                 })
             }
             UiCommand::SetTextSelection {
@@ -1665,17 +1673,17 @@ async fn run_ui_commands(
                 start,
                 end,
                 backward,
-            } => {
-                draw_ui_window_for_read(window, cx)?;
+            } => draw_ui_window_for_read(window, cx).and_then(|()| {
                 window.update(cx, move |view, _window, cx| {
                     view.custom_registry
                         .set_text_selection(id, start, end, backward, cx);
                 })
-            }
+            }),
             UiCommand::SetTextValue { id, value } => {
-                draw_ui_window_for_read(window, cx)?;
-                window.update(cx, move |view, _window, cx| {
-                    view.custom_registry.set_text_value(id, value, cx);
+                draw_ui_window_for_read(window, cx).and_then(|()| {
+                    window.update(cx, move |view, _window, cx| {
+                        view.custom_registry.set_text_value(id, value, cx);
+                    })
                 })
             }
             UiCommand::ControlClock { control, response } => {
@@ -1698,8 +1706,17 @@ async fn run_ui_commands(
                             y,
                             button,
                             modifiers,
+                            click_count,
                         } => {
-                            crate::automation::dispatch_click(window, cx, x, y, button, modifiers);
+                            crate::automation::dispatch_click(
+                                window,
+                                cx,
+                                x,
+                                y,
+                                button,
+                                modifiers,
+                                click_count,
+                            );
                             Ok(())
                         }
                         MouseInput::Down {
@@ -1707,9 +1724,16 @@ async fn run_ui_commands(
                             y,
                             button,
                             modifiers,
+                            click_count,
                         } => {
                             crate::automation::dispatch_mouse_down(
-                                window, cx, x, y, button, modifiers,
+                                window,
+                                cx,
+                                x,
+                                y,
+                                button,
+                                modifiers,
+                                click_count,
                             );
                             Ok(())
                         }
@@ -1718,9 +1742,16 @@ async fn run_ui_commands(
                             y,
                             button,
                             modifiers,
+                            click_count,
                         } => {
                             crate::automation::dispatch_mouse_up(
-                                window, cx, x, y, button, modifiers,
+                                window,
+                                cx,
+                                x,
+                                y,
+                                button,
+                                modifiers,
+                                click_count,
                             );
                             Ok(())
                         }
@@ -4214,6 +4245,8 @@ impl GpuixRenderer {
     }
 
     /// `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
+    /// `clickCount` is the platform's repeat count: 2 for the second click of
+    /// a double click (default 1).
     #[napi]
     pub fn simulate_click(
         &self,
@@ -4221,13 +4254,17 @@ impl GpuixRenderer {
         y: f64,
         button: Option<u32>,
         modifiers: Option<String>,
+        click_count: Option<u32>,
     ) -> Result<()> {
         let button = button.unwrap_or(0);
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers =
+            crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
+        let click_count =
+            crate::automation::click_count(click_count).map_err(Error::from_reason)?;
 
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
-            crate::automation::dispatch_click(window, cx, x, y, button, modifiers);
+            crate::automation::dispatch_click(window, cx, x, y, button, modifiers, click_count);
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -4236,6 +4273,7 @@ impl GpuixRenderer {
             y,
             button,
             modifiers,
+            click_count,
         });
 
         #[cfg(not(any(
@@ -4275,13 +4313,17 @@ impl GpuixRenderer {
         y: f64,
         button: Option<u32>,
         modifiers: Option<String>,
+        click_count: Option<u32>,
     ) -> Result<()> {
         let button = button.unwrap_or(0);
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers =
+            crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
+        let click_count =
+            crate::automation::click_count(click_count).map_err(Error::from_reason)?;
 
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
-            crate::automation::dispatch_mouse_down(window, cx, x, y, button, modifiers);
+            crate::automation::dispatch_mouse_down(window, cx, x, y, button, modifiers, click_count);
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -4290,6 +4332,7 @@ impl GpuixRenderer {
             y,
             button,
             modifiers,
+            click_count,
         });
 
         #[cfg(not(any(
@@ -4313,13 +4356,17 @@ impl GpuixRenderer {
         y: f64,
         button: Option<u32>,
         modifiers: Option<String>,
+        click_count: Option<u32>,
     ) -> Result<()> {
         let button = button.unwrap_or(0);
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers =
+            crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
+        let click_count =
+            crate::automation::click_count(click_count).map_err(Error::from_reason)?;
 
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
-            crate::automation::dispatch_mouse_up(window, cx, x, y, button, modifiers);
+            crate::automation::dispatch_mouse_up(window, cx, x, y, button, modifiers, click_count);
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -4328,6 +4375,7 @@ impl GpuixRenderer {
             y,
             button,
             modifiers,
+            click_count,
         });
 
         #[cfg(not(any(
@@ -4352,7 +4400,8 @@ impl GpuixRenderer {
         pressed_button: Option<u32>,
         modifiers: Option<String>,
     ) -> Result<()> {
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers =
+            crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
 
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
@@ -4813,6 +4862,23 @@ fn update_web_view<R>(
             })
         })
     })
+}
+
+/// The same modifier parse as every other surface, surfaced to JS as a thrown
+/// error rather than a silently weakened gesture.
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn parse_web_modifiers(
+    modifiers: Option<&str>,
+) -> Result<gpui::Modifiers, wasm_bindgen::JsValue> {
+    crate::automation::parse_modifiers(modifiers)
+        .map_err(|error| wasm_bindgen::JsValue::from_str(&error))
+}
+
+/// The same click-count check as every other surface, for the same reason.
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn parse_web_click_count(click_count: Option<u32>) -> Result<usize, wasm_bindgen::JsValue> {
+    crate::automation::click_count(click_count)
+        .map_err(|error| wasm_bindgen::JsValue::from_str(&error))
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -5495,10 +5561,20 @@ impl WebGpuixRenderer {
         y: f64,
         button: Option<u32>,
         modifiers: Option<String>,
+        click_count: Option<u32>,
     ) -> Result<(), wasm_bindgen::JsValue> {
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers = parse_web_modifiers(modifiers.as_deref())?;
+        let click_count = parse_web_click_count(click_count)?;
         update_web_window(move |window, cx| {
-            crate::automation::dispatch_click(window, cx, x, y, button.unwrap_or(0), modifiers);
+            crate::automation::dispatch_click(
+                window,
+                cx,
+                x,
+                y,
+                button.unwrap_or(0),
+                modifiers,
+                click_count,
+            );
             window.refresh();
         })
     }
@@ -5510,8 +5586,10 @@ impl WebGpuixRenderer {
         y: f64,
         button: Option<u32>,
         modifiers: Option<String>,
+        click_count: Option<u32>,
     ) -> Result<(), wasm_bindgen::JsValue> {
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers = parse_web_modifiers(modifiers.as_deref())?;
+        let click_count = parse_web_click_count(click_count)?;
         update_web_window(move |window, cx| {
             crate::automation::dispatch_mouse_down(
                 window,
@@ -5520,6 +5598,7 @@ impl WebGpuixRenderer {
                 y,
                 button.unwrap_or(0),
                 modifiers,
+                click_count,
             );
             window.refresh();
         })
@@ -5532,10 +5611,20 @@ impl WebGpuixRenderer {
         y: f64,
         button: Option<u32>,
         modifiers: Option<String>,
+        click_count: Option<u32>,
     ) -> Result<(), wasm_bindgen::JsValue> {
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers = parse_web_modifiers(modifiers.as_deref())?;
+        let click_count = parse_web_click_count(click_count)?;
         update_web_window(move |window, cx| {
-            crate::automation::dispatch_mouse_up(window, cx, x, y, button.unwrap_or(0), modifiers);
+            crate::automation::dispatch_mouse_up(
+                window,
+                cx,
+                x,
+                y,
+                button.unwrap_or(0),
+                modifiers,
+                click_count,
+            );
             window.refresh();
         })
     }
@@ -5548,7 +5637,7 @@ impl WebGpuixRenderer {
         pressed_button: Option<u32>,
         modifiers: Option<String>,
     ) -> Result<(), wasm_bindgen::JsValue> {
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers = parse_web_modifiers(modifiers.as_deref())?;
         update_web_window(move |window, cx| {
             crate::automation::dispatch_mouse_move(window, cx, x, y, pressed_button, modifiers);
             window.refresh();
@@ -5564,7 +5653,7 @@ impl WebGpuixRenderer {
         delta_y: f64,
         modifiers: Option<String>,
     ) -> Result<(), wasm_bindgen::JsValue> {
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers = parse_web_modifiers(modifiers.as_deref())?;
         update_web_window(move |window, cx| {
             let options = crate::automation::ScrollWheelOptions {
                 phase: None,

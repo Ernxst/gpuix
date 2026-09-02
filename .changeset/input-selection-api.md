@@ -1,9 +1,11 @@
 ---
 "@gpuix/native": minor
-"@gpuix/react": minor
+"@gpuix/react": major
 ---
 
-Expose the text-editing members of `HTMLInputElement` on `<input>` and `<textarea>` refs: `value`, `selectionStart`, `selectionEnd`, `selectionDirection`, `setSelectionRange()` and `select()`. Selection was document-scoped only, so currency masking, select-all-on-focus and caret restoration had no way to reach the caret.
+BREAKING: `<input>` and `<textarea>` narrow their `ref` from `React.Ref<PublicInstance>` to `React.Ref<InputPublicInstance>`. `RefObject<T>` is invariant in `T`, so an existing `useRef<PublicInstance>(null)` handed to `<input ref>` stops compiling. Widen the annotation to `useRef<InputPublicInstance>(null)`, which is a strict superset of what the ref carried before.
+
+Expose the text-editing members of `HTMLInputElement` on those refs: `value`, `selectionStart`, `selectionEnd`, `selectionDirection`, `setSelectionRange()` and `select()`. Selection was document-scoped only, so currency masking, select-all-on-focus and caret restoration had no way to reach the caret.
 
 Offsets are UTF-16 code units, as the DOM's are, so they line up with `value.slice()` even across astral characters; the editor stores UTF-8 bytes and converts at the boundary. `setSelectionRange()` follows HTML's "set the selection range": offsets past the end of the value point at the end, and an inverted range collapses to a caret at `end` rather than being swapped. `selectionDirection` never reports `"none"` — this editor tracks only which end of the selection moves, and HTML lets a platform without that mode report `"forward"` instead.
 

@@ -3265,6 +3265,9 @@ two disagree.
 |---|---|
 | `app.getByTestId('send')` | The `data-testid` prop |
 | `app.getByText('New chat')` | A node's own text |
+| `app.getByLabelText('Recipe search')` | The `ariaLabel` prop |
+| `app.getByPlaceholderText('Search recipes')` | The `placeholder` prop |
+| `app.getByDisplayValue('iron plate')` | The `value` prop |
 | `app.getByType('textarea')` | The host element type |
 | `locator.getByText('...')` | A descendant of another locator |
 
@@ -3280,11 +3283,43 @@ case-insensitive substring match, and regular expressions, predicate matchers,
 supported. A node has one test ID, its `data-testid` prop — the same rule the
 in-process queries use.
 
+### The `semantics` block
+
+Every tree node carries a small `semantics` block, in the locator tree and in
+the in-process `TestElement` alike. The locator tree omits `style`, `events`,
+and `customProps` so a 5k-row list is not 100ms of JSON, which used to leave an
+input's value unreachable from a locator entirely; `semantics` is the part worth
+paying for.
+
+| Field | Source | Notes |
+|---|---|---|
+| `role` | the `role` prop | The declaration, verbatim |
+| `label` | the `ariaLabel` prop | |
+| `value` | the `value` prop | `<input>` and `<textarea>` |
+| `placeholder` | the `placeholder` prop | `<input>` and `<textarea>` |
+| `disabled` | `disabled` or `ariaDisabled` | Present only when `true` |
+
+Absent fields are omitted, and a node that declares none of them has no
+`semantics` key at all.
+
+Two boundaries are worth stating plainly. `semantics.role` is the **authored**
+role, not GPUI's computed accessibility role — implicit roles and
+name-from-contents live in the accessibility snapshot, which is what
+`getByRole` reads. And `semantics.value` is the retained `value` prop, so a
+controlled input reports its current value while an uncontrolled one reports the
+last value the author set rather than the live editing buffer.
+
+```ts
+const node = await app.getByLabelText('Recipe search').element()
+node.semantics // { label: 'Recipe search', placeholder: 'Search recipes', value: 'iron plate' }
+```
+
 ### Mouse, wheel, and drag
 
 | Call | What it does |
 |---|---|
 | `locator.hover()` | Moves the pointer to the center, so hover styles and tooltips fire |
+| `locator.dblclick()` | Two clicks over the center, the second with `clickCount: 2` |
 | `locator.wheel(dx, dy)` | One wheel event over the center |
 | `locator.dragBy(dx, dy)` | Presses on the center, travels, releases |
 | `locator.dragTo(target)` | Same, ending on another locator or a `{ x, y }` point |
@@ -3309,6 +3344,25 @@ testable:
 ```ts
 await app.getByTestId('canvas').wheel(0, 120, { modifiers: 'cmd' })
 await app.getByTestId('clip-8').click({ modifiers: 'shift' })
+```
+
+An unrecognised modifier name **throws**. Accepted names are `cmd` (`meta`,
+`super`, `win`, `platform`), `ctrl` (`control`), `alt` (`option`), `shift`, and
+`fn` (`function`). A typo used to be dropped silently, so `'comand'` dispatched
+a plain click and the test asserting the modifier path passed while exercising
+the unmodified one.
+
+`click`, `mouse.down`, and `mouse.up` also take **`clickCount`**, the platform's
+repeat count within one click sequence. `dblclick()` sends the whole sequence
+the way a platform does — two clicks, the second with `clickCount: 2` — and the
+app sees `click` (detail 1), `click` (detail 2), then `doubleClick` (detail 2),
+which is the DOM order. `dblclick()` does not accept `clickCount`, since it is
+the click count; pass one to `click()` directly for an unusual value. A count of
+`0` is **rejected**, not clamped: there is no press that is zero presses.
+
+```ts
+await app.getByTestId('cell-7').dblclick()
+await app.mouse.down(point, { clickCount: 2 })
 ```
 
 `click()` needs painted bounds. **Every element that accepts `data-testid` records
@@ -3452,7 +3506,10 @@ queries match retained `<text>` content, test ID queries match one test ID per
 element, and role queries match GPUI's computed
 accessibility role, accessible name, and heading level. Role names are ARIA
 names such as `button`, `heading`, and `region`; `name` accepts a string,
-regular expression, or predicate. The singular `getBy...` and `queryBy...`
+regular expression, or predicate. Label, placeholder, and display-value queries
+read the [`semantics` block](#the-semantics-block): `getByLabelText` matches the
+declared `ariaLabel`, `getByPlaceholderText` the `placeholder` prop, and
+`getByDisplayValue` the `value` prop. The singular `getBy...` and `queryBy...`
 methods throw when more than one element matches; required `getBy...` /
 `getAllBy...` methods also throw when none match. Their `queryBy...` /
 `queryAllBy...` counterparts return `null` / `[]` for a miss. `within(element)`
@@ -3470,6 +3527,11 @@ An element has exactly one test ID, as in Testing Library: its `data-testid`
 attribute. The retained-tree queries, `renderer.findByTestId`, and the
 automation locators all resolve it that way, so every path returns the same
 nodes.
+
+Testing Library's `ByAltText` and `ByTitle` have no desktop counterpart: there
+is no `alt` attribute and no tooltip-bearing `title`. Label an `<img>` with
+`ariaLabel` and find it with `getByLabelText` or
+`getByRole('img', { name })`.
 
 Role queries currently search the visible accessibility tree. `hidden` defaults
 to `false`, and `{ hidden: false }` is supported explicitly. `{ hidden: true }`
@@ -3507,6 +3569,11 @@ const ledger = screen.getByRole('region', { name: 'Production ledger' })
 screen.getByRole('link', { name: /coal current/i })
 screen.getByRole('heading', { name: 'Build list', level: 2 })
 screen.queryAllByRole('button')
+
+const search = screen.getByLabelText('Recipe search')
+screen.getByPlaceholderText('Search recipes')
+screen.getByDisplayValue(/iron/)
+search.semantics // { label: 'Recipe search', placeholder: 'Search recipes', value: 'iron plate' }
 
 const panel = screen.getByTestId('power-panel')
 screen.within(panel).getByText('Rate')
@@ -3552,9 +3619,95 @@ the newly focused element. `type(element, text)` converts literal spaces,
 newlines, and tabs for that syntax. `clear(element)` selects all with the
 platform chord (`cmd-a` on macOS, `ctrl-a` elsewhere) and deletes.
 `unhover(element)` moves the pointer to the nearest point off the element, or
-out of the window at `(-1, -1)` when the element fills it. `dblClick` currently
-rejects with an issue #216 message until the native dispatcher can carry
-`click_count`.
+out of the window at `(-1, -1)` when the element fills it. `dblClick(element)`
+sends two clicks over the center, the second carrying the platform's repeat
+count, so the component sees `onClick` (detail 1), `onClick` (detail 2), then
+`onDoubleClick` (detail 2) — the DOM order, where `dblclick` follows the second
+click rather than replacing it.
+
+### Matchers
+
+`@gpuix/react/testing/matchers` ships a jest-dom-shaped pack for `expect.extend`.
+Wire it once, in a setup file or at the top of a suite:
+
+```ts
+import { expect } from 'vitest'
+import { gpuixMatchers, type GpuixMatchers } from '@gpuix/react/testing/matchers'
+
+expect.extend(gpuixMatchers)
+
+declare module 'vitest' {
+  interface Matchers<T = any> extends GpuixMatchers<T> {}
+}
+```
+
+| Matcher | Asserts |
+|---|---|
+| `toBeInTheDocument()` | The element still resolves in the retained tree |
+| `toBeVisible()` | The element painted a box in the last frame |
+| `toBeDisabled()` | `disabled` or `ariaDisabled` is declared on it |
+| `toHaveFocus()` | It holds the window's keyboard focus |
+| `toHaveTextContent(matcher, options?)` | Its text plus every descendant's |
+| `toHaveValue(value)` | Its retained `value` prop, exactly |
+| `toHaveDisplayValue(matcher, options?)` | Its `value` prop, through the Testing Library matcher |
+| `toHaveAccessibleName(matcher?)` | Its computed accessible name |
+
+Every matcher re-resolves the element against its renderer first, so an element
+captured before a rerender reports current state — the same contract
+`TestElement.children` and `parentElement` already keep. An element that has
+since been removed **fails** the assertion rather than throwing, so
+`expect(removed).not.toBeVisible()` works after an unmount, as it does in
+jest-dom. Only a receiver that was never a `TestElement` throws.
+
+Five behaviours differ from jest-dom, and each difference is the desktop being
+honest rather than the matcher being incomplete:
+
+**`toBeVisible` means painted, not visible.** Bounds are recorded during paint
+and cleared at the start of every frame, so "no bounds" means "this element
+painted nothing last frame" and nothing more. It conflates a row scrolled out of
+a virtual list with an element that is genuinely hidden, and it says nothing
+about a fully transparent one: `opacity: 0` is visible to this matcher and
+hidden in a browser. When you need those apart, assert on the reason instead of
+the pixel.
+
+**`toBeDisabled` counts `ariaDisabled`, and does not inherit.** jest-dom reads
+the native attribute alone and deliberately ignores `aria-disabled`; here the
+two are a single predicate all the way down to the accessibility tree
+(`is_action_disabled`), so a disabled query cannot disagree with a disabled
+accessibility node. GPUIX also has no disabling container — no
+`<fieldset disabled>` — so the matcher reports the element's own state and
+invents no ancestor rule.
+
+**`toHaveFocus` reads the window's focus**, the direct analogue of
+`document.activeElement`, rather than the accessibility snapshot's `gpui_focus`.
+The snapshot only carries a node for an element that projects accessibility
+semantics, so a focused plain `<input>` would be invisible to it.
+
+**`toHaveTextContent` uses jest-dom's matching rules and the queries'
+normalization.** A bare string is a case-sensitive substring, a regular
+expression is tested, a function is a predicate; the text is trimmed and
+whitespace-collapsed first, and `{ trim }`, `{ collapseWhitespace }`, and
+`{ normalizer }` all apply. `toHaveDisplayValue` uses the queries' rules
+instead, so a bare string there is exact. Passing `''` throws, as it does in
+jest-dom: an empty string is a substring of everything, so the assertion could
+never fail. Use `toHaveTextContent(/^$/)` for an element with no text. A `/g`
+regular expression is stateful and will alternate between passing and failing
+across repeated assertions — jest-dom has the same wart; drop the `g`.
+
+**`toHaveValue(value)` takes a string, and only a string.** jest-dom's
+zero-argument form and its numeric and string-array forms are not implemented:
+there is no `type="number"` input and no multi-select to coerce for, and "has
+any value" is `expect(element.semantics?.value).toBeDefined()`.
+
+`toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
+node, which exists only where the element projects accessibility semantics. An
+`ariaLabel` with no declared role has no accessible name, and the matcher
+reports that rather than falling back to the raw prop — use `getByLabelText` or
+`TestElement.semantics.label` for the declaration.
+
+`toBeChecked`, `toHaveClass`, and `toBeEmptyDOMElement` are deliberately absent:
+there is no class attribute, no empty-DOM notion worth asserting on this tree,
+and checked state is already covered by `getByRole` with `ariaChecked`.
 
 `waitFor(callback, options)` retries `callback` until it stops throwing, using
 Testing Library's defaults (`timeout` 1000ms, `interval` 50ms, `onTimeout`) and
