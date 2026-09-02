@@ -8594,8 +8594,12 @@ fn direct_child_index(tree: &RetainedTree, ancestor_id: u64, element_id: u64) ->
 ///    listener — the same `events.contains("scroll")` gate that attaches it;
 /// 3. the element's own text, when it has `content`.
 ///
-/// Only ever called for an element that owns a `gpui::ScrollHandle`, so the
-/// scroll tracker's other condition (the element scrolls at all) already holds.
+/// The index is only ever *used* on an element that owns a
+/// `gpui::ScrollHandle`, so the scroll tracker's other condition (the element
+/// scrolls at all) holds wherever the answer is acted on. The reveal path
+/// computes it before looking the handle up, and reaches a scroller through the
+/// looser `is_overflow_scroller`, so it can be computed for an element that
+/// painted no tracker — and discarded a line later.
 ///
 /// `None` leaves the reveal unrequested rather than scrolling to an unrelated
 /// row, and covers the two indices that name no painted child:
@@ -8606,6 +8610,13 @@ fn direct_child_index(tree: &RetainedTree, ancestor_id: u64, element_id: u64) ->
 /// - an index past the last child. gpui keeps an unsatisfiable request pending
 ///   instead of dropping it, so a later frame that grows the child list would
 ///   apply it as an unexplained jump.
+///
+/// Both answer with `None` rather than an error, against this codebase's habit
+/// of failing loudly, because the common way to reach them is benign: JS
+/// computed the index against items it holds and a frame has not committed them
+/// yet. Throwing would punish that one-frame race, and the DOM has no throw
+/// here either — `scrollIntoView()` on an element with nothing to reveal is a
+/// no-op.
 fn painted_index_of_child(tree: &RetainedTree, scroller_id: u64, index: usize) -> Option<usize> {
     let scroller = tree.elements.get(&scroller_id)?;
     if scroller.element_type == "text" || index >= scroller.children.len() {
