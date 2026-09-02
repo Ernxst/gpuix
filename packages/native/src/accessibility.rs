@@ -519,6 +519,21 @@ fn supports_accessibility_host(element_type: &str) -> bool {
     matches!(element_type, "div" | "text" | "input" | "textarea" | "img")
 }
 
+/// Element types whose accessibility declaration reaches an AccessKit node.
+///
+/// Every custom element projects `role` and the ARIA props through
+/// `custom_elements::apply_accessibility`, so declaring them is meaningful on
+/// all of them. `supports_accessibility_host` stays narrower because
+/// `visuallyHidden` additionally needs the element to lay out as a plain box,
+/// which the painting adapters do not.
+fn projects_accessibility(element_type: &str) -> bool {
+    supports_accessibility_host(element_type)
+        || matches!(
+            element_type,
+            "svg" | "canvas" | "code" | "diff" | "markdown" | "anchored"
+        )
+}
+
 pub(crate) fn is_visually_hidden(tree: &RetainedTree, element: &RetainedElement) -> bool {
     element
         .custom_props
@@ -634,7 +649,7 @@ pub(crate) fn element_problems(
     let role = role_value.and_then(AccessibilityRole::parse);
 
     if has_semantics(element)
-        && !supports_accessibility_host(&element.element_type)
+        && !projects_accessibility(&element.element_type)
         && element
             .custom_props
             .keys()
@@ -654,7 +669,7 @@ pub(crate) fn element_problems(
             property,
             value,
             format!(
-                "<{}> does not support accessibility semantics; use a <div>, <text>, <input>, <textarea>, or <img> semantic root",
+                "<{}> does not support accessibility semantics; declare them on a <div> that wraps it",
                 element.element_type
             ),
         ));
@@ -1336,33 +1351,42 @@ mod tests {
         }
     }
 
+    fn semantic_element(id: u64, element_type: &str) -> RetainedElement {
+        let mut element = RetainedElement::new(id, element_type.to_string(), 1);
+        element.custom_props.insert("role".into(), "heading".into());
+        element
+            .custom_props
+            .insert("ariaLabel".into(), "Notes".into());
+        element
+    }
+
     #[test]
     fn reports_unsupported_hosts_instead_of_dropping_semantics() {
-        for (index, element_type) in [
-            "virtual-list",
-            "anchored",
-            "canvas",
-            "svg",
-            "code",
-            "diff",
-            "markdown",
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let mut element = RetainedElement::new(index as u64 + 1, element_type.to_string(), 1);
-            element.custom_props.insert("role".into(), "heading".into());
-            element
-                .custom_props
-                .insert("ariaLabel".into(), "Notes".into());
+        // `<virtual-list>` is the one host left that never projects what it is
+        // given, so it is the one that still has to say so.
+        let element = semantic_element(1, "virtual-list");
+        let problems = element_problems(&detached_tree(), &element);
 
-            let problems = element_problems(&detached_tree(), &element);
-            assert_eq!(problems.len(), 1, "<{element_type}>");
-            assert!(
-                problems[0]
-                    .problem
-                    .reason
-                    .contains("does not support accessibility semantics"),
+        assert_eq!(problems.len(), 1);
+        assert!(
+            problems[0]
+                .problem
+                .reason
+                .contains("does not support accessibility semantics")
+        );
+    }
+
+    #[test]
+    fn every_custom_element_accepts_a_semantic_declaration() {
+        for (index, element_type) in ["anchored", "canvas", "svg", "code", "diff", "markdown"]
+            .into_iter()
+            .enumerate()
+        {
+            let element = semantic_element(index as u64 + 1, element_type);
+
+            assert_eq!(
+                element_problems(&detached_tree(), &element),
+                Vec::new(),
                 "<{element_type}>"
             );
         }

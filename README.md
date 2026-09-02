@@ -1950,10 +1950,19 @@ target/currentTarget, and preventDefault behavior exactly once. The application
 remains responsible for applying requested value changes.
 
 Semantics are implemented on `<div>`/JSX aliases, `<text>`, `<input>`,
-`<textarea>`, and `<img>`. Other native custom hosts reject accessibility props
-with the standard property diagnostic instead of dropping them. `ariaHidden`
-is universal because it suppresses a whole subtree, including supported hosts
-inside an otherwise unsupported container.
+`<textarea>`, `<img>`, `<svg>`, `<canvas>`, `<code>`, `<diff>`, `<markdown>`,
+and `<anchored>`. A `role` on a custom element reaches AccessKit like any
+other, so `<canvas role="img" ariaLabel="Throughput chart">` names a chart and
+`<anchored role="dialog">` announces a popover. `<virtual-list>` is the one
+host that still rejects accessibility props with the standard property
+diagnostic instead of dropping them; declare them on a `<div>` that wraps it.
+`ariaHidden` is universal because it suppresses a whole subtree, including
+supported hosts inside an otherwise unsupported container.
+
+A bare `<svg>` infers the `graphics-document` role from SVG-AAM. `<canvas>`,
+`<code>`, `<diff>`, `<markdown>`, and `<anchored>` have no implicit role: they
+carry only what the author declares, exactly as their generic DOM counterparts
+do.
 
 Semantic nodes use GPUIX's stable retained element identity for their AccessKit
 node ID. The author `id` remains platform-visible metadata and is not the node

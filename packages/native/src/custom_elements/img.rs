@@ -1836,27 +1836,27 @@ where
     )
 }
 
-/// GPUI's `Img` stores the role and ARIA properties applied through
-/// `StatefulInteractiveElement`, but unlike `Div` it does not expose them from
+/// GPUI's `Img` and `Svg` store the role and ARIA properties applied through
+/// `StatefulInteractiveElement`, but unlike `Div` they do not expose them from
 /// `Element::a11y_role` and `Element::write_a11y_info`. AccessKit therefore
-/// filters the image before it can read the authored name. Keep the real image
-/// as the layout, paint, and interaction owner while a non-rendered div carries
-/// the same accessibility projection for those two element hooks.
-struct AccessibleImg {
-    image: gpui::Stateful<gpui::Img>,
+/// filters the leaf before it can read the authored name. Keep the real leaf as
+/// the layout, paint, and interaction owner while a non-rendered div carries the
+/// same accessibility projection for those two element hooks.
+struct AccessibleLeaf<E> {
+    element: E,
     accessibility: gpui::Stateful<gpui::Div>,
 }
 
-impl gpui::Element for AccessibleImg {
-    type RequestLayoutState = <gpui::Stateful<gpui::Img> as gpui::Element>::RequestLayoutState;
-    type PrepaintState = <gpui::Stateful<gpui::Img> as gpui::Element>::PrepaintState;
+impl<E: gpui::Element> gpui::Element for AccessibleLeaf<E> {
+    type RequestLayoutState = E::RequestLayoutState;
+    type PrepaintState = E::PrepaintState;
 
     fn id(&self) -> Option<gpui::ElementId> {
-        gpui::Element::id(&self.image)
+        gpui::Element::id(&self.element)
     }
 
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        gpui::Element::source_location(&self.image)
+        gpui::Element::source_location(&self.element)
     }
 
     fn a11y_role(&self) -> Option<gpui::Role> {
@@ -1874,7 +1874,7 @@ impl gpui::Element for AccessibleImg {
         window: &mut gpui::Window,
         cx: &mut gpui::App,
     ) -> (gpui::LayoutId, Self::RequestLayoutState) {
-        gpui::Element::request_layout(&mut self.image, id, inspector_id, window, cx)
+        gpui::Element::request_layout(&mut self.element, id, inspector_id, window, cx)
     }
 
     fn prepaint(
@@ -1887,7 +1887,7 @@ impl gpui::Element for AccessibleImg {
         cx: &mut gpui::App,
     ) -> Self::PrepaintState {
         gpui::Element::prepaint(
-            &mut self.image,
+            &mut self.element,
             id,
             inspector_id,
             bounds,
@@ -1908,7 +1908,7 @@ impl gpui::Element for AccessibleImg {
         cx: &mut gpui::App,
     ) {
         gpui::Element::paint(
-            &mut self.image,
+            &mut self.element,
             id,
             inspector_id,
             bounds,
@@ -1920,13 +1920,13 @@ impl gpui::Element for AccessibleImg {
     }
 }
 
-impl gpui::InteractiveElement for AccessibleImg {
+impl<E: gpui::InteractiveElement> gpui::InteractiveElement for AccessibleLeaf<E> {
     fn interactivity(&mut self) -> &mut gpui::Interactivity {
-        gpui::InteractiveElement::interactivity(&mut self.image)
+        gpui::InteractiveElement::interactivity(&mut self.element)
     }
 }
 
-impl gpui::IntoElement for AccessibleImg {
+impl<E: gpui::Element> gpui::IntoElement for AccessibleLeaf<E> {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -2044,8 +2044,8 @@ impl CustomElement for ImgElement {
         let el = apply_image_accessibility(&ctx, el);
         let el = super::wire_standard_events(el, &ctx, cx);
         let accessibility = apply_image_accessibility(&ctx, gpui::div().id(element_id));
-        let el = AccessibleImg {
-            image: el,
+        let el = AccessibleLeaf {
+            element: el,
             accessibility,
         };
         crate::automation::track_own_bounds(el, ctx.id, ctx.paint_bounds_listener.clone())
@@ -2195,18 +2195,25 @@ impl CustomElement for SvgElement {
         let element_id = gpui::SharedString::from(format!("__gpuix_svg_{}", ctx.id));
         let Some(bytes) = bytes else {
             let empty = super::custom_surface(gpui::div().id(element_id), &ctx, cx);
-            return empty.into_any_element();
+            return super::apply_accessibility(empty, &ctx).into_any_element();
         };
 
         let mut icon = gpui::svg()
             .data(bytes)
             .flex_none()
             .text_color(ctx.current_color)
-            .id(element_id);
+            .id(element_id.clone());
         if let Some(style) = ctx.style {
             icon = crate::renderer::apply_interactive_styles(icon, style);
         }
         let icon = super::wire_standard_events(icon, &ctx, cx);
+        let icon = super::apply_accessibility(icon, &ctx);
+        // gpui's `Svg` withholds its role and ARIA properties from AccessKit for
+        // the same reason `Img` does, so it needs the same paired projection.
+        let icon = AccessibleLeaf {
+            element: icon,
+            accessibility: super::apply_accessibility(gpui::div().id(element_id), &ctx),
+        };
         crate::automation::track_own_bounds(icon, ctx.id, ctx.paint_bounds_listener.clone())
             .into_any_element()
     }

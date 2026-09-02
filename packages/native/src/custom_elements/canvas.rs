@@ -1633,7 +1633,8 @@ impl CustomElement for CanvasElement {
                 ctx.paint_bounds_listener.clone(),
             ))
             .child(drawing);
-        self.attach_mouse_events(root, &ctx, cx).into_any_element()
+        let root = self.attach_mouse_events(root, &ctx, cx);
+        super::apply_accessibility(root, &ctx).into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
