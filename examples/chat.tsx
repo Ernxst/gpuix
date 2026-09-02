@@ -363,7 +363,7 @@ function IconButton({
 }) {
   return (
     <div
-      testId={testId}
+      data-testid={testId}
       style={{
         width: 26,
         height: 26,
@@ -969,7 +969,7 @@ function ChipSelect({
     <Select value={value} onValueChange={onChange} style={{ flexShrink: 0 }}>
       <div style={{ position: 'relative', display: 'flex' }}>
         <SelectTrigger
-          testId={testId}
+          data-testid={testId}
           style={(state) => ({
             display: 'flex',
             flexDirection: 'row',
@@ -1298,7 +1298,7 @@ function Composer({
         }}
       >
         <textarea
-          testId="composer"
+          data-testid="composer"
           value={value}
           placeholder="Do anything..."
           minRows={1}
@@ -1336,7 +1336,7 @@ function Composer({
           <ModeToggle value={mode} onChange={onModeChange} />
           <div style={{ flexGrow: 1 }} />
           <div
-            testId="send"
+            data-testid="send"
             style={{
               width: 26,
               height: 26,

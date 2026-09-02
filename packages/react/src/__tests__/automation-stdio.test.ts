@@ -41,7 +41,7 @@ function fakeRenderer(): TestAutomationRenderer {
       JSON.stringify({
         id: 1,
         type: "div",
-        testId: "inc",
+        dataTestId: "inc",
         bounds: { x: 0, y: 0, width: 40, height: 20 },
         children: [{ id: 2, type: "text", text: `clicks:${clicks}` }],
       }),
@@ -60,10 +60,10 @@ describe("automation stdio", () => {
       JSON.stringify({
         id: 1,
         type: "div",
-        testId: "  inc  ",
+        dataTestId: "  inc  ",
         children: [
           { id: 2, type: "text", text: "  clicks:\n0  " },
-          { id: 3, type: "div", dataTestId: "standard", testId: "shadowed" },
+          { id: 3, type: "div", dataTestId: "standard" },
         ],
       })
     const app = await connectTest(renderer)
@@ -92,10 +92,8 @@ describe("automation stdio", () => {
         .count()
     ).toBe(1)
 
-    // One test ID per node: data-testid wins, and the legacy prop does not
-    // answer for a node that carries one, whatever else the tree holds.
+    // One test ID per node, resolved from `data-testid`.
     expect(await app.getByTestId("standard").count()).toBe(1)
-    expect(await app.getByTestId("shadowed").count()).toBe(0)
     await app.close()
   })
 

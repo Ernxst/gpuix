@@ -39,7 +39,7 @@ describeNative("inline text runs", () => {
         }}
       >
         <text
-          testId="wrapped-inline"
+          data-testid="wrapped-inline"
           style={{ width: 220, color: "#e6edf7", fontSize: 20, lineHeight: 27 }}
         >
           {"Factory output is "}
@@ -51,7 +51,7 @@ describeNative("inline text runs", () => {
           {"."}
         </text>
         <text
-          testId="truncated-inline"
+          data-testid="truncated-inline"
           style={{
             width: 180,
             color: "#cbd5e1",
@@ -87,7 +87,7 @@ describeNative("inline text runs", () => {
     render(
       <div style={{ display: "flex", padding: 24, width: 420, backgroundColor: "#10131a" }}>
         <text
-          testId="preformatted-inline"
+          data-testid="preformatted-inline"
           style={{ whiteSpace: "pre", color: "#e6edf7", fontSize: 20, lineHeight: "1.4" }}
         >
           {"line  1\nline  "}
@@ -136,7 +136,7 @@ describeNative("inline text runs", () => {
     render(
       <div style={{ display: "flex", padding: 20, width: 220 }}>
         <text
-          testId="selection-inline"
+          data-testid="selection-inline"
           style={{ width: 180, color: "#ffffff", fontSize: 18, lineHeight: 24 }}
         >
           {"Alpha beta "}
@@ -159,7 +159,7 @@ describeNative("inline text runs", () => {
     render(
       <div style={{ display: "flex", padding: 24, width: 360, backgroundColor: "#111827" }}>
         <text
-          testId="multibyte-inline"
+          data-testid="multibyte-inline"
           style={{ width: 240, color: "#f8fafc", fontSize: 22, lineHeight: 30 }}
         >
           {"Ångström "}
@@ -203,7 +203,7 @@ describeNative("inline text runs", () => {
             ref={(instance) => {
               target = instance
             }}
-            testId="inline-action"
+            data-testid="inline-action"
             onClick={targetClick}
             style={{ color: "#60a5fa", textDecoration: "underline" }}
           >
@@ -308,7 +308,7 @@ describeNative("inline text runs", () => {
         <text>
           prefix
           <text
-            testId="invalid-inline-style"
+            data-testid="invalid-inline-style"
             style={{ paddingLeft: 8, color: "red" } as StyleDesc}
           >
             value

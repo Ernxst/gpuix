@@ -117,7 +117,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       testRoot.render(
         <div style={{ width: 240, height: 140, display: "flex" }}>
           <canvas ref={canvasRef} width={120} height={100} style={{ width: 120, height: 100 }} />
-          <text testId="canvas-sibling" style={{ color: "#ffffff" }}>
+          <text data-testid="canvas-sibling" style={{ color: "#ffffff" }}>
             stable sibling
           </text>
         </div>
@@ -146,7 +146,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     const canvasRef = createRef<CanvasPublicInstance>()
     try {
       testRoot.render(
-        <canvas ref={canvasRef} testId="context-canvas" width={120} height={80} />
+        <canvas ref={canvasRef} data-testid="context-canvas" width={120} height={80} />
       )
       const first = canvasRef.current?.getContext("2d")
       expect(first).toBeDefined()
@@ -165,9 +165,9 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const spec = CANVAS_ELEMENT_UNSUPPORTED_MEMBERS[0]
     try {
-      strict.render(<canvas ref={strictRef} testId="strict-data-url" width={80} height={60} />)
+      strict.render(<canvas ref={strictRef} data-testid="strict-data-url" width={80} height={60} />)
       compatibility.render(
-        <canvas ref={compatibilityRef} testId="compat-data-url" width={80} height={60} />
+        <canvas ref={compatibilityRef} data-testid="compat-data-url" width={80} height={60} />
       )
 
       expect(() => strictRef.current!.toDataURL()).toThrow(
@@ -389,7 +389,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     const canvasRef = createRef<CanvasPublicInstance>()
     try {
       testRoot.render(
-        <canvas ref={canvasRef} testId="rotated-image-canvas" width={120} height={80} />
+        <canvas ref={canvasRef} data-testid="rotated-image-canvas" width={120} height={80} />
       )
       const image = new Image()
       image.src = canvasImageFixture
@@ -409,7 +409,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     const canvasRef = createRef<CanvasPublicInstance>()
     try {
       testRoot.render(
-        <canvas ref={canvasRef} testId="reflected-image-canvas" width={120} height={80} />
+        <canvas ref={canvasRef} data-testid="reflected-image-canvas" width={120} height={80} />
       )
       const image = new Image()
       image.src = canvasImageFixture
@@ -429,7 +429,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     const canvasRef = createRef<CanvasPublicInstance>()
     try {
       testRoot.render(
-        <canvas ref={canvasRef} testId="alpha-image-canvas" width={120} height={80} />
+        <canvas ref={canvasRef} data-testid="alpha-image-canvas" width={120} height={80} />
       )
       const image = new Image()
       image.src = canvasImageFixture
@@ -734,7 +734,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     const canvasRef = createRef<CanvasPublicInstance>()
     try {
       testRoot.render(
-        <canvas ref={canvasRef} testId="cached-canvas" width={120} height={80} />
+        <canvas ref={canvasRef} data-testid="cached-canvas" width={120} height={80} />
       )
       const context = canvasRef.current!.getContext("2d")!
       context.beginPath()
@@ -769,7 +769,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     const canvasRef = createRef<PublicInstance>()
     try {
       testRoot.render(
-        <canvas ref={canvasRef} testId="diagnostic-canvas" width={120} height={80} />
+        <canvas ref={canvasRef} data-testid="diagnostic-canvas" width={120} height={80} />
       )
       expect(() =>
         __applyCanvasCommands(
@@ -807,10 +807,10 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     try {
       testRoot.render(
         <div>
-          <canvas ref={canvasRef} testId="warning-canvas" width={60} height={80} />
+          <canvas ref={canvasRef} data-testid="warning-canvas" width={60} height={80} />
           <canvas
             ref={secondCanvasRef}
-            testId="second-warning-canvas"
+            data-testid="second-warning-canvas"
             width={60}
             height={80}
           />
@@ -834,10 +834,10 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       )
       testRoot.render(
         <div>
-          <canvas ref={canvasRef} testId="warning-canvas" width={60} height={80} />
+          <canvas ref={canvasRef} data-testid="warning-canvas" width={60} height={80} />
           <canvas
             ref={secondCanvasRef}
-            testId="second-warning-canvas"
+            data-testid="second-warning-canvas"
             width={60}
             height={80}
           />
@@ -847,12 +847,12 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       expect(
         testRoot.renderer
           .drainStyleDiagnostics()
-          .map(({ property, testId, value }) => ({ property, testId, value }))
+          .map(({ property, dataTestId, value }) => ({ property, dataTestId, value }))
       ).toEqual([
-        { property: "lineDashOffset", testId: "warning-canvas", value: "op[0]" },
+        { property: "lineDashOffset", dataTestId: "warning-canvas", value: "op[0]" },
         {
           property: "lineDashOffset",
-          testId: "second-warning-canvas",
+          dataTestId: "second-warning-canvas",
           value: "op[0]",
         },
       ])
@@ -897,7 +897,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     const canvasRef = createRef<CanvasPublicInstance>()
     try {
       testRoot.render(
-        <canvas ref={canvasRef} testId="overflow-canvas" width={120} height={80} />
+        <canvas ref={canvasRef} data-testid="overflow-canvas" width={120} height={80} />
       )
       const context = canvasRef.current!.getContext("2d")!
       context.transform(Number.MAX_VALUE, 0, 0, 1, 0, 0)
@@ -918,7 +918,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     const canvasRef = createRef<CanvasPublicInstance>()
     try {
       testRoot.render(
-        <canvas ref={canvasRef} testId="complex-path-canvas" width={180} height={120} />
+        <canvas ref={canvasRef} data-testid="complex-path-canvas" width={180} height={120} />
       )
       const context = canvasRef.current!.getContext("2d")!
       context.beginPath()
@@ -948,7 +948,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     const strictRef = createRef<CanvasPublicInstance>()
     try {
       strict.render(
-        <canvas ref={strictRef} testId="strict-clear-canvas" width={100} height={80} />
+        <canvas ref={strictRef} data-testid="strict-clear-canvas" width={100} height={80} />
       )
       const context = strictRef.current!.getContext("2d")!
       context.clearRect(10, 10, 20, 20)
@@ -966,7 +966,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       nonStrict.render(
         <canvas
           ref={nonStrictRef}
-          testId="warning-clear-canvas"
+          data-testid="warning-clear-canvas"
           width={100}
           height={80}
         />
@@ -984,7 +984,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       expect(nonStrict.renderer.drainStyleDiagnostics()).toEqual([
         expect.objectContaining({
           property: "clearRect",
-          testId: "warning-clear-canvas",
+          dataTestId: "warning-clear-canvas",
           value: "op[0]",
         }),
       ])
@@ -1138,7 +1138,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       testRoot.render(
         <div style={{ width: 260, height: 160 }}>
           <canvas
-            testId="capture-canvas"
+            data-testid="capture-canvas"
             width={80}
             height={80}
             style={{ width: 80, height: 80 }}
@@ -1238,7 +1238,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     try {
       testRoot.render(
         <canvas
-          testId="local-coordinates"
+          data-testid="local-coordinates"
           width={400}
           height={200}
           style={{ width: 200, height: 100 }}

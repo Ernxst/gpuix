@@ -136,7 +136,7 @@ describeNative("keyboard focus", () => {
             key={index}
             href={`/${index}`}
             ariaLabel={`row-${index}`}
-            testId={`row-${index}`}
+            data-testid={`row-${index}`}
             style={{ width: 200, height: 40, flexShrink: 0 }}
           >
             <text>{`Row ${index}`}</text>
@@ -170,7 +170,7 @@ describeNative("keyboard focus", () => {
 
     testRoot.render(
       <div style={{ width: 240, height: 120 }}>
-        <a href="/first" ariaLabel="first" testId="first">
+        <a href="/first" ariaLabel="first" data-testid="first">
           <text>First</text>
         </a>
         <a
@@ -199,7 +199,7 @@ describeNative("keyboard focus", () => {
         <a
           href="/first"
           ariaLabel="first"
-          testId="throwing-tab-target"
+          data-testid="throwing-tab-target"
           onKeyDown={() => {
             throw new Error("tab handler failed")
           }}
@@ -247,7 +247,7 @@ describeNative("keyboard focus", () => {
       >
         <a
           href="/one"
-          testId="one"
+          data-testid="one"
           onFocus={(event) => record("one", event)}
           onBlur={(event) => record("one", event)}
           style={{ width: 200, height: 40 }}
@@ -304,7 +304,7 @@ describeNative("keyboard focus", () => {
   it("scrolls a plain overflow container only when tab focus leaves the viewport", () => {
     testRoot.render(
       <div
-        testId="plain-scroller"
+        data-testid="plain-scroller"
         style={{ width: 240, height: 120, overflowY: "scroll" }}
       >
         {Array.from({ length: 12 }, (_, index) => (
@@ -416,7 +416,7 @@ describeNative("keyboard focus", () => {
             key={index}
             href={`/${index}`}
             ariaLabel={`imperative-row-${index}`}
-            testId={`imperative-row-${index}`}
+            data-testid={`imperative-row-${index}`}
             style={{ width: 200, height: 40, flexShrink: 0 }}
           >
             <text>{`Imperative row ${index}`}</text>
@@ -440,13 +440,13 @@ describeNative("keyboard focus", () => {
     testRoot.render(
       <div style={{ width: 520, height: 520, display: "flex", flexDirection: "column" }}>
         <div
-          testId="plain-tall-scroller"
+          data-testid="plain-tall-scroller"
           style={{ width: 240, height: 120, overflowY: "scroll", flexShrink: 0 }}
         >
           <a
             href="/plain-tall"
             ariaLabel="plain-tall"
-            testId="plain-tall"
+            data-testid="plain-tall"
             style={{ width: 200, height: 200, flexShrink: 0 }}
           >
             <text>Plain tall row</text>
@@ -461,7 +461,7 @@ describeNative("keyboard focus", () => {
           <a
             href="/virtual-tall"
             ariaLabel="virtual-tall"
-            testId="virtual-tall"
+            data-testid="virtual-tall"
             style={{ width: 200, height: 200, flexShrink: 0 }}
           >
             <text>Virtual tall row</text>
@@ -501,7 +501,7 @@ describeNative("keyboard focus", () => {
         <a
           href={`/${kind}-descendant`}
           ariaLabel={`${kind}-descendant`}
-          testId={`${kind}-descendant`}
+          data-testid={`${kind}-descendant`}
           style={{ width: 200, height: 40, flexShrink: 0 }}
         >
           <text>{`${kind} descendant`}</text>
@@ -513,7 +513,7 @@ describeNative("keyboard focus", () => {
     testRoot.render(
       <div style={{ width: 520, height: 520, display: "flex", flexDirection: "column" }}>
         <div
-          testId="plain-descendant-scroller"
+          data-testid="plain-descendant-scroller"
           style={{ width: 240, height: 120, overflowY: "scroll", flexShrink: 0 }}
         >
           {tallRow("plain")}
@@ -585,7 +585,7 @@ describeNative("keyboard focus", () => {
             key="one"
             href="/one"
             ariaLabel="one"
-            testId="one"
+            data-testid="one"
             style={{ width: 200, height: 40 }}
           >
             <text>One</text>

@@ -284,7 +284,7 @@ const MessageRow = memo(function MessageRow({
 }) {
   return (
     <div
-      testId={`message-${message.id}`}
+      data-testid={`message-${message.id}`}
       style={{
         display: 'flex',
         flexDirection: 'row',
@@ -341,7 +341,7 @@ const EdgeRow = memo(function EdgeRow({
 }) {
   return (
     <div
-      testId={`edge-${side}`}
+      data-testid={`edge-${side}`}
       style={{
         display: 'flex',
         height: EDGE_HEIGHT,
@@ -610,7 +610,7 @@ export function InfiniteChatApp({
 
         {loading === 'route' && (
           <div
-            testId="loading-route"
+            data-testid="loading-route"
             style={{
               position: 'absolute',
               top: 12,

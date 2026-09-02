@@ -156,7 +156,7 @@ function Counter() {
   return (
     <div style={{ width: 400, height: 200 }}>
       <div
-        testId="inc"
+        data-testid="inc"
         style={{ width: 200, height: 80 }}
         onClick={() => setCount((value) => value + 1)}
       >
@@ -383,13 +383,13 @@ describeNative("automation", () => {
     }
     const app = (withActionHandler: boolean) => (
       <div
-        testId="activation-parent"
+        data-testid="activation-parent"
         style={{ width: 240, height: 100 }}
         onClickCapture={(event) => record("parent-capture", event)}
         onClick={(event) => record("parent-bubble", event)}
       >
         <button
-          testId="activation-target"
+          data-testid="activation-target"
           role="button"
           ariaLabel="Run"
           style={{ width: 120, height: 50 }}
@@ -437,7 +437,7 @@ describeNative("automation", () => {
       <div style={{ width: 240, height: 100 }}>
         <button
           {...(state as Record<string, boolean>)}
-          testId="disabled-control"
+          data-testid="disabled-control"
           ariaLabel="Unavailable"
           style={{ width: 120, height: 50 }}
           onClick={() => seen.push("click")}
@@ -807,7 +807,7 @@ describeNative("automation", () => {
           </text>
         ) : null}
         <text
-          testId="trailing-heading"
+          data-testid="trailing-heading"
           role="heading"
           ariaLevel={3}
           ariaLabel="Explicit totals name"
@@ -1630,23 +1630,22 @@ describeNative("automation", () => {
     expect(renderer.findByTestId("true")?.dataTestId).toBe("true")
   })
 
-  it("counts the same test IDs in-process and over automation on a mixed tree", async () => {
+  it("counts the same test IDs in-process and over automation", async () => {
     const screen = createTestRoot()
     screen.render(
       <div>
-        <div testId="legacy-only" />
-        <div data-testid="standard" testId="shadowed" />
+        <div data-testid="plain" />
+        <div data-testid="standard" />
       </div>
     )
     const app = await connectTest(screen.renderer)
 
-    for (const testId of ["legacy-only", "standard", "shadowed"]) {
+    for (const testId of ["plain", "standard", "missing"]) {
       expect([testId, await app.getByTestId(testId).count()]).toEqual([
         testId,
         screen.queryAllByTestId(testId).length,
       ])
     }
-    expect(await app.getByTestId("shadowed").count()).toBe(0)
     expect(await app.getByTestId("standard").count()).toBe(1)
 
     await app.close()
@@ -1669,7 +1668,7 @@ describeNative("automation", () => {
     function Fade() {
       return (
         <div
-          testId="box"
+          data-testid="box"
           style={{ width: 200, height: 80, backgroundColor: "#1e1e2e" }}
           motion={{
             initial: { opacity: 0 },
@@ -1704,7 +1703,7 @@ describeNative("automation", () => {
       return (
         <div style={{ width: 600, height: 200, position: "relative" }}>
           <div
-            testId="handle"
+            data-testid="handle"
             style={{
               position: "absolute",
               left: x,
@@ -1753,7 +1752,7 @@ describeNative("automation", () => {
     function Target() {
       return (
         <div
-          testId="target"
+          data-testid="target"
           style={{ width: 200, height: 80, backgroundColor: "#101010" }}
           onMouseDown={(event) => seen.push({ button: event.button })}
           onClick={(event) => seen.push({ click: event.isRightClick })}
@@ -1788,7 +1787,7 @@ describeNative("automation", () => {
     function Surface() {
       return (
         <div
-          testId="surface"
+          data-testid="surface"
           style={{ width: 300, height: 200, backgroundColor: "#101010" }}
           onWheel={(event) =>
             seen.push({
@@ -1828,13 +1827,13 @@ describeNative("automation", () => {
       return (
         <div style={{ display: "flex", flexDirection: "column", width: 400, height: 200 }}>
           <input
-            testId="single"
+            data-testid="single"
             style={{ width: 300, height: 40 }}
             value={single}
             onChange={(event) => setSingle(event.value)}
           />
           <textarea
-            testId="multi"
+            data-testid="multi"
             style={{ width: 300, height: 60 }}
             value={multi}
             onChange={(event) => setMulti(event.value)}

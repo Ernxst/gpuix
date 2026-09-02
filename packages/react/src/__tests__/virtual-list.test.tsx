@@ -80,7 +80,7 @@ describe("<virtual-list>", () => {
     vi.stubGlobal("process", undefined)
     try {
       render(
-        <div testId="browser-host">
+        <div data-testid="browser-host">
           <text>browser-safe</text>
         </div>
       )
@@ -240,14 +240,14 @@ describe("<virtual-list>", () => {
         estimatedItemHeight={40}
         style={{ width: 400, height: 160 }}
       >
-        <div testId="plain-row" style={{ height: 40, flexShrink: 0 }}>
+        <div data-testid="plain-row" style={{ height: 40, flexShrink: 0 }}>
           <text>plain</text>
         </div>
-        <div testId="focusable-row" tabIndex={0} style={{ height: 40, flexShrink: 0 }}>
+        <div data-testid="focusable-row" tabIndex={0} style={{ height: 40, flexShrink: 0 }}>
           <text>focusable</text>
         </div>
         <div
-          testId="explicit-row"
+          data-testid="explicit-row"
           style={{ width: 120, height: 40, flexShrink: 0 }}
         >
           <text>explicit</text>

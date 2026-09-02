@@ -7,7 +7,7 @@ function App() {
 
   return (
     <a
-      testId="appkit-click-anchor"
+      data-testid="appkit-click-anchor"
       onClick={() => setClicks((count) => count + 1)}
       onMouseEnter={() => setHovered(true)}
       style={{
@@ -18,7 +18,7 @@ function App() {
       }}
     >
       <span
-        testId="appkit-click-painted-child"
+        data-testid="appkit-click-painted-child"
         style={{ width: 200, height: 70, backgroundColor: "#273449" }}
       >
         Click through AppKit

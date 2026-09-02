@@ -479,7 +479,7 @@ const TrackHeaders = memo(function TrackHeaders({
       {rows.map(({ track, top, height }) => (
         <div
           key={track.id}
-          testId={`track-header-${track.id}`}
+          data-testid={`track-header-${track.id}`}
           style={{
             position: 'absolute',
             left: 0,
@@ -596,7 +596,7 @@ const ClipView = memo(function ClipView({
 
   return (
     <div
-      testId={testId}
+      data-testid={testId}
       style={{
         position: 'absolute',
         left: clip.start * pxPerSecond,
@@ -634,7 +634,7 @@ const ClipView = memo(function ClipView({
       {width > TRIM_HANDLE_WIDTH * 3 && (
         <>
           <div
-            testId={`${testId}-trim-start`}
+            data-testid={`${testId}-trim-start`}
             style={{ ...TRIM_HANDLE_BASE, left: 0 }}
             onMouseDown={(event) => {
               event.stopPropagation()
@@ -644,7 +644,7 @@ const ClipView = memo(function ClipView({
             onMouseUp={gesture.end}
           />
           <div
-            testId={`${testId}-trim-end`}
+            data-testid={`${testId}-trim-end`}
             style={{ ...TRIM_HANDLE_BASE, right: 0 }}
             onMouseDown={(event) => {
               event.stopPropagation()
@@ -772,7 +772,7 @@ const MediaBin = memo(function MediaBin() {
   }
   return (
     <div
-      testId="media-bin"
+      data-testid="media-bin"
       style={{
         width: 260,
         height: 220,
@@ -1167,7 +1167,7 @@ export function TimelineApp(props: TimelineAppProps = {}) {
 
       {/* Timeline panel. One onWheel listener pans every pane. */}
       <div
-        testId="timeline-panel"
+        data-testid="timeline-panel"
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -1203,7 +1203,7 @@ export function TimelineApp(props: TimelineAppProps = {}) {
             </Label>
           </div>
           <div
-            testId="timeline-ruler"
+            data-testid="timeline-ruler"
             style={{
               flexGrow: 1,
               minWidth: 0,
@@ -1234,7 +1234,7 @@ export function TimelineApp(props: TimelineAppProps = {}) {
                 pxPerSecond={viewport.pxPerSecond}
               />
               <div
-                testId="timeline-playhead"
+                data-testid="timeline-playhead"
                 style={{
                   position: 'absolute',
                   left: playhead * viewport.pxPerSecond - 4,
@@ -1283,7 +1283,7 @@ export function TimelineApp(props: TimelineAppProps = {}) {
           </div>
 
           <div
-            testId="timeline-grid"
+            data-testid="timeline-grid"
             style={{
               flexGrow: 1,
               minWidth: 0,
@@ -1330,7 +1330,7 @@ export function TimelineApp(props: TimelineAppProps = {}) {
               )}
               {preview?.guide != null && (
                 <div
-                  testId="snap-guide"
+                  data-testid="snap-guide"
                   style={{
                     position: 'absolute',
                     left: preview.guide * viewport.pxPerSecond,
@@ -1356,7 +1356,7 @@ export function TimelineApp(props: TimelineAppProps = {}) {
             </div>
             {drag?.kind === 'marquee' && drag.moved && (
               <div
-                testId="marquee"
+                data-testid="marquee"
                 style={{
                   position: 'absolute',
                   left: Math.min(drag.originX, drag.x) - geometry.gridLeft,
@@ -1392,7 +1392,7 @@ export function TimelineApp(props: TimelineAppProps = {}) {
             {project.name}
           </Label>
           <div
-            testId="zoom-slider"
+            data-testid="zoom-slider"
             style={{
               position: 'relative',
               width: ZOOM_SLIDER_WIDTH,
@@ -1424,7 +1424,7 @@ export function TimelineApp(props: TimelineAppProps = {}) {
             />
           </div>
           <div
-            testId="cull-toggle"
+            data-testid="cull-toggle"
             style={{
               paddingLeft: 8,
               paddingRight: 8,
@@ -1441,16 +1441,16 @@ export function TimelineApp(props: TimelineAppProps = {}) {
               {cull ? 'cull on' : 'cull off'}
             </Label>
           </div>
-          <text testId="readout" style={{ fontSize: 10, color: C.faint, userSelect: 'none' }}>
+          <text data-testid="readout" style={{ fontSize: 10, color: C.faint, userSelect: 'none' }}>
             {readout}
           </text>
           <text
-            testId="selection"
+            data-testid="selection"
             style={{ fontSize: 10, color: C.faint, userSelect: 'none' }}
           >
             {selectionReadout}
           </text>
-          <text testId="events" style={{ fontSize: 10, color: C.faint, userSelect: 'none' }}>
+          <text data-testid="events" style={{ fontSize: 10, color: C.faint, userSelect: 'none' }}>
             {log.join(' ')}
           </text>
         </div>

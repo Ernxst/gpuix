@@ -1280,7 +1280,7 @@ work. Linux currently ignores `focus`.
 Playwright-like automation API. Full docs are in the README **Automation**
 section.
 
-Mark targets with `testId`. Then either:
+Mark targets with `data-testid`. Then either:
 
 - `connectTest(renderer)` against `createTestRoot()` in vitest
 - `launch({ command, args })` against a child process. The app serves commands

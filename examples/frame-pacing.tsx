@@ -82,14 +82,14 @@ function FramePacing() {
       }}
     >
       <text style={{ color: "#f5f5f5", fontSize: 18 }}>Display-link frame pacing</text>
-      <text testId="pacing-preflight" style={{ color: "#fbbf24" }}>
+      <text data-testid="pacing-preflight" style={{ color: "#fbbf24" }}>
         {preflight}
       </text>
-      <text testId="pacing-result" style={{ color: "#a3e635" }}>
+      <text data-testid="pacing-result" style={{ color: "#a3e635" }}>
         {result}
       </text>
       <div
-        testId="scroll-target"
+        data-testid="scroll-target"
         style={{ flexGrow: 1, overflow: "scroll", backgroundColor: "#262626", padding: 12 }}
         onWheel={handleScroll}
       >

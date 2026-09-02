@@ -179,7 +179,7 @@ describeNative('timeline performance', () => {
     const clip = root.renderer
       .findByType('div')
       .map((element) => element)
-      .find((element) => String(element.testId ?? '').startsWith('clip-clip-'))
+      .find((element) => String(element.dataTestId ?? '').startsWith('clip-clip-'))
     expect(clip, 'no clip found to drag').toBeTruthy()
     const bounds = root.renderer.getElementBounds(clip!.id)
     expect(bounds, 'clip was never painted').toBeTruthy()

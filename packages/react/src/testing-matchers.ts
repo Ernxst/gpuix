@@ -18,17 +18,12 @@ export type MatcherFunction<Element> = (content: string, element: Element) => bo
 export type Matcher<Element> = MatcherFunction<Element> | RegExp | number | string
 
 /**
- * One test ID per element, as in Testing Library. `data-testid` is the standard
- * attribute, so it wins; the legacy `testId` prop only answers for elements that
- * carry no `data-testid`. Resolving per element rather than per tree is what
- * keeps the retained-tree queries and the automation locators counting the same
- * nodes on a tree that mixes both props.
+ * One test ID per element, as in Testing Library: the standard `data-testid`
+ * attribute. Resolving per element rather than per tree is what keeps the
+ * retained-tree queries and the automation locators counting the same nodes.
  */
-export function resolveTestId(node: {
-  dataTestId?: string
-  testId?: string
-}): string | undefined {
-  return node.dataTestId ?? node.testId
+export function resolveTestId(node: { dataTestId?: string }): string | undefined {
+  return node.dataTestId
 }
 
 /** Testing Library's default normalizer, composable inside a custom one. */

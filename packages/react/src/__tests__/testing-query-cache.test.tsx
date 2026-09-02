@@ -45,9 +45,9 @@ describeNative("TestRenderer query cache", () => {
 
     try {
       root.render(
-        <div id="panel-before" testId="panel-before" onClick={firstClick}>
-          <text testId="label">before</text>
-          <text testId="removed">removed</text>
+        <div id="panel-before" data-testid="panel-before" onClick={firstClick}>
+          <text data-testid="label">before</text>
+          <text data-testid="removed">removed</text>
         </div>
       )
       const firstPanel = root.renderer.findByTestId("panel-before")!
@@ -56,8 +56,8 @@ describeNative("TestRenderer query cache", () => {
       expect(root.renderer.findByElementId("panel-before")).toBe(firstPanel)
 
       root.render(
-        <div id="panel-after" testId="panel-after">
-          <text testId="label">react update</text>
+        <div id="panel-after" data-testid="panel-after">
+          <text data-testid="label">react update</text>
         </div>
       )
       const panel = root.renderer.findByTestId("panel-after")!
@@ -75,7 +75,7 @@ describeNative("TestRenderer query cache", () => {
       root.renderer.setText(textLeaf.id, "direct update")
       expect(root.renderer.findByText("direct update")?.id).toBe(textLeaf.id)
 
-      root.renderer.setCustomProp(panel.id, "testId", JSON.stringify("direct-panel"))
+      root.renderer.setCustomProp(panel.id, "data-testid", JSON.stringify("direct-panel"))
       root.renderer.setCustomProp(panel.id, "id", JSON.stringify("direct-id"))
       root.renderer.setEventListener(panel.id, "click", true)
       expect(root.renderer.findByTestId("direct-panel")?.id).toBe(panel.id)
@@ -98,7 +98,7 @@ describeNative("TestRenderer query cache", () => {
 
     try {
       root.render(
-        <div testId="identity-root">
+        <div data-testid="identity-root">
           <text>identity</text>
         </div>
       )
@@ -227,12 +227,12 @@ describeNative("TestRenderer query cache", () => {
       )
       expectCompatibilityMutation(
         "setCustomProp",
-        ["setCustomPropValue", rootId, "testId", "structural"],
-        () => renderer.setCustomProp(rootId, "testId", JSON.stringify("structural"))
+        ["setCustomPropValue", rootId, "data-testid", "structural"],
+        () => renderer.setCustomProp(rootId, "data-testid", JSON.stringify("structural"))
       )
       const batchesBeforeInvalidCustomProp = applyBatch.mock.calls.length
       const invalidationsBeforeInvalidCustomProp = invalidate.mock.calls.length
-      expect(() => renderer.setCustomProp(rootId, "testId", "not-json")).toThrow()
+      expect(() => renderer.setCustomProp(rootId, "data-testid", "not-json")).toThrow()
       expect(applyBatch.mock.calls.length).toBe(batchesBeforeInvalidCustomProp)
       expect(invalidate.mock.calls.length).toBe(invalidationsBeforeInvalidCustomProp)
       expectCompatibilityMutation(

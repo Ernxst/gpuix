@@ -73,7 +73,6 @@ function rendererFor(node: HostNode): MutationRenderer {
 function describeCanvas(instance: Instance): string {
   const props = instance.props as Props & Record<string, unknown>
   const identity = [
-    props.testId === undefined ? undefined : `testId=${JSON.stringify(props.testId)}`,
     props["data-testid"] === undefined
       ? undefined
       : `data-testid=${JSON.stringify(props["data-testid"])}`,
@@ -369,7 +368,6 @@ class ContradictoryAccessibilityVisibilityError extends Error {
 
 function elementSubject(instance: Instance, props: Props): string {
   const identity = [
-    props.testId === undefined ? undefined : `testId=${JSON.stringify(props.testId)}`,
     props["data-testid"] === undefined
       ? undefined
       : `data-testid=${JSON.stringify(props["data-testid"])}`,
@@ -627,7 +625,6 @@ const UNIVERSAL_PROPS = new Set([
   "autoFocus",
   "tabIndex",
   "motion",
-  "testId",
   "role",
   "ariaLabel",
   "ariaDescription",

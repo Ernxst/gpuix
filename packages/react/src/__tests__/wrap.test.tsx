@@ -35,14 +35,14 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div
-        testId="box"
+        data-testid="box"
         style={{
           width: 200,
           padding: 8,
           backgroundColor: "#111",
         }}
       >
-        <text testId="prose" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
+        <text data-testid="prose" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
           {PROSE}
         </text>
       </div>,
@@ -59,7 +59,7 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ width: 160 }}>
-        <text testId="prose" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
+        <text data-testid="prose" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
           {PROSE}
         </text>
       </div>,
@@ -68,7 +68,7 @@ describeNative("text wrapping", () => {
 
     render(
       <div style={{ width: 480 }}>
-        <text testId="prose" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
+        <text data-testid="prose" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
           {PROSE}
         </text>
       </div>,
@@ -80,10 +80,10 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div
-        testId="box"
+        data-testid="box"
         style={{ width: 140, padding: 4, backgroundColor: "#111" }}
       >
-        <text testId="token" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
+        <text data-testid="token" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
           pneumonoultramicroscopicsilicovolcanoconiosis
         </text>
       </div>,
@@ -99,7 +99,7 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ width: 120 }}>
-        <text testId="line" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
+        <text data-testid="line" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
           {PROSE}
         </text>
       </div>,
@@ -109,7 +109,7 @@ describeNative("text wrapping", () => {
     render(
       <div style={{ width: 120 }}>
         <text
-          testId="line"
+          data-testid="line"
           style={{ fontSize: 14, lineHeight: 20, color: "#eee", whiteSpace: "nowrap" }}
         >
           {PROSE}
@@ -125,7 +125,7 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div
-        testId="row"
+        data-testid="row"
         style={{
           display: "flex",
           flexDirection: "row",
@@ -135,7 +135,7 @@ describeNative("text wrapping", () => {
       >
         <div style={{ width: 48, flexShrink: 0, backgroundColor: "#333" }} />
         <text
-          testId="prose"
+          data-testid="prose"
           style={{
             fontSize: 14,
             lineHeight: 20,
@@ -159,7 +159,7 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div
-        testId="col"
+        data-testid="col"
         style={{
           display: "flex",
           flexDirection: "row",
@@ -169,7 +169,7 @@ describeNative("text wrapping", () => {
       >
         <div style={{ width: 40, flexShrink: 0 }} />
         <markdown
-          testId="md"
+          data-testid="md"
           source="- a second item with a long sentence that must wrap without leaving the transcript column"
           style={{ flexGrow: 1, minWidth: 0 }}
         />
@@ -185,7 +185,7 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div
-        testId="col"
+        data-testid="col"
         style={{
           display: "flex",
           flexDirection: "row",
@@ -195,7 +195,7 @@ describeNative("text wrapping", () => {
       >
         <div style={{ width: 40, flexShrink: 0 }} />
         <markdown
-          testId="md"
+          data-testid="md"
           source="This paragraph is long enough that it must wrap once the flex item is allowed to shrink below its max-content width."
           style={{ flexGrow: 1 }}
         />
@@ -210,8 +210,8 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     const line = "const tree = mdxParse(source) // ".padEnd(180, "x")
     render(
-      <div testId="col" style={{ width: 240, backgroundColor: "#111" }}>
-        <markdown testId="md" source={"```ts\n" + line + "\n```"} />
+      <div data-testid="col" style={{ width: 240, backgroundColor: "#111" }}>
+        <markdown data-testid="md" source={"```ts\n" + line + "\n```"} />
       </div>,
     )
 
@@ -222,8 +222,8 @@ describeNative("text wrapping", () => {
   it("records bounds on an empty markdown node", () => {
     const { render, renderer } = createTestRoot()
     render(
-      <div testId="col" style={{ width: 240, height: 40, backgroundColor: "#111" }}>
-        <markdown testId="md" source="" />
+      <div data-testid="col" style={{ width: 240, height: 40, backgroundColor: "#111" }}>
+        <markdown data-testid="md" source="" />
       </div>,
     )
     expect(rect(renderer, "md").width).toBeGreaterThan(0)
@@ -233,7 +233,7 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     const line = "const wide = '".padEnd(220, "x") + "'"
     render(
-      <div testId="col" style={{ width: 240, padding: 8, backgroundColor: "#111" }}>
+      <div data-testid="col" style={{ width: 240, padding: 8, backgroundColor: "#111" }}>
         <markdown source={"```ts\n" + line + "\n```"} />
       </div>,
     )
@@ -249,7 +249,7 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     const line = "const wide = '".padEnd(220, "x") + "'"
     render(
-      <div testId="col" style={{ width: 240, padding: 8, backgroundColor: "#111" }}>
+      <div data-testid="col" style={{ width: 240, padding: 8, backgroundColor: "#111" }}>
         <code code={line + "\n" + line} language="ts" />
       </div>,
     )
@@ -265,7 +265,7 @@ describeNative("text wrapping", () => {
   it("lets a parent scroller take a vertical wheel over a wide markdown fence", () => {
     const { render, renderer } = createTestRoot()
     render(
-      <div testId="scroller" style={{ width: 240, height: 120, overflowY: "scroll" }}>
+      <div data-testid="scroller" style={{ width: 240, height: 120, overflowY: "scroll" }}>
         <markdown source={"```ts\n" + "const wide = '".padEnd(200, "x") + "'\n```"} />
         <div style={{ height: 400 }}>
           <text>below</text>
@@ -297,7 +297,7 @@ describeNative("test window size", { timeout: 14_000 }, () => {
   function sized(options: Parameters<typeof createTestRoot>[0]) {
     const root = createTestRoot(options)
     root.render(
-      <div testId="full" style={{ width: "100%", height: "100%", backgroundColor: "#111" }} />,
+      <div data-testid="full" style={{ width: "100%", height: "100%", backgroundColor: "#111" }} />,
     )
     return { window: root.renderer.getWindowSize(), full: rect(root.renderer, "full") }
   }
@@ -348,7 +348,7 @@ describeNative("test window size", { timeout: 14_000 }, () => {
       const root = createTestRoot({ width: windowWidth, height: 400 })
       root.render(
         <div style={{ width: "100%", flexDirection: "row", justifyContent: "center" }}>
-          <div testId="column" style={{ width: cap, maxWidth: "100%" }}>
+          <div data-testid="column" style={{ width: cap, maxWidth: "100%" }}>
             <text style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>{PROSE}</text>
           </div>
         </div>,

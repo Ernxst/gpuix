@@ -49,7 +49,7 @@ describe("percentage layout inside scroll containers", () => {
           </div>
 
           <div
-            testId="overflow-y-scrollport"
+            data-testid="overflow-y-scrollport"
             style={{
               display: "flex",
               flexDirection: "row",
@@ -59,14 +59,14 @@ describe("percentage layout inside scroll containers", () => {
               overflowY: "scroll",
             }}
           >
-            <div testId="overflow-y-half" style={{ width: 40, height: "50%", minHeight: 0 }}>
-              <div testId="overflow-y-control" style={{ width: "100%", height: 10 }} />
+            <div data-testid="overflow-y-half" style={{ width: 40, height: "50%", minHeight: 0 }}>
+              <div data-testid="overflow-y-control" style={{ width: "100%", height: 10 }} />
             </div>
-            <div testId="overflow-y-full" style={{ width: 40, height: "100%" }} />
-            <div testId="overflow-y-minimum" style={{ width: 40, minHeight: "100%" }}>
+            <div data-testid="overflow-y-full" style={{ width: 40, height: "100%" }} />
+            <div data-testid="overflow-y-minimum" style={{ width: 40, minHeight: "100%" }}>
               <div style={{ width: 40, height: 40 }} />
             </div>
-            <div testId="overflow-y-tall" style={{ width: 40, height: 300 }} />
+            <div data-testid="overflow-y-tall" style={{ width: 40, height: 300 }} />
           </div>
         </div>,
       )
@@ -116,7 +116,7 @@ describe("percentage layout inside scroll containers", () => {
             overflowX: "scroll",
           }}
         >
-          <div testId="basis-child" style={{ width: 40, height: 20, flexBasis: 120 }} />
+          <div data-testid="basis-child" style={{ width: 40, height: 20, flexBasis: 120 }} />
         </div>,
       )
 
@@ -141,8 +141,8 @@ describe("percentage layout inside scroll containers", () => {
             overflowX: "scroll",
           }}
         >
-          <div testId="shrinking-child" style={{ width: 200, height: 20, flexShrink: 1 }} />
-          <div testId="fixed-after-shrink" style={{ width: 200, height: 20 }} />
+          <div data-testid="shrinking-child" style={{ width: 200, height: 20, flexShrink: 1 }} />
+          <div data-testid="fixed-after-shrink" style={{ width: 200, height: 20 }} />
         </div>,
       )
 
@@ -168,8 +168,8 @@ describe("percentage layout inside scroll containers", () => {
             overflowX: "scroll",
           }}
         >
-          <div testId="growing-child" style={{ width: 40, height: 20, flexGrow: 1 }} />
-          <div testId="fixed-after-grow" style={{ width: 40, height: 20 }} />
+          <div data-testid="growing-child" style={{ width: 40, height: 20, flexGrow: 1 }} />
+          <div data-testid="fixed-after-grow" style={{ width: 40, height: 20 }} />
         </div>,
       )
 

@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import {
   createTestRoot,
   isNativeTestRendererAvailable,
-  nativeTestRendererError,
+  nativeTestRendererLoadError,
   TestRenderer,
 } from "../testing.js"
 import { useWindowSize } from "../hooks/use-window-size.js"
@@ -116,7 +116,7 @@ describe("TestGpuixRenderer availability", () => {
     } else {
       // Compiled in, but this environment could not initialize it. That is an
       // environment failure, not a broken flag; require only a recorded reason.
-      expect(nativeTestRendererError).toBeInstanceOf(Error)
+      expect(nativeTestRendererLoadError).toBeInstanceOf(Error)
     }
   })
 })
@@ -521,12 +521,12 @@ describe("native test renderer diagnostics", () => {
 
   it("surfaces loader failures or constructs the GPU-backed renderer", () => {
     if (!isNativeTestRendererAvailable()) {
-      expect(nativeTestRendererError).toBeInstanceOf(Error)
-      expect(() => new TestRenderer()).toThrow(nativeTestRendererError!.message)
+      expect(nativeTestRendererLoadError).toBeInstanceOf(Error)
+      expect(() => new TestRenderer()).toThrow(nativeTestRendererLoadError!.message)
       return
     }
 
-    expect(nativeTestRendererError).toBeNull()
+    expect(nativeTestRendererLoadError).toBeNull()
     resetRender()
     const renderer = new TestRenderer()
     const ignored = new TestRenderer()
@@ -554,7 +554,7 @@ describeNative("render()", () => {
         root.render(
           <div style={{ width: 320, height: 200 }}>
             <div
-              testId="target"
+              data-testid="target"
               style={{ width: 120, height: 48, marginLeft: 24, marginTop: 16 }}
             />
           </div>
@@ -608,7 +608,7 @@ describeNative("render()", () => {
     function Size({ id }: { id: string }) {
       const size = useWindowSize()
       renderedSizes.set(id, size)
-      return <text testId={id} />
+      return <text data-testid={id} />
     }
 
     render(

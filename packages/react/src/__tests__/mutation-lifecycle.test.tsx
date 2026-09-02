@@ -12,7 +12,7 @@ describeNative("mutation lifecycle", () => {
 
     try {
       render(
-        <section testId="content">
+        <section data-testid="content">
           <text>content</text>
         </section>
       )
