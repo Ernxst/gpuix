@@ -1101,9 +1101,11 @@ impl TestGpuixRenderer {
         modifiers: Option<String>,
         click_count: Option<u32>,
     ) -> Result<()> {
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers =
+            crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
         let button = button.unwrap_or(0);
-        let click_count = click_count.unwrap_or(1) as usize;
+        let click_count =
+            crate::automation::click_count(click_count).map_err(Error::from_reason)?;
         let result = with_test_state(self.state_id, |cx, window, _view| {
             // A real click is delivered to the active window. The offscreen
             // platform has no activation callback, so model that step here.
@@ -1234,7 +1236,8 @@ impl TestGpuixRenderer {
         pressed_button: Option<u32>,
         modifiers: Option<String>,
     ) -> Result<()> {
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers =
+            crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
         with_test_state(self.state_id, |cx, window, _view| {
             let button: Option<gpui::MouseButton> = pressed_button.map(u32_to_mouse_button);
 
@@ -1415,6 +1418,8 @@ impl TestGpuixRenderer {
 
     /// Simulate a mouse down event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
+    /// `click_count` is the platform's repeat count: 2 for the second press of
+    /// a double click (default 1).
     #[napi]
     pub fn simulate_mouse_down(
         &self,
@@ -1422,14 +1427,24 @@ impl TestGpuixRenderer {
         y: f64,
         button: Option<u32>,
         modifiers: Option<String>,
+        click_count: Option<u32>,
     ) -> Result<()> {
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers =
+            crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
+        let click_count =
+            crate::automation::click_count(click_count).map_err(Error::from_reason)?;
         let result = with_test_state(self.state_id, |cx, window, _view| {
-            cx.simulate_mouse_down(
+            // Not `cx.simulate_mouse_down`: that helper hard-codes
+            // `click_count: 1`, so a double-click press could not be expressed.
+            cx.simulate_event(
                 window,
-                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-                u32_to_mouse_button(button.unwrap_or(0)),
-                modifiers,
+                gpui::MouseDownEvent {
+                    position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+                    modifiers,
+                    button: u32_to_mouse_button(button.unwrap_or(0)),
+                    click_count,
+                    first_mouse: false,
+                },
             );
             Ok(())
         });
@@ -1441,6 +1456,8 @@ impl TestGpuixRenderer {
 
     /// Simulate a mouse up event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
+    /// `click_count` is the platform's repeat count: 2 for the second release
+    /// of a double click (default 1).
     #[napi]
     pub fn simulate_mouse_up(
         &self,
@@ -1448,14 +1465,22 @@ impl TestGpuixRenderer {
         y: f64,
         button: Option<u32>,
         modifiers: Option<String>,
+        click_count: Option<u32>,
     ) -> Result<()> {
-        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let modifiers =
+            crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
+        let click_count =
+            crate::automation::click_count(click_count).map_err(Error::from_reason)?;
         let result = with_test_state(self.state_id, |cx, window, _view| {
-            cx.simulate_mouse_up(
+            // Not `cx.simulate_mouse_up`, for the same reason as the press.
+            cx.simulate_event(
                 window,
-                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-                u32_to_mouse_button(button.unwrap_or(0)),
-                modifiers,
+                gpui::MouseUpEvent {
+                    position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+                    modifiers,
+                    button: u32_to_mouse_button(button.unwrap_or(0)),
+                    click_count,
+                },
             );
             Ok(())
         });
@@ -1545,11 +1570,11 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn drag_select(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> Result<()> {
         self.flush()?;
-        self.simulate_mouse_down(x1, y1, None, None)?;
+        self.simulate_mouse_down(x1, y1, None, None, None)?;
         self.flush()?;
         self.simulate_mouse_move(x2, y2, Some(0), None)?;
         self.flush()?;
-        self.simulate_mouse_up(x2, y2, None, None)?;
+        self.simulate_mouse_up(x2, y2, None, None, None)?;
         self.flush()?;
         Ok(())
     }

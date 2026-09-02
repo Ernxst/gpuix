@@ -125,20 +125,23 @@ export interface TestAutomationRenderer {
     x: number,
     y: number,
     button?: number,
-    modifiers?: string
+    modifiers?: string,
+    clickCount?: number
   ): void
   postAppKitClick?(x: number, y: number): void
   nativeSimulateMouseDown(
     x: number,
     y: number,
     button?: number,
-    modifiers?: string
+    modifiers?: string,
+    clickCount?: number
   ): void
   nativeSimulateMouseUp(
     x: number,
     y: number,
     button?: number,
-    modifiers?: string
+    modifiers?: string,
+    clickCount?: number
   ): void
   nativeSimulateMouseMove(
     x: number,
@@ -230,7 +233,8 @@ export class InProcessBackend extends ValidatedAutomationBackend {
         params.x,
         params.y,
         params.button,
-        params.modifiers
+        params.modifiers,
+        params.clickCount
       )
       return { ok: true as const }
     },
@@ -246,7 +250,8 @@ export class InProcessBackend extends ValidatedAutomationBackend {
         params.x,
         params.y,
         params.button,
-        params.modifiers
+        params.modifiers,
+        params.clickCount
       )
       return { ok: true as const }
     },
@@ -255,7 +260,8 @@ export class InProcessBackend extends ValidatedAutomationBackend {
         params.x,
         params.y,
         params.button,
-        params.modifiers
+        params.modifiers,
+        params.clickCount
       )
       return { ok: true as const }
     },
@@ -462,10 +468,15 @@ export function selectAllKeystroke(): string {
 export type LocatorMatcher = Matcher<TreeNode>
 export type LocatorMatcherOptions = MatcherOptions
 
+/** The `semantics` fields a locator can select on. */
+type SemanticsField = "label" | "placeholder" | "value"
+
 interface Selector {
   testId?: LocatorMatcher
   text?: LocatorMatcher
   type?: string
+  /** A declared `semantics` field and the matcher it must satisfy. */
+  semantics?: { field: SemanticsField; matcher: LocatorMatcher }
   matcherOptions?: LocatorMatcherOptions
   parent?: Selector
 }
@@ -477,6 +488,13 @@ function matches(node: TreeNode, selector: Selector): boolean {
     if (!matchesMatcher(testId, node, selector.testId, selector.matcherOptions)) return false
   }
   if (selector.type != null && node.type !== selector.type) return false
+  if (selector.semantics != null) {
+    const declared = node.semantics?.[selector.semantics.field]
+    if (declared === undefined) return false
+    if (!matchesMatcher(declared, node, selector.semantics.matcher, selector.matcherOptions)) {
+      return false
+    }
+  }
   if (
     selector.text != null &&
     !matchesMatcher(nodeText(node), node, selector.text, selector.matcherOptions)
@@ -529,8 +547,19 @@ export type PointTarget = { x: number; y: number } | Locator
 export interface MouseOptions {
   /** 0 = left (default), 1 = middle, 2 = right. */
   button?: number
-  /** Held modifiers in `press()` syntax: `"cmd"`, `"cmd-shift"`, `"alt"`. */
+  /**
+   * Held modifiers in `press()` syntax: `"cmd"`, `"cmd-shift"`, `"alt"`.
+   *
+   * An unknown name is an error, not a silently dropped modifier.
+   */
   modifiers?: string
+  /**
+   * The platform's repeat count within one click sequence. Defaults to 1.
+   *
+   * Pass 2 for the second click of a double click; prefer `dblclick()`, which
+   * sends the whole sequence the way a platform does.
+   */
+  clickCount?: number
 }
 
 export interface DragOptions extends MouseOptions {
@@ -572,6 +601,33 @@ export class Locator {
   getByText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
     return new Locator(this.app, {
       text,
+      matcherOptions: options,
+      parent: this.selector,
+    })
+  }
+
+  /** A descendant whose declared `ariaLabel` matches. */
+  getByLabelText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return this.bySemantics("label", text, options)
+  }
+
+  /** A descendant whose `placeholder` prop matches. */
+  getByPlaceholderText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return this.bySemantics("placeholder", text, options)
+  }
+
+  /** A descendant whose `value` prop matches. */
+  getByDisplayValue(value: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return this.bySemantics("value", value, options)
+  }
+
+  private bySemantics(
+    field: SemanticsField,
+    matcher: LocatorMatcher,
+    options: LocatorMatcherOptions
+  ): Locator {
+    return new Locator(this.app, {
+      semantics: { field, matcher },
       matcherOptions: options,
       parent: this.selector,
     })
@@ -622,6 +678,21 @@ export class Locator {
   async click(options: MouseOptions = {}): Promise<void> {
     const point = await this.center()
     await this.app.call("click", { ...point, ...options })
+  }
+
+  /**
+   * Two clicks over the centre, the second carrying the platform's repeat
+   * count — the DOM order, where `dblclick` follows the second `click` rather
+   * than replacing it.
+   *
+   * `clickCount` is not accepted: this method *is* the click count, and taking
+   * one only to overwrite it would silently discard what the caller asked for.
+   * Drive an unusual count through `click({ clickCount })` directly.
+   */
+  async dblclick(options: Omit<MouseOptions, "clickCount"> = {}): Promise<void> {
+    const point = await this.center()
+    await this.app.call("click", { ...point, ...options, clickCount: 1 })
+    await this.app.call("click", { ...point, ...options, clickCount: 2 })
   }
 
   /** Move the pointer to the centre, so hover styles and tooltips fire. */
@@ -832,6 +903,30 @@ export class App {
     return new Locator(this, { text, matcherOptions: options })
   }
 
+  /** A node whose declared `ariaLabel` matches. */
+  getByLabelText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return new Locator(this, {
+      semantics: { field: "label", matcher: text },
+      matcherOptions: options,
+    })
+  }
+
+  /** A node whose `placeholder` prop matches. */
+  getByPlaceholderText(text: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return new Locator(this, {
+      semantics: { field: "placeholder", matcher: text },
+      matcherOptions: options,
+    })
+  }
+
+  /** A node whose `value` prop matches. */
+  getByDisplayValue(value: LocatorMatcher, options: LocatorMatcherOptions = {}): Locator {
+    return new Locator(this, {
+      semantics: { field: "value", matcher: value },
+      matcherOptions: options,
+    })
+  }
+
   getByType(type: string): Locator {
     return new Locator(this, { type })
   }
@@ -874,15 +969,28 @@ export class App {
 
 export interface LiveAutomationRenderer {
   capabilities?(): RendererCapabilities
-  simulateClick(x: number, y: number, button?: number, modifiers?: string): void
+  simulateClick(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string,
+    clickCount?: number
+  ): void
   postAppKitClick?(x: number, y: number): void
   simulateMouseDown(
     x: number,
     y: number,
     button?: number,
-    modifiers?: string
+    modifiers?: string,
+    clickCount?: number
   ): void
-  simulateMouseUp(x: number, y: number, button?: number, modifiers?: string): void
+  simulateMouseUp(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string,
+    clickCount?: number
+  ): void
   simulateMouseMove(
     x: number,
     y: number,
@@ -928,8 +1036,8 @@ export function liveRendererAsTest(
     capabilities: renderer.capabilities?.bind(renderer),
     getSynchronousScrollDrawCount:
       renderer.getSynchronousScrollDrawCount?.bind(renderer),
-    nativeSimulateClick(x, y, button, modifiers) {
-      renderer.simulateClick(x, y, button, modifiers)
+    nativeSimulateClick(x, y, button, modifiers, clickCount) {
+      renderer.simulateClick(x, y, button, modifiers, clickCount)
       afterInput()
     },
     postAppKitClick(x, y) {
@@ -939,12 +1047,12 @@ export function liveRendererAsTest(
       renderer.postAppKitClick(x, y)
       afterInput()
     },
-    nativeSimulateMouseDown(x, y, button, modifiers) {
-      renderer.simulateMouseDown(x, y, button, modifiers)
+    nativeSimulateMouseDown(x, y, button, modifiers, clickCount) {
+      renderer.simulateMouseDown(x, y, button, modifiers, clickCount)
       afterInput()
     },
-    nativeSimulateMouseUp(x, y, button, modifiers) {
-      renderer.simulateMouseUp(x, y, button, modifiers)
+    nativeSimulateMouseUp(x, y, button, modifiers, clickCount) {
+      renderer.simulateMouseUp(x, y, button, modifiers, clickCount)
       afterInput()
     },
     nativeSimulateMouseMove(x, y, pressedButton, modifiers) {
