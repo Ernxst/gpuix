@@ -1,5 +1,5 @@
 import React from "react"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   cleanup,
   isNativeTestRendererAvailable,
@@ -10,8 +10,13 @@ import {
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
-function Counter(): React.ReactElement {
+const mounts: string[] = []
+
+function Counter({ label = "a" }: { label?: string }): React.ReactElement {
   const [count, setCount] = React.useState(0)
+  React.useEffect(() => {
+    mounts.push(label)
+  }, [label])
   return (
     <div>
       <div
@@ -24,6 +29,10 @@ function Counter(): React.ReactElement {
       <text data-testid="count">{`count ${count}`}</text>
     </div>
   )
+}
+
+function Boom(): React.ReactElement {
+  throw new Error("render exploded")
 }
 
 describeNative("render", () => {
@@ -62,6 +71,36 @@ describeNative("render", () => {
     expect(textContent(renderer, second.getByTestId("second"))).toBe("second")
   })
 
+  it("mounts a fresh tree instead of reconciling against the last one", async () => {
+    mounts.length = 0
+    const first = render(<Counter />)
+    await first.userEvent.click(first.getByRole("button", { name: "Bump" }))
+    expect(textContent(first.renderer, first.getByTestId("count"))).toBe("count 1")
+
+    const second = render(<Counter label="b" />)
+
+    // A reused window is not a reused tree: state is gone and the effect ran
+    // again, as it would in a browser page that got a new container.
+    expect(textContent(second.renderer, second.getByTestId("count"))).toBe("count 0")
+    expect(mounts).toEqual(["a", "b"])
+  })
+
+  it("opens a fresh window when a root died on an uncaught render error", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const dead = render(<Boom />)
+      expect(dead.root.getStatus().status).toBe("failed")
+
+      const live = render(<text data-testid="ok">ok</text>)
+
+      expect(live.renderer).not.toBe(dead.renderer)
+      expect(live.root.getStatus().status).toBe("active")
+      expect(textContent(live.renderer, live.getByTestId("ok"))).toBe("ok")
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   it("opens a fresh window when the options differ from the live one", () => {
     const wide = render(<text>wide</text>, { width: 900, height: 600 })
     expect(wide.renderer.getWindowSize().width).toBe(900)
@@ -95,18 +134,25 @@ describeNative("render", () => {
     expect(render(<text>next</text>).renderer).toBe(screen.renderer)
   })
 
-  it("resets focus and the window size when it reuses the window", () => {
+  it("resets focus, activation, the clock and the window size when it reuses the window", () => {
     const first = render(<div data-testid="focusable" tabIndex={0} role="button" ariaLabel="Focus target" />)
     const renderer: TestRenderer = first.renderer
     const size = renderer.getWindowSize()
     renderer.focusElement(first.getByTestId("focusable").id)
+    renderer.nativeSimulateWindowActivation(true)
     renderer.simulateResize(700, 500)
+    renderer.clockFastForward(60_000)
     expect(renderer.getActiveElement()).not.toBeNull()
+    expect(renderer.isActive()).toBe(true)
 
     const second = render(<text data-testid="plain">plain</text>)
 
     expect(second.renderer).toBe(renderer)
     expect(renderer.getActiveElement()).toBeNull()
+    expect(renderer.isActive()).toBe(false)
     expect(renderer.getWindowSize()).toEqual(size)
+    // The clock is live again *and* re-anchored: a bare resume would have kept
+    // the 60s offset as this test's baseline.
+    expect(renderer.clockPause()).toBeLessThan(5_000)
   })
 })

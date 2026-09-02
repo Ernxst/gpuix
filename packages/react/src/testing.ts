@@ -2462,7 +2462,14 @@ function resetSharedWindow(active: ActiveRenderRoot): void {
   // the old tree's coordinates would mount the next one already hovered.
   renderer.nativeSimulateMouseMove(-1, -1)
   renderer.blur()
+  // A test that activated the window leaves it active; a fresh one is not.
+  renderer.nativeSimulateWindowActivation(false)
   renderer.clearSelection()
+  // `clockResume` alone preserves the elapsed time, so a `clockSet` or
+  // `clockFastForward` offset from the previous test would still be the next
+  // one's baseline. Re-anchor at zero first, then hand the clock back to
+  // wall time.
+  renderer.clockSet(0)
   renderer.clockResume()
   renderer.setReducedMotion(false)
   renderer.setAllowPrivateNetworkImages(active.options.allowPrivateNetworkImages ?? false)
@@ -2521,19 +2528,30 @@ export function cleanup(): void {
  * **One window per test file.** Opening an offscreen GPUI window costs about a
  * second, so the window created by the first `render()` is reused by every
  * later one in the same file — vitest isolates module state per file, so
- * nothing is shared between files. Each `render()` starts from a reset window
- * (see `cleanup`) and **replaces** the previous tree rather than mounting a
- * second one beside it, since a desktop window has one root, not a `document.body`
+ * nothing is shared between files. Each `render()` unmounts the previous tree
+ * and starts from a reset window (see `cleanup`), so a reused window is never a
+ * reused tree; it **replaces** the previous tree rather than mounting a second
+ * one beside it, since a desktop window has one root, not a `document.body`
  * that can hold many containers.
  *
  * **Options decide reuse.** `options` are the `createTestRoot()` options, all
  * of which are fixed when the window is constructed. A call whose options match
- * the live window's reuses it; a call whose options differ tears that window
- * down and opens a fresh one.
+ * the live window's reuses it; a call whose options differ — compared field by
+ * field, so an omitted option differs from one passed at its default value —
+ * tears that window down and opens a fresh one. So does a root that died on an
+ * uncaught render error.
  */
 export function render(node: ReactNode, options: TestRootOptions = {}): RenderResult {
   const live = activeRenderRoot
-  if (live !== null && !sameTestRootOptions(live.options, options)) {
+  if (
+    live !== null &&
+    // A root that died on an uncaught render error can be rendered into and
+    // will even paint, but `getStatus()` reads `failed` forever. `cleanup()`
+    // refuses to hand such a root to the next test; a second `render()` in
+    // the same test must refuse it too.
+    (!sameTestRootOptions(live.options, options) ||
+      live.root.root.getStatus().status !== "active")
+  ) {
     disposeSharedRoot(live)
   }
 
@@ -2566,6 +2584,12 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
     }
     activeRenderRoot = active
   } else {
+    // Unmount before resetting, as `cleanup()` does. Rendering the new node
+    // straight into the live root would reconcile against the old tree —
+    // component state and mount effects would survive a call that is supposed
+    // to be a fresh mount — and an unmount effect running after the reset
+    // could re-dirty the window that was just cleaned.
+    active.root.render(null)
     resetSharedWindow(active)
   }
 

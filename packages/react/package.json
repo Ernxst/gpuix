@@ -94,7 +94,13 @@
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
     "react-reconciler": "^0.31.0",
-    "scheduler": "^0.25.0"
+    "scheduler": "^0.25.0",
+    "vitest": "^3.0.0 || ^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@tanstack/react-router": "1.170.32",

@@ -3952,24 +3952,41 @@ which re-renders into the same root.
 **One window per test file.** Opening an offscreen GPUI window costs about a
 second, so the window the first `render()` opens is reused by every later
 `render()` in the same file. Vitest gives each test file its own module
-instance, so nothing is shared between files.
+instance, so nothing is shared between files. Nothing closes that window at the
+end of the file either: it is released when the worker process exits, which
+under vitest's default `pool: 'forks'` with `isolate: true` is one file later.
+A runner that shares one process across files without resetting the module
+registry would keep the first file's window for the whole run.
 
 **`options` decide reuse.** `options` is `TestRootOptions` — `width`, `height`,
 `scaleFactor`, `allowPrivateNetworkImages`, `strictStyles` — and every one of
 them is fixed when the window is constructed. A call whose options match the
 live window's reuses it; a call whose options differ tears that window down and
-opens a fresh one. Keep the options identical across a file to keep the window.
+opens a fresh one. The comparison is field by field on what you passed, so an
+omitted option is *not* the same request as one passed explicitly at its
+default value: `render(node)` and `render(node, { width: 1280 })` rebuild the
+window every time they alternate, even when the window would be identical. Keep
+the options object identical across a file — or omit it everywhere — to keep the
+window.
 
 **Every `render()` starts from a reset window.** The tree from the previous
-`render()` is unmounted, and the window state a test can move without going
-through React is put back: the window size (after `simulateResize`), keyboard
-focus, text selection, pointer position, a paused motion clock, the
-reduced-motion override, `strictStyles`, and `allowPrivateNetworkImages`. Any
-queued native events are discarded so the old tree's input cannot land on the
-new one. Everything else you set through `renderer` — application menus, the
-debug frame overlay, CPU throttling — persists for the rest of the file; reset
-it yourself if the next test cares. A root that died on an uncaught render error
-is never reused: its window is closed and the next `render()` opens a new one.
+`render()` is unmounted first, so component state and mount effects do not
+survive into the new tree: a reused window is not a reused tree. Then the window
+state a test can move without going through React is put back: the window size
+(after `simulateResize`), keyboard focus, window activation, text selection,
+pointer position, the reduced-motion override, `strictStyles`, and
+`allowPrivateNetworkImages`. The motion clock is re-anchored at zero and handed
+back to wall time, so a `clock.pause()`, `clockSet` or `clockFastForward` offset
+does not become the next test's baseline. Any queued native events are discarded
+so the old tree's input cannot land on the new one.
+
+Everything else you set through `renderer` persists for the rest of the file;
+reset it yourself if the next test cares. That includes application menus, the
+debug frame overlay, CPU throttling, and any pointer button or modifier left
+held by a partial drag — GPUI exposes no cheap way to read those back, so
+`render()` cannot restore them. A root that died on an uncaught render error is
+never reused: its window is closed and the next `render()` opens a new one, even
+mid-test.
 
 **One tree, not many.** A second `render()` in the same test **replaces** the
 first tree rather than mounting beside it. A browser page has a `document.body`
