@@ -1642,9 +1642,7 @@ impl TestGpuixRenderer {
                     if view.scroll_virtual_list_to_item(id, index, offset) {
                         return;
                     }
-                    if let Some(handle) = view.scroll_handles.get(&id) {
-                        handle.scroll_to_item(index);
-                    }
+                    view.scroll_handle_to_child(id, index);
                 });
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
