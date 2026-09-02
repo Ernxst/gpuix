@@ -99,26 +99,6 @@ interface Resolved {
   describe: () => string
 }
 
-/**
- * Re-resolve an element against its renderer.
- *
- * `TestElement.children` and `parentElement` already re-resolve after a
- * rerender, so a matcher that read the captured snapshot instead would be the
- * one stale surface on the object.
- */
-function resolve(received: unknown, matcher: string): Resolved {
-  const captured = asTestElement(received, matcher)
-  const renderer = rendererOf(captured)
-  const element = renderer.getElement(captured.id)
-  if (element === undefined) {
-    throw new Error(
-      `${matcher}: element #${captured.id} <${captured.type}> is no longer in the renderer's tree`
-    )
-  }
-
-  return { renderer, element, describe: () => describeElement(renderer, element) }
-}
-
 function report(
   context: MatcherContext,
   pass: boolean,
@@ -130,6 +110,49 @@ function report(
     message: () =>
       `expected element ${context.isNot === true ? "not " : ""}to ${expectation}\n\n${actual}`,
   }
+}
+
+/**
+ * Run a matcher against an element re-resolved from its renderer.
+ *
+ * Two failure modes are deliberately different. A receiver that was never a
+ * `TestElement` **throws**: no assertion about it could mean anything, and a
+ * quiet `pass: false` would let `.not.toBeVisible()` "pass" on a typo. An
+ * element that is no longer in the tree **fails**, because a removed node is
+ * precisely what `.not.toBeVisible()` and `.not.toHaveFocus()` are asked
+ * about, and jest-dom answers a detached node with `pass: false` too. Throwing
+ * there made the negated form unusable after an unmount.
+ *
+ * The re-resolution itself matters because `TestElement.children` and
+ * `parentElement` already re-resolve after a rerender; a matcher reading the
+ * captured snapshot would be the one stale surface on the object.
+ */
+function against(
+  context: MatcherContext,
+  received: unknown,
+  matcher: string,
+  expectation: string,
+  read: (resolved: Resolved) => { pass: boolean; actual: string }
+): GpuixMatcherResult {
+  const captured = asTestElement(received, matcher)
+  const renderer = rendererOf(captured)
+  const element = renderer.getElement(captured.id)
+  if (element === undefined) {
+    return report(
+      context,
+      false,
+      expectation,
+      `  element #${captured.id} <${captured.type}> is no longer in the renderer's tree`
+    )
+  }
+
+  const { pass, actual } = read({
+    renderer,
+    element,
+    describe: () => describeElement(renderer, element),
+  })
+
+  return report(context, pass, expectation, actual)
 }
 
 /** The AccessKit node projected from this element, if it has one. */
@@ -188,31 +211,43 @@ export const gpuixMatchers = {
    * Assert on the reason, not the pixel, when you need one of those apart.
    */
   toBeVisible(this: MatcherContext, received: unknown): GpuixMatcherResult {
-    const { renderer, element, describe } = resolve(received, "toBeVisible")
-    const bounds = renderer.getElementBounds(element.id)
-
-    return report(
+    return against(
       this,
-      bounds !== null,
+      received,
+      "toBeVisible",
       "have painted in the last frame",
-      bounds === null
-        ? `  ${describe()} painted no bounds`
-        : `  ${describe()} painted [x=${bounds[0]}, y=${bounds[1]}, width=${bounds[2]}, height=${bounds[3]}]`
+      ({ renderer, element, describe }) => {
+        const bounds = renderer.getElementBounds(element.id)
+        return {
+          pass: bounds !== null,
+          actual:
+            bounds === null
+              ? `  ${describe()} painted no bounds`
+              : `  ${describe()} painted [x=${bounds[0]}, y=${bounds[1]}, width=${bounds[2]}, height=${bounds[3]}]`,
+        }
+      }
     )
   },
 
   /**
    * The element declares `disabled` or `ariaDisabled`.
    *
-   * This is the element's own state. GPUIX has no disabling container — no
-   * `<fieldset disabled>` — so unlike jest-dom there is no ancestor to inherit
-   * from, and none is invented.
+   * Two departures from jest-dom, both because the desktop differs. It has no
+   * disabling container — no `<fieldset disabled>` — so there is no ancestor to
+   * inherit from and none is invented. And it counts `ariaDisabled`, which
+   * jest-dom's `toBeDisabled` deliberately ignores in favour of the native
+   * attribute alone: here the two are one predicate all the way down
+   * (`is_action_disabled`), so a disabled query cannot disagree with a disabled
+   * accessibility node.
    */
   toBeDisabled(this: MatcherContext, received: unknown): GpuixMatcherResult {
-    const { element, describe } = resolve(received, "toBeDisabled")
-    const disabled = element.semantics?.disabled === true
-
-    return report(this, disabled, "be disabled", `  ${describe()} is ${disabled ? "" : "not "}disabled`)
+    return against(this, received, "toBeDisabled", "be disabled", ({ element, describe }) => {
+      const disabled = element.semantics?.disabled === true
+      return {
+        pass: disabled,
+        actual: `  ${describe()} is ${disabled ? "" : "not "}disabled`,
+      }
+    })
   },
 
   /**
@@ -225,18 +260,16 @@ export const gpuixMatchers = {
    * invisible to it.
    */
   toHaveFocus(this: MatcherContext, received: unknown): GpuixMatcherResult {
-    const { renderer, element, describe } = resolve(received, "toHaveFocus")
-    const active = renderer.getActiveElement()
-    const focused = active === null ? undefined : renderer.getElement(active)
-
-    return report(
-      this,
-      active === element.id,
-      "have focus",
-      `  ${describe()}\n  focus is on ${
-        focused === undefined ? "no element" : describeElement(renderer, focused)
-      }`
-    )
+    return against(this, received, "toHaveFocus", "have focus", ({ renderer, element, describe }) => {
+      const active = renderer.getActiveElement()
+      const focused = active === null ? undefined : renderer.getElement(active)
+      return {
+        pass: active === element.id,
+        actual: `  ${describe()}\n  focus is on ${
+          focused === undefined ? "no element" : describeElement(renderer, focused)
+        }`,
+      }
+    })
   },
 
   /**
@@ -254,20 +287,39 @@ export const gpuixMatchers = {
     expected: TextContentMatcher,
     options: TextContentOptions = {}
   ): GpuixMatcherResult {
-    const { renderer, element, describe } = resolve(received, "toHaveTextContent")
-    const content = resolveNormalizer(options)(textContent(renderer, element))
-    const pass =
-      typeof expected === "function"
-        ? expected(content, element)
-        : expected instanceof RegExp
-          ? expected.test(content)
-          : content.includes(String(expected))
+    // jest-dom rejects this rather than answering it, and so do we: an empty
+    // string is a substring of everything, so the assertion can never fail and
+    // whatever the author meant, it was not this.
+    if (expected === "") {
+      throw new Error(
+        "toHaveTextContent: checking with an empty string always matches. " +
+          "Assert the text you expect, or use toHaveTextContent(/^$/) for an element with no text."
+      )
+    }
 
-    return report(
+    return against(
       this,
-      pass,
+      received,
+      "toHaveTextContent",
       `have text content ${describeMatcher(expected)}`,
-      `  ${describe()}\n  text content ${JSON.stringify(content)}`
+      ({ renderer, element, describe }) => {
+        const content = resolveNormalizer(options)(textContent(renderer, element))
+        return {
+          pass:
+            typeof expected === "function"
+              ? expected(content, element)
+              : expected instanceof RegExp
+                ? // Not reset the way the queries reset `lastIndex`, because
+                  // jest-dom does not either and this matcher follows jest-dom.
+                  // The consequence is jest-dom's own wart: a `/g` pattern is
+                  // stateful, so repeating the same assertion alternates
+                  // between passing and failing. Drop the `g` — it buys a
+                  // `test()` call nothing anyway.
+                  expected.test(content)
+                : content.includes(String(expected)),
+          actual: `  ${describe()}\n  text content ${JSON.stringify(content)}`,
+        }
+      }
     )
   },
 
@@ -277,20 +329,31 @@ export const gpuixMatchers = {
    * This is the raw prop with no normalization — the matcher for "the value is
    * exactly this string". Use `toHaveDisplayValue` for a regular expression, a
    * predicate, or normalized text.
+   *
+   * jest-dom's zero-argument form (`toHaveValue()`, "has any value") and its
+   * numeric and string-array forms are not implemented. There is no
+   * `type="number"` input and no multi-select to coerce for, and "has any
+   * value" is `expect(element.semantics?.value).toBeDefined()`.
    */
   toHaveValue(
     this: MatcherContext,
     received: unknown,
     expected: string
   ): GpuixMatcherResult {
-    const { element, describe } = resolve(received, "toHaveValue")
-    const value = element.semantics?.value
-
-    return report(
+    return against(
       this,
-      value === expected,
+      received,
+      "toHaveValue",
       `have value ${JSON.stringify(expected)}`,
-      `  ${describe()}\n  value ${value === undefined ? "is not declared" : JSON.stringify(value)}`
+      ({ element, describe }) => {
+        const value = element.semantics?.value
+        return {
+          pass: value === expected,
+          actual: `  ${describe()}\n  value ${
+            value === undefined ? "is not declared" : JSON.stringify(value)
+          }`,
+        }
+      }
     )
   },
 
@@ -305,14 +368,20 @@ export const gpuixMatchers = {
     expected: TextContentMatcher,
     options: MatcherOptions = {}
   ): GpuixMatcherResult {
-    const { element, describe } = resolve(received, "toHaveDisplayValue")
-    const value = element.semantics?.value
-
-    return report(
+    return against(
       this,
-      value !== undefined && matchesMatcher(value, element, expected, options),
+      received,
+      "toHaveDisplayValue",
       `have display value ${describeMatcher(expected)}`,
-      `  ${describe()}\n  value ${value === undefined ? "is not declared" : JSON.stringify(value)}`
+      ({ element, describe }) => {
+        const value = element.semantics?.value
+        return {
+          pass: value !== undefined && matchesMatcher(value, element, expected, options),
+          actual: `  ${describe()}\n  value ${
+            value === undefined ? "is not declared" : JSON.stringify(value)
+          }`,
+        }
+      }
     )
   },
 
@@ -331,20 +400,23 @@ export const gpuixMatchers = {
     expected?: TextContentMatcher,
     options: MatcherOptions = {}
   ): GpuixMatcherResult {
-    const { renderer, element, describe } = resolve(received, "toHaveAccessibleName")
-    const name = accessibilityNodeOf(renderer, element)?.aria.label ?? ""
-    const pass =
-      expected === undefined
-        ? name.length > 0
-        : matchesMatcher(name, element, expected, options)
-
-    return report(
+    return against(
       this,
-      pass,
+      received,
+      "toHaveAccessibleName",
       expected === undefined
         ? "have an accessible name"
         : `have accessible name ${describeMatcher(expected)}`,
-      `  ${describe()}\n  accessible name ${JSON.stringify(name)}`
+      ({ renderer, element, describe }) => {
+        const name = accessibilityNodeOf(renderer, element)?.aria.label ?? ""
+        return {
+          pass:
+            expected === undefined
+              ? name.length > 0
+              : matchesMatcher(name, element, expected, options),
+          actual: `  ${describe()}\n  accessible name ${JSON.stringify(name)}`,
+        }
+      }
     )
   },
 }

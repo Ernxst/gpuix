@@ -3549,9 +3549,12 @@ declare module 'vitest' {
 
 Every matcher re-resolves the element against its renderer first, so an element
 captured before a rerender reports current state — the same contract
-`TestElement.children` and `parentElement` already keep.
+`TestElement.children` and `parentElement` already keep. An element that has
+since been removed **fails** the assertion rather than throwing, so
+`expect(removed).not.toBeVisible()` works after an unmount, as it does in
+jest-dom. Only a receiver that was never a `TestElement` throws.
 
-Four behaviours differ from jest-dom, and each difference is the desktop being
+Five behaviours differ from jest-dom, and each difference is the desktop being
 honest rather than the matcher being incomplete:
 
 **`toBeVisible` means painted, not visible.** Bounds are recorded during paint
@@ -3562,7 +3565,11 @@ about a fully transparent one: `opacity: 0` is visible to this matcher and
 hidden in a browser. When you need those apart, assert on the reason instead of
 the pixel.
 
-**`toBeDisabled` does not inherit.** GPUIX has no disabling container — no
+**`toBeDisabled` counts `ariaDisabled`, and does not inherit.** jest-dom reads
+the native attribute alone and deliberately ignores `aria-disabled`; here the
+two are a single predicate all the way down to the accessibility tree
+(`is_action_disabled`), so a disabled query cannot disagree with a disabled
+accessibility node. GPUIX also has no disabling container — no
 `<fieldset disabled>` — so the matcher reports the element's own state and
 invents no ancestor rule.
 
@@ -3576,7 +3583,16 @@ normalization.** A bare string is a case-sensitive substring, a regular
 expression is tested, a function is a predicate; the text is trimmed and
 whitespace-collapsed first, and `{ trim }`, `{ collapseWhitespace }`, and
 `{ normalizer }` all apply. `toHaveDisplayValue` uses the queries' rules
-instead, so a bare string there is exact.
+instead, so a bare string there is exact. Passing `''` throws, as it does in
+jest-dom: an empty string is a substring of everything, so the assertion could
+never fail. Use `toHaveTextContent(/^$/)` for an element with no text. A `/g`
+regular expression is stateful and will alternate between passing and failing
+across repeated assertions — jest-dom has the same wart; drop the `g`.
+
+**`toHaveValue(value)` takes a string, and only a string.** jest-dom's
+zero-argument form and its numeric and string-array forms are not implemented:
+there is no `type="number"` input and no multi-select to coerce for, and "has
+any value" is `expect(element.semantics?.value).toBeDefined()`.
 
 `toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
 node, which exists only where the element projects accessibility semantics. An

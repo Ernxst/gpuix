@@ -224,6 +224,71 @@ describeNative("gpuix matcher pack", () => {
     }
   })
 
+  it("fails rather than throws for every matcher on an unmounted element", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div style={{ display: "flex", width: 200, height: 100 }}>
+          <input
+            data-testid="field"
+            ariaLabel="Amount"
+            value="one"
+            style={{ width: 100, height: 30 }}
+          />
+        </div>
+      )
+      const field = screen.getByTestId("field")
+      screen.renderer.focusElement(field.id)
+      expect(field).toBeVisible()
+      expect(field).toHaveFocus()
+
+      screen.render(<div style={{ display: "flex", width: 200, height: 100 }} />)
+
+      // A removed node is exactly what the negated form is asked about, so it
+      // must answer, not throw. Throwing made `.not.` unusable after unmount.
+      expect(field).not.toBeInTheDocument()
+      expect(field).not.toBeVisible()
+      expect(field).not.toBeDisabled()
+      expect(field).not.toHaveFocus()
+      expect(field).not.toHaveTextContent("one")
+      expect(field).not.toHaveValue("one")
+      expect(field).not.toHaveDisplayValue("one")
+      expect(field).not.toHaveAccessibleName()
+
+      // The positive form fails, and says why.
+      expect(() => expect(field).toBeVisible()).toThrowError(
+        /is no longer in the renderer's tree/
+      )
+      expect(() => expect(field).toHaveValue("one")).toThrowError(
+        /is no longer in the renderer's tree/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("rejects an empty string that could never fail", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(<div data-testid="panel" />)
+      const panel = screen.getByTestId("panel")
+
+      // "" is a substring of everything, so the assertion is unfalsifiable.
+      expect(() => expect(panel).toHaveTextContent("")).toThrowError(
+        /empty string always matches/
+      )
+      expect(() => expect(panel).not.toHaveTextContent("")).toThrowError(
+        /empty string always matches/
+      )
+      // The suggested alternative does work.
+      expect(panel).toHaveTextContent(/^$/)
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("rejects a value that is not a test element", () => {
     expect(() => expect(null).toBeInTheDocument()).toThrowError(
       /toBeInTheDocument expects a TestElement/
