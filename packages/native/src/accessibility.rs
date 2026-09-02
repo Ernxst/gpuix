@@ -575,6 +575,17 @@ fn visually_hidden_rejection(
     tree: &RetainedTree,
     element: &RetainedElement,
 ) -> Option<&'static str> {
+    // A custom element projects its own semantics but paints its own content
+    // through an adapter, so there is no unpainted node for the projection to
+    // put in its place. Widening the semantics gate to these hosts must not
+    // widen this one by omission: say so rather than dropping the declaration.
+    if projects_accessibility(&element.element_type)
+        && !supports_accessibility_host(&element.element_type)
+    {
+        return Some(
+            "visuallyHidden replaces the element with an accessibility-only node, which this element type cannot produce; wrap it in a <div> or <text> and visually hide that instead",
+        );
+    }
     if is_hidden(element) {
         return Some(
             "ariaHidden removes the accessibility node that visuallyHidden exists to preserve; remove one property",
@@ -1374,6 +1385,36 @@ mod tests {
                 .reason
                 .contains("does not support accessibility semantics")
         );
+    }
+
+    #[test]
+    fn custom_elements_cannot_be_visually_hidden() {
+        for (index, element_type) in ["anchored", "canvas", "svg", "code", "diff", "markdown"]
+            .into_iter()
+            .enumerate()
+        {
+            let mut element = RetainedElement::new(index as u64 + 1, element_type.to_string(), 1);
+            element.custom_props.insert("role".into(), "region".into());
+            element
+                .custom_props
+                .insert("visuallyHidden".into(), true.into());
+
+            let problems = element_problems(&detached_tree(), &element);
+
+            assert_eq!(problems.len(), 1, "<{element_type}>");
+            assert!(
+                problems[0]
+                    .problem
+                    .reason
+                    .contains("this element type cannot produce"),
+                "<{element_type}>: {}",
+                problems[0].problem.reason
+            );
+            assert!(
+                !is_visually_hidden(&detached_tree(), &element),
+                "<{element_type}>"
+            );
+        }
     }
 
     #[test]
