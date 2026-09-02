@@ -3273,7 +3273,9 @@ the unmodified one.
 repeat count within one click sequence. `dblclick()` sends the whole sequence
 the way a platform does — two clicks, the second with `clickCount: 2` — and the
 app sees `click` (detail 1), `click` (detail 2), then `doubleClick` (detail 2),
-which is the DOM order.
+which is the DOM order. `dblclick()` does not accept `clickCount`, since it is
+the click count; pass one to `click()` directly for an unusual value. A count of
+`0` is **rejected**, not clamped: there is no press that is zero presses.
 
 ```ts
 await app.getByTestId('cell-7').dblclick()

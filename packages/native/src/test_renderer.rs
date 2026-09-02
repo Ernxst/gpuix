@@ -1104,7 +1104,8 @@ impl TestGpuixRenderer {
         let modifiers =
             crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
         let button = button.unwrap_or(0);
-        let click_count = crate::automation::click_count(click_count);
+        let click_count =
+            crate::automation::click_count(click_count).map_err(Error::from_reason)?;
         let result = with_test_state(self.state_id, |cx, window, _view| {
             // A real click is delivered to the active window. The offscreen
             // platform has no activation callback, so model that step here.
@@ -1430,7 +1431,8 @@ impl TestGpuixRenderer {
     ) -> Result<()> {
         let modifiers =
             crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
-        let click_count = crate::automation::click_count(click_count);
+        let click_count =
+            crate::automation::click_count(click_count).map_err(Error::from_reason)?;
         let result = with_test_state(self.state_id, |cx, window, _view| {
             // Not `cx.simulate_mouse_down`: that helper hard-codes
             // `click_count: 1`, so a double-click press could not be expressed.
@@ -1467,7 +1469,8 @@ impl TestGpuixRenderer {
     ) -> Result<()> {
         let modifiers =
             crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
-        let click_count = crate::automation::click_count(click_count);
+        let click_count =
+            crate::automation::click_count(click_count).map_err(Error::from_reason)?;
         let result = with_test_state(self.state_id, |cx, window, _view| {
             // Not `cx.simulate_mouse_up`, for the same reason as the press.
             cx.simulate_event(

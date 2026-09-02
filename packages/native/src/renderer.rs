@@ -4048,7 +4048,8 @@ impl GpuixRenderer {
         let button = button.unwrap_or(0);
         let modifiers =
             crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
-        let click_count = crate::automation::click_count(click_count);
+        let click_count =
+            crate::automation::click_count(click_count).map_err(Error::from_reason)?;
 
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
@@ -4106,7 +4107,8 @@ impl GpuixRenderer {
         let button = button.unwrap_or(0);
         let modifiers =
             crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
-        let click_count = crate::automation::click_count(click_count);
+        let click_count =
+            crate::automation::click_count(click_count).map_err(Error::from_reason)?;
 
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
@@ -4148,7 +4150,8 @@ impl GpuixRenderer {
         let button = button.unwrap_or(0);
         let modifiers =
             crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
-        let click_count = crate::automation::click_count(click_count);
+        let click_count =
+            crate::automation::click_count(click_count).map_err(Error::from_reason)?;
 
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
@@ -4657,6 +4660,13 @@ fn parse_web_modifiers(
     modifiers: Option<&str>,
 ) -> Result<gpui::Modifiers, wasm_bindgen::JsValue> {
     crate::automation::parse_modifiers(modifiers)
+        .map_err(|error| wasm_bindgen::JsValue::from_str(&error))
+}
+
+/// The same click-count check as every other surface, for the same reason.
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn parse_web_click_count(click_count: Option<u32>) -> Result<usize, wasm_bindgen::JsValue> {
+    crate::automation::click_count(click_count)
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error))
 }
 
@@ -5261,7 +5271,7 @@ impl WebGpuixRenderer {
         click_count: Option<u32>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let modifiers = parse_web_modifiers(modifiers.as_deref())?;
-        let click_count = crate::automation::click_count(click_count);
+        let click_count = parse_web_click_count(click_count)?;
         update_web_window(move |window, cx| {
             crate::automation::dispatch_click(
                 window,
@@ -5286,7 +5296,7 @@ impl WebGpuixRenderer {
         click_count: Option<u32>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let modifiers = parse_web_modifiers(modifiers.as_deref())?;
-        let click_count = crate::automation::click_count(click_count);
+        let click_count = parse_web_click_count(click_count)?;
         update_web_window(move |window, cx| {
             crate::automation::dispatch_mouse_down(
                 window,
@@ -5311,7 +5321,7 @@ impl WebGpuixRenderer {
         click_count: Option<u32>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let modifiers = parse_web_modifiers(modifiers.as_deref())?;
-        let click_count = crate::automation::click_count(click_count);
+        let click_count = parse_web_click_count(click_count)?;
         update_web_window(move |window, cx| {
             crate::automation::dispatch_mouse_up(
                 window,

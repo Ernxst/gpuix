@@ -684,8 +684,12 @@ export class Locator {
    * Two clicks over the centre, the second carrying the platform's repeat
    * count — the DOM order, where `dblclick` follows the second `click` rather
    * than replacing it.
+   *
+   * `clickCount` is not accepted: this method *is* the click count, and taking
+   * one only to overwrite it would silently discard what the caller asked for.
+   * Drive an unusual count through `click({ clickCount })` directly.
    */
-  async dblclick(options: MouseOptions = {}): Promise<void> {
+  async dblclick(options: Omit<MouseOptions, "clickCount"> = {}): Promise<void> {
     const point = await this.center()
     await this.app.call("click", { ...point, ...options, clickCount: 1 })
     await this.app.call("click", { ...point, ...options, clickCount: 2 })

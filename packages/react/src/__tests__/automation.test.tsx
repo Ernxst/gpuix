@@ -1872,6 +1872,30 @@ describeNative("automation", () => {
     await app.close()
   })
 
+  it("rejects a click count of zero on both sides of the protocol", async () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div data-testid="target" style={{ width: 200, height: 80 }}>
+        <text>target</text>
+      </div>
+    )
+    const app = await connectTest(renderer)
+
+    // The protocol schema rejects it before dispatch...
+    await expect(
+      app.getByTestId("target").click({ clickCount: 0 })
+    ).rejects.toThrow()
+
+    // ...and so does the native entry point, reached directly. Clamping 0 to 1
+    // would repair a caller's nonsense silently, which is what the modifier
+    // parse in this same change stopped doing.
+    expect(() => renderer.nativeSimulateClick(10, 10, 0, undefined, 0)).toThrow(
+      /clickCount 0/
+    )
+
+    await app.close()
+  })
+
   it("rejects an unknown modifier name rather than dropping it", async () => {
     const { render, renderer } = createTestRoot()
     render(

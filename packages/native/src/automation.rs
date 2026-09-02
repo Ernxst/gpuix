@@ -365,8 +365,17 @@ fn parse_keystroke(keystroke: &str) -> Result<Keystroke, String> {
 /// The renderer has always read `click_count` off the event; only these entry
 /// points could not express anything but 1, so no automation caller could
 /// produce a double click at all.
-pub fn click_count(click_count: Option<u32>) -> usize {
-    click_count.unwrap_or(1).max(1) as usize
+///
+/// `0` is rejected rather than clamped, matching the automation protocol's
+/// schema and the modifier parse next door: repairing a caller's nonsense
+/// quietly is the failure mode both of those exist to avoid. There is no press
+/// that is zero presses.
+pub fn click_count(click_count: Option<u32>) -> Result<usize, String> {
+    match click_count {
+        None => Ok(1),
+        Some(0) => Err("Invalid clickCount 0: a click is at least one press".to_string()),
+        Some(count) => Ok(count as usize),
+    }
 }
 
 /// Every automation mouse dispatcher takes modifiers, so a test can drive
@@ -561,12 +570,17 @@ mod tests {
     }
 
     #[test]
-    fn click_count_defaults_to_one_and_never_goes_below_it() {
-        assert_eq!(click_count(None), 1);
-        assert_eq!(click_count(Some(0)), 1);
-        assert_eq!(click_count(Some(1)), 1);
-        assert_eq!(click_count(Some(2)), 2);
-        assert_eq!(click_count(Some(3)), 3);
+    fn click_count_defaults_to_one_and_rejects_zero() {
+        assert_eq!(click_count(None).expect("default"), 1);
+        assert_eq!(click_count(Some(1)).expect("single"), 1);
+        assert_eq!(click_count(Some(2)).expect("double"), 2);
+        assert_eq!(click_count(Some(3)).expect("triple"), 3);
+
+        // Rejected, not clamped: the automation protocol's schema rejects 0
+        // too, and quietly repairing a caller's nonsense is the failure mode
+        // the modifier parse next door exists to avoid.
+        let error = click_count(Some(0)).expect_err("zero is not a click");
+        assert!(error.contains("clickCount 0"), "{error}");
     }
 
     #[test]
