@@ -850,6 +850,15 @@ function isContextSensitiveRoleSource(role: unknown): boolean {
  * they compute — the DOM recomputes them the moment the attribute changes.
  * Only a role entering or leaving that set can move a descendant, so every
  * other update skips the walk entirely.
+ *
+ * The walk covers the whole subtree rather than stopping at a nested sectioning
+ * boundary: `nativeRole` re-walks upwards from each node, so descending past a
+ * boundary is wasted work but never a wrong answer.
+ *
+ * This writes `role` straight to the renderer rather than going through
+ * `diffCustomProps`, which is only correct because `role` is in
+ * `UNIVERSAL_PROPS` — the built-in filter there would otherwise drop it for the
+ * div aliases these types compile to. Any prop added here needs the same check.
  */
 function resyncContextDependentRoles(container: Container, instance: Instance): void {
   const pending: HostNode[] = [...stateFor(instance).children]
