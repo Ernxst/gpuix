@@ -969,6 +969,7 @@ export interface Props {
 
 // Props for native text editor elements.
 export interface InputProps extends Props {
+  ref?: React.Ref<InputPublicInstance>
   /** External editor value. Native edits apply immediately and report through onChange. */
   value?: string
   placeholder?: string
@@ -1223,6 +1224,25 @@ export interface NativeRenderer {
   /** Drop the current selection. */
   clearSelection?(): void
 
+  // ── Text editing API ───────────────────────────────────────────
+  // `<input>` and `<textarea>` keep their caret outside the retained tree.
+  // These reach it in UTF-16 code units, the unit `selectionStart` counts.
+  /** One editor's value, or null for an element that does not edit text. */
+  getInputValue?(elementId: number): string | null
+  /** `[selectionStart, selectionEnd, backward]`, where `backward` is 1 for
+   *  `selectionDirection === "backward"`. Null for a non-editor element. */
+  getInputSelection?(elementId: number): Array<number> | null
+  /** Write an editor's value the way assigning `HTMLInputElement.value` does:
+   *  no change event, caret to the end when the text differs. */
+  setInputValue?(elementId: number, value: string): void
+  /** `HTMLInputElement.setSelectionRange()` in UTF-16 code units. */
+  setInputSelection?(
+    elementId: number,
+    start: number,
+    end: number,
+    backward: boolean
+  ): void
+
   // ── Highlight API ──────────────────────────────────────────────
   /** Every highlight wash painted in the last frame, in paint order.
    *  A quad never appears in getPaintedText(), so this is how `highlight`
@@ -1459,6 +1479,67 @@ export interface PublicInstance {
   getBounds(): ElementBounds | null
 }
 
+/**
+ * `HTMLInputElement.selectionDirection`. `"none"` is accepted by
+ * {@link InputPublicInstance.setSelectionRange} and never reported back: this
+ * editor tracks only which end of the selection moves, and HTML lets a platform
+ * without a `"none"` mode use `"forward"` in its place.
+ */
+export type SelectionDirection = "forward" | "backward" | "none"
+
+/**
+ * `<input>` and `<textarea>` refs, carrying the text-editing members of
+ * `HTMLInputElement`. Offsets count UTF-16 code units, exactly as the DOM's do,
+ * so they line up with `String.prototype.slice` on {@link value}.
+ */
+export interface InputPublicInstance extends PublicInstance {
+  type: "input" | "textarea"
+  /**
+   * The editor's current text, matching `HTMLInputElement.value`.
+   *
+   * Assigning writes straight to the native editor: it fires no `onChange`, and
+   * moves the caret to the end when the text actually differs. React's `value`
+   * prop still wins the moment it *changes* — the next commit of a different
+   * `value` overwrites what you wrote, and a commit of an unchanged one leaves
+   * it alone. On a controlled input, prefer setting React state.
+   *
+   * **Differs from ReactDOM.** ReactDOM re-asserts a controlled input's `value`
+   * on every commit, so an imperative write there is undone by the next render
+   * even when the prop did not change. This renderer diffs props instead, so
+   * the write survives until the `value` prop itself changes. Do not rely on
+   * either renderer to revert it for you.
+   */
+  value: string
+  /**
+   * Offset of the selection's start in UTF-16 code units, matching
+   * `HTMLInputElement.selectionStart`. Equals {@link selectionEnd} when the
+   * selection is a bare caret.
+   *
+   * Assigning pushes {@link selectionEnd} out ahead of it when it would
+   * otherwise fall behind, as the DOM's setter does.
+   */
+  selectionStart: number
+  /** Offset of the selection's end in UTF-16 code units, matching
+   *  `HTMLInputElement.selectionEnd`. Assigning below {@link selectionStart}
+   *  collapses the selection to a caret at the new value. */
+  selectionEnd: number
+  /** Which end of the selection moves, matching
+   *  `HTMLInputElement.selectionDirection`. Never `"none"`; see
+   *  {@link SelectionDirection}. */
+  readonly selectionDirection: "forward" | "backward"
+  /**
+   * Select the text between two UTF-16 offsets, matching
+   * `HTMLInputElement.setSelectionRange()`, and reveal the caret.
+   *
+   * Offsets past the end of the value point at the end, and an inverted range
+   * collapses to a caret at `end` rather than being swapped — both are what
+   * HTML specifies. An omitted or unrecognized `direction` means `"forward"`.
+   */
+  setSelectionRange(start: number, end: number, direction?: SelectionDirection): void
+  /** Select all of the editor's text, matching `HTMLInputElement.select()`. */
+  select(): void
+}
+
 export interface CanvasPublicInstance extends PublicInstance {
   type: "canvas"
   getContext(
@@ -1473,6 +1554,12 @@ export interface CanvasPublicInstance extends PublicInstance {
 export interface Instance extends PublicInstance {
   getContext?: CanvasPublicInstance["getContext"]
   toDataURL?: CanvasPublicInstance["toDataURL"]
+  value?: InputPublicInstance["value"]
+  selectionStart?: InputPublicInstance["selectionStart"]
+  selectionEnd?: InputPublicInstance["selectionEnd"]
+  readonly selectionDirection?: InputPublicInstance["selectionDirection"]
+  setSelectionRange?: InputPublicInstance["setSelectionRange"]
+  select?: InputPublicInstance["select"]
   __applyCanvasCommands(
     ops: Uint32Array,
     operands: Float64Array,

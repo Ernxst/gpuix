@@ -154,6 +154,21 @@ export declare class GpuixRenderer {
   getSelectedText(): string | null
   /** Drop the current selection and request a repaint. */
   clearSelection(): void
+  /** One editor's API value, or null for any element that does not edit text. */
+  getInputValue(elementId: number): string | null
+  /**
+   * `[selectionStart, selectionEnd, backward]` in UTF-16 code units, where
+   * `backward` is 1 for `selectionDirection == "backward"`. Null for any
+   * element that does not edit text.
+   */
+  getInputSelection(elementId: number): Array<number> | null
+  /**
+   * Write one editor's value, as assigning `HTMLInputElement.value` does:
+   * no `change` event, and the caret moves to the end when the value differs.
+   */
+  setInputValue(elementId: number, value: string): void
+  /** `HTMLInputElement.setSelectionRange()` in UTF-16 code units. */
+  setInputSelection(elementId: number, start: number, end: number, backward: boolean): void
   /**
    * Set the scroll offset of a scrollable element.
    * x and y are negative pixel values (scroll down = more negative y).
@@ -464,6 +479,12 @@ export declare class TestGpuixRenderer {
   getSelectedText(): string | null
   /** Drop the current selection. */
   clearSelection(): void
+  /** One `<input>`/`<textarea>`'s API value, or null for any other element. */
+  getInputValue(elementId: number): string | null
+  /** `[selectionStart, selectionEnd, backward]` in UTF-16 code units, or null. */
+  getInputSelection(elementId: number): Array<number> | null
+  setInputValue(elementId: number, value: string): void
+  setInputSelection(elementId: number, start: number, end: number, backward: boolean): void
   /**
    * Syntax-cache counters as `[hits, misses, documents]`.
    *

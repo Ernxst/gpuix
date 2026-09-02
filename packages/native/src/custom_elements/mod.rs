@@ -417,6 +417,30 @@ pub trait CustomElement: 'static {
         None
     }
 
+    /// This element's DOM-shaped text editing state, or None for every element
+    /// that does not edit text — everything but `<input>` and `<textarea>`.
+    fn text_editing_state(&self, _cx: &gpui::App) -> Option<input::TextEditingState> {
+        None
+    }
+
+    /// Apply `HTMLInputElement.setSelectionRange()`, in UTF-16 code units.
+    /// Returns false for an element that does not edit text.
+    fn set_text_selection(
+        &self,
+        _start: usize,
+        _end: usize,
+        _backward: bool,
+        _cx: &mut gpui::App,
+    ) -> bool {
+        false
+    }
+
+    /// Apply an imperative `HTMLInputElement.value` write.
+    /// Returns false for an element that does not edit text.
+    fn set_text_value(&self, _value: String, _cx: &mut gpui::App) -> bool {
+        false
+    }
+
     /// Clean up resources (GPUI entities, subscriptions, etc.)
     fn destroy(&mut self);
 }
@@ -574,6 +598,34 @@ impl CustomElementRegistry {
         self.instances
             .get(&id)
             .and_then(|entry| entry.element.test_state())
+    }
+
+    /// One live `<input>`/`<textarea>`'s DOM-shaped text editing state.
+    pub fn text_editing_state(&self, id: u64, cx: &gpui::App) -> Option<input::TextEditingState> {
+        self.instances
+            .get(&id)
+            .and_then(|entry| entry.element.text_editing_state(cx))
+    }
+
+    /// Apply `setSelectionRange()` to one live editor, in UTF-16 code units.
+    pub fn set_text_selection(
+        &self,
+        id: u64,
+        start: usize,
+        end: usize,
+        backward: bool,
+        cx: &mut gpui::App,
+    ) -> bool {
+        self.instances
+            .get(&id)
+            .is_some_and(|entry| entry.element.set_text_selection(start, end, backward, cx))
+    }
+
+    /// Apply an imperative `value` write to one live editor.
+    pub fn set_text_value(&self, id: u64, value: String, cx: &mut gpui::App) -> bool {
+        self.instances
+            .get(&id)
+            .is_some_and(|entry| entry.element.set_text_value(value, cx))
     }
 
     /// Remove and destroy instances whose IDs no longer exist in the tree.

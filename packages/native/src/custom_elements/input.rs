@@ -299,6 +299,43 @@ impl TextEditorElement {
             state: None,
         }
     }
+
+    /// The live editor's state, or — before the first frame builds one — the
+    /// last `value` prop with the caret at its end, which is where the editor
+    /// puts it when the state is finally created.
+    fn editing_state(&self, cx: &App) -> TextEditingState {
+        match &self.state {
+            Some(state) => state.read(cx).editing_state(),
+            None => pending_editing_state(&self.value, self.multiline),
+        }
+    }
+
+    /// False before the first frame builds the editor: there is no state to
+    /// write to, and the caller asked for something that did not happen.
+    fn set_selection(&self, start: usize, end: usize, backward: bool, cx: &mut App) -> bool {
+        let Some(state) = &self.state else { return false };
+        state.update(cx, |state, cx| {
+            state.set_selection_utf16(start, end, backward, cx)
+        });
+        true
+    }
+
+    /// An imperative `input.value = …`. This deliberately does not touch
+    /// `self.value`, the mirror of React's `value` prop: leaving the mirror
+    /// alone is what makes the next commit of an *unchanged* prop leave the
+    /// written value in place, and a commit of a *changed* prop overwrite it —
+    /// the same order of precedence the DOM gives a controlled input.
+    ///
+    /// Like the DOM's setter, this fires no `change` event and, for a value
+    /// that actually differs, moves the caret to the end.
+    ///
+    /// False before the first frame builds the editor, as in
+    /// {@link set_selection}.
+    fn set_value(&self, value: String, cx: &mut App) -> bool {
+        let Some(state) = &self.state else { return false };
+        state.update(cx, |state, cx| state.set_external_text(value, cx));
+        true
+    }
 }
 
 impl CustomElement for TextEditorElement {
@@ -495,6 +532,18 @@ impl CustomElement for TextEditorElement {
         ]
     }
 
+    fn text_editing_state(&self, cx: &App) -> Option<TextEditingState> {
+        Some(TextEditorElement::editing_state(self, cx))
+    }
+
+    fn set_text_selection(&self, start: usize, end: usize, backward: bool, cx: &mut App) -> bool {
+        TextEditorElement::set_selection(self, start, end, backward, cx)
+    }
+
+    fn set_text_value(&self, value: String, cx: &mut App) -> bool {
+        TextEditorElement::set_value(self, value, cx)
+    }
+
     fn destroy(&mut self) {
         self.state = None;
     }
@@ -580,6 +629,56 @@ fn push_undo_snapshot(history: &mut VecDeque<EditSnapshot>, snapshot: EditSnapsh
     history.push_back(snapshot);
 }
 
+/// One text editor as `HTMLInputElement` describes itself: the API value plus
+/// the selection in **UTF-16 code units**, which is what `selectionStart` and
+/// `selectionEnd` count. The editor stores UTF-8 byte offsets internally, so
+/// every crossing of this boundary converts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextEditingState {
+    pub value: String,
+    pub selection_start: usize,
+    pub selection_end: usize,
+    /// `selectionDirection == "backward"`: the selection's start is the end
+    /// that moves. This editor cannot represent the DOM's third direction,
+    /// `"none"`, and HTML explicitly allows a platform without it to report
+    /// `"forward"` instead.
+    pub selection_backward: bool,
+}
+
+/// Apply HTML's "set the selection range" ordering rule. An inverted range
+/// collapses at `end`, it is not swapped: `setSelectionRange(5, 2)` puts the
+/// caret immediately before offset 2.
+/// <https://html.spec.whatwg.org/multipage/form-elements.html#set-the-selection-range>
+fn ordered_selection(start: usize, end: usize) -> (usize, usize) {
+    if end <= start {
+        (end, end)
+    } else {
+        (start, end)
+    }
+}
+
+/// What an editor will report before its first frame has built any state: the
+/// `value` prop with the caret at its end, which is where the editor puts the
+/// caret when it is finally created.
+///
+/// Reports the value the editor is *about* to hold, not the raw prop. A
+/// single-line editor folds newlines into spaces, so `"a\nb"` is `"a b"` — and
+/// a caret at its end is 3, not 3-with-a-newline-in-the-middle.
+fn pending_editing_state(value: &str, multiline: bool) -> TextEditingState {
+    let value = if multiline {
+        value.to_string()
+    } else {
+        single_line_text(value)
+    };
+    let end = value.encode_utf16().count();
+    TextEditingState {
+        value,
+        selection_start: end,
+        selection_end: end,
+        selection_backward: false,
+    }
+}
+
 struct TextEditorState {
     element_id: u64,
     callback: Option<EventCallback>,
@@ -652,6 +751,43 @@ impl TextEditorState {
             selected_range: self.selected_range.clone(),
             selection_reversed: self.selection_reversed,
         }
+    }
+
+    /// This editor's DOM-visible state, with the selection converted out of the
+    /// UTF-8 byte offsets the editor stores.
+    fn editing_state(&self) -> TextEditingState {
+        let range = self.range_to_utf16(&self.selected_range);
+        TextEditingState {
+            value: self.content.clone(),
+            selection_start: range.start,
+            selection_end: range.end,
+            selection_backward: self.selection_reversed,
+        }
+    }
+
+    /// `HTMLInputElement.setSelectionRange()`. Offsets are UTF-16 code units
+    /// and past-the-end values point at the end, as HTML requires.
+    ///
+    /// Also drops any in-flight IME composition: the marked range indexes the
+    /// old selection, and leaving it behind would make the next composition
+    /// commit overwrite unrelated text.
+    fn set_selection_utf16(
+        &mut self,
+        start: usize,
+        end: usize,
+        backward: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let (start, end) = ordered_selection(start, end);
+        let range = self.offset_from_utf16(start)..self.offset_from_utf16(end);
+        self.selected_range = range;
+        // A caret has no end that could be "the moving one", and a reversed
+        // empty range would make the next shift+arrow extend the wrong way.
+        self.selection_reversed = backward && !self.selected_range.is_empty();
+        self.marked_range = None;
+        self.follow_cursor = true;
+        self.reset_blink(cx);
+        cx.notify();
     }
 
     fn sync_prop_value(&mut self, value: String, cx: &mut Context<Self>) {
@@ -1958,6 +2094,36 @@ mod tests {
     #[test]
     fn single_line_newlines_become_one_space() {
         assert_eq!(single_line_text("a\r\nb\nc\rd"), "a b c d");
+    }
+
+    #[test]
+    fn pending_state_reports_the_text_the_editor_will_hold() {
+        // A single-line editor folds newlines, so the caret at the end of
+        // "a\nb" is 3 in the folded "a b" it is about to show.
+        let single = pending_editing_state("a\nb", false);
+        assert_eq!(single.value, "a b");
+        assert_eq!(single.selection_start, 3);
+        assert_eq!(single.selection_end, 3);
+        assert!(!single.selection_backward);
+
+        let multi = pending_editing_state("a\nb", true);
+        assert_eq!(multi.value, "a\nb");
+        assert_eq!(multi.selection_start, 3);
+
+        // Offsets are UTF-16 code units, so an astral character counts twice.
+        assert_eq!(pending_editing_state("a😀", false).selection_start, 3);
+        assert_eq!(pending_editing_state("", false).selection_start, 0);
+    }
+
+    #[test]
+    fn set_selection_range_collapses_an_inverted_range_at_its_end() {
+        // HTML: "If end is less than or equal to start then the start of the
+        // selection and the end of the selection must both be placed
+        // immediately before the character with offset end."
+        assert_eq!(ordered_selection(5, 2), (2, 2));
+        assert_eq!(ordered_selection(3, 3), (3, 3));
+        assert_eq!(ordered_selection(2, 5), (2, 5));
+        assert_eq!(ordered_selection(0, 0), (0, 0));
     }
 
     #[test]

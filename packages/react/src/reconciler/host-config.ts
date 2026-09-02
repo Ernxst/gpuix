@@ -16,6 +16,7 @@ import type {
   MutationRenderer,
   Props,
   PublicInstance,
+  SelectionDirection,
   StyleDesc,
   TextInstance,
   VirtualListProps,
@@ -999,6 +1000,104 @@ function diffCustomProps(
   }
 }
 
+/** Element types backed by the native text editor. */
+const TEXT_EDITING_TYPES = new Set<string>(["input", "textarea"])
+
+/**
+ * WebIDL folds every `unsigned long` argument through `ToUint32`, which is what
+ * `x >>> 0` spells: `setSelectionRange(-1, -1)` really does mean "both ends at
+ * 4294967295", clamped to the end of the value by the time it lands.
+ */
+function selectionOffset(value: number): number {
+  return value >>> 0
+}
+
+/**
+ * Install the text-editing members of `HTMLInputElement` on an `<input>` or
+ * `<textarea>` ref. They are accessors, not plain fields, because every read
+ * has to reach the native editor: the caret moves on keystrokes and pointer
+ * drags that React never sees.
+ */
+function installTextEditingMembers(
+  instance: Instance,
+  container: Container,
+  id: number
+): void {
+  // Before the first frame builds an editor the native side has no state to
+  // report, so fall back to the `value` prop with the caret at its end — where
+  // the editor puts the caret when it is finally created.
+  const readValue = (): string => {
+    const native = container.native
+    const value = native.getInputValue ? native.getInputValue(id) : null
+    if (typeof value === "string") return value
+    const prop = (instance.props as Props & { value?: unknown }).value
+    return typeof prop === "string" ? prop : ""
+  }
+  const readSelection = (): readonly number[] => {
+    const native = container.native
+    const range = native.getInputSelection ? native.getInputSelection(id) : null
+    if (range) return range
+    const end = readValue().length
+    return [end, end, 0]
+  }
+  const setSelection = (start: number, end: number, backward: boolean): void => {
+    container.native.setInputSelection?.(id, start, end, backward)
+  }
+
+  // Non-enumerable and configurable, matching the prototype accessors these
+  // mirror on a real `HTMLInputElement`. Every read crosses to native and
+  // forces a draw, so an enumerable own property would make an incidental
+  // spread, `Object.keys()`, or deep-equal over a ref cost four of them.
+  const nativeAccessor = (
+    descriptor: PropertyDescriptor
+  ): PropertyDescriptor & ThisType<undefined> => ({
+    enumerable: false,
+    configurable: true,
+    ...descriptor,
+  })
+
+  Object.defineProperties(instance, {
+    value: nativeAccessor({
+      get: readValue,
+      set: (value: unknown) => {
+        container.native.setInputValue?.(id, value == null ? "" : String(value))
+      },
+    }),
+    selectionStart: nativeAccessor({
+      get: () => readSelection()[0]!,
+      // The DOM's setter drags `selectionEnd` along rather than letting the
+      // start overtake it. One read covers both the end and the direction.
+      set: (value: number) => {
+        const start = selectionOffset(value)
+        const current = readSelection()
+        setSelection(start, Math.max(current[1]!, start), current[2] === 1)
+      },
+    }),
+    selectionEnd: nativeAccessor({
+      get: () => readSelection()[1]!,
+      set: (value: number) => {
+        const current = readSelection()
+        setSelection(current[0]!, selectionOffset(value), current[2] === 1)
+      },
+    }),
+    selectionDirection: nativeAccessor({
+      get: (): "forward" | "backward" =>
+        readSelection()[2] === 1 ? "backward" : "forward",
+    }),
+  })
+
+  instance.setSelectionRange = (
+    start: number,
+    end: number,
+    direction?: SelectionDirection
+  ): void => {
+    setSelection(selectionOffset(start), selectionOffset(end), direction === "backward")
+  }
+  // `select()` is "set the selection range with 0 and infinity", which lands on
+  // the end of the value once the native side clamps it.
+  instance.select = (): void => setSelection(0, readValue().length, false)
+}
+
 /**
  * Materialize a render-phase host node only after React places its subtree in
  * the commit phase. Abandoned concurrent renders stay as collectable JS
@@ -1183,6 +1282,9 @@ export const hostConfig = {
         )
         return undefined as never
       }) as NonNullable<Instance["toDataURL"]>
+    }
+    if (TEXT_EDITING_TYPES.has(type)) {
+      installTextEditingMembers(instance, rootContainerInstance, id)
     }
     hostNodeStates.set(instance, {
       container: rootContainerInstance,
