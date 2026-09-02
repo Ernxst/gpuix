@@ -53,11 +53,10 @@ export declare class GpuixRenderer {
    *   ["destroyElement",   id]
    *   ["appendChild",      parentId, childId]
    *   ["insertBefore",     parentId, childId, beforeId]
-   *   ["setStyle",         id, { ...style } | "{styleJson}"]
+   *   ["setStyle",         id, { ...style }]
    *   ["setText",          id, "content"]
    *   ["setEventListener", id, "eventType", true|false]
    *   ["setRoot",          id]
-   *   ["setCustomProp",      id, "key", value | "{valueJson}"]
    *   ["setCustomPropValue", id, "key", value]
    *
    * Returns accumulated destroyed IDs from all destroyElement ops.
