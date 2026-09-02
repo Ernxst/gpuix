@@ -606,4 +606,125 @@ describeNative("keyboard focus", () => {
     testRoot.renderer.simulateKeystrokes("tab")
     expect(focusedLabel()).toBe("two")
   })
+
+  describe("keys with nothing focused", () => {
+    // A browser targets `document.body` when no element has focus, so a
+    // listener on the root still hears the key. That is how "press / to
+    // search" works before the user has touched anything.
+
+    it("targets the root element for printable and named keys", () => {
+      const events: GpuixSyntheticEvent[] = []
+      const rootRef = React.createRef<PublicInstance>()
+
+      testRoot.render(
+        <div ref={rootRef} onKeyDown={(event) => events.push(event)}>
+          <text>no focusable content</text>
+        </div>
+      )
+
+      expect(testRoot.renderer.getActiveElement()).toBeNull()
+
+      testRoot.renderer.simulateKeystrokes("k")
+      testRoot.renderer.simulateKeystrokes("escape")
+      testRoot.renderer.simulateKeystrokes("cmd-shift-p")
+
+      // `"p"` for `cmd-shift-p` is a known divergence in the shared key-name
+      // normalization, not a property of this path: UI Events reports the
+      // shifted character, `"P"`. Asserted as it behaves so a later parity fix
+      // reads as the fix it is.
+      expect(events.map((event) => event.key)).toEqual(["k", "Escape", "p"])
+      expect(events.every((event) => event.target.id === rootRef.current!.id)).toBe(true)
+      expect(events.every((event) => event.repeat === false)).toBe(true)
+      expect(events[2]!.metaKey).toBe(true)
+      expect(events[2]!.shiftKey).toBe(true)
+    })
+
+    it("runs the root's capture listener at AT_TARGET, then its bubble listener", () => {
+      const phases: [string, number][] = []
+
+      testRoot.render(
+        <div
+          onKeyDownCapture={(event) => phases.push(["capture", event.eventPhase])}
+          onKeyDown={(event) => phases.push(["bubble", event.eventPhase])}
+          onKeyUp={() => phases.push(["up", 2])}
+        >
+          <text>no focusable content</text>
+        </div>
+      )
+
+      testRoot.renderer.simulateKeystrokes("k")
+
+      // Both listeners on the target run at AT_TARGET, as in the DOM.
+      expect(phases).toEqual([
+        ["capture", 2],
+        ["bubble", 2],
+        ["up", 2],
+      ])
+    })
+
+    // Counts, not targets. A root listener is told about the keys of a focused
+    // descendant too, with its own id as `event.target` — pre-existing in
+    // ancestor key delivery, so the assertion here is that the no-focus
+    // fallback adds no delivery on top of it.
+    it("adds no delivery once something is focused, and resumes when focus is dropped", () => {
+      let deliveries = 0
+      const rootRef = React.createRef<PublicInstance>()
+      const controlRef = React.createRef<PublicInstance>()
+
+      testRoot.render(
+        <div
+          ref={rootRef}
+          onKeyDown={() => {
+            deliveries += 1
+          }}
+        >
+          <div ref={controlRef} tabIndex={0} ariaLabel="control">
+            <text>Control</text>
+          </div>
+        </div>
+      )
+
+      testRoot.renderer.simulateKeystrokes("k")
+      expect(deliveries).toBe(1)
+
+      controlRef.current!.focus()
+      testRoot.renderer.flush()
+      testRoot.renderer.simulateKeystrokes("k")
+
+      // One more, from the root's own handler hearing the focused element's
+      // key — not two, which is what a second copy from the fallback would be.
+      expect(deliveries).toBe(2)
+
+      controlRef.current!.blur()
+      testRoot.renderer.flush()
+      testRoot.renderer.simulateKeystrokes("k")
+
+      expect(deliveries).toBe(3)
+    })
+
+    it("still lets the root cancel Tab traversal exactly once", () => {
+      const keys: string[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 400, height: 200 }}
+          onKeyDown={(event) => {
+            keys.push(event.key!)
+            if (event.key === "Tab") event.preventDefault()
+          }}
+        >
+          <a href="/one" ariaLabel="one" style={{ width: 200, height: 40 }}>
+            <text>One</text>
+          </a>
+        </div>
+      )
+
+      testRoot.renderer.simulateKeystrokes("tab")
+
+      // The synthesized Tab key down already targets the root when nothing is
+      // focused; the no-focus fallback must not deliver it a second time.
+      expect(keys).toEqual(["Tab"])
+      expect(focusedLabel()).toBeNull()
+    })
+  })
 })

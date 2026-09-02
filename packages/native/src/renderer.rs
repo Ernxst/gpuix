@@ -1516,20 +1516,29 @@ async fn run_ui_commands(
                 refresh_ui_window(window, cx)
             }
             UiCommand::ScrollToItem { id, index, offset } => {
-                if !VIRTUAL_LIST_STATES.with(|cell| {
+                let queued = VIRTUAL_LIST_STATES.with(|cell| {
                     if !cell.borrow().contains_key(&id) {
                         return false;
                     }
                     queue_virtual_list_scroll(id, index, offset);
                     true
-                }) {
-                    SCROLL_HANDLES.with(|cell| {
-                        if let Some(handle) = cell.borrow().get(&id) {
-                            handle.scroll_to_item(index);
-                        }
-                    });
-                }
-                refresh_ui_window(window, cx)
+                });
+                let revealed = if queued {
+                    Ok(())
+                } else {
+                    // The retained child index has to be mapped against the
+                    // tree the view holds, so the reveal runs on the UI thread.
+                    window.update(cx, |view, _window, _cx| {
+                        let tree = view.tree.clone();
+                        let tree = tree.lock().unwrap();
+                        SCROLL_HANDLES.with(|cell| {
+                            if let Some(handle) = cell.borrow().get(&id) {
+                                scroll_handle_to_child(handle, &tree, id, index);
+                            }
+                        });
+                    })
+                };
+                revealed.and_then(|()| refresh_ui_window(window, cx))
             }
             UiCommand::GetScrollOffset { id, response } => {
                 let offset = VIRTUAL_LIST_STATES
@@ -3856,10 +3865,11 @@ impl GpuixRenderer {
             queue_virtual_list_scroll(id, index, offset);
             true
         }) {
+            let tree = self.tree.lock().unwrap();
             SCROLL_HANDLES.with(|cell| {
                 let handles = cell.borrow();
                 if let Some(handle) = handles.get(&id) {
-                    handle.scroll_to_item(index);
+                    scroll_handle_to_child(handle, &tree, id, index);
                 }
             });
         }
@@ -5396,9 +5406,10 @@ impl WebGpuixRenderer {
             queue_virtual_list_scroll(id, index, offset);
             true
         }) {
+            let tree = self.tree.lock().unwrap();
             SCROLL_HANDLES.with(|handles| {
                 if let Some(handle) = handles.borrow().get(&id) {
-                    handle.scroll_to_item(index);
+                    scroll_handle_to_child(handle, &tree, id, index);
                 }
             });
         }
@@ -6321,6 +6332,16 @@ impl GpuixView {
         true
     }
 
+    /// Reveal the `index`th retained child of an overflow scroller.
+    pub(crate) fn scroll_handle_to_child(&self, scroller_id: u64, index: usize) {
+        let Some(handle) = self.scroll_handles.get(&scroller_id) else {
+            return;
+        };
+        let tree = self.tree.clone();
+        let tree = tree.lock().unwrap();
+        scroll_handle_to_child(handle, &tree, scroller_id, index);
+    }
+
     /// The list's logical scroll anchor as
     /// `[item_ix, offset_in_item_px, viewport_height_px]`.
     ///
@@ -7024,6 +7045,54 @@ impl GpuixView {
                 shift,
                 ..Default::default()
             });
+        });
+    }
+
+    /// The DOM's body fallback: a key pressed with nothing focused still has a
+    /// target — `document.body` there, the root element here — so a root
+    /// listener hears it, which is how a global shortcut works before the user
+    /// has focused anything. It is the same target the synthesized Tab key down
+    /// already falls back to.
+    ///
+    /// GPUI delivers key events along the focus path, and `render` focuses the
+    /// root wrapper whenever nothing else holds focus, so this listener is the
+    /// no-focus case. Requiring the wrapper itself to be focused is what keeps
+    /// delivery single: while a retained element (or a text editor's own handle)
+    /// has focus, that element's handler is the one that fires, even though this
+    /// wrapper is still an ancestor on the dispatch path.
+    ///
+    /// Tab never arrives here — its key binding dispatches `FocusNext` /
+    /// `FocusPrevious`, and a bubbled action consumes the key event before GPUI
+    /// reaches any key listener.
+    fn dispatch_unfocused_key_event(
+        &self,
+        event_type: &str,
+        keystroke: &gpui::Keystroke,
+        is_held: Option<bool>,
+        window: &gpui::Window,
+    ) {
+        if !self.root_focus_handle.is_focused(window) {
+            return;
+        }
+        let tree = self.tree.lock().unwrap();
+        let Some(root_id) = tree.root_id else {
+            return;
+        };
+        // As on the focused path, a key event is only carried across to JS for
+        // an element that listens for it.
+        if !tree
+            .elements
+            .get(&root_id)
+            .is_some_and(|element| element.events.contains(event_type))
+        {
+            return;
+        }
+        drop(tree);
+        emit_event_full(&self.event_callback, root_id, event_type, |payload| {
+            payload.key = Some(keystroke.key.clone());
+            payload.key_char = keystroke.key_char.clone();
+            payload.is_held = is_held;
+            payload.modifiers = Some(keystroke.modifiers.into());
         });
     }
 
@@ -7760,7 +7829,18 @@ impl gpui::Render for GpuixView {
                 .text_color(gpui::rgba(0xe2e2e2ff))
                 .track_focus(&self.root_focus_handle)
                 .on_action(cx.listener(Self::focus_next_action))
-                .on_action(cx.listener(Self::focus_previous_action));
+                .on_action(cx.listener(Self::focus_previous_action))
+                .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, _cx| {
+                    view.dispatch_unfocused_key_event(
+                        "keyDown",
+                        &event.keystroke,
+                        Some(event.is_held),
+                        window,
+                    );
+                }))
+                .on_key_up(cx.listener(|view, event: &gpui::KeyUpEvent, window, _cx| {
+                    view.dispatch_unfocused_key_event("keyUp", &event.keystroke, None, window);
+                }));
             with_window_menu_actions(root)
                 .child(selection_frame_reset(
                     self.selection.clone(),
@@ -8557,24 +8637,69 @@ fn direct_child_index(tree: &RetainedTree, ancestor_id: u64, element_id: u64) ->
     }
 }
 
-/// The index `gpui::ScrollHandle::scroll_to_item` needs for the scroller child
-/// that contains `element_id`.
+/// The index `gpui::ScrollHandle::scroll_to_item` needs for the scroller's
+/// `index`th retained child.
 ///
-/// gpui counts the children it painted, and every element paints an automation
-/// bounds tracker before its own content and children, so a retained child index
-/// is one (or two, for a scroller with its own text) short of gpui's.
-/// A `<text>` scroller has no such child: `build_host_container` flattens its
-/// whole subtree into one inline element, so gpui paints a single run where the
-/// retained tree has children, and no index names the target. `None` leaves the
-/// reveal unrequested instead of scrolling to an unrelated row.
-fn painted_child_index(tree: &RetainedTree, scroller_id: u64, element_id: u64) -> Option<usize> {
-    let index = direct_child_index(tree, scroller_id, element_id)?;
+/// gpui counts the children it painted, and `build_host_container` paints up to
+/// three of its own before the retained ones, in this order:
+///
+/// 1. the automation bounds tracker, on every element;
+/// 2. the scroll-position tracker, on a scroller carrying an `onScroll`
+///    listener — the same `events.contains("scroll")` gate that attaches it;
+/// 3. the element's own text, when it has `content`.
+///
+/// The index is only ever *used* on an element that owns a
+/// `gpui::ScrollHandle`, so the scroll tracker's other condition (the element
+/// scrolls at all) holds wherever the answer is acted on. The reveal path
+/// computes it before looking the handle up, and reaches a scroller through the
+/// looser `is_overflow_scroller`, so it can be computed for an element that
+/// painted no tracker — and discarded a line later.
+///
+/// `None` leaves the reveal unrequested rather than scrolling to an unrelated
+/// row, and covers the two indices that name no painted child:
+///
+/// - a `<text>` scroller, whose whole subtree `build_host_container` flattens
+///   into one inline element, so gpui paints a single run where the retained
+///   tree has children;
+/// - an index past the last child. gpui keeps an unsatisfiable request pending
+///   instead of dropping it, so a later frame that grows the child list would
+///   apply it as an unexplained jump.
+///
+/// Both answer with `None` rather than an error, against this codebase's habit
+/// of failing loudly, because the common way to reach them is benign: JS
+/// computed the index against items it holds and a frame has not committed them
+/// yet. Throwing would punish that one-frame race, and the DOM has no throw
+/// here either — `scrollIntoView()` on an element with nothing to reveal is a
+/// no-op.
+fn painted_index_of_child(tree: &RetainedTree, scroller_id: u64, index: usize) -> Option<usize> {
     let scroller = tree.elements.get(&scroller_id)?;
-    if scroller.element_type == "text" {
+    if scroller.element_type == "text" || index >= scroller.children.len() {
         return None;
     }
-    let leading = 1 + usize::from(scroller.content.is_some());
+    let leading = 1
+        + usize::from(scroller.events.contains("scroll"))
+        + usize::from(scroller.content.is_some());
     Some(index + leading)
+}
+
+/// The index `gpui::ScrollHandle::scroll_to_item` needs for the scroller child
+/// that contains `element_id`.
+fn painted_child_index(tree: &RetainedTree, scroller_id: u64, element_id: u64) -> Option<usize> {
+    let index = direct_child_index(tree, scroller_id, element_id)?;
+    painted_index_of_child(tree, scroller_id, index)
+}
+
+/// Reveal the scroller's `index`th retained child through its scroll handle,
+/// which counts painted children rather than retained ones.
+fn scroll_handle_to_child(
+    handle: &gpui::ScrollHandle,
+    tree: &RetainedTree,
+    scroller_id: u64,
+    index: usize,
+) {
+    if let Some(painted) = painted_index_of_child(tree, scroller_id, index) {
+        handle.scroll_to_item(painted);
+    }
 }
 
 #[cfg(test)]
@@ -8617,6 +8742,67 @@ mod painted_child_index_tests {
         ]));
 
         assert_eq!(painted_child_index(&tree, 1, 3), None);
+    }
+
+    #[test]
+    fn child_index_from_the_public_api_skips_the_automation_tracker_too() {
+        let tree = tree_from(serde_json::json!([
+            ["createElement", 1, "div"],
+            ["createElement", 2, "div"],
+            ["createElement", 3, "div"],
+            ["appendChild", 1, 2],
+            ["appendChild", 1, 3],
+            ["setRoot", 1]
+        ]));
+
+        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(1));
+        assert_eq!(painted_index_of_child(&tree, 1, 1), Some(2));
+    }
+
+    /// An `onScroll` listener puts a second canvas of gpui's own in front of
+    /// the retained children, so the same child moves one further along.
+    #[test]
+    fn an_onscroll_listener_adds_a_second_leading_child() {
+        let mut tree = tree_from(serde_json::json!([
+            ["createElement", 1, "div"],
+            ["createElement", 2, "div"],
+            ["createElement", 3, "div"],
+            ["appendChild", 1, 2],
+            ["appendChild", 1, 3],
+            ["setRoot", 1]
+        ]));
+        tree.set_event_listener(1, "scroll".to_string(), true);
+
+        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(2));
+        assert_eq!(painted_index_of_child(&tree, 1, 1), Some(3));
+        assert_eq!(painted_child_index(&tree, 1, 3), Some(3));
+
+        // The scroller's own text paints after both trackers.
+        tree.set_text(1, "leading text".to_string());
+        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(3));
+
+        // A listener the scroller does not carry moves nothing.
+        tree.set_event_listener(1, "scroll".to_string(), false);
+        tree.set_event_listener(1, "click".to_string(), true);
+        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(2));
+    }
+
+    /// gpui holds an unsatisfiable `scroll_to_item` request until a frame can
+    /// satisfy it, so a past-the-end index must not be requested at all.
+    #[test]
+    fn an_index_past_the_last_child_names_no_painted_child() {
+        let tree = tree_from(serde_json::json!([
+            ["createElement", 1, "div"],
+            ["createElement", 2, "div"],
+            ["createElement", 3, "div"],
+            ["appendChild", 1, 2],
+            ["appendChild", 1, 3],
+            ["setRoot", 1]
+        ]));
+
+        assert_eq!(painted_index_of_child(&tree, 1, 1), Some(2));
+        assert_eq!(painted_index_of_child(&tree, 1, 2), None);
+        assert_eq!(painted_index_of_child(&tree, 1, 6), None);
     }
 }
 

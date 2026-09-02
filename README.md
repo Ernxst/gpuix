@@ -1575,6 +1575,17 @@ Virtual-list `scrollToItem` calls are applied on the **next render, after
 that frame's child splice**, so an index computed against a just-committed
 child list is never shifted twice.
 
+`scrollToItem` **does nothing** in two cases, rather than revealing an
+unrelated row:
+
+- **an index past the last child.** gpui holds a reveal it cannot satisfy until
+  a frame can, so a stale index would land as an unexplained jump on the first
+  later frame whose child list is long enough.
+- **a scrolling `<text>`.** A text host's whole subtree is painted as one
+  flattened run, so no index names a child inside it. Scroll it with
+  `scrollTo(id, x, y)`, or wrap the rows in a `div` scroller when they must be
+  revealed one at a time.
+
 ### Performance model
 
 | Work | Plain scroll container | `<virtual-list>` children | `<virtual-list>` + `itemCount` |
@@ -1854,6 +1865,67 @@ phase to keep focus on the current element, matching the browser:
   Editor
 </div>
 ```
+
+### Keys with nothing focused
+
+A browser targets `document.body` when no element has focus, so a listener on
+the document still hears the key. GPUIX targets the **root element** instead:
+put `onKeyDown` / `onKeyUp` (or their capture forms) on the element you render
+at the top of the tree and it hears every key pressed before the user has
+focused anything — the "press `/` to search" and palette shortcuts that must
+work on first paint.
+
+```tsx
+<div
+  style={{ width: '100%', height: '100%' }}
+  onKeyDown={(event) => {
+    if (event.key === '/') openSearch()
+  }}
+>
+  <App />
+</div>
+```
+
+`event.target` is that root element, and its capture and bubble listeners both
+run at `AT_TARGET`, as they do for any DOM event whose target is the listener.
+`Tab` is unaffected: it still traverses, and `preventDefault()` still cancels
+the traversal.
+
+**A root listener is not only the no-focus path.** An element that listens for
+keys is told about every key event that passes through it, including the ones
+travelling up from a focused descendant, and it is told with **its own id as
+`event.target`** — so a root handler also runs for each character typed into a
+focused `<input>`. When that focused descendant listens for keys too, the root
+handler runs **twice for the one keypress**: once as the ordinary DOM bubble,
+carrying the descendant as `event.target` at phase `3`, and once as the
+ancestor's own delivery, carrying the root as `event.target` at phase `2`.
+
+So `event.target` is not uniformly wrong on a key event — it is inconsistent.
+A root listener sees both shapes for the same physical key, which is why
+filtering on `event.target` (or on `eventPhase`) cannot separate "nothing is
+focused" from "the user is typing". The no-focus fallback adds no delivery to
+any of this; the focus read is what answers the question:
+
+```tsx
+const rootRef = useRef<PublicInstance>(null)
+
+<div
+  ref={rootRef}
+  onKeyDown={(event) => {
+    // Ignore keys that belong to a focused element, the way a `document`
+    // listener would read `event.target`. Compare against the root's own id:
+    // when the root is itself focusable and focused, the shortcut should fire,
+    // and a bare `!== null` check would swallow it.
+    const active = renderer.getActiveElement()
+    if (active !== null && active !== rootRef.current?.id) return
+    if (event.key === '/') openSearch()
+  }}
+>
+```
+
+The inconsistent target is in ancestor key delivery generally, not in this
+fallback, and it is why the guard reads focus rather than the event. Until it is
+fixed, `getActiveElement()` is the reliable answer to "what has focus".
 
 ### Imperative focus
 
