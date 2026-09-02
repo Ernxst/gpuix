@@ -604,9 +604,13 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
   it("reports an unknown direct style with element, property, and value", () => {
     const renderer = new TestRenderer()
-    renderer.createElement(41, "text")
-    renderer.setCustomProp(41, "data-testid", JSON.stringify("direct-label"))
-    renderer.setStyle(41, JSON.stringify({ textTranform: "uppercase" }))
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 41, "text"],
+        ["setCustomPropValue", 41, "data-testid", "direct-label"],
+        ["setStyle", 41, { textTranform: "uppercase" }],
+      ])
+    )
 
     const diagnostics = renderer.drainStyleDiagnostics()
     expect(diagnostics).toHaveLength(1)
@@ -624,10 +628,14 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
   it("reports an invalid length expression with element, property, value, and parse position", () => {
     const renderer = new TestRenderer()
-    renderer.createElement(44, "div")
-    renderer.setCustomProp(44, "data-testid", JSON.stringify("fluid-panel"))
-    renderer.setStyle(44, JSON.stringify({ width: "calc(100% - 2rem)", height: 40 }))
-    renderer.setRoot(44)
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 44, "div"],
+        ["setCustomPropValue", 44, "data-testid", "fluid-panel"],
+        ["setStyle", 44, { width: "calc(100% - 2rem)", height: 40 }],
+        ["setRoot", 44],
+      ])
+    )
 
     expect(renderer.getElement(44)?.style).toMatchObject({ height: 40 })
     const [diagnostic] = renderer.drainStyleDiagnostics()
@@ -686,21 +694,26 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
   it("reports malformed nested grid tracks with their track index", () => {
     const renderer = new TestRenderer()
-    renderer.createElement(82, "div")
-    renderer.setCustomProp(82, "data-testid", JSON.stringify("ledger-grid"))
-    renderer.setStyle(
-      82,
-      JSON.stringify({
-        display: "grid",
-        gridTemplateColumns: [
-          { type: "max-content" },
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 82, "div"],
+        ["setCustomPropValue", 82, "data-testid", "ledger-grid"],
+        [
+          "setStyle",
+          82,
           {
-            type: "minmax",
-            min: { type: "fr", value: 1 },
-            max: { type: "fr", value: 1 },
+            display: "grid",
+            gridTemplateColumns: [
+              { type: "max-content" },
+              {
+                type: "minmax",
+                min: { type: "fr", value: 1 },
+                max: { type: "fr", value: 1 },
+              },
+            ],
           },
         ],
-      }),
+      ])
     )
 
     const diagnostics = renderer.drainStyleDiagnostics()
@@ -717,19 +730,24 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
   it("rejects a malformed transition as one descriptor with precise paths", () => {
     const renderer = new TestRenderer()
-    renderer.createElement(83, "div")
-    renderer.setCustomProp(83, "data-testid", JSON.stringify("animated-card"))
-    renderer.setStyle(
-      83,
-      JSON.stringify({
-        opacity: 0.4,
-        transition: {
-          properties: ["opacity", "display"],
-          durationMs: -100,
-        },
-      })
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 83, "div"],
+        ["setCustomPropValue", 83, "data-testid", "animated-card"],
+        [
+          "setStyle",
+          83,
+          {
+            opacity: 0.4,
+            transition: {
+              properties: ["opacity", "display"],
+              durationMs: -100,
+            },
+          },
+        ],
+        ["setRoot", 83],
+      ])
     )
-    renderer.setRoot(83)
 
     expect(renderer.getElement(83)?.style).toMatchObject({ opacity: 0.4 })
     expect(renderer.getElement(83)?.style).not.toHaveProperty("transition")
@@ -744,12 +762,13 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
   it("keeps deterministic field dropping when strict diagnostics are disabled", () => {
     const renderer = new TestRenderer()
     renderer.setStrictStyles(false)
-    renderer.createElement(91, "div")
-    renderer.setStyle(
-      91,
-      JSON.stringify({ textTranform: "uppercase", backgroundColor: "red" })
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 91, "div"],
+        ["setStyle", 91, { textTranform: "uppercase", backgroundColor: "red" }],
+        ["setRoot", 91],
+      ])
     )
-    renderer.setRoot(91)
 
     expect(renderer.getElement(91)?.style).toMatchObject({ backgroundColor: "red" })
     expect(renderer.drainStyleDiagnostics()).toEqual([])
@@ -877,20 +896,25 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
   it("validates outline and focus-visible fields with their full property paths", () => {
     const renderer = new TestRenderer()
-    renderer.createElement(101, "div")
-    renderer.setCustomProp(101, "data-testid", JSON.stringify("focus-card"))
-    renderer.setStyle(
-      101,
-      JSON.stringify({
-        outlineColor: "not-a-color",
-        outlineWidth: -1,
-        focusVisible: {
-          backgroundColor: "blue",
-          outlineOffset: "wide",
-        },
-      })
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 101, "div"],
+        ["setCustomPropValue", 101, "data-testid", "focus-card"],
+        [
+          "setStyle",
+          101,
+          {
+            outlineColor: "not-a-color",
+            outlineWidth: -1,
+            focusVisible: {
+              backgroundColor: "blue",
+              outlineOffset: "wide",
+            },
+          },
+        ],
+        ["setRoot", 101],
+      ])
     )
-    renderer.setRoot(101)
 
     expect(renderer.getElement(101)?.style).toMatchObject({
       focusVisible: { backgroundColor: "blue" },

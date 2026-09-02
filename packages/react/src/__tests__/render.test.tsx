@@ -409,9 +409,13 @@ if (!isNativeTestRendererAvailable()) {
 }
 
 const renderer = new TestRenderer()
-renderer.createElement(1, "text")
-renderer.setText(1, "esm test binding")
-renderer.setRoot(1)
+renderer.applyBatch(
+  JSON.stringify([
+    ["createElement", 1, "text"],
+    ["setText", 1, "esm test binding"],
+    ["setRoot", 1],
+  ])
+)
 renderer.flush()
 
 if (!renderer.getPaintedText().includes("esm test binding")) {

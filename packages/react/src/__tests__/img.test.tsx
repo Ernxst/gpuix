@@ -274,9 +274,13 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
 
   it("reports malformed direct and batched sources with element, property, and value", () => {
     const direct = createImageRenderer()
-    direct.createElement(41, "img")
-    direct.setCustomProp(41, "data-testid", JSON.stringify("direct-image"))
-    direct.setCustomProp(41, "src", JSON.stringify({ kind: "path", url: "/tmp/a.png" }))
+    direct.applyBatch(
+      JSON.stringify([
+        ["createElement", 41, "img"],
+        ["setCustomPropValue", 41, "data-testid", "direct-image"],
+        ["setCustomPropValue", 41, "src", { kind: "path", url: "/tmp/a.png" }],
+      ])
+    )
     expect(direct.drainStyleDiagnostics()[0]).toMatchObject({
       elementId: 41,
       elementType: "img",

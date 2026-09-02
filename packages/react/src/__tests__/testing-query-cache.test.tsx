@@ -72,21 +72,28 @@ describeNative("TestRenderer query cache", () => {
       expect(root.renderer.findByTestId("removed")).toBeUndefined()
 
       const textLeaf = root.renderer.findByText("react update")!
-      root.renderer.setText(textLeaf.id, "direct update")
+      root.renderer.applyBatch(JSON.stringify([["setText", textLeaf.id, "direct update"]]))
       expect(root.renderer.findByText("direct update")?.id).toBe(textLeaf.id)
 
-      root.renderer.setCustomProp(panel.id, "data-testid", JSON.stringify("direct-panel"))
-      root.renderer.setCustomProp(panel.id, "id", JSON.stringify("direct-id"))
-      root.renderer.setEventListener(panel.id, "click", true)
+      root.renderer.applyBatch(
+        JSON.stringify([
+          ["setCustomPropValue", panel.id, "data-testid", "direct-panel"],
+          ["setCustomPropValue", panel.id, "id", "direct-id"],
+          ["setEventListener", panel.id, "click", true],
+        ])
+      )
       expect(root.renderer.findByTestId("direct-panel")?.id).toBe(panel.id)
       expect(root.renderer.findByElementId("direct-id")?.id).toBe(panel.id)
       expect(root.renderer.getElement(panel.id)?.events).toContain("click")
 
-      root.renderer.removeChild(panel.id, label.id)
+      // The batch transport has no detach-only operation: destroying a child
+      // both unlinks it from its parent and drops its whole subtree.
+      expect(
+        root.renderer.applyBatch(JSON.stringify([["destroyElement", label.id]]))
+      ).toContain(label.id)
       expect(root.renderer.getElement(panel.id)?.children.map((child) => child.id)).not.toContain(
         label.id
       )
-      root.renderer.destroyElement(label.id)
       expect(root.renderer.getElement(label.id)).toBeUndefined()
     } finally {
       root.unmount()
@@ -173,123 +180,50 @@ describeNative("TestRenderer query cache", () => {
     }
   }, 10_000)
 
-  it("routes compatibility mutators through batched transport and invalidation", () => {
+  it("routes one batch through the native transport and invalidates the snapshot", () => {
     const renderer = new TestRenderer()
     const state = internals(renderer)
     const invalidate = vi.spyOn(state, "invalidateElementMap")
     const applyBatch = vi.spyOn(state.native, "applyBatch")
-    const exercised: string[] = []
     const rootId = 10_000
     const textId = 10_001
-    const insertedId = 10_002
-    const destroyedId = 10_003
-
-    const expectCompatibilityMutation = (
-      name: string,
-      mutation: unknown[],
-      mutate: () => unknown
-    ): unknown => {
-      const invalidationsBefore = invalidate.mock.calls.length
-      const batchesBefore = applyBatch.mock.calls.length
-      const result = mutate()
-      expect(invalidate.mock.calls.length, name).toBe(invalidationsBefore + 1)
-      expect(applyBatch.mock.calls.length, name).toBe(batchesBefore + 1)
-      expect(JSON.parse(applyBatch.mock.calls.at(-1)![0]), name).toEqual([mutation])
-      exercised.push(name)
-      return result
-    }
+    const destroyedId = 10_002
 
     try {
-      expectCompatibilityMutation("createElement", ["createElement", rootId, "div"], () =>
-        renderer.createElement(rootId, "div")
-      )
-      expectCompatibilityMutation("setRoot", ["setRoot", rootId], () =>
-        renderer.setRoot(rootId)
-      )
-      expectCompatibilityMutation("createElement", ["createElement", textId, "text"], () =>
-        renderer.createElement(textId, "text")
-      )
-      expectCompatibilityMutation("appendChild", ["appendChild", rootId, textId], () =>
-        renderer.appendChild(rootId, textId)
-      )
-      expectCompatibilityMutation("setText", ["setText", textId, "direct"], () =>
-        renderer.setText(textId, "direct")
-      )
-      expectCompatibilityMutation(
-        "setStyle",
-        ["setStyle", rootId, JSON.stringify({ width: 20 })],
-        () => renderer.setStyle(rootId, JSON.stringify({ width: 20 }))
-      )
-      expectCompatibilityMutation(
-        "setEventListener",
+      const batch = [
+        ["createElement", rootId, "div"],
+        ["setRoot", rootId],
+        ["setStyle", rootId, { width: 20 }],
         ["setEventListener", rootId, "click", true],
-        () => renderer.setEventListener(rootId, "click", true)
-      )
-      expectCompatibilityMutation(
-        "setCustomProp",
         ["setCustomPropValue", rootId, "data-testid", "structural"],
-        () => renderer.setCustomProp(rootId, "data-testid", JSON.stringify("structural"))
-      )
-      const batchesBeforeInvalidCustomProp = applyBatch.mock.calls.length
-      const invalidationsBeforeInvalidCustomProp = invalidate.mock.calls.length
-      expect(() => renderer.setCustomProp(rootId, "data-testid", "not-json")).toThrow()
-      expect(applyBatch.mock.calls.length).toBe(batchesBeforeInvalidCustomProp)
-      expect(invalidate.mock.calls.length).toBe(invalidationsBeforeInvalidCustomProp)
-      expectCompatibilityMutation(
-        "createElement",
-        ["createElement", insertedId, "div"],
-        () => renderer.createElement(insertedId, "div")
-      )
-      expectCompatibilityMutation(
-        "insertBefore",
-        ["insertBefore", rootId, insertedId, textId],
-        () => renderer.insertBefore(rootId, insertedId, textId)
-      )
-      expectCompatibilityMutation(
-        "removeChild",
-        ["destroyElement", insertedId],
-        () => renderer.removeChild(rootId, insertedId)
-      )
-      expectCompatibilityMutation(
-        "createElement",
+        ["createElement", textId, "text"],
+        ["appendChild", rootId, textId],
+        ["setText", textId, "direct"],
         ["createElement", destroyedId, "div"],
-        () => renderer.createElement(destroyedId, "div")
-      )
-      expect(
-        expectCompatibilityMutation(
-          "destroyElement",
-          ["destroyElement", destroyedId],
-          () => renderer.destroyElement(destroyedId)
-        )
-      ).toEqual([destroyedId])
-      expectCompatibilityMutation("applyBatch", ["setText", textId, "batched"], () =>
-        renderer.applyBatch(JSON.stringify([["setText", textId, "batched"]]))
-      )
+        ["insertBefore", rootId, destroyedId, textId],
+      ]
+      const invalidationsBefore = invalidate.mock.calls.length
+      expect(renderer.applyBatch(JSON.stringify(batch))).toEqual([])
+      // One React commit is one FFI call, and one snapshot invalidation.
+      expect(applyBatch.mock.calls.length).toBe(1)
+      expect(JSON.parse(applyBatch.mock.calls[0]![0])).toEqual(batch)
+      expect(invalidate.mock.calls.length).toBe(invalidationsBefore + 1)
+
+      expect(renderer.findByTestId("structural")?.id).toBe(rootId)
+      expect(renderer.getElement(rootId)?.events).toContain("click")
+      expect(renderer.findByText("direct")?.id).toBe(textId)
+
+      // Destroyed ids come back so the caller can drop their event handlers.
+      expect(renderer.applyBatch(JSON.stringify([["destroyElement", destroyedId]]))).toEqual([
+        destroyedId,
+      ])
+      expect(renderer.getElement(destroyedId)).toBeUndefined()
+
       // Disposal clears the native retained tree, so it must also drop the
       // snapshot — a cached map would keep serving the dead tree.
       const invalidationsBeforeDispose = invalidate.mock.calls.length
       renderer.dispose()
-      expect(invalidate.mock.calls.length, "dispose").toBe(
-        invalidationsBeforeDispose + 1
-      )
-      exercised.push("dispose")
-
-      expect(new Set(exercised)).toEqual(
-        new Set([
-          "dispose",
-          "createElement",
-          "destroyElement",
-          "appendChild",
-          "removeChild",
-          "insertBefore",
-          "setStyle",
-          "setText",
-          "setEventListener",
-          "setRoot",
-          "setCustomProp",
-          "applyBatch",
-        ])
-      )
+      expect(invalidate.mock.calls.length, "dispose").toBe(invalidationsBeforeDispose + 1)
     } finally {
       applyBatch.mockRestore()
       invalidate.mockRestore()
