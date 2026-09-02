@@ -8586,19 +8586,34 @@ fn direct_child_index(tree: &RetainedTree, ancestor_id: u64, element_id: u64) ->
 /// The index `gpui::ScrollHandle::scroll_to_item` needs for the scroller's
 /// `index`th retained child.
 ///
-/// gpui counts the children it painted, and every element paints an automation
-/// bounds tracker before its own content and children, so a retained child index
-/// is one (or two, for a scroller with its own text) short of gpui's.
-/// A `<text>` scroller has no such child: `build_host_container` flattens its
-/// whole subtree into one inline element, so gpui paints a single run where the
-/// retained tree has children, and no index names the target. `None` leaves the
-/// reveal unrequested instead of scrolling to an unrelated row.
+/// gpui counts the children it painted, and `build_host_container` paints up to
+/// three of its own before the retained ones, in this order:
+///
+/// 1. the automation bounds tracker, on every element;
+/// 2. the scroll-position tracker, on a scroller carrying an `onScroll`
+///    listener — the same `events.contains("scroll")` gate that attaches it;
+/// 3. the element's own text, when it has `content`.
+///
+/// Only ever called for an element that owns a `gpui::ScrollHandle`, so the
+/// scroll tracker's other condition (the element scrolls at all) already holds.
+///
+/// `None` leaves the reveal unrequested rather than scrolling to an unrelated
+/// row, and covers the two indices that name no painted child:
+///
+/// - a `<text>` scroller, whose whole subtree `build_host_container` flattens
+///   into one inline element, so gpui paints a single run where the retained
+///   tree has children;
+/// - an index past the last child. gpui keeps an unsatisfiable request pending
+///   instead of dropping it, so a later frame that grows the child list would
+///   apply it as an unexplained jump.
 fn painted_index_of_child(tree: &RetainedTree, scroller_id: u64, index: usize) -> Option<usize> {
     let scroller = tree.elements.get(&scroller_id)?;
-    if scroller.element_type == "text" {
+    if scroller.element_type == "text" || index >= scroller.children.len() {
         return None;
     }
-    let leading = 1 + usize::from(scroller.content.is_some());
+    let leading = 1
+        + usize::from(scroller.events.contains("scroll"))
+        + usize::from(scroller.content.is_some());
     Some(index + leading)
 }
 
@@ -8677,6 +8692,52 @@ mod painted_child_index_tests {
 
         assert_eq!(painted_index_of_child(&tree, 1, 0), Some(1));
         assert_eq!(painted_index_of_child(&tree, 1, 1), Some(2));
+    }
+
+    /// An `onScroll` listener puts a second canvas of gpui's own in front of
+    /// the retained children, so the same child moves one further along.
+    #[test]
+    fn an_onscroll_listener_adds_a_second_leading_child() {
+        let mut tree = tree_from(serde_json::json!([
+            ["createElement", 1, "div"],
+            ["createElement", 2, "div"],
+            ["createElement", 3, "div"],
+            ["appendChild", 1, 2],
+            ["appendChild", 1, 3],
+            ["setRoot", 1]
+        ]));
+        tree.set_event_listener(1, "scroll".to_string(), true);
+
+        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(2));
+        assert_eq!(painted_index_of_child(&tree, 1, 1), Some(3));
+        assert_eq!(painted_child_index(&tree, 1, 3), Some(3));
+
+        // The scroller's own text paints after both trackers.
+        tree.set_text(1, "leading text".to_string());
+        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(3));
+
+        // A listener the scroller does not carry moves nothing.
+        tree.set_event_listener(1, "scroll".to_string(), false);
+        tree.set_event_listener(1, "click".to_string(), true);
+        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(2));
+    }
+
+    /// gpui holds an unsatisfiable `scroll_to_item` request until a frame can
+    /// satisfy it, so a past-the-end index must not be requested at all.
+    #[test]
+    fn an_index_past_the_last_child_names_no_painted_child() {
+        let tree = tree_from(serde_json::json!([
+            ["createElement", 1, "div"],
+            ["createElement", 2, "div"],
+            ["createElement", 3, "div"],
+            ["appendChild", 1, 2],
+            ["appendChild", 1, 3],
+            ["setRoot", 1]
+        ]));
+
+        assert_eq!(painted_index_of_child(&tree, 1, 1), Some(2));
+        assert_eq!(painted_index_of_child(&tree, 1, 2), None);
+        assert_eq!(painted_index_of_child(&tree, 1, 6), None);
     }
 }
 

@@ -3995,6 +3995,70 @@ describeNative("events", () => {
       expect(offset![1]).toBe(-220)
     })
 
+    it("reveals the same row when the scroller also listens for scroll", () => {
+      function ItemList() {
+        return (
+          <div style={{ width: 200, height: 100, overflow: "scroll" }} onScroll={() => {}}>
+            {["A", "B", "C", "D"].map((label) => (
+              <div key={label} style={{ height: 80 }}>
+                <text>{`Item ${label}`}</text>
+              </div>
+            ))}
+          </div>
+        )
+      }
+
+      testRoot.render(<ItemList />)
+
+      const container = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflow === "scroll")!
+
+      expect(testRoot.renderer.getScrollOffset(container.id)).toEqual([0, 0])
+
+      testRoot.renderer.scrollToItem(container.id, 3)
+
+      // `onScroll` puts a second canvas of gpui's own in front of the retained
+      // children — the scroll-position tracker, after the automation bounds
+      // tracker — so this scroller's rows sit two further along than a plain
+      // one's. Landing on -140 is the same row short as an unmapped index.
+      const offset = testRoot.renderer.getScrollOffset(container.id)
+      expect(offset).not.toBeNull()
+      expect(offset![1]).toBe(-220)
+    })
+
+    it("leaves no pending reveal for an index past the last child", () => {
+      function ItemList({ count }: { count: number }) {
+        return (
+          <div style={{ width: 200, height: 100, overflow: "scroll" }}>
+            {Array.from({ length: count }, (_, index) => (
+              <div key={index} style={{ height: 80 }}>
+                <text>{`Item ${index}`}</text>
+              </div>
+            ))}
+          </div>
+        )
+      }
+
+      testRoot.render(<ItemList count={2} />)
+
+      const container = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflow === "scroll")!
+
+      testRoot.renderer.scrollToItem(container.id, 6)
+      expect(testRoot.renderer.getScrollOffset(container.id)).toEqual([0, 0])
+
+      // gpui keeps an unsatisfiable reveal pending rather than dropping it, so
+      // an out-of-range index would land as an unexplained jump on the first
+      // frame whose child list is long enough.
+      testRoot.render(<ItemList count={8} />)
+      testRoot.renderer.flush()
+      testRoot.renderer.drawPendingFrame()
+
+      expect(testRoot.renderer.getScrollOffset(container.id)).toEqual([0, 0])
+    })
+
     it("should render scrollable container with visible screenshot diff", () => {
       function ScreenshotScroller() {
         return (
