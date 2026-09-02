@@ -20,10 +20,10 @@ import {
   getDefaultNormalizer,
   matches as matchesMatcher,
   resolveTestId,
+  type DefaultNormalizerOptions,
   type Matcher,
   type MatcherOptions as TestingMatcherOptions,
   type NormalizerFn,
-  type NormalizerOptions,
 } from "./testing-matchers.js"
 import {
   normalizeScrollWheelOptions,
@@ -344,7 +344,7 @@ export interface TestElement {
 }
 
 export type MatcherOptions = TestingMatcherOptions
-export type { NormalizerFn, NormalizerOptions }
+export type { DefaultNormalizerOptions, NormalizerFn }
 export { getDefaultNormalizer }
 export type TextMatcher = Matcher<TestElement>
 export type TestIdMatcher = Matcher<TestElement>

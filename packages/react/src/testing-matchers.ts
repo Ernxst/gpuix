@@ -1,13 +1,13 @@
 export type NormalizerFn = (content: string) => string
 
-export interface NormalizerOptions {
+export interface DefaultNormalizerOptions {
   /** Strip leading and trailing whitespace. Defaults to true. */
   trim?: boolean
   /** Collapse runs of whitespace into a single space. Defaults to true. */
   collapseWhitespace?: boolean
 }
 
-export interface MatcherOptions extends NormalizerOptions {
+export interface MatcherOptions extends DefaultNormalizerOptions {
   /** Full equality by default; false enables case-insensitive substring matching. */
   exact?: boolean
   /** Replaces the default trim-and-collapse-whitespace normalizer. */
@@ -30,7 +30,7 @@ export function resolveTestId(node: { dataTestId?: string }): string | undefined
 export function getDefaultNormalizer({
   trim = true,
   collapseWhitespace = true,
-}: NormalizerOptions = {}): NormalizerFn {
+}: DefaultNormalizerOptions = {}): NormalizerFn {
   return (content) => {
     let normalized = content
     if (trim) normalized = normalized.trim()
