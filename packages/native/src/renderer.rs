@@ -9521,12 +9521,25 @@ fn build_visually_hidden_element(
 ) -> gpui::AnyElement {
     use gpui::prelude::*;
 
+    // Flattening is the only check a malformed `<text>` subtree gets, and this
+    // projection paints nothing that would otherwise reach it. Its accessible
+    // text now comes from the tree, so run the flatten for the diagnostic alone
+    // rather than let an authoring mistake pass silently here.
+    if element.element_type == "text" {
+        drop(flatten_text(element, ctx));
+    }
+
     let name_from_contents = accessible_name_from_contents(element, ctx);
     // A role that does not name itself from its contents still keeps its text.
     // Painted text reaches AccessKit as the value of the node that draws it, and
     // the projection draws nothing, so the flattened string becomes this node's
     // value the same way the painted `<text>` host sets one below. An ancestor
     // that already owns this text as its own name suppresses the duplicate.
+    //
+    // Unlike a painted value, this one is whitespace-normalized: it is built by
+    // the name flattener, and the accname flat string is normalized. A `<text>`
+    // whose authored spacing is irregular therefore reads slightly differently
+    // projected than painted.
     let content_value = (!ctx.inherited.text_accessibility_owned_by_role
         && !crate::accessibility::role_supports_name_from_contents(element))
     .then(|| crate::accessibility::flattened_contents_text(ctx.tree, element))

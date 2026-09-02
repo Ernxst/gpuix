@@ -1319,20 +1319,27 @@ describeNative("automation", () => {
     expect(rowGroup[1].aria).toMatchObject({ role: "RowGroup" })
     expect(rowGroup[1].aria).not.toHaveProperty("label")
     expect(rowGroup[1].children).toEqual([headerRow[0], alphaRow[0], betaRow[0]])
-    expect(headerRow[1].aria).toMatchObject({ role: "Row", row_index: 1 })
-    expect(headerRow[1].aria).not.toHaveProperty("label")
+    // `row` names itself from its contents, and accname names each cell in its
+    // own right on the way down, so the labels these cells carry name the row.
+    expect(headerRow[1].aria).toMatchObject({
+      role: "Row",
+      row_index: 1,
+      label: "Site Power",
+    })
     expect(headerRow[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
       expect.objectContaining({ role: "ColumnHeader", label: "Site" }),
       expect.objectContaining({ role: "ColumnHeader", label: "Power" }),
     ])
-    expect(alphaRow[1].aria).toMatchObject({ role: "Row", row_index: 2 })
-    expect(alphaRow[1].aria).not.toHaveProperty("label")
+    expect(alphaRow[1].aria).toMatchObject({
+      role: "Row",
+      row_index: 2,
+      label: "Alpha 42 MW",
+    })
     expect(alphaRow[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
       expect.objectContaining({ role: "RowHeader", label: "Alpha" }),
       expect.objectContaining({ role: "Cell", label: "42 MW" }),
     ])
-    expect(betaRow[1].aria).toMatchObject({ role: "Row", row_index: 3 })
-    expect(betaRow[1].aria).not.toHaveProperty("label")
+    expect(betaRow[1].aria).toMatchObject({ role: "Row", row_index: 3, label: "Beta" })
     expect(betaRow[1].children?.map((key) => tree.nodes[key]?.aria)).toEqual([
       expect.objectContaining({ role: "RowHeader", label: "Beta" }),
     ])
