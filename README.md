@@ -2531,7 +2531,9 @@ text imports no longer need a runtime flag.
 | Event | Props | Payload fields |
 |-------|-------|----------------|
 | Click | `onClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` — primary button only |
+| Double click | `onDoubleClick` | Same fields, after the second `onClick`; primary button only |
 | Aux click | `onAuxClick` | Same fields, for the non-primary buttons |
+| Context menu | `onContextMenu` | Same fields as `onMouseDown`, on the right-button press; cancelable |
 | Mouse down | `onMouseDown` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse up | `onMouseUp` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse enter | `onMouseEnter` | `hovered` |
@@ -2607,6 +2609,12 @@ so it ends when the pointer leaves the element.
 `onClick` is the primary button too, like the DOM. Use **`onAuxClick`** for the
 others, and read `event.isRightClick`. `onMouseDown` and `onMouseUp` see every
 button through `event.button` (`0` left, `1` middle, `2` right).
+
+`onDoubleClick` follows the second `onClick` of a primary-button pair; a
+repeated keyboard activation is two clicks and never a double click.
+`onContextMenu` fires on the right-button **press**, so the order is
+`onMouseDown`, `onContextMenu`, `onAuxClick`, as on macOS and in the DOM. It is
+cancelable: call `event.preventDefault()` to suppress your own menu.
 
 ## Supported Styles
 
