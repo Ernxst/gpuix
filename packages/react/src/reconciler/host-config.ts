@@ -337,6 +337,7 @@ const ELEMENT_INTERNAL_COLOR_TRANSITION_TYPES = new Set<ElementType>([
 ])
 const warnedUnsupportedStyleTransitions = new WeakSet<Instance>()
 const warnedInvalidStyleProps = new WeakSet<Instance>()
+const warnedUnsupportedClassNameProps = new WeakSet<Instance>()
 const warnedUnsupportedAccessibilityRoleProps = new WeakSet<Instance>()
 const warnedUnsupportedAriaProps = new WeakSet<Instance>()
 const warnedVisuallyHiddenProps = new WeakSet<Instance>()
@@ -347,6 +348,10 @@ class UnsupportedStyleTransitionError extends Error {
 
 class InvalidStylePropError extends Error {
   override name = "InvalidStylePropError"
+}
+
+class UnsupportedClassNamePropError extends Error {
+  override name = "UnsupportedClassNamePropError"
 }
 
 class UnsupportedAccessibilityRolePropError extends Error {
@@ -399,6 +404,25 @@ function styleForRenderer(instance: Instance, container: Container, props: Props
   // Treat a rejected update like style removal instead of preserving stale or
   // serialising an arbitrary value into the native renderer.
   return {}
+}
+
+function diagnoseUnsupportedClassNameProp(
+  instance: Instance,
+  container: Container,
+  props: Props
+): void {
+  const className = (props as Props & { className?: unknown }).className
+  // `className=""` and `className={null}` apply no CSS classes on the web
+  // either, so nothing is lost by ignoring them here.
+  if (className === undefined || className === null || className === "") return
+
+  const message =
+    `[gpuix] ${elementSubject(instance, props)} does not support className. ` +
+    "CSS classes are not applied by the native renderer; use the style prop with a GPUIX style object instead."
+  if (container.strictStyles) throw new UnsupportedClassNamePropError(message)
+  if (warnedUnsupportedClassNameProps.has(instance)) return
+  warnedUnsupportedClassNameProps.add(instance)
+  console.warn(message)
 }
 
 /**
@@ -909,6 +933,7 @@ export const hostConfig = {
       mounted: false,
     })
     diagnoseUnsupportedStyleTransition(instance, rootContainerInstance, props)
+    diagnoseUnsupportedClassNameProp(instance, rootContainerInstance, props)
     diagnoseUnsupportedAccessibilityRoleProp(instance, rootContainerInstance, props)
     diagnoseUnsupportedAriaProp(instance, rootContainerInstance, props)
     diagnoseVisuallyHiddenProp(instance, rootContainerInstance, props)
@@ -1056,6 +1081,7 @@ export const hostConfig = {
   ): void {
     const container = containerFor(instance)
     diagnoseUnsupportedStyleTransition(instance, container, newProps)
+    diagnoseUnsupportedClassNameProp(instance, container, newProps)
     diagnoseUnsupportedAccessibilityRoleProp(instance, container, newProps)
     diagnoseUnsupportedAriaProp(instance, container, newProps)
     diagnoseVisuallyHiddenProp(instance, container, newProps)
