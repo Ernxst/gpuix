@@ -173,8 +173,10 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       expect(() => strictRef.current!.toDataURL()).toThrow(
         new RegExp(`strict-data-url.*HTMLCanvasElement\\.toDataURL.*${spec.reason}`)
       )
-      compatibilityRef.current!.toDataURL()
-      compatibilityRef.current!.toDataURL()
+      // There is nothing to encode, so nothing comes back — and the signature
+      // now says so. It used to claim `string` and hand the caller `undefined`.
+      expect(compatibilityRef.current!.toDataURL()).toBeUndefined()
+      expect(compatibilityRef.current!.toDataURL("image/png")).toBeUndefined()
       expect(warn).toHaveBeenCalledTimes(1)
       expect(warn).toHaveBeenCalledWith(
         expect.stringMatching(

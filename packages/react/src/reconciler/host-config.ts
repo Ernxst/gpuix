@@ -1274,14 +1274,15 @@ export const hostConfig = {
         if (contextId !== "2d") return null
         return getOrCreateRecordingContext2D(instance, diagnosticTarget)
       }) as NonNullable<Instance["getContext"]>
-      instance.toDataURL = (() => {
-        diagnoseUnsupportedCanvasElementMember(
-          instance,
-          diagnosticTarget,
-          "toDataURL"
-        )
-        return undefined as never
-      }) as NonNullable<Instance["toDataURL"]>
+      // Reports why there is no data URL and returns nothing. Under
+      // `strictStyles` the diagnostic throws instead of returning.
+      instance.toDataURL = (): undefined => {
+        diagnoseUnsupportedCanvasElementMember(instance, diagnosticTarget, "toDataURL")
+        return undefined
+      }
+    }
+    if (TEXT_EDITING_TYPES.has(type)) {
+      installTextEditingMembers(instance, rootContainerInstance, id)
     }
     if (TEXT_EDITING_TYPES.has(type)) {
       installTextEditingMembers(instance, rootContainerInstance, id)

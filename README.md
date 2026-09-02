@@ -457,6 +457,29 @@ path without a renderer check, however. DPR-scaled bitmap dimensions paired
 with the matching `context.scale(dpr, dpr)` map back to the same GPUIX layout
 geometry, while GPUIX still rasterizes at the layout box's physical resolution.
 
+### Canvas pixel readback
+
+There is none. `HTMLCanvasElement.toDataURL()` encodes the canvas **bitmap**,
+and GPUI has no per-element readback to encode.
+
+`toDataURL()`, `getImageData()` and `putImageData()` all report that the same
+way at runtime. Only `toDataURL()` is also *typed* for it, declared to return
+`undefined`, because GPUIX owns that signature. The 2D context members keep
+lib.dom's `CanvasRenderingContext2D` types, so `getImageData()` still looks
+like it returns an `ImageData`; there, the diagnostic is the only signal.
+
+The one readback that does exist, `captureScreenshot()`, is not a substitute.
+It grabs the whole window's composited pixels, it is built only into
+`test-support` builds, and cropping it to the element would return whatever is
+painted over the canvas at its laid-out size rather than the canvas bitmap at
+`width` × `height`. That trades a wrong type for wrong pixels.
+
+Calling `toDataURL()` reports why: under `strictStyles` it throws
+`Canvas2DNotImplementedError`, and otherwise it warns once per element and
+returns `undefined`. Keep the source data you drew from and re-encode that, or
+capture through the automation screenshot path when a window image is what you
+actually want.
+
 ### Canvas image residency
 
 Decoded canvas images are shared by source within one renderer, but their GPU
