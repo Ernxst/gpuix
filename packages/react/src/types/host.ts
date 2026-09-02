@@ -803,10 +803,18 @@ export interface Props {
   ariaLabel?: string
   /** DOM-compatible alias for ariaLabel. */
   "aria-label"?: string
+  /** Space-separated `id`s whose text names this node. Wins over ariaLabel. */
+  ariaLabelledBy?: string
+  /** DOM-compatible alias for ariaLabelledBy. */
+  "aria-labelledby"?: string
   /** Supplementary accessible description announced after the name, role, and value. */
   ariaDescription?: string
   /** DOM-compatible alias for ariaDescription. */
   "aria-description"?: string
+  /** Space-separated `id`s whose text describes this node. Wins over ariaDescription. */
+  ariaDescribedBy?: string
+  /** DOM-compatible alias for ariaDescribedBy. */
+  "aria-describedby"?: string
   /** Checked state for checkboxes and switches. */
   ariaChecked?: boolean | "mixed"
   /** DOM-compatible alias for ariaChecked. */

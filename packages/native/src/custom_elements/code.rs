@@ -248,7 +248,9 @@ impl CustomElement for CodeElement {
             &ctx,
             cx,
         );
-        block.child(body).into_any_element()
+        super::apply_accessibility(block, &ctx)
+            .child(body)
+            .into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
