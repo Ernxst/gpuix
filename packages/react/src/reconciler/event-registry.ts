@@ -10,6 +10,11 @@ import {
   type GpuixEventDispatchResult,
   type GpuixSyntheticEvent,
 } from "./synthetic-event.js"
+// A cycle on paper — `reconciler.js` imports this module for `attachRoot` —
+// and harmless in practice: neither module touches the other's bindings while
+// they evaluate, only later, from inside a dispatch.
+import { flushSync } from "./reconciler.js"
+import { TEXT_EDITING_TYPES } from "./text-editing.js"
 
 const EVENT_REGISTRY_KEY = "__gpuixEventRegistry"
 
@@ -42,8 +47,21 @@ const TARGET_ONLY_EVENTS = new Set([
 
 const NON_BUBBLING_EVENTS = new Set(["focus", "blur", "scroll"])
 
-/** The host types whose text lives in a native editor rather than in a prop. */
-const TEXT_EDITING_TYPES = new Set(["input", "textarea"])
+/**
+ * The editor a change event came from, when there is one whose state React
+ * might have to restore.
+ *
+ * Resolved before the dispatch, because it decides how the dispatch runs.
+ */
+function textEditorTarget(
+  payload: EventPayload,
+  renderer: NativeRenderer
+): Instance | undefined {
+  if (payload.eventType !== "change") return undefined
+  const container = eventRegistrySlot().containersByRenderer.get(renderer)
+  const target = container?.eventTargets.get(payload.elementId)
+  return target !== undefined && TEXT_EDITING_TYPES.has(target.type) ? target : undefined
+}
 
 /**
  * React DOM's `restoreControlledState`, ported to the native editor.
@@ -59,32 +77,28 @@ const TEXT_EDITING_TYPES = new Set(["input", "textarea"])
  * read of the editor: they agree exactly when React accepted the edit, and that
  * is the common case, so an accepted keystroke costs no native call at all.
  *
- * **The microtask is the whole timing contract.** React must be given its
- * chance to answer the change before we decide the edit was refused. An update
- * scheduled by a handler flushes either on the way out of the caller's
- * `flushSync` or in the microtask React queued while the handler ran — both
- * land before a microtask queued *after* the handlers returned. Restoring
- * synchronously here would rewind every accepted keystroke a frame before
- * React's own value arrived.
+ * **This may only run once React's answer has committed**, which is what the
+ * `flushSync` around the dispatch is for. Deciding earlier would read the props
+ * React is in the middle of replacing and rewind an edit it *accepted* — and
+ * that rewind would stick, because the value React commits a moment later looks
+ * to the editor like an echo of the edit it just reported, and is dropped.
  */
-function restoreControlledEditor(payload: EventPayload, renderer: NativeRenderer): void {
-  if (payload.eventType !== "change") return
+function restoreControlledEditor(
+  target: Instance,
+  payload: EventPayload,
+  renderer: NativeRenderer
+): void {
+  // The editor may have unmounted, or its id been reused, during the dispatch.
   const container = eventRegistrySlot().containersByRenderer.get(renderer)
-  const target = container?.eventTargets.get(payload.elementId)
-  if (!container || !target || !TEXT_EDITING_TYPES.has(target.type)) return
-
-  queueMicrotask(() => {
-    // The editor may have unmounted, or its id been reused, while we waited.
-    if (container.eventTargets.get(payload.elementId) !== target) return
-    const declared = (target.props as { value?: unknown }).value
-    // `value == null` is React's own test for an uncontrolled field: no prop
-    // owns the text, so there is nothing to restore it to. This is what keeps
-    // typing and imperative `ref.value` writes on an uncontrolled input.
-    if (declared === null || declared === undefined) return
-    const value = String(declared)
-    if (value === payload.value) return
-    renderer.setInputValue?.(payload.elementId, value)
-  })
+  if (container?.eventTargets.get(payload.elementId) !== target) return
+  const declared = (target.props as { value?: unknown }).value
+  // `value == null` is React's own test for an uncontrolled field: no prop owns
+  // the text, so there is nothing to restore it to. This is what keeps typing
+  // and imperative `ref.value` writes on an uncontrolled input.
+  if (declared === null || declared === undefined) return
+  const value = String(declared)
+  if (value === payload.value) return
+  renderer.setInputValue?.(payload.elementId, value)
 }
 
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
@@ -261,7 +275,19 @@ export function handleGpuixEvent(
   payload: EventPayload,
   renderer: NativeRenderer
 ): GpuixEventDispatchResult {
-  const result = dispatchGpuixEvent(payload, renderer)
+  // A change on a text editor is a **discrete** event, as `input` and `change`
+  // are in the DOM, and the only kind GPUIX treats that way. The host config
+  // reports `DefaultEventPriority` for everything, so a handler's `setState`
+  // normally only schedules work — the commit lands a macrotask later. That is
+  // fine for a click, and fatal here: the restore below has to tell an edit
+  // React accepted from one it refused, and it can only do that once React's
+  // answer has committed. `flushSync` makes this one dispatch behave as a
+  // discrete event does, committing before it returns. Every other event keeps
+  // the priority it had.
+  const editor = textEditorTarget(payload, renderer)
+  const result = editor
+    ? flushSync(() => dispatchGpuixEvent(payload, renderer))
+    : dispatchGpuixEvent(payload, renderer)
 
   if (
     payload.eventType === "click" &&
@@ -281,9 +307,8 @@ export function handleGpuixEvent(
     )
   }
 
-  // After the handlers, never before: the queued check has to see the props
-  // React settled on, not the ones it is about to replace.
-  restoreControlledEditor(payload, renderer)
+  // After the handlers and after their commit, never before.
+  if (editor) restoreControlledEditor(editor, payload, renderer)
 
   return result
 }

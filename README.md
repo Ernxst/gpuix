@@ -1775,8 +1775,10 @@ report `"forward"` in its place.
 Assigning `value` writes straight to the native editor: it fires no `onChange`.
 React's `value` prop still wins the moment it *changes* — the next commit of a
 different `value` overwrites what you wrote, a commit of an unchanged one leaves
-it alone. On a controlled input the next edit undoes it as well, since the
-restore above puts `props.value` back. Set React state instead.
+it alone. On a controlled input, an edit the handler then **declines** wipes it
+too, because the restore above puts `props.value` back; an edit the handler
+stores keeps it, since the prop it stores is the edited text. Set React state
+instead.
 
 Select-all-on-focus and caret restoration after a reformatting `onChange` are
 the two idioms this exists for:

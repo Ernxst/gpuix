@@ -25,3 +25,10 @@ An editor with no `value` prop is uncontrolled and untouched — the same test
 React uses — so typed text and imperative `ref.value` writes still stand. The
 check costs nothing when the edit was accepted: the emitted value and the prop
 agree, and no native call is made.
+
+A change on an `<input>` or `<textarea>` is now dispatched as a **discrete**
+event, the way the DOM dispatches `input` and `change`: React commits the
+handler's update before the dispatch returns, which is what lets the editor tell
+an accepted edit from a refused one, and what makes the rewind land between two
+keystrokes rather than after the burst. Every other event keeps the priority it
+had.

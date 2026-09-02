@@ -26,6 +26,7 @@ import {
   unregisterEventHandler,
   unregisterEventHandlers,
 } from "./event-registry.js"
+import { TEXT_EDITING_TYPES } from "./text-editing.js"
 import {
   DEFAULT_VIRTUAL_LIST_ESTIMATED_ITEM_HEIGHT,
   VirtualListRowContractError,
@@ -1020,9 +1021,6 @@ function diffCustomProps(
     }
   }
 }
-
-/** Element types backed by the native text editor. */
-const TEXT_EDITING_TYPES = new Set<string>(["input", "textarea"])
 
 /**
  * WebIDL folds every `unsigned long` argument through `ToUint32`, which is what

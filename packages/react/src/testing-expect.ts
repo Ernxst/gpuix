@@ -33,6 +33,7 @@ import {
   type TestElement,
   type TestRenderer,
 } from "./testing.js"
+import { TEXT_EDITING_TYPES } from "./reconciler/text-editing.js"
 
 /** The normalization half of the matcher options; `exact` has no meaning here. */
 export type TextContentOptions = Omit<MatcherOptions, "exact">
@@ -163,9 +164,6 @@ function accessibilityNodeOf(
   const tree = renderer.getAccessibilityTree()
   return Object.values(tree.nodes).find((node) => node.host_id === element.id)
 }
-
-/** The host types backed by the native text editor. */
-const TEXT_EDITING_TYPES = new Set(["input", "textarea"])
 
 /**
  * The value a browser would report for this element.
