@@ -26,6 +26,11 @@
       "import": "./dist/testing.js",
       "default": "./dist/testing.js"
     },
+    "./testing/vitest": {
+      "types": "./dist/testing-vitest.d.ts",
+      "import": "./dist/testing-vitest.js",
+      "default": "./dist/testing-vitest.js"
+    },
     "./testing/matchers": {
       "types": "./dist/testing-expect.d.ts",
       "import": "./dist/testing-expect.js",
@@ -89,7 +94,13 @@
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
     "react-reconciler": "^0.31.0",
-    "scheduler": "^0.25.0"
+    "scheduler": "^0.25.0",
+    "vitest": "^3.0.0 || ^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@tanstack/react-router": "1.170.32",
