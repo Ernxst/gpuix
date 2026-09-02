@@ -44,6 +44,10 @@ interface HostNodeState {
   container: Container
   children: HostNode[]
   mounted: boolean
+  // HTML-AAM gives `<header>`, `<footer>` and `<li>` a role that depends on
+  // which element contains them, so the implicit role needs the parent node,
+  // not just the parent id.
+  parent: Instance | null
 }
 
 const hostNodeStates = new WeakMap<HostNode, HostNodeState>()
@@ -131,12 +135,14 @@ function removeTrackedChild(state: HostNodeState, child: HostNode): void {
   const index = state.children.indexOf(child)
   if (index !== -1) state.children.splice(index, 1)
   child.parentId = null
+  stateFor(child).parent = null
 }
 
 function appendTrackedChild(parent: Instance, state: HostNodeState, child: HostNode): void {
   removeTrackedChild(state, child)
   state.children.push(child)
   child.parentId = parent.id
+  stateFor(child).parent = parent
 }
 
 function insertTrackedChild(
@@ -153,6 +159,7 @@ function insertTrackedChild(
     state.children.splice(beforeIndex, 0, child)
   }
   child.parentId = parent.id
+  stateFor(child).parent = parent
 }
 
 // ── Event wiring helpers ─────────────────────────────────────────────
@@ -728,13 +735,99 @@ function nativeActivationKind(type: string, props: Props): "anchor" | undefined 
   return type === "a" || typeof href === "string" ? "anchor" : undefined
 }
 
-/** Restore the two semantic aliases after both normalize to a native div. */
-function nativeRole(type: string, props: Props): Props["role"] | undefined {
+/**
+ * HTML-AAM's implicit role for each JSX alias whose role depends only on the
+ * tag name. The aliases missing from this table either have no corresponding
+ * role (`p`, `span`, `strong`, `em`, `kbd`) or need their surroundings to
+ * resolve, and are handled in `nativeRole`.
+ */
+const IMPLICIT_ROLES: Readonly<Record<string, NonNullable<Props["role"]>>> = {
+  a: "link",
+  article: "article",
+  aside: "complementary",
+  button: "button",
+  h1: "heading",
+  h2: "heading",
+  h3: "heading",
+  h4: "heading",
+  h5: "heading",
+  h6: "heading",
+  li: "listitem",
+  main: "main",
+  nav: "navigation",
+  ol: "list",
+  ul: "list",
+}
+
+/**
+ * HTML-AAM scopes `<header>`/`<footer>` to the body element: they are the
+ * page's banner and contentinfo landmarks only when no sectioning element —
+ * or element carrying one of those elements' roles — contains them.
+ */
+const LANDMARK_SCOPING_TYPES = new Set(["article", "aside", "main", "nav", "section"])
+const LANDMARK_SCOPING_ROLES = new Set([
+  "article",
+  "complementary",
+  "main",
+  "navigation",
+  "region",
+])
+
+/** The list containers that make an `<li>` a listitem rather than a generic. */
+const LIST_OWNER_TYPES = new Set(["ul", "ol", "menu"])
+
+function isScopedToBody(instance: Instance): boolean {
+  for (let node = stateFor(instance).parent; node !== null; node = stateFor(node).parent) {
+    const role = node.props.role
+    if (LANDMARK_SCOPING_TYPES.has(node.type)) return false
+    if (typeof role === "string" && LANDMARK_SCOPING_ROLES.has(role)) return false
+  }
+  return true
+}
+
+function isInsideList(instance: Instance): boolean {
+  const parent = stateFor(instance).parent
+  if (parent === null) return false
+  return LIST_OWNER_TYPES.has(parent.type) || parent.props.role === "list"
+}
+
+/** The accessible name authored on the element itself, as `<section>` needs it. */
+function hasAuthoredName(props: Props): boolean {
+  const label = authoredAriaLabel(props)
+  return label !== undefined && label !== ""
+}
+
+/**
+ * Restore each alias's HTML-AAM implicit role after it normalizes to a native
+ * div. An explicit `role` always wins, exactly as `role` overrides an element's
+ * implicit role in the DOM.
+ */
+function nativeRole(
+  type: string,
+  props: Props,
+  instance: Instance
+): Props["role"] | undefined {
   if (props.role !== undefined) return props.role
-  if (type === "button") return "button"
-  if (type === "a") return "link"
   if (type === "img") return nativeImageRole(props)
-  return undefined
+  // `<section>` is a region landmark only when it has an accessible name;
+  // an unnamed one is generic, so it contributes no node of its own.
+  if (type === "section") return hasAuthoredName(props) ? "region" : undefined
+  if (type === "header") return isScopedToBody(instance) ? "banner" : undefined
+  if (type === "footer") return isScopedToBody(instance) ? "contentinfo" : undefined
+  if (type === "li") return isInsideList(instance) ? "listitem" : undefined
+  return IMPLICIT_ROLES[type]
+}
+
+/**
+ * `<h1>`–`<h6>` carry their heading level with the implicit heading role. An
+ * authored `ariaLevel` wins, and an explicit `role` that is not `heading` drops
+ * the level with the role it belonged to.
+ */
+function nativeHeadingLevel(type: string, props: Props): number | undefined {
+  if (props.role !== undefined && props.role !== "heading") return undefined
+  if (props.ariaLevel !== undefined || props["aria-level"] !== undefined) return undefined
+  const level = /^h([1-6])$/.exec(type)?.[1]
+  return level === undefined ? undefined : Number(level)
 }
 
 /** An explicitly authored accessible name, from either prop spelling. */
@@ -767,7 +860,11 @@ function nativeImageLabel(type: string, props: Props): string | undefined {
   return authoredAriaLabel(props) === undefined ? alt : undefined
 }
 
-function customPropEntries(type: string, props: Props): Array<[string, CustomPropInput]> {
+function customPropEntries(
+  instance: Instance,
+  props: Props
+): Array<[string, CustomPropInput]> {
+  const { type } = instance
   const propEntries = Object.entries(props) as Array<[string, CustomPropInput]>
   const entries = propEntries.flatMap(([key, value]): Array<[string, CustomPropInput]> => {
     if (key === "activationKind" || key === "role" || key === "tabIndex") return []
@@ -780,8 +877,10 @@ function customPropEntries(type: string, props: Props): Array<[string, CustomPro
   if (tabIndex !== undefined) entries.push(["tabIndex", tabIndex])
   const activationKind = nativeActivationKind(type, props)
   if (activationKind) entries.push(["activationKind", activationKind])
-  const role = nativeRole(type, props)
+  const role = nativeRole(type, props, instance)
   if (role !== undefined) entries.push(["role", role])
+  const headingLevel = nativeHeadingLevel(type, props)
+  if (headingLevel !== undefined) entries.push(["ariaLevel", headingLevel])
   const imageLabel = nativeImageLabel(type, props)
   if (imageLabel !== undefined) entries.push(["ariaLabel", imageLabel])
 
@@ -798,12 +897,12 @@ function customPropEntries(type: string, props: Props): Array<[string, CustomPro
 /** Send all custom props to Rust for non-built-in element types. */
 function syncCustomProps(
   renderer: MutationRenderer,
-  id: number,
-  type: string,
+  instance: Instance,
   props: Props
 ): void {
+  const { id, type } = instance
   const builtIn = BUILT_IN_TYPES.has(type)
-  for (const [key, value] of customPropEntries(type, props)) {
+  for (const [key, value] of customPropEntries(instance, props)) {
     if (isReservedProp(key)) continue
     if (builtIn && !UNIVERSAL_PROPS.has(key) && !isIdentityProp(key)) continue
     renderer.setCustomProp(id, key, serializeCustomProp(type, key, value))
@@ -813,14 +912,14 @@ function syncCustomProps(
 /** Diff and send changed custom props to Rust. */
 function diffCustomProps(
   renderer: MutationRenderer,
-  id: number,
-  type: string,
+  instance: Instance,
   oldProps: Props,
   newProps: Props
 ): void {
+  const { id, type } = instance
   const builtIn = BUILT_IN_TYPES.has(type)
-  const oldEntries = customPropEntries(type, oldProps)
-  const newEntries = customPropEntries(type, newProps)
+  const oldEntries = customPropEntries(instance, oldProps)
+  const newEntries = customPropEntries(instance, newProps)
   const newKeys = newEntries.map(([key]) => key)
   // Updated or added props
   for (const [key, value] of newEntries) {
@@ -857,7 +956,7 @@ function materialize(node: HostNode): HostNodeState {
     renderer.createElement(node.id, DIV_ALIASES.has(node.type) ? "div" : node.type)
     sendStyle(state.container, node)
     syncEventListeners(state.container, node.id, node.props)
-    syncCustomProps(renderer, node.id, node.type, node.props)
+    syncCustomProps(renderer, node, node.props)
   } else {
     // Native hit testing reports the deepest painted retained node. A raw React
     // text node has no public host instance of its own, so route that source to
@@ -1030,6 +1129,7 @@ export const hostConfig = {
       container: rootContainerInstance,
       children: [],
       mounted: false,
+      parent: null,
     })
     diagnoseUnsupportedStyleTransition(instance, rootContainerInstance, props)
     diagnoseUnsupportedClassNameProp(instance, rootContainerInstance, props)
@@ -1142,6 +1242,7 @@ export const hostConfig = {
       container: rootContainerInstance,
       children: [],
       mounted: false,
+      parent: null,
     })
     return instance
   },
@@ -1189,7 +1290,7 @@ export const hostConfig = {
     container.renderer.setStyle(instance.id, styleForRenderer(instance, container, newProps) ?? {})
     diffEventListeners(container, instance.id, oldProps, newProps)
     // Custom prop diff (for non-div/text elements)
-    diffCustomProps(container.renderer, instance.id, instance.type, oldProps, newProps)
+    diffCustomProps(container.renderer, instance, oldProps, newProps)
     instance.props = newProps
     scheduleVirtualListValidation(instance, stateFor(instance))
   },
@@ -1205,6 +1306,7 @@ export const hostConfig = {
 
   appendChildToContainer(container: Container, child: Instance): void {
     child.parentId = null
+    stateFor(child).parent = null
     materialize(child)
     container.renderer.setRoot(child.id)
   },
@@ -1212,6 +1314,7 @@ export const hostConfig = {
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {
     stateFor(parent).children.push(child)
     child.parentId = parent.id
+    stateFor(child).parent = parent
   },
 
   hideInstance(instance: Instance): void {

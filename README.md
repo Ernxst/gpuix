@@ -1796,10 +1796,45 @@ Removing `tabIndex` removes the element from the tab order.
 
 ## Native accessibility
 
-Semantic host elements feed GPUI's AccessKit tree directly. `<button>` infers
-the `button` role and `<a>` infers the `link` role; other JSX aliases do not
-infer roles. An explicit `role` still defines custom controls or overrides an
-alias. These aliases add semantics and focus behavior, but no visual defaults.
+Semantic host elements feed GPUI's AccessKit tree directly. Every JSX alias
+infers the implicit ARIA role HTML-AAM gives its element, so the same tree
+reports the same roles under GPUIX and under `react-dom`. An explicit `role`
+always wins, exactly as it overrides an implicit role in the DOM. These aliases
+add semantics and focus behavior, but no visual defaults.
+
+| Alias | Implicit role |
+|---|---|
+| `<main>` | `main` |
+| `<nav>` | `navigation` |
+| `<article>` | `article` |
+| `<aside>` | `complementary` |
+| `<h1>`–`<h6>` | `heading`, with the matching `ariaLevel` |
+| `<ul>`, `<ol>` | `list` |
+| `<li>` | `listitem` |
+| `<button>` | `button` |
+| `<a>` | `link` |
+| `<img>` | `img`, or `presentation` when decorative |
+| `<header>` | `banner` |
+| `<footer>` | `contentinfo` |
+| `<section>` | `region` |
+| `<p>`, `<span>`, `<strong>`, `<em>`, `<kbd>` | none |
+
+Three of those roles depend on where the element sits or how it is named, and
+GPUIX resolves them the way HTML-AAM does:
+
+- `<header>` and `<footer>` are the `banner` and `contentinfo` landmarks only
+  when nothing between them and the root is an `<article>`, `<aside>`,
+  `<main>`, `<nav>`, or `<section>`, or carries one of those elements' roles.
+  Inside sectioning content they are generic and add no node of their own.
+- `<section>` is a `region` landmark only when it has an accessible name. An
+  unnamed `<section>` is generic.
+- `<li>` is a `listitem` only inside a `<ul>`, `<ol>`, or an element with
+  `role="list"`.
+
+An authored `ariaLevel` wins over the level a heading tag implies, so
+`<h2 ariaLevel={4}>` reports level 4. The aliases with no implicit role add no
+accessibility node, which keeps them out of name computation exactly as their
+generic DOM counterparts are.
 
 `<img>` follows HTML-AAM: it infers the `img` role and takes its accessible
 name from `alt`. `alt=""` marks the image decorative, so it infers
@@ -1816,9 +1851,9 @@ name from `alt`. `alt=""` marks the image decorative, so it infers
 </button>
 ```
 
-The role set is `button`, `checkbox`, `heading`, `img`, `link`, `option`,
-`slider`, `spinbutton`, `switch`, and `textbox`. Explicit role and state props
-map directly to their GPUI / AccessKit equivalents:
+`role` accepts the ARIA role vocabulary in `AccessibilityRoleRegistry`.
+Explicit role and state props map directly to their GPUI / AccessKit
+equivalents:
 
 | React prop | Native meaning |
 |---|---|
