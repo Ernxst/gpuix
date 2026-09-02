@@ -15,6 +15,8 @@ const aliases = [
     aria-checked
     aria-expanded
     aria-current="page"
+    aria-live="polite"
+    aria-atomic
     aria-selected
     aria-valuetext="Medium"
     aria-valuemin={1}
@@ -42,6 +44,8 @@ const aliasProps: Props = {
   "aria-checked": true,
   "aria-expanded": true,
   "aria-current": "page",
+  "aria-live": "polite",
+  "aria-atomic": true,
   "aria-selected": true,
   "aria-valuetext": "Medium",
   "aria-valuemin": 1,
@@ -65,6 +69,12 @@ const currentTokens: Props[] = [
   { ariaCurrent: "time" },
   { ariaCurrent: "true" },
   { "aria-current": "false" },
+]
+const liveTokens: Props[] = [
+  { ariaLive: "off" },
+  { ariaLive: "polite" },
+  { ariaLive: "assertive" },
+  { "aria-live": "assertive", ariaAtomic: "true" },
 ]
 const roleVocabulary = [
   "table",
@@ -95,6 +105,8 @@ const roleVocabulary = [
 const unsupportedProps: Props = { "aria-busy": true }
 // @ts-expect-error ariaCurrent accepts only the ARIA current-item token set.
 const invalidCurrent: Props = { ariaCurrent: "chapter" }
+// @ts-expect-error ariaLive accepts only the ARIA live-region politeness tokens.
+const invalidLive: Props = { ariaLive: "rude" }
 // @ts-expect-error disabled is an HTML boolean attribute, not an ARIA Booleanish attribute.
 const invalidDisabled: Props = { disabled: "false" }
 const visuallyHidden: Props = { visuallyHidden: true }
@@ -106,9 +118,11 @@ const futureVisuallyHidden: Props = { visuallyHidden: "untilFocus" }
 void aliases
 void aliasProps
 void currentTokens
+void liveTokens
 void roleVocabulary
 void unsupportedProps
 void invalidCurrent
+void invalidLive
 void invalidDisabled
 void visuallyHidden
 void falseVisuallyHidden

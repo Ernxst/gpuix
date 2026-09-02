@@ -36,6 +36,19 @@ role/state/value, and whether every requested action changed the visible status.
    Control-Option-Down Arrow. Confirm the announced value and visible count
    increment and decrement once.
 
+7. Live regions, with VoiceOver still running and focus left where it is:
+   1. Activate Save, then Include byproducts. Confirm VoiceOver speaks each new
+      status line without the cursor moving to it.
+   2. Increment Machine count while VoiceOver is mid-utterance. Confirm the
+      visually hidden `Machine count: N` alert interrupts, while the visible
+      `role="status"` line waits its turn.
+   3. Activate Save twice in a row. Confirm the second activation is **silent**:
+      the status text did not change, and GPUIX announces on a changed string
+      rather than on a mutation. This divergence is documented in the README;
+      do not "fix" it here.
+   4. Confirm the visually hidden alert is spoken at all, since it paints
+      nothing and reaches VoiceOver only through the accessibility tree.
+
 This VoiceOver pass is required before claiming that the semantics are
 announced correctly on macOS; a green build only proves that they are wired.
 

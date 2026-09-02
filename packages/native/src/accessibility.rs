@@ -17,6 +17,8 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaChecked",
     "ariaExpanded",
     "ariaCurrent",
+    "ariaLive",
+    "ariaAtomic",
     "ariaSelected",
     "ariaValue",
     "ariaValueMin",
@@ -261,6 +263,30 @@ impl AccessibilityRole {
             "disabled" | "ariaDisabled" => !matches!(self.role, Role::Heading | Role::Image),
             _ => true,
         }
+    }
+}
+
+/// The live-region politeness and atomicity a role carries on its own.
+///
+/// WAI-ARIA gives five roles an implicit `aria-live`, and three of those an
+/// implicit `aria-atomic`. An authored `ariaLive` / `ariaAtomic` overrides the
+/// implicit value, exactly as it does in the DOM.
+fn implicit_live(role: AccessibilityRole) -> (Option<gpui::Live>, Option<bool>) {
+    match role.role {
+        gpui::Role::Alert => (Some(gpui::Live::Assertive), Some(true)),
+        gpui::Role::Status => (Some(gpui::Live::Polite), Some(true)),
+        gpui::Role::Log => (Some(gpui::Live::Polite), Some(false)),
+        gpui::Role::Marquee | gpui::Role::Timer => (Some(gpui::Live::Off), None),
+        _ => (None, None),
+    }
+}
+
+fn parse_aria_live(value: &serde_json::Value) -> Option<gpui::Live> {
+    match value.as_str()? {
+        "off" => Some(gpui::Live::Off),
+        "polite" => Some(gpui::Live::Polite),
+        "assertive" => Some(gpui::Live::Assertive),
+        _ => None,
     }
 }
 
@@ -530,6 +556,8 @@ struct AccessibilityProps<'a> {
     checked: Option<gpui::Toggled>,
     expanded: Option<bool>,
     current: Option<gpui::accesskit::AriaCurrent>,
+    live: Option<gpui::Live>,
+    atomic: Option<bool>,
     selected: Option<bool>,
     value: Option<&'a str>,
     value_min: Option<f64>,
@@ -589,6 +617,14 @@ impl<'a> AccessibilityProps<'a> {
                 .custom_props
                 .get("ariaCurrent")
                 .and_then(parse_aria_current),
+            live: element
+                .custom_props
+                .get("ariaLive")
+                .and_then(parse_aria_live),
+            atomic: element
+                .custom_props
+                .get("ariaAtomic")
+                .and_then(parse_booleanish),
             selected: element
                 .custom_props
                 .get("ariaSelected")
@@ -956,7 +992,8 @@ pub(crate) fn element_problems(
             | "ariaDescribedBy" => !value.is_string(),
             "ariaChecked" => !(value.is_boolean() || value.as_str() == Some("mixed")),
             "ariaCurrent" => parse_aria_current(value).is_none(),
-            "ariaExpanded" | "ariaSelected" | "ariaDisabled" | "ariaHidden" => {
+            "ariaLive" => parse_aria_live(value).is_none(),
+            "ariaExpanded" | "ariaSelected" | "ariaAtomic" | "ariaDisabled" | "ariaHidden" => {
                 parse_booleanish(value).is_none()
             }
             "visuallyHidden" => VisuallyHiddenMode::parse(value).is_none(),
@@ -976,6 +1013,7 @@ pub(crate) fn element_problems(
                 "ariaCurrent" => {
                     "one of \"page\", \"step\", \"location\", \"date\", \"time\", \"true\", or \"false\""
                 }
+                "ariaLive" => "one of \"off\", \"polite\", or \"assertive\"",
                 "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => "a finite number",
                 "ariaLevel"
                 | "ariaRowIndex"
@@ -1027,6 +1065,8 @@ pub(crate) fn element_problems(
                 | "ariaChecked"
                 | "ariaExpanded"
                 | "ariaCurrent"
+                | "ariaLive"
+                | "ariaAtomic"
                 | "ariaSelected"
                 | "ariaValue"
                 | "ariaValueMin"
@@ -1058,6 +1098,13 @@ pub(crate) fn element_problems(
                         }
                         "ariaDescription" | "ariaDescribedBy" => {
                             "a description requires an explicit supported role, so it is omitted from the accessibility tree"
+                        }
+                        // A role-less live region reaches no AccessKit node at
+                        // all, so the politeness has nowhere to land. The DOM
+                        // allows it; GPUIX says which role to add instead of
+                        // implying one.
+                        "ariaLive" | "ariaAtomic" => {
+                            "a live region requires an explicit supported role, so it is omitted from the accessibility tree; add role=\"status\", role=\"alert\", or role=\"log\""
                         }
                         _ => {
                             "the property requires an explicit supported role, so it is omitted from the accessibility tree"
@@ -1143,6 +1190,23 @@ where
     if let Some(author_id) = &element.author_id {
         el = el.accessibility_id(author_id.clone());
     }
+    // An authored politeness overrides the one the role carries, as it does in
+    // the DOM. Both require a role: AccessKit's filter drops a node without one,
+    // and every adapter's live-region branch runs behind that filter.
+    let (role_live, role_atomic) = props.role.map_or((None, None), implicit_live);
+    let live = props
+        .live
+        .or(role_live)
+        .filter(|_| props.supports("ariaLive"));
+    // A live `visuallyHidden` projection is one node with no children, so the
+    // text it carries as its value has nothing else to speak it. macOS
+    // announces `value`, but Windows and AT-SPI announce `name`, and only a
+    // `Label` role reads that name from the value. Writing the flattened text
+    // to both keeps the projection audible everywhere. `content_value` is set
+    // by that projection alone, and the doubling is confined to a live region,
+    // so an ordinary `visuallyHidden` node keeps exactly the accname it had.
+    let live_projection_name =
+        content_value.filter(|_| live.is_some_and(|live| live != gpui::Live::Off));
     // accname order: the referenced text wins over `ariaLabel`, which wins over
     // the name the contents would compute.
     if let Some(label) = props
@@ -1154,6 +1218,7 @@ where
                 .label
                 .filter(|_| props.supports("ariaLabel"))
                 .or(name_from_contents)
+                .or(live_projection_name)
                 .map(str::to_owned)
         })
     {
@@ -1184,6 +1249,16 @@ where
     }
     if let Some(current) = props.current.filter(|_| props.supports("ariaCurrent")) {
         el = el.aria_current(current);
+    }
+    if let Some(live) = live {
+        el = el.aria_live(live);
+    }
+    if let Some(atomic) = props
+        .atomic
+        .or(role_atomic)
+        .filter(|_| props.supports("ariaAtomic"))
+    {
+        el = el.aria_atomic(atomic);
     }
     if let Some(selected) = props.selected.filter(|_| props.supports("ariaSelected")) {
         el = el.aria_selected(selected);
@@ -1871,6 +1946,104 @@ mod tests {
             );
             assert!(element_problems(&detached_tree(), &link).is_empty(), "{token}");
         }
+    }
+
+    #[test]
+    fn parses_every_aria_live_token() {
+        for (token, expected) in [
+            ("off", gpui::Live::Off),
+            ("polite", gpui::Live::Polite),
+            ("assertive", gpui::Live::Assertive),
+        ] {
+            let mut region = RetainedElement::new(13, "div".to_string(), 1);
+            region.custom_props.insert("role".into(), "region".into());
+            region.custom_props.insert("ariaLive".into(), token.into());
+
+            assert_eq!(
+                AccessibilityProps::from_element(&detached_tree(), &region).live,
+                Some(expected)
+            );
+            assert!(
+                element_problems(&detached_tree(), &region).is_empty(),
+                "{token}"
+            );
+        }
+    }
+
+    #[test]
+    fn derives_live_region_defaults_from_the_role() {
+        // WAI-ARIA's implicit live-region values. A role that carries them needs
+        // no authored ariaLive, exactly as in the DOM.
+        for (role, live, atomic) in [
+            ("alert", Some(gpui::Live::Assertive), Some(true)),
+            ("status", Some(gpui::Live::Polite), Some(true)),
+            ("log", Some(gpui::Live::Polite), Some(false)),
+            ("marquee", Some(gpui::Live::Off), None),
+            ("timer", Some(gpui::Live::Off), None),
+            ("region", None, None),
+        ] {
+            let parsed = AccessibilityRole::parse(&role.into()).expect("declared role");
+            assert_eq!(implicit_live(parsed), (live, atomic), "{role}");
+        }
+    }
+
+    #[test]
+    fn keeps_an_authored_politeness_over_the_one_the_role_carries() {
+        let mut alert = RetainedElement::new(14, "div".to_string(), 1);
+        alert.custom_props.insert("role".into(), "alert".into());
+        alert
+            .custom_props
+            .insert("ariaLive".into(), "polite".into());
+        alert.custom_props.insert("ariaAtomic".into(), false.into());
+
+        let props = AccessibilityProps::from_element(&detached_tree(), &alert);
+        assert_eq!(props.live, Some(gpui::Live::Polite));
+        assert_eq!(props.atomic, Some(false));
+        assert!(element_problems(&detached_tree(), &alert).is_empty());
+    }
+
+    #[test]
+    fn reports_a_live_region_that_has_no_role_to_carry_it() {
+        // GPUI produces no AccessKit node without a role, so the politeness has
+        // nowhere to land. The DOM allows it; say which role to add instead.
+        let mut roleless = RetainedElement::new(15, "div".to_string(), 1);
+        roleless
+            .custom_props
+            .insert("ariaLive".into(), "polite".into());
+
+        let problems = element_problems(&detached_tree(), &roleless);
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0].problem.property, "ariaLive");
+        assert_eq!(problems[0].effect, AccessibilityProblemEffect::Ignored);
+        assert!(
+            problems[0]
+                .problem
+                .reason
+                .contains("a live region requires an explicit supported role"),
+            "{:?}",
+            problems[0]
+        );
+    }
+
+    #[test]
+    fn rejects_a_malformed_politeness_and_atomicity() {
+        let mut region = RetainedElement::new(16, "div".to_string(), 1);
+        region.custom_props.insert("role".into(), "status".into());
+        region.custom_props.insert("ariaLive".into(), "rude".into());
+        region
+            .custom_props
+            .insert("ariaAtomic".into(), "sometimes".into());
+
+        let problems = element_problems(&detached_tree(), &region);
+        assert_eq!(problems.len(), 2);
+        for problem in &problems {
+            assert_eq!(problem.effect, AccessibilityProblemEffect::Rejected);
+        }
+        assert!(
+            AccessibilityProps::from_element(&detached_tree(), &region)
+                .live
+                .is_none()
+        );
     }
 
     fn semantic_element(id: u64, element_type: &str) -> RetainedElement {

@@ -94,9 +94,15 @@ function App() {
         <text>Open recipe library</text>
       </a>
 
-      <div style={{ color: "#a6adc8" }}>
+      {/* A visible polite live region: activating any control changes its text,
+          which a screen reader announces without moving focus. */}
+      <div role="status" style={{ color: "#a6adc8" }}>
         <text>{status}</text>
       </div>
+
+      {/* The sr-only half of the same check: an assertive projection with no
+          painted box, so only a screen reader ever reports the count. */}
+      <div visuallyHidden role="alert">{`Machine count: ${machines}`}</div>
     </main>
   )
 }
