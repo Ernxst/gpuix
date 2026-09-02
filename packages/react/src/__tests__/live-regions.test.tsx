@@ -180,6 +180,73 @@ describeNative("live regions", () => {
     })
   })
 
+  it("gives a live name-from-contents role a value as well as a name", () => {
+    // A role that names itself from its contents suppresses the child label
+    // that painted the text, so without this the node would carry a name and
+    // no value — and macOS raises an announcement only for a node that has a
+    // value. A live `heading` would be permanently silent there.
+    screen.render(
+      <div data-testid="heading" role="heading" ariaLevel={2} ariaLive="assertive">
+        <text>Chapter 3</text>
+      </div>
+    )
+
+    expect(nodeFor("heading").aria).toMatchObject({
+      live: "Assertive",
+      label: "Chapter 3",
+      value: "Chapter 3",
+    })
+  })
+
+  it("gives a visually hidden name-from-contents role the same pair", () => {
+    screen.render(
+      <div
+        data-testid="heading"
+        visuallyHidden
+        role="heading"
+        ariaLevel={2}
+        ariaLive="polite"
+      >
+        Chapter 3
+      </div>
+    )
+
+    expect(nodeFor("heading").aria).toMatchObject({
+      live: "Polite",
+      label: "Chapter 3",
+      value: "Chapter 3",
+    })
+  })
+
+  it("leaves a heading that is not live carrying only its name", () => {
+    // The doubling belongs to the live path alone; an ordinary heading keeps
+    // exactly the accname it always had.
+    screen.render(
+      <div data-testid="heading" role="heading" ariaLevel={2}>
+        <text>Chapter 3</text>
+      </div>
+    )
+
+    expect(nodeFor("heading").aria.label).toBe("Chapter 3")
+    expect(nodeFor("heading").aria.value).toBeUndefined()
+  })
+
+  it("reports a live region on a role that reaches no node", () => {
+    // `presentation` parses but resolves to no GPUI role, so the element
+    // contributes no AccessKit node at all and the politeness is inert.
+    screen.render(<div data-testid="decorative" role="presentation" ariaLive="polite" />)
+
+    const element = screen.getByTestId("decorative")
+    const diagnostic = screen.renderer
+      .drainStyleDiagnostics()
+      .find((candidate) => candidate.property === "ariaLive")
+
+    expect(diagnostic!.message).toContain("a live region requires an explicit supported role")
+    expect(
+      Object.values(tree().nodes).find((node) => node.host_id === element.id)
+    ).toBeUndefined()
+  })
+
   it("leaves an ordinary visually hidden node named the way it always was", () => {
     screen.render(
       <div data-testid="note" visuallyHidden role="note">

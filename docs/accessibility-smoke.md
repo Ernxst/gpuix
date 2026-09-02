@@ -36,7 +36,11 @@ role/state/value, and whether every requested action changed the visible status.
    Control-Option-Down Arrow. Confirm the announced value and visible count
    increment and decrement once.
 
-7. Live regions, with VoiceOver still running and focus left where it is:
+7. Live regions, with VoiceOver still running and focus left where it is. Both
+   example regions mount already carrying text, so **expect each to be spoken
+   once when the window appears** — the hidden alert assertively, the visible
+   status politely. That is the mount-time divergence from the browser
+   documented in the README, not a defect:
    1. Activate Save, then Include byproducts. Confirm VoiceOver speaks each new
       status line without the cursor moving to it.
    2. Increment Machine count while VoiceOver is mid-utterance. Confirm the

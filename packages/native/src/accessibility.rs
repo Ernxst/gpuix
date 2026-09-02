@@ -806,6 +806,27 @@ fn applied_as_problem(
     )
 }
 
+/// Why a property that needs a role is omitted when the element has none that
+/// reaches AccessKit — either because none was authored, or because the one
+/// that was resolves to no node.
+fn roleless_reason(property: &str) -> &'static str {
+    match property {
+        "ariaLabel" | "ariaLabelledBy" => {
+            "a name requires an explicit supported role, so it is omitted from the accessibility tree"
+        }
+        "ariaDescription" | "ariaDescribedBy" => {
+            "a description requires an explicit supported role, so it is omitted from the accessibility tree"
+        }
+        // A live region without a node has nowhere for the politeness to land.
+        // The DOM allows it; GPUIX says which role to add instead of implying
+        // one.
+        "ariaLive" | "ariaAtomic" => {
+            "a live region requires an explicit supported role, so it is omitted from the accessibility tree; add role=\"status\", role=\"alert\", or role=\"log\""
+        }
+        _ => "the property requires an explicit supported role, so it is omitted from the accessibility tree",
+    }
+}
+
 fn supports_accessibility_host(element_type: &str) -> bool {
     matches!(element_type, "div" | "text" | "input" | "textarea" | "img")
 }
@@ -1091,26 +1112,19 @@ pub(crate) fn element_problems(
                         role
                     ),
                 )),
+                // `presentation` and `none` parse, but they resolve to no GPUI
+                // role, so the element contributes no AccessKit node and the
+                // politeness is as inert as it is on a role-less element. Only
+                // the live-region props are reported here: the rest already
+                // read as "this element is deliberately not exposed".
+                Some(parsed)
+                    if parsed.into_gpui().is_none()
+                        && matches!(property.as_str(), "ariaLive" | "ariaAtomic") =>
+                {
+                    problems.push(ignored_problem(property, value, roleless_reason(property)));
+                }
                 None if role_value.is_none() => {
-                    let reason = match property.as_str() {
-                        "ariaLabel" | "ariaLabelledBy" => {
-                            "a name requires an explicit supported role, so it is omitted from the accessibility tree"
-                        }
-                        "ariaDescription" | "ariaDescribedBy" => {
-                            "a description requires an explicit supported role, so it is omitted from the accessibility tree"
-                        }
-                        // A role-less live region reaches no AccessKit node at
-                        // all, so the politeness has nowhere to land. The DOM
-                        // allows it; GPUIX says which role to add instead of
-                        // implying one.
-                        "ariaLive" | "ariaAtomic" => {
-                            "a live region requires an explicit supported role, so it is omitted from the accessibility tree; add role=\"status\", role=\"alert\", or role=\"log\""
-                        }
-                        _ => {
-                            "the property requires an explicit supported role, so it is omitted from the accessibility tree"
-                        }
-                    };
-                    problems.push(ignored_problem(property, value, reason));
+                    problems.push(ignored_problem(property, value, roleless_reason(property)));
                 }
                 _ => {}
             }
@@ -1207,6 +1221,15 @@ where
     // so an ordinary `visuallyHidden` node keeps exactly the accname it had.
     let live_projection_name =
         content_value.filter(|_| live.is_some_and(|live| live != gpui::Live::Off));
+    // The mirror image, for a role that *does* name itself from its contents.
+    // Its text becomes the node's name, and the child that painted it is
+    // suppressed so the name is not announced twice — which leaves the live
+    // node with no value at all, and macOS raises an announcement only for a
+    // node that has one. A live `<div role="heading">` would therefore be
+    // permanently silent there. Browsers announce it, so the text goes on as
+    // the value as well, for a live region alone.
+    let live_contents_value =
+        name_from_contents.filter(|_| live.is_some_and(|live| live != gpui::Live::Off));
     // accname order: the referenced text wins over `ariaLabel`, which wins over
     // the name the contents would compute.
     if let Some(label) = props
@@ -1267,6 +1290,7 @@ where
         .value
         .filter(|_| props.supports("ariaValue"))
         .or(content_value)
+        .or(live_contents_value)
     {
         el = el.aria_value(value.to_owned());
     }
@@ -1984,7 +2008,41 @@ mod tests {
         ] {
             let parsed = AccessibilityRole::parse(&role.into()).expect("declared role");
             assert_eq!(implicit_live(parsed), (live, atomic), "{role}");
+
+            // An implicit live region is authored as nothing but its role, so
+            // it must stay diagnostic-free.
+            let mut element = RetainedElement::new(17, "div".to_string(), 1);
+            element.custom_props.insert("role".into(), role.into());
+            let problems = element_problems(&detached_tree(), &element);
+            assert!(problems.is_empty(), "{role}: {problems:?}");
         }
+    }
+
+    #[test]
+    fn reports_a_live_region_on_a_role_that_reaches_no_node() {
+        // `presentation` parses, but it resolves to no GPUI role, so the
+        // element contributes no AccessKit node and the politeness is as inert
+        // as it is on a role-less element.
+        let mut presentational = RetainedElement::new(18, "div".to_string(), 1);
+        presentational
+            .custom_props
+            .insert("role".into(), "presentation".into());
+        presentational
+            .custom_props
+            .insert("ariaLive".into(), "assertive".into());
+
+        let problems = element_problems(&detached_tree(), &presentational);
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0].problem.property, "ariaLive");
+        assert_eq!(problems[0].effect, AccessibilityProblemEffect::Ignored);
+        assert!(
+            problems[0]
+                .problem
+                .reason
+                .contains("a live region requires an explicit supported role"),
+            "{:?}",
+            problems[0]
+        );
     }
 
     #[test]
