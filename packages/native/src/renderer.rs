@@ -9025,7 +9025,7 @@ pub(crate) fn build_host_container(
     use gpui::prelude::*;
 
     let flattened_text = (element.element_type == "text").then(|| flatten_text(element, ctx));
-    let name_from_contents = accessible_name_from_contents(element, flattened_text.as_ref(), ctx);
+    let name_from_contents = accessible_name_from_contents(element, ctx);
 
     let transition_hover =
         style.is_some_and(|style| style.transition.is_some() && style.hover.is_some());
@@ -9499,11 +9499,10 @@ pub(crate) fn build_host_container(
     el.into_any_element()
 }
 
-fn accessible_name_from_contents<'a>(
+fn accessible_name_from_contents(
     element: &crate::retained_tree::RetainedElement,
-    flattened_text: Option<&'a crate::text::inline::InlineText>,
     ctx: &BuildCtx,
-) -> Option<std::borrow::Cow<'a, str>> {
+) -> Option<String> {
     let owns_name = crate::accessibility::role_supports_name_from_contents(element)
         && element
             .custom_props
@@ -9513,40 +9512,7 @@ fn accessible_name_from_contents<'a>(
     if !owns_name {
         return None;
     }
-    flattened_accessibility_text(element, flattened_text, ctx)
-}
-
-/// The element's subtree flattened to the string the accessible name
-/// computation reads, or `None` when the subtree holds no text.
-fn flattened_accessibility_text<'a>(
-    element: &crate::retained_tree::RetainedElement,
-    flattened_text: Option<&'a crate::text::inline::InlineText>,
-    ctx: &BuildCtx,
-) -> Option<std::borrow::Cow<'a, str>> {
-    let name = flattened_text.map_or_else(
-        || {
-            let mut descendants = vec![element];
-            let mut words = Vec::new();
-            while let Some(descendant) = descendants.pop() {
-                if crate::accessibility::is_hidden(descendant) {
-                    continue;
-                }
-                if let Some(content) = &descendant.content {
-                    words.extend(content.split_whitespace());
-                }
-                descendants.extend(
-                    descendant
-                        .children
-                        .iter()
-                        .rev()
-                        .filter_map(|id| ctx.tree.elements.get(id)),
-                );
-            }
-            std::borrow::Cow::Owned(words.join(" "))
-        },
-        |text| std::borrow::Cow::Borrowed(text.accessibility_text.as_str()),
-    );
-    (!name.is_empty()).then_some(name)
+    crate::accessibility::flattened_contents_text(ctx.tree, element)
 }
 
 fn build_visually_hidden_element(
@@ -9555,16 +9521,28 @@ fn build_visually_hidden_element(
 ) -> gpui::AnyElement {
     use gpui::prelude::*;
 
-    let flattened_text = (element.element_type == "text").then(|| flatten_text(element, ctx));
-    let name_from_contents = accessible_name_from_contents(element, flattened_text.as_ref(), ctx);
+    // Flattening is the only check a malformed `<text>` subtree gets, and this
+    // projection paints nothing that would otherwise reach it. Its accessible
+    // text now comes from the tree, so run the flatten for the diagnostic alone
+    // rather than let an authoring mistake pass silently here.
+    if element.element_type == "text" {
+        drop(flatten_text(element, ctx));
+    }
+
+    let name_from_contents = accessible_name_from_contents(element, ctx);
     // A role that does not name itself from its contents still keeps its text.
     // Painted text reaches AccessKit as the value of the node that draws it, and
     // the projection draws nothing, so the flattened string becomes this node's
     // value the same way the painted `<text>` host sets one below. An ancestor
     // that already owns this text as its own name suppresses the duplicate.
+    //
+    // Unlike a painted value, this one is whitespace-normalized: it is built by
+    // the name flattener, and the accname flat string is normalized. A `<text>`
+    // whose authored spacing is irregular therefore reads slightly differently
+    // projected than painted.
     let content_value = (!ctx.inherited.text_accessibility_owned_by_role
         && !crate::accessibility::role_supports_name_from_contents(element))
-    .then(|| flattened_accessibility_text(element, flattened_text.as_ref(), ctx))
+    .then(|| crate::accessibility::flattened_contents_text(ctx.tree, element))
     .flatten();
     let element_id = retained_gpui_element_id(element)
         .expect("a validated visuallyHidden semantic host has a GPUI element id");
