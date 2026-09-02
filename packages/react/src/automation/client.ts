@@ -589,7 +589,14 @@ export class Locator {
     await this.app.mouse.move(await this.center(), options)
   }
 
-  /** Send one wheel event over the centre of this element. */
+  /**
+   * Send one wheel event over the centre of this element.
+   *
+   * `deltaX` and `deltaY` are **platform deltas**, not DOM deltas: they are
+   * injected where the trackpad driver injects, so they say how far the content
+   * moves and scrolling down is negative. The `onWheel` payload the app
+   * observes is the DOM negation, where scrolling down is positive.
+   */
   async wheel(
     deltaX: number,
     deltaY: number,
