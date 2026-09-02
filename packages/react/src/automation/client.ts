@@ -995,15 +995,29 @@ export function browserKeystrokeInit(
   const keyName = parts.join("-")
   // One key table for the whole package: the synthetic-event translation a
   // handler observes and the browser event this sends must agree.
-  const key = domKeyName(keyName) ?? keyName
+  const named = domKeyName(keyName) ?? keyName
+  const shiftKey = modifiers.has("shift")
+  const ctrlKey = modifiers.has("ctrl")
+  const metaKey = modifiers.has("cmd") || modifiers.has("meta")
+  const altKey = modifiers.has("alt")
+  // Desktop reads `key` from the character the layout produced, so `shift-a`
+  // is "A" there. A keystroke string carries no character, so shift is applied
+  // here to keep the browser mirror on the same `key` value. Only the letter
+  // case is recoverable: shifted punctuation ("shift-1" is "!" on a US layout)
+  // is layout-dependent and stays unmapped. GPUI produces no character under
+  // ctrl, cmd, or alt, so those combinations keep the unshifted name.
+  const key =
+    shiftKey && !ctrlKey && !metaKey && !altKey && Array.from(named).length === 1
+      ? named.toUpperCase()
+      : named
   return {
     key,
-    altKey: modifiers.has("alt"),
+    altKey,
     bubbles: true,
-    ctrlKey: modifiers.has("ctrl"),
-    metaKey: modifiers.has("cmd") || modifiers.has("meta"),
+    ctrlKey,
+    metaKey,
     repeat: isHeld,
-    shiftKey: modifiers.has("shift"),
+    shiftKey,
   }
 }
 
