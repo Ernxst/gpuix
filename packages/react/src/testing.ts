@@ -2555,6 +2555,16 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
     disposeSharedRoot(live)
   }
 
+  if (activeRenderRoot !== null) {
+    // Unmount before resetting — rendering the new node straight into the
+    // live root would reconcile against the old tree, and an unmount effect
+    // running after the reset could re-dirty the window that was just
+    // cleaned. `cleanup()` also guards the unmount: an unmount effect that
+    // throws poisons the window, which is then disposed rather than handed
+    // back, exactly as between tests.
+    cleanup()
+  }
+
   let active = activeRenderRoot
   if (active === null) {
     const root = createTestRoot(options)
@@ -2583,14 +2593,6 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
       },
     }
     activeRenderRoot = active
-  } else {
-    // Unmount before resetting, as `cleanup()` does. Rendering the new node
-    // straight into the live root would reconcile against the old tree —
-    // component state and mount effects would survive a call that is supposed
-    // to be a fresh mount — and an unmount effect running after the reset
-    // could re-dirty the window that was just cleaned.
-    active.root.render(null)
-    resetSharedWindow(active)
   }
 
   active.root.render(node)
