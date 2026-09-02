@@ -20,8 +20,9 @@ now.
 
 One departure from the DOM: a browser always has a rect for a connected
 element, but bounds here are recorded during paint. An element that painted
-nothing in the last frame — scrolled out of a virtual list, `display: none`,
-visually hidden — has no rect at all, so this throws and names the element
+nothing in the last frame — scrolled out of a virtual list, visually hidden,
+even `visibility: "hidden"` (which still occupies layout, and a browser would
+give a rect) — has no rect at all, so this throws and names the element
 rather than quietly returning zeros that no assertion can distinguish from a
 collapsed box.
 

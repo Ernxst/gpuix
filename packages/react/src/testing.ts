@@ -400,8 +400,9 @@ export interface TestElement {
    * before a rerender reports the bounds it paints now. Unlike a browser, which
    * always has a rect for a connected element, bounds here are recorded during
    * paint: an element that painted nothing in the last frame — scrolled out of
-   * a virtual list, `display: none`, never committed — has no rect at all, and
-   * this throws rather than reporting a box of zeros.
+   * a virtual list, `visibility: "hidden"` (which a browser would still give a
+   * rect), never committed — has no rect at all, and this throws rather than
+   * reporting a box of zeros.
    */
   readonly getBoundingClientRect: () => TestElementRect
   /** The standard `data-testid` attribute: the one locator prop. */
@@ -1504,7 +1505,7 @@ export function rendererOf(element: TestElement): TestRenderer {
  * the same painted bounds `renderer.getElementBounds` reports.
  */
 function boundingClientRectOf(renderer: TestRenderer, element: TestElement): TestElementRect {
-  const current = getElement(renderer, element.id, "element")
+  const current = getElement(renderer, element.id, "bounding client rect target")
   const bounds = renderer.getElementBounds(current.id)
   if (bounds === null) throw noPaintedBoundsError(renderer, current)
 
