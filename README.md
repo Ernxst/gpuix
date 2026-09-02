@@ -3520,6 +3520,74 @@ out of the window at `(-1, -1)` when the element fills it. `dblClick` currently
 rejects with an issue #216 message until the native dispatcher can carry
 `click_count`.
 
+### Matchers
+
+`@gpuix/react/testing/matchers` ships a jest-dom-shaped pack for `expect.extend`.
+Wire it once, in a setup file or at the top of a suite:
+
+```ts
+import { expect } from 'vitest'
+import { gpuixMatchers, type GpuixMatchers } from '@gpuix/react/testing/matchers'
+
+expect.extend(gpuixMatchers)
+
+declare module 'vitest' {
+  interface Matchers<T = any> extends GpuixMatchers<T> {}
+}
+```
+
+| Matcher | Asserts |
+|---|---|
+| `toBeInTheDocument()` | The element still resolves in the retained tree |
+| `toBeVisible()` | The element painted a box in the last frame |
+| `toBeDisabled()` | `disabled` or `ariaDisabled` is declared on it |
+| `toHaveFocus()` | It holds the window's keyboard focus |
+| `toHaveTextContent(matcher, options?)` | Its text plus every descendant's |
+| `toHaveValue(value)` | Its retained `value` prop, exactly |
+| `toHaveDisplayValue(matcher, options?)` | Its `value` prop, through the Testing Library matcher |
+| `toHaveAccessibleName(matcher?)` | Its computed accessible name |
+
+Every matcher re-resolves the element against its renderer first, so an element
+captured before a rerender reports current state — the same contract
+`TestElement.children` and `parentElement` already keep.
+
+Four behaviours differ from jest-dom, and each difference is the desktop being
+honest rather than the matcher being incomplete:
+
+**`toBeVisible` means painted, not visible.** Bounds are recorded during paint
+and cleared at the start of every frame, so "no bounds" means "this element
+painted nothing last frame" and nothing more. It conflates a row scrolled out of
+a virtual list with an element that is genuinely hidden, and it says nothing
+about a fully transparent one: `opacity: 0` is visible to this matcher and
+hidden in a browser. When you need those apart, assert on the reason instead of
+the pixel.
+
+**`toBeDisabled` does not inherit.** GPUIX has no disabling container — no
+`<fieldset disabled>` — so the matcher reports the element's own state and
+invents no ancestor rule.
+
+**`toHaveFocus` reads the window's focus**, the direct analogue of
+`document.activeElement`, rather than the accessibility snapshot's `gpui_focus`.
+The snapshot only carries a node for an element that projects accessibility
+semantics, so a focused plain `<input>` would be invisible to it.
+
+**`toHaveTextContent` uses jest-dom's matching rules and the queries'
+normalization.** A bare string is a case-sensitive substring, a regular
+expression is tested, a function is a predicate; the text is trimmed and
+whitespace-collapsed first, and `{ trim }`, `{ collapseWhitespace }`, and
+`{ normalizer }` all apply. `toHaveDisplayValue` uses the queries' rules
+instead, so a bare string there is exact.
+
+`toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
+node, which exists only where the element projects accessibility semantics. An
+`ariaLabel` with no declared role has no accessible name, and the matcher
+reports that rather than falling back to the raw prop — use `getByLabelText` or
+`TestElement.semantics.label` for the declaration.
+
+`toBeChecked`, `toHaveClass`, and `toBeEmptyDOMElement` are deliberately absent:
+there is no class attribute, no empty-DOM notion worth asserting on this tree,
+and checked state is already covered by `getByRole` with `ariaChecked`.
+
 `waitFor(callback, options)` retries `callback` until it stops throwing, using
 Testing Library's defaults (`timeout` 1000ms, `interval` 50ms, `onTimeout`) and
 rethrowing the last error on expiry. Unlike a browser `waitFor` it does not wait

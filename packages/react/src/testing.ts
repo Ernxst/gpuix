@@ -326,6 +326,9 @@ export function isNativeTestRendererAvailable(): boolean {
 
 // ── Test element tree ────────────────────────────────────────────────
 
+/** Which renderer each `TestElement` was read from. See `rendererOf`. */
+const elementRenderers = new WeakMap<TestElement, TestRenderer>()
+
 /**
  * The queryable semantics of one element, as the native tree emits them at
  * both detail levels. Every field mirrors a prop the author declared.
@@ -1092,6 +1095,7 @@ export class TestRenderer implements NativeRenderer {
         },
       })
       map.set(node.id, element)
+      elementRenderers.set(element, renderer)
       for (const child of node.children ?? []) {
         walk(child, node.id)
       }
@@ -1444,6 +1448,25 @@ export function textContent(renderer: TestRenderer, element: TestElement): strin
   return `${element.text ?? ""}${element.children
     .map((child) => textContent(renderer, child))
     .join("")}`
+}
+
+/**
+ * The renderer a `TestElement` was read from.
+ *
+ * A jest-dom-shaped matcher is handed the element alone, but almost every
+ * question worth asking of one — is it still mounted, did it paint, does it
+ * hold focus — is a question about the renderer. The map is weak and populated
+ * where elements are built, so it costs nothing and cannot outlive the tree.
+ */
+export function rendererOf(element: TestElement): TestRenderer {
+  const renderer = elementRenderers.get(element)
+  if (renderer === undefined) {
+    throw new Error(
+      `Element #${element.id} did not come from a TestRenderer, so it has no tree to be read against`
+    )
+  }
+
+  return renderer
 }
 
 // ── waitFor ──────────────────────────────────────────────────────────
@@ -2121,7 +2144,8 @@ function describeAccessibleNameMatcher(matcher: AccessibleNameMatcher): string {
   return describeMatcher(matcher)
 }
 
-function describeElement(renderer: TestRenderer, element: TestElement): string {
+/** One-line `<type identity text>` rendering of an element, for failure messages. */
+export function describeElement(renderer: TestRenderer, element: TestElement): string {
   const identity = [
     element.dataTestId === undefined ? undefined : `data-testid=${JSON.stringify(element.dataTestId)}`,
     element.authorId === undefined ? undefined : `id=${JSON.stringify(element.authorId)}`,
