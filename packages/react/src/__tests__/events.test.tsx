@@ -118,30 +118,37 @@ describeNative("application menus", () => {
 
 })
 
+/** A macOS-shaped capability read; the frame loop only branches on frameClock. */
+function frameClockCapabilities(
+  frameClock: RendererCapabilities["frameClock"]
+): () => RendererCapabilities {
+  return () => ({
+    platform: "macos",
+    frameClock,
+    window: { activation: true, activate: true, resize: true, multiple: false },
+    images: { privateNetwork: true },
+    automation: {
+      click: true,
+      hover: true,
+      drag: true,
+      scrollWheel: true,
+      keyboard: "native",
+      screenshot: true,
+      screenshotFormats: ["png"],
+      clock: true,
+      tree: true,
+    },
+  })
+}
+
 describe("frame loop", () => {
   it("keeps the active timer kind when an external frame source falls back", () => {
     let kind: RendererCapabilities["frameClock"]["kind"] = "display-link"
-    const capabilities = (): RendererCapabilities => ({
-      platform: "macos",
-      frameClock: { kind, requiresTick: true, externalFrame: true },
-      window: { activation: true, activate: true, resize: true, multiple: false },
-      images: { privateNetwork: true },
-      automation: {
-        click: true,
-        hover: true,
-        drag: true,
-        scrollWheel: true,
-        keyboard: "native",
-        screenshot: true,
-        screenshotFormats: ["png"],
-        clock: true,
-        tree: true,
-      },
-    })
+    const capabilities = (): RendererCapabilities =>
+      frameClockCapabilities({ kind, requiresTick: true, externalFrame: true })()
     const loop = startFrameLoop(
       {
         capabilities,
-        requiresTick: () => true,
         tick: () => false,
         tickIdle: () => true,
         setFrameRequestHandler: () => {
@@ -159,7 +166,11 @@ describe("frame loop", () => {
   it("does not tick when the native platform owns its event loop", () => {
     let ticks = 0
     const loop = startFrameLoop({
-      requiresTick: () => false,
+      capabilities: frameClockCapabilities({
+        kind: "manual",
+        requiresTick: false,
+        externalFrame: false,
+      }),
       tick: () => {
         ticks += 1
       },
@@ -174,7 +185,11 @@ describe("frame loop", () => {
     let frameRequest: (() => void) | null = null
     const loop = startFrameLoop(
       {
-        requiresTick: () => true,
+        capabilities: frameClockCapabilities({
+          kind: "display-link",
+          requiresTick: true,
+          externalFrame: true,
+        }),
         tick: () => {
           ticks += 1
         },
@@ -200,7 +215,11 @@ describe("frame loop", () => {
     let idleTicks = 0
     const loop = startFrameLoop(
       {
-        requiresTick: () => true,
+        capabilities: frameClockCapabilities({
+          kind: "display-link",
+          requiresTick: true,
+          externalFrame: true,
+        }),
         tick: () => {
           frameTicks += 1
         },
@@ -222,7 +241,11 @@ describe("frame loop", () => {
     let ticks = 0
     let frameRequest: (() => void) | null = null
     const loop = startFrameLoop({
-      requiresTick: () => true,
+      capabilities: frameClockCapabilities({
+        kind: "display-link",
+        requiresTick: true,
+        externalFrame: true,
+      }),
       tick: () => {
         ticks += 1
       },
@@ -245,7 +268,11 @@ describe("frame loop", () => {
     let unrecoverableErrors = 0
     const loop = startFrameLoop(
       {
-        requiresTick: () => true,
+        capabilities: frameClockCapabilities({
+          kind: "display-link",
+          requiresTick: true,
+          externalFrame: true,
+        }),
         tick: () => {
           throw new Error("injected native frame failure")
         },
@@ -282,7 +309,11 @@ describe("frame loop", () => {
     let ticks = 0
     const loop = startFrameLoop(
       {
-        requiresTick: () => true,
+        capabilities: frameClockCapabilities({
+          kind: "display-link",
+          requiresTick: true,
+          externalFrame: true,
+        }),
         tick: () => {
           ticks += 1
           if (ticks === 1) {
@@ -302,7 +333,11 @@ describe("frame loop", () => {
     let ticks = 0
     const loop = startFrameLoop(
       {
-        requiresTick: () => true,
+        capabilities: frameClockCapabilities({
+          kind: "display-link",
+          requiresTick: true,
+          externalFrame: true,
+        }),
         tick: () => {
           ticks += 1
         },
@@ -319,7 +354,11 @@ describe("frame loop", () => {
     let terminated = 0
     const loop = startFrameLoop(
       {
-        requiresTick: () => true,
+        capabilities: frameClockCapabilities({
+          kind: "display-link",
+          requiresTick: true,
+          externalFrame: true,
+        }),
         tick: () => {
           ticks += 1
           return false
@@ -343,7 +382,11 @@ describe("frame loop", () => {
     let terminated = 0
     const loop = startFrameLoop(
       {
-        requiresTick: () => true,
+        capabilities: frameClockCapabilities({
+          kind: "display-link",
+          requiresTick: true,
+          externalFrame: true,
+        }),
         tick: () => {
           ticks += 1
           return ticks < 3
@@ -367,7 +410,11 @@ describe("frame loop", () => {
     let terminated = 0
     const loop = startFrameLoop(
       {
-        requiresTick: () => true,
+        capabilities: frameClockCapabilities({
+          kind: "display-link",
+          requiresTick: true,
+          externalFrame: true,
+        }),
         tick: () => {
           ticks += 1
           if (ticks === 1) throw new Error("injected tick failure")
@@ -394,7 +441,11 @@ describe("frame loop", () => {
     const failures: unknown[] = []
     const loop = startFrameLoop(
       {
-        requiresTick: () => true,
+        capabilities: frameClockCapabilities({
+          kind: "display-link",
+          requiresTick: true,
+          externalFrame: true,
+        }),
         tick: () => {
           ticks += 1
           throw new Error(`tick failure ${ticks}`)
