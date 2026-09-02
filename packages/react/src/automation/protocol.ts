@@ -47,6 +47,9 @@ const buttonSchema = z.number().int().min(0).max(2).optional()
 /** Held modifiers, in the same hyphenated syntax as `press("cmd-a")`. */
 const modifiersSchema = z.string().optional()
 
+/** The platform's repeat count within one click sequence: 2 is a double click. */
+const clickCountSchema = z.number().int().min(1).optional()
+
 export const boundsSchema = z.object({
   x: z.number(),
   y: z.number(),
@@ -55,6 +58,24 @@ export const boundsSchema = z.object({
 })
 
 export type ElementBounds = z.infer<typeof boundsSchema>
+
+export const semanticsSchema = z.object({
+  role: z.string().optional(),
+  label: z.string().optional(),
+  value: z.string().optional(),
+  placeholder: z.string().optional(),
+  disabled: z.literal(true).optional(),
+})
+
+/**
+ * The declared semantics of a node, present at both tree detail levels.
+ *
+ * The locator tree drops `customProps` to stay cheap on a 5k-row list, so this
+ * block is the only way a locator can see an input's value, its placeholder, or
+ * its label. `role` is the authored `role` prop rather than GPUI's computed
+ * accessibility role, and `disabled` is present only when true.
+ */
+export type NodeSemantics = z.infer<typeof semanticsSchema>
 
 export const treeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
   z.object({
@@ -66,6 +87,7 @@ export const treeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
     style: z.record(z.string(), z.unknown()).optional(),
     events: z.array(z.string()).optional(),
     customProps: z.record(z.string(), z.unknown()).optional(),
+    semantics: semanticsSchema.optional(),
     bounds: boundsSchema.optional(),
     children: z.array(treeNodeSchema).optional(),
   })
@@ -80,6 +102,7 @@ export interface TreeNode {
   style?: Record<string, unknown>
   events?: string[]
   customProps?: Record<string, unknown>
+  semantics?: NodeSemantics
   bounds?: ElementBounds
   children?: TreeNode[]
 }
@@ -117,6 +140,7 @@ export const methods = {
       y: z.number(),
       button: buttonSchema,
       modifiers: modifiersSchema,
+      clickCount: clickCountSchema,
     }),
     result: okSchema,
   },
@@ -129,6 +153,7 @@ export const methods = {
     params: pointSchema.extend({
       button: buttonSchema,
       modifiers: modifiersSchema,
+      clickCount: clickCountSchema,
     }),
     result: okSchema,
   },
@@ -136,6 +161,7 @@ export const methods = {
     params: pointSchema.extend({
       button: buttonSchema,
       modifiers: modifiersSchema,
+      clickCount: clickCountSchema,
     }),
     result: okSchema,
   },

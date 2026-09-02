@@ -26,6 +26,11 @@
       "import": "./dist/testing.js",
       "default": "./dist/testing.js"
     },
+    "./testing/matchers": {
+      "types": "./dist/testing-expect.d.ts",
+      "import": "./dist/testing-expect.js",
+      "default": "./dist/testing-expect.js"
+    },
     "./select": {
       "types": "./dist/components/select.d.ts",
       "import": "./dist/components/select.js",

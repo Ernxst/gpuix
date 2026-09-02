@@ -635,6 +635,54 @@ impl RetainedTree {
     }
 }
 
+/// The queryable semantics of one element, emitted at **both** tree detail
+/// levels so the locator tree and the retained tree answer the same questions.
+///
+/// This is deliberately small and declaration-shaped: every field mirrors a
+/// prop the author wrote, so it costs one map lookup per element and needs no
+/// accessibility pass. It exists because the automation tree drops
+/// `customProps` — without it, a locator cannot see an input's value at all,
+/// and an in-process test had to reach into `customProps` by hand.
+///
+/// * `role` — the authored `role` prop, verbatim. GPUI's *computed* role
+///   (implicit roles, name-from-contents) lives in the accessibility snapshot,
+///   which is what role queries read; this is the declaration, not the
+///   computation.
+/// * `label` — the authored `ariaLabel`.
+/// * `value` / `placeholder` — the `<input>`/`<textarea>` props. `value` is the
+///   retained prop, so for a controlled input it is the current value and for
+///   an uncontrolled one it is the last value the author set, not the live
+///   editing buffer.
+/// * `disabled` — emitted only when true, from `disabled` or `ariaDisabled`,
+///   the same predicate the accessibility tree uses.
+///
+/// Absent fields are omitted, and an element that declares none of them gets no
+/// `semantics` key at all.
+fn semantics_to_json(element: &RetainedElement) -> Option<serde_json::Value> {
+    let mut semantics = serde_json::Map::new();
+
+    for (key, prop) in [
+        ("role", "role"),
+        ("label", "ariaLabel"),
+        ("value", "value"),
+        ("placeholder", "placeholder"),
+    ] {
+        if let Some(text) = element
+            .custom_props
+            .get(prop)
+            .and_then(serde_json::Value::as_str)
+        {
+            semantics.insert(key.to_string(), serde_json::Value::String(text.to_string()));
+        }
+    }
+
+    if crate::accessibility::is_action_disabled(element) {
+        semantics.insert("disabled".to_string(), serde_json::Value::Bool(true));
+    }
+
+    (!semantics.is_empty()).then(|| serde_json::Value::Object(semantics))
+}
+
 fn element_to_json(
     id: u64,
     tree: &RetainedTree,
@@ -694,6 +742,10 @@ fn element_to_json(
                 "height": rect.height,
             }),
         );
+    }
+
+    if let Some(semantics) = semantics_to_json(element) {
+        obj.insert("semantics".to_string(), semantics);
     }
 
     if include_details {
@@ -1175,6 +1227,81 @@ mod tests {
         assert_eq!(
             tree.elements[&3].content.as_deref(),
             Some("one\ntwo\rthree")
+        );
+    }
+
+    fn tree_with_labelled_input() -> RetainedTree {
+        let mut tree = RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+        tree.create_element(2, "input".to_string());
+        tree.append_child(1, 2);
+        tree.set_root(Some(1));
+        for (key, value) in [
+            ("role", serde_json::json!("textbox")),
+            ("ariaLabel", serde_json::json!("Recipe search")),
+            ("value", serde_json::json!("iron plate")),
+            ("placeholder", serde_json::json!("Search recipes")),
+            ("disabled", serde_json::json!(true)),
+        ] {
+            tree.set_custom_prop(2, key.to_string(), value);
+        }
+        tree
+    }
+
+    /// The whole point of the block: the automation tree drops `customProps`,
+    /// so without it a locator cannot see a value, a placeholder, or a label.
+    #[test]
+    fn semantics_are_emitted_at_both_tree_detail_levels() {
+        let tree = tree_with_labelled_input();
+        let bounds = std::collections::HashMap::new();
+        let expected = serde_json::json!({
+            "role": "textbox",
+            "label": "Recipe search",
+            "value": "iron plate",
+            "placeholder": "Search recipes",
+            "disabled": true,
+        });
+
+        for (level, json) in [
+            ("detailed", tree.to_json(&bounds)),
+            ("automation", tree.to_automation_json(&bounds)),
+        ] {
+            let input = &json["children"][0];
+            assert_eq!(input["semantics"], expected, "{level} tree");
+        }
+
+        // The detail levels still differ in what they carry beside it.
+        assert!(tree.to_json(&bounds)["children"][0]["customProps"].is_object());
+        assert!(tree.to_automation_json(&bounds)["children"][0]["customProps"].is_null());
+    }
+
+    #[test]
+    fn semantics_omit_absent_fields_and_undeclared_elements() {
+        let mut tree = tree_with_child();
+        tree.set_root(Some(1));
+        tree.set_custom_prop(2, "ariaLabel".to_string(), serde_json::json!("Summary"));
+        let json = tree.to_automation_json(&std::collections::HashMap::new());
+
+        assert_eq!(json["semantics"], serde_json::Value::Null, "plain div");
+        assert_eq!(
+            json["children"][0]["semantics"],
+            serde_json::json!({ "label": "Summary" }),
+            "only the declared field, and no disabled: false"
+        );
+    }
+
+    /// `ariaDisabled` is the same predicate the accessibility tree applies, so
+    /// a disabled query cannot disagree with a disabled accessibility node.
+    #[test]
+    fn semantics_disabled_follows_aria_disabled() {
+        let mut tree = tree_with_child();
+        tree.set_root(Some(1));
+        tree.set_custom_prop(2, "ariaDisabled".to_string(), serde_json::json!(true));
+        let json = tree.to_automation_json(&std::collections::HashMap::new());
+
+        assert_eq!(
+            json["children"][0]["semantics"],
+            serde_json::json!({ "disabled": true })
         );
     }
 }
