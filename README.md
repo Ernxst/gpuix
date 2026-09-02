@@ -1575,6 +1575,17 @@ Virtual-list `scrollToItem` calls are applied on the **next render, after
 that frame's child splice**, so an index computed against a just-committed
 child list is never shifted twice.
 
+`scrollToItem` **does nothing** in two cases, rather than revealing an
+unrelated row:
+
+- **an index past the last child.** gpui holds a reveal it cannot satisfy until
+  a frame can, so a stale index would land as an unexplained jump on the first
+  later frame whose child list is long enough.
+- **a scrolling `<text>`.** A text host's whole subtree is painted as one
+  flattened run, so no index names a child inside it. Scroll it with
+  `scrollTo(id, x, y)`, or wrap the rows in a `div` scroller when they must be
+  revealed one at a time.
+
 ### Performance model
 
 | Work | Plain scroll container | `<virtual-list>` children | `<virtual-list>` + `itemCount` |
