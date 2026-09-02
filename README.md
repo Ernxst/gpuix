@@ -1855,6 +1855,32 @@ phase to keep focus on the current element, matching the browser:
 </div>
 ```
 
+### Keys with nothing focused
+
+A browser targets `document.body` when no element has focus, so a listener on
+the document still hears the key. GPUIX targets the **root element** instead:
+put `onKeyDown` / `onKeyUp` (or their capture forms) on the element you render
+at the top of the tree and it hears every key pressed before the user has
+focused anything — the "press `/` to search" and palette shortcuts that must
+work on first paint.
+
+```tsx
+<div
+  style={{ width: '100%', height: '100%' }}
+  onKeyDown={(event) => {
+    if (event.key === '/') openSearch()
+  }}
+>
+  <App />
+</div>
+```
+
+`event.target` is that root element, and its capture and bubble listeners both
+run at `AT_TARGET`, as they do for any DOM event whose target is the listener.
+Once anything takes focus the key belongs to the focused element and this
+fallback goes quiet, so a key is never delivered twice. `Tab` is unaffected: it
+still traverses, and `preventDefault()` still cancels the traversal.
+
 ### Imperative focus
 
 `focusNext()` and `focusPrevious()` take the same path as the default `Tab` and

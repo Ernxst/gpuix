@@ -7032,6 +7032,54 @@ impl GpuixView {
         });
     }
 
+    /// The DOM's body fallback: a key pressed with nothing focused still has a
+    /// target — `document.body` there, the root element here — so a root
+    /// listener hears it, which is how a global shortcut works before the user
+    /// has focused anything. It is the same target the synthesized Tab key down
+    /// already falls back to.
+    ///
+    /// GPUI delivers key events along the focus path, and `render` focuses the
+    /// root wrapper whenever nothing else holds focus, so this listener is the
+    /// no-focus case. Requiring the wrapper itself to be focused is what keeps
+    /// delivery single: while a retained element (or a text editor's own handle)
+    /// has focus, that element's handler is the one that fires, even though this
+    /// wrapper is still an ancestor on the dispatch path.
+    ///
+    /// Tab never arrives here — its key binding dispatches `FocusNext` /
+    /// `FocusPrevious`, and a bubbled action consumes the key event before GPUI
+    /// reaches any key listener.
+    fn dispatch_unfocused_key_event(
+        &self,
+        event_type: &str,
+        keystroke: &gpui::Keystroke,
+        is_held: Option<bool>,
+        window: &gpui::Window,
+    ) {
+        if !self.root_focus_handle.is_focused(window) {
+            return;
+        }
+        let tree = self.tree.lock().unwrap();
+        let Some(root_id) = tree.root_id else {
+            return;
+        };
+        // As on the focused path, a key event is only carried across to JS for
+        // an element that listens for it.
+        if !tree
+            .elements
+            .get(&root_id)
+            .is_some_and(|element| element.events.contains(event_type))
+        {
+            return;
+        }
+        drop(tree);
+        emit_event_full(&self.event_callback, root_id, event_type, |payload| {
+            payload.key = Some(keystroke.key.clone());
+            payload.key_char = keystroke.key_char.clone();
+            payload.is_held = is_held;
+            payload.modifiers = Some(keystroke.modifiers.into());
+        });
+    }
+
     pub(crate) fn resolve_tab_key_down(
         &mut self,
         default_prevented: bool,
@@ -7765,7 +7813,18 @@ impl gpui::Render for GpuixView {
                 .text_color(gpui::rgba(0xe2e2e2ff))
                 .track_focus(&self.root_focus_handle)
                 .on_action(cx.listener(Self::focus_next_action))
-                .on_action(cx.listener(Self::focus_previous_action));
+                .on_action(cx.listener(Self::focus_previous_action))
+                .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, _cx| {
+                    view.dispatch_unfocused_key_event(
+                        "keyDown",
+                        &event.keystroke,
+                        Some(event.is_held),
+                        window,
+                    );
+                }))
+                .on_key_up(cx.listener(|view, event: &gpui::KeyUpEvent, window, _cx| {
+                    view.dispatch_unfocused_key_event("keyUp", &event.keystroke, None, window);
+                }));
             with_window_menu_actions(root)
                 .child(selection_frame_reset(
                     self.selection.clone(),
