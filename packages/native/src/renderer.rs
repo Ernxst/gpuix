@@ -7006,9 +7006,25 @@ impl GpuixView {
                         requested = true;
                     } else if let Some(index) = painted_child_index(&tree, scroller_id, current) {
                         if let Some(handle) = self.scroll_handles.get(&scroller_id) {
+                            let scrolls_y = tree
+                                .elements
+                                .get(&scroller_id)
+                                .is_some_and(scrolls_vertically);
                             match alignment {
-                                RevealAlignment::Nearest => handle.scroll_to_item(index),
-                                RevealAlignment::Start => handle.scroll_to_top_of_item(index),
+                                // gpui's `Top` strategy writes the vertical
+                                // offset whether or not the scroller has a
+                                // vertical viewport, unlike the per-axis gate
+                                // its nearest-edge strategy applies
+                                // (`ScrollHandle::scroll_to_active_item`). A
+                                // handle registers for `overflowX` alone, and
+                                // there `block: "start"` has no vertical
+                                // component to honor.
+                                RevealAlignment::Start if scrolls_y => {
+                                    handle.scroll_to_top_of_item(index)
+                                }
+                                RevealAlignment::Nearest | RevealAlignment::Start => {
+                                    handle.scroll_to_item(index)
+                                }
                             }
                             requested = true;
                         }
@@ -7989,6 +8005,15 @@ fn is_overflow_scroller(element: &crate::retained_tree::RetainedElement) -> bool
     })
 }
 
+/// Whether the element declares a vertical scroll viewport, resolved the way
+/// `build_host_container` resolves it: the axis property overrides the
+/// shorthand.
+fn scrolls_vertically(element: &crate::retained_tree::RetainedElement) -> bool {
+    element.style.as_deref().is_some_and(|style| {
+        style.overflow_y.as_deref().or(style.overflow.as_deref()) == Some("scroll")
+    })
+}
+
 fn nearest_scroll_ancestor(tree: &RetainedTree, element_id: u64) -> Option<ScrollAncestor> {
     let mut current = element_id;
     loop {
@@ -8026,11 +8051,61 @@ fn direct_child_index(tree: &RetainedTree, ancestor_id: u64, element_id: u64) ->
 /// gpui counts the children it painted, and every element paints an automation
 /// bounds tracker before its own content and children, so a retained child index
 /// is one (or two, for a scroller with its own text) short of gpui's.
+/// A `<text>` scroller has no such child: `build_host_container` flattens its
+/// whole subtree into one inline element, so gpui paints a single run where the
+/// retained tree has children, and no index names the target. `None` leaves the
+/// reveal unrequested instead of scrolling to an unrelated row.
 fn painted_child_index(tree: &RetainedTree, scroller_id: u64, element_id: u64) -> Option<usize> {
     let index = direct_child_index(tree, scroller_id, element_id)?;
     let scroller = tree.elements.get(&scroller_id)?;
+    if scroller.element_type == "text" {
+        return None;
+    }
     let leading = 1 + usize::from(scroller.content.is_some());
     Some(index + leading)
+}
+
+#[cfg(test)]
+mod painted_child_index_tests {
+    use super::*;
+
+    fn tree_from(batch: serde_json::Value) -> RetainedTree {
+        let bytes = serde_json::to_vec(&batch).unwrap();
+        let mut tree = RetainedTree::new();
+        apply_batch_to_tree_with_diagnostics(&mut tree, &bytes, false).expect("valid batch");
+        tree
+    }
+
+    #[test]
+    fn div_scroller_child_index_skips_the_automation_tracker() {
+        let tree = tree_from(serde_json::json!([
+            ["createElement", 1, "div"],
+            ["createElement", 2, "div"],
+            ["createElement", 3, "div"],
+            ["appendChild", 1, 2],
+            ["appendChild", 1, 3],
+            ["setRoot", 1]
+        ]));
+
+        assert_eq!(painted_child_index(&tree, 1, 2), Some(1));
+        assert_eq!(painted_child_index(&tree, 1, 3), Some(2));
+    }
+
+    #[test]
+    fn flattened_text_scroller_has_no_painted_child_to_scroll_to() {
+        let tree = tree_from(serde_json::json!([
+            ["createElement", 1, "text"],
+            ["createElement", 2, "text"],
+            ["createElement", 3, "text"],
+            ["setText", 2, "before "],
+            ["setText", 3, "target"],
+            ["appendChild", 1, 2],
+            ["appendChild", 1, 3],
+            ["setRoot", 1]
+        ]));
+
+        assert_eq!(painted_child_index(&tree, 1, 3), None);
+    }
 }
 
 fn virtual_list_ancestor_id(tree: &RetainedTree, element_id: u64) -> Option<u64> {

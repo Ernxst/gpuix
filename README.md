@@ -1284,12 +1284,20 @@ drops writes to `scrollTop` / `scrollLeft`.
 
 `scrollIntoView()` supports the DOM default `block: "start"` and
 `block: "nearest"`. `block: "center"`, `block: "end"`, `scrollIntoView(false)`
-and any `inline` other than `"nearest"` throw rather than scroll the wrong
-distance, because gpui has no equivalent alignment.
+and any `inline` other than `"nearest"` have no gpui equivalent: they warn once
+and reveal by the nearest edge, or throw under `strictStyles`. `block: "start"`
+aligns the **scroll container's own child** that contains the target, not the
+target itself, so a deeply nested element rests at the top of its row rather
+than at the top of the viewport.
 
-Reading any of the six properties forces layout, exactly as reading
-`Element.scrollHeight` does on the web. Hoist the reads you need out of a hot
-scroll handler rather than repeating them.
+Reading any of the six properties forces layout in the native renderer, as
+reading `Element.scrollHeight` does on the web; the browser-mirror renderer
+samples the last frame instead. Hoist the reads you need out of a hot scroll
+handler rather than repeating them: each read costs a forced draw, and on an
+element that is **not** a scroll container it costs two, because the metrics
+call returns nothing and the fallback measures the element's bounds — the
+three-property "am I at the bottom?" idiom above is six draws there. A
+per-frame metrics cache would collapse that; it is not implemented yet.
 
 ## Virtual lists
 

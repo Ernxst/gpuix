@@ -334,6 +334,7 @@ const warnedInvalidStyleProps = new WeakSet<Instance>()
 const warnedUnsupportedClassNameProps = new WeakSet<Instance>()
 const warnedUnsupportedAccessibilityRoleProps = new WeakSet<Instance>()
 const warnedUnsupportedAriaProps = new WeakSet<Instance>()
+const warnedUnsupportedScrollIntoViewOptions = new WeakSet<Instance>()
 
 class UnsupportedStyleTransitionError extends Error {
   override name = "UnsupportedStyleTransitionError"
@@ -374,20 +375,31 @@ class UnsupportedScrollIntoViewOptionError extends Error {
  * smallest amount that reveals it.
  *
  * The DOM defaults to `block: "start"`, and `scrollIntoView(true)` spells the
- * same thing. `"center"` and `"end"` have no gpui equivalent, so they are
- * rejected rather than quietly downgraded to a nearest-edge reveal.
+ * same thing. `"center"` and `"end"` have no gpui equivalent: under
+ * `strictStyles` they throw, and otherwise they warn once per element and
+ * reveal by the nearest edge, the way every other unsupported input on this
+ * host config degrades. A component shared with the web must not crash on
+ * native for an alignment the reveal can only approximate.
  */
 function scrollIntoViewAlignsToTop(
   instance: Instance,
+  container: Container,
   props: Props,
   options?: boolean | ScrollIntoViewOptions
 ): boolean {
-  const reject = (spelling: string): never => {
-    throw new UnsupportedScrollIntoViewOptionError(
+  const reject = (spelling: string): boolean => {
+    const message =
       `[gpuix] ${elementSubject(instance, props)} cannot scrollIntoView with ${spelling}. ` +
-        'The native renderer aligns to a child\'s top edge (block: "start") or scrolls the ' +
-        'smallest amount that reveals it (block: "nearest").'
-    )
+      'The native renderer aligns to a child\'s top edge (block: "start") or scrolls the ' +
+      'smallest amount that reveals it (block: "nearest").'
+    if (container.strictStyles) throw new UnsupportedScrollIntoViewOptionError(message)
+    if (!warnedUnsupportedScrollIntoViewOptions.has(instance)) {
+      warnedUnsupportedScrollIntoViewOptions.add(instance)
+      console.warn(message)
+    }
+    // The nearest edge always reveals the element, so the scroll still
+    // happens; only where it comes to rest differs.
+    return false
   }
 
   if (options === undefined || options === true) return true
@@ -877,7 +889,7 @@ export const hostConfig = {
       scrollIntoView: (options?: boolean | ScrollIntoViewOptions) =>
         rootContainerInstance.native.scrollElementIntoView?.(
           id,
-          scrollIntoViewAlignsToTop(instance, props, options)
+          scrollIntoViewAlignsToTop(instance, rootContainerInstance, props, options)
         ),
       getBounds: () => {
         const getElementBounds = rootContainerInstance.native.getElementBounds

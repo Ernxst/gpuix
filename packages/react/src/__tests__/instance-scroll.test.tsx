@@ -1,5 +1,5 @@
 import React from "react"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
 import type { PublicInstance } from "../types/host.js"
 
@@ -174,13 +174,78 @@ describeNative("host instance scroll properties", () => {
     expect(scroller.scrollTop).toBe(160)
   })
 
-  it("rejects scrollIntoView alignments gpui cannot express", () => {
-    const { target } = renderRowScroller()
+  it("warns and reveals by the nearest edge for alignments gpui cannot express", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const { scroller, target } = renderRowScroller()
 
+    expect(() => target.scrollIntoView({ block: "center" })).not.toThrow()
+    testRoot.renderer.flush()
+
+    // Same fallback the rest of the host config takes outside strict styles:
+    // warn once, then do the closest supported thing rather than crash a
+    // component shared with the web.
+    expect(scroller.scrollTop).toBe(100)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/scrollIntoView.*block: "center"/))
+
+    target.scrollIntoView(false)
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
+  it("rejects unsupported scrollIntoView alignments under strictStyles", () => {
+    const strict = createTestRoot({ strictStyles: true })
+    const targetRef = React.createRef<PublicInstance>()
+
+    strict.render(
+      <div style={{ width: 200, height: 100, overflow: "scroll" }}>
+        <div style={{ height: 400, flexShrink: 0 }}>
+          <div ref={targetRef} style={{ height: 40, flexShrink: 0 }}>
+            <text>target</text>
+          </div>
+        </div>
+      </div>
+    )
+
+    const target = targetRef.current!
     expect(() => target.scrollIntoView({ block: "center" })).toThrow(
       /scrollIntoView.*block: "center"/
     )
     expect(() => target.scrollIntoView(false)).toThrow(/scrollIntoView.*block: "end"/)
+    strict.renderer.dispose()
+  })
+
+  it("keeps block: \"start\" off the axis an x-only scroller does not own", () => {
+    const scrollerRef = React.createRef<PublicInstance>()
+    const targetRef = React.createRef<PublicInstance>()
+
+    // Eight 100px columns in a 200px viewport. Column 4 (400..500) sits 60px
+    // down, and the 240px columns overflow the 100px height — so a vertical
+    // write survives gpui's own clamp even though nothing here scrolls
+    // vertically.
+    testRoot.render(
+      <div ref={scrollerRef} style={{ width: 200, height: 100, overflowX: "scroll" }}>
+        {Array.from({ length: 8 }, (_, index) => (
+          <div
+            key={index}
+            ref={index === 4 ? targetRef : undefined}
+            style={{ width: 100, height: 240, marginTop: index === 4 ? 60 : 0 }}
+          >
+            <text>{`col-${index}`}</text>
+          </div>
+        ))}
+      </div>
+    )
+
+    const scroller = scrollerRef.current!
+    targetRef.current!.scrollIntoView()
+    testRoot.renderer.flush()
+
+    // The column's right edge meets the viewport's, as a horizontal reveal does.
+    expect(scroller.scrollLeft).toBe(300)
+    // `block: "start"` has no vertical component on a scroller that declares no
+    // vertical overflow.
+    expect(scroller.scrollTop).toBe(0)
   })
 
   it("reveals a focused element through nested scrollers", () => {
@@ -249,5 +314,38 @@ describeNative("host instance scroll properties", () => {
     testRoot.renderer.flush()
     expect(list.scrollTop).toBe(200)
     expect(testRoot.renderer.getScrollOffset(list.id)).toEqual([0, -200])
+  })
+
+  it("clamps a virtual list reveal to the last scroll position", () => {
+    const listRef = React.createRef<PublicInstance>()
+    const lastRef = React.createRef<PublicInstance>()
+
+    testRoot.render(
+      <virtual-list
+        ref={listRef}
+        overdraw={0}
+        estimatedItemHeight={40}
+        style={{ width: 400, height: 160 }}
+      >
+        {Array.from({ length: 20 }, (_, index) => (
+          <div
+            key={index}
+            ref={index === 19 ? lastRef : undefined}
+            style={{ height: 40, flexShrink: 0 }}
+          >
+            <text>{`row-${index}`}</text>
+          </div>
+        ))}
+      </virtual-list>
+    )
+
+    const list = listRef.current!
+    lastRef.current!.scrollIntoView()
+    testRoot.renderer.flush()
+
+    // The last row's top is 760px down, past the 640px the DOM allows: a
+    // reveal cannot scroll further than scrollHeight - clientHeight.
+    expect(list.scrollTop).toBe(list.scrollHeight - list.clientHeight)
+    expect(list.scrollTop).toBe(640)
   })
 })
