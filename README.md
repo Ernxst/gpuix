@@ -1884,26 +1884,37 @@ the traversal.
 keys is told about every key event that passes through it, including the ones
 travelling up from a focused descendant, and it is told with **its own id as
 `event.target`** — so a root handler also runs for each character typed into a
-focused `<input>`, and the target does not say so. The no-focus fallback adds no
-delivery there (it stays quiet while anything is focused), but a root listener
-cannot tell the two situations apart from the event alone. Gate on the focus
-read when the difference matters:
+focused `<input>`. When that focused descendant listens for keys too, the root
+handler runs **twice for the one keypress**: once as the ordinary DOM bubble,
+carrying the descendant as `event.target` at phase `3`, and once as the
+ancestor's own delivery, carrying the root as `event.target` at phase `2`.
+
+So `event.target` is not uniformly wrong on a key event — it is inconsistent.
+A root listener sees both shapes for the same physical key, which is why
+filtering on `event.target` (or on `eventPhase`) cannot separate "nothing is
+focused" from "the user is typing". The no-focus fallback adds no delivery to
+any of this; the focus read is what answers the question:
 
 ```tsx
+const rootRef = useRef<PublicInstance>(null)
+
 <div
+  ref={rootRef}
   onKeyDown={(event) => {
-    // Ignore keys that belong to whatever is focused, the way a `document`
-    // listener would check `event.target`.
-    if (renderer.getActiveElement() !== null) return
+    // Ignore keys that belong to a focused element, the way a `document`
+    // listener would read `event.target`. Compare against the root's own id:
+    // when the root is itself focusable and focused, the shortcut should fire,
+    // and a bare `!== null` check would swallow it.
+    const active = renderer.getActiveElement()
+    if (active !== null && active !== rootRef.current?.id) return
     if (event.key === '/') openSearch()
   }}
 >
 ```
 
-That divergence is in ancestor key delivery generally, not in this fallback: it
-is why `event.target` on a key event names the listening element rather than the
-focused one. Treat `getActiveElement()` as the reliable answer until it is
-fixed.
+The inconsistent target is in ancestor key delivery generally, not in this
+fallback, and it is why the guard reads focus rather than the event. Until it is
+fixed, `getActiveElement()` is the reliable answer to "what has focus".
 
 ### Imperative focus
 
