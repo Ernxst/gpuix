@@ -173,8 +173,14 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
     let id = ctx.id;
     // `doubleClick` and `contextMenu` are synthesized in React from the click
     // and mouse-down payloads, so they ride those listeners rather than owning
-    // one. The flag keeps an element that declares both from attaching two
-    // click listeners, and `contextMenu` alone takes the right button only.
+    // one. The flag keeps an element that declares both `click` and
+    // `doubleClick` from attaching two click listeners.
+    //
+    // `mouseDown` is not in any of these elements' `supported_events`, so the
+    // `contextMenu` arm is the only mouse-down listener they ever carry and it
+    // is unconditionally right-button. An element declaring both props
+    // therefore hears `onMouseDown` for the right button alone; left and
+    // middle presses stay off the wire until `mouseDown` is supported here.
     let mut click_attached = false;
     for event in ctx.events {
         let callback = ctx.event_callback.clone();
@@ -204,7 +210,7 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
                 });
             }
             "contextMenu" => {
-                el = el.on_mouse_down(gpui::MouseButton::Right, move |event, _window, _cx| {
+                el = el.on_mouse_down(gpui::MouseButton::Right, move |event, _window, cx| {
                     crate::renderer::emit_event_full(&callback, id, "mouseDown", |p| {
                         let (x, y) = crate::renderer::point_to_xy(event.position);
                         p.x = Some(x);
@@ -213,6 +219,11 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
                         p.click_count = Some(event.click_count as u32);
                         p.modifiers = Some(event.modifiers.into());
                     });
+                    // The div and canvas paths stop here too. Without it an
+                    // ancestor's own GPUI listener also fires and React
+                    // dispatches its `onMouseDown` twice: once bubbling from
+                    // this element, once at the ancestor.
+                    cx.stop_propagation();
                 });
             }
             "wheel" => {

@@ -601,6 +601,36 @@ describeNative("events", () => {
       expect(calls).toEqual(["doubleClick", "contextMenu"])
     })
 
+    it("dispatches an ancestor mouse down once per right press on a custom element", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 240, height: 120, padding: 20 }}
+          onMouseDown={(event) => calls.push(`div:mouseDown:${event.button}`)}
+        >
+          <code
+            code="const synthesized = true"
+            testId="code-context-menu-child"
+            style={{ width: 200, height: 80 }}
+            onContextMenu={() => calls.push("code:contextMenu")}
+          />
+        </div>
+      )
+      const code = testRoot.renderer.findByTestId("code-context-menu-child")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(code.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      testRoot.renderer.nativeSimulateMouseDown(centerX, centerY, 2)
+
+      // One press is one bubbled `onMouseDown`, as in the browser. Unless the
+      // custom element stops native propagation the ancestor's own GPUI
+      // listener fires as well, and React dispatches the ancestor handler
+      // twice: once bubbling from the custom element, once at the ancestor.
+      expect(calls).toEqual(["div:mouseDown:2", "code:contextMenu"])
+    })
+
     it("reaches an ancestor context menu from a right press on an inert child", () => {
       const calls: string[] = []
 
