@@ -3822,6 +3822,17 @@ relationships in the DOM shape. A previously returned element re-resolves
 those relationships after a rerender; accessing them after that element was
 removed throws instead of returning a stale snapshot.
 
+`TestElement.getBoundingClientRect()` returns the element's painted box in the
+DOM's `DOMRect` shape — `{ x, y, width, height, top, right, bottom, left }`,
+with the derived fields computed as a browser computes them. The coordinates
+are the ones `renderer.getElementBounds` reports: logical pixels relative to
+the window, the desktop's analogue of viewport-relative. It re-resolves the
+element on every call, as `children` does. One departure from the DOM: a
+browser always has a rect for a connected element, but bounds here are recorded
+during paint, so an element that painted nothing in the last frame — the
+`toBeVisible` condition — has no rect and this **throws** naming the element,
+rather than returning zeros an assertion cannot tell from a collapsed box.
+
 ```tsx
 import { createTestRoot } from '@gpuix/react/testing'
 
@@ -3845,6 +3856,7 @@ screen.getByDisplayValue(/iron/)
 search.semantics // { label: 'Recipe search', placeholder: 'Search recipes', value: 'iron plate' }
 
 const panel = screen.getByTestId('power-panel')
+panel.getBoundingClientRect() // { x, y, width, height, top, right, bottom, left }
 screen.within(panel).getByText('Rate')
 screen.within(ledger).getByText('State')
 screen.queryAllByTestId(/^optional-/)
