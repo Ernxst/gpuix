@@ -1268,6 +1268,8 @@ enum UiCommand {
         response: SyncSender<Option<crate::automation::ElementBounds>>,
     },
     FocusElement(u64),
+    FocusNext,
+    FocusPrevious,
     ResolveTabKeyDown {
         default_prevented: bool,
     },
@@ -1523,6 +1525,12 @@ async fn run_ui_commands(
                 view.focus_element_and_reveal(id, window, cx);
                 window.refresh();
             }),
+            UiCommand::FocusNext => window.update(cx, |view, window, cx| {
+                view.move_focus(FocusDirection::Next, window, cx)
+            }),
+            UiCommand::FocusPrevious => window.update(cx, |view, window, cx| {
+                view.move_focus(FocusDirection::Previous, window, cx)
+            }),
             UiCommand::ResolveTabKeyDown { default_prevented } => {
                 window.update(cx, move |view, window, cx| {
                     view.resolve_tab_key_down(default_prevented, window, cx);
@@ -1685,6 +1693,9 @@ async fn run_ui_commands(
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
         };
         if let Err(error) = result {
+            if cx.update(|cx| cx.windows().is_empty()) {
+                break;
+            }
             log::error!("Failed to handle GPUI UI command: {error:#}");
         }
     }
@@ -2303,6 +2314,38 @@ impl GpuixRenderer {
         Ok(())
     }
 
+    // GPUI declares PerMonitorV2 only in the host exe manifest (zed#8936).
+    // A napi .node is loaded by node.exe/bun.exe, so that manifest never applies.
+    // Call on gpuix-ui only, before WindowsPlatform::new. Never on the Node thread:
+    // the V2 fallback is SetThreadDpiAwarenessContext, which would change bun itself.
+    #[cfg(target_os = "windows")]
+    fn enable_per_monitor_dpi() {
+        use windows::Win32::UI::HiDpi::{
+            AreDpiAwarenessContextsEqual, GetThreadDpiAwarenessContext,
+            SetProcessDpiAwarenessContext, SetThreadDpiAwarenessContext,
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        };
+
+        // SAFETY: All functions are process/thread DPI configuration calls. This
+        // runs before this thread creates a window, as required by Win32.
+        unsafe {
+            let current = GetThreadDpiAwarenessContext();
+            if AreDpiAwarenessContextsEqual(current, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+                .as_bool()
+            {
+                return;
+            }
+            if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_ok() {
+                return;
+            }
+            if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE).is_ok() {
+                return;
+            }
+            // Process awareness is already locked (node/bun manifest). This thread has no HWND yet.
+            SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+    }
+
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     fn init_threaded(&self, options: Option<WindowOptions>) -> Result<()> {
         let options = options.unwrap_or_default();
@@ -2341,8 +2384,12 @@ impl GpuixRenderer {
         std::thread::Builder::new()
             .name("gpuix-ui".to_string())
             .spawn(move || {
+                #[cfg(target_os = "windows")]
+                Self::enable_per_monitor_dpi();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let app = gpui_platform::application().with_http_client(default_http_client());
+                    let app = gpui_platform::application()
+                        .with_http_client(default_http_client())
+                        .with_quit_mode(gpui::QuitMode::LastWindowClosed);
                     app.run(move |cx| {
                         cx.set_reduce_motion(reduced_motion);
                         init_key_bindings(cx);
@@ -2794,7 +2841,11 @@ impl GpuixRenderer {
                     "Renderer not initialized. Call init() first.",
                 ));
             }
-            RendererLifecycle::Terminated => return Ok(false),
+            RendererLifecycle::Terminated => {
+                #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+                self.ui_commands.lock().unwrap().take();
+                return Ok(false);
+            }
             RendererLifecycle::Running => {}
         }
 
@@ -2835,7 +2886,11 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let _ = (dispatch_frame_request, after_precheck);
-            return Ok(true);
+            let running = *self.lifecycle.lock().unwrap() == RendererLifecycle::Running;
+            if !running {
+                self.ui_commands.lock().unwrap().take();
+            }
+            return Ok(running);
         }
 
         #[cfg(not(any(
@@ -2939,10 +2994,19 @@ impl GpuixRenderer {
         renderer_capabilities(self.active_frame_clock_kind())
     }
 
-    /// Whether JavaScript must drive the native event loop with tick().
+    /// Whether JavaScript must call tick() until it returns false.
+    ///
+    /// macOS: tick() pumps AppKit. Windows/Linux: tick() reports whether the
+    /// UI thread is still inside `Platform::run`. Both return false after the
+    /// last window closes so the JS frame loop can finish termination.
     #[napi]
     pub fn requires_tick(&self) -> bool {
-        cfg!(target_os = "macos")
+        cfg!(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        ))
     }
 
     /// Registers a coalesced display-link frame request callback when supported.
@@ -3275,6 +3339,44 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusElement(id));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Move focus to the next GPUIX tab stop without dispatching a key event.
+    #[napi]
+    pub fn focus_next(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|view, window, cx| view.move_focus(FocusDirection::Next, window, cx));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::FocusNext);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Move focus to the previous GPUIX tab stop without dispatching a key event.
+    #[napi]
+    pub fn focus_previous(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|view, window, cx| {
+            view.move_focus(FocusDirection::Previous, window, cx)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::FocusPrevious);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -4739,6 +4841,16 @@ impl WebGpuixRenderer {
         update_web_view(move |view, window, cx| {
             view.focus_element_and_reveal(id, window, cx);
         })
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusNext)]
+    pub fn focus_next(&self) -> Result<(), wasm_bindgen::JsValue> {
+        update_web_view(|view, window, cx| view.move_focus(FocusDirection::Next, window, cx))
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusPrevious)]
+    pub fn focus_previous(&self) -> Result<(), wasm_bindgen::JsValue> {
+        update_web_view(|view, window, cx| view.move_focus(FocusDirection::Previous, window, cx))
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = resolveTabKeyDown)]
@@ -6378,7 +6490,7 @@ impl GpuixView {
         self.dispatch_next_tab_key_down(window, cx);
     }
 
-    fn move_focus(
+    pub(crate) fn move_focus(
         &mut self,
         direction: FocusDirection,
         window: &mut gpui::Window,
@@ -7704,7 +7816,7 @@ enum ScrollAncestor {
 }
 
 #[derive(Clone, Copy)]
-enum FocusDirection {
+pub(crate) enum FocusDirection {
     Next,
     Previous,
 }
@@ -10163,11 +10275,11 @@ pub(crate) fn renderer_capabilities(frame_clock_kind: &str) -> RendererCapabilit
     let (platform, requires_tick, screenshot) = if cfg!(target_os = "macos") {
         ("macos", true, cfg!(feature = "test-support"))
     } else if cfg!(target_os = "windows") {
-        ("windows", false, cfg!(feature = "test-support"))
+        ("windows", true, cfg!(feature = "test-support"))
     } else if cfg!(target_os = "linux") {
-        ("linux", false, false)
+        ("linux", true, false)
     } else if cfg!(target_os = "freebsd") {
-        ("freebsd", false, false)
+        ("freebsd", true, false)
     } else {
         ("unknown", false, false)
     };

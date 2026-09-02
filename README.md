@@ -815,8 +815,12 @@ on the returned handle to end it. One thrown tick is reported and retried;
 repeated failures quit instead of abandoning the native window.
 
 On **Windows and Linux**, GPUI runs its normal blocking native event loop on one
-dedicated Rust UI thread. Node sends in-process commands to that thread, so
-`startFrameLoop` returns a no-op handle and does not create a JavaScript timer.
+dedicated Rust UI thread. Node sends in-process commands to that thread, so a
+timer tick neither pumps that loop nor requests a frame. `startFrameLoop` still
+runs there: its ticks observe whether the UI thread is alive, and `tick()`
+returns `false` once the last window closes, which stops the loop and runs
+`onTerminated`. Call it on every platform — `render()` does. Skipping it on
+Windows or Linux leaves the process running after the window is gone.
 All platforms use GPUI's native platform, window, renderer, input, scroll,
 clipboard, keyboard, and IME implementations. The embedded macOS run-loop
 extension comes from the pinned GPUIX fork. CI runs the full React and example
@@ -1663,6 +1667,27 @@ a `div` when it should receive keyboard focus:
 | `tabIndex={-1}` | Skipped by Tab, but focusable by click or renderer API |
 | `autoFocus` | Takes focus once, when its native focus handle is created |
 
+### Element keyboard callbacks
+
+`onKeyDown` fires for the focused element and then through React's capture and
+bubble phases. `onKeyUp` follows the same path when the key is released. Adding
+either callback creates the element's native focus handle.
+
+```tsx
+<div
+  autoFocus
+  tabIndex={0}
+  onKeyDown={(event) => {
+    console.log(event.key, event.keyChar, event.modifiers, event.isHeld)
+  }}
+  onKeyUp={(event) => {
+    console.log(`${event.key} released`)
+  }}
+>
+  Focused target
+</div>
+```
+
 `Tab` calls GPUI's `window.focus_next()`. `Shift+Tab` calls
 `window.focus_prev()`. Before that default runs, GPUIX dispatches the keydown
 through React's capture and bubble phases. Call `preventDefault()` from either
@@ -1677,6 +1702,19 @@ phase to keep focus on the current element, matching the browser:
 >
   Editor
 </div>
+```
+
+### Imperative focus
+
+`focusNext()` and `focusPrevious()` take the same path as the default `Tab` and
+`Shift+Tab`: they first reveal the next focusable row when it is a virtual item
+that has not been painted yet, then move GPUI focus with `window.focus_next()`
+or `window.focus_prev()`, then scroll the newly focused element into view. They
+do not dispatch a `keydown`, so a `preventDefault()` handler cannot cancel them.
+
+```ts
+renderer.focusNext()
+renderer.focusPrevious()
 ```
 
 Use a ref for imperative focus:
@@ -3208,9 +3246,12 @@ use a directory link, configure Vitest to dedupe `react`, `react-dom`,
 `react-reconciler`, and `scheduler`; that is only a fallback, not a supported
 way to consume the unpublished fork under Bun.
 
-`hasNativeTestRenderer` was removed. Use
-`isNativeTestRendererAvailable()` when a test must check whether the native
-renderer can initialize.
+The native package exports `TestGpuixRenderer` on every platform. Construction
+on Linux or a build without GPU test support throws a clear availability error;
+`hasTestGpuixRenderer()` reports whether construction is supported. In React
+tests, use `isNativeTestRendererAvailable()` when a suite must check whether the
+native renderer can initialize. The old `hasNativeTestRenderer` export remains
+removed.
 
 `createTestRoot()` returns synchronous queries bound to its renderer. Text
 queries match retained `<text>` content, test ID queries match both `testId`

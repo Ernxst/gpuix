@@ -33,8 +33,8 @@ use crate::renderer::{
     parse_canvas_image_source, parse_debug_frame_overlay_mode, pending_accessibility_diagnostics,
     pending_custom_prop_diagnostic, set_application_menus, take_style_diagnostics_for_reporting,
     to_element_id, validate_canvas_target, AnimationFrameCallback, CanvasImageLoadState,
-    DebugFrameOverlayStats, EventCallback, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView,
-    MenuSpec, PendingStyleDiagnostics, WindowSize,
+    DebugFrameOverlayStats, EventCallback, FocusDirection, FrameTimestampOrigin,
+    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostics, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -1270,6 +1270,36 @@ impl TestGpuixRenderer {
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn focus_next(&self) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.move_focus(FocusDirection::Next, window, cx);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn focus_previous(&self) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.move_focus(FocusDirection::Previous, window, cx);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
             cx.run_until_parked();
             Ok(())
         })
