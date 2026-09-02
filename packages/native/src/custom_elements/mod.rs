@@ -171,10 +171,19 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
     cx: &mut gpui::Context<crate::renderer::GpuixView>,
 ) -> E {
     let id = ctx.id;
+    // `doubleClick` and `contextMenu` are synthesized in React from the click
+    // and mouse-down payloads, so they ride those listeners rather than owning
+    // one. The flag keeps an element that declares both from attaching two
+    // click listeners, and `contextMenu` alone takes the right button only.
+    let mut click_attached = false;
     for event in ctx.events {
         let callback = ctx.event_callback.clone();
         match event.as_str() {
-            "click" => {
+            "click" | "doubleClick" => {
+                if click_attached {
+                    continue;
+                }
+                click_attached = true;
                 el = el.on_click(move |click, _window, _cx| {
                     crate::renderer::emit_event_full(&callback, id, "click", |p| {
                         let (x, y) = crate::renderer::point_to_xy(click.position());
@@ -182,6 +191,27 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
                         p.y = Some(y);
                         p.click_count = Some(click.click_count() as u32);
                         p.modifiers = Some(click.modifiers().into());
+                        // React reads both to decide whether a second click is
+                        // a `doubleClick`, which is the primary button only.
+                        p.is_right_click = Some(click.is_right_click());
+                        p.button = Some(match click {
+                            gpui::ClickEvent::Mouse(event) => {
+                                crate::renderer::mouse_button_to_u32(event.down.button)
+                            }
+                            gpui::ClickEvent::Keyboard(_) | gpui::ClickEvent::Touch(_) => 0,
+                        });
+                    });
+                });
+            }
+            "contextMenu" => {
+                el = el.on_mouse_down(gpui::MouseButton::Right, move |event, _window, _cx| {
+                    crate::renderer::emit_event_full(&callback, id, "mouseDown", |p| {
+                        let (x, y) = crate::renderer::point_to_xy(event.position);
+                        p.x = Some(x);
+                        p.y = Some(y);
+                        p.button = Some(crate::renderer::mouse_button_to_u32(event.button));
+                        p.click_count = Some(event.click_count as u32);
+                        p.modifiers = Some(event.modifiers.into());
                     });
                 });
             }

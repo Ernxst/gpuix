@@ -1226,6 +1226,18 @@ impl CanvasElement {
         // flags keep a canvas that declares both from attaching two.
         let mut click_attached = false;
         let mut mouse_down_attached = false;
+        // A canvas that declares only `onContextMenu` takes the right button
+        // alone, so a left press neither costs an IPC round trip nor stops
+        // propagation on behalf of a listener that would ignore it.
+        let mouse_down_buttons: &[gpui::MouseButton] = if ctx.events.contains("mouseDown") {
+            &[
+                gpui::MouseButton::Left,
+                gpui::MouseButton::Middle,
+                gpui::MouseButton::Right,
+            ]
+        } else {
+            &[gpui::MouseButton::Right]
+        };
         for event_type in ctx.events {
             let callback = ctx.event_callback.clone();
             let geometry = self.geometry.clone();
@@ -1279,14 +1291,10 @@ impl CanvasElement {
                         continue;
                     }
                     mouse_down_attached = true;
-                    for &button in &[
-                        gpui::MouseButton::Left,
-                        gpui::MouseButton::Middle,
-                        gpui::MouseButton::Right,
-                    ] {
+                    for &button in mouse_down_buttons {
                         let callback = callback.clone();
                         let geometry = geometry.clone();
-                        element = element.on_mouse_down(button, move |event, _window, _cx| {
+                        element = element.on_mouse_down(button, move |event, _window, cx| {
                             let (x, y) = local_point(&geometry, event.position);
                             crate::renderer::emit_event_full(
                                 &callback,
@@ -1301,6 +1309,11 @@ impl CanvasElement {
                                     payload.modifiers = Some(event.modifiers.into());
                                 },
                             );
+                            // The div path stops here too. Without it an
+                            // ancestor's own GPUI listener also fires and
+                            // React dispatches its `onMouseDown` twice: once
+                            // bubbling from the canvas, once at target.
+                            cx.stop_propagation();
                         });
                     }
                 }

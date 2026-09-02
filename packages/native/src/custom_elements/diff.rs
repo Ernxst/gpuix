@@ -426,6 +426,8 @@ impl CustomElement for DiffElement {
             "showMore",
             "lineClick",
             "click",
+            "doubleClick",
+            "contextMenu",
             "mouseEnter",
             "mouseLeave",
             "wheel",

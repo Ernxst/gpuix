@@ -8313,14 +8313,25 @@ pub(crate) fn build_host_container(
     // `contextMenu` rides the mouse-down listener: macOS opens a context menu
     // on the press, so the DOM order is mousedown, contextmenu, mouseup,
     // auxclick. React synthesizes it from the right-button payload.
-    if tracks_pointer_event(element, ctx.tree, "mouseDown")
-        || tracks_pointer_event(element, ctx.tree, "contextMenu")
-    {
-        for &button in &[
-            gpui::MouseButton::Left,
-            gpui::MouseButton::Middle,
-            gpui::MouseButton::Right,
-        ] {
+    //
+    // A subtree that tracks only `contextMenu` takes the right button alone.
+    // `tracks_pointer_event` walks ancestors, so an app-root `onContextMenu`
+    // would otherwise put an all-button listener on every descendant: an IPC
+    // round trip per left press, and a `stop_propagation` that suppresses the
+    // GPUI listener of an ancestor React would then never hear from.
+    let tracks_mouse_down = tracks_pointer_event(element, ctx.tree, "mouseDown");
+    let tracks_context_menu = tracks_pointer_event(element, ctx.tree, "contextMenu");
+    if tracks_mouse_down || tracks_context_menu {
+        let buttons: &[gpui::MouseButton] = if tracks_mouse_down {
+            &[
+                gpui::MouseButton::Left,
+                gpui::MouseButton::Middle,
+                gpui::MouseButton::Right,
+            ]
+        } else {
+            &[gpui::MouseButton::Right]
+        };
+        for &button in buttons {
             let callback = ctx.event_callback.clone();
             let id = element.id;
             el = el.on_mouse_down(button, move |mouse_event, _window, cx| {

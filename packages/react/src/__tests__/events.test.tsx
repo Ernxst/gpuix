@@ -577,6 +577,56 @@ describeNative("events", () => {
       expect(calls).toEqual(["doubleClick", "contextMenu"])
     })
 
+    it("delivers double click and context menu on a custom element beside canvas", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <code
+          code="const synthesized = true"
+          testId="code-synthetic-clicks"
+          style={{ width: 200, height: 80 }}
+          onDoubleClick={() => calls.push("doubleClick")}
+          onContextMenu={() => calls.push("contextMenu")}
+        />
+      )
+      const code = testRoot.renderer.findByTestId("code-synthetic-clicks")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(code.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      testRoot.renderer.nativeSimulateClick(centerX, centerY)
+      testRoot.renderer.nativeSimulateClick(centerX, centerY, 0, undefined, 2)
+      testRoot.renderer.nativeSimulateClick(centerX, centerY, 2)
+
+      expect(calls).toEqual(["doubleClick", "contextMenu"])
+    })
+
+    it("reaches an ancestor context menu from a right press on an inert child", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 240, height: 120, padding: 20 }}
+          onContextMenu={() => calls.push("contextMenu")}
+        >
+          <div testId="context-menu-inert-child" style={{ width: 200, height: 80 }} />
+        </div>
+      )
+      const child = testRoot.renderer.findByTestId("context-menu-inert-child")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      // The child declares nothing. It carries a right-button mouse-down
+      // listener only because `contextMenu` tracking walks ancestors, and that
+      // is the whole button set it needs: a left press must stay off the wire.
+      testRoot.renderer.nativeSimulateMouseDown(centerX, centerY)
+      expect(calls).toEqual([])
+
+      testRoot.renderer.nativeSimulateMouseDown(centerX, centerY, 2)
+      expect(calls).toEqual(["contextMenu"])
+    })
+
     it("dispatches one event through capture, target, and bubble with DOM-shaped targets", () => {
       const calls: Array<{
         name: string
