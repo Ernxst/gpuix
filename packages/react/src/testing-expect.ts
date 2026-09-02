@@ -33,7 +33,15 @@ import {
   type TestElement,
   type TestRenderer,
 } from "./testing.js"
+import { toMatchScreenshot, type ToMatchScreenshotOptions } from "./testing-screenshot.js"
 import { TEXT_EDITING_TYPES } from "./reconciler/text-editing.js"
+
+export type {
+  ResolveScreenshotPath,
+  ScreenshotComparatorOptions,
+  ScreenshotPathContext,
+  ToMatchScreenshotOptions,
+} from "./testing-screenshot.js"
 
 /** The normalization half of the matcher options; `exact` has no meaning here. */
 export type TextContentOptions = Omit<MatcherOptions, "exact">
@@ -74,6 +82,14 @@ export interface GpuixMatchers<R = unknown> {
   toHaveDisplayValue(expected: TextContentMatcher, options?: MatcherOptions): R
   /** The element's computed accessible name matches, or is non-empty. */
   toHaveAccessibleName(expected?: TextContentMatcher, options?: MatcherOptions): R
+  /**
+   * The window — or the element's box within it — matches its stored golden.
+   *
+   * The one asynchronous matcher here, as vitest browser mode's is: it must be
+   * awaited, `await expect(screen).toMatchScreenshot('built')`.
+   */
+  toMatchScreenshot(options?: ToMatchScreenshotOptions): Promise<R>
+  toMatchScreenshot(name?: string, options?: ToMatchScreenshotOptions): Promise<R>
 }
 
 function asTestElement(received: unknown, matcher: string): TestElement {
@@ -450,4 +466,13 @@ export const gpuixMatchers = {
       }
     )
   },
+
+  /**
+   * The golden matcher, mirroring vitest browser mode's. Its receiver is a
+   * render result or a `TestRenderer` — the whole offscreen window — or a
+   * `TestElement`, clipped to the box that element painted. See
+   * `testing-screenshot.ts` for the decisions it makes and where they differ
+   * from vitest's.
+   */
+  toMatchScreenshot,
 }

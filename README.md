@@ -4047,6 +4047,7 @@ declare module 'vitest' {
 | `toHaveValue(value)` | Its current value, exactly |
 | `toHaveDisplayValue(matcher, options?)` | Its current value, through the Testing Library matcher |
 | `toHaveAccessibleName(matcher?)` | Its computed accessible name |
+| `await toMatchScreenshot(name?, options?)` | The window, or the element's box, against a stored golden |
 
 Every matcher re-resolves the element against its renderer first, so an element
 captured before a rerender reports current state — the same contract
@@ -4126,6 +4127,85 @@ reports that rather than falling back to the raw prop — use `getByLabelText` o
 `toBeChecked`, `toHaveClass`, and `toBeEmptyDOMElement` are deliberately absent:
 there is no class attribute, no empty-DOM notion worth asserting on this tree,
 and checked state is already covered by `getByRole` with `ariaChecked`.
+
+#### toMatchScreenshot
+
+`toMatchScreenshot` is vitest browser mode's golden matcher, so the same
+assertion reads the same in a browser suite and a desktop one. It is
+**asynchronous** — always `await` it:
+
+```ts
+const screen = render(<Panel />)
+
+// The whole offscreen window.
+await expect(screen).toMatchScreenshot('panel')
+
+// Just what one element painted, clipped to its device-pixel box.
+await expect(screen.getByTestId('tile')).toMatchScreenshot('tile')
+```
+
+The receiver is a `render()` result, a `TestRenderer`, or a `TestElement`. An
+element capture takes the window screenshot and crops it to the element's
+`getBoundingClientRect()` scaled by the window's `scaleFactor`, so an element
+golden is in device pixels like the window one, and an element that painted
+nothing throws rather than comparing an empty box.
+
+Called without a name, the golden is named after the test and a per-test
+counter — `my-test-1.png`, `my-test-2.png` — exactly as in vitest. The default
+path is vitest's too:
+
+```
+${root}/${testFileDirectory}/__screenshots__/${testFileName}/${arg}${ext}
+```
+
+Both knobs are options:
+
+```ts
+await expect(screen).toMatchScreenshot('panel', {
+  comparatorOptions: {
+    tolerance: 2,            // per-channel delta a pixel may differ by (default 0)
+    differingPixelBudget: 0.01, // fraction of pixels allowed past it (default 0)
+    maxChannelDelta: 16,     // ceiling on the worst pixel, whatever the budget (default 255)
+  },
+  resolveScreenshotPath: ({ root, testFileDirectory, testFileName, arg, ext }) =>
+    path.join(root, testFileDirectory, '__goldens__', testFileName, `${arg}${ext}`),
+})
+```
+
+The comparison is the native one `expectCanvasMatchesBrowser` uses, and the
+defaults are exact: the renderer that wrote a golden reproduces it byte for
+byte, so a difference is a real difference until you say otherwise.
+
+Outcomes, all of them vitest's:
+
+| Situation | What happens |
+|---|---|
+| No golden | It is written and the assertion **fails**: "No existing reference screenshot found; a new one was created. Review it before running tests again." |
+| No golden, in CI (`updateSnapshot: 'none'`) | The capture goes to the diff directory, not the golden path, and the assertion fails |
+| `vitest --update` | The golden is overwritten and the assertion passes, whatever the comparison or the sizes said — vitest's precedence |
+| Sizes differ | **Fails** without comparing pixels, naming both: "Expected image dimensions to be 400×240px, but received 200×240px." Never skipped, and a `scaleFactor` change reaches you as this |
+| Pixels differ | **Fails**, naming the golden, the capture, and a diff image |
+
+Three things differ from vitest browser mode, all of them the desktop:
+
+**Mismatch artifacts land beside the golden, in `__diff_output__/`.** vitest
+writes them into the runner's `attachmentsDir` and attaches them to the test
+report; that directory is a server-side config value with no route to a matcher
+running in the worker, so the artifacts go to
+`<golden dir>/__diff_output__/<name>-actual.png` and `-diff.png` instead. The
+failure message names the golden, the capture, and the diff in vitest's layout.
+
+**There is no capture-stability loop.** vitest re-screenshots a live page until
+two frames agree, because a browser can still be animating. `captureScreenshot`
+draws the committed tree synchronously and reproduces itself exactly, so a
+capture is taken once; the "Could not capture a stable screenshot" outcome does
+not exist here.
+
+**One comparator, and it is the native one.** `comparatorName`, custom
+comparators, `screenshotOptions` (masking, `fullPage`, caret handling), and
+`timeout` are not implemented: they describe a browser page, not an offscreen
+GPUI window. `tolerance`, `differingPixelBudget`, and `maxChannelDelta` are the
+knobs, with `compareImages` behind them.
 
 `waitFor(callback, options)` retries `callback` until it stops throwing, using
 Testing Library's defaults (`timeout` 1000ms, `interval` 50ms, `onTimeout`) and

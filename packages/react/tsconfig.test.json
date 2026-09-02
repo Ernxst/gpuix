@@ -9,6 +9,7 @@
     "src/__tests__/resolved-style.test.tsx",
     "src/__tests__/style-desc.types.ts",
     "src/__tests__/testing-exports.types.ts",
-    "src/__tests__/element-identity.test.tsx"
+    "src/__tests__/element-identity.test.tsx",
+    "src/__tests__/testing-screenshot.test.tsx"
   ]
 }
