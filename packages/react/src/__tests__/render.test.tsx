@@ -3,6 +3,7 @@
 
 import { spawn } from "node:child_process"
 import { unlinkSync, writeFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import React, { useState } from "react"
@@ -93,6 +94,32 @@ function collectOutput(child: ReturnType<typeof spawn>) {
     },
   }
 }
+
+describe("TestGpuixRenderer availability", () => {
+  // The flag reports a compile-time fact and availability reports a runtime
+  // probe, so they are not equal in general: a build with the renderer can
+  // still fail to initialize on a machine without a usable GPU. Only the
+  // one-way implications below are contractual.
+  it("exports a constructor that explains itself when it cannot construct", () => {
+    const native = createRequire(import.meta.url)("@gpuix/native") as {
+      TestGpuixRenderer?: new (width?: number, height?: number) => unknown
+      hasTestGpuixRenderer?: () => boolean
+    }
+    expect(typeof native.TestGpuixRenderer).toBe("function")
+    if (native.hasTestGpuixRenderer?.() === false) {
+      expect(isNativeTestRendererAvailable()).toBe(false)
+      // Must be the stub's own reason, never "is not a constructor".
+      expect(() => new native.TestGpuixRenderer!()).toThrow(/TestGpuixRenderer/)
+    } else if (isNativeTestRendererAvailable()) {
+      const renderer = new native.TestGpuixRenderer!(1, 1)
+      expect(renderer).toBeTruthy()
+    } else {
+      // Compiled in, but this environment could not initialize it. That is an
+      // environment failure, not a broken flag; require only a recorded reason.
+      expect(nativeTestRendererError).toBeInstanceOf(Error)
+    }
+  })
+})
 
 function runChild(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {

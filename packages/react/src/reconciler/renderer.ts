@@ -66,10 +66,11 @@ export interface FrameLoopOptions {
 }
 
 /**
- * Drive GPUI's embedded macOS event loop from its native display link.
+ * Drive GPUI until the last window closes, using a native display link when available.
  *
  * On Windows and Linux, GPUI owns a blocking event loop on a Rust UI thread,
- * so this function returns a no-op handle without creating a timer.
+ * so timer ticks only observe whether that thread is still running. They do
+ * not pump the platform loop or request frames.
  *
  * On macOS, a coalesced native callback asks JavaScript for one AppKit pump per
  * display-link request. A separate timer pump cannot dispatch frame tokens; it

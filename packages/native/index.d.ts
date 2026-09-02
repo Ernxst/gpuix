@@ -90,7 +90,13 @@ export declare class GpuixRenderer {
    * backwards compatibility; new callers should branch on this object.
    */
   capabilities(): RendererCapabilities
-  /** Whether JavaScript must drive the native event loop with tick(). */
+  /**
+   * Whether JavaScript must call tick() until it returns false.
+   *
+   * macOS: tick() pumps AppKit. Windows/Linux: tick() reports whether the
+   * UI thread is still inside `Platform::run`. Both return false after the
+   * last window closes so the JS frame loop can finish termination.
+   */
   requiresTick(): boolean
   /**
    * Registers a coalesced display-link frame request callback when supported.
@@ -120,6 +126,10 @@ export declare class GpuixRenderer {
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
+  /** Move focus to the next GPUIX tab stop without dispatching a key event. */
+  focusNext(): void
+  /** Move focus to the previous GPUIX tab stop without dispatching a key event. */
+  focusPrevious(): void
   /**
    * Complete the DOM default for a Tab keydown after React capture and
    * bubble handlers have had a chance to call preventDefault().
@@ -380,6 +390,8 @@ export declare class TestGpuixRenderer {
    * Call flush() before this so the element tree and focus handles exist.
    */
   focusElement(id: number): void
+  focusNext(): void
+  focusPrevious(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   setPointerCapture(id: number): void
   releasePointerCapture(id: number): void
@@ -740,6 +752,9 @@ export interface GpuixStyleDiagnostic {
   property: string
   value: string
 }
+
+/** True only when this binary compiled the real GPU test renderer. */
+export declare function hasTestGpuixRenderer(): boolean
 
 /**
  * One highlight wash painted in the last frame, with the boxes it drew.

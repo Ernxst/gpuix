@@ -148,6 +148,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   hasMainMenu(): boolean
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number): void
+  focusNext(): void
+  focusPrevious(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   setPointerCapture(elementId: number): void
   releasePointerCapture(elementId: number): void
@@ -257,13 +259,24 @@ function initializeNativeTestRenderer(): NativeTestRendererConstructor | null {
   try {
     const native = requireNative("@gpuix/native") as {
       TestGpuixRenderer?: NativeTestRendererConstructor
+      hasTestGpuixRenderer?: () => boolean
     }
-    if (native.TestGpuixRenderer) {
+    const hasRealRenderer = native.hasTestGpuixRenderer?.()
+    if (hasRealRenderer !== false && native.TestGpuixRenderer) {
       NativeTestRenderer = native.TestGpuixRenderer
       // Construct once here so availability includes native initialization, not
       // merely whether the binding exports its constructor. The first
       // TestRenderer reuses this instance.
       probedNativeTestRenderer = new native.TestGpuixRenderer()
+    } else if (native.TestGpuixRenderer) {
+      // hasTestGpuixRenderer() === false. Construct the stub anyway and let it
+      // throw into the catch below, so the reason comes from the native build
+      // itself. A copy of the message here could not tell "Linux has no
+      // test-support" apart from "this build turned test-support off".
+      const stub = new native.TestGpuixRenderer()
+      throw new Error(
+        `hasTestGpuixRenderer() is false but TestGpuixRenderer constructed (${typeof stub}).`
+      )
     } else {
       nativeTestRendererLoadError = new Error(
         "@gpuix/native does not export TestGpuixRenderer. Build with test-support to run tests."
@@ -1052,6 +1065,20 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.native.focusElement(elementId)
     // Programmatic focus is reported when GPUI commits the next frame.
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
+  focusNext(): void {
+    this.native.flush()
+    this.native.focusNext()
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
+  focusPrevious(): void {
+    this.native.flush()
+    this.native.focusPrevious()
     this.native.flush()
     this.dispatchNativeEvents()
   }
