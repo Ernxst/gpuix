@@ -1827,6 +1827,7 @@ where
     }
     crate::accessibility::apply(
         el,
+        ctx.tree,
         ctx.retained_element,
         ctx.event_callback,
         ctx.focus_handle,

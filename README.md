@@ -1858,6 +1858,7 @@ equivalents:
 | React prop | Native meaning |
 |---|---|
 | `ariaLabel`, `ariaDescription` | Accessible name and supplementary description; requires a supported explicit or inferred role |
+| `ariaLabelledBy`, `ariaDescribedBy` | Space-separated author `id`s whose text supplies the name or description; wins over `ariaLabel` / `ariaDescription` |
 | `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
 | `ariaExpanded`, `ariaSelected` | Boolean semantic states |
 | `ariaValue` | Human-readable value text |
@@ -1867,6 +1868,22 @@ equivalents:
 | `ariaDisabled` | Unavailable and non-activating, but retained in tab order |
 | `ariaHidden` | Excludes the element and its complete subtree from AccessKit |
 | `visuallyHidden` | Keeps the roled node and its name in AccessKit while painting nothing and reserving no layout space |
+
+`ariaLabelledBy` and `ariaDescribedBy` take space-separated author `id`s and are
+resolved against the retained tree each time it is built, so the name follows
+the referenced text as it changes. Each reference contributes its own
+`ariaLabel` when it has one and its flattened contents otherwise, joined by a
+single space in the order written. An id that matches nothing contributes
+nothing rather than voiding the whole list, and a list that resolves to nothing
+falls back to `ariaLabel`. Both props accept their DOM spellings,
+`aria-labelledby` and `aria-describedby`.
+
+```tsx
+<text id="ledger-title">Production ledger</text>
+<section ariaLabelledBy="ledger-title">
+  <text>State</text>
+</section>
+```
 
 `visuallyHidden` is the screen-reader-only announcement that CSS spells
 `sr-only`. It accepts `true` only, and requires an explicit supported `role`,

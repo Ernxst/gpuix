@@ -31,6 +31,10 @@ pub struct CustomRenderContext<'a> {
     /// Full retained declaration. Accessibility is universal rather than a
     /// custom-adapter prop, so supported hosts read it from this shared seam.
     pub retained_element: &'a crate::retained_tree::RetainedElement,
+    /// The tree the declaration sits in. `ariaLabelledBy` and `ariaDescribedBy`
+    /// name other elements by id, so the projection cannot be computed from the
+    /// element alone.
+    pub tree: &'a crate::retained_tree::RetainedTree,
     /// Event types registered by React (e.g. "keyDown", "click").
     pub events: &'a HashSet<String>,
     /// Whether this element or a retained ancestor declares mouse enter/leave.
@@ -174,6 +178,7 @@ pub(crate) fn apply_accessibility<E: gpui::StatefulInteractiveElement>(
 ) -> E {
     crate::accessibility::apply(
         el,
+        ctx.tree,
         ctx.retained_element,
         ctx.event_callback,
         ctx.focus_handle,

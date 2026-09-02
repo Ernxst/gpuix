@@ -11,7 +11,9 @@ use crate::{
 const ACCESSIBILITY_PROPS: &[&str] = &[
     "role",
     "ariaLabel",
+    "ariaLabelledBy",
     "ariaDescription",
+    "ariaDescribedBy",
     "ariaChecked",
     "ariaExpanded",
     "ariaCurrent",
@@ -275,11 +277,68 @@ fn parse_aria_current(value: &serde_json::Value) -> Option<gpui::accesskit::Aria
     }
 }
 
+/// Flatten an element's subtree to the string the accessible name computation
+/// reads from it. Hidden subtrees contribute nothing, as in the DOM.
+pub(crate) fn subtree_text(tree: &RetainedTree, element: &RetainedElement) -> String {
+    let mut descendants = vec![element];
+    let mut words = Vec::new();
+    while let Some(descendant) = descendants.pop() {
+        if is_hidden(descendant) {
+            continue;
+        }
+        if let Some(content) = &descendant.content {
+            words.extend(content.split_whitespace());
+        }
+        descendants.extend(
+            descendant
+                .children
+                .iter()
+                .rev()
+                .filter_map(|id| tree.elements.get(id)),
+        );
+    }
+    words.join(" ")
+}
+
+/// Resolve an `aria-labelledby` / `aria-describedby` IDREF list to the text its
+/// targets contribute.
+///
+/// Each reference contributes its own `ariaLabel` when it has one and its
+/// flattened contents otherwise, joined by a single space in the order written.
+/// An id that matches nothing contributes nothing rather than failing the whole
+/// list, which is what the accname spec's traversal does.
+fn resolve_id_references(tree: &RetainedTree, value: &serde_json::Value) -> Option<String> {
+    let references = value.as_str()?;
+    let mut parts = Vec::new();
+    for reference in references.split_whitespace() {
+        let Some(target) = tree
+            .find_by_element_id(reference)
+            .and_then(|id| tree.elements.get(&id))
+        else {
+            continue;
+        };
+        let text = target
+            .custom_props
+            .get("ariaLabel")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| subtree_text(tree, target));
+        if !text.is_empty() {
+            parts.push(text);
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
 #[derive(Debug, Default)]
 struct AccessibilityProps<'a> {
     role: Option<AccessibilityRole>,
     label: Option<&'a str>,
+    /// Text resolved from `ariaLabelledBy`. Owned because it is built by joining
+    /// several referenced subtrees rather than borrowed from one prop.
+    labelled_by: Option<String>,
     description: Option<&'a str>,
+    described_by: Option<String>,
     checked: Option<gpui::Toggled>,
     expanded: Option<bool>,
     current: Option<gpui::accesskit::AriaCurrent>,
@@ -299,7 +358,7 @@ struct AccessibilityProps<'a> {
 }
 
 impl<'a> AccessibilityProps<'a> {
-    fn from_element(element: &'a RetainedElement) -> Self {
+    fn from_element(tree: &RetainedTree, element: &'a RetainedElement) -> Self {
         Self {
             role: element
                 .custom_props
@@ -309,10 +368,18 @@ impl<'a> AccessibilityProps<'a> {
                 .custom_props
                 .get("ariaLabel")
                 .and_then(serde_json::Value::as_str),
+            labelled_by: element
+                .custom_props
+                .get("ariaLabelledBy")
+                .and_then(|value| resolve_id_references(tree, value)),
             description: element
                 .custom_props
                 .get("ariaDescription")
                 .and_then(serde_json::Value::as_str),
+            described_by: element
+                .custom_props
+                .get("ariaDescribedBy")
+                .and_then(|value| resolve_id_references(tree, value)),
             checked: element.custom_props.get("ariaChecked").and_then(|value| {
                 if let Some(checked) = value.as_bool() {
                     Some(if checked {
@@ -686,7 +753,8 @@ pub(crate) fn element_problems(
 
     for (property, value) in &element.custom_props {
         let malformed = match property.as_str() {
-            "ariaLabel" | "ariaDescription" | "ariaValue" => !value.is_string(),
+            "ariaLabel" | "ariaDescription" | "ariaValue" | "ariaLabelledBy"
+            | "ariaDescribedBy" => !value.is_string(),
             "ariaChecked" => !(value.is_boolean() || value.as_str() == Some("mixed")),
             "ariaCurrent" => parse_aria_current(value).is_none(),
             "ariaExpanded" | "ariaSelected" | "ariaDisabled" | "ariaHidden" => {
@@ -704,6 +772,7 @@ pub(crate) fn element_problems(
         if malformed {
             let expected = match property.as_str() {
                 "ariaLabel" | "ariaDescription" | "ariaValue" => "a string",
+                "ariaLabelledBy" | "ariaDescribedBy" => "a string of space-separated element ids",
                 "ariaChecked" => "a boolean or \"mixed\"",
                 "ariaCurrent" => {
                     "one of \"page\", \"step\", \"location\", \"date\", \"time\", \"true\", or \"false\""
@@ -753,7 +822,9 @@ pub(crate) fn element_problems(
         if matches!(
             property.as_str(),
             "ariaLabel"
+                | "ariaLabelledBy"
                 | "ariaDescription"
+                | "ariaDescribedBy"
                 | "ariaChecked"
                 | "ariaExpanded"
                 | "ariaCurrent"
@@ -783,10 +854,10 @@ pub(crate) fn element_problems(
                 )),
                 None if role_value.is_none() => {
                     let reason = match property.as_str() {
-                        "ariaLabel" => {
+                        "ariaLabel" | "ariaLabelledBy" => {
                             "a name requires an explicit supported role, so it is omitted from the accessibility tree"
                         }
-                        "ariaDescription" => {
+                        "ariaDescription" | "ariaDescribedBy" => {
                             "a description requires an explicit supported role, so it is omitted from the accessibility tree"
                         }
                         _ => {
@@ -846,6 +917,7 @@ pub(crate) fn element_problems(
 /// than dropping the content.
 pub(crate) fn apply<E>(
     mut el: E,
+    tree: &RetainedTree,
     element: &RetainedElement,
     callback: &Option<EventCallback>,
     focus_handle: Option<&gpui::FocusHandle>,
@@ -862,8 +934,9 @@ where
 
     // `from_element` withholds malformed values. The role checks below compute
     // the accessibility projection, including role-specific fallbacks such as
-    // ariaChecked="mixed" becoming false on a switch.
-    let props = AccessibilityProps::from_element(element);
+    // ariaChecked="mixed" becoming false on a switch. It needs the tree because
+    // `ariaLabelledBy` and `ariaDescribedBy` name other elements by id.
+    let props = AccessibilityProps::from_element(tree, element);
 
     if let Some(role) = props.role.and_then(AccessibilityRole::into_gpui) {
         el = el.role(role);
@@ -871,18 +944,29 @@ where
     if let Some(author_id) = &element.author_id {
         el = el.accessibility_id(author_id.clone());
     }
+    // accname order: the referenced text wins over `ariaLabel`, which wins over
+    // the name the contents would compute.
     if let Some(label) = props
-        .label
+        .labelled_by
+        .clone()
         .filter(|_| props.supports("ariaLabel"))
-        .or(name_from_contents)
+        .or_else(|| {
+            props
+                .label
+                .filter(|_| props.supports("ariaLabel"))
+                .or(name_from_contents)
+                .map(str::to_owned)
+        })
     {
-        el = el.aria_label(label.to_owned());
+        el = el.aria_label(label);
     }
     if let Some(description) = props
-        .description
+        .described_by
+        .clone()
+        .or_else(|| props.description.map(str::to_owned))
         .filter(|_| props.supports("ariaDescription"))
     {
-        el = el.aria_description(description.to_owned());
+        el = el.aria_description(description);
     }
     if let Some(checked) = props.checked.filter(|_| props.supports("ariaChecked")) {
         let checked = if props
@@ -1080,7 +1164,7 @@ mod tests {
             .insert("ariaValueNow".into(), 42.into());
         element.custom_props.insert("disabled".into(), true.into());
 
-        let props = AccessibilityProps::from_element(&element);
+        let props = AccessibilityProps::from_element(&detached_tree(), &element);
         assert_eq!(
             props.role,
             Some(AccessibilityRole {
@@ -1127,7 +1211,7 @@ mod tests {
             element.custom_props.insert("disabled".into(), value);
 
             assert_eq!(
-                AccessibilityProps::from_element(&element).disabled,
+                AccessibilityProps::from_element(&detached_tree(), &element).disabled,
                 expected,
                 "{description}"
             );
@@ -1344,7 +1428,7 @@ mod tests {
             link.custom_props.insert("ariaCurrent".into(), token.into());
 
             assert_eq!(
-                AccessibilityProps::from_element(&link).current,
+                AccessibilityProps::from_element(&detached_tree(), &link).current,
                 Some(expected)
             );
             assert!(element_problems(&detached_tree(), &link).is_empty(), "{token}");
@@ -1374,6 +1458,24 @@ mod tests {
                 .reason
                 .contains("does not support accessibility semantics")
         );
+    }
+
+    #[test]
+    fn reference_lists_have_to_be_strings() {
+        for property in ["ariaLabelledBy", "ariaDescribedBy"] {
+            let mut element = RetainedElement::new(1, "div".to_string(), 1);
+            element.custom_props.insert("role".into(), "region".into());
+            element.custom_props.insert(property.into(), 7.into());
+
+            let problems = element_problems(&detached_tree(), &element);
+
+            assert_eq!(problems.len(), 1, "{property}");
+            assert_eq!(
+                problems[0].problem.reason,
+                "expected a string of space-separated element ids",
+                "{property}"
+            );
+        }
     }
 
     #[test]

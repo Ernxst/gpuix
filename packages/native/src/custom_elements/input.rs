@@ -434,6 +434,7 @@ impl CustomElement for TextEditorElement {
         ));
         editor = crate::accessibility::apply(
             editor,
+            ctx.tree,
             ctx.retained_element,
             ctx.event_callback,
             Some(&focus_handle),
