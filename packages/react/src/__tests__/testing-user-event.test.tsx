@@ -211,14 +211,64 @@ describeNative("createTestRoot userEvent", () => {
     }
   })
 
-  it("reports the pending click-count dependency for dblClick", async () => {
+  it("sends dblClick as two clicks, the second carrying the repeat count", async () => {
+    const screen = createTestRoot()
+    const calls: Array<{ type: string; detail: number }> = []
+
+    try {
+      screen.render(
+        <button
+          data-testid="action"
+          style={{ width: 120, height: 40 }}
+          onClick={(event) => calls.push({ type: "click", detail: event.detail })}
+          onDoubleClick={(event) =>
+            calls.push({ type: "doubleClick", detail: event.detail })
+          }
+        />
+      )
+
+      await screen.userEvent.dblClick(screen.getByTestId("action"))
+
+      // DOM order: dblclick follows the second click rather than replacing it.
+      expect(calls).toEqual([
+        { type: "click", detail: 1 },
+        { type: "click", detail: 2 },
+        { type: "doubleClick", detail: 2 },
+      ])
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("fails loudly on a typo'd modifier instead of dropping it", () => {
     const screen = createTestRoot()
 
     try {
       screen.render(<button data-testid="action" style={{ width: 120, height: 40 }} />)
-      await expect(
-        screen.userEvent.dblClick(screen.getByTestId("action"))
-      ).rejects.toThrow(/dblClick.*#216/i)
+
+      // A silently ignored name dispatched an unmodified click, so a test
+      // asserting the modified path passed while exercising the other one.
+      expect(() => screen.renderer.nativeSimulateClick(10, 10, 0, "comand")).toThrow(
+        /Unknown modifier 'comand' in 'comand'/
+      )
+      expect(() => screen.renderer.nativeSimulateClick(10, 10, 0, "cmd-shfit")).toThrow(
+        /Unknown modifier 'shfit'/
+      )
+      expect(() => screen.renderer.nativeSimulateMouseDown(10, 10, 0, "ctrll")).toThrow(
+        /Unknown modifier 'ctrll'/
+      )
+      expect(() => screen.renderer.nativeSimulateMouseUp(10, 10, 0, "ctrll")).toThrow(
+        /Unknown modifier 'ctrll'/
+      )
+      expect(() => screen.renderer.nativeSimulateMouseMove(10, 10, undefined, "optn")).toThrow(
+        /Unknown modifier 'optn'/
+      )
+
+      // Real names, including aliases and an empty string, still pass.
+      expect(() =>
+        screen.renderer.nativeSimulateClick(10, 10, 0, "cmd-shift-alt-ctrl-fn")
+      ).not.toThrow()
+      expect(() => screen.renderer.nativeSimulateClick(10, 10, 0, "")).not.toThrow()
     } finally {
       screen.unmount()
     }
