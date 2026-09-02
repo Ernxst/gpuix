@@ -11483,6 +11483,9 @@ mod batch_tests {
         .expect_err("the legacy opcode is gone");
 
         assert!(error.contains("unknown operation"), "{error}");
+        // The visitor's op index has to survive past the first op, or a skew
+        // late in a long batch names nothing.
+        assert!(error.contains("Batch op 1"), "{error}");
         assert!(tree.elements.is_empty(), "the batch must stay atomic");
     }
 
