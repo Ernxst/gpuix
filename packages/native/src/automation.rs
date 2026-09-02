@@ -277,29 +277,42 @@ pub fn mouse_button(button: u32) -> MouseButton {
     }
 }
 
+const MODIFIER_NAMES: &str =
+    "cmd, meta, super, win, platform, ctrl, control, alt, option, shift, fn, function";
+
 /// Parse the held modifiers of a simulated mouse event from the same
 /// hyphenated syntax `press("cmd-a")` already uses: `"cmd"`, `"cmd-shift"`,
-/// `"alt"`. `None` and `""` mean no modifier. Unknown names are ignored, so a
-/// typo weakens the gesture instead of failing the whole automation call.
+/// `"alt"`. `None` and `""` mean no modifier.
+///
+/// An unknown name is an error. It used to be ignored, which made a typo the
+/// worst possible failure: `"comand-click"` dispatched a plain click, and the
+/// test that asserted the modifier path passed while testing the unmodified
+/// one. There is no gesture a caller can mean by a name that does not exist.
 ///
 /// A string, not an object, because the same value has to cross the napi, the
 /// wasm and the stdio boundary, and only wasm makes objects awkward.
-pub fn parse_modifiers(modifiers: Option<&str>) -> Modifiers {
+pub fn parse_modifiers(modifiers: Option<&str>) -> Result<Modifiers, String> {
     let mut parsed = Modifiers::default();
     let Some(text) = modifiers else {
-        return parsed;
+        return Ok(parsed);
     };
     for part in text.split('-') {
         match part.trim().to_ascii_lowercase().as_str() {
+            // `""` is how a caller says "no modifiers" without passing `None`.
+            "" => {}
             "cmd" | "meta" | "super" | "win" | "platform" => parsed.platform = true,
             "ctrl" | "control" => parsed.control = true,
             "alt" | "option" => parsed.alt = true,
             "shift" => parsed.shift = true,
             "fn" | "function" => parsed.function = true,
-            _ => {}
+            unknown => {
+                return Err(format!(
+                    "Unknown modifier '{unknown}' in '{text}'. Expected one of: {MODIFIER_NAMES}"
+                ))
+            }
         }
     }
-    parsed
+    Ok(parsed)
 }
 
 pub fn dispatch_keystrokes(
@@ -346,8 +359,28 @@ fn parse_keystroke(keystroke: &str) -> Result<Keystroke, String> {
     Keystroke::parse(keystroke).map_err(|error| format!("Invalid keystroke '{keystroke}': {error}"))
 }
 
+/// The platform's repeat count within one click sequence: 1 for a single
+/// click, 2 for the second click of a double click. `None` means 1.
+///
+/// The renderer has always read `click_count` off the event; only these entry
+/// points could not express anything but 1, so no automation caller could
+/// produce a double click at all.
+///
+/// `0` is rejected rather than clamped, matching the automation protocol's
+/// schema and the modifier parse next door: repairing a caller's nonsense
+/// quietly is the failure mode both of those exist to avoid. There is no press
+/// that is zero presses.
+pub fn click_count(click_count: Option<u32>) -> Result<usize, String> {
+    match click_count {
+        None => Ok(1),
+        Some(0) => Err("Invalid clickCount 0: a click is at least one press".to_string()),
+        Some(count) => Ok(count as usize),
+    }
+}
+
 /// Every automation mouse dispatcher takes modifiers, so a test can drive
-/// cmd-wheel zoom, shift-click range selection, or alt-drag duplication.
+/// cmd-wheel zoom, shift-click range selection, or alt-drag duplication, and a
+/// click count, so it can drive double-click-to-edit.
 pub fn dispatch_click(
     window: &mut Window,
     cx: &mut App,
@@ -355,6 +388,7 @@ pub fn dispatch_click(
     y: f64,
     button: u32,
     modifiers: Modifiers,
+    click_count: usize,
 ) {
     let position = point(px(x as f32), px(y as f32));
     let button = mouse_button(button);
@@ -363,7 +397,7 @@ pub fn dispatch_click(
             button,
             position,
             modifiers,
-            click_count: 1,
+            click_count,
             first_mouse: false,
         }
         .to_platform_input(),
@@ -374,7 +408,7 @@ pub fn dispatch_click(
             button,
             position,
             modifiers,
-            click_count: 1,
+            click_count,
         }
         .to_platform_input(),
         cx,
@@ -388,13 +422,14 @@ pub fn dispatch_mouse_down(
     y: f64,
     button: u32,
     modifiers: Modifiers,
+    click_count: usize,
 ) {
     window.dispatch_event(
         MouseDownEvent {
             button: mouse_button(button),
             position: point(px(x as f32), px(y as f32)),
             modifiers,
-            click_count: 1,
+            click_count,
             first_mouse: false,
         }
         .to_platform_input(),
@@ -409,13 +444,14 @@ pub fn dispatch_mouse_up(
     y: f64,
     button: u32,
     modifiers: Modifiers,
+    click_count: usize,
 ) {
     window.dispatch_event(
         MouseUpEvent {
             button: mouse_button(button),
             position: point(px(x as f32), px(y as f32)),
             modifiers,
-            click_count: 1,
+            click_count,
         }
         .to_platform_input(),
         cx,
@@ -501,6 +537,51 @@ pub fn dispatch_scroll_wheel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_supported_modifier_name_parses() {
+        let all = parse_modifiers(Some("cmd-ctrl-alt-shift-fn")).expect("known names");
+        assert!(all.platform && all.control && all.alt && all.shift && all.function);
+
+        for alias in ["meta", "super", "win", "platform"] {
+            assert!(parse_modifiers(Some(alias)).expect("alias").platform, "{alias}");
+        }
+        assert!(parse_modifiers(Some("control")).expect("control").control);
+        assert!(parse_modifiers(Some("option")).expect("option").alt);
+        assert!(parse_modifiers(Some("function")).expect("function").function);
+        assert!(parse_modifiers(Some("CMD-Shift")).expect("case-insensitive").platform);
+
+        assert_eq!(parse_modifiers(None).expect("none"), Modifiers::default());
+        assert_eq!(parse_modifiers(Some("")).expect("empty"), Modifiers::default());
+    }
+
+    /// A typo used to weaken the gesture instead of failing: `"comand-click"`
+    /// dispatched a plain click, so a test asserting the modifier path passed
+    /// while exercising the unmodified one.
+    #[test]
+    fn an_unknown_modifier_name_is_an_error() {
+        let error = parse_modifiers(Some("comand")).expect_err("typo must fail");
+        assert!(error.contains("Unknown modifier 'comand'"), "{error}");
+        assert!(error.contains("cmd"), "the message lists what is accepted: {error}");
+
+        // A typo alongside a real name fails too, rather than half-applying.
+        let error = parse_modifiers(Some("cmd-shfit")).expect_err("typo must fail");
+        assert!(error.contains("Unknown modifier 'shfit' in 'cmd-shfit'"), "{error}");
+    }
+
+    #[test]
+    fn click_count_defaults_to_one_and_rejects_zero() {
+        assert_eq!(click_count(None).expect("default"), 1);
+        assert_eq!(click_count(Some(1)).expect("single"), 1);
+        assert_eq!(click_count(Some(2)).expect("double"), 2);
+        assert_eq!(click_count(Some(3)).expect("triple"), 3);
+
+        // Rejected, not clamped: the automation protocol's schema rejects 0
+        // too, and quietly repairing a caller's nonsense is the failure mode
+        // the modifier parse next door exists to avoid.
+        let error = click_count(Some(0)).expect_err("zero is not a click");
+        assert!(error.contains("clickCount 0"), "{error}");
+    }
 
     #[test]
     fn frozen_clock_holds_and_fast_forwards() {

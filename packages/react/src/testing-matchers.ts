@@ -39,7 +39,16 @@ export function getDefaultNormalizer({
   }
 }
 
-function makeNormalizer({
+/**
+ * The normalizer a set of matcher options asks for, with Testing Library's rule
+ * that a custom one replaces `trim`/`collapseWhitespace` rather than composing
+ * with them.
+ *
+ * Exported so the jest-dom-shaped matchers normalize in the same one place the
+ * queries do. `toHaveTextContent` does not share Testing Library's *matching*
+ * rules — a bare string is a substring there — but it must share this.
+ */
+export function resolveNormalizer({
   trim,
   collapseWhitespace,
   normalizer,
@@ -65,7 +74,7 @@ export function matches<Element>(
   matcher: Matcher<Element>,
   options: MatcherOptions = {}
 ): boolean {
-  const normalizedContent = makeNormalizer(options)(content)
+  const normalizedContent = resolveNormalizer(options)(content)
 
   if (typeof matcher === "function") return matcher(normalizedContent, element)
   if (matcher instanceof RegExp) {
