@@ -1782,6 +1782,50 @@ map directly to their GPUI / AccessKit equivalents:
 | `disabled` | Unavailable, non-activating, and removed from tab order |
 | `ariaDisabled` | Unavailable and non-activating, but retained in tab order |
 | `ariaHidden` | Excludes the element and its complete subtree from AccessKit |
+| `visuallyHidden` | Keeps the roled node and its name in AccessKit while painting nothing and reserving no layout space |
+
+`visuallyHidden` is the screen-reader-only announcement that CSS spells
+`sr-only`. It accepts `true` only, and requires an explicit supported `role`,
+because it projects the element as an accessibility node rather than styling it:
+
+```tsx
+<text visuallyHidden role="heading" ariaLevel={1}>
+  Production ledger
+</text>
+```
+
+The projection carries the element's own semantics and its flattened text, and
+nothing else. A role that names itself from its contents takes that text as its
+accessible name; any other role folds it onto the node's value, because a
+one-node projection has no child node to carry the text the way painted text
+does. Plain text keeps its whole subtree either way, so the wrapper the web
+spells `<div role="status" class="sr-only">` keeps its text in the accessibility
+tree:
+
+```tsx
+<div visuallyHidden role="status">
+  Saved 3 files
+</div>
+```
+
+GPUI exposes no `aria-live` equivalent, so nothing marks that node as a live
+region. Its text is readable wherever a screen reader reaches it, but a change
+to that text is not announced; live-region announcement is not implemented yet.
+
+GPUIX rejects with a property diagnostic — and renders the element as authored —
+when it is asked to hide more than the projection carries:
+
+- `ariaHidden` on the same element, which would remove the node it preserves
+- an interactive element (`<input>`, `<textarea>`, `tabIndex`, `autoFocus`, or a
+  click/key/focus handler), whose control the projection would destroy
+- any host other than `<text>` whose subtree is more than plain text: a
+  descendant with accessibility semantics of its own owns a node the projection
+  would drop, and a focusable or interactive descendant owns a control it would
+  destroy
+
+A visually hidden subtree with its own nodes or controls is not supported yet;
+on the web `sr-only` keeps the whole subtree exposed and live. Track it as a
+follow-up before hiding a structured wrapper.
 
 Unroled drawn text enters AccessKit as `Label` content. `<text>` exposes its
 flattened inline string as one label, while native `<code>`, `<markdown>`, and

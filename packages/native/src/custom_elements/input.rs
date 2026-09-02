@@ -439,6 +439,7 @@ impl CustomElement for TextEditorElement {
             Some(&focus_handle),
             ctx.accessibility_hidden,
             None,
+            None,
         );
         editor = super::wire_style_transition_events(editor, &ctx, cx);
         if ctx.events.contains("click") && !action_disabled {

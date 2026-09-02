@@ -769,31 +769,174 @@ describeNative("automation", () => {
     expect(renderer.getPaintedText()).toEqual(["BUILT", "loud"])
   })
 
-  it("gives a roled text host its flattened name without a duplicate Label", () => {
+  it("gives visible and visually hidden roled text its flattened name without a duplicate Label", () => {
     const { render, renderer } = createTestRoot()
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gpuix-visually-hidden-"))
+    const baselinePath = path.join(dir, "baseline.png")
+    const hiddenPath = path.join(dir, "visually-hidden.png")
 
-    render(
-      <div>
-        <text role="heading" ariaLevel={2}>
+    const frame = (includeVisuallyHidden: boolean) => (
+      <div
+        style={{
+          display: "flex",
+          width: 480,
+          height: 100,
+          backgroundColor: "#101522",
+        }}
+      >
+        <text
+          role="heading"
+          ariaLevel={2}
+          style={{ width: 220, height: 60, color: "#ffffff" }}
+        >
           Production <text>totals</text>
         </text>
-        <text role="heading" ariaLevel={3} ariaLabel="Explicit totals name">
+        {includeVisuallyHidden ? (
+          <text
+            visuallyHidden
+            role="heading"
+            ariaLevel={1}
+            style={{
+              width: 180,
+              height: 60,
+              color: "#ffffff",
+              backgroundColor: "#ff0000",
+            }}
+          >
+            Production ledger
+          </text>
+        ) : null}
+        <text
+          testId="trailing-heading"
+          role="heading"
+          ariaLevel={3}
+          ariaLabel="Explicit totals name"
+          style={{ width: 220, height: 60, color: "#ffffff" }}
+        >
           Ignored contents
+        </text>
+      </div>
+    )
+
+    try {
+      render(frame(false))
+      renderer.flush()
+      renderer.drawPendingFrame()
+      const trailingBefore = renderer.getElementBounds(
+        renderer.findByTestId("trailing-heading")!.id
+      )
+      renderer.captureScreenshot(baselinePath)
+
+      render(frame(true))
+      renderer.flush()
+      renderer.drawPendingFrame()
+      const tree = renderer.getAccessibilityTree()
+      const nodes = Object.values(tree.nodes)
+      const trailingAfter = renderer.getElementBounds(
+        renderer.findByTestId("trailing-heading")!.id
+      )
+      renderer.captureScreenshot(hiddenPath)
+
+      expect(nodes.find((node) => node.aria.label === "Production totals")).toMatchObject({
+        aria: { role: "Heading", label: "Production totals", level: 2 },
+      })
+      expect(nodes.find((node) => node.aria.label === "Explicit totals name")).toMatchObject({
+        aria: { role: "Heading", label: "Explicit totals name", level: 3 },
+      })
+      expect(nodes.find((node) => node.aria.label === "Production ledger")).toMatchObject({
+        aria: { role: "Heading", label: "Production ledger", level: 1 },
+      })
+      expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
+      expect(renderer.getPaintedText()).not.toContain("Production ledger")
+      expect(trailingAfter).toEqual(trailingBefore)
+      expect(fs.readFileSync(hiddenPath).equals(fs.readFileSync(baselinePath))).toBe(true)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+
+    render(
+      <div ariaHidden>
+        <text visuallyHidden role="heading" ariaLevel={1}>
+          Hidden subtree heading
         </text>
       </div>
     )
     renderer.flush()
     renderer.drawPendingFrame()
-    const tree = renderer.getAccessibilityTree()
-    const nodes = Object.values(tree.nodes)
+    expect(
+      Object.values(renderer.getAccessibilityTree().nodes).some(
+        (node) => node.aria.label === "Hidden subtree heading"
+      )
+    ).toBe(false)
+  })
 
-    expect(nodes.find((node) => node.aria.label === "Production totals")).toMatchObject({
-      aria: { role: "Heading", label: "Production totals", level: 2 },
+  it("keeps visually hidden text under a role that is not named from its contents", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ display: "flex", width: 480, height: 100 }}>
+        <text visuallyHidden role="status">
+          Saved 3 files
+        </text>
+        <text visuallyHidden role="img" ariaLabel="Bar chart">
+          2019 through 2024
+        </text>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    // The projection has no child node to carry the text the way painted text
+    // does, so a role that is not named from its contents folds it onto value.
+    expect(nodes.find((node) => node.aria.role === "Status")).toMatchObject({
+      aria: { role: "Status", value: "Saved 3 files" },
     })
-    expect(nodes.find((node) => node.aria.label === "Explicit totals name")).toMatchObject({
-      aria: { role: "Heading", label: "Explicit totals name", level: 3 },
+    expect(nodes.find((node) => node.aria.role === "Image")).toMatchObject({
+      aria: { role: "Image", label: "Bar chart", value: "2019 through 2024" },
     })
-    expect(nodes.some((node) => node.aria.role === "Label")).toBe(false)
+    expect(renderer.getPaintedText()).not.toContain("Saved 3 files")
+    expect(renderer.getPaintedText()).not.toContain("2019 through 2024")
+  })
+
+  it("projects a visually hidden wrapper whose subtree is only text", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ display: "flex", width: 480, height: 100 }}>
+        <div visuallyHidden role="heading" ariaLevel={1}>
+          Production ledger
+        </div>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    expect(nodes.find((node) => node.aria.label === "Production ledger")).toMatchObject({
+      aria: { role: "Heading", label: "Production ledger", level: 1 },
+    })
+    expect(renderer.getPaintedText()).not.toContain("Production ledger")
+  })
+
+  it("projects the canonical sr-only live region wrapper", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div style={{ display: "flex", width: 480, height: 100 }}>
+        <div visuallyHidden role="status">
+          Saved 3 files
+        </div>
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    expect(nodes.find((node) => node.aria.role === "Status")).toMatchObject({
+      aria: { role: "Status", value: "Saved 3 files" },
+    })
+    expect(renderer.getPaintedText()).not.toContain("Saved 3 files")
   })
 
   it.each([

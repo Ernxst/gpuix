@@ -160,7 +160,7 @@ pub(crate) fn pending_accessibility_diagnostics(
 ) -> Vec<PendingStyleDiagnostic> {
     tree.elements
         .get(&element_id)
-        .map(crate::accessibility::element_problems)
+        .map(|element| crate::accessibility::element_problems(tree, element))
         .unwrap_or_default()
         .into_iter()
         .map(|accessibility_problem| PendingStyleDiagnostic {
@@ -7362,6 +7362,21 @@ fn build_element_with_parent_layout(
         || retained_gpui_element_id(element),
     );
 
+    if crate::accessibility::is_visually_hidden(ctx.tree, element) {
+        ctx.custom_registry.destroy(id);
+        ctx.motion_states.remove(&id);
+        ctx.transition_states.remove(&id);
+        ctx.scroll_handles.remove(&id);
+        let built = build_visually_hidden_element(element, ctx);
+        if tracks_accessibility_host_identity {
+            ctx.gpui_element_path
+                .as_mut()
+                .expect("tracked accessibility identity has a path")
+                .pop();
+        }
+        return built;
+    }
+
     let declared_style = element.style.as_deref();
     let parent_inherited = ctx.inherited.clone();
     let hover_within = parent_inherited.hover_groups.iter().any(|group| {
@@ -8099,45 +8114,7 @@ pub(crate) fn build_host_container(
     use gpui::prelude::*;
 
     let flattened_text = (element.element_type == "text").then(|| flatten_text(element, ctx));
-    let text_owns_accessible_name = crate::accessibility::role_supports_name_from_contents(element)
-        && element
-            .custom_props
-            .get("ariaLabel")
-            .and_then(serde_json::Value::as_str)
-            .is_none();
-    let wrapper_accessible_name =
-        (text_owns_accessible_name && flattened_text.is_none()).then(|| {
-            let mut descendants = vec![element];
-            let mut words = Vec::new();
-            while let Some(descendant) = descendants.pop() {
-                if crate::accessibility::is_hidden(descendant) {
-                    continue;
-                }
-                if let Some(content) = &descendant.content {
-                    words.extend(content.split_whitespace());
-                }
-                descendants.extend(
-                    descendant
-                        .children
-                        .iter()
-                        .rev()
-                        .filter_map(|id| ctx.tree.elements.get(id)),
-                );
-            }
-            words.join(" ")
-        });
-    let name_from_contents = text_owns_accessible_name
-        .then(|| {
-            flattened_text.as_ref().map_or_else(
-                || {
-                    wrapper_accessible_name
-                        .as_deref()
-                        .expect("roled wrappers are flattened before accessibility is applied")
-                },
-                |text| text.accessibility_text.as_str(),
-            )
-        })
-        .filter(|name| !name.is_empty());
+    let name_from_contents = accessible_name_from_contents(element, flattened_text.as_ref(), ctx);
 
     let transition_hover =
         style.is_some_and(|style| style.transition.is_some() && style.hover.is_some());
@@ -8282,7 +8259,9 @@ pub(crate) fn build_host_container(
         ctx.event_callback,
         ctx.focus_handles.get(&element.id),
         ctx.inherited.accessibility_hidden,
-        name_from_contents,
+        name_from_contents.as_deref(),
+        // Painted text carries its own value on the node that draws it.
+        None,
     );
     if !native_disabled {
         if let Some(tab_index) = element
@@ -8606,6 +8585,96 @@ pub(crate) fn build_host_container(
     }
 
     el.into_any_element()
+}
+
+fn accessible_name_from_contents<'a>(
+    element: &crate::retained_tree::RetainedElement,
+    flattened_text: Option<&'a crate::text::inline::InlineText>,
+    ctx: &BuildCtx,
+) -> Option<std::borrow::Cow<'a, str>> {
+    let owns_name = crate::accessibility::role_supports_name_from_contents(element)
+        && element
+            .custom_props
+            .get("ariaLabel")
+            .and_then(serde_json::Value::as_str)
+            .is_none();
+    if !owns_name {
+        return None;
+    }
+    flattened_accessibility_text(element, flattened_text, ctx)
+}
+
+/// The element's subtree flattened to the string the accessible name
+/// computation reads, or `None` when the subtree holds no text.
+fn flattened_accessibility_text<'a>(
+    element: &crate::retained_tree::RetainedElement,
+    flattened_text: Option<&'a crate::text::inline::InlineText>,
+    ctx: &BuildCtx,
+) -> Option<std::borrow::Cow<'a, str>> {
+    let name = flattened_text.map_or_else(
+        || {
+            let mut descendants = vec![element];
+            let mut words = Vec::new();
+            while let Some(descendant) = descendants.pop() {
+                if crate::accessibility::is_hidden(descendant) {
+                    continue;
+                }
+                if let Some(content) = &descendant.content {
+                    words.extend(content.split_whitespace());
+                }
+                descendants.extend(
+                    descendant
+                        .children
+                        .iter()
+                        .rev()
+                        .filter_map(|id| ctx.tree.elements.get(id)),
+                );
+            }
+            std::borrow::Cow::Owned(words.join(" "))
+        },
+        |text| std::borrow::Cow::Borrowed(text.accessibility_text.as_str()),
+    );
+    (!name.is_empty()).then_some(name)
+}
+
+fn build_visually_hidden_element(
+    element: &crate::retained_tree::RetainedElement,
+    ctx: &BuildCtx,
+) -> gpui::AnyElement {
+    use gpui::prelude::*;
+
+    let flattened_text = (element.element_type == "text").then(|| flatten_text(element, ctx));
+    let name_from_contents = accessible_name_from_contents(element, flattened_text.as_ref(), ctx);
+    // A role that does not name itself from its contents still keeps its text.
+    // Painted text reaches AccessKit as the value of the node that draws it, and
+    // the projection draws nothing, so the flattened string becomes this node's
+    // value the same way the painted `<text>` host sets one below. An ancestor
+    // that already owns this text as its own name suppresses the duplicate.
+    let content_value = (!ctx.inherited.text_accessibility_owned_by_role
+        && !crate::accessibility::role_supports_name_from_contents(element))
+    .then(|| flattened_accessibility_text(element, flattened_text.as_ref(), ctx))
+    .flatten();
+    let element_id = retained_gpui_element_id(element)
+        .expect("a validated visuallyHidden semantic host has a GPUI element id");
+    // One pixel, out of flow, painting nothing. The web's `sr-only` clips to
+    // 1x1 rather than collapsing the box for the same reason: platform
+    // assistive technology moves a cursor over node bounds and hit-tests them,
+    // and a zero-area rect is not reliably addressable.
+    let el = gpui::div()
+        .id(element_id)
+        .absolute()
+        .w(gpui::px(1.0))
+        .h(gpui::px(1.0));
+    crate::accessibility::apply(
+        el,
+        element,
+        ctx.event_callback,
+        None,
+        ctx.inherited.accessibility_hidden,
+        name_from_contents.as_deref(),
+        content_value.as_deref(),
+    )
+    .into_any_element()
 }
 
 /// A selectable text run owned by `element`. Runs are left to gpui so the
