@@ -16,10 +16,13 @@ Name-from-contents and `ariaLabelledBy` / `ariaDescribedBy` now flatten through
 one walk, so a name computed from an element's own subtree and a name taken
 from a referenced one can no longer disagree about spacing. That walk names each
 descendant the way accname's step 2F does, which it previously did only while
-resolving a reference: a descendant's `ariaLabel` now replaces the subtree it
-names when a role is named from its contents. `<div role="button"><img
-alt="Save"/></div>` is named `Save`, and a `role="row"` built from labelled
-cells takes its name from those labels instead of going unnamed.
+resolving a reference: a descendant's `ariaLabelledBy` or `ariaLabel` now
+replaces the subtree it names when a role is named from its contents. `<div
+role="button"><img alt="Save"/></div>` is named `Save`, and a `role="row"` built
+from labelled cells takes its name from those labels instead of going unnamed.
+Only a descendant whose role carries that name counts: a role-less `ariaLabel`
+is already dropped on its way to the platform, and a name from contents reads
+the tree the platform reads.
 
 One consequence to know: a `visuallyHidden` element projects its text as an
 AccessKit value through this flattener, so that value is whitespace-normalized

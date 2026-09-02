@@ -286,9 +286,12 @@ enum NameSubject {
     /// list, so that precedence belongs to the caller and neither is read at
     /// the root; a hidden root contributes nothing.
     ///
-    /// Every *descendant* is named the way step 2F names it, so a label
-    /// replaces the subtree it names there: `<div role="button"><img
-    /// alt="Save"/></div>` is named "Save", as it is in the DOM.
+    /// Every *descendant* is named the way step 2F names it: a reference list
+    /// or a label replaces the subtree it names, so `<div role="button"><img
+    /// alt="Save"/></div>` is named "Save", as it is in the DOM. Only a
+    /// descendant whose role carries that name counts, because a role-less one
+    /// is dropped on its way to the platform and the name has to read the tree
+    /// the platform reads.
     Contents,
     /// The node an `aria-labelledby` / `aria-describedby` entry points at. It
     /// contributes even when it is hidden — the `<div ariaHidden id="label">`
@@ -328,6 +331,20 @@ fn flattened_text(tree: &RetainedTree, element: &RetainedElement, subject: NameS
         normalized.push_str(word);
     }
     normalized
+}
+
+/// Whether an authored name on `node` reaches the accessibility tree at all.
+///
+/// `apply` sets one only for a node whose declared role supports it, and
+/// `element_problems` tells the author when a role-less label was dropped. A
+/// name computed from contents reads the tree the platform reads, so a label
+/// the tree never carries contributes nothing to it either: the browser
+/// ignores `aria-label` on a generic just the same.
+fn carries_authored_name(node: &RetainedElement) -> bool {
+    node.custom_props
+        .get("role")
+        .and_then(AccessibilityRole::parse)
+        .is_some_and(|role| role.supports("ariaLabel"))
 }
 
 /// Whether `node` runs into its siblings instead of separating from them.
@@ -378,26 +395,35 @@ fn contribute_flattened_text(
     is_root: bool,
     flat: &mut String,
 ) {
-    if let NameSubject::Reference {
-        follow_references: true,
-    } = subject
-    {
-        if is_root {
-            if let Some(text) = node
-                .custom_props
-                .get("ariaLabelledBy")
-                .and_then(|value| resolve_references(tree, value, false))
-            {
-                flat.push_str(&text);
-                return;
-            }
+    // An authored name — a reference list, then a label — replaces the subtree
+    // it names, at every node accname would name in its own right. The root of
+    // a contents walk is not one of those: its caller already decided that its
+    // contents are what name it. A descendant is one only when the tree would
+    // carry the name it declares.
+    let carries_name = if is_root {
+        !matches!(subject, NameSubject::Contents)
+    } else {
+        carries_authored_name(node)
+    };
+    // A reference is never followed from inside a reference: one level is what
+    // the spec resolves, and it is what makes a descendant pointing back at an
+    // ancestor terminate rather than recur.
+    let follows_references = carries_name
+        && match subject {
+            NameSubject::Contents => !is_root,
+            NameSubject::Reference { follow_references } => is_root && follow_references,
+        };
+    if follows_references {
+        if let Some(text) = node
+            .custom_props
+            .get("ariaLabelledBy")
+            .and_then(|value| resolve_references(tree, value, false))
+        {
+            flat.push_str(&text);
+            return;
         }
     }
-    // A label replaces the subtree it names, at every node accname would name
-    // in its own right. The root of a contents walk is not one of those: its
-    // caller already decided that its contents are what name it.
-    let names_itself = is_root && matches!(subject, NameSubject::Contents);
-    if !names_itself {
+    if carries_name {
         if let Some(label) = node
             .custom_props
             .get("ariaLabel")
@@ -1421,12 +1447,65 @@ mod tests {
         let mut tree = detached_tree();
         append_element(&mut tree, None, 1, "div");
         append_element(&mut tree, Some(1), 2, "img");
+        tree.set_custom_prop(2, "role".into(), "img".into());
         tree.set_custom_prop(2, "ariaLabel".into(), "Save".into());
         append_element(&mut tree, Some(1), 3, "text");
-        append_text_node(&mut tree, 3, 4, "ignored glyph");
+        tree.set_custom_prop(3, "role".into(), "img".into());
         tree.set_custom_prop(3, "ariaLabel".into(), "All".into());
+        append_text_node(&mut tree, 3, 4, "ignored glyph");
 
         assert_eq!(contents_name(&tree, 1).as_deref(), Some("Save All"));
+    }
+
+    #[test]
+    fn ignores_a_descendant_label_that_no_role_carries() {
+        // `apply` sets a label only for a node whose role supports one, and the
+        // author is told the rest are dropped. A name from contents reads the
+        // same tree: the label is not there, so the painted text is the name.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_element(&mut tree, Some(1), 2, "div");
+        tree.set_custom_prop(2, "ariaLabel".into(), "Save".into());
+        append_element(&mut tree, Some(1), 3, "text");
+        append_text_node(&mut tree, 3, 4, "All");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("All"));
+    }
+
+    #[test]
+    fn resolves_a_descendant_reference_list_for_the_subtree_it_names() {
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        append_element(&mut tree, Some(1), 2, "text");
+        tree.set_custom_prop(2, "id".into(), "save".into());
+        append_text_node(&mut tree, 2, 3, "Save");
+        append_element(&mut tree, Some(1), 4, "div");
+        tree.set_custom_prop(4, "role".into(), "button".into());
+        append_element(&mut tree, Some(4), 5, "img");
+        tree.set_custom_prop(5, "role".into(), "img".into());
+        tree.set_custom_prop(5, "ariaLabelledBy".into(), "save".into());
+        append_text_node(&mut tree, 5, 6, "glyph");
+        append_element(&mut tree, Some(4), 7, "text");
+        append_text_node(&mut tree, 7, 8, "All");
+
+        assert_eq!(contents_name(&tree, 4).as_deref(), Some("Save All"));
+    }
+
+    #[test]
+    fn stops_at_one_level_when_a_descendant_references_its_own_ancestor() {
+        // The reference resolves against the subtree being walked. Following
+        // one level is what the spec resolves and what makes this terminate.
+        let mut tree = detached_tree();
+        append_element(&mut tree, None, 1, "div");
+        tree.set_custom_prop(1, "id".into(), "root".into());
+        tree.set_custom_prop(1, "role".into(), "button".into());
+        append_element(&mut tree, Some(1), 2, "text");
+        tree.set_custom_prop(2, "role".into(), "img".into());
+        tree.set_custom_prop(2, "ariaLabelledBy".into(), "root".into());
+        append_text_node(&mut tree, 2, 3, "glyph");
+        append_text_node(&mut tree, 1, 4, "All");
+
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("glyph All All"));
     }
 
     #[test]

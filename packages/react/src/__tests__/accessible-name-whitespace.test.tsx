@@ -174,6 +174,48 @@ describeNative("accessible name whitespace", () => {
     }
   })
 
+  it("ignores a descendant label that no role carries", () => {
+    const screen = createTestRoot()
+
+    try {
+      // A role-less label never reaches the tree — the author is told as much —
+      // and the browser ignores `aria-label` on a generic for the same reason.
+      screen.render(
+        <div data-testid="save" role="button">
+          <div ariaLabel="Save" />
+          <text>All</text>
+        </div>
+      )
+
+      expect(screen.getByRole("button", { name: "All" })).toBe(screen.getByTestId("save"))
+      expect(screen.queryByRole("button", { name: "Save All" })).toBeNull()
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("resolves a descendant's reference list into the name", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text id="save-label">Save</text>
+          <div data-testid="save" role="button">
+            <div role="img" ariaLabelledBy="save-label">
+              <text>glyph</text>
+            </div>
+            <text>All</text>
+          </div>
+        </div>
+      )
+
+      expect(screen.getByRole("button", { name: "Save All" })).toBe(screen.getByTestId("save"))
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("normalizes the value a visually hidden text host projects", () => {
     const screen = createTestRoot()
 
