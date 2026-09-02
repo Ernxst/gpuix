@@ -1520,20 +1520,29 @@ async fn run_ui_commands(
                 refresh_ui_window(window, cx)
             }
             UiCommand::ScrollToItem { id, index, offset } => {
-                if !VIRTUAL_LIST_STATES.with(|cell| {
+                let queued = VIRTUAL_LIST_STATES.with(|cell| {
                     if !cell.borrow().contains_key(&id) {
                         return false;
                     }
                     queue_virtual_list_scroll(id, index, offset);
                     true
-                }) {
-                    SCROLL_HANDLES.with(|cell| {
-                        if let Some(handle) = cell.borrow().get(&id) {
-                            handle.scroll_to_item(index);
-                        }
-                    });
-                }
-                refresh_ui_window(window, cx)
+                });
+                let revealed = if queued {
+                    Ok(())
+                } else {
+                    // The retained child index has to be mapped against the
+                    // tree the view holds, so the reveal runs on the UI thread.
+                    window.update(cx, |view, _window, _cx| {
+                        let tree = view.tree.clone();
+                        let tree = tree.lock().unwrap();
+                        SCROLL_HANDLES.with(|cell| {
+                            if let Some(handle) = cell.borrow().get(&id) {
+                                scroll_handle_to_child(handle, &tree, id, index);
+                            }
+                        });
+                    })
+                };
+                revealed.and_then(|()| refresh_ui_window(window, cx))
             }
             UiCommand::GetScrollOffset { id, response } => {
                 let offset = VIRTUAL_LIST_STATES
@@ -3861,10 +3870,11 @@ impl GpuixRenderer {
             queue_virtual_list_scroll(id, index, offset);
             true
         }) {
+            let tree = self.tree.lock().unwrap();
             SCROLL_HANDLES.with(|cell| {
                 let handles = cell.borrow();
                 if let Some(handle) = handles.get(&id) {
-                    handle.scroll_to_item(index);
+                    scroll_handle_to_child(handle, &tree, id, index);
                 }
             });
         }
@@ -5401,9 +5411,10 @@ impl WebGpuixRenderer {
             queue_virtual_list_scroll(id, index, offset);
             true
         }) {
+            let tree = self.tree.lock().unwrap();
             SCROLL_HANDLES.with(|handles| {
                 if let Some(handle) = handles.borrow().get(&id) {
-                    handle.scroll_to_item(index);
+                    scroll_handle_to_child(handle, &tree, id, index);
                 }
             });
         }
@@ -6324,6 +6335,16 @@ impl GpuixView {
             payload.end_index = Some((index + 1) as f64);
         });
         true
+    }
+
+    /// Reveal the `index`th retained child of an overflow scroller.
+    pub(crate) fn scroll_handle_to_child(&self, scroller_id: u64, index: usize) {
+        let Some(handle) = self.scroll_handles.get(&scroller_id) else {
+            return;
+        };
+        let tree = self.tree.clone();
+        let tree = tree.lock().unwrap();
+        scroll_handle_to_child(handle, &tree, scroller_id, index);
     }
 
     /// The list's logical scroll anchor as
@@ -8562,8 +8583,8 @@ fn direct_child_index(tree: &RetainedTree, ancestor_id: u64, element_id: u64) ->
     }
 }
 
-/// The index `gpui::ScrollHandle::scroll_to_item` needs for the scroller child
-/// that contains `element_id`.
+/// The index `gpui::ScrollHandle::scroll_to_item` needs for the scroller's
+/// `index`th retained child.
 ///
 /// gpui counts the children it painted, and every element paints an automation
 /// bounds tracker before its own content and children, so a retained child index
@@ -8572,14 +8593,33 @@ fn direct_child_index(tree: &RetainedTree, ancestor_id: u64, element_id: u64) ->
 /// whole subtree into one inline element, so gpui paints a single run where the
 /// retained tree has children, and no index names the target. `None` leaves the
 /// reveal unrequested instead of scrolling to an unrelated row.
-fn painted_child_index(tree: &RetainedTree, scroller_id: u64, element_id: u64) -> Option<usize> {
-    let index = direct_child_index(tree, scroller_id, element_id)?;
+fn painted_index_of_child(tree: &RetainedTree, scroller_id: u64, index: usize) -> Option<usize> {
     let scroller = tree.elements.get(&scroller_id)?;
     if scroller.element_type == "text" {
         return None;
     }
     let leading = 1 + usize::from(scroller.content.is_some());
     Some(index + leading)
+}
+
+/// The index `gpui::ScrollHandle::scroll_to_item` needs for the scroller child
+/// that contains `element_id`.
+fn painted_child_index(tree: &RetainedTree, scroller_id: u64, element_id: u64) -> Option<usize> {
+    let index = direct_child_index(tree, scroller_id, element_id)?;
+    painted_index_of_child(tree, scroller_id, index)
+}
+
+/// Reveal the scroller's `index`th retained child through its scroll handle,
+/// which counts painted children rather than retained ones.
+fn scroll_handle_to_child(
+    handle: &gpui::ScrollHandle,
+    tree: &RetainedTree,
+    scroller_id: u64,
+    index: usize,
+) {
+    if let Some(painted) = painted_index_of_child(tree, scroller_id, index) {
+        handle.scroll_to_item(painted);
+    }
 }
 
 #[cfg(test)]
@@ -8622,6 +8662,21 @@ mod painted_child_index_tests {
         ]));
 
         assert_eq!(painted_child_index(&tree, 1, 3), None);
+    }
+
+    #[test]
+    fn child_index_from_the_public_api_skips_the_automation_tracker_too() {
+        let tree = tree_from(serde_json::json!([
+            ["createElement", 1, "div"],
+            ["createElement", 2, "div"],
+            ["createElement", 3, "div"],
+            ["appendChild", 1, 2],
+            ["appendChild", 1, 3],
+            ["setRoot", 1]
+        ]));
+
+        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(1));
+        assert_eq!(painted_index_of_child(&tree, 1, 1), Some(2));
     }
 }
 

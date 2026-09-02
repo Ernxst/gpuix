@@ -3985,10 +3985,14 @@ describeNative("events", () => {
       // Scroll to item 3 (index 3, the 4th child "Item D")
       testRoot.renderer.scrollToItem(container.id, 3)
 
-      // After scrolling to item, offset should have changed
+      // "Item D" spans 240..320 in a 100px viewport, so revealing it by its
+      // nearest edge rests the content 220px above the top. -140 would mean
+      // the child index reached gpui unmapped: gpui counts painted children,
+      // which start with the automation bounds tracker, so index 3 would
+      // reveal "Item C" — one row short.
       const offset = testRoot.renderer.getScrollOffset(container.id)
       expect(offset).not.toBeNull()
-      expect(offset![1]).toBeLessThan(0) // scrolled down to reveal item
+      expect(offset![1]).toBe(-220)
     })
 
     it("should render scrollable container with visible screenshot diff", () => {
