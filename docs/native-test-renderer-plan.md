@@ -5,6 +5,15 @@ description: Migrate from mocked TypeScript TestRenderer to real GPUI-backed tes
 
 # Native Test Renderer Plan
 
+> [!NOTE]
+> **Superseded in part.** The per-mutation API this plan sketches
+> (`createElement`, `setStyle`, `setText`, `setRoot`, and peers, shown under
+> "Architecture" and "Test Flow Example") no longer exists. The renderer
+> transport is one atomic `applyBatch(json)` call per React commit; a test
+> drives the renderer by constructing that batch. Everything else here — the
+> GPUI `TestPlatform` backing, the shared `RetainedTree`, `commitMutations`,
+> the flush/simulate/drain flow — still describes the shipped design.
+
 ## Goal
 
 Replace the mocked `TestRenderer` (pure TypeScript, in-memory element tree) with a real native test renderer backed by GPUI's test infrastructure. Tests run the **same Rust code** as production — `build_element()`, `apply_styles()`, event wiring, focus management — but with no GPU and no visible window.

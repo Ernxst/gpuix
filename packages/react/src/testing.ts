@@ -46,7 +46,6 @@ import type {
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
-import type { MutationTuple } from "./reconciler/batch-renderer.js"
 import {
   disposeRecordingContext2D,
   flushRecordingContext2D,
@@ -624,57 +623,6 @@ export class TestRenderer implements NativeRenderer {
 
   capabilities(): RendererCapabilities {
     return this.native.capabilities()
-  }
-
-  // Keep direct mutation methods at runtime for one compatibility release.
-
-  private applyCompatibilityMutation(mutation: MutationTuple): Array<number> {
-    const destroyedIds = this.native.applyBatch(JSON.stringify([mutation]))
-    this.invalidateElementMap()
-    return destroyedIds
-  }
-
-  createElement(id: number, elementType: string): void {
-    this.applyCompatibilityMutation(["createElement", id, elementType])
-  }
-
-  destroyElement(id: number): Array<number> {
-    return this.applyCompatibilityMutation(["destroyElement", id])
-  }
-
-  appendChild(parentId: number, childId: number): void {
-    this.applyCompatibilityMutation(["appendChild", parentId, childId])
-  }
-
-  removeChild(_parentId: number, childId: number): void {
-    // The atomic transport intentionally has no detach-only operation because
-    // React removals now own and destroy the removed subtree.
-    this.applyCompatibilityMutation(["destroyElement", childId])
-  }
-
-  insertBefore(parentId: number, childId: number, beforeId: number): void {
-    this.applyCompatibilityMutation(["insertBefore", parentId, childId, beforeId])
-  }
-
-  setStyle(id: number, styleJson: string): void {
-    this.applyCompatibilityMutation(["setStyle", id, styleJson])
-  }
-
-  setText(id: number, content: string): void {
-    this.applyCompatibilityMutation(["setText", id, content])
-  }
-
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void {
-    this.applyCompatibilityMutation(["setEventListener", id, eventType, hasHandler])
-  }
-
-  setRoot(id: number): void {
-    this.applyCompatibilityMutation(["setRoot", id])
-  }
-
-  setCustomProp(id: number, key: string, valueJson: string): void {
-    const value = JSON.parse(valueJson) as MutationTuple[number]
-    this.applyCompatibilityMutation(["setCustomPropValue", id, key, value])
   }
 
   flushMutations(): void {

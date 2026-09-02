@@ -272,36 +272,42 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
     })
   })
 
-  it("reports malformed direct and batched sources with element, property, and value", () => {
-    const direct = createImageRenderer()
-    direct.createElement(41, "img")
-    direct.setCustomProp(41, "data-testid", JSON.stringify("direct-image"))
-    direct.setCustomProp(41, "src", JSON.stringify({ kind: "path", url: "/tmp/a.png" }))
-    expect(direct.drainStyleDiagnostics()[0]).toMatchObject({
+  // Both batches are malformed the same way; what differs is whether the
+  // element's identity metadata was interned before or after the bad `src`.
+  it("reports a malformed source whether identity metadata precedes or follows it", () => {
+    const identityFirst = createImageRenderer()
+    identityFirst.applyBatch(
+      JSON.stringify([
+        ["createElement", 41, "img"],
+        ["setCustomPropValue", 41, "data-testid", "identity-first"],
+        ["setCustomPropValue", 41, "src", { kind: "path", url: "/tmp/a.png" }],
+      ])
+    )
+    expect(identityFirst.drainStyleDiagnostics()[0]).toMatchObject({
       elementId: 41,
       elementType: "img",
-      dataTestId: "direct-image",
+      dataTestId: "identity-first",
       property: "src",
       value: '{"kind":"path","url":"/tmp/a.png"}',
     })
 
-    const batched = createImageRenderer()
-    batched.applyBatch(
+    const identityLast = createImageRenderer()
+    identityLast.applyBatch(
       JSON.stringify([
         ["createElement", 73, "img"],
         ["setCustomPropValue", 73, "src", { kind: "url", url: "file:///tmp/a.png" }],
-        ["setCustomPropValue", 73, "data-testid", "batch-image"],
+        ["setCustomPropValue", 73, "data-testid", "identity-last"],
         ["setRoot", 73],
       ])
     )
-    const diagnostic = batched.drainStyleDiagnostics()[0]
+    const diagnostic = identityLast.drainStyleDiagnostics()[0]
     expect(diagnostic).toMatchObject({
       elementId: 73,
       elementType: "img",
-      dataTestId: "batch-image",
+      dataTestId: "identity-last",
       property: "src",
     })
-    expect(diagnostic.message).toContain('<img data-testid="batch-image">')
+    expect(diagnostic.message).toContain('<img data-testid="identity-last">')
     expect(diagnostic.message).toContain("file:///tmp/a.png")
   })
 

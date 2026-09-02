@@ -1225,7 +1225,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       expect(() =>
         renderer.applyCanvasCommands(404, stream.ops, stream.operands, stream.strings)
       ).toThrow(/missing element 404/)
-      renderer.createElement(7, "div")
+      renderer.applyBatch(JSON.stringify([["createElement", 7, "div"]]))
       expect(() =>
         renderer.applyCanvasCommands(7, stream.ops, stream.operands, stream.strings)
       ).toThrow(/element 7.*<div>.*not a <canvas>/)
