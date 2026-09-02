@@ -7,7 +7,8 @@ BREAKING: align retained-tree and automation text/test-ID/role queries with Test
 String matchers are now exact after trimming and collapsing whitespace. Pass
 `{ exact: false }` for case-insensitive substring matching. Queries also accept
 regular expressions, predicate matchers, `{ trim }`, `{ collapseWhitespace }`,
-and custom normalizers composed from the newly exported `getDefaultNormalizer`.
+and custom normalizers composed from the newly exported `getDefaultNormalizer`,
+whose `NormalizerOptions` and `NormalizerFn` types are exported alongside it.
 `getByRole`'s `name` option goes through the same matcher, so the accessible
 name is normalized before comparison. Automation `getByText` now matches a
 node's own text instead of its prior substring rule, and `renderer.findByText`
