@@ -772,6 +772,9 @@ export type AriaCurrent =
   | "true"
   | "false"
 
+/** How urgently a screen reader announces a change inside a live region. */
+export type AriaLive = "off" | "polite" | "assertive"
+
 /** AccessKit actions delivered through `onAccessibilityAction`. */
 export type AccessibilityAction = "increment" | "decrement" | "focus"
 
@@ -827,6 +830,14 @@ export interface Props {
   ariaCurrent?: AriaCurrent
   /** DOM-compatible alias for ariaCurrent. */
   "aria-current"?: AriaCurrent
+  /** Announce changes inside this node without moving focus. Requires a role. */
+  ariaLive?: AriaLive
+  /** DOM-compatible alias for ariaLive. */
+  "aria-live"?: AriaLive
+  /** Announce the whole live region rather than only the part that changed. */
+  ariaAtomic?: Booleanish
+  /** DOM-compatible alias for ariaAtomic. */
+  "aria-atomic"?: Booleanish
   /** Selected state for selectable semantic nodes. */
   ariaSelected?: Booleanish
   /** DOM-compatible alias for ariaSelected. */

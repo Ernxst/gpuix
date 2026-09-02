@@ -99,6 +99,9 @@ export interface AccessKitNodeSnapshot {
     value?: string
     selected?: boolean
     current?: "False" | "True" | "Page" | "Step" | "Location" | "Date" | "Time"
+    live?: "Off" | "Polite" | "Assertive"
+    /** AccessKit models atomicity as a flag, so `false` is reported as absent. */
+    live_atomic?: true
     expanded?: boolean
     toggled?: "False" | "True" | "Mixed"
     disabled?: true

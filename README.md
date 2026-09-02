@@ -2064,6 +2064,8 @@ equivalents:
 | `ariaLabelledBy`, `ariaDescribedBy` | Space-separated author `id`s whose text supplies the name or description; wins over `ariaLabel` / `ariaDescription` |
 | `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
 | `ariaExpanded`, `ariaSelected` | Boolean semantic states |
+| `ariaLive` | `off`, `polite`, or `assertive` live-region politeness; announces text changes without moving focus |
+| `ariaAtomic` | Present the whole live region rather than only the part that changed |
 | `ariaValue` | Human-readable value text |
 | `ariaValueMin`, `ariaValueMax`, `ariaValueNow` | Numeric value range and current value |
 | `ariaLevel` | One-based heading level |
@@ -2133,9 +2135,8 @@ tree:
 </div>
 ```
 
-GPUI exposes no `aria-live` equivalent, so nothing marks that node as a live
-region. Its text is readable wherever a screen reader reaches it, but a change
-to that text is not announced; live-region announcement is not implemented yet.
+That wrapper is also a live region, so a change to its text is announced. See
+**Live regions** below.
 
 GPUIX rejects with a property diagnostic — and renders the element as authored —
 when it is asked to hide more than the projection carries:
@@ -2151,6 +2152,62 @@ when it is asked to hide more than the projection carries:
 A visually hidden subtree with its own nodes or controls is not supported yet;
 on the web `sr-only` keeps the whole subtree exposed and live. Track it as a
 follow-up before hiding a structured wrapper.
+
+**Live regions.** `ariaLive` marks a node as a live region, so a screen reader
+announces changes to the text inside it without moving focus. It takes `"off"`,
+`"polite"`, or `"assertive"`, and accepts the DOM spelling `aria-live`.
+`ariaAtomic` (`aria-atomic`) asks assistive technology to present the whole
+region rather than only the part that changed.
+
+```tsx
+<div role="status" ariaLive="polite">
+  <text>{`Saved ${count} files`}</text>
+</div>
+```
+
+Five roles carry an implicit politeness, exactly as they do in the DOM, so the
+usual cases need no `ariaLive` at all:
+
+| Role | Implicit `ariaLive` | Implicit `ariaAtomic` |
+|---|---|---|
+| `alert` | `assertive` | `true` |
+| `status` | `polite` | `true` |
+| `log` | `polite` | `false` |
+| `marquee`, `timer` | `off` | — |
+
+An authored `ariaLive` or `ariaAtomic` overrides the implicit value. Politeness
+inherits down the accessibility tree, so the region carries it while the painted
+text inside it is what changes; `assertive` interrupts the current utterance and
+`polite` waits for it. A live region requires an explicit supported `role`:
+without one GPUI contributes no accessibility node for the politeness to land
+on, so GPUIX reports `ariaLive` as ignored rather than inventing a role. Add
+`role="status"`, `role="alert"`, or `role="log"`. A `visuallyHidden` live region
+is the `sr-only` announcement pattern and works the same way — but do not give
+any live region an `ariaLabel`. An authored name outranks the region's own text, as accname
+says it should, so the name then never changes, and Windows and Linux announce a
+live region by re-reading exactly that name. Let the text be the name.
+
+Announcements come from AccessKit diffing consecutive frames rather than from a
+mutation record, which produces four differences from the browser worth knowing:
+
+- **A live region that mounts already containing text is announced.** Browsers
+  do that only for `role="alert"`; GPUIX does it at every politeness. A toast
+  that appears with its message therefore speaks, which is usually what the
+  author meant — but do not mount a `role="status"` region already full of text
+  you did not want read out.
+- **Setting the same string twice in a row is silent.** The adapters compare the
+  text they last published, and a mutation that does not change it raises
+  nothing. Alternate between two regions when a repeat has to be spoken again.
+- **Several changes inside one React commit announce once**, with the final
+  text, because GPUIX sends one accessibility update per drawn frame.
+- **A live region scrolled out of a clipping ancestor stops announcing**, since
+  it leaves the accessibility tree along with the rest of the clipped content.
+
+`aria-busy` and `aria-relevant` have no AccessKit equivalent and are not
+supported. Live regions are verified on macOS with VoiceOver
+([docs/accessibility-smoke.md](./docs/accessibility-smoke.md)); Windows and
+Linux use the same AccessKit properties but have not been checked against a
+screen reader here.
 
 Unroled drawn text enters AccessKit as `Label` content. `<text>` exposes its
 flattened inline string as one label, while native `<code>`, `<markdown>`, and
