@@ -1494,6 +1494,12 @@ export interface InputPublicInstance extends PublicInstance {
    * prop still wins the moment it *changes* — the next commit of a different
    * `value` overwrites what you wrote, and a commit of an unchanged one leaves
    * it alone. On a controlled input, prefer setting React state.
+   *
+   * **Differs from ReactDOM.** ReactDOM re-asserts a controlled input's `value`
+   * on every commit, so an imperative write there is undone by the next render
+   * even when the prop did not change. This renderer diffs props instead, so
+   * the write survives until the `value` prop itself changes. Do not rely on
+   * either renderer to revert it for you.
    */
   value: string
   /**
