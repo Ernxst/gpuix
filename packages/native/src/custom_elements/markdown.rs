@@ -131,7 +131,7 @@ impl CustomElement for MarkdownElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &["linkClick", "click", "mouseEnter", "mouseLeave"]
+        &["linkClick", "click", "mouseEnter", "mouseLeave", "wheel"]
     }
 
     fn destroy(&mut self) {

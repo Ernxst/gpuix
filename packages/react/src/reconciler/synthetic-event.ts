@@ -152,14 +152,18 @@ export function createGpuixSyntheticEvent(
   let propagationStopped = false
 
   const modifiers = nativeEvent.modifiers
-  const isPlainFocusEvent = nativeEvent.eventType === "focus" || nativeEvent.eventType === "blur"
+  const isNonCancelableEvent =
+    nativeEvent.eventType === "focus" ||
+    nativeEvent.eventType === "blur" ||
+    nativeEvent.eventType === "scroll"
+  const isNonBubblingEvent = isNonCancelableEvent
   const event = {
     ...nativeEvent,
     nativeEvent,
     target,
     type: nativeEvent.eventType,
-    bubbles: !isPlainFocusEvent,
-    cancelable: !isPlainFocusEvent,
+    bubbles: !isNonBubblingEvent,
+    cancelable: !isNonCancelableEvent,
     altKey: modifiers?.alt ?? false,
     ctrlKey: modifiers?.ctrl ?? false,
     metaKey: modifiers?.cmd ?? false,
@@ -168,7 +172,7 @@ export function createGpuixSyntheticEvent(
     key: domKeyName(nativeEvent.key, nativeEvent.keyChar),
     repeat: nativeEvent.isHeld ?? false,
     preventDefault(): void {
-      if (!isPlainFocusEvent) defaultPrevented = true
+      if (!isNonCancelableEvent) defaultPrevented = true
     },
     stopPropagation(): void {
       propagationStopped = true

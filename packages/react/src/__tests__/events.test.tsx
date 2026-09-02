@@ -2080,14 +2080,14 @@ describeNative("events", () => {
   })
 
   describe("scroll events", () => {
-    it("should handle onScroll and receive exact delta values", () => {
-      const receivedEvents: EventPayload[] = []
+    it("delivers pixel and line wheel deltas with DOM units", () => {
+      const receivedEvents: GpuixSyntheticEvent[] = []
 
       function ScrollBox() {
         return (
           <div
             style={{ width: 200, height: 200 }}
-            onScroll={(e: EventPayload) => receivedEvents.push(e)}
+            onWheel={(event) => receivedEvents.push(event)}
           >
             <text>scrollable</text>
           </div>
@@ -2096,44 +2096,160 @@ describeNative("events", () => {
 
       testRoot.render(<ScrollBox />)
       testRoot.renderer.nativeSimulateScrollWheel(100, 100, 0, -50)
+      testRoot.renderer.nativeSimulateScrollWheel(100, 100, 2, -3, {
+        deltaUnit: "lines",
+      })
 
-      expect(receivedEvents.length).toBeGreaterThanOrEqual(1)
-      const scrollEvent = receivedEvents.find(
-        (e) => e.eventType === "scroll"
-      )
-      expect(scrollEvent).toBeDefined()
-      expect(scrollEvent!.eventType).toBe("scroll")
-      expect(scrollEvent!.deltaX).toBe(0)
-      expect(scrollEvent!.deltaY).toBe(-50)
-      expect(scrollEvent!.touchPhase).toBe("moved")
+      expect(
+        receivedEvents.map((event) => ({
+          type: event.type,
+          deltaX: event.deltaX,
+          deltaY: event.deltaY,
+          deltaZ: event.deltaZ,
+          deltaMode: event.deltaMode,
+          bubbles: event.bubbles,
+          cancelable: event.cancelable,
+        }))
+      ).toEqual([
+        // A GPUI ScrollDelta is the negation of a DOM delta, so a downward
+        // wheel (-50 to GPUI) reaches the handler as deltaY: 50.
+        {
+          type: "wheel",
+          deltaX: 0,
+          deltaY: 50,
+          deltaZ: 0,
+          deltaMode: 0,
+          bubbles: true,
+          cancelable: true,
+        },
+        {
+          type: "wheel",
+          deltaX: -2,
+          deltaY: 3,
+          deltaZ: 0,
+          deltaMode: 1,
+          bubbles: true,
+          cancelable: true,
+        },
+      ])
     })
 
-    it("should update state on scroll", () => {
-      function ScrollCounter() {
-        const [scrollCount, setScrollCount] = useState(0)
+    it("delivers wheel deltas to a canvas", () => {
+      const wheels: Array<{ type: string; deltaY: number | undefined }> = []
+
+      testRoot.render(
+        <canvas
+          width={200}
+          height={200}
+          testId="wheel-canvas"
+          style={{ width: 200, height: 200 }}
+          onWheel={(event) => wheels.push({ type: event.type, deltaY: event.deltaY })}
+        />
+      )
+      const canvas = testRoot.renderer.findByTestId("wheel-canvas")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(canvas.id)!
+      testRoot.renderer.nativeSimulateScrollWheel(
+        x + width / 2,
+        y + height / 2,
+        0,
+        -50
+      )
+
+      expect(wheels).toEqual([{ type: "wheel", deltaY: 50 }])
+    })
+
+    it("delivers wheel deltas to a custom element beside canvas", () => {
+      const wheels: Array<{ type: string; deltaY: number | undefined }> = []
+
+      testRoot.render(
+        <code
+          code="const wheel = true"
+          testId="wheel-code"
+          style={{ width: 200, height: 120 }}
+          onWheel={(event) => wheels.push({ type: event.type, deltaY: event.deltaY })}
+        />
+      )
+      const code = testRoot.renderer.findByTestId("wheel-code")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(code.id)!
+      testRoot.renderer.nativeSimulateScrollWheel(
+        x + width / 2,
+        y + height / 2,
+        0,
+        -50
+      )
+
+      expect(wheels).toEqual([{ type: "wheel", deltaY: 50 }])
+    })
+
+    it("fires non-bubbling scroll after the position changes", () => {
+      const parentEvents: string[] = []
+      const childEvents: Array<{
+        type: string
+        scrollTop: number
+        bubbles: boolean
+        cancelable: boolean
+        deltaY: number | undefined
+      }> = []
+
+      function ScrollBox() {
         return (
-          <div
-            style={{ width: 200, height: 200 }}
-            onScroll={() => setScrollCount((c) => c + 1)}
-          >
-            <text>{`Scrolls: ${scrollCount}`}</text>
+          <div onScroll={() => parentEvents.push("parent")}>
+            <div
+              style={{ width: 200, height: 100, overflowY: "scroll" }}
+              onScroll={(event) =>
+                childEvents.push({
+                  type: event.type,
+                  scrollTop: event.currentTarget.scrollTop,
+                  bubbles: event.bubbles,
+                  cancelable: event.cancelable,
+                  deltaY: event.deltaY,
+                })
+              }
+            >
+              <div style={{ height: 400 }}>
+                <text>scrollable</text>
+              </div>
+            </div>
           </div>
         )
       }
 
-      testRoot.render(<ScrollCounter />)
-      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
-        [
-          "Scrolls: 0",
-        ]
-      `)
+      testRoot.render(<ScrollBox />)
+      testRoot.renderer.nativeSimulateScrollWheel(100, 50, 0, -40)
+      testRoot.renderer.flush()
+      testRoot.renderer.dispatchNativeEvents()
 
-      testRoot.renderer.nativeSimulateScrollWheel(100, 100, 0, -30)
-      expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
-        [
-          "Scrolls: 1",
-        ]
-      `)
+      expect(childEvents).toEqual([
+        {
+          type: "scroll",
+          scrollTop: 40,
+          bubbles: false,
+          cancelable: false,
+          deltaY: undefined,
+        },
+      ])
+      expect(parentEvents).toEqual([])
+    })
+
+    it("does not fire scroll when a wheel cannot move the scroller", () => {
+      const scrollPositions: number[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 100, overflowY: "scroll" }}
+          onScroll={(event) => scrollPositions.push(event.currentTarget.scrollTop)}
+        >
+          <div style={{ height: 400 }}>
+            <text>scrollable</text>
+          </div>
+        </div>
+      )
+
+      testRoot.renderer.nativeSimulateScrollWheel(100, 50, 0, 40)
+      testRoot.renderer.flush()
+      testRoot.renderer.dispatchNativeEvents()
+
+      expect(scrollPositions).toEqual([])
     })
   })
 
@@ -3445,7 +3561,7 @@ describeNative("events", () => {
         return (
           <div
             style={{ width: 320, height: 200, position: "relative" }}
-            onScroll={(e: EventPayload) => deltas.push(e.deltaY ?? 0)}
+            onWheel={(e: EventPayload) => deltas.push(e.deltaY ?? 0)}
           >
             <div
               style={{
@@ -3466,7 +3582,7 @@ describeNative("events", () => {
       testRoot.render(<Canvas />)
       testRoot.renderer.nativeSimulateScrollWheel(100, 60, 0, -80)
 
-      expect(deltas).toEqual([-80])
+      expect(deltas).toEqual([80])
     })
 
     it("lets an absolute sibling pass the wheel to a scroller below it", () => {
@@ -3516,7 +3632,7 @@ describeNative("events", () => {
         return (
           <div
             style={{ width: 320, height: 200, position: "relative" }}
-            onScroll={(e: EventPayload) => deltas.push(e.deltaY ?? 0)}
+            onWheel={(e: EventPayload) => deltas.push(e.deltaY ?? 0)}
           >
             <div
               style={{
@@ -3548,7 +3664,7 @@ describeNative("events", () => {
         return (
           <div
             style={{ width: 200, height: 200, backgroundColor: "#101010" }}
-            onScroll={(e: EventPayload) => held.push(e.modifiers?.cmd)}
+            onWheel={(e: EventPayload) => held.push(e.modifiers?.cmd)}
           >
             <text>surface</text>
           </div>
@@ -3746,6 +3862,8 @@ describeNative("events", () => {
 
       // Scroll should fire the onScroll event AND move the content
       testRoot.renderer.nativeSimulateScrollWheel(150, 50, 0, -40)
+      testRoot.renderer.flush()
+      testRoot.renderer.dispatchNativeEvents()
 
       // Event should have fired
       expect(receivedScrollEvents.length).toBeGreaterThanOrEqual(1)
@@ -3753,7 +3871,7 @@ describeNative("events", () => {
         (e) => e.eventType === "scroll"
       )
       expect(scrollEvent).toBeDefined()
-      expect(scrollEvent!.deltaY).toBe(-40)
+      expect(scrollEvent!.deltaY).toBeUndefined()
 
       // Content should have scrolled
       const container = testRoot.renderer

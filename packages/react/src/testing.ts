@@ -781,7 +781,12 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** End-to-end: simulate scroll wheel through GPUI →
-   *  dispatch resulting events to React. */
+   *  dispatch resulting events to React.
+   *
+   *  `deltaX` and `deltaY` are **platform deltas**, not DOM deltas: they enter
+   *  GPUI where the trackpad driver does, so they say how far the content
+   *  moves. Scrolling down is negative here. The `onWheel` payload the handler
+   *  receives is the DOM negation, where scrolling down is positive. */
   nativeSimulateScrollWheel(
     x: number,
     y: number,
@@ -802,7 +807,10 @@ export class TestRenderer implements NativeRenderer {
 
   /** Dispatch a wheel without the surrounding flushes, for perf sampling.
    *  Call `flush()` yourself, or the sample is the React update only and
-   *  none of the GPUI build, layout and paint that follows. */
+   *  none of the GPUI build, layout and paint that follows.
+   *
+   *  Takes platform deltas, like `nativeSimulateScrollWheel`: scrolling down is
+   *  negative on the way in and positive in the `onWheel` payload. */
   dispatchScrollWheel(
     x: number,
     y: number,

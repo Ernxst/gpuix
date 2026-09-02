@@ -1350,26 +1350,13 @@ impl CanvasElement {
                         );
                     });
                 }
-                "scroll" => {
+                "wheel" => {
                     element = element.on_scroll_wheel(move |event, _window, _cx| {
                         let (x, y) = local_point(&geometry, event.position);
-                        crate::renderer::emit_event_full(&callback, id, "scroll", |payload| {
+                        crate::renderer::emit_event_full(&callback, id, "wheel", |payload| {
                             payload.x = Some(x);
                             payload.y = Some(y);
-                            payload.modifiers = Some(event.modifiers.into());
-                            payload.precise = Some(event.delta.precise());
-                            let delta = event.delta.pixel_delta(gpui::px(20.0));
-                            payload.delta_x = Some(f64::from(f32::from(delta.x)));
-                            payload.delta_y = Some(f64::from(f32::from(delta.y)));
-                            payload.touch_phase = Some(
-                                match event.touch_phase {
-                                    gpui::TouchPhase::Started => "started",
-                                    gpui::TouchPhase::Moved => "moved",
-                                    gpui::TouchPhase::Ended => "ended",
-                                    gpui::TouchPhase::Cancelled => "cancelled",
-                                }
-                                .to_string(),
-                            );
+                            crate::renderer::apply_wheel_delta(payload, event);
                         });
                     });
                 }
@@ -1653,7 +1640,7 @@ impl CustomElement for CanvasElement {
             "mouseEnter",
             "mouseLeave",
             "mouseDownOutside",
-            "scroll",
+            "wheel",
         ]
     }
 

@@ -40,7 +40,7 @@ const TARGET_ONLY_EVENTS = new Set([
   "visibleRange",
 ])
 
-const NON_BUBBLING_EVENTS = new Set(["focus", "blur"])
+const NON_BUBBLING_EVENTS = new Set(["focus", "blur", "scroll"])
 
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
   const containersByRenderer = eventRegistrySlot().containersByRenderer
