@@ -5,6 +5,13 @@ description: Plan for exposing Zed components (Editor, DiffView) as GPUIX React 
 
 # Custom Elements via Polymorphic Trait Interface
 
+> [!NOTE]
+> **Superseded in part.** The `renderer.setCustomProp(id, key, JSON.stringify(value))`
+> call in the prop-diffing sketch below no longer exists. The reconciler queues
+> a `["setCustomPropValue", id, key, value]` op carrying the raw value and
+> issues one `applyBatch(json)` per commit; stringifying here would make Rust
+> parse twice. The trait-based architecture this plan describes is unchanged.
+
 ## Goal
 
 Expose complex native components from Zed (Editor, DiffView, etc.) as GPUIX React custom elements — used like built-in elements with props and callbacks:
