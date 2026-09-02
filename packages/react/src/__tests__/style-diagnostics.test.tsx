@@ -335,7 +335,9 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         elementType: "div",
         property: "visuallyHidden",
         value: "true",
-        message: expect.stringContaining("children would leave the accessibility tree"),
+        message: expect.stringContaining(
+          "children with accessibility semantics of their own"
+        ),
       })
 
       // Rejected means the element renders as authored, not as a stripped node.
@@ -348,6 +350,62 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         aria: { role: "Heading", label: "Retained ledger", level: 2 },
       })
       expect(testRoot.renderer.getPaintedText()).not.toContain("Retained ledger")
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("rejects a visuallyHidden subtree whose text is focusable or interactive", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+    const undo = vi.fn()
+
+    try {
+      testRoot.render(
+        <div style={{ width: 400, height: 200 }}>
+          <div testId="hidden-handler" role="status" visuallyHidden>
+            Saved <text onClick={undo}>Undo handler</text>
+          </div>
+          <div testId="hidden-tab-stop" role="status" visuallyHidden>
+            Saved <text tabIndex={0}>Undo tab stop</text>
+          </div>
+          {/* Control: a subtree of plain text still projects. */}
+          <div testId="hidden-plain" role="status" visuallyHidden>
+            Saved 3 files
+          </div>
+        </div>
+      )
+
+      const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+      const byTestId = (testId: string) => {
+        const diagnostic = diagnostics.find((candidate) => candidate.testId === testId)
+        expect(diagnostic, testId).toBeDefined()
+        return diagnostic!
+      }
+      expect(diagnostics).toHaveLength(2)
+      for (const testId of ["hidden-handler", "hidden-tab-stop"]) {
+        expect(byTestId(testId)).toMatchObject({
+          elementType: "div",
+          property: "visuallyHidden",
+          value: "true",
+          message: expect.stringContaining("destroyed rather than hidden"),
+        })
+      }
+
+      // Rejected means the interactive subtree paints and stays live, rather
+      // than being folded into an accessibility-only node that loses it.
+      const painted = testRoot.renderer.getPaintedText()
+      expect(painted).toContain("Undo handler")
+      expect(painted).toContain("Undo tab stop")
+      expect(painted).not.toContain("Saved 3 files")
+
+      const nodes = Object.values(testRoot.renderer.getAccessibilityTree().nodes)
+      expect(
+        nodes.find(
+          (node) => node.aria.role === "Status" && node.aria.value === "Saved 3 files"
+        )
+      ).toBeDefined()
       expect(warn).toHaveBeenCalled()
     } finally {
       testRoot.unmount()

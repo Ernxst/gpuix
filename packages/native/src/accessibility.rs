@@ -586,30 +586,35 @@ fn visually_hidden_rejection(
     // when the same flattening already covers them — a subtree of plain `<text>`
     // loses nothing under any role, because React makes a child element out of
     // every JSX string and the projection carries the flattened result as the
-    // node's name or its value. A roled descendant owns a node of its own, which
-    // would leave the accessibility tree with the element's box, so a structured
-    // subtree stays out of scope for now.
+    // node's name or its value. A descendant that owns accessibility semantics
+    // of its own has a node the projection would drop, and a focusable or
+    // interactive descendant has a control the projection would destroy, so a
+    // structured subtree stays out of scope for now.
     if element.element_type != "text"
         && !element.children.is_empty()
         && !subtree_is_flattened_text(tree, element)
     {
         return Some(
-            "visuallyHidden exposes only this element, so its roled children would leave the accessibility tree; visually hide an element whose subtree is plain text instead",
+            "visuallyHidden exposes only this element, so children with accessibility semantics of their own, and focusable or interactive children, are destroyed rather than hidden; visually hide an element whose subtree is plain text instead",
         );
     }
     None
 }
 
-/// Whether every descendant is an unroled `<text>` element, so the projection
-/// flattens the whole subtree into the surviving node and nothing is dropped. A
-/// descendant missing from the tree counts as unknown, which is not flattenable.
+/// Whether every descendant is an unroled, non-interactive `<text>` element, so
+/// the projection flattens the whole subtree into the surviving node and nothing
+/// is dropped. A descendant missing from the tree counts as unknown, which is
+/// not flattenable.
 fn subtree_is_flattened_text(tree: &RetainedTree, element: &RetainedElement) -> bool {
     let mut pending: Vec<u64> = element.children.clone();
     while let Some(id) = pending.pop() {
         let Some(descendant) = tree.elements.get(&id) else {
             return false;
         };
-        if descendant.element_type != "text" || has_semantics(descendant) {
+        if descendant.element_type != "text"
+            || has_semantics(descendant)
+            || is_focusable(descendant)
+        {
             return false;
         }
         pending.extend(descendant.children.iter().copied());
@@ -1263,14 +1268,43 @@ mod tests {
         assert!(is_visually_hidden(&tree, &live_region));
         assert!(element_problems(&tree, &live_region).is_empty());
 
-        // A roled descendant owns a node of its own, which the projection drops.
+        // A descendant with accessibility semantics of its own owns a node the
+        // projection drops.
         let mut roled_child = visually_hidden(RetainedElement::new(29, "div".to_string(), 1));
         roled_child
             .custom_props
             .insert("role".into(), "heading".into());
         roled_child.children.push(27);
         assert!(!is_visually_hidden(&tree, &roled_child));
-        assert!(only_reason(&tree, &roled_child).contains("children would leave"));
+        assert!(
+            only_reason(&tree, &roled_child).contains("accessibility semantics of their own")
+        );
+
+        // Plain text that is focusable or wired to an event is not plain: the
+        // projection would destroy the handler and the tab stop along with it.
+        tree.create_element(30, "text".to_string());
+        tree.elements
+            .get_mut(&30)
+            .expect("created element")
+            .events
+            .insert("click".into());
+        let mut handler_child = visually_hidden(RetainedElement::new(31, "div".to_string(), 1));
+        handler_child
+            .custom_props
+            .insert("role".into(), "status".into());
+        handler_child.children.extend([24, 30]);
+        assert!(!is_visually_hidden(&tree, &handler_child));
+        assert!(only_reason(&tree, &handler_child).contains("destroyed rather than hidden"));
+
+        tree.create_element(32, "text".to_string());
+        tree.set_custom_prop(32, "tabIndex".into(), 0.into());
+        let mut tab_stop_child = visually_hidden(RetainedElement::new(33, "div".to_string(), 1));
+        tab_stop_child
+            .custom_props
+            .insert("role".into(), "status".into());
+        tab_stop_child.children.extend([24, 32]);
+        assert!(!is_visually_hidden(&tree, &tab_stop_child));
+        assert!(only_reason(&tree, &tab_stop_child).contains("destroyed rather than hidden"));
 
         let mut runs = visually_hidden(RetainedElement::new(25, "text".to_string(), 1));
         runs.custom_props.insert("role".into(), "heading".into());
