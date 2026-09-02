@@ -881,9 +881,15 @@ export interface Props {
   /** Primary button only, like the DOM. Use `onAuxClick` for the others. */
   onClick?: (event: GpuixSyntheticEvent) => void
   onClickCapture?: (event: GpuixSyntheticEvent) => void
+  /** Primary-button double click, dispatched after the second `onClick`. */
+  onDoubleClick?: (event: GpuixSyntheticEvent) => void
+  onDoubleClickCapture?: (event: GpuixSyntheticEvent) => void
   /** Non-primary click, like the DOM `auxclick`. */
   onAuxClick?: (event: GpuixSyntheticEvent) => void
   onAuxClickCapture?: (event: GpuixSyntheticEvent) => void
+  /** Cancelable secondary-click context-menu request. */
+  onContextMenu?: (event: GpuixSyntheticEvent) => void
+  onContextMenuCapture?: (event: GpuixSyntheticEvent) => void
   onMouseDown?: (event: GpuixSyntheticEvent) => void
   onMouseDownCapture?: (event: GpuixSyntheticEvent) => void
   onMouseUp?: (event: GpuixSyntheticEvent) => void

@@ -355,8 +355,10 @@ export declare class TestGpuixRenderer {
    * which triggers the same event handlers as production.
    * IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
    * `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
+   * `click_count` models a repeat within one click sequence: a platform
+   * sends 2 for the second click of a double click (default 1).
    */
-  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null, clickCount?: number | undefined | null): void
   /**
    * Simulate key strokes through GPUI's input pipeline.
    * Format: space-separated keys, e.g. "a", "enter", "cmd-shift-p".
@@ -628,11 +630,11 @@ export interface EventPayload {
   button?: number
   /**
    * Number of consecutive clicks (1=single, 2=double, 3=triple).
-   * Populated for: mouseDown, mouseUp, click.
+   * Populated for: mouseDown, mouseUp, click, auxClick.
    */
   clickCount?: number
   /**
-   * Whether this is a right-click (convenience for click events).
+   * Whether this is a right-click (convenience for click and context-menu events).
    * true when button==2 or ClickEvent::is_right_click().
    */
   isRightClick?: boolean

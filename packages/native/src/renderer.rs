@@ -7974,8 +7974,9 @@ fn apply_click_handler<E>(
 where
     E: gpui::StatefulInteractiveElement,
 {
-    if !tracks_pointer_event(element, ctx.tree, "click")
-        || action_disabled_in_ancestry(ctx.tree, element.id)
+    let tracks_click = tracks_pointer_event(element, ctx.tree, "click");
+    let tracks_double_click = tracks_pointer_event(element, ctx.tree, "doubleClick");
+    if (!tracks_click && !tracks_double_click) || action_disabled_in_ancestry(ctx.tree, element.id)
     {
         return el;
     }
@@ -8404,17 +8405,30 @@ pub(crate) fn build_host_container(
                 p.modifiers = Some(click_event.modifiers().into());
                 p.click_count = Some(click_event.click_count() as u32);
                 p.is_right_click = Some(click_event.is_right_click());
+                p.button = Some(match click_event {
+                    gpui::ClickEvent::Mouse(event) => mouse_button_to_u32(event.down.button),
+                    gpui::ClickEvent::Keyboard(_) | gpui::ClickEvent::Touch(_) => 0,
+                });
+                p.input_source = Some(
+                    match click_event {
+                        gpui::ClickEvent::Mouse(_) => "mouse",
+                        gpui::ClickEvent::Keyboard(_) => "keyboard",
+                        gpui::ClickEvent::Touch(_) => "touch",
+                    }
+                    .to_string(),
+                );
             });
             cx.stop_propagation();
         });
     }
 
-    if tracks_pointer_event(element, ctx.tree, "mouseDown") {
-        for &button in &[
-            gpui::MouseButton::Left,
-            gpui::MouseButton::Middle,
-            gpui::MouseButton::Right,
-        ] {
+    // `contextMenu` rides the mouse-down listener: macOS opens a context menu
+    // on the press, so the DOM order is mousedown, contextmenu, mouseup,
+    // auxclick. React synthesizes it from the right-button payload.
+    let tracks_mouse_down = tracks_pointer_event(element, ctx.tree, "mouseDown");
+    let tracks_context_menu = tracks_pointer_event(element, ctx.tree, "contextMenu");
+    if tracks_mouse_down || tracks_context_menu {
+        for &button in mouse_down_button_set(tracks_mouse_down) {
             let callback = ctx.event_callback.clone();
             let id = element.id;
             el = el.on_mouse_down(button, move |mouse_event, _window, cx| {
@@ -9354,6 +9368,55 @@ pub(crate) fn mouse_button_to_u32(button: gpui::MouseButton) -> u32 {
         gpui::MouseButton::Middle => 1,
         gpui::MouseButton::Right => 2,
         gpui::MouseButton::Navigate(_) => 3,
+    }
+}
+
+/// The buttons a subtree's mouse-down listener has to cover.
+///
+/// `contextMenu` rides the mouse-down listener, and the tracking walk reaches
+/// ancestors, so a subtree that tracks `contextMenu` without `mouseDown` would
+/// otherwise put an all-button listener on every descendant: an IPC round trip
+/// per left press, and a `stop_propagation` taken on behalf of a listener that
+/// only ever wanted the right button. Such a subtree takes the right button
+/// alone.
+pub(crate) fn mouse_down_button_set(tracks_mouse_down: bool) -> &'static [gpui::MouseButton] {
+    if tracks_mouse_down {
+        &[
+            gpui::MouseButton::Left,
+            gpui::MouseButton::Middle,
+            gpui::MouseButton::Right,
+        ]
+    } else {
+        &[gpui::MouseButton::Right]
+    }
+}
+
+#[cfg(test)]
+mod mouse_down_button_set_tests {
+    use super::*;
+
+    #[test]
+    fn context_menu_without_mouse_down_takes_the_right_button_alone() {
+        assert_eq!(
+            mouse_down_button_set(false),
+            &[gpui::MouseButton::Right],
+            "a subtree that tracks only `contextMenu` must not listen for the \
+             left or middle button: each one costs an IPC round trip and a \
+             `stop_propagation` no React listener asked for"
+        );
+    }
+
+    #[test]
+    fn tracked_mouse_down_takes_every_button() {
+        assert_eq!(
+            mouse_down_button_set(true),
+            &[
+                gpui::MouseButton::Left,
+                gpui::MouseButton::Middle,
+                gpui::MouseButton::Right,
+            ],
+            "`onMouseDown` sees every button through `event.button`"
+        );
     }
 }
 

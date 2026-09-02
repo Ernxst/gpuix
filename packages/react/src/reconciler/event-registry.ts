@@ -209,6 +209,33 @@ export function handleGpuixEvent(
   payload: EventPayload,
   renderer: NativeRenderer
 ): GpuixEventDispatchResult {
+  const result = dispatchGpuixEvent(payload, renderer)
+
+  if (
+    payload.eventType === "click" &&
+    payload.clickCount === 2 &&
+    (payload.button ?? 0) === 0 &&
+    payload.isRightClick !== true &&
+    // Two keyboard activations are two clicks, never a double click.
+    payload.inputSource !== "keyboard"
+  ) {
+    dispatchGpuixEvent({ ...payload, eventType: "doubleClick" }, renderer)
+  } else if (payload.eventType === "mouseDown" && payload.button === 2) {
+    // macOS opens a context menu on the press, so contextmenu follows
+    // mousedown and precedes mouseup and auxclick, as it does in the DOM.
+    dispatchGpuixEvent(
+      { ...payload, eventType: "contextMenu", isRightClick: true },
+      renderer
+    )
+  }
+
+  return result
+}
+
+function dispatchGpuixEvent(
+  payload: EventPayload,
+  renderer: NativeRenderer
+): GpuixEventDispatchResult {
   const container = eventRegistrySlot().containersByRenderer.get(renderer)
   if (!container) {
     if (payload.eventType === "keyDown" && activationKey(payload) === "tab") {

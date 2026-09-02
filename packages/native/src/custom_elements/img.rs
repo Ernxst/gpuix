@@ -1966,7 +1966,14 @@ impl CustomElement for ImgElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &["click", "mouseEnter", "mouseLeave", "wheel"]
+        &[
+            "click",
+            "doubleClick",
+            "contextMenu",
+            "mouseEnter",
+            "mouseLeave",
+            "wheel",
+        ]
     }
 
     fn test_state(&self) -> Option<serde_json::Value> {
@@ -2109,7 +2116,14 @@ impl CustomElement for SvgElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &["click", "mouseEnter", "mouseLeave", "wheel"]
+        &[
+            "click",
+            "doubleClick",
+            "contextMenu",
+            "mouseEnter",
+            "mouseLeave",
+            "wheel",
+        ]
     }
 
     fn destroy(&mut self) {}

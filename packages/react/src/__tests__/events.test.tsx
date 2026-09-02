@@ -469,6 +469,225 @@ describeNative("events", () => {
       `)
     })
 
+    it("delivers double click after the second click with detail 2", () => {
+      const calls: Array<{ type: string; detail: number }> = []
+
+      testRoot.render(
+        <div
+          testId="double-click-target"
+          style={{ width: 200, height: 80 }}
+          onClick={(event) => calls.push({ type: "click", detail: event.detail })}
+          onDoubleClick={(event) =>
+            calls.push({ type: "doubleClick", detail: event.detail })
+          }
+        />
+      )
+      // The platform reports the repeat count on the second press.
+      testRoot.renderer.nativeSimulateClick(40, 40)
+      testRoot.renderer.nativeSimulateClick(40, 40, 0, undefined, 2)
+
+      expect(calls).toEqual([
+        { type: "click", detail: 1 },
+        { type: "click", detail: 2 },
+        { type: "doubleClick", detail: 2 },
+      ])
+    })
+
+    it("does not turn a repeated keyboard activation into a double click", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <div
+          testId="keyboard-activation-target"
+          style={{ width: 200, height: 80 }}
+          onClick={() => calls.push("click")}
+          onDoubleClick={() => calls.push("doubleClick")}
+        />
+      )
+      const target = testRoot.renderer.findByTestId("keyboard-activation-target")!
+
+      handleGpuixEvent(
+        {
+          elementId: target.id,
+          eventType: "click",
+          button: 0,
+          clickCount: 2,
+          isRightClick: false,
+          inputSource: "keyboard",
+        },
+        testRoot.renderer
+      )
+
+      expect(calls).toEqual(["click"])
+    })
+
+    it("delivers a cancelable context menu on the right mouse press", () => {
+      const order: string[] = []
+      const calls: Array<{
+        type: string
+        button: number
+        detail: number
+        cancelable: boolean
+        defaultPrevented: boolean
+      }> = []
+
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 80 }}
+          onMouseDown={() => order.push("mouseDown")}
+          onMouseUp={() => order.push("mouseUp")}
+          onAuxClick={() => order.push("auxClick")}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            order.push("contextMenu")
+            calls.push({
+              type: "contextMenu",
+              button: event.button,
+              detail: event.detail,
+              cancelable: event.cancelable,
+              defaultPrevented: event.defaultPrevented,
+            })
+          }}
+        />
+      )
+
+      testRoot.renderer.nativeSimulateClick(40, 40)
+      testRoot.renderer.nativeSimulateClick(40, 40, 2)
+
+      // macOS fires contextmenu on the press, between mousedown and auxclick.
+      // The right-button mouseup is missing: GPUI's aux-click listener stops
+      // propagation before the mouse-up listener runs. That divergence
+      // predates this event and is not what this test locks in.
+      expect(order).toEqual([
+        "mouseDown",
+        "mouseUp",
+        "mouseDown",
+        "contextMenu",
+        "auxClick",
+      ])
+      expect(calls).toEqual([
+        {
+          type: "contextMenu",
+          button: 2,
+          detail: 0,
+          cancelable: true,
+          defaultPrevented: true,
+        },
+      ])
+    })
+
+    it("delivers double click and context menu on a canvas that declares neither click", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <canvas
+          width={200}
+          height={80}
+          testId="canvas-synthetic-clicks"
+          style={{ width: 200, height: 80 }}
+          onDoubleClick={() => calls.push("doubleClick")}
+          onContextMenu={() => calls.push("contextMenu")}
+        />
+      )
+      const canvas = testRoot.renderer.findByTestId("canvas-synthetic-clicks")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(canvas.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      testRoot.renderer.nativeSimulateClick(centerX, centerY)
+      testRoot.renderer.nativeSimulateClick(centerX, centerY, 0, undefined, 2)
+      testRoot.renderer.nativeSimulateClick(centerX, centerY, 2)
+
+      expect(calls).toEqual(["doubleClick", "contextMenu"])
+    })
+
+    it("delivers double click and context menu on a custom element beside canvas", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <code
+          code="const synthesized = true"
+          testId="code-synthetic-clicks"
+          style={{ width: 200, height: 80 }}
+          onDoubleClick={() => calls.push("doubleClick")}
+          onContextMenu={() => calls.push("contextMenu")}
+        />
+      )
+      const code = testRoot.renderer.findByTestId("code-synthetic-clicks")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(code.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      testRoot.renderer.nativeSimulateClick(centerX, centerY)
+      testRoot.renderer.nativeSimulateClick(centerX, centerY, 0, undefined, 2)
+      testRoot.renderer.nativeSimulateClick(centerX, centerY, 2)
+
+      expect(calls).toEqual(["doubleClick", "contextMenu"])
+    })
+
+    it("dispatches an ancestor mouse down once per right press on a custom element", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 240, height: 120, padding: 20 }}
+          onMouseDown={(event) => calls.push(`div:mouseDown:${event.button}`)}
+        >
+          <code
+            code="const synthesized = true"
+            testId="code-context-menu-child"
+            style={{ width: 200, height: 80 }}
+            onContextMenu={() => calls.push("code:contextMenu")}
+          />
+        </div>
+      )
+      const code = testRoot.renderer.findByTestId("code-context-menu-child")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(code.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      testRoot.renderer.nativeSimulateMouseDown(centerX, centerY, 2)
+
+      // One press is one bubbled `onMouseDown`, as in the browser. Unless the
+      // custom element stops native propagation the ancestor's own GPUI
+      // listener fires as well, and React dispatches the ancestor handler
+      // twice: once bubbling from the custom element, once at the ancestor.
+      expect(calls).toEqual(["div:mouseDown:2", "code:contextMenu"])
+    })
+
+    it("reaches an ancestor context menu from a right press on an inert child", () => {
+      const calls: string[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 240, height: 120, padding: 20 }}
+          onContextMenu={() => calls.push("contextMenu")}
+        >
+          <div testId="context-menu-inert-child" style={{ width: 200, height: 80 }} />
+        </div>
+      )
+      const child = testRoot.renderer.findByTestId("context-menu-inert-child")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      // The child declares nothing. It carries a mouse-down listener only
+      // because `contextMenu` tracking walks ancestors, and this locks that
+      // walk: without it the right press reaches no handler at all.
+      //
+      // It does not guard the right-button narrowing of that listener. A left
+      // press is silent either way, because the ancestor has no `onMouseDown`
+      // and the extra native payload is drained inside
+      // `nativeSimulateMouseDown` with nowhere to be observed. The button set
+      // itself is guarded in Rust, by
+      // `renderer::mouse_down_button_set_tests`.
+      testRoot.renderer.nativeSimulateMouseDown(centerX, centerY)
+      expect(calls).toEqual([])
+
+      testRoot.renderer.nativeSimulateMouseDown(centerX, centerY, 2)
+      expect(calls).toEqual(["contextMenu"])
+    })
+
     it("dispatches one event through capture, target, and bubble with DOM-shaped targets", () => {
       const calls: Array<{
         name: string

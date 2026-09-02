@@ -691,6 +691,14 @@ export class App {
     down: (target: PointTarget, options?: MouseOptions) => Promise<void>
     up: (target: PointTarget, options?: MouseOptions) => Promise<void>
     click: (target: PointTarget, options?: MouseOptions) => Promise<void>
+    /**
+     * Send one wheel event over a point.
+     *
+     * `deltaX` and `deltaY` are **platform deltas**, not DOM deltas: they are
+     * injected where the trackpad driver injects, so they say how far the
+     * content moves and scrolling down is negative. The `onWheel` payload the
+     * app observes is the DOM negation, where scrolling down is positive.
+     */
     wheel: (
       target: PointTarget,
       deltaX: number,
@@ -726,6 +734,8 @@ export class App {
         const point = await this.resolvePoint(target)
         await this.call("click", { ...point, ...options })
       },
+      // Platform deltas in, DOM deltas out of `onWheel`: see the note on the
+      // `wheel` field above.
       wheel: async (target, deltaX, deltaY, options = {}) => {
         const point = await this.resolvePoint(target)
         await this.call("scrollWheel", {

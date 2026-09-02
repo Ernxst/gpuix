@@ -174,8 +174,12 @@ const EVENT_PROPS = [
   // Mouse events
   ["onClickCapture", "click", "capture"],
   ["onClick", "click", "bubble"],
+  ["onDoubleClickCapture", "doubleClick", "capture"],
+  ["onDoubleClick", "doubleClick", "bubble"],
   ["onAuxClickCapture", "auxClick", "capture"],
   ["onAuxClick", "auxClick", "bubble"],
+  ["onContextMenuCapture", "contextMenu", "capture"],
+  ["onContextMenu", "contextMenu", "bubble"],
   ["onMouseDownCapture", "mouseDown", "capture"],
   ["onMouseDown", "mouseDown", "bubble"],
   ["onMouseUpCapture", "mouseUp", "capture"],
