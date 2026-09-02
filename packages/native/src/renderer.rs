@@ -78,10 +78,6 @@ pub(crate) struct PendingStyleDiagnostics {
 }
 
 impl PendingStyleDiagnostics {
-    pub(crate) fn push(&mut self, diagnostic: PendingStyleDiagnostic) {
-        self.diagnostics.push(diagnostic);
-    }
-
     pub(crate) fn extend(&mut self, diagnostics: impl IntoIterator<Item = PendingStyleDiagnostic>) {
         self.diagnostics.extend(diagnostics);
     }
@@ -2822,11 +2818,10 @@ impl GpuixRenderer {
     ///   ["destroyElement",   id]
     ///   ["appendChild",      parentId, childId]
     ///   ["insertBefore",     parentId, childId, beforeId]
-    ///   ["setStyle",         id, { ...style } | "{styleJson}"]
+    ///   ["setStyle",         id, { ...style }]
     ///   ["setText",          id, "content"]
     ///   ["setEventListener", id, "eventType", true|false]
     ///   ["setRoot",          id]
-    ///   ["setCustomProp",      id, "key", value | "{valueJson}"]
     ///   ["setCustomPropValue", id, "key", value]
     ///
     /// Returns accumulated destroyed IDs from all destroyElement ops.
@@ -10655,24 +10650,6 @@ impl<'de> serde::Deserialize<'de> for StrArg<'de> {
     }
 }
 
-/// A legacy `setCustomProp` payload: a JSON string gets decoded, anything else
-/// is taken as-is. `setCustomPropValue` skips this and stores the raw value.
-struct LegacyPropArg(serde_json::Value);
-
-impl<'de> serde::Deserialize<'de> for LegacyPropArg {
-    fn deserialize<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<Self, D::Error> {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        if let serde_json::Value::String(encoded) = &value {
-            return Ok(LegacyPropArg(
-                serde_json::from_str(encoded).unwrap_or_else(|_| value.clone()),
-            ));
-        }
-        Ok(LegacyPropArg(value))
-    }
-}
-
 /// `hasHandler` arrives as a bool from the reconciler and as a non-negative
 /// integer from hand-written batches. That is exactly what `as_bool()` then
 /// `as_u64()` accepted before, so a negative or fractional number stays an
@@ -10774,11 +10751,6 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
                     "setRoot" => BatchOp::SetRoot {
                         id: next_id(&mut seq, "id")?,
                     },
-                    "setCustomProp" => BatchOp::SetCustomProp {
-                        id: next_id(&mut seq, "id")?,
-                        key: next_arg::<A, StrArg>(&mut seq, "prop key")?.0.into_owned(),
-                        value: next_arg::<A, LegacyPropArg>(&mut seq, "custom prop value")?.0,
-                    },
                     "setCustomPropValue" => BatchOp::SetCustomProp {
                         id: next_id(&mut seq, "id")?,
                         key: next_arg::<A, StrArg>(&mut seq, "prop key")?.0.into_owned(),
@@ -10801,48 +10773,27 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
     }
 }
 
-/// Turn one raw `setStyle` payload into a shared style.
-///
-/// The reconciler always sends an object. A legacy batch can send the same
-/// object as a JSON *string*, so that is unwrapped to the bytes the interner
-/// should see. Anything else, `null` included, is handed to `StyleDesc` and
-/// rejected there. Doing this here, rather than in the deserializer, keeps the
-/// raw bytes available for the content hash.
-fn style_payload_bytes<'a>(
-    payload: &'a serde_json::value::RawValue,
-) -> BatchResult<std::borrow::Cow<'a, [u8]>> {
-    use std::borrow::Cow;
-
-    let raw = payload.get().trim();
-    if raw.starts_with('"') {
-        let encoded: String = serde_json::from_str(raw).map_err(|error| error.to_string())?;
-        Ok(Cow::Owned(encoded.into_bytes()))
-    } else {
-        Ok(Cow::Borrowed(raw.as_bytes()))
-    }
-}
-
 /// Resolve every `setStyle` payload in the batch, in op order.
 ///
-/// This is the last fallible step, so it runs before the apply loop and borrows
-/// only the style table. The borrow checker then proves no element was touched
-/// when it returns `Err`, which is what makes a batch atomic. An earlier
-/// version interned inside the apply loop, so a malformed style at the end of a
-/// batch left everything before it applied and then threw.
+/// Infallible. Decoding already proved every payload is syntactically valid
+/// JSON, and a payload that is not a style *object* — `null` or a JSON string
+/// included — degrades to the empty style with a recorded problem rather than
+/// rejecting the batch. It still runs before the apply loop and borrows only
+/// the style table, so the interned styles line up with the ops that use them.
 fn resolve_styles(
     styles: &mut StyleTable,
     ops: &[BatchOp<'_>],
     collect_diagnostics: bool,
-) -> BatchResult<Vec<(Arc<StyleDesc>, Vec<StyleProblem>)>> {
+) -> Vec<(Arc<StyleDesc>, Vec<StyleProblem>)> {
     let mut resolved = Vec::new();
-    for (index, op) in ops.iter().enumerate() {
+    for op in ops {
         if let BatchOp::SetStyle { style, .. } = op {
-            let raw = style_payload_bytes(style)
-                .map_err(|error| format!("Batch op {index} setStyle parse error: {error}"))?;
-            let value: serde_json::Value = serde_json::from_slice(raw.as_ref())
-                .map_err(|error| format!("Batch op {index} setStyle parse error: {error}"))?;
+            // Keeping the raw bytes here is what makes the content hash work.
+            let raw = style.get().trim().as_bytes();
+            let value: serde_json::Value = serde_json::from_slice(raw)
+                .expect("a RawValue payload is always valid JSON");
             let parsed = crate::style::parse_style_value(&value);
-            let shared = styles.intern_parsed(raw.as_ref(), parsed.style);
+            let shared = styles.intern_parsed(raw, parsed.style);
             let problems = if collect_diagnostics {
                 parsed.problems
             } else {
@@ -10851,7 +10802,7 @@ fn resolve_styles(
             resolved.push((shared, problems));
         }
     }
-    Ok(resolved)
+    resolved
 }
 
 #[cfg(test)]
@@ -10910,10 +10861,10 @@ mod resolve_styles_tests {
 /// Shared between GpuixRenderer::apply_batch and TestGpuixRenderer::apply_batch.
 /// Returns accumulated destroyed IDs (as f64) from all destroyElement ops.
 ///
-/// ATOMIC: the batch is decoded and every style is resolved before a single
-/// element is touched. If any op is malformed the tree is left unchanged and an
-/// error is returned. Nothing after that point can fail, so JS and Rust cannot
-/// desync when a batch is retried.
+/// ATOMIC: decoding is the only fallible phase, and it happens before a single
+/// element or style is touched. If any op is malformed the tree is left
+/// unchanged and an error is returned. Nothing after that point can fail, so JS
+/// and Rust cannot desync when a batch is retried.
 ///
 /// Batch format: JSON array of tuples [opcode, ...args].
 /// See GpuixRenderer::apply_batch for opcode documentation.
@@ -10930,11 +10881,8 @@ pub(crate) fn apply_batch_to_tree_with_diagnostics(
     // Phase 1: decode. No mutation.
     let parsed = parse_batch_ops(bytes)?;
 
-    // Phase 2: resolve styles. Touches the style table only; a failure here
-    // sweeps back out whatever this call interned.
-    let styles = resolve_styles(&mut tree.styles, &parsed, collect_diagnostics)
-        .inspect_err(|_| tree.styles.sweep())?;
-    let mut styles = styles.into_iter();
+    // Phase 2: resolve styles. Touches the style table only, and cannot fail.
+    let mut styles = resolve_styles(&mut tree.styles, &parsed, collect_diagnostics).into_iter();
 
     // Phase 3: apply. Cannot fail.
     let mut destroyed_ids: Vec<f64> = Vec::new();
@@ -11578,83 +11526,32 @@ mod batch_tests {
         apply_batch_to_tree(tree, json.as_bytes())
     }
 
-    /// Everything a mutation can reach, so an unwanted partial apply shows up
-    /// as a diff instead of hiding in a field the test forgot to read.
-    fn describe(tree: &RetainedTree) -> String {
-        let mut ids: Vec<_> = tree.elements.keys().copied().collect();
-        ids.sort_unstable();
-        let mut out = format!("root={:?}\n", tree.root_id);
-        for id in ids {
-            let element = &tree.elements[&id];
-            let mut events: Vec<_> = element.events.iter().cloned().collect();
-            events.sort();
-            let mut props: Vec<_> = element.custom_props.iter().collect();
-            props.sort_by(|(a, _), (b, _)| a.cmp(b));
-            out += &format!(
-                "{id} type={} text={:?} style={:?} children={:?} parent={:?} events={events:?} props={props:?} rev={}/{}\n",
-                element.element_type,
-                element.content,
-                element.style.as_deref(),
-                element.children,
-                element.parent,
-                element.subtree_revision,
-                element.search_revision,
-            );
-        }
-        out
-    }
-
-    /// Style-value problems degrade, but malformed JSON is still fallible and
-    /// must be resolved before the apply loop touches an element.
     #[test]
-    fn a_malformed_style_applies_nothing_at_all() {
+    fn a_string_encoded_style_no_longer_applies() {
         let mut tree = RetainedTree::new();
-        apply(&mut tree, r#"[["createElement",1,"div"],["setRoot",1]]"#).expect("valid batch");
-        let before = describe(&tree);
-        let styles_before = tree.styles.len();
-
-        let error = apply(
+        let outcome = apply_batch_to_tree_with_diagnostics(
             &mut tree,
-            r#"[["createElement",2,"div"],["setText",2,"changed"],["setStyle",2,"{not json"]]"#,
+            br#"[["createElement",1,"div"],["setStyle",1,"{\"color\":\"red\"}"]]"#,
+            true,
         )
-        .expect_err("a malformed style must reject the batch");
-
-        assert_eq!(describe(&tree), before, "the tree must be untouched");
+        .expect("a non-object style degrades like any other");
         assert_eq!(
-            tree.styles.len(),
-            styles_before,
-            "the failed batch must not leave styles interned"
+            tree.elements[&1].style.as_deref(),
+            Some(&StyleDesc::default()),
+            "a JSON-string style is no longer unwrapped into an object"
         );
-        assert!(error.contains("setStyle"), "{error}");
-    }
-
-    /// A style that fails halfway through a long batch is unfindable without
-    /// its index; serde reports a byte offset, which names nothing.
-    #[test]
-    fn a_style_error_names_its_op_index() {
-        let mut tree = RetainedTree::new();
-        let error = apply(
-            &mut tree,
-            r#"[["createElement",1,"div"],["setStyle",1,{"color":"red"}],["setStyle",1,"{not json"]]"#,
-        )
-        .expect_err("a bad style rejects the batch");
+        // Degrading silently would hide the version skew that sent it.
+        let problems: Vec<_> = outcome
+            .diagnostics
+            .iter()
+            .map(|diagnostic| (&diagnostic.problem.property, &diagnostic.problem.reason))
+            .collect();
         assert!(
-            error.starts_with("Batch op 2 setStyle parse error:"),
-            "{error}"
-        );
-    }
-
-    #[test]
-    fn a_legacy_string_encoded_style_still_applies() {
-        let mut tree = RetainedTree::new();
-        apply(
-            &mut tree,
-            r#"[["createElement",1,"div"],["setStyle",1,"{\"color\":\"red\"}"]]"#,
-        )
-        .expect("a JSON-string style is legacy, not invalid");
-        assert_eq!(
-            tree.elements[&1].style.as_deref().unwrap().color.as_deref(),
-            Some("red")
+            problems
+                .iter()
+                .any(|(property, reason)| *property == "<style>"
+                    && reason.contains("expected a style object")),
+            "{problems:?}"
         );
     }
 
@@ -11700,7 +11597,6 @@ mod batch_tests {
             r#"[["setText",ID,"x"]]"#,
             r#"[["setEventListener",ID,"click",true]]"#,
             r#"[["setRoot",ID]]"#,
-            r#"[["setCustomProp",ID,"k",1]]"#,
             r#"[["setCustomPropValue",ID,"k",1]]"#,
         ];
         // 1e999 overflows f64, 9007199254740992 is Number.MAX_SAFE_INTEGER + 1.
@@ -11760,19 +11656,23 @@ mod batch_tests {
         }
     }
 
+    /// The legacy `setCustomProp` opcode carried a JSON-string payload that the
+    /// renderer decoded a second time. Only `setCustomPropValue` remains, so the
+    /// old opcode has to fail as loudly as any other version skew would.
     #[test]
-    fn set_custom_prop_decodes_legacy_json_input() {
+    fn the_legacy_set_custom_prop_opcode_is_rejected() {
         let mut tree = RetainedTree::new();
-        apply(
+        let error = apply(
             &mut tree,
             r#"[["createElement",1,"img"],["setCustomProp",1,"src","{\"kind\":\"path\",\"url\":\"/tmp/a.png\"}"]]"#,
         )
-        .expect("legacy encoded custom-prop operation");
+        .expect_err("the legacy opcode is gone");
 
-        assert_eq!(
-            tree.get_custom_prop(1, "src"),
-            Some(&serde_json::json!({ "kind": "path", "url": "/tmp/a.png" }))
-        );
+        assert!(error.contains("unknown operation"), "{error}");
+        // The visitor's op index has to survive past the first op, or a skew
+        // late in a long batch names nothing.
+        assert!(error.contains("Batch op 1"), "{error}");
+        assert!(tree.elements.is_empty(), "the batch must stay atomic");
     }
 
     #[test]
