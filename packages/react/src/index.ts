@@ -241,6 +241,8 @@ export type {
   GridTrackSizing,
   ImageMimeType,
   ImageSource,
+  InputPublicInstance,
+  SelectionDirection,
   LinearGradient,
   LinearGradientStop,
   EdgeInsets,

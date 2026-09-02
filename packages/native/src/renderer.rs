@@ -45,6 +45,7 @@ use std::time::Duration;
 use wasm_bindgen::JsCast as _;
 
 use crate::canvas::{CanvasDiagnostic, SharedDisplayLists};
+use crate::custom_elements::input::TextEditingState;
 use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::retained_tree::{RetainedTree, StyleTable};
@@ -824,6 +825,17 @@ pub(crate) fn to_element_id(id: f64) -> Result<u64> {
     raw_element_id(id).map_err(Error::from_reason)
 }
 
+/// Clamp a selection offset arriving from JS. `setSelectionRange()` takes
+/// WebIDL `unsigned long`s, so JavaScript has already folded every value into
+/// 0..2^32-1 before it gets here; this only keeps a hand-rolled caller from
+/// turning a stray float into an out-of-range `usize`.
+pub(crate) fn to_selection_offset(offset: f64) -> usize {
+    if !offset.is_finite() || offset <= 0.0 {
+        return 0;
+    }
+    offset.min(u32::MAX as f64) as usize
+}
+
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub(crate) fn parse_canvas_image_source(
     source_json: String,
@@ -985,6 +997,18 @@ mod selection_scroll_tests {
             selection_scroll_step(bounds, gpui::point(gpui::px(20.0), gpui::px(220.0)))
                 > selection_scroll_step(bounds, gpui::point(gpui::px(20.0), gpui::px(200.0)))
         );
+    }
+
+    #[test]
+    fn selection_offsets_survive_values_javascript_can_still_produce() {
+        assert_eq!(to_selection_offset(0.0), 0);
+        assert_eq!(to_selection_offset(7.0), 7);
+        // `ToUint32` already turns each of these into 0 on the JavaScript side.
+        assert_eq!(to_selection_offset(-1.0), 0);
+        assert_eq!(to_selection_offset(f64::NAN), 0);
+        assert_eq!(to_selection_offset(f64::INFINITY), 0);
+        assert_eq!(to_selection_offset(u32::MAX as f64), u32::MAX as usize);
+        assert_eq!(to_selection_offset(1e300), u32::MAX as usize);
     }
 }
 
@@ -1295,6 +1319,20 @@ enum UiCommand {
         id: u64,
         response: SyncSender<()>,
     },
+    GetTextEditingState {
+        id: u64,
+        response: SyncSender<Option<TextEditingState>>,
+    },
+    SetTextSelection {
+        id: u64,
+        start: usize,
+        end: usize,
+        backward: bool,
+    },
+    SetTextValue {
+        id: u64,
+        value: String,
+    },
     ControlClock {
         control: ClockControl,
         response: SyncSender<f64>,
@@ -1594,6 +1632,27 @@ async fn run_ui_commands(
                 });
                 response.send(()).ok();
                 result
+            }
+            UiCommand::GetTextEditingState { id, response } => {
+                window.update(cx, move |view, _window, cx| {
+                    response
+                        .send(view.custom_registry.text_editing_state(id, cx))
+                        .ok();
+                })
+            }
+            UiCommand::SetTextSelection {
+                id,
+                start,
+                end,
+                backward,
+            } => window.update(cx, move |view, _window, cx| {
+                view.custom_registry
+                    .set_text_selection(id, start, end, backward, cx);
+            }),
+            UiCommand::SetTextValue { id, value } => {
+                window.update(cx, move |view, _window, cx| {
+                    view.custom_registry.set_text_value(id, value, cx);
+                })
             }
             UiCommand::ControlClock { control, response } => {
                 window.update(cx, move |view, _window, cx| {
@@ -3556,6 +3615,129 @@ impl GpuixRenderer {
         self.request_invalidate()
     }
 
+    // ── Text editing API ─────────────────────────────────────────────
+    // `<input>` and `<textarea>` own an editor whose text and caret live in a
+    // GPUI entity, not in the retained tree. These read and write it the way
+    // `HTMLInputElement` does, in UTF-16 code units.
+    //
+    // Every one of them draws the committed tree first, exactly as
+    // `getElementBounds` does. A React commit only reaches the editor when the
+    // frame syncs the `value` prop into it, and that sync parks the caret at
+    // the end of the new text. Writing a caret without flushing first would let
+    // the next frame overwrite it — which is precisely the caret restoration an
+    // effect after a reformatting `onChange` is trying to perform.
+
+    /// One editor's API value, or null for any element that does not edit text.
+    #[napi]
+    pub fn get_input_value(&self, element_id: f64) -> Result<Option<String>> {
+        Ok(self
+            .text_editing_state(to_element_id(element_id)?)?
+            .map(|state| state.value))
+    }
+
+    /// `[selectionStart, selectionEnd, backward]` in UTF-16 code units, where
+    /// `backward` is 1 for `selectionDirection == "backward"`. Null for any
+    /// element that does not edit text.
+    #[napi]
+    pub fn get_input_selection(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
+        Ok(self
+            .text_editing_state(to_element_id(element_id)?)?
+            .map(|state| {
+                vec![
+                    state.selection_start as f64,
+                    state.selection_end as f64,
+                    if state.selection_backward { 1.0 } else { 0.0 },
+                ]
+            }))
+    }
+
+    /// Write one editor's value, as assigning `HTMLInputElement.value` does:
+    /// no `change` event, and the caret moves to the end when the value differs.
+    #[napi]
+    pub fn set_input_value(&self, element_id: f64, value: String) -> Result<()> {
+        let id = to_element_id(element_id)?;
+
+        #[cfg(target_os = "macos")]
+        draw_window_for_automation_read()?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, cx| {
+            view.custom_registry.set_text_value(id, value, cx);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetTextValue { id, value });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// `HTMLInputElement.setSelectionRange()` in UTF-16 code units.
+    #[napi]
+    pub fn set_input_selection(
+        &self,
+        element_id: f64,
+        start: f64,
+        end: f64,
+        backward: bool,
+    ) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let start = to_selection_offset(start);
+        let end = to_selection_offset(end);
+
+        #[cfg(target_os = "macos")]
+        draw_window_for_automation_read()?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, cx| {
+            view.custom_registry
+                .set_text_selection(id, start, end, backward, cx);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetTextSelection {
+            id,
+            start,
+            end,
+            backward,
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    fn text_editing_state(&self, id: u64) -> Result<Option<TextEditingState>> {
+        #[cfg(target_os = "macos")]
+        draw_window_for_automation_read()?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, cx| {
+            view.custom_registry.text_editing_state(id, cx)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetTextEditingState { id, response })?;
+            return recv_ui_response(receiver, "the text editing state query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     // ── Scroll API ───────────────────────────────────────────────────
     // GpuixView syncs scroll handles and virtual list states to thread-local maps.
 
@@ -5007,6 +5189,71 @@ impl WebGpuixRenderer {
     pub fn clear_selection(&self) {
         self.selection.lock().clear();
         notify_web();
+    }
+
+    // ── Text editing API ─────────────────────────────────────────────
+
+    /// One editor's API value, or null for any element that does not edit text.
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getInputValue)]
+    pub fn get_input_value(
+        &self,
+        element_id: f64,
+    ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        let state = update_web_view(move |view, _window, cx| {
+            view.custom_registry.text_editing_state(id, cx)
+        })?;
+        Ok(state.map_or(wasm_bindgen::JsValue::NULL, |state| {
+            wasm_bindgen::JsValue::from_str(&state.value)
+        }))
+    }
+
+    /// `[selectionStart, selectionEnd, backward]` in UTF-16 code units, or null.
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getInputSelection)]
+    pub fn get_input_selection(
+        &self,
+        element_id: f64,
+    ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        let state = update_web_view(move |view, _window, cx| {
+            view.custom_registry.text_editing_state(id, cx)
+        })?;
+        Ok(state.map_or(wasm_bindgen::JsValue::NULL, |state| {
+            web_number_array([
+                state.selection_start as f64,
+                state.selection_end as f64,
+                if state.selection_backward { 1.0 } else { 0.0 },
+            ])
+        }))
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setInputValue)]
+    pub fn set_input_value(
+        &self,
+        element_id: f64,
+        value: String,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_view(move |view, _window, cx| {
+            view.custom_registry.set_text_value(id, value, cx);
+        })
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setInputSelection)]
+    pub fn set_input_selection(
+        &self,
+        element_id: f64,
+        start: f64,
+        end: f64,
+        backward: bool,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        let start = to_selection_offset(start);
+        let end = to_selection_offset(end);
+        update_web_view(move |view, _window, cx| {
+            view.custom_registry
+                .set_text_selection(id, start, end, backward, cx);
+        })
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = scrollTo)]

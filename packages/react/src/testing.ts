@@ -233,6 +233,10 @@ interface NativeTestRendererApi extends NativeRenderer {
   getPaintedHighlights(): HighlightMatch[]
   getSyntaxCacheStats(): number[]
   clearSelection(): void
+  getInputValue(elementId: number): string | null
+  getInputSelection(elementId: number): number[] | null
+  setInputValue(elementId: number, value: string): void
+  setInputSelection(elementId: number, start: number, end: number, backward: boolean): void
   setStrictStyles(enabled: boolean): void
   setAllowPrivateNetworkImages(enabled: boolean): void
   drainStyleDiagnostics(): StyleDiagnostic[]
@@ -1292,6 +1296,29 @@ export class TestRenderer implements NativeRenderer {
   clearSelection(): void {
     this.native.clearSelection()
     this.native.flush()
+  }
+
+  // ── Text editing API ────────────────────────────────────────────
+  // No flush in this wrapper: each native call draws the committed tree
+  // itself, exactly as the production renderer does. Flushing here would hide
+  // a missing forced draw from every test that touches the caret.
+
+  /** One `<input>`/`<textarea>`'s value, or null for any other element. */
+  getInputValue(elementId: number): string | null {
+    return this.native.getInputValue(elementId)
+  }
+
+  /** `[selectionStart, selectionEnd, backward]` in UTF-16 code units, or null. */
+  getInputSelection(elementId: number): number[] | null {
+    return this.native.getInputSelection(elementId)
+  }
+
+  setInputValue(elementId: number, value: string): void {
+    this.native.setInputValue(elementId, value)
+  }
+
+  setInputSelection(elementId: number, start: number, end: number, backward: boolean): void {
+    this.native.setInputSelection(elementId, start, end, backward)
   }
 
   setDebugFrameOverlay(mode: DebugFrameOverlayMode): string {

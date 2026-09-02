@@ -1678,6 +1678,66 @@ inactive. Override its colour through the shared native theme:
 <input theme={{ caret: '#22c55e' }} />
 ```
 
+### Value and selection on the ref
+
+An `<input>` or `<textarea>` ref is an `InputPublicInstance`, carrying the
+text-editing members of `HTMLInputElement`. Offsets count **UTF-16 code
+units**, exactly as the DOM's do, so they line up with `value.slice()`:
+
+```tsx
+const ref = useRef<InputPublicInstance>(null)
+
+ref.current.value                      // the editor's current text
+ref.current.selectionStart             // caret / selection start
+ref.current.selectionEnd               // selection end
+ref.current.selectionDirection         // "forward" | "backward"
+
+ref.current.setSelectionRange(0, 4)                // select the first 4 units
+ref.current.setSelectionRange(0, 4, 'backward')    // shift+arrow extends the start
+ref.current.select()                               // select everything
+ref.current.selectionStart = 3                     // drags selectionEnd along
+ref.current.value = 'replaced'                     // no onChange; caret to the end
+```
+
+`setSelectionRange()` follows HTML: offsets past the end of the value point at
+the end, and an inverted range collapses to a caret at `end` rather than being
+swapped. `selectionDirection` is never `"none"` — this editor tracks only which
+end of the selection moves, and HTML lets a platform without a `"none"` mode
+report `"forward"` in its place.
+
+Assigning `value` writes straight to the native editor: it fires no `onChange`.
+React's `value` prop still wins the moment it *changes* — the next commit of a
+different `value` overwrites what you wrote, a commit of an unchanged one leaves
+it alone. On a controlled input, set React state instead.
+
+Select-all-on-focus and caret restoration after a reformatting `onChange` are
+the two idioms this exists for:
+
+```tsx
+<input
+  ref={ref}
+  value={amount}
+  onFocus={() => ref.current?.select()}
+  onChange={(event) => {
+    caretToRestore.current = ref.current?.selectionStart ?? 0
+    setAmount(formatCurrency(event.value ?? ''))
+  }}
+/>
+
+// in an effect, after the reformatted value has committed
+useEffect(() => {
+  const caret = caretToRestore.current
+  if (caret === null) return
+  ref.current?.setSelectionRange(caret, caret)
+  caretToRestore.current = null
+})
+```
+
+The restore has to run in an effect, not inside `onChange`: a changed `value`
+prop parks the caret at the end of the new text when the next frame applies it.
+Every read and write above draws the committed tree first, as `getBounds()`
+does, so the caret you write is the one that survives.
+
 ## Focus and keyboard navigation
 
 Focus is a **native GPUI concept**. GPUIX connects stable React element IDs to
@@ -3648,6 +3708,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] GPU-backed test renderer with screenshot capture
 - [x] Standalone build (pinned GPUI platform dependencies)
 - [x] Native text input and multiline textarea
+- [x] `HTMLInputElement`-shaped value and selection on input refs (`value`, `selectionStart`, `setSelectionRange()`, `select()`)
 - [x] Image and SVG elements (`<img>`, `<svg>`)
 - [x] Virtual lists (`<virtual-list>`)
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>`)

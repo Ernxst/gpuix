@@ -1496,6 +1496,92 @@ impl TestGpuixRenderer {
         self.selection.lock().clear();
     }
 
+    // ── Text editing API ───────────────────────────────────────────────
+    // Each of these draws the committed tree first, as `getElementBounds`
+    // does. A React commit only reaches the editor when a frame syncs the
+    // `value` prop into it, and that sync parks the caret at the end of the new
+    // text; writing a caret before the flush would let the next frame overwrite
+    // it.
+
+    /// One `<input>`/`<textarea>`'s API value, or null for any other element.
+    #[napi]
+    pub fn get_input_value(&self, element_id: f64) -> Result<Option<String>> {
+        Ok(self
+            .text_editing_state(to_element_id(element_id)?)?
+            .map(|state| state.value))
+    }
+
+    /// `[selectionStart, selectionEnd, backward]` in UTF-16 code units, or null.
+    #[napi]
+    pub fn get_input_selection(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
+        Ok(self
+            .text_editing_state(to_element_id(element_id)?)?
+            .map(|state| {
+                vec![
+                    state.selection_start as f64,
+                    state.selection_end as f64,
+                    if state.selection_backward { 1.0 } else { 0.0 },
+                ]
+            }))
+    }
+
+    #[napi]
+    pub fn set_input_value(&self, element_id: f64, value: String) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        self.flush()?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, cx| {
+                    view.custom_registry.set_text_value(id, value, cx);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn set_input_selection(
+        &self,
+        element_id: f64,
+        start: f64,
+        end: f64,
+        backward: bool,
+    ) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let start = crate::renderer::to_selection_offset(start);
+        let end = crate::renderer::to_selection_offset(end);
+        self.flush()?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, cx| {
+                    view.custom_registry
+                        .set_text_selection(id, start, end, backward, cx);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    fn text_editing_state(
+        &self,
+        id: u64,
+    ) -> Result<Option<crate::custom_elements::input::TextEditingState>> {
+        self.flush()?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.read(app).custom_registry.text_editing_state(id, app)
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
     /// Syntax-cache counters as `[hits, misses, documents]`.
     ///
     /// GPUIX rebuilds its whole element tree every frame, so a `<code>` block
