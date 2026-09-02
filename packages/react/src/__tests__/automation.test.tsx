@@ -887,8 +887,8 @@ describeNative("automation", () => {
     renderer.drawPendingFrame()
 
     const nodes = Object.values(renderer.getAccessibilityTree().nodes)
-    // A live region announces its content, so the sr-only status keeps its
-    // text the way painted text does: as the node's value.
+    // The projection has no child node to carry the text the way painted text
+    // does, so a role that is not named from its contents folds it onto value.
     expect(nodes.find((node) => node.aria.role === "Status")).toMatchObject({
       aria: { role: "Status", value: "Saved 3 files" },
     })
