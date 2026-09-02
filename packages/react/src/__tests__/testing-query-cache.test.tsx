@@ -83,7 +83,9 @@ describeNative("TestRenderer query cache", () => {
       expect(root.renderer.getElement(panel.id)?.events).toContain("click")
 
       root.renderer.removeChild(panel.id, label.id)
-      expect(root.renderer.getElement(panel.id)?.children).not.toContain(label.id)
+      expect(root.renderer.getElement(panel.id)?.children.map((child) => child.id)).not.toContain(
+        label.id
+      )
       root.renderer.destroyElement(label.id)
       expect(root.renderer.getElement(label.id)).toBeUndefined()
     } finally {

@@ -3399,6 +3399,11 @@ These are Testing Library-shaped call sites, not DOM locators: they return a
 `TestElement` immediately and do not add browser accessibility or asynchronous
 locator semantics.
 
+`TestElement.children` and `TestElement.parentElement` expose current retained
+relationships in the DOM shape. A previously returned element re-resolves
+those relationships after a rerender; accessing them after that element was
+removed throws instead of returning a stale snapshot.
+
 ```tsx
 import { createTestRoot } from '@gpuix/react/testing'
 
@@ -3421,6 +3426,14 @@ screen.within(panel).getByText('Rate')
 screen.within(ledger).getByText('State')
 screen.queryAllByTestId(/^optional-/)
 
+await screen.userEvent.click(panel)
+await screen.userEvent.hover(panel)
+await screen.userEvent.unhover(panel)
+await screen.userEvent.type(screen.getByTestId('search'), 'iron ore')
+await screen.userEvent.clear(screen.getByTestId('search'))
+await screen.userEvent.keyboard(panel, 'cmd-enter')
+await screen.userEvent.tab({ shift: true })
+
 // Re-render through the same bound screen.
 screen.render(<UpdatedComponent />)
 
@@ -3436,6 +3449,19 @@ const events = renderer.drainNativeEvents()
 renderer.captureScreenshot('/tmp/test.png')
 const text = renderer.getAllText()
 ```
+
+`userEvent.keyboard(element, keystrokes)` focuses the element and uses GPUI's
+space-separated keystroke syntax — not user-event's `{Shift>}A{/Shift}` bracket
+syntax, and it takes the target element rather than reading the focused one.
+Each physical keypress is committed through React before the next is sent, so a
+`tab` in the middle of a string moves focus and the rest of the string lands on
+the newly focused element. `type(element, text)` converts literal spaces,
+newlines, and tabs for that syntax. `clear(element)` selects all with the
+platform chord (`cmd-a` on macOS, `ctrl-a` elsewhere) and deletes.
+`unhover(element)` moves the pointer to the nearest point off the element, or
+out of the window at `(-1, -1)` when the element fills it. `dblClick` currently
+rejects with an issue #216 message until the native dispatcher can carry
+`click_count`.
 
 `TestElement.style` is the declared descriptor and keeps nested state styles
 unchanged. Use `getResolvedStyle(elementId)` after simulating input to read the

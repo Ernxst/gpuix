@@ -436,7 +436,10 @@ export class SseBackend extends ValidatedAutomationBackend {
   }
 }
 
-function toKeystrokes(text: string): string {
+/** Literal text as GPUI's space-separated keystroke syntax. Shared with the
+ *  in-process `userEvent.type` so the two paths cannot describe a space, a
+ *  newline, or a tab differently. */
+export function toKeystrokes(text: string): string {
   return [...text]
     .map((ch) => {
       if (ch === " ") return "space"
@@ -445,6 +448,15 @@ function toKeystrokes(text: string): string {
       return ch
     })
     .join(" ")
+}
+
+/** The platform's select-all chord. macOS uses cmd, everything else ctrl. */
+export function selectAllKeystroke(): string {
+  const browserPlatform = typeof navigator === "undefined" ? "" : navigator.platform
+  return browserPlatform.includes("Mac") ||
+    (typeof process !== "undefined" && process.platform === "darwin")
+    ? "cmd-a"
+    : "ctrl-a"
 }
 
 export type LocatorMatcher = Matcher<TreeNode>
@@ -651,16 +663,10 @@ export class Locator {
 
   async fill(text: string): Promise<void> {
     const node = await this.element()
-    const browserPlatform = typeof navigator === "undefined" ? "" : navigator.platform
-    const selectAll =
-      browserPlatform.includes("Mac") ||
-      (typeof process !== "undefined" && process.platform === "darwin")
-        ? "cmd-a"
-        : "ctrl-a"
     const replacement = text.length === 0 ? "backspace" : toKeystrokes(text)
     await this.app.call("keystrokes", {
       elementId: node.id,
-      keys: `${selectAll} ${replacement}`,
+      keys: `${selectAllKeystroke()} ${replacement}`,
     })
   }
 

@@ -988,7 +988,7 @@ describeNative("events", () => {
       )
 
       const text = testRoot.renderer.findByText("Factory")!
-      const anchor = testRoot.renderer.getElement(text.parentId!)!
+      const anchor = text.parentElement!
       return { router, anchor }
     }
 

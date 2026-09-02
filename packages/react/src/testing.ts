@@ -27,6 +27,8 @@ import {
 } from "./testing-matchers.js"
 import {
   normalizeScrollWheelOptions,
+  selectAllKeystroke,
+  toKeystrokes,
   type NativeScrollWheelOptions,
   type ScrollWheelInput,
 } from "./automation/client.js"
@@ -327,13 +329,15 @@ export function isNativeTestRendererAvailable(): boolean {
 // ── Test element tree ────────────────────────────────────────────────
 
 export interface TestElement {
-  id: number
-  type: string
-  style: Record<string, unknown>
-  text: string | null
-  events: Set<string>
-  children: number[]
-  parentId: number | null
+  readonly id: number
+  readonly type: string
+  readonly style: Record<string, unknown>
+  readonly text: string | null
+  readonly events: Set<string>
+  /** Direct retained children, re-resolved against the current renderer tree. */
+  readonly children: readonly TestElement[]
+  /** Current retained parent, or null for the root element. */
+  readonly parentElement: TestElement | null
   /** The legacy locator prop. Only used when `data-testid` is absent. */
   testId?: string
   /** The standard `data-testid` attribute. Wins over `testId` on the same element. */
@@ -937,21 +941,43 @@ export class TestRenderer implements NativeRenderer {
 
     const json = JSON.parse(this.native.getTreeJson())
     const map = new Map<number, TestElement>()
+    const renderer = this
     const walk = (node: any, parentId: number | null) => {
       if (!node) return
-      map.set(node.id, {
+      const childIds = (node.children ?? []).map((child: any) => child.id) as number[]
+      const element = {
         id: node.id,
         type: node.type,
         style: node.style ?? {},
         text: node.text ?? null,
         events: new Set(node.events ?? []),
-        children: (node.children ?? []).map((c: any) => c.id),
-        parentId,
         ...(node.authorId ? { authorId: node.authorId } : {}),
         ...(node.dataTestId ? { dataTestId: node.dataTestId } : {}),
         ...(node.testId ? { testId: node.testId } : {}),
         ...(node.customProps ? { customProps: node.customProps } : {}),
+      } as TestElement
+      Object.defineProperties(element, {
+        children: {
+          get(): readonly TestElement[] {
+            const current = getElement(renderer, element.id, "element")
+            if (current !== element) return current.children
+            return Object.freeze(
+              childIds.map((childId) =>
+                getElement(renderer, childId, `child of <${element.type}>`)
+              )
+            )
+          },
+        },
+        parentElement: {
+          get(): TestElement | null {
+            const current = getElement(renderer, element.id, "element")
+            if (current !== element) return current.parentElement
+            if (parentId === null) return null
+            return getElement(renderer, parentId, `parent of ${describeElement(renderer, element)}`)
+          },
+        },
       })
+      map.set(node.id, element)
       for (const child of node.children ?? []) {
         walk(child, node.id)
       }
@@ -963,7 +989,6 @@ export class TestRenderer implements NativeRenderer {
     for (const element of map.values()) {
       Object.freeze(element.style)
       Object.freeze(element.events)
-      Object.freeze(element.children)
       if (element.customProps) Object.freeze(element.customProps)
       Object.freeze(element)
     }
@@ -1304,25 +1329,9 @@ export class TestRenderer implements NativeRenderer {
 
 // ── Test root helper ─────────────────────────────────────────────────
 
-/** Returns every direct child, resolving the renderer's numeric element table. */
-export function getChildren(renderer: TestRenderer, element: TestElement): TestElement[] {
-  return element.children.map((childId) =>
-    getElement(renderer, childId, `child of <${element.type}>`)
-  )
-}
-
-/** Returns an element's parent from the renderer's numeric element table. */
-export function getParent(renderer: TestRenderer, element: TestElement): TestElement {
-  if (element.parentId === null) {
-    throw new Error(`${describeElement(renderer, element)} has no parent`)
-  }
-
-  return getElement(renderer, element.parentId, `parent of ${describeElement(renderer, element)}`)
-}
-
 /** Returns an element's text, including the text rendered by every descendant. */
 export function textContent(renderer: TestRenderer, element: TestElement): string {
-  return `${element.text ?? ""}${getChildren(renderer, element)
+  return `${element.text ?? ""}${element.children
     .map((child) => textContent(renderer, child))
     .join("")}`
 }
@@ -1578,7 +1587,7 @@ function matchesAccessibleName(
 }
 
 function nodeText(renderer: TestRenderer, element: TestElement): string {
-  return `${element.text ?? ""}${getChildren(renderer, element)
+  return `${element.text ?? ""}${element.children
     .map((child) => child.text ?? "")
     .join("")}`
 }
@@ -1589,7 +1598,7 @@ function hasMatchingTextChild(
   text: TextMatcher,
   options?: MatcherOptions
 ): boolean {
-  return getChildren(renderer, element).some((child) =>
+  return element.children.some((child) =>
     matchesMatcher(nodeText(renderer, child), child, text, options)
   )
 }
@@ -1597,7 +1606,7 @@ function hasMatchingTextChild(
 function getElements(renderer: TestRenderer, scope: TestElement, includeScope = true): TestElement[] {
   return [
     ...(includeScope ? [scope] : []),
-    ...getChildren(renderer, scope).flatMap((child) => getElements(renderer, child)),
+    ...scope.children.flatMap((child) => getElements(renderer, child)),
   ]
 }
 
@@ -1750,7 +1759,109 @@ export interface TestRoot extends TestQueries {
   renderer: TestRenderer
   render: (node: ReactNode) => void
   within: (element: TestElement) => TestQueries
+  userEvent: TestUserEvent
   unmount: () => void
+}
+
+export interface UserEventTabOptions {
+  shift?: boolean
+}
+
+/** Vitest browser-mode-shaped interactions over retained TestElements. */
+export interface TestUserEvent {
+  click: (element: TestElement) => Promise<void>
+  dblClick: (element: TestElement) => Promise<void>
+  hover: (element: TestElement) => Promise<void>
+  /** Moves the pointer off the element. An element that fills the window can
+   *  only be left by leaving the window, so the pointer goes to (-1, -1). */
+  unhover: (element: TestElement) => Promise<void>
+  type: (element: TestElement, text: string) => Promise<void>
+  clear: (element: TestElement) => Promise<void>
+  tab: (options?: UserEventTabOptions) => Promise<void>
+  /**
+   * Focuses the element, then sends GPUI's space-separated keystroke syntax
+   * (`"cmd-enter"`, `"a b"`, `"shift-tab"`) one physical keypress at a time.
+   *
+   * This is not user-event's `keyboard()`: it takes the target element, and it
+   * does not read user-event's `{Shift>}A{/Shift}` bracket syntax. GPUI's own
+   * keystroke strings are what the native dispatcher speaks.
+   */
+  keyboard: (element: TestElement, keystrokes: string) => Promise<void>
+}
+
+interface TestElementBounds {
+  element: TestElement
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+function resolveElementBounds(renderer: TestRenderer, element: TestElement): TestElementBounds {
+  const current = getElement(renderer, element.id, "userEvent target")
+  const bounds = renderer.getElementBounds(current.id)
+  if (bounds === null) {
+    throw new Error(`${describeElement(renderer, current)} has no painted bounds`)
+  }
+  const [x, y, width, height] = bounds
+  return { element: current, x, y, width, height }
+}
+
+function centerOf({ x, y, width, height }: TestElementBounds): { x: number; y: number } {
+  return { x: x + width / 2, y: y + height / 2 }
+}
+
+/** The nearest point off the element. An element that covers the whole window
+ *  has no such point inside it, so the pointer leaves the window instead —
+ *  which is what a real pointer would have to do to stop hovering. */
+function pointOutside(
+  renderer: TestRenderer,
+  { x, y, width, height }: TestElementBounds
+): { x: number; y: number } {
+  const window = renderer.getWindowSize()
+  if (x > 0) return { x: x - 1, y: y + height / 2 }
+  if (x + width < window.width) return { x: x + width + 1, y: y + height / 2 }
+  if (y > 0) return { x: x + width / 2, y: y - 1 }
+  if (y + height < window.height) return { x: x + width / 2, y: y + height + 1 }
+  return { x: -1, y: -1 }
+}
+
+function createTestUserEvent(renderer: TestRenderer): TestUserEvent {
+  const keyboard = async (element: TestElement, keystrokes: string): Promise<void> => {
+    const current = getElement(renderer, element.id, "userEvent keyboard target")
+    // Focus first, then let simulateKeystrokes drain each physical keypress:
+    // a keystroke that moves focus, such as `tab`, must be committed through
+    // React before the next key is sent, or the rest of the string lands on
+    // the element that was focused when the call started.
+    renderer.focusElement(current.id)
+    renderer.simulateKeystrokes(keystrokes)
+  }
+
+  return {
+    click: async (element) => {
+      const point = centerOf(resolveElementBounds(renderer, element))
+      renderer.nativeSimulateClick(point.x, point.y)
+    },
+    dblClick: async () => {
+      throw new Error(
+        "userEvent.dblClick is not available until click_count support lands; see issue #216"
+      )
+    },
+    hover: async (element) => {
+      const point = centerOf(resolveElementBounds(renderer, element))
+      renderer.nativeSimulateMouseMove(point.x, point.y)
+    },
+    unhover: async (element) => {
+      const point = pointOutside(renderer, resolveElementBounds(renderer, element))
+      renderer.nativeSimulateMouseMove(point.x, point.y)
+    },
+    type: async (element, text) => keyboard(element, toKeystrokes(text)),
+    clear: async (element) => keyboard(element, `${selectAllKeystroke()} backspace`),
+    tab: async (options = {}) => {
+      renderer.simulateKeystrokes(options.shift === true ? "shift-tab" : "tab")
+    },
+    keyboard,
+  }
 }
 
 export interface TestRootOptions extends TestWindowOptions {
@@ -1804,6 +1915,7 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
     render,
     ...queries,
     within: (element) => getQueries(renderer, () => getElement(renderer, element.id, "scoped element"), false),
+    userEvent: createTestUserEvent(renderer),
     unmount,
   }
 }
