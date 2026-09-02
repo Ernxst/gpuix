@@ -1533,7 +1533,22 @@ export interface CanvasPublicInstance extends PublicInstance {
     options?: CanvasRenderingContext2DSettings
   ): CanvasRenderingContext2D
   getContext(contextId: string, options?: unknown): CanvasRenderingContext2D | null
-  toDataURL(type?: string, quality?: unknown): string
+  /**
+   * Never produces a data URL, and is typed for what it really returns.
+   *
+   * `HTMLCanvasElement.toDataURL()` encodes the canvas **bitmap**, and GPUI has
+   * no per-element readback to encode. The one readback that does exist,
+   * `captureScreenshot()`, grabs the whole window's composited pixels: it is
+   * built only into `test-support` builds, it is clipped to the window, and it
+   * would return whatever is painted over the canvas at its laid-out size
+   * rather than the canvas bitmap at `width` × `height`. Cropping it would
+   * swap a wrong type for wrong pixels.
+   *
+   * Calling this reports why: under `strictStyles` it throws
+   * `Canvas2DNotImplementedError`, and otherwise warns once per element and
+   * returns `undefined`.
+   */
+  toDataURL(type?: string, quality?: unknown): undefined
 }
 
 // Internal host instance. The real element state lives in Rust's RetainedTree.
