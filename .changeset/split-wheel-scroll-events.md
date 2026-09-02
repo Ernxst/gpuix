@@ -9,4 +9,6 @@ BREAKING: Wheel handlers must move from `onScroll` to `onWheel`. `onScroll` no l
 
 BREAKING: `deltaX` and `deltaY` use DOM signs, the negation of the platform deltas the old `onScroll` payload exposed. `deltaY` is positive scrolling down. Handlers that negated the old values should drop the compensation.
 
+`onWheel` now fires on `<canvas>`, `<img>`, `<svg>`, `<code>`, `<diff>`, `<markdown>` and `<anchored>` too, which declared the prop and never delivered it.
+
 Fixes #220

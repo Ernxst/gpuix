@@ -2134,6 +2134,29 @@ describeNative("events", () => {
       expect(wheels).toEqual([{ type: "wheel", deltaY: 50 }])
     })
 
+    it("delivers wheel deltas to a custom element beside canvas", () => {
+      const wheels: Array<{ type: string; deltaY: number | undefined }> = []
+
+      testRoot.render(
+        <code
+          code="const wheel = true"
+          testId="wheel-code"
+          style={{ width: 200, height: 120 }}
+          onWheel={(event) => wheels.push({ type: event.type, deltaY: event.deltaY })}
+        />
+      )
+      const code = testRoot.renderer.findByTestId("wheel-code")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(code.id)!
+      testRoot.renderer.nativeSimulateScrollWheel(
+        x + width / 2,
+        y + height / 2,
+        0,
+        -50
+      )
+
+      expect(wheels).toEqual([{ type: "wheel", deltaY: 50 }])
+    })
+
     it("fires non-bubbling scroll after the position changes", () => {
       const parentEvents: string[] = []
       const childEvents: Array<{
