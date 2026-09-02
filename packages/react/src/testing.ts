@@ -44,7 +44,12 @@ import type {
   StyleDesc,
   StyleDiagnostic,
 } from "./types/host.js"
-import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
+import {
+  createRoot,
+  flushSync,
+  strictStylesDefault,
+  type Root,
+} from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
 import {
   disposeRecordingContext2D,
@@ -2401,6 +2406,171 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
     waitFor: createWaitFor(renderer),
     unmount,
   }
+}
+
+// ── render() ─────────────────────────────────────────────────────────
+
+/**
+ * What `render()` returns: everything `createTestRoot()` gives, plus
+ * `rerender`.
+ *
+ * `unmount` here is vitest-browser-react's `unmount`, not `createTestRoot`'s:
+ * it unmounts the rendered tree and **keeps the offscreen window**, which is
+ * the whole point of sharing one window across a test file. Call
+ * `createTestRoot()` directly when you want to own the window's lifetime.
+ */
+export interface RenderResult extends TestRoot {
+  /** Re-render into the same root, keeping the window and the renderer. */
+  rerender: (node: ReactNode) => void
+}
+
+interface ActiveRenderRoot {
+  root: TestRoot
+  options: TestRootOptions
+  /** Window size at creation, restored after a test calls `simulateResize`. */
+  windowSize: { width: number; height: number }
+  result: RenderResult
+}
+
+/** The one offscreen window `render()` shares, per module instance — which
+ *  vitest gives each test file its own copy of. */
+let activeRenderRoot: ActiveRenderRoot | null = null
+
+/** Every field of `TestRootOptions` is fixed when the window is constructed,
+ *  so a request that differs in any of them cannot reuse the live window. */
+function sameTestRootOptions(a: TestRootOptions, b: TestRootOptions): boolean {
+  return (
+    a.width === b.width &&
+    a.height === b.height &&
+    a.scaleFactor === b.scaleFactor &&
+    a.allowPrivateNetworkImages === b.allowPrivateNetworkImages &&
+    a.strictStyles === b.strictStyles
+  )
+}
+
+/** Return the shared window to the state a freshly created one is in, for the
+ *  knobs a test can move without going through the React tree. Everything else
+ *  set through `renderer` — menus, the debug frame overlay, CPU throttling —
+ *  persists for the rest of the file. */
+function resetSharedWindow(active: ActiveRenderRoot): void {
+  const { renderer } = active.root
+  const size = renderer.getWindowSize()
+  if (size.width !== active.windowSize.width || size.height !== active.windowSize.height) {
+    renderer.simulateResize(active.windowSize.width, active.windowSize.height)
+  }
+  // The pointer is a window-level position, not tree state: leaving it over
+  // the old tree's coordinates would mount the next one already hovered.
+  renderer.nativeSimulateMouseMove(-1, -1)
+  renderer.blur()
+  renderer.clearSelection()
+  renderer.clockResume()
+  renderer.setReducedMotion(false)
+  renderer.setAllowPrivateNetworkImages(active.options.allowPrivateNetworkImages ?? false)
+  renderer.setStrictStyles(active.options.strictStyles ?? strictStylesDefault())
+  // Anything the old tree queued and nobody drained would land on the new one.
+  renderer.drainEvents()
+  renderer.flush()
+}
+
+/** Drop the shared window entirely. The next `render()` opens a new one. */
+function disposeSharedRoot(active: ActiveRenderRoot): void {
+  if (activeRenderRoot === active) activeRenderRoot = null
+  active.root.unmount()
+}
+
+/**
+ * Unmount the tree `render()` mounted, keeping the offscreen window for the
+ * next `render()` in this file.
+ *
+ * `@gpuix/react/testing/vitest` calls this in an `afterEach`. Call it yourself
+ * — or from your own runner's teardown — when you import `@gpuix/react/testing`
+ * directly.
+ */
+export function cleanup(): void {
+  const active = activeRenderRoot
+  if (active === null) return
+
+  // A root that died on an uncaught render error can never be rendered into
+  // again, so the window goes with it rather than poisoning the next test.
+  if (active.root.root.getStatus().status !== "active") {
+    disposeSharedRoot(active)
+    return
+  }
+
+  try {
+    active.root.render(null)
+  } catch (error) {
+    // An unmount effect threw. The tree's state is now unknown, so the window
+    // cannot be handed to the next test; the error still belongs to this one.
+    disposeSharedRoot(active)
+    throw error
+  }
+  resetSharedWindow(active)
+}
+
+/**
+ * Render `node` into a test root and return it, the way
+ * `render()` from vitest-browser-react does.
+ *
+ * ```tsx
+ * const screen = render(<Panel />)
+ * await screen.userEvent.click(screen.getByRole("button", { name: "Save" }))
+ * expect(screen.getByText("Saved")).toBeInTheDocument()
+ * ```
+ *
+ * **One window per test file.** Opening an offscreen GPUI window costs about a
+ * second, so the window created by the first `render()` is reused by every
+ * later one in the same file — vitest isolates module state per file, so
+ * nothing is shared between files. Each `render()` starts from a reset window
+ * (see `cleanup`) and **replaces** the previous tree rather than mounting a
+ * second one beside it, since a desktop window has one root, not a `document.body`
+ * that can hold many containers.
+ *
+ * **Options decide reuse.** `options` are the `createTestRoot()` options, all
+ * of which are fixed when the window is constructed. A call whose options match
+ * the live window's reuses it; a call whose options differ tears that window
+ * down and opens a fresh one.
+ */
+export function render(node: ReactNode, options: TestRootOptions = {}): RenderResult {
+  const live = activeRenderRoot
+  if (live !== null && !sameTestRootOptions(live.options, options)) {
+    disposeSharedRoot(live)
+  }
+
+  let active = activeRenderRoot
+  if (active === null) {
+    const root = createTestRoot(options)
+    const size = root.renderer.getWindowSize()
+    const rerender = (next: ReactNode): void => root.render(next)
+    active = {
+      root,
+      // Copied, so a caller reusing and mutating one options object cannot
+      // change what this window is recorded as having been built with.
+      options: {
+        width: options.width,
+        height: options.height,
+        scaleFactor: options.scaleFactor,
+        allowPrivateNetworkImages: options.allowPrivateNetworkImages,
+        strictStyles: options.strictStyles,
+      },
+      windowSize: { width: size.width, height: size.height },
+      result: {
+        ...root,
+        rerender,
+        // Tree-only unmount: vitest-browser-react's `unmount` removes the
+        // component, not the page it rendered into.
+        unmount: () => {
+          if (activeRenderRoot === active) cleanup()
+        },
+      },
+    }
+    activeRenderRoot = active
+  } else {
+    resetSharedWindow(active)
+  }
+
+  active.root.render(node)
+  return active.result
 }
 
 export interface CanvasComparisonOptions {

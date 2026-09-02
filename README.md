@@ -3906,6 +3906,104 @@ count, so the component sees `onClick` (detail 1), `onClick` (detail 2), then
 `onDoubleClick` (detail 2) — the DOM order, where `dblclick` follows the second
 click rather than replacing it.
 
+### render()
+
+`render(node, options?)` is `createTestRoot()` with the window lifecycle taken
+off your hands, shaped like `render()` from
+[vitest-browser-react](https://github.com/vitest-dev/vitest-browser-react). A
+desktop test reads the same as the browser test beside it:
+
+```tsx
+import { render } from '@gpuix/react/testing/vitest'
+
+it('saves the recipe', async () => {
+  const screen = render(<RecipePanel />)
+
+  await screen.userEvent.click(screen.getByRole('button', { name: 'Save' }))
+  expect(screen.getByText('Saved')).toBeInTheDocument()
+
+  screen.rerender(<RecipePanel readOnly />)
+  expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+})
+```
+
+That replaces the fixture every desktop suite hand-rolls to own the window:
+
+```tsx
+// Before: the suite owns the window, and every test remembers to unmount.
+let screen: TestRoot
+beforeAll(() => {
+  screen = createTestRoot()
+})
+afterAll(() => {
+  screen.unmount()
+})
+
+it('saves the recipe', async () => {
+  screen.render(<RecipePanel />)
+  // ...and nothing resets focus, the clock, or the tree for the next test.
+})
+```
+
+The returned object is what `createTestRoot()` returns — every query,
+`within`, `userEvent`, `waitFor`, `renderer`, `root` — plus **`rerender(node)`**,
+which re-renders into the same root.
+
+**One window per test file.** Opening an offscreen GPUI window costs about a
+second, so the window the first `render()` opens is reused by every later
+`render()` in the same file. Vitest gives each test file its own module
+instance, so nothing is shared between files.
+
+**`options` decide reuse.** `options` is `TestRootOptions` — `width`, `height`,
+`scaleFactor`, `allowPrivateNetworkImages`, `strictStyles` — and every one of
+them is fixed when the window is constructed. A call whose options match the
+live window's reuses it; a call whose options differ tears that window down and
+opens a fresh one. Keep the options identical across a file to keep the window.
+
+**Every `render()` starts from a reset window.** The tree from the previous
+`render()` is unmounted, and the window state a test can move without going
+through React is put back: the window size (after `simulateResize`), keyboard
+focus, text selection, pointer position, a paused motion clock, the
+reduced-motion override, `strictStyles`, and `allowPrivateNetworkImages`. Any
+queued native events are discarded so the old tree's input cannot land on the
+new one. Everything else you set through `renderer` — application menus, the
+debug frame overlay, CPU throttling — persists for the rest of the file; reset
+it yourself if the next test cares. A root that died on an uncaught render error
+is never reused: its window is closed and the next `render()` opens a new one.
+
+**One tree, not many.** A second `render()` in the same test **replaces** the
+first tree rather than mounting beside it. A browser page has a `document.body`
+that holds any number of containers; a desktop window has one root.
+`unmount()` on the result is vitest-browser-react's `unmount` — it removes the
+tree and **keeps** the window. Use `createTestRoot()` when you want to own the
+window's lifetime yourself.
+
+**Automatic cleanup, and where vitest enters.** `@gpuix/react/testing` never
+imports vitest: it also runs from plain scripts, other runners, and the
+automation harness. The `afterEach` that unmounts after each test lives in a
+separate entry point:
+
+| Import | Cleanup |
+|---|---|
+| `@gpuix/react/testing/vitest` | `afterEach(cleanup)` is registered for you |
+| `@gpuix/react/testing` | Call the exported `cleanup()` from your own teardown |
+
+Both entries export the same API — `testing/vitest` re-exports all of
+`testing` — so the only difference is the registration. This is
+vitest-browser-react's split with the polarity reversed: there the default entry
+registers the cleanup and `vitest-browser-react/pure` opts out, because nothing
+in it has to run outside vitest.
+
+```ts
+import { afterEach } from 'vitest'
+import { cleanup, render } from '@gpuix/react/testing'
+
+afterEach(cleanup) // exactly what `@gpuix/react/testing/vitest` does for you
+```
+
+`cleanup()` unmounts the rendered tree and resets the window, keeping it open
+for the next `render()`. It is safe to call when nothing is rendered.
+
 ### Matchers
 
 `@gpuix/react/testing/matchers` ships a jest-dom-shaped pack for `expect.extend`.

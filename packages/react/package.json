@@ -26,6 +26,11 @@
       "import": "./dist/testing.js",
       "default": "./dist/testing.js"
     },
+    "./testing/vitest": {
+      "types": "./dist/testing-vitest.d.ts",
+      "import": "./dist/testing-vitest.js",
+      "default": "./dist/testing-vitest.js"
+    },
     "./testing/matchers": {
       "types": "./dist/testing-expect.d.ts",
       "import": "./dist/testing-expect.js",
