@@ -4,6 +4,7 @@ import React, { useState } from "react"
 import { describe, expect, it } from "vitest"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
+import type { InputPublicInstance } from "../types/host.js"
 
 expect.extend(gpuixMatchers)
 
@@ -186,6 +187,90 @@ describeNative("gpuix matcher pack", () => {
       expect(screen.getByTestId("panel")).not.toHaveValue("")
       expect(screen.getByTestId("panel")).not.toHaveDisplayValue("")
       expect(() => expect(screen.getByTestId("panel")).toHaveValue("")).toThrowError(
+        /value is not declared/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("reads the value the user typed into an uncontrolled input", async () => {
+    const screen = createTestRoot({ width: 400, height: 160 })
+
+    try {
+      screen.render(
+        <div style={{ width: 400, height: 160 }}>
+          <input data-testid="field" style={{ width: 300, height: 40 }} />
+        </div>
+      )
+      const field = screen.getByTestId("field")
+
+      await screen.userEvent.type(field, "hi")
+
+      // The canonical RTL idiom. The typed text only ever lived in the native
+      // editor, so a matcher reading the retained prop would fail here.
+      expect(field).toHaveValue("hi")
+      expect(field).toHaveDisplayValue("hi")
+      expect(field).toHaveDisplayValue(/^h/)
+      expect(field).not.toHaveValue("")
+      // The declaration-flavoured surface is unchanged: no `value` prop was
+      // ever written, and `semantics` still says so.
+      expect(field.semantics?.value).toBeUndefined()
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("reads the value an imperative ref write put in the editor", () => {
+    const screen = createTestRoot({ width: 400, height: 160 })
+    const ref = React.createRef<InputPublicInstance>()
+
+    try {
+      screen.render(
+        <div style={{ width: 400, height: 160 }}>
+          <input
+            ref={ref}
+            data-testid="field"
+            value="hello"
+            style={{ width: 300, height: 40 }}
+          />
+        </div>
+      )
+      const field = screen.getByTestId("field")
+      expect(field).toHaveValue("hello")
+
+      ref.current!.value = "goodbye"
+
+      expect(field).toHaveValue("goodbye")
+      expect(field).toHaveDisplayValue("goodbye")
+      expect(field).not.toHaveValue("hello")
+      // `HTMLInputElement.value =` does not rewrite the attribute either.
+      expect(field.semantics?.value).toBe("hello")
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("falls back to the declared value for an element that edits no text", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div data-testid="panel" role="button" ariaLabel="Ledger">
+            <text>Ledger</text>
+          </div>
+        </div>
+      )
+      const panel = screen.getByTestId("panel")
+
+      // No editor to read from, so the matchers answer from `semantics` — and
+      // an element that declares no value has none, rather than the "" a
+      // native read would report for an empty editor.
+      expect(screen.renderer.getInputValue(panel.id)).toBeNull()
+      expect(panel).not.toHaveValue("")
+      expect(panel).not.toHaveDisplayValue("")
+      expect(() => expect(panel).toHaveDisplayValue(/.*/)).toThrowError(
         /value is not declared/
       )
     } finally {

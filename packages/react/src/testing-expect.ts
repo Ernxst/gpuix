@@ -67,9 +67,9 @@ export interface GpuixMatchers<R = unknown> {
   toHaveFocus(): R
   /** The element's text, plus every descendant's, contains or matches this. */
   toHaveTextContent(expected: TextContentMatcher, options?: TextContentOptions): R
-  /** The element's retained `value` prop equals this exactly. */
+  /** The element's current value equals this exactly. */
   toHaveValue(expected: string): R
-  /** The element's `value` prop matches, through the Testing Library matcher. */
+  /** The element's current value matches, through the Testing Library matcher. */
   toHaveDisplayValue(expected: TextContentMatcher, options?: MatcherOptions): R
   /** The element's computed accessible name matches, or is non-empty. */
   toHaveAccessibleName(expected?: TextContentMatcher, options?: MatcherOptions): R
@@ -162,6 +162,23 @@ function accessibilityNodeOf(
 ): AccessKitNodeSnapshot | undefined {
   const tree = renderer.getAccessibilityTree()
   return Object.values(tree.nodes).find((node) => node.host_id === element.id)
+}
+
+/**
+ * The value a browser would report for this element.
+ *
+ * For a text-editing host — `<input>`, `<textarea>` — that is the editor's own
+ * buffer, so text the user typed and an imperative `ref.value = x` write are
+ * both seen, exactly as `HTMLInputElement.value` sees them. The retained
+ * `value` prop only answers for an element that does not edit text, which is
+ * where the prop *is* the value.
+ *
+ * The read crosses to native and forces a draw, the same cost
+ * `renderer.getInputValue` always carries; that is a fair price in test code
+ * and the reason the queries keep reading the declared prop instead.
+ */
+function currentValue(renderer: TestRenderer, element: TestElement): string | undefined {
+  return renderer.getInputValue(element.id) ?? element.semantics?.value
 }
 
 function describeMatcher(matcher: TextContentMatcher): string {
@@ -324,16 +341,18 @@ export const gpuixMatchers = {
   },
 
   /**
-   * The element's retained `value` prop, compared exactly.
+   * The element's current value, compared exactly.
    *
-   * This is the raw prop with no normalization — the matcher for "the value is
-   * exactly this string". Use `toHaveDisplayValue` for a regular expression, a
-   * predicate, or normalized text.
+   * The live editor buffer for `<input>` and `<textarea>`, and the retained
+   * `value` prop for anything else — see `currentValue`. No normalization: this
+   * is the matcher for "the value is exactly this string". Use
+   * `toHaveDisplayValue` for a regular expression, a predicate, or normalized
+   * text.
    *
    * jest-dom's zero-argument form (`toHaveValue()`, "has any value") and its
    * numeric and string-array forms are not implemented. There is no
    * `type="number"` input and no multi-select to coerce for, and "has any
-   * value" is `expect(element.semantics?.value).toBeDefined()`.
+   * value" is `expect(renderer.getInputValue(field.id)).not.toBe("")`.
    */
   toHaveValue(
     this: MatcherContext,
@@ -345,8 +364,8 @@ export const gpuixMatchers = {
       received,
       "toHaveValue",
       `have value ${JSON.stringify(expected)}`,
-      ({ element, describe }) => {
-        const value = element.semantics?.value
+      ({ renderer, element, describe }) => {
+        const value = currentValue(renderer, element)
         return {
           pass: value === expected,
           actual: `  ${describe()}\n  value ${
@@ -358,9 +377,13 @@ export const gpuixMatchers = {
   },
 
   /**
-   * The element's `value` prop through the Testing Library matcher, so strings
+   * The element's current value through the Testing Library matcher, so strings
    * are exact after normalization and regular expressions, predicates, and
    * `{ exact: false }` all work as they do in the queries.
+   *
+   * The same value `toHaveValue` reads: live for a text editor, the retained
+   * prop otherwise. `getByDisplayValue` still matches the declared prop — a
+   * query walks every element and cannot force a draw per candidate.
    */
   toHaveDisplayValue(
     this: MatcherContext,
@@ -373,8 +396,8 @@ export const gpuixMatchers = {
       received,
       "toHaveDisplayValue",
       `have display value ${describeMatcher(expected)}`,
-      ({ element, describe }) => {
-        const value = element.semantics?.value
+      ({ renderer, element, describe }) => {
+        const value = currentValue(renderer, element)
         return {
           pass: value !== undefined && matchesMatcher(value, element, expected, options),
           actual: `  ${describe()}\n  value ${

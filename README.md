@@ -3502,7 +3502,9 @@ role, not GPUI's computed accessibility role — implicit roles and
 name-from-contents live in the accessibility snapshot, which is what
 `getByRole` reads. And `semantics.value` is the retained `value` prop, so a
 controlled input reports its current value while an uncontrolled one reports the
-last value the author set rather than the live editing buffer.
+last value the author set rather than the live editing buffer. The
+[`toHaveValue` and `toHaveDisplayValue` matchers](#matchers) read that live
+buffer; `semantics.value` and `getByDisplayValue` stay the declaration.
 
 ```ts
 const node = await app.getByLabelText('Recipe search').element()
@@ -3843,8 +3845,8 @@ declare module 'vitest' {
 | `toBeDisabled()` | `disabled` or `ariaDisabled` is declared on it |
 | `toHaveFocus()` | It holds the window's keyboard focus |
 | `toHaveTextContent(matcher, options?)` | Its text plus every descendant's |
-| `toHaveValue(value)` | Its retained `value` prop, exactly |
-| `toHaveDisplayValue(matcher, options?)` | Its `value` prop, through the Testing Library matcher |
+| `toHaveValue(value)` | Its current value, exactly |
+| `toHaveDisplayValue(matcher, options?)` | Its current value, through the Testing Library matcher |
 | `toHaveAccessibleName(matcher?)` | Its computed accessible name |
 
 Every matcher re-resolves the element against its renderer first, so an element
@@ -3892,7 +3894,23 @@ across repeated assertions — jest-dom has the same wart; drop the `g`.
 **`toHaveValue(value)` takes a string, and only a string.** jest-dom's
 zero-argument form and its numeric and string-array forms are not implemented:
 there is no `type="number"` input and no multi-select to coerce for, and "has
-any value" is `expect(element.semantics?.value).toBeDefined()`.
+any value" is `expect(renderer.getInputValue(field.id)).not.toBe('')`.
+
+`toHaveValue` and `toHaveDisplayValue` read the **live editor value** for an
+`<input>` or `<textarea>`, the way `HTMLInputElement.value` does, so typed text
+and an imperative `ref.value = 'x'` write are both visible on an uncontrolled
+input:
+
+```ts
+await screen.userEvent.type(field, 'hi')
+expect(field).toHaveValue('hi')
+```
+
+Everything else falls back to the retained `value` prop, which for a non-editing
+element *is* the value. Each assertion costs one native read and a forced draw —
+worth it in a test, and the reason the queries do not do the same:
+`getByDisplayValue` and `TestElement.semantics.value` stay the
+declaration-flavoured surface, matching the prop the author set.
 
 `toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
 node, which exists only where the element projects accessibility semantics. An
