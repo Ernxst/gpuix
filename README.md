@@ -1831,6 +1831,11 @@ GPUIX resolves them the way HTML-AAM does:
 - `<li>` is a `listitem` only inside a `<ul>`, `<ol>`, or an element with
   `role="list"`.
 
+These three re-resolve whenever what they read actually changes: attaching the
+element to a parent, and an ancestor gaining or losing one of the roles above.
+A `<div role="list">` that becomes `role="group"` drops its `<li>` children back
+to generic, as it does in the DOM.
+
 An authored `ariaLevel` wins over the level a heading tag implies, so
 `<h2 ariaLevel={4}>` reports level 4. The aliases with no implicit role add no
 accessibility node, which keeps them out of name computation exactly as their

@@ -303,6 +303,148 @@ describeNative("implicit ARIA roles for semantic aliases", () => {
     }
   })
 
+  it("resolves the role of a list item inserted into an already-mounted list", () => {
+    const screen = createTestRoot()
+
+    function List({ extra }: { extra: boolean }): React.ReactElement {
+      return (
+        <ul data-testid="list">
+          <li data-testid="first">
+            <text>Coal</text>
+          </li>
+          {extra ? (
+            <li data-testid="second">
+              <text>Iron</text>
+            </li>
+          ) : null}
+        </ul>
+      )
+    }
+
+    try {
+      screen.render(<List extra={false} />)
+      expect(screen.getAllByRole("listitem")).toEqual([screen.getByTestId("first")])
+
+      screen.render(<List extra={true} />)
+      expect(screen.getAllByRole("listitem")).toEqual([
+        screen.getByTestId("first"),
+        screen.getByTestId("second"),
+      ])
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("resolves the scope of a header inserted into an already-mounted article", () => {
+    const screen = createTestRoot()
+
+    function Page({ withHeader }: { withHeader: boolean }): React.ReactElement {
+      return (
+        <div>
+          <article data-testid="article">
+            <text>Body</text>
+            {withHeader ? (
+              <header data-testid="header">
+                <text>Factory</text>
+              </header>
+            ) : null}
+          </article>
+        </div>
+      )
+    }
+
+    try {
+      screen.render(<Page withHeader={false} />)
+      expect(screen.queryByRole("banner")).toBeNull()
+
+      screen.render(<Page withHeader={true} />)
+      expect(screen.queryByRole("banner")).toBeNull()
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("keeps the banner landmark for a header inserted outside sectioning content", () => {
+    const screen = createTestRoot()
+
+    function Page({ withHeader }: { withHeader: boolean }): React.ReactElement {
+      return (
+        <div>
+          <text>Body</text>
+          {withHeader ? (
+            <header data-testid="header">
+              <text>Factory</text>
+            </header>
+          ) : null}
+        </div>
+      )
+    }
+
+    try {
+      screen.render(<Page withHeader={false} />)
+      expect(screen.queryByRole("banner")).toBeNull()
+
+      screen.render(<Page withHeader={true} />)
+      expect(screen.getByRole("banner")).toBe(screen.getByTestId("header"))
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("re-resolves list items when the owner's role stops being a list", () => {
+    const screen = createTestRoot()
+
+    function Rows({ role }: { role: "list" | "group" }): React.ReactElement {
+      return (
+        <div role={role} data-testid="owner">
+          <li data-testid="row">
+            <text>Coal</text>
+          </li>
+        </div>
+      )
+    }
+
+    try {
+      screen.render(<Rows role="list" />)
+      expect(screen.getByRole("listitem")).toBe(screen.getByTestId("row"))
+
+      screen.render(<Rows role="group" />)
+      expect(screen.queryByRole("listitem")).toBeNull()
+
+      screen.render(<Rows role="list" />)
+      expect(screen.getByRole("listitem")).toBe(screen.getByTestId("row"))
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("re-resolves header scope when an ancestor's landmark role changes", () => {
+    const screen = createTestRoot()
+
+    function Page({ role }: { role?: "navigation" }): React.ReactElement {
+      return (
+        <div role={role} data-testid="wrapper">
+          <header data-testid="header">
+            <text>Factory</text>
+          </header>
+        </div>
+      )
+    }
+
+    try {
+      screen.render(<Page />)
+      expect(screen.getByRole("banner")).toBe(screen.getByTestId("header"))
+
+      screen.render(<Page role="navigation" />)
+      expect(screen.queryByRole("banner")).toBeNull()
+
+      screen.render(<Page />)
+      expect(screen.getByRole("banner")).toBe(screen.getByTestId("header"))
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("lets an explicit role override the alias's implicit role", () => {
     const screen = createTestRoot()
 

@@ -776,7 +776,7 @@ const LANDMARK_SCOPING_ROLES = new Set([
 ])
 
 /** The list containers that make an `<li>` a listitem rather than a generic. */
-const LIST_OWNER_TYPES = new Set(["ul", "ol", "menu"])
+const LIST_OWNER_TYPES = new Set(["ul", "ol"])
 
 function isScopedToBody(instance: Instance): boolean {
   for (let node = stateFor(instance).parent; node !== null; node = stateFor(node).parent) {
@@ -830,6 +830,45 @@ function nativeHeadingLevel(type: string, props: Props): number | undefined {
   if (props.ariaLevel !== undefined || props["aria-level"] !== undefined) return undefined
   const level = /^h([1-6])$/.exec(type)?.[1]
   return level === undefined ? undefined : Number(level)
+}
+
+/** The aliases whose implicit role is read from an ancestor rather than themselves. */
+const CONTEXT_DEPENDENT_ROLE_TYPES = new Set(["li", "header", "footer"])
+
+/** The ancestor roles those aliases read. `<section>` reads only its own props. */
+const CONTEXT_SENSITIVE_ROLE_SOURCES = new Set([...LANDMARK_SCOPING_ROLES, "list"])
+
+function isContextSensitiveRoleSource(role: unknown): boolean {
+  return typeof role === "string" && CONTEXT_SENSITIVE_ROLE_SOURCES.has(role)
+}
+
+/**
+ * Re-resolve the descendant roles that read this element's role from above.
+ *
+ * `<li>` reads its list owner and `<header>`/`<footer>` read every sectioning
+ * ancestor, so an ancestor gaining or losing one of those roles changes what
+ * they compute — the DOM recomputes them the moment the attribute changes.
+ * Only a role entering or leaving that set can move a descendant, so every
+ * other update skips the walk entirely.
+ */
+function resyncContextDependentRoles(container: Container, instance: Instance): void {
+  const pending: HostNode[] = [...stateFor(instance).children]
+  while (pending.length > 0) {
+    const node = pending.pop()
+    if (node === undefined) break
+    if (!("type" in node)) continue
+
+    const state = stateFor(node)
+    if (state.mounted && CONTEXT_DEPENDENT_ROLE_TYPES.has(node.type)) {
+      const role = nativeRole(node.type, node.props, node)
+      container.renderer.setCustomProp(
+        node.id,
+        "role",
+        role === undefined ? null : serializeCustomProp(node.type, "role", role)
+      )
+    }
+    pending.push(...state.children)
+  }
 }
 
 /** An explicitly authored accessible name, from either prop spelling. */
@@ -1143,8 +1182,11 @@ export const hostConfig = {
 
   appendChild(parent: Instance, child: Instance | TextInstance): void {
     const parentState = materialize(parent)
-    materialize(child)
+    // Attach before materializing. Materializing sends the child's props, and a
+    // context-dependent implicit role reads the ancestors this call installs;
+    // resolving it first computes the role against no parent at all.
     appendTrackedChild(parent, parentState, child)
+    materialize(child)
     if (!("type" in child)) parentState.container.eventTargets.set(child.id, parent)
     scheduleVirtualListValidation(parent, parentState)
     parentState.container.renderer.appendChild(parent.id, child.id)
@@ -1172,8 +1214,9 @@ export const hostConfig = {
     beforeChild: Instance | TextInstance
   ): void {
     const parentState = materialize(parent)
-    materialize(child)
+    // Attach before materializing, for the reason `appendChild` explains.
     insertTrackedChild(parent, parentState, child, beforeChild)
+    materialize(child)
     if (!("type" in child)) parentState.container.eventTargets.set(child.id, parent)
     scheduleVirtualListValidation(parent, parentState)
     parentState.container.renderer.insertBefore(parent.id, child.id, beforeChild.id)
@@ -1294,6 +1337,14 @@ export const hostConfig = {
     // Custom prop diff (for non-div/text elements)
     diffCustomProps(container.renderer, instance, oldProps, newProps)
     instance.props = newProps
+    // After the new props are installed, so the descendants' ancestor walk
+    // reads the role this update just applied.
+    if (
+      oldProps.role !== newProps.role &&
+      (isContextSensitiveRoleSource(oldProps.role) || isContextSensitiveRoleSource(newProps.role))
+    ) {
+      resyncContextDependentRoles(container, instance)
+    }
     scheduleVirtualListValidation(instance, stateFor(instance))
   },
 
