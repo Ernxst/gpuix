@@ -733,9 +733,18 @@ function nativeActivationKind(type: string, props: Props): "anchor" | undefined 
 function nativeRole(type: string, props: Props): Props["role"] | undefined {
   if (props.role !== undefined) return props.role
   if (type === "button") return "button"
-  if (type === "a") return "link"
+  // HTML-AAM maps `<a>` to `link` only when it has an `href`. A placeholder
+  // anchor without one computes `generic`, and announcing it as a link tells a
+  // screen-reader user there is somewhere to go when there is not.
+  if (type === "a") return nativeAnchorRole(props)
   if (type === "img") return nativeImageRole(props)
   return undefined
+}
+
+/** `<a href>` is a link; `<a>` alone is generic, which needs no role at all. */
+function nativeAnchorRole(props: Props): "link" | undefined {
+  const { href } = props as Props & { href?: unknown }
+  return typeof href === "string" ? "link" : undefined
 }
 
 /** An explicitly authored accessible name, from either prop spelling. */
@@ -1071,6 +1080,18 @@ export const hostConfig = {
         const bounds = getElementBounds.call(rootContainerInstance.native, id)
         if (!bounds) return null
         return { x: bounds[0]!, y: bounds[1]!, width: bounds[2]!, height: bounds[3]! }
+      },
+      getBoundingClientRect: () => {
+        // The DOM reports an all-zero rect for an element with no boxes rather
+        // than nothing at all, so an unpainted element does the same here.
+        const bounds = instance.getBounds() ?? { x: 0, y: 0, width: 0, height: 0 }
+        return {
+          ...bounds,
+          top: bounds.y,
+          right: bounds.x + bounds.width,
+          bottom: bounds.y + bounds.height,
+          left: bounds.x,
+        }
       },
       __applyCanvasCommands: (ops, operands, strings) => {
         if (instance.type !== "canvas") {

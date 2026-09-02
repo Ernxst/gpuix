@@ -119,9 +119,45 @@ export type GpuixSyntheticEvent = EventPayload & {
   readonly detail: number
   readonly key?: string
   readonly repeat: boolean
+  /**
+   * Pointer position in window coordinates, the DOM spelling of `x`.
+   *
+   * `clientX` and `pageX` hold the same number here. They differ in a browser
+   * only by the document's own scroll offset, and this renderer has no
+   * scrolling document — scroll containers are ordinary elements. `0` on
+   * events that carry no pointer position.
+   */
+  readonly clientX: number
+  /** Pointer position in window coordinates, the DOM spelling of `y`.
+   *  See {@link clientX}. */
+  readonly clientY: number
+  /** Identical to {@link clientX}; see it for why. */
+  readonly pageX: number
+  /** Identical to {@link clientY}; see {@link clientX} for why. */
+  readonly pageY: number
+  /**
+   * The other element in a two-element transition, matching
+   * `MouseEvent.relatedTarget`: on `mouseEnter` the element the pointer left,
+   * on `mouseLeave` the element it moved to. `null` when the pointer came from
+   * or went to nothing outside the tree.
+   *
+   * Always `null` on `focus` and `blur`. GPUI's focus subscriptions report only
+   * the element whose own focus changed, never the other side of the
+   * transition, so this renderer genuinely does not know it.
+   */
+  readonly relatedTarget: PublicInstance | null
 
   preventDefault(): void
   stopPropagation(): void
+  /**
+   * Stop this event, including any listener still to run on the current
+   * target, matching `Event.stopImmediatePropagation()`.
+   *
+   * `stopPropagation()` alone still lets the target's other listener run — a
+   * `onClickCapture` and `onClick` pair on one element are both AT_TARGET
+   * listeners, and the DOM runs both.
+   */
+  stopImmediatePropagation(): void
   isDefaultPrevented(): boolean
   isPropagationStopped(): boolean
   /** Route this pressed-pointer sequence to the original event target. */
@@ -140,17 +176,22 @@ export interface GpuixEventDispatchResult {
 interface SyntheticEventController {
   event: GpuixSyntheticEvent
   setCurrentTarget(target: PublicInstance, phase: GpuixEventPhase): void
+  /** True once `stopImmediatePropagation()` has run, so the dispatcher can skip
+   *  the current target's remaining listener. */
+  isImmediatePropagationStopped(): boolean
 }
 
 export function createGpuixSyntheticEvent(
   nativeEvent: EventPayload,
   target: PublicInstance,
-  renderer: NativeRenderer
+  renderer: NativeRenderer,
+  relatedTarget: PublicInstance | null = null
 ): SyntheticEventController {
   let currentTarget = target
   let eventPhase: GpuixEventPhase = 2
   let defaultPrevented = false
   let propagationStopped = false
+  let immediatePropagationStopped = false
 
   const modifiers = nativeEvent.modifiers
   const isNonCancelableEvent =
@@ -173,11 +214,20 @@ export function createGpuixSyntheticEvent(
     detail: nativeEvent.eventType === "contextMenu" ? 0 : (nativeEvent.clickCount ?? 0),
     key: domKeyName(nativeEvent.key, nativeEvent.keyChar),
     repeat: nativeEvent.isHeld ?? false,
+    clientX: nativeEvent.x ?? 0,
+    clientY: nativeEvent.y ?? 0,
+    pageX: nativeEvent.x ?? 0,
+    pageY: nativeEvent.y ?? 0,
+    relatedTarget,
     preventDefault(): void {
       if (!isNonCancelableEvent) defaultPrevented = true
     },
     stopPropagation(): void {
       propagationStopped = true
+    },
+    stopImmediatePropagation(): void {
+      propagationStopped = true
+      immediatePropagationStopped = true
     },
     isDefaultPrevented(): boolean {
       return defaultPrevented
@@ -205,6 +255,9 @@ export function createGpuixSyntheticEvent(
     setCurrentTarget(target, phase): void {
       currentTarget = target
       eventPhase = phase
+    },
+    isImmediatePropagationStopped(): boolean {
+      return immediatePropagationStopped
     },
   }
 }

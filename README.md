@@ -314,8 +314,18 @@ the unchanged payload is exposed as `nativeEvent`. The synthetic surface adds:
   `getAttribute(name)`
 - flattened `altKey`, `ctrlKey`, `metaKey`, and `shiftKey` values
 - a primary-button default (`button === 0`)
+- `clientX` / `clientY` and `pageX` / `pageY`, the DOM spellings of `x` and
+  `y`. All four hold the same number: they differ in a browser only by the
+  document's own scroll offset, and this renderer has no scrolling document
+- `relatedTarget` on `mouseEnter` and `mouseLeave` — the element the pointer
+  left, or the one it moved to. Always `null` on `focus` and `blur`: GPUI's
+  focus subscriptions report only the element whose own focus changed, never
+  the other side of the transition
 - capture and bubble dispatch through the retained React ancestry
-- `preventDefault()` / `defaultPrevented` and `stopPropagation()`
+- `preventDefault()` / `defaultPrevented`, `stopPropagation()`, and
+  `stopImmediatePropagation()`. An element's capture and bubble listeners are
+  both AT_TARGET listeners, and as in the DOM `stopPropagation()` still lets
+  the second one run — `stopImmediatePropagation()` is the one that does not
 
 `handleGpuixEvent()` returns the synchronous prevention result. A prevented
 Enter or Space key event cancels the keyboard-generated click that follows. A
@@ -1296,10 +1306,19 @@ ref.current.scrollTo({ top: 240 })                 // instant; `behavior` is ign
 ref.current.scrollIntoView()                       // block: "start", the DOM default
 ref.current.scrollIntoView({ block: "nearest" })   // smallest revealing scroll
 
+ref.current.getBoundingClientRect()                // DOMRect-shaped measurement
+ref.current.getBounds()                            // the same box as {x, y, width, height}
+
 // "Am I at the bottom?" — the standard DOM test
 const atBottom =
   ref.current.scrollTop + ref.current.clientHeight >= ref.current.scrollHeight
 ```
+
+`getBoundingClientRect()` returns the `DOMRect` shape — `x`, `y`, `width`,
+`height`, `top`, `right`, `bottom`, `left` — as a plain object, never null: an
+element with no painted box reports an all-zero rect, as the DOM does. Use
+`getBounds()` when the distinction between "no box" and "a zero box" matters;
+it returns `null` for the former.
 
 Only `overflow: "scroll"` elements and `<virtual-list>` are scroll containers
 here. Everything else — **including `overflow: "hidden"`, which the web does
@@ -1876,9 +1895,15 @@ Removing `tabIndex` removes the element from the tab order.
 ## Native accessibility
 
 Semantic host elements feed GPUI's AccessKit tree directly. `<button>` infers
-the `button` role and `<a>` infers the `link` role; other JSX aliases do not
-infer roles. An explicit `role` still defines custom controls or overrides an
-alias. These aliases add semantics and focus behavior, but no visual defaults.
+the `button` role, and `<a href>` infers the `link` role; other JSX aliases do
+not infer roles. An explicit `role` still defines custom controls or overrides
+an alias. These aliases add semantics and focus behavior, but no visual
+defaults.
+
+Following HTML-AAM, the `link` role needs the `href`. A bare `<a>` computes
+`generic` and infers nothing: announcing it as a link would promise a
+destination that does not exist. Give a scripted anchor an explicit
+`role="link"` when it really does navigate.
 
 `<img>` follows HTML-AAM: it infers the `img` role and takes its accessible
 name from `alt`. `alt=""` marks the image decorative, so it infers
