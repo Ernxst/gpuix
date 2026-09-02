@@ -3136,26 +3136,16 @@ impl GpuixRenderer {
         *self.lifecycle.lock().unwrap() == RendererLifecycle::Running
     }
 
-    /// Stable platform and renderer feature read. Keep individual methods for
-    /// backwards compatibility; new callers should branch on this object.
+    /// Stable platform and renderer feature read.
+    ///
+    /// `frameClock.requiresTick` is how JavaScript learns it must call tick()
+    /// until it returns false. macOS: tick() pumps AppKit. Windows/Linux:
+    /// tick() reports whether the UI thread is still inside `Platform::run`.
+    /// Both return false after the last window closes so the JS frame loop can
+    /// finish termination.
     #[napi]
     pub fn capabilities(&self) -> RendererCapabilities {
         renderer_capabilities(self.active_frame_clock_kind())
-    }
-
-    /// Whether JavaScript must call tick() until it returns false.
-    ///
-    /// macOS: tick() pumps AppKit. Windows/Linux: tick() reports whether the
-    /// UI thread is still inside `Platform::run`. Both return false after the
-    /// last window closes so the JS frame loop can finish termination.
-    #[napi]
-    pub fn requires_tick(&self) -> bool {
-        cfg!(any(
-            target_os = "macos",
-            target_os = "windows",
-            target_os = "linux",
-            target_os = "freebsd"
-        ))
     }
 
     /// Registers a coalesced display-link frame request callback when supported.
@@ -5197,11 +5187,6 @@ impl WebGpuixRenderer {
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = capabilities)]
     pub fn capabilities(&self) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
         web_renderer_capabilities()
-    }
-
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = requiresTick)]
-    pub fn requires_tick(&self) -> bool {
-        false
     }
 
     pub fn tick(&self) {}

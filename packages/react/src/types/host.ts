@@ -1146,7 +1146,7 @@ export interface NativeRenderer {
   loadCanvasImage?(observerId: number, sourceJson: string): void
   getCanvasImageLoadState?(observerId: number): CanvasImageLoadState | null
   releaseCanvasImage?(observerId: number): void
-  /** Stable platform and renderer feature read. Legacy probes remain available. */
+  /** Stable platform and renderer feature read. */
   capabilities?(): RendererCapabilities
   /** Drop renderer-owned buffered work when a custom transport maintains its own queue. */
   discardMutations?(): void
@@ -1162,7 +1162,6 @@ export interface NativeRenderer {
   // ── Application lifecycle ──────────────────────────────────────
   setMenus?(menus: MenuSpec[]): void
   quit?(): void
-  requiresTick?(): boolean
   tick?(): boolean
   /** Install a coalesced native frame source. Returns false when timers must drive ticks. */
   setFrameRequestHandler?(handler: (() => void) | null): boolean

@@ -131,7 +131,7 @@ const setFrameRequestHandler = (callback: (() => void) | null): boolean => {
               if (forceTimer) {
                 loop.stop()
                 loop = startFrameLoop({
-                  requiresTick: renderer.requiresTick.bind(renderer),
+                  capabilities: renderer.capabilities.bind(renderer),
                   tick: measuredTick,
                   quit: renderer.quit.bind(renderer),
                 })
@@ -158,7 +158,7 @@ const setFrameRequestHandler = (callback: (() => void) | null): boolean => {
 }
 let preflightReady = false
 let loop = startFrameLoop({
-  requiresTick: renderer.requiresTick.bind(renderer),
+  capabilities: renderer.capabilities.bind(renderer),
   tick: measuredTick,
   quit: renderer.quit.bind(renderer),
   setFrameRequestHandler,

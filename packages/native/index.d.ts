@@ -85,18 +85,15 @@ export declare class GpuixRenderer {
   testHasEmbeddedRuntime(): boolean
   isInitialized(): boolean
   /**
-   * Stable platform and renderer feature read. Keep individual methods for
-   * backwards compatibility; new callers should branch on this object.
+   * Stable platform and renderer feature read.
+   *
+   * `frameClock.requiresTick` is how JavaScript learns it must call tick()
+   * until it returns false. macOS: tick() pumps AppKit. Windows/Linux:
+   * tick() reports whether the UI thread is still inside `Platform::run`.
+   * Both return false after the last window closes so the JS frame loop can
+   * finish termination.
    */
   capabilities(): RendererCapabilities
-  /**
-   * Whether JavaScript must call tick() until it returns false.
-   *
-   * macOS: tick() pumps AppKit. Windows/Linux: tick() reports whether the
-   * UI thread is still inside `Platform::run`. Both return false after the
-   * last window closes so the JS frame loop can finish termination.
-   */
-  requiresTick(): boolean
   /**
    * Registers a coalesced display-link frame request callback when supported.
    * Returns false when this renderer must be timer-driven instead.

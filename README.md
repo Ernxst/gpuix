@@ -886,8 +886,10 @@ listed. `images.privateNetwork` means
 `setAllowPrivateNetworkImages(enabled)` is available on that renderer (the
 same policy can also be set at creation with `allowPrivateNetworkImages`).
 
-Existing probes such as `requiresTick()`, `isActive()`, and
-`captureScreenshot()` remain supported for compatibility. A call that is not
+Branch on `capabilities()` rather than probing: `frameClock.requiresTick`
+replaces the removed `requiresTick()` method. State reads such as
+`isActive()` and actions such as `captureScreenshot()` stay, gated by the
+capability they need. A call that is not
 supported by its renderer fails with `UnsupportedCapabilityError`, whose
 `code` is `ERR_GPUX_UNSUPPORTED_CAPABILITY` and whose `capability` identifies
 the unavailable feature.
