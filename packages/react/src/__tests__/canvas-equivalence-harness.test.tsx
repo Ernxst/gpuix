@@ -111,7 +111,7 @@ describeLocalMac("canvas browser-equivalence harness", { timeout: 12_000 }, () =
             "div",
             { style: { padding: 16 } },
             createElement("canvas", {
-              testId: "logical-canvas",
+              "data-testid": "logical-canvas",
               width: CANVAS_GOLDEN_WIDTH * CANVAS_GOLDEN_DPR,
               height: CANVAS_GOLDEN_HEIGHT * CANVAS_GOLDEN_DPR,
               style: { width: CANVAS_GOLDEN_WIDTH, height: CANVAS_GOLDEN_HEIGHT },

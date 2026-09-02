@@ -17,14 +17,14 @@ describeNative("createTestRoot userEvent", () => {
       return (
         <div style={{ width: 480, height: 240, gap: 8 }}>
           <button
-            testId="action"
+            data-testid="action"
             style={{ width: 120, height: 40 }}
             onClick={() => setClicks((count) => count + 1)}
             onMouseEnter={() => setHovered(true)}
             onMouseLeave={() => setHovered(false)}
           />
           <input
-            testId="first"
+            data-testid="first"
             role="textbox"
             ariaLabel="first"
             value={first}
@@ -32,7 +32,7 @@ describeNative("createTestRoot userEvent", () => {
             onChange={(event) => setFirst(event.value ?? "")}
           />
           <input
-            testId="second"
+            data-testid="second"
             role="textbox"
             ariaLabel="second"
             value={second}
@@ -105,13 +105,13 @@ describeNative("createTestRoot userEvent", () => {
       return (
         <div style={{ width: 480, height: 240, gap: 8 }}>
           <input
-            testId="first"
+            data-testid="first"
             value={first}
             style={{ width: 180, height: 40 }}
             onChange={(event) => setFirst(event.value ?? "")}
           />
           <input
-            testId="second"
+            data-testid="second"
             value={second}
             style={{ width: 180, height: 40 }}
             onChange={(event) => setSecond(event.value ?? "")}
@@ -141,7 +141,7 @@ describeNative("createTestRoot userEvent", () => {
 
       return (
         <div
-          testId="surface"
+          data-testid="surface"
           style={{ width: 200, height: 120 }}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
@@ -172,8 +172,8 @@ describeNative("createTestRoot userEvent", () => {
 
     try {
       screen.render(
-        <div testId="parent">
-          <text testId="child">before</text>
+        <div data-testid="parent">
+          <text data-testid="child">before</text>
         </div>
       )
       const parent = screen.getByTestId("parent")
@@ -188,9 +188,9 @@ describeNative("createTestRoot userEvent", () => {
       expect(Object.isFrozen(parent.children)).toBe(true)
 
       screen.render(
-        <div testId="parent">
-          <text testId="child">after</text>
-          <text testId="sibling">new</text>
+        <div data-testid="parent">
+          <text data-testid="child">after</text>
+          <text data-testid="sibling">new</text>
         </div>
       )
       const currentParent = screen.getByTestId("parent")
@@ -200,11 +200,11 @@ describeNative("createTestRoot userEvent", () => {
       expect(parent.children).toHaveLength(2)
       expect(parent.children[0]).toBe(currentChild)
       expect(parent.children[1]).toBe(sibling)
-      expect(parent.children.map((element) => element.testId)).toEqual(["child", "sibling"])
+      expect(parent.children.map((element) => element.dataTestId)).toEqual(["child", "sibling"])
       expect(parent.children).not.toContain(child)
       expect(child.parentElement).toBe(currentParent)
 
-      screen.render(<div testId="parent" />)
+      screen.render(<div data-testid="parent" />)
       expect(() => child.parentElement).toThrow(/element #[0-9]+ is absent/)
     } finally {
       screen.unmount()
@@ -215,7 +215,7 @@ describeNative("createTestRoot userEvent", () => {
     const screen = createTestRoot()
 
     try {
-      screen.render(<button testId="action" style={{ width: 120, height: 40 }} />)
+      screen.render(<button data-testid="action" style={{ width: 120, height: 40 }} />)
       await expect(
         screen.userEvent.dblClick(screen.getByTestId("action"))
       ).rejects.toThrow(/dblClick.*#216/i)

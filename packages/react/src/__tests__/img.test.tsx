@@ -275,12 +275,12 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
   it("reports malformed direct and batched sources with element, property, and value", () => {
     const direct = createImageRenderer()
     direct.createElement(41, "img")
-    direct.setCustomProp(41, "testId", JSON.stringify("direct-image"))
+    direct.setCustomProp(41, "data-testid", JSON.stringify("direct-image"))
     direct.setCustomProp(41, "src", JSON.stringify({ kind: "path", url: "/tmp/a.png" }))
     expect(direct.drainStyleDiagnostics()[0]).toMatchObject({
       elementId: 41,
       elementType: "img",
-      testId: "direct-image",
+      dataTestId: "direct-image",
       property: "src",
       value: '{"kind":"path","url":"/tmp/a.png"}',
     })
@@ -290,7 +290,7 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
       JSON.stringify([
         ["createElement", 73, "img"],
         ["setCustomPropValue", 73, "src", { kind: "url", url: "file:///tmp/a.png" }],
-        ["setCustomPropValue", 73, "testId", "batch-image"],
+        ["setCustomPropValue", 73, "data-testid", "batch-image"],
         ["setRoot", 73],
       ])
     )
@@ -298,10 +298,10 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
     expect(diagnostic).toMatchObject({
       elementId: 73,
       elementType: "img",
-      testId: "batch-image",
+      dataTestId: "batch-image",
       property: "src",
     })
-    expect(diagnostic.message).toContain('<img testId="batch-image">')
+    expect(diagnostic.message).toContain('<img data-testid="batch-image">')
     expect(diagnostic.message).toContain("file:///tmp/a.png")
   })
 
@@ -578,11 +578,11 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
     const testRoot = createImageTestRoot()
     testRoot.render(
       <img
-        testId="bad-image"
+        data-testid="bad-image"
         src={{ kind: "data", mimeType: "text/plain" as ImageMimeType, bytes: [1] }}
       />
     )
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('<img testId="bad-image">'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('<img data-testid="bad-image">'))
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("text/plain"))
   })
 })
@@ -670,7 +670,7 @@ describeNative("custom element: svg", () => {
           }}
         >
           <div
-            testId="svg-current-color-state"
+            data-testid="svg-current-color-state"
             tabIndex={0}
             style={{
               width: 160,
@@ -760,7 +760,7 @@ describeNative("custom element: svg", () => {
           }}
         >
           <div
-            testId="svg-current-color-group"
+            data-testid="svg-current-color-group"
             style={{
               hoverGroup: "svg-current-color-group",
               width: 180,
@@ -771,7 +771,7 @@ describeNative("custom element: svg", () => {
           >
             <div style={{ width: 40, height: 100 }} />
             <div
-              testId="svg-current-color-hover-within"
+              data-testid="svg-current-color-hover-within"
               style={{
                 width: 140,
                 height: 100,
@@ -815,7 +815,7 @@ describeNative("custom element: svg", () => {
         <div style={{ width: "100%", height: "100%", position: "relative", backgroundColor: "#10131d" }}>
           {show && (
             <div
-              testId="svg-current-color-mounted"
+              data-testid="svg-current-color-mounted"
               style={{
                 position: "absolute",
                 left: 40,
@@ -861,7 +861,7 @@ describeNative("custom element: svg", () => {
       return (
         <div style={{ width: "100%", height: "100%", position: "relative", backgroundColor: "#10131d" }}>
           <div
-            testId="svg-current-color-occluded"
+            data-testid="svg-current-color-occluded"
             style={{
               position: "absolute",
               left: 40,

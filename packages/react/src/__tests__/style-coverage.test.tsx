@@ -68,7 +68,7 @@ function HoverWithinCaptureProbe({ capture }: { capture: "child" | "group" }) {
       }}
     >
       <div
-        testId="capture-row"
+        data-testid="capture-row"
         onMouseDown={capture === "group" ? capturePointer : undefined}
         style={{
           hoverGroup: "capture-row",
@@ -83,7 +83,7 @@ function HoverWithinCaptureProbe({ capture }: { capture: "child" | "group" }) {
         }}
       >
         <div
-          testId="capture-child"
+          data-testid="capture-child"
           onMouseDown={capture === "child" ? capturePointer : undefined}
           style={{ width: 120, height: 60, backgroundColor: "#64748b" }}
         />
@@ -132,7 +132,7 @@ function HoverWithinSiblingProbe({
         }}
       >
         <text
-          testId="destination-label"
+          data-testid="destination-label"
           onClick={onClick}
           style={{ color: "#ffffff", fontSize: 22 }}
         >
@@ -160,9 +160,9 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
 
     render(
       <div style={{ display: "flex", flexDirection: "column", width: "100%", padding: 20, gap: 16 }}>
-        <div testId="ch-length" style={{ width: "24ch", height: 30, fontSize: 20, backgroundColor: "#7c86ff" }} />
-        <div testId="calc-length" style={{ width: "calc(100% - 4ch)", height: 30, fontSize: 20, backgroundColor: "#38bdf8" }} />
-        <div testId="clamp-length" style={{ width: "clamp(240px, 70%, 960px)", height: 30, backgroundColor: "#f59e0b" }} />
+        <div data-testid="ch-length" style={{ width: "24ch", height: 30, fontSize: 20, backgroundColor: "#7c86ff" }} />
+        <div data-testid="calc-length" style={{ width: "calc(100% - 4ch)", height: 30, fontSize: 20, backgroundColor: "#38bdf8" }} />
+        <div data-testid="clamp-length" style={{ width: "clamp(240px, 70%, 960px)", height: 30, backgroundColor: "#f59e0b" }} />
       </div>,
     )
 
@@ -183,17 +183,17 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
 
     render(
       <div style={{ width: "100%", backgroundColor: "#101010" }}>
-        <div testId="containing-block" style={{ width: 400, fontSize: 24 }}>
+        <div data-testid="containing-block" style={{ width: 400, fontSize: 24 }}>
           <div
-            testId="containing-block-calc"
+            data-testid="containing-block-calc"
             style={{ width: "calc(50% + 20px)", height: 30, backgroundColor: "#38bdf8" }}
           />
           <div
-            testId="inherited-ch"
+            data-testid="inherited-ch"
             style={{ width: "10ch", height: 30, backgroundColor: "#7c86ff" }}
           />
           <div
-            testId="local-ch"
+            data-testid="local-ch"
             style={{ width: "10ch", height: 30, fontSize: 12, backgroundColor: "#f59e0b" }}
           />
         </div>
@@ -230,7 +230,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     render(
       <div style={{ width: 400, height: 100, fontSize: 20, backgroundColor: "#101010" }}>
         <div
-          testId="hover-length"
+          data-testid="hover-length"
           style={{
             width: 80,
             height: 40,
@@ -352,10 +352,10 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
   it("aligns mixed-size text to a flex row baseline", () => {
     const pair = (alignItems: "baseline" | "flex-end") => (
       <div style={{ display: "flex", flexDirection: "row", alignItems }}>
-        <text testId={`${alignItems}-figure`} style={{ color: "#ffffff", fontSize: 32 }}>
+        <text data-testid={`${alignItems}-figure`} style={{ color: "#ffffff", fontSize: 32 }}>
           13
         </text>
-        <text testId={`${alignItems}-unit`} style={{ color: "#ffffff", fontSize: 12 }}>
+        <text data-testid={`${alignItems}-unit`} style={{ color: "#ffffff", fontSize: 12 }}>
           MW
         </text>
       </div>
@@ -372,13 +372,13 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     selfBaseline.render(
       <div style={{ display: "flex", flexDirection: "row", alignItems: "flex-end" }}>
         <text
-          testId="self-baseline-figure"
+          data-testid="self-baseline-figure"
           style={{ color: "#ffffff", fontSize: 32, alignSelf: "baseline" }}
         >
           13
         </text>
         <text
-          testId="self-baseline-unit"
+          data-testid="self-baseline-unit"
           style={{ color: "#ffffff", fontSize: 12, alignSelf: "baseline" }}
         >
           MW
@@ -505,7 +505,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     const card = (outlined: boolean) => (
       <div style={{ display: "flex", padding: 80, backgroundColor: "#101010" }}>
         <div
-          testId="outlined-card"
+          data-testid="outlined-card"
           style={{
             width: 240,
             height: 120,
@@ -669,7 +669,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     render(
       <div style={{ display: "flex", width: 600, height: 120, backgroundColor: "#101010" }}>
         <div
-          testId="ledger"
+          data-testid="ledger"
           style={{
             display: "grid",
             width: 600,
@@ -688,12 +688,12 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
             ],
           }}
         >
-          <div testId="header-name" style={{ width: 140, height: 24 }} />
-          <div testId="header-rate" style={{ width: 80, height: 24 }} />
-          <div testId="header-status" style={{ width: 48, height: 24 }} />
-          <div testId="row-name" style={{ width: 72, height: 24 }} />
-          <div testId="row-rate" style={{ width: 80, height: 24 }} />
-          <div testId="row-status" style={{ width: 48, height: 24 }} />
+          <div data-testid="header-name" style={{ width: 140, height: 24 }} />
+          <div data-testid="header-rate" style={{ width: 80, height: 24 }} />
+          <div data-testid="header-status" style={{ width: 48, height: 24 }} />
+          <div data-testid="row-name" style={{ width: 72, height: 24 }} />
+          <div data-testid="row-rate" style={{ width: 80, height: 24 }} />
+          <div data-testid="row-status" style={{ width: 48, height: 24 }} />
         </div>
       </div>,
     )
@@ -755,7 +755,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
         }}
       >
         <div
-          testId="custom-hover-group"
+          data-testid="custom-hover-group"
           style={{
             hoverGroup: "custom-hover-group",
             display: "flex",
@@ -769,7 +769,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
         >
           <code
             code="padding activates this code block"
-            testId="custom-hover-within-target"
+            data-testid="custom-hover-within-target"
             style={{
               width: 180,
               height: 60,
@@ -801,7 +801,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     const { render, renderer } = createTestRoot()
     render(
       <div
-        testId="outer-hover-group"
+        data-testid="outer-hover-group"
         style={{
           hoverGroup: "outer-hover-group",
           display: "flex",
@@ -814,7 +814,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
         }}
       >
         <div
-          testId="inner-hover-group"
+          data-testid="inner-hover-group"
           style={{
             hoverGroup: "inner-hover-group",
             display: "flex",
@@ -827,7 +827,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
           }}
         >
           <span
-            testId="nested-hover-within-target"
+            data-testid="nested-hover-within-target"
             style={{
               width: 120,
               height: 40,
@@ -895,7 +895,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
           }}
         >
           <div
-            testId="virtual-list-hover-row"
+            data-testid="virtual-list-hover-row"
             style={{
               display: "flex",
               alignItems: "center",
@@ -905,7 +905,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
             }}
           >
             <span
-              testId="virtual-list-hover-target"
+              data-testid="virtual-list-hover-target"
               style={{
                 width: 180,
                 height: 40,

@@ -69,7 +69,7 @@ describe("resolved test-renderer styles", () => {
           }}
         >
           <div
-            testId="state-target"
+            data-testid="state-target"
             style={{
               width: 160,
               height: 40,
@@ -120,7 +120,7 @@ describe("resolved test-renderer styles", () => {
       root.render(
         <div style={{ width: 400, height: 120, padding: 40 }}>
           <div
-            testId="focus-target"
+            data-testid="focus-target"
             tabIndex={0}
             style={{
               width: 160,
@@ -159,7 +159,7 @@ describe("resolved test-renderer styles", () => {
       root.render(
         <div style={{ width: 400, height: 120, padding: 40 }}>
           <div autoFocus tabIndex={0} style={{ width: 1, height: 1 }} />
-          <div testId="focus-visible-target" tabIndex={0} style={style} />
+          <div data-testid="focus-visible-target" tabIndex={0} style={style} />
         </div>
       )
 

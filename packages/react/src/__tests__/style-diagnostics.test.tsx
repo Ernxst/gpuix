@@ -22,74 +22,74 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     const cases = (validRoleAdded: boolean, nativeDisabled: boolean) => (
       <div>
         <div
-          testId="invalid-role"
+          data-testid="invalid-role"
           {...({ role: "bogus" } as Record<string, string>)}
           ariaLabel="Bad role"
         />
         <div
-          testId="roleless-ledger"
+          data-testid="roleless-ledger"
           role={validRoleAdded ? "button" : undefined}
           ariaLabel="Production ledger"
         />
         <div
-          testId="roleless-description"
+          data-testid="roleless-description"
           role={validRoleAdded ? "button" : undefined}
           ariaDescription="Deployment summary"
         />
         <div
-          testId="roleless-selected"
+          data-testid="roleless-selected"
           role={validRoleAdded ? "option" : undefined}
           ariaSelected
         />
-        <div testId="unsupported-selected" role="button" ariaLabel="Save" ariaSelected />
-        <div testId="mixed-switch" role="switch" ariaLabel="Mode" ariaChecked="mixed" />
+        <div data-testid="unsupported-selected" role="button" ariaLabel="Save" ariaSelected />
+        <div data-testid="mixed-switch" role="switch" ariaLabel="Mode" ariaChecked="mixed" />
         <div
-          testId="double-disabled"
+          data-testid="double-disabled"
           role="button"
           ariaLabel="Double disabled"
           disabled={nativeDisabled}
           ariaDisabled
         />
         <div
-          testId="hidden-focus"
+          data-testid="hidden-focus"
           role="button"
           ariaLabel="Hidden focus"
           ariaHidden
           tabIndex={0}
         />
         <markdown
-          testId="unsupported-host"
+          data-testid="unsupported-host"
           role="heading"
           ariaLabel="Unsupported host"
           source="Unsupported host contents"
         />
         <div
-          testId="malformed-label"
+          data-testid="malformed-label"
           role="button"
           ariaDescription="Malformed label marker"
           ariaLabel={42 as unknown as string}
         />
         <div
-          testId="malformed-current"
+          data-testid="malformed-current"
           role="link"
           ariaLabel="Malformed current"
           ariaCurrent={"chapter" as unknown as "page"}
         />
         <div
-          testId="malformed-hidden"
+          data-testid="malformed-hidden"
           role="button"
           ariaLabel="Malformed hidden"
           ariaHidden={"yes" as unknown as boolean}
         />
-        <div testId="malformed-level" role="heading" ariaLabel="Malformed level" ariaLevel={0} />
+        <div data-testid="malformed-level" role="heading" ariaLabel="Malformed level" ariaLevel={0} />
         <div
-          testId="malformed-value"
+          data-testid="malformed-value"
           role="slider"
           ariaLabel="Malformed value"
           ariaValueNow={Number.POSITIVE_INFINITY}
         />
         <div
-          testId="malformed-checked"
+          data-testid="malformed-checked"
           role="checkbox"
           ariaLabel="Malformed checked"
           ariaChecked={"yes" as unknown as boolean}
@@ -103,7 +103,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       const diagnostics = testRoot.renderer.drainStyleDiagnostics()
       expect(diagnostics).toHaveLength(15)
       const byTestId = (testId: string) => {
-        const diagnostic = diagnostics.find((candidate) => candidate.testId === testId)
+        const diagnostic = diagnostics.find((candidate) => candidate.dataTestId === testId)
         expect(diagnostic, testId).toBeDefined()
         return diagnostic!
       }
@@ -119,13 +119,13 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         const element = testRoot.renderer.findByTestId(testId)!
         const prefix =
           effect === "rejected"
-            ? `[gpuix] Invalid property on <${elementType} testId="${testId}"> (element ${element.id}): `
-            : `[gpuix] Accessibility issue on <${elementType} testId="${testId}"> (element ${element.id}): `
+            ? `[gpuix] Invalid property on <${elementType} data-testid="${testId}"> (element ${element.id}): `
+            : `[gpuix] Accessibility issue on <${elementType} data-testid="${testId}"> (element ${element.id}): `
         const computedValue = appliedAs === undefined ? "" : ` as ${appliedAs}`
         expect(byTestId(testId)).toMatchObject({
           elementId: element.id,
           elementType,
-          testId,
+          dataTestId: testId,
           property,
           value,
           message: `${prefix}property "${property}" ${effect} value ${value}${computedValue}: ${reason}`,
@@ -307,12 +307,12 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     try {
       testRoot.render(
         <div style={{ width: 400, height: 200 }}>
-          <input testId="hidden-control" role="textbox" ariaLabel="Hidden search" visuallyHidden />
-          <div testId="hidden-wrapper" role="heading" ariaLevel={1} visuallyHidden>
+          <input data-testid="hidden-control" role="textbox" ariaLabel="Hidden search" visuallyHidden />
+          <div data-testid="hidden-wrapper" role="heading" ariaLevel={1} visuallyHidden>
             <text role="link">Production ledger</text>
           </div>
           {/* Plain text under a name-from-contents role loses nothing. */}
-          <div testId="hidden-text-wrapper" role="heading" ariaLevel={2} visuallyHidden>
+          <div data-testid="hidden-text-wrapper" role="heading" ariaLevel={2} visuallyHidden>
             Retained ledger
           </div>
         </div>
@@ -320,7 +320,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
       const diagnostics = testRoot.renderer.drainStyleDiagnostics()
       const byTestId = (testId: string) => {
-        const diagnostic = diagnostics.find((candidate) => candidate.testId === testId)
+        const diagnostic = diagnostics.find((candidate) => candidate.dataTestId === testId)
         expect(diagnostic, testId).toBeDefined()
         return diagnostic!
       }
@@ -364,14 +364,14 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     try {
       testRoot.render(
         <div style={{ width: 400, height: 200 }}>
-          <div testId="hidden-handler" role="status" visuallyHidden>
+          <div data-testid="hidden-handler" role="status" visuallyHidden>
             Saved <text onClick={undo}>Undo handler</text>
           </div>
-          <div testId="hidden-tab-stop" role="status" visuallyHidden>
+          <div data-testid="hidden-tab-stop" role="status" visuallyHidden>
             Saved <text tabIndex={0}>Undo tab stop</text>
           </div>
           {/* Control: a subtree of plain text still projects. */}
-          <div testId="hidden-plain" role="status" visuallyHidden>
+          <div data-testid="hidden-plain" role="status" visuallyHidden>
             Saved 3 files
           </div>
         </div>
@@ -379,7 +379,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
       const diagnostics = testRoot.renderer.drainStyleDiagnostics()
       const byTestId = (testId: string) => {
-        const diagnostic = diagnostics.find((candidate) => candidate.testId === testId)
+        const diagnostic = diagnostics.find((candidate) => candidate.dataTestId === testId)
         expect(diagnostic, testId).toBeDefined()
         return diagnostic!
       }
@@ -419,7 +419,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     try {
       testRoot.render(
         <div
-          testId="unsupported-state-set"
+          data-testid="unsupported-state-set"
           role="img"
           ariaLabel="Unsupported state set"
           ariaChecked
@@ -470,10 +470,10 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         expect(diagnostic).toMatchObject({
           elementId: element.id,
           elementType: "div",
-          testId: "unsupported-state-set",
+          dataTestId: "unsupported-state-set",
         })
         expect(diagnostic.message).toBe(
-          `[gpuix] Accessibility issue on <div testId="unsupported-state-set"> (element ${element.id}): ` +
+          `[gpuix] Accessibility issue on <div data-testid="unsupported-state-set"> (element ${element.id}): ` +
             `property "${diagnostic.property}" ignored value ${diagnostic.value}: ` +
             `role=Image does not support ${diagnostic.property}, so it is omitted from the accessibility tree`
         )
@@ -496,7 +496,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       expect(() => {
         testRoot.render(
           <div
-            testId="bad-card"
+            data-testid="bad-card"
             style={
               {
                 backgroundColor: "#ff0000",
@@ -508,7 +508,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       }).not.toThrow()
 
       expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('<div testId="bad-card">')
+        expect.stringContaining('<div data-testid="bad-card">')
       )
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("marginTop"))
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('"auto"'))
@@ -518,7 +518,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
       const renderer = wrapWithBatching(testRoot.renderer)
       renderer.createElement(10_001, "div")
-      renderer.setCustomProp(10_001, "testId", "native-diagnostic")
+      renderer.setCustomProp(10_001, "data-testid", "native-diagnostic")
       renderer.setStyle(10_001, { width: "banana" })
       renderer.flushMutations()
 
@@ -546,7 +546,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     try {
       invalid.render(
         <div
-          testId="bad-width"
+          data-testid="bad-width"
           style={{ width: "banana" } as unknown as StyleDesc}
         />
       )
@@ -557,11 +557,11 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       expect(diagnostics[0]).toMatchObject({
         elementId: element.id,
         elementType: "div",
-        testId: "bad-width",
+        dataTestId: "bad-width",
         property: "width",
         value: '"banana"',
         message:
-          `[gpuix] Invalid style on <div testId="bad-width"> (element ${element.id}): ` +
+          `[gpuix] Invalid style on <div data-testid="bad-width"> (element ${element.id}): ` +
           'property "width" rejected value "banana": invalid length at byte 0: ' +
           "expected a number with px, %, or ch",
       })
@@ -572,7 +572,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
     const clean = createTestRoot({ strictStyles: true })
     try {
-      clean.render(<div testId="valid-width" style={{ width: 320 }} />)
+      clean.render(<div data-testid="valid-width" style={{ width: 320 }} />)
       expect(clean.renderer.drainStyleDiagnostics()).toEqual([])
     } finally {
       clean.unmount()
@@ -584,7 +584,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     const testRoot = createTestRoot({ strictStyles: true })
 
     try {
-      testRoot.render(<div testId="roleless-ledger" ariaLabel="Production ledger" />)
+      testRoot.render(<div data-testid="roleless-ledger" ariaLabel="Production ledger" />)
 
       const element = testRoot.renderer.findByTestId("roleless-ledger")!
       const diagnostics = testRoot.renderer.drainStyleDiagnostics()
@@ -592,11 +592,11 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       expect(diagnostics[0]).toMatchObject({
         elementId: element.id,
         elementType: "div",
-        testId: "roleless-ledger",
+        dataTestId: "roleless-ledger",
         property: "ariaLabel",
         value: '"Production ledger"',
         message:
-          `[gpuix] Accessibility issue on <div testId="roleless-ledger"> (element ${element.id}): ` +
+          `[gpuix] Accessibility issue on <div data-testid="roleless-ledger"> (element ${element.id}): ` +
           'property "ariaLabel" ignored value "Production ledger": ' +
           "a name requires an explicit supported role, so it is omitted from the accessibility tree",
       })
@@ -608,7 +608,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
   it("reports an unknown direct style with element, property, and value", () => {
     const renderer = new TestRenderer()
     renderer.createElement(41, "text")
-    renderer.setCustomProp(41, "testId", JSON.stringify("direct-label"))
+    renderer.setCustomProp(41, "data-testid", JSON.stringify("direct-label"))
     renderer.setStyle(41, JSON.stringify({ textTranform: "uppercase" }))
 
     const diagnostics = renderer.drainStyleDiagnostics()
@@ -616,11 +616,11 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(diagnostics[0]).toMatchObject({
       elementId: 41,
       elementType: "text",
-      testId: "direct-label",
+      dataTestId: "direct-label",
       property: "textTranform",
       value: '"uppercase"',
     })
-    expect(diagnostics[0].message).toContain('<text testId="direct-label">')
+    expect(diagnostics[0].message).toContain('<text data-testid="direct-label">')
     expect(diagnostics[0].message).toContain("textTranform")
     expect(diagnostics[0].message).toContain('"uppercase"')
   })
@@ -628,7 +628,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
   it("reports an invalid length expression with element, property, value, and parse position", () => {
     const renderer = new TestRenderer()
     renderer.createElement(44, "div")
-    renderer.setCustomProp(44, "testId", JSON.stringify("fluid-panel"))
+    renderer.setCustomProp(44, "data-testid", JSON.stringify("fluid-panel"))
     renderer.setStyle(44, JSON.stringify({ width: "calc(100% - 2rem)", height: 40 }))
     renderer.setRoot(44)
 
@@ -637,11 +637,11 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(diagnostic).toMatchObject({
       elementId: 44,
       elementType: "div",
-      testId: "fluid-panel",
+      dataTestId: "fluid-panel",
       property: "width",
       value: '"calc(100% - 2rem)"',
     })
-    expect(diagnostic!.message).toContain('<div testId="fluid-panel">')
+    expect(diagnostic!.message).toContain('<div data-testid="fluid-panel">')
     expect(diagnostic!.message).toContain("byte")
   })
 
@@ -653,7 +653,6 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         ["setStyle", 73, { flex: 1, backgroundColor: "red" }],
         ["setCustomPropValue", 73, "id", "profile-card"],
         ["setCustomPropValue", 73, "data-testid", 42],
-        ["setCustomPropValue", 73, "testId", "batch-card"],
         ["setRoot", 73],
       ])
     )
@@ -664,11 +663,8 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(diagnostics[0]).toMatchObject({
       authorId: "profile-card",
       dataTestId: "42",
-      testId: "batch-card",
     })
-    expect(diagnostics[0].message).toContain(
-      '<div id="profile-card" data-testid="42" testId="batch-card">'
-    )
+    expect(diagnostics[0].message).toContain('<div id="profile-card" data-testid="42">')
     expect(diagnostics[0].message).toContain("flex")
     expect(diagnostics[0].message).toContain("1")
   })
@@ -694,7 +690,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
   it("reports malformed nested grid tracks with their track index", () => {
     const renderer = new TestRenderer()
     renderer.createElement(82, "div")
-    renderer.setCustomProp(82, "testId", JSON.stringify("ledger-grid"))
+    renderer.setCustomProp(82, "data-testid", JSON.stringify("ledger-grid"))
     renderer.setStyle(
       82,
       JSON.stringify({
@@ -715,17 +711,17 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(diagnostics[0]).toMatchObject({
       elementId: 82,
       elementType: "div",
-      testId: "ledger-grid",
+      dataTestId: "ledger-grid",
       property: "gridTemplateColumns[1].min.type",
       value: '"fr"',
     })
-    expect(diagnostics[0].message).toContain('<div testId="ledger-grid">')
+    expect(diagnostics[0].message).toContain('<div data-testid="ledger-grid">')
   })
 
   it("rejects a malformed transition as one descriptor with precise paths", () => {
     const renderer = new TestRenderer()
     renderer.createElement(83, "div")
-    renderer.setCustomProp(83, "testId", JSON.stringify("animated-card"))
+    renderer.setCustomProp(83, "data-testid", JSON.stringify("animated-card"))
     renderer.setStyle(
       83,
       JSON.stringify({
@@ -741,10 +737,10 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(renderer.getElement(83)?.style).toMatchObject({ opacity: 0.4 })
     expect(renderer.getElement(83)?.style).not.toHaveProperty("transition")
     expect(
-      renderer.drainStyleDiagnostics().map(({ property, testId }) => ({ property, testId }))
+      renderer.drainStyleDiagnostics().map(({ property, dataTestId }) => ({ property, dataTestId }))
     ).toEqual([
-      { property: "transition.properties[1]", testId: "animated-card" },
-      { property: "transition.durationMs", testId: "animated-card" },
+      { property: "transition.properties[1]", dataTestId: "animated-card" },
+      { property: "transition.durationMs", dataTestId: "animated-card" },
     ])
   })
 
@@ -770,17 +766,17 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
   ] as const)("rejects a %s style prop loudly on mount and update", (_kind, style) => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const strictCreate = createTestRoot({ strictStyles: true })
-    strictCreate.render(<div testId="invalid-style" style={style as unknown as StyleDesc} />)
+    strictCreate.render(<div data-testid="invalid-style" style={style as unknown as StyleDesc} />)
 
     const strictUpdate = createTestRoot({ strictStyles: true })
-    strictUpdate.render(<div testId="invalid-style" style={{ width: 10 }} />)
-    strictUpdate.render(<div testId="invalid-style" style={style as unknown as StyleDesc} />)
+    strictUpdate.render(<div data-testid="invalid-style" style={{ width: 10 }} />)
+    strictUpdate.render(<div data-testid="invalid-style" style={style as unknown as StyleDesc} />)
 
     expect(error.mock.calls.flat()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           name: "InvalidStylePropError",
-          message: expect.stringContaining("<div testId=\"invalid-style\">"),
+          message: expect.stringContaining("<div data-testid=\"invalid-style\">"),
         }),
       ])
     )
@@ -790,13 +786,13 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const compatibility = createTestRoot({ strictStyles: false })
-    compatibility.render(<div testId="invalid-style" style={{ width: 10 }} />)
-    compatibility.render(<div testId="invalid-style" style={style as unknown as StyleDesc} />)
-    compatibility.render(<div testId="invalid-style" style={style as unknown as StyleDesc} />)
+    compatibility.render(<div data-testid="invalid-style" style={{ width: 10 }} />)
+    compatibility.render(<div data-testid="invalid-style" style={style as unknown as StyleDesc} />)
+    compatibility.render(<div data-testid="invalid-style" style={style as unknown as StyleDesc} />)
 
     expect(warn).toHaveBeenCalledTimes(1)
     expect(warn).toHaveBeenCalledWith(
-      expect.stringMatching(/<div testId="invalid-style">.*style accepts a plain style object only/)
+      expect.stringMatching(/<div data-testid="invalid-style">.*style accepts a plain style object only/)
     )
     compatibility.unmount()
   })
@@ -806,16 +802,16 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     const strictCreate = createTestRoot({ strictStyles: true })
     strictCreate.render(
       <div
-        testId="strict-class-name"
+        data-testid="strict-class-name"
         {...({ className: "rounded-lg" } as Record<string, string>)}
       />
     )
 
     const strictUpdate = createTestRoot({ strictStyles: true })
-    strictUpdate.render(<div testId="strict-class-name-update" />)
+    strictUpdate.render(<div data-testid="strict-class-name-update" />)
     strictUpdate.render(
       <div
-        testId="strict-class-name-update"
+        data-testid="strict-class-name-update"
         {...({ className: "text-sm" } as Record<string, string>)}
       />
     )
@@ -834,16 +830,16 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const compatibility = createTestRoot({ strictStyles: false })
-    compatibility.render(<div testId="compat-class-name" />)
+    compatibility.render(<div data-testid="compat-class-name" />)
     compatibility.render(
       <div
-        testId="compat-class-name"
+        data-testid="compat-class-name"
         {...({ className: "bg-slate-900" } as Record<string, string>)}
       />
     )
     compatibility.render(
       <div
-        testId="compat-class-name"
+        data-testid="compat-class-name"
         {...({ className: "bg-slate-800" } as Record<string, string>)}
       />
     )
@@ -851,7 +847,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(warn).toHaveBeenCalledTimes(1)
     expect(warn).toHaveBeenCalledWith(
       expect.stringMatching(
-        /<div testId="compat-class-name">.*does not support className.*style prop/
+        /<div data-testid="compat-class-name">.*does not support className.*style prop/
       )
     )
     compatibility.unmount()
@@ -865,11 +861,11 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     // either, so there is nothing for the native renderer to lose.
     const strict = createTestRoot({ strictStyles: true })
     strict.render(
-      <div testId="empty-class-name" {...({ className: "" } as Record<string, string>)} />
+      <div data-testid="empty-class-name" {...({ className: "" } as Record<string, string>)} />
     )
     strict.render(
       <div
-        testId="empty-class-name"
+        data-testid="empty-class-name"
         {...({ className: null } as unknown as Record<string, string>)}
       />
     )
@@ -885,7 +881,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
   it("validates outline and focus-visible fields with their full property paths", () => {
     const renderer = new TestRenderer()
     renderer.createElement(101, "div")
-    renderer.setCustomProp(101, "testId", JSON.stringify("focus-card"))
+    renderer.setCustomProp(101, "data-testid", JSON.stringify("focus-card"))
     renderer.setStyle(
       101,
       JSON.stringify({
@@ -905,17 +901,17 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     const diagnostics = renderer.drainStyleDiagnostics().map((diagnostic) => ({
       property: diagnostic.property,
       elementType: diagnostic.elementType,
-      testId: diagnostic.testId,
+      dataTestId: diagnostic.dataTestId,
     }))
     expect(diagnostics).toHaveLength(3)
     expect(diagnostics).toEqual(
       expect.arrayContaining([
-        { property: "outlineColor", elementType: "div", testId: "focus-card" },
-        { property: "outlineWidth", elementType: "div", testId: "focus-card" },
+        { property: "outlineColor", elementType: "div", dataTestId: "focus-card" },
+        { property: "outlineWidth", elementType: "div", dataTestId: "focus-card" },
         {
           property: "focusVisible.outlineOffset",
           elementType: "div",
-          testId: "focus-card",
+          dataTestId: "focus-card",
         },
       ])
     )

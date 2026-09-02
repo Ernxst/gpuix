@@ -14,7 +14,7 @@ describeNative("ref element measurement", () => {
     try {
       root.render(
         <div style={{ padding: 17 }}>
-          <div ref={ref} testId="measured" style={{ width: 123, height: 45 }} />
+          <div ref={ref} data-testid="measured" style={{ width: 123, height: 45 }} />
         </div>
       )
 
@@ -42,7 +42,7 @@ describeNative("ref element measurement", () => {
       return (
         <div>
           <div ref={measured} style={{ width: wide ? 220 : 100, height: 40 }} />
-          <div testId="resize" onClick={() => setWide(true)} style={{ width: 20, height: 20 }} />
+          <div data-testid="resize" onClick={() => setWide(true)} style={{ width: 20, height: 20 }} />
         </div>
       )
     }

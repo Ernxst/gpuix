@@ -36,10 +36,10 @@ describe("flex baseline layout", () => {
               flexShrink: 0,
             }}
           >
-            <text testId={`row-${index}-large`} style={{ fontSize: 32 }}>
+            <text data-testid={`row-${index}-large`} style={{ fontSize: 32 }}>
               13
             </text>
-            <text testId={`row-${index}-small`} style={{ fontSize: 12 }}>
+            <text data-testid={`row-${index}-small`} style={{ fontSize: 12 }}>
               MW
             </text>
           </div>
@@ -69,7 +69,7 @@ describe("flex baseline layout", () => {
         }}
       >
         {[32, 12, 32, 12].map((fontSize, index) => (
-          <text key={index} testId={`wrapped-${index}`} style={{ width: 30, fontSize }}>
+          <text key={index} data-testid={`wrapped-${index}`} style={{ width: 30, fontSize }}>
             X
           </text>
         ))}
@@ -90,11 +90,11 @@ describe("flex baseline layout", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div
-        testId="synthesized-baseline-row"
+        data-testid="synthesized-baseline-row"
         style={{ display: "flex", flexDirection: "row", alignItems: "baseline" }}
       >
-        <div testId="baseline-box" style={{ width: 32, height: 32 }} />
-        <text testId="baseline-text" style={{ fontSize: 16 }}>
+        <div data-testid="baseline-box" style={{ width: 32, height: 32 }} />
+        <text data-testid="baseline-text" style={{ fontSize: 16 }}>
           MW
         </text>
       </div>,
@@ -112,14 +112,14 @@ describe("flex baseline layout", () => {
     render(
       <div style={{ display: "flex", flexDirection: "row", alignItems: "baseline" }}>
         <div style={{ display: "flex", flexDirection: "row", alignItems: "baseline" }}>
-          <text testId="nested-small" style={{ fontSize: 12 }}>
+          <text data-testid="nested-small" style={{ fontSize: 12 }}>
             MW
           </text>
-          <text testId="nested-large" style={{ fontSize: 32 }}>
+          <text data-testid="nested-large" style={{ fontSize: 32 }}>
             13
           </text>
         </div>
-        <text testId="outer-small" style={{ fontSize: 12 }}>
+        <text data-testid="outer-small" style={{ fontSize: 12 }}>
           MW
         </text>
       </div>,
@@ -138,13 +138,13 @@ describe("flex baseline layout", () => {
     render(
       <div style={{ display: "flex", flexDirection: "row", alignItems: "baseline" }}>
         <text
-          testId="inline-run-baseline"
+          data-testid="inline-run-baseline"
           style={{ fontFamily: "Courier New", fontSize: 32, lineHeight: 40 }}
         >
           <text style={{ fontFamily: "Times New Roman" }}>Ag</text>
         </text>
         <text
-          testId="inline-run-reference"
+          data-testid="inline-run-reference"
           style={{ fontFamily: "Times New Roman", fontSize: 32, lineHeight: 40 }}
         >
           Ag

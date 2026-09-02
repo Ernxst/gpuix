@@ -36,7 +36,7 @@ describeNative("native style transitions", () => {
       root.render(
         <div style={{ width: 300, height: 120, padding: 10 }}>
           <div
-            testId="spring-hover-target"
+            data-testid="spring-hover-target"
             style={{
               width: 100,
               height: 80,
@@ -74,7 +74,7 @@ describeNative("native style transitions", () => {
     const root = createTestRoot()
     const card = (expanded: boolean) => (
       <div
-        testId="updated-target"
+        data-testid="updated-target"
         style={{
           width: expanded ? 200 : 100,
           height: 80,
@@ -122,7 +122,7 @@ describeNative("native style transitions", () => {
     const root = createTestRoot()
     const image = (expanded: boolean) => (
       <img
-        testId="transitioning-image"
+        data-testid="transitioning-image"
         style={{
           width: expanded ? 200 : 100,
           height: expanded ? 80 : 40,
@@ -175,7 +175,7 @@ describeNative("native style transitions", () => {
       {
         name: "canvas",
         render: (expanded: boolean) => (
-          <canvas testId="custom-family-target" style={customTransitionStyle(expanded)} />
+          <canvas data-testid="custom-family-target" style={customTransitionStyle(expanded)} />
         ),
       },
       {
@@ -183,7 +183,7 @@ describeNative("native style transitions", () => {
         render: (expanded: boolean) => (
           <code
             code="const covered = true"
-            testId="custom-family-target"
+            data-testid="custom-family-target"
             style={customTransitionStyle(expanded)}
           />
         ),
@@ -191,7 +191,7 @@ describeNative("native style transitions", () => {
       {
         name: "diff",
         render: (expanded: boolean) => (
-          <diff patch="" testId="custom-family-target" style={customTransitionStyle(expanded)} />
+          <diff patch="" data-testid="custom-family-target" style={customTransitionStyle(expanded)} />
         ),
       },
       {
@@ -199,7 +199,7 @@ describeNative("native style transitions", () => {
         render: (expanded: boolean) => (
           <input
             value="covered"
-            testId="custom-family-target"
+            data-testid="custom-family-target"
             style={customTransitionStyle(expanded)}
           />
         ),
@@ -209,7 +209,7 @@ describeNative("native style transitions", () => {
         render: (expanded: boolean) => (
           <textarea
             value="covered"
-            testId="custom-family-target"
+            data-testid="custom-family-target"
             style={customTransitionStyle(expanded)}
           />
         ),
@@ -219,7 +219,7 @@ describeNative("native style transitions", () => {
         render: (expanded: boolean) => (
           <markdown
             source="covered"
-            testId="custom-family-target"
+            data-testid="custom-family-target"
             style={customTransitionStyle(expanded)}
           />
         ),
@@ -229,7 +229,7 @@ describeNative("native style transitions", () => {
         render: (expanded: boolean) => (
           <anchored
             position={{ x: 20, y: 20 }}
-            testId="custom-family-target"
+            data-testid="custom-family-target"
             style={customTransitionStyle(expanded)}
           >
             <text style={{ color: "#ffffff" }}>covered</text>
@@ -273,7 +273,7 @@ describeNative("native style transitions", () => {
       root.render(
         <input
           value="focus"
-          testId="focus-transition-input"
+          data-testid="focus-transition-input"
           style={{
             width: 120,
             height: 52,
@@ -309,7 +309,7 @@ describeNative("native style transitions", () => {
       root.render(
         <virtual-list
           itemCount={0}
-          testId="inert-transition"
+          data-testid="inert-transition"
           style={{
             transition: {
               properties: ["opacity"],
@@ -323,7 +323,7 @@ describeNative("native style transitions", () => {
       root.render(
         <virtual-list
           itemCount={0}
-          testId="inert-transition"
+          data-testid="inert-transition"
           style={{
             transition: {
               properties: ["opacity"],
@@ -338,7 +338,7 @@ describeNative("native style transitions", () => {
       const markdown = (property: "opacity" | "color") => (
         <markdown
           source="internal colour"
-          testId="internal-colour-transition"
+          data-testid="internal-colour-transition"
           style={{
             opacity: 0.5,
             color: "#ffffff",
@@ -356,7 +356,7 @@ describeNative("native style transitions", () => {
 
       expect(warn).toHaveBeenCalledTimes(2)
       expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('<virtual-list testId="inert-transition">')
+        expect.stringContaining('<virtual-list data-testid="inert-transition">')
       )
       expect(warn).toHaveBeenCalledWith(expect.stringContaining(STYLE_TRANSITION_SUPPORT_MESSAGE))
       expect(warn).toHaveBeenCalledWith(
@@ -390,7 +390,7 @@ describeNative("native style transitions", () => {
           }}
         >
           <div
-            testId="transition-group"
+            data-testid="transition-group"
             style={{
               hoverGroup: "transition-group",
               width: 240,
@@ -400,7 +400,7 @@ describeNative("native style transitions", () => {
             }}
           >
             <div
-              testId="hover-within-target"
+              data-testid="hover-within-target"
               style={{
                 width: 100,
                 height: 100,
@@ -463,12 +463,12 @@ describeNative("native style transitions", () => {
       root.renderer.clockPause()
       root.render(
         <div
-          testId="custom-hover-within-group"
+          data-testid="custom-hover-within-group"
           style={{ hoverGroup: "custom-hover-within-group" }}
         >
           <code
             code="not part of this gap"
-            testId="custom-hover-within-target"
+            data-testid="custom-hover-within-target"
             style={{
               width: 180,
               height: 60,
@@ -508,7 +508,7 @@ describeNative("native style transitions", () => {
     const card = (expanded: boolean) => (
       <markdown
         source="Custom surface"
-        testId="custom-update-target"
+        data-testid="custom-update-target"
         style={{
           width: expanded ? 200 : 120,
           height: 80,
@@ -555,7 +555,7 @@ describeNative("native style transitions", () => {
       root.render(
         <code
           code="const hovered = true"
-          testId="custom-hover-target"
+          data-testid="custom-hover-target"
           style={{
             width: 120,
             height: 80,
@@ -601,7 +601,7 @@ describeNative("native style transitions", () => {
       root.renderer.clockPause()
       root.render(
         <img
-          testId="hovering-image"
+          data-testid="hovering-image"
           style={{
             width: 100,
             height: 60,
@@ -648,7 +648,7 @@ describeNative("native style transitions", () => {
           }}
         >
           <div
-            testId="transition-target"
+            data-testid="transition-target"
             tabIndex={0}
             style={{
               width: 120,
@@ -732,7 +732,7 @@ describeNative("native style transitions", () => {
       root.render(
         <div style={{ width: 300, height: 120, padding: 20 }}>
           <div
-            testId="reduced-target"
+            data-testid="reduced-target"
             style={{
               width: 100,
               height: 60,
@@ -767,11 +767,11 @@ describeNative("native style transitions", () => {
       root.renderer.setReducedMotion(true)
       root.render(
         <div
-          testId="reduced-group"
+          data-testid="reduced-group"
           style={{ hoverGroup: "reduced-group", width: 260, height: 120 }}
         >
           <div
-            testId="reduced-hover-within-target"
+            data-testid="reduced-hover-within-target"
             style={{
               width: 100,
               height: 60,
@@ -800,7 +800,7 @@ describeNative("native style transitions", () => {
     const card = (expanded: boolean) => (
       <markdown
         source="Reduced motion"
-        testId="reduced-custom-target"
+        data-testid="reduced-custom-target"
         style={{
           width: expanded ? 180 : 100,
           height: 60,
@@ -869,7 +869,7 @@ describeNative("native style transitions", () => {
       root.render(
         <div>
           <div
-            testId="leaving-target"
+            data-testid="leaving-target"
             style={{
               opacity: 0.5,
               transition: { properties: ["opacity"], durationMs: 100 },
@@ -893,7 +893,7 @@ describeNative("native style transitions", () => {
         <div>
           <code
             code="leaving"
-            testId="leaving-custom-target"
+            data-testid="leaving-custom-target"
             style={{
               opacity: 0.5,
               transition: { properties: ["opacity"], durationMs: 100 },
@@ -979,7 +979,7 @@ describeNative("motion spring easing", () => {
       root.renderer.clockPause()
       root.render(
         <motion.div
-          testId="motion-spring-target"
+          data-testid="motion-spring-target"
           initial={{ width: 0, opacity: 0 }}
           animate={{ width: 100, opacity: 1 }}
           transition={{

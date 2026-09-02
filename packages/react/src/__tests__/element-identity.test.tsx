@@ -305,7 +305,7 @@ describeNative("painted bounds for leaf surfaces", () => {
     testRoot.render(
       <div style={{ display: "flex", width: 600, height: 300, padding: 20 }}>
         <svg
-          testId="icon"
+          data-testid="icon"
           source={'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="#000"/></svg>'}
           style={{ width: 48, height: 32, color: "#5ca9ff" }}
         />
@@ -330,7 +330,7 @@ describeNative("painted bounds for leaf surfaces", () => {
 
     testRoot.render(
       <div style={{ display: "flex", width: 600, height: 300, padding: 24 }}>
-        <img testId="picture" src={fixture} style={{ width: 200, height: 100 }} />
+        <img data-testid="picture" src={fixture} style={{ width: 200, height: 100 }} />
       </div>,
     )
 
@@ -344,10 +344,10 @@ describeNative("painted bounds for leaf surfaces", () => {
   it("records the overlay bounds of a deferred <anchored>, not its trigger", () => {
     testRoot.render(
       <div style={{ width: 800, height: 400 }}>
-        <div testId="trigger" style={{ width: 120, height: 40 }}>
+        <div data-testid="trigger" style={{ width: 120, height: 40 }}>
           <text>trigger</text>
           <anchored
-            testId="overlay"
+            data-testid="overlay"
             position={{ x: 300, y: 200 }}
             style={{ width: 260, height: 90, backgroundColor: "#1e1e2e" }}
           >

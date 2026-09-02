@@ -2507,7 +2507,7 @@ ellipsis, selection, and copying operate across run boundaries.
 <text style={{ width: 240, color: '#e6edf7' }}>
   Output is{' '}
   <text
-    testId="output-rate"
+    data-testid="output-rate"
     onClick={showRateDetails}
     style={{ color: '#7dd3fc', fontWeight: 700, letterSpacing: 1 }}
   >
@@ -2519,7 +2519,7 @@ ellipsis, selection, and copying operate across run boundaries.
 
 Inline runs can vary `color`, `fontFamily`, `fontWeight`, `letterSpacing`,
 `backgroundColor`, `textDecoration`, and `textTransform`. Nested `onClick`,
-refs, and `testId` retain the nested text host as their target. Layout styles
+refs, and `data-testid` retain the nested text host as their target. Layout styles
 belong on the outer `<text>`; strict style diagnostics report them on inline
 descendants. A `<text>` accepts only strings and nested `<text>` elements, so
 block and custom children are rejected during React render.
@@ -2865,7 +2865,7 @@ Style objects are decoded field-by-field. An invalid value rejects only that
 field; valid siblings still commit and the error never escapes React's commit
 phase. In a Node runtime outside `NODE_ENV=production`, strict styles are
 enabled by default and each rejection warns with the renderer id, element type,
-author `id` and `testId` when present, property, and offending value. Unknown properties,
+author `id` and `data-testid` when present, property, and offending value. Unknown properties,
 unsupported enum values, invalid colors, radial gradients, and supported
 properties with malformed values all use the same diagnostic path.
 
@@ -3072,18 +3072,18 @@ wrapping `<div>`.
 
 ## Automation
 
-Mark elements with **`testId`**, then drive them like Playwright. The same
+Mark elements with **`data-testid`**, then drive them like Playwright. The same
 client works in vitest, inside browser pages, and against a child process.
 
 Standard `id` and `data-*` attributes are also preserved on every host element,
 so shared DOM/native JSX can use semantic IDs. GPU-backed tests can resolve an
 author ID with `renderer.findByElementId('site-state')`; locator queries remain
-the `testId`, text, and type API listed below.
+the `data-testid`, text, and type API listed below.
 
 ```tsx
-<div testId="sidebar-collapse" onClick={onCollapse}>‹</div>
-<textarea testId="composer" value={draft} onChange={...} />
-<div testId="send" onClick={onSend}>↑</div>
+<div data-testid="sidebar-collapse" onClick={onCollapse}>‹</div>
+<textarea data-testid="composer" value={draft} onChange={...} />
+<div data-testid="send" onClick={onSend}>↑</div>
 ```
 
 ```ts
@@ -3180,7 +3180,7 @@ two disagree.
 
 | Call | Matches |
 |---|---|
-| `app.getByTestId('send')` | The `data-testid` prop, or `testId` when absent |
+| `app.getByTestId('send')` | The `data-testid` prop |
 | `app.getByText('New chat')` | A node's own text |
 | `app.getByType('textarea')` | The host element type |
 | `locator.getByText('...')` | A descendant of another locator |
@@ -3194,8 +3194,8 @@ Text and test-ID locators use Testing Library matcher semantics: strings are
 exact after trimming and collapsing whitespace, `{ exact: false }` enables a
 case-insensitive substring match, and regular expressions, predicate matchers,
 `{ trim }`, `{ collapseWhitespace }`, and custom `{ normalizer }` functions are
-supported. A node has one test ID: `data-testid` if present, otherwise the
-legacy `testId` prop — the same rule the in-process queries use.
+supported. A node has one test ID, its `data-testid` prop — the same rule the
+in-process queries use.
 
 ### Mouse, wheel, and drag
 
@@ -3228,12 +3228,12 @@ await app.getByTestId('canvas').wheel(0, 120, { modifiers: 'cmd' })
 await app.getByTestId('clip-8').click({ modifiers: 'shift' })
 ```
 
-`click()` needs painted bounds. **Every element that accepts `testId` records
+`click()` needs painted bounds. **Every element that accepts `data-testid` records
 them**, including `<img>`, `<svg>` and `<anchored>`. An `<anchored>` reports the
 box of the overlay itself, not of the trigger it is anchored to, so `click()`
 lands on the menu even when it is deferred and snapped back inside the window.
 
-`<virtual-list>` is the exception, and it takes no `testId`. gpui's list is not
+`<virtual-list>` is the exception, and it takes no `data-testid`. gpui's list is not
 an interactive element, so it has nothing to record a box against. Put the
 locator on a wrapping `<div>`.
 
@@ -3383,11 +3383,10 @@ and a custom `{ normalizer }` — composable with the exported
 Library's matcher semantics. Passing `normalizer` together with `trim` or
 `collapseWhitespace` throws, as it does there.
 
-An element has exactly one test ID, as in Testing Library. `data-testid` is the
-standard attribute and wins; the legacy `testId` prop answers only for elements
-that carry no `data-testid`. The retained-tree queries, `renderer.findByTestId`,
-and the automation locators all resolve it that way, so a tree that mixes the
-two props returns the same nodes through every path.
+An element has exactly one test ID, as in Testing Library: its `data-testid`
+attribute. The retained-tree queries, `renderer.findByTestId`, and the
+automation locators all resolve it that way, so every path returns the same
+nodes.
 
 Role queries currently search the visible accessibility tree. `hidden` defaults
 to `false`, and `{ hidden: false }` is supported explicitly. `{ hidden: true }`
@@ -3557,7 +3556,7 @@ element and read it with `textContent()`. A screenshot tells you that something
 changed; a readout tells you what, and the failure message names the number.
 
 ```tsx
-<text testId="readout">{`x=${scrollX} y=${scrollY} zoom=${zoom} sel=${selected}`}</text>
+<text data-testid="readout">{`x=${scrollX} y=${scrollY} zoom=${zoom} sel=${selected}`}</text>
 ```
 
 ```ts

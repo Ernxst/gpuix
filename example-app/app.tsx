@@ -127,7 +127,7 @@ function IconButton({
 }) {
   return (
     <div
-      testId={testId}
+      data-testid={testId}
       onClick={onClick}
       style={{
         width: 28,
@@ -162,7 +162,7 @@ function SidebarRow({
 }) {
   return (
     <div
-      testId={`view-${label.toLowerCase()}`}
+      data-testid={`view-${label.toLowerCase()}`}
       onClick={onClick}
       style={{
         display: 'flex',
@@ -200,7 +200,7 @@ function Checkbox({
 }) {
   return (
     <div
-      testId={testId}
+      data-testid={testId}
       onClick={onToggle}
       style={{
         width: 19,
@@ -237,7 +237,7 @@ function TodoRow({
 
   return (
     <div
-      testId={`row-${todo.id}`}
+      data-testid={`row-${todo.id}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -313,7 +313,7 @@ function Composer({ onAdd }: { onAdd: (title: string) => void }) {
     >
       <Icon name="plus" size={15} color={C.tertiary} />
       <input
-        testId="composer"
+        data-testid="composer"
         value={draft}
         placeholder="Add a task"
         autoFocus
@@ -323,7 +323,7 @@ function Composer({ onAdd }: { onAdd: (title: string) => void }) {
         style={{ flexGrow: 1, fontSize: 14, fontFamily: FONT, color: C.text }}
       />
       <div
-        testId="add"
+        data-testid="add"
         onClick={submit}
         style={{
           height: 30,

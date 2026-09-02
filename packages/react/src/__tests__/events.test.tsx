@@ -474,7 +474,7 @@ describeNative("events", () => {
 
       testRoot.render(
         <div
-          testId="double-click-target"
+          data-testid="double-click-target"
           style={{ width: 200, height: 80 }}
           onClick={(event) => calls.push({ type: "click", detail: event.detail })}
           onDoubleClick={(event) =>
@@ -498,7 +498,7 @@ describeNative("events", () => {
 
       testRoot.render(
         <div
-          testId="keyboard-activation-target"
+          data-testid="keyboard-activation-target"
           style={{ width: 200, height: 80 }}
           onClick={() => calls.push("click")}
           onDoubleClick={() => calls.push("doubleClick")}
@@ -583,7 +583,7 @@ describeNative("events", () => {
         <canvas
           width={200}
           height={80}
-          testId="canvas-synthetic-clicks"
+          data-testid="canvas-synthetic-clicks"
           style={{ width: 200, height: 80 }}
           onDoubleClick={() => calls.push("doubleClick")}
           onContextMenu={() => calls.push("contextMenu")}
@@ -607,7 +607,7 @@ describeNative("events", () => {
       testRoot.render(
         <code
           code="const synthesized = true"
-          testId="code-synthetic-clicks"
+          data-testid="code-synthetic-clicks"
           style={{ width: 200, height: 80 }}
           onDoubleClick={() => calls.push("doubleClick")}
           onContextMenu={() => calls.push("contextMenu")}
@@ -635,7 +635,7 @@ describeNative("events", () => {
         >
           <code
             code="const synthesized = true"
-            testId="code-context-menu-child"
+            data-testid="code-context-menu-child"
             style={{ width: 200, height: 80 }}
             onContextMenu={() => calls.push("code:contextMenu")}
           />
@@ -663,7 +663,7 @@ describeNative("events", () => {
           style={{ width: 240, height: 120, padding: 20 }}
           onContextMenu={() => calls.push("contextMenu")}
         >
-          <div testId="context-menu-inert-child" style={{ width: 200, height: 80 }} />
+          <div data-testid="context-menu-inert-child" style={{ width: 200, height: 80 }} />
         </div>
       )
       const child = testRoot.renderer.findByTestId("context-menu-inert-child")!
@@ -788,7 +788,7 @@ describeNative("events", () => {
       testRoot.render(
         <a onClick={click} style={{ width: 240, height: 100 }}>
           <span
-            testId="painted-click-child"
+            data-testid="painted-click-child"
             style={{ width: 160, height: 60, backgroundColor: "#273449" }}
           >
             Factory
@@ -810,7 +810,7 @@ describeNative("events", () => {
         <a onClick={click} style={{ width: 240, height: 100 }}>
           <span style={{ width: 180, height: 70 }}>
             <span
-              testId="painted-click-grandchild"
+              data-testid="painted-click-grandchild"
               style={{ width: 140, height: 50, backgroundColor: "#273449" }}
             >
               Factory
@@ -833,7 +833,7 @@ describeNative("events", () => {
       testRoot.render(
         <a onClick={anchorClick} style={{ width: 240, height: 100 }}>
           <button
-            testId="interactive-painted-click-child"
+            data-testid="interactive-painted-click-child"
             onClick={buttonClick}
             style={{ width: 160, height: 60, backgroundColor: "#273449" }}
           >
@@ -856,7 +856,7 @@ describeNative("events", () => {
       testRoot.render(
         <a onClick={click} style={{ width: 240, height: 100 }}>
           <span
-            testId="transparent-click-child"
+            data-testid="transparent-click-child"
             style={{ width: 160, height: 60, backgroundColor: "rgba(39, 52, 73, 0)" }}
           >
             Factory
@@ -895,7 +895,7 @@ describeNative("events", () => {
           <TanStackLink
             to="/factory"
             preload={false}
-            testId="tanstack-link"
+            data-testid="tanstack-link"
             style={{ width: 180, height: 50 }}
           >
             Factory
@@ -948,7 +948,7 @@ describeNative("events", () => {
           <TanStackLink
             to="/factory"
             preload={false}
-            testId="tanstack-keyboard-link"
+            data-testid="tanstack-keyboard-link"
             style={{ width: 180, height: 50 }}
           >
             Factory
@@ -1017,7 +1017,7 @@ describeNative("events", () => {
       testRoot.render(
         <button
           autoFocus
-          testId="space-activation"
+          data-testid="space-activation"
           onClick={click}
           style={{ width: 180, height: 50 }}
         />
@@ -1042,7 +1042,7 @@ describeNative("events", () => {
         <a
           autoFocus
           href="/factory"
-          testId="anchor-activation"
+          data-testid="anchor-activation"
           onClick={() => navigate("/factory")}
           style={{ width: 180, height: 50 }}
         >
@@ -1135,8 +1135,8 @@ describeNative("events", () => {
       testRoot.render(
         <div style={{ display: "flex", gap: 20 }}>
           <div autoFocus tabIndex={0} style={{ width: 1, height: 1 }} />
-          <button testId="implicit-focus-button" style={style} />
-          <div testId="primitive-div" style={style} />
+          <button data-testid="implicit-focus-button" style={style} />
+          <div data-testid="primitive-div" style={style} />
         </div>
       )
 
@@ -1271,7 +1271,7 @@ describeNative("events", () => {
             }}
           >
             <div
-              testId="focus-scoped-child"
+              data-testid="focus-scoped-child"
               tabIndex={staticChildOutline ? undefined : 0}
               style={{
                 width: 180,
@@ -1522,17 +1522,17 @@ describeNative("events", () => {
       testRoot.render(
         <a
           href="/factory"
-          testId="anchor-events"
+          data-testid="anchor-events"
           onMouseEnter={enter}
           onMouseLeave={leave}
           style={{ hoverGroup: "anchor", width: 200, height: 100 }}
         >
           <span
-            testId="anchor-painted-child"
+            data-testid="anchor-painted-child"
             style={{ minHeight: 36, padding: 8, backgroundColor: "#1f272d" }}
           >
             <text
-              testId="anchor-hover-within"
+              data-testid="anchor-hover-within"
               style={{
                 color: "#334155",
                 hoverWithin: { color: "#f59e0b" },
@@ -1575,7 +1575,7 @@ describeNative("events", () => {
       testRoot.render(
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <a
-            testId="opaque-anchor"
+            data-testid="opaque-anchor"
             onMouseEnter={() => {
               order.push("opaque-parent-enter")
               opaqueParentEnter()
@@ -1587,7 +1587,7 @@ describeNative("events", () => {
             style={{ width: 240, height: 52 }}
           >
             <span
-              testId="opaque-painted-child"
+              data-testid="opaque-painted-child"
               onMouseEnter={() => {
                 order.push("opaque-child-enter")
                 opaqueChildEnter()
@@ -1602,27 +1602,27 @@ describeNative("events", () => {
             </span>
           </a>
           <a
-            testId="low-alpha-anchor"
+            data-testid="low-alpha-anchor"
             onMouseEnter={lowAlphaEnter}
             onMouseLeave={lowAlphaLeave}
             style={{ width: 240, height: 52 }}
           >
             <span
-              testId="low-alpha-painted-child"
+              data-testid="low-alpha-painted-child"
               style={{ minHeight: 36, padding: 8, backgroundColor: "rgba(31, 39, 45, 0.04)" }}
             >
               low alpha background
             </span>
           </a>
           <a
-            testId="grandchild-anchor"
+            data-testid="grandchild-anchor"
             onMouseEnter={grandchildEnter}
             onMouseLeave={grandchildLeave}
             style={{ width: 240, height: 52 }}
           >
             <span style={{ minHeight: 36, padding: 8 }}>
               <span
-                testId="grandchild-painted-child"
+                data-testid="grandchild-painted-child"
                 style={{ minHeight: 20, padding: 4, backgroundColor: "#1f272d" }}
               >
                 grandchild background
@@ -1673,7 +1673,7 @@ describeNative("events", () => {
         >
           <code
             code="const hover = true"
-            testId="transition-hover-code"
+            data-testid="transition-hover-code"
             onMouseEnter={() => events.push("child-enter")}
             onMouseLeave={() => events.push("child-leave")}
             style={{
@@ -1713,7 +1713,7 @@ describeNative("events", () => {
           <canvas
             width={220}
             height={80}
-            testId="transition-hover-canvas"
+            data-testid="transition-hover-canvas"
             onMouseEnter={() => events.push("child-enter")}
             onMouseLeave={() => events.push("child-leave")}
             style={{
@@ -1752,7 +1752,7 @@ describeNative("events", () => {
           <canvas
             width={220}
             height={80}
-            testId="ordered-hover-canvas"
+            data-testid="ordered-hover-canvas"
             onMouseEnter={() => events.push("child-enter")}
             onMouseMove={() => events.push("child-move")}
             style={{ width: 220, height: 80 }}
@@ -1772,13 +1772,13 @@ describeNative("events", () => {
 
       testRoot.render(
         <div
-          testId="sibling-parent"
+          data-testid="sibling-parent"
           onMouseEnter={() => events.push("parent-enter")}
           onMouseLeave={() => events.push("parent-leave")}
           style={{ display: "flex", width: 240, height: 52 }}
         >
           <span
-            testId="left-painted-sibling"
+            data-testid="left-painted-sibling"
             onMouseEnter={() => events.push("left-enter")}
             onMouseLeave={() => events.push("left-leave")}
             style={{ flexGrow: 1, backgroundColor: "#1f272d" }}
@@ -1786,7 +1786,7 @@ describeNative("events", () => {
             left
           </span>
           <span
-            testId="right-painted-sibling"
+            data-testid="right-painted-sibling"
             onMouseEnter={() => events.push("right-enter")}
             onMouseLeave={() => events.push("right-leave")}
             style={{ flexGrow: 1, backgroundColor: "#334155" }}
@@ -1869,7 +1869,7 @@ describeNative("events", () => {
           }}
         >
           <div
-            testId="hover-row"
+            data-testid="hover-row"
             onMouseEnter={() => events.push("enter")}
             onMouseLeave={() => events.push("leave")}
             style={{
@@ -1882,7 +1882,7 @@ describeNative("events", () => {
               hover: { backgroundColor: "#d97706" },
             }}
           >
-            <text testId="hover-row-label" style={{ color: "#ffffff", fontSize: 22 }}>
+            <text data-testid="hover-row-label" style={{ color: "#ffffff", fontSize: 22 }}>
               Destination
             </text>
           </div>
@@ -2360,7 +2360,7 @@ describeNative("events", () => {
         <canvas
           width={200}
           height={200}
-          testId="wheel-canvas"
+          data-testid="wheel-canvas"
           style={{ width: 200, height: 200 }}
           onWheel={(event) => wheels.push({ type: event.type, deltaY: event.deltaY })}
         />
@@ -2383,7 +2383,7 @@ describeNative("events", () => {
       testRoot.render(
         <code
           code="const wheel = true"
-          testId="wheel-code"
+          data-testid="wheel-code"
           style={{ width: 200, height: 120 }}
           onWheel={(event) => wheels.push({ type: event.type, deltaY: event.deltaY })}
         />
@@ -2635,7 +2635,7 @@ describeNative("events", () => {
           style={{ width: 240, height: 100 }}
         >
           <span
-            testId="painted-press-child"
+            data-testid="painted-press-child"
             style={{ width: 160, height: 60, backgroundColor: "#273449" }}
           >
             Factory
@@ -2686,7 +2686,7 @@ describeNative("events", () => {
       testRoot.render(
         <a onMouseMove={move} style={{ width: 240, height: 100 }}>
           <span
-            testId="painted-move-child"
+            data-testid="painted-move-child"
             style={{ width: 160, height: 60, backgroundColor: "#273449" }}
           >
             Factory
@@ -3536,7 +3536,7 @@ describeNative("events", () => {
       function NestedVirtualScroller() {
         return (
           <div
-            testId="nested-scroll-parent"
+            data-testid="nested-scroll-parent"
             style={{
               display: "flex",
               flexDirection: "column",
@@ -3547,7 +3547,7 @@ describeNative("events", () => {
             }}
           >
             <virtual-list
-              testId="nested-scroll-list"
+              data-testid="nested-scroll-list"
               itemCount={rows.length}
               windowStart={0}
               estimatedItemHeight={40}

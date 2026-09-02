@@ -17,11 +17,11 @@ describeNative("createTestRoot bound queries", () => {
     try {
       screen.render(
         <div>
-          <div testId="summary">
+          <div data-testid="summary">
             <text>Power</text>
             <text>Rate</text>
           </div>
-          <div testId="details">
+          <div data-testid="details">
             <text>Built</text>
             <text>Rate</text>
           </div>
@@ -57,10 +57,10 @@ describeNative("createTestRoot bound queries", () => {
     try {
       screen.render(
         <div>
-          <div testId="summary">
+          <div data-testid="summary">
             <text data-testid="value">Power</text>
           </div>
-          <div testId="details">
+          <div data-testid="details">
             <text data-testid="value">Built</text>
           </div>
         </div>
@@ -77,7 +77,7 @@ describeNative("createTestRoot bound queries", () => {
       expect(textContent(screen.renderer, scoped.getByTestId("value"))).toBe("Power")
       expect(scoped.queryByTestId("details")).toBeNull()
       expect(() => scoped.getByTestId("details")).toThrowError(
-        'Unable to find an element with test ID "details" within <div testId="summary"'
+        'Unable to find an element with test ID "details" within <div data-testid="summary"'
       )
     } finally {
       screen.unmount()
@@ -90,9 +90,9 @@ describeNative("createTestRoot bound queries", () => {
     try {
       screen.render(
         <div>
-          <text testId="  Primary   Action  ">{"  Save\n  factory  "}</text>
+          <text data-testid="  Primary   Action  ">{"  Save\n  factory  "}</text>
           <text data-testid="secondary-action">Delete factory</text>
-          <div testId="wrapper">
+          <div data-testid="wrapper">
             <text>Nested only</text>
           </div>
         </div>
@@ -115,7 +115,7 @@ describeNative("createTestRoot bound queries", () => {
       ).toBe(save)
 
       expect(screen.queryByTestId("primary")).toBeNull()
-      expect(screen.getByTestId("primary", { exact: false }).testId).toContain("Primary")
+      expect(screen.getByTestId("primary", { exact: false }).dataTestId).toContain("Primary")
       expect(
         screen.getByTestId(
           (content, element) =>
@@ -125,7 +125,7 @@ describeNative("createTestRoot bound queries", () => {
       expect(
         screen.getByTestId("PRIMARY ACTION", {
           normalizer: (content) => content.trim().replace(/\s+/g, " ").toUpperCase(),
-        }).testId
+        }).dataTestId
       ).toBe("  Primary   Action  ")
 
       expect(screen.getAllByText("Nested only")).toHaveLength(1)
@@ -149,30 +149,22 @@ describeNative("createTestRoot bound queries", () => {
     }
   })
 
-  it("resolves one test ID per element, preferring data-testid", () => {
+  it("resolves one test ID per element from data-testid", () => {
     const screen = createTestRoot()
 
     try {
       screen.render(
         <div>
-          <text testId="legacy-only">Legacy</text>
-          <text data-testid="standard" testId="shadowed">
-            Standard
-          </text>
+          <text data-testid="plain">Plain</text>
+          <text data-testid="standard">Standard</text>
         </div>
       )
 
       const standard = screen.getByTestId("standard")
-      expect(standard.testId).toBe("shadowed")
-      expect(screen.getAllByTestId("legacy-only")).toHaveLength(1)
-
-      // The legacy prop no longer answers on an element that has data-testid,
-      // so a mixed tree cannot report different counts to different query paths.
-      expect(screen.queryAllByTestId("shadowed")).toEqual([])
-      expect(screen.queryByTestId("shadowed")).toBeNull()
-      expect(screen.renderer.findByTestId("shadowed")).toBeUndefined()
+      expect(screen.getAllByTestId("plain")).toHaveLength(1)
+      expect(screen.queryByTestId("missing")).toBeNull()
       expect(screen.renderer.findByTestId("standard")).toBe(standard)
-      expect(screen.renderer.findByTestId("legacy-only")?.testId).toBe("legacy-only")
+      expect(screen.renderer.findByTestId("plain")?.dataTestId).toBe("plain")
 
       // renderer.findByText runs on the shared matcher, not a raw substring.
       const label = screen.renderer.findByText("Standard")
@@ -190,18 +182,18 @@ describeNative("createTestRoot bound queries", () => {
     try {
       screen.render(
         <div>
-          <text testId="target">Legacy</text>
-          <text data-testid="target">Standard</text>
+          <text data-testid="target">First</text>
+          <text data-testid="target">Second</text>
         </div>
       )
 
-      // Both elements resolve to the same test ID, so the answer is the first
-      // in tree order. Passing options must not move the query onto a native
+      // Both elements carry the same test ID, so the answer is the first in
+      // tree order. Passing options must not move the query onto a native
       // data-testid index that would answer with the second one instead.
       const first = screen.renderer.findByTestId("target")
       expect(first).toBeDefined()
-      expect(textContent(screen.renderer, first!)).toBe("Legacy")
-      expect(first?.dataTestId).toBeUndefined()
+      expect(textContent(screen.renderer, first!)).toBe("First")
+      expect(first?.dataTestId).toBe("target")
       expect(screen.renderer.findByTestId("target", {})).toBe(first)
       expect(screen.renderer.findByTestId("target", { exact: false })).toBe(first)
     } finally {
@@ -215,7 +207,7 @@ describeNative("createTestRoot bound queries", () => {
     try {
       screen.render(
         <div>
-          <div testId="output" role="heading" ariaLabel="  Iron   Output  " ariaLevel={2} />
+          <div data-testid="output" role="heading" ariaLabel="  Iron   Output  " ariaLevel={2} />
         </div>
       )
 
@@ -233,7 +225,7 @@ describeNative("createTestRoot bound queries", () => {
       expect(screen.getByRole("heading", { name: /^Iron Output$/, level: 2 })).toBe(output)
       expect(
         screen.getByRole("heading", {
-          name: (name, element) => name === "Iron Output" && element.testId === "output",
+          name: (name, element) => name === "Iron Output" && element.dataTestId === "output",
         })
       ).toBe(output)
     } finally {
@@ -246,14 +238,14 @@ describeNative("createTestRoot bound queries", () => {
 
     try {
       screen.render(
-        <div testId="page">
+        <div data-testid="page">
           <text data-testid="value">Ore</text>
           <text data-testid="value">Ore rate</text>
         </div>
       )
 
       expect(() => screen.getByText("Moss")).toThrowError(
-        /Unable to find an element with text "Moss" within <div testId="page" text="OreOre rate">\. Near misses:\n  <text text="Ore">\n  <text text="Ore rate">/
+        /Unable to find an element with text "Moss" within <div data-testid="page" text="OreOre rate">\. Near misses:\n  <text text="Ore">\n  <text text="Ore rate">/
       )
       expect(() => screen.getByText(/Ore/)).toThrowError("Found multiple elements with text /Ore/")
       expect(() => screen.queryByText(/Ore/)).toThrowError("Found multiple elements with text /Ore/")
@@ -283,7 +275,7 @@ describeNative("createTestRoot bound queries", () => {
 
     try {
       screen.render(
-        <div testId="panel">
+        <div data-testid="panel">
           <text>Before</text>
         </div>
       )
@@ -291,7 +283,7 @@ describeNative("createTestRoot bound queries", () => {
       const scoped = screen.within(panel)
 
       screen.render(
-        <div testId="panel">
+        <div data-testid="panel">
           <div>
             <text>After</text>
           </div>
@@ -309,8 +301,8 @@ describeNative("createTestRoot bound queries", () => {
 
     try {
       screen.render(
-        <div testId="panel">
-          <text testId="value">Rate</text>
+        <div data-testid="panel">
+          <text data-testid="value">Rate</text>
         </div>
       )
 
@@ -335,8 +327,8 @@ describeNative("createTestRoot bound queries", () => {
           <section role="region" ariaLabel="Production ledger">
             <text>State</text>
           </section>
-          <a role="link" ariaLabel={coalCurrent.name} testId="site" />
-          <h2 role="heading" ariaLabel="Build list" ariaLevel={2} testId="heading" />
+          <a role="link" ariaLabel={coalCurrent.name} data-testid="site" />
+          <h2 role="heading" ariaLabel="Build list" ariaLevel={2} data-testid="heading" />
         </div>
       )
 
@@ -356,7 +348,7 @@ describeNative("createTestRoot bound queries", () => {
     const root = createTestRoot()
 
     try {
-      root.render(<div role="button" ariaLabel="Save factory" testId="save" />)
+      root.render(<div role="button" ariaLabel="Save factory" data-testid="save" />)
 
       const retained = root.getByTestId("save")
       const tree = root.renderer.getAccessibilityTree()
@@ -382,12 +374,12 @@ describeNative("createTestRoot bound queries", () => {
     try {
       root.render(
         <div>
-          <div testId="first" role="checkbox" ariaLabel="Coal input" ariaChecked />
-          <div testId="second" role="checkbox" ariaLabel="Iron input" ariaChecked={false} />
-          <div testId="heading-2" role="heading" ariaLabel="Build list" ariaLevel={2} />
-          <div testId="heading-3" role="heading" ariaLabel="Build list" ariaLevel={3} />
-          <input testId="search" role="textbox" ariaLabel="Recipe search" />
-          <img testId="preview" role="img" ariaLabel="Recipe preview" />
+          <div data-testid="first" role="checkbox" ariaLabel="Coal input" ariaChecked />
+          <div data-testid="second" role="checkbox" ariaLabel="Iron input" ariaChecked={false} />
+          <div data-testid="heading-2" role="heading" ariaLabel="Build list" ariaLevel={2} />
+          <div data-testid="heading-3" role="heading" ariaLabel="Build list" ariaLevel={3} />
+          <input data-testid="search" role="textbox" ariaLabel="Recipe search" />
+          <img data-testid="preview" role="img" ariaLabel="Recipe preview" />
         </div>
       )
 
@@ -397,7 +389,7 @@ describeNative("createTestRoot bound queries", () => {
       expect(root.getByRole("checkbox", { name: /iron/i })).toBe(root.getByTestId("second"))
       expect(
         root.getByRole("checkbox", {
-          name: (name, element) => name.endsWith("input") && element.testId === "first",
+          name: (name, element) => name.endsWith("input") && element.dataTestId === "first",
         })
       ).toBe(root.getByTestId("first"))
       expect(root.getByRole("heading", { name: "Build list", level: 2 })).toBe(
@@ -422,9 +414,9 @@ describeNative("createTestRoot bound queries", () => {
 
     try {
       root.render(
-        <div role="region" ariaLabel="Outer" testId="outer">
-          <div role="button" ariaLabel="Save" testId="save" />
-          <div role="button" ariaLabel="Delete" testId="delete" />
+        <div role="region" ariaLabel="Outer" data-testid="outer">
+          <div role="button" ariaLabel="Save" data-testid="save" />
+          <div role="button" ariaLabel="Delete" data-testid="delete" />
         </div>
       )
 
@@ -455,16 +447,16 @@ describeNative("createTestRoot bound queries", () => {
 
     try {
       root.render(
-        <div testId="panel">
+        <div data-testid="panel">
           <div role="button" ariaLabel="Before" />
         </div>
       )
       const scoped = root.within(root.getByTestId("panel"))
 
       root.render(
-        <div testId="panel">
+        <div data-testid="panel">
           <div>
-            <div role="button" ariaLabel="After" testId="after" />
+            <div role="button" ariaLabel="After" data-testid="after" />
           </div>
         </div>
       )
@@ -483,7 +475,7 @@ describeNative("createTestRoot bound queries", () => {
       root.render(
         <div>
           <div role="button" ariaLabel="Hidden action" ariaHidden />
-          <div role="button" ariaLabel="Visible action" testId="visible" />
+          <div role="button" ariaLabel="Visible action" data-testid="visible" />
         </div>
       )
 
@@ -505,8 +497,8 @@ describeNative("createTestRoot bound queries", () => {
     try {
       root.render(
         <div>
-          <div role="button" ariaLabel="Save factory" testId="save" />
-          <div role="heading" ariaLabel="Production" ariaLevel={2} testId="heading" />
+          <div role="button" ariaLabel="Save factory" data-testid="save" />
+          <div role="heading" ariaLabel="Production" ariaLevel={2} data-testid="heading" />
         </div>
       )
 

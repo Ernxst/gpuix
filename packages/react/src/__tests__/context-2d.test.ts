@@ -39,7 +39,7 @@ function recording(strict = true): {
   const owner = {}
   const target: CanvasRecorderTarget = {
     strict,
-    describeElement: () => '<canvas testId="unit-canvas" elementId=17>',
+    describeElement: () => '<canvas data-testid="unit-canvas" elementId=17>',
     applyCanvasCommands: (ops, operands, strings) => {
       applied.push({ ops, operands, strings })
     },
@@ -436,7 +436,7 @@ describe("CanvasRenderingContext2D unimplemented-member contract", () => {
         .map(([message]) => String(message))
         .filter((message) => message.includes(`CanvasRenderingContext2D.${member} `))
       expect(messages).toHaveLength(1)
-      expect(messages[0]).toContain('<canvas testId="unit-canvas" elementId=17>')
+      expect(messages[0]).toContain('<canvas data-testid="unit-canvas" elementId=17>')
       expect(messages[0]).toContain(reason)
       expect(messages[0]).toContain(
         disposition === "not-implementable" ? "not implementable" : "not implemented"

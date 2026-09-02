@@ -45,7 +45,7 @@ assets.d.ts    tells TypeScript that a `.svg` import is a string
 - **`motion.div`** for the sidebar, animated in Rust with no React frames
 - **`<svg>`** icons tinted through `style.color`
 - **`hover` and `active`** styles applied natively, with no JavaScript round trip
-- **`testId`** props, so the automation client can drive the app
+- **`data-testid`** props, so the automation client can drive the app
 
 ## Testing
 

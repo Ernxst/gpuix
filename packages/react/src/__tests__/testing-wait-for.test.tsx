@@ -45,7 +45,7 @@ function DelayedPanel() {
   if (!ready) return <text>waiting</text>
 
   return (
-    <div testId="panel" role="button" ariaLabel="Confirm">
+    <div data-testid="panel" role="button" ariaLabel="Confirm">
       <text>ready</text>
     </div>
   )

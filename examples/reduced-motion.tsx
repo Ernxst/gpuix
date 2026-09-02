@@ -12,7 +12,7 @@ export function ReducedMotionTarget({ expanded }: { expanded: boolean }) {
       }}
     >
       <div
-        testId="style-transition-target"
+        data-testid="style-transition-target"
         style={{
           width: expanded ? 280 : 140,
           height: 72,
@@ -27,7 +27,7 @@ export function ReducedMotionTarget({ expanded }: { expanded: boolean }) {
         }}
       />
       <motion.div
-        testId="motion-target"
+        data-testid="motion-target"
         initial={false}
         animate={{
           width: expanded ? 280 : 140,
@@ -65,7 +65,7 @@ export function ReducedMotionExample() {
       </text>
       <ReducedMotionTarget expanded={expanded} />
       <div
-        testId="style-transition-toggle"
+        data-testid="style-transition-toggle"
         onClick={() => setExpanded((value) => !value)}
         style={{
           paddingTop: 12,

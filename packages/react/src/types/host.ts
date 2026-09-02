@@ -955,8 +955,6 @@ export interface Props {
   autoFocus?: boolean
   /** Native GPUI tab order. Use 0 for normal keyboard focus. */
   tabIndex?: number
-  /** Stable locator id for automation. */
-  testId?: string
   /** Internal native animation description used by motion components. */
   motion?: MotionProps
 }
@@ -1256,7 +1254,6 @@ export interface StyleDiagnostic {
   authorId?: string
   /** The standard `data-testid` attribute, when the affected element has one. */
   dataTestId?: string
-  testId?: string
   property: string
   value: string
 }

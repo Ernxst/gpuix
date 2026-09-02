@@ -267,8 +267,6 @@ let probedNativeTestRenderer: NativeTestRendererApi | null = null
 let nativeTestRendererInitialized = false
 /** The native binding error when the test renderer cannot be loaded. */
 export let nativeTestRendererLoadError: Error | null = null
-/** Backward-compatible alias for nativeTestRendererLoadError. */
-export { nativeTestRendererLoadError as nativeTestRendererError }
 const requireNative = createRequire(import.meta.url)
 
 function initializeNativeTestRenderer(): NativeTestRendererConstructor | null {
@@ -338,9 +336,7 @@ export interface TestElement {
   readonly children: readonly TestElement[]
   /** Current retained parent, or null for the root element. */
   readonly parentElement: TestElement | null
-  /** The legacy locator prop. Only used when `data-testid` is absent. */
-  testId?: string
-  /** The standard `data-testid` attribute. Wins over `testId` on the same element. */
+  /** The standard `data-testid` attribute: the one locator prop. */
   dataTestId?: string
   /** The author-defined `id` attribute, distinct from the numeric renderer ID. */
   authorId?: string
@@ -457,7 +453,7 @@ export function recordCanvasCommands(
   let recorded: RecordedCanvasCommands | undefined
   const context = getOrCreateRecordingContext2D(owner, {
     strict: true,
-    describeElement: () => '<canvas testId="recorded-frame">',
+    describeElement: () => '<canvas data-testid="recorded-frame">',
     applyCanvasCommands: (ops, operands, strings) => {
       recorded = { ops, operands, strings }
     },
@@ -983,7 +979,6 @@ export class TestRenderer implements NativeRenderer {
         events: new Set(node.events ?? []),
         ...(node.authorId ? { authorId: node.authorId } : {}),
         ...(node.dataTestId ? { dataTestId: node.dataTestId } : {}),
-        ...(node.testId ? { testId: node.testId } : {}),
         ...(node.customProps ? { customProps: node.customProps } : {}),
       } as TestElement
       Object.defineProperties(element, {
@@ -1080,14 +1075,9 @@ export class TestRenderer implements NativeRenderer {
     )
   }
 
-  /** Find the first element whose resolved test ID matches, on the same
-   *  `data-testid`-wins-per-element rule as the bound `*ByTestId` queries.
-   *
-   *  There is no native `data-testid` index shortcut: on a tree that mixes
-   *  `data-testid` and the legacy `testId`, the index answers with its own hit
-   *  while this scan answers with the first match in tree order, so a shortcut
-   *  taken only when no options are passed would return a different element
-   *  with and without them. */
+  /** Find the first element whose `data-testid` matches, on the same rule as
+   *  the bound `*ByTestId` queries: first match in tree order, matcher options
+   *  applied. */
   findByTestId(testId: TestIdMatcher, options?: MatcherOptions): TestElement | undefined {
     return [...this.buildElementMap().values()].find((el) => {
       const resolved = resolveTestId(el)
@@ -1899,7 +1889,6 @@ function describeAccessibleNameMatcher(matcher: AccessibleNameMatcher): string {
 function describeElement(renderer: TestRenderer, element: TestElement): string {
   const identity = [
     element.dataTestId === undefined ? undefined : `data-testid=${JSON.stringify(element.dataTestId)}`,
-    element.testId === undefined ? undefined : `testId=${JSON.stringify(element.testId)}`,
     element.authorId === undefined ? undefined : `id=${JSON.stringify(element.authorId)}`,
   ]
     .filter((attribute): attribute is string => attribute !== undefined)

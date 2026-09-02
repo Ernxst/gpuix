@@ -63,7 +63,6 @@ export const treeNodeSchema: z.ZodType<TreeNode> = z.lazy(() =>
     text: z.string().optional(),
     authorId: z.string().optional(),
     dataTestId: z.string().optional(),
-    testId: z.string().optional(),
     style: z.record(z.string(), z.unknown()).optional(),
     events: z.array(z.string()).optional(),
     customProps: z.record(z.string(), z.unknown()).optional(),
@@ -78,7 +77,6 @@ export interface TreeNode {
   text?: string
   authorId?: string
   dataTestId?: string
-  testId?: string
   style?: Record<string, unknown>
   events?: string[]
   customProps?: Record<string, unknown>

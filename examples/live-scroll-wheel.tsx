@@ -26,11 +26,11 @@ function LiveScrollWheel() {
       }}
     >
       <text style={{ color: "#f5f5f5", fontSize: 18 }}>Live scroll-wheel automation</text>
-      <text testId="scroll-state" style={{ color: "#a3e635" }}>
+      <text data-testid="scroll-state" style={{ color: "#a3e635" }}>
         {`Last wheel: ${lastWheel}`}
       </text>
       <div
-        testId="scroll-target"
+        data-testid="scroll-target"
         style={{ height: 220, overflow: "scroll", backgroundColor: "#262626", padding: 12 }}
         onWheel={(event: EventPayload) =>
           setLastWheel(
@@ -39,14 +39,14 @@ function LiveScrollWheel() {
         }
       >
         <div style={{ height: 960 }}>
-          <text testId="scroll-content" style={{ color: "#d4d4d4" }}>
+          <text data-testid="scroll-content" style={{ color: "#d4d4d4" }}>
             Wheel input moves this live native scroll area.
           </text>
         </div>
       </div>
       <text style={{ color: "#f5f5f5", fontSize: 18 }}>Nested residual routing</text>
       <div
-        testId="nested-scroll-parent"
+        data-testid="nested-scroll-parent"
         style={{
           display: "flex",
           flexDirection: "column",
@@ -58,7 +58,7 @@ function LiveScrollWheel() {
         }}
       >
         <virtual-list
-          testId="nested-scroll-list"
+          data-testid="nested-scroll-list"
           itemCount={nestedRows.length}
           windowStart={0}
           estimatedItemHeight={40}
