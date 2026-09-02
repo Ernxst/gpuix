@@ -1890,6 +1890,21 @@ falls back to `ariaLabel`. Both props accept their DOM spellings,
 </section>
 ```
 
+A referenced node contributes even when it is `ariaHidden`, which is what the
+`sr-only`-style label pattern relies on; a hidden **descendant** of one does
+not. A reference on the referenced element is followed one level and no
+further, so a cycle terminates instead of recursing.
+
+The resolved name is what the accessibility tree carries, so `getByRole(role,
+{ name })` and the platform screen reader both see it. `semantics.label` and
+`getByLabelText` read the authored `ariaLabel` verbatim and do **not** resolve
+references — query a referenced name through `getByRole`.
+
+The resolution reads authored `ariaLabel`s and painted text. It does not apply
+`style.textTransform`, substitute an `<img>`'s `alt`, or read an `<input>`'s
+value, so referencing one of those contributes its text content rather than its
+computed value.
+
 `visuallyHidden` is the screen-reader-only announcement that CSS spells
 `sr-only`. It accepts `true` only, and requires an explicit supported `role`,
 because it projects the element as an accessibility node rather than styling it:

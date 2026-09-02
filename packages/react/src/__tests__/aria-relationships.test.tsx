@@ -155,6 +155,120 @@ describeNative("aria-labelledby and aria-describedby", () => {
     }
   })
 
+  it("includes a directly referenced node even when it is hidden", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text id="ledger-title" ariaHidden>
+            Production ledger
+          </text>
+          <div data-testid="ledger" role="region" ariaLabelledBy="ledger-title" />
+        </div>
+      )
+
+      expect(screen.getByRole("region", { name: "Production ledger" })).toBe(
+        screen.getByTestId("ledger")
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("leaves a hidden descendant of the referenced node out of the name", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div id="heading">
+            <text>Production</text>
+            <text ariaHidden>secret</text>
+            <text>ledger</text>
+          </div>
+          <div data-testid="ledger" role="region" ariaLabelledBy="heading" />
+        </div>
+      )
+
+      expect(screen.getByRole("region", { name: "Production ledger" })).toBe(
+        screen.getByTestId("ledger")
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("substitutes a descendant's ariaLabel for the text it labels", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div id="heading">
+            <text>Production</text>
+            <div role="img" ariaLabel="ledger">
+              <text>ignored glyph</text>
+            </div>
+          </div>
+          <div data-testid="ledger" role="region" ariaLabelledBy="heading" />
+        </div>
+      )
+
+      expect(screen.getByRole("region", { name: "Production ledger" })).toBe(
+        screen.getByTestId("ledger")
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("follows the referenced element's own reference one level", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text id="source">Production ledger</text>
+          <div id="middle" role="region" ariaLabelledBy="source">
+            <text>ignored contents</text>
+          </div>
+          <div data-testid="ledger" role="button" ariaLabelledBy="middle" />
+        </div>
+      )
+
+      expect(screen.getByRole("button", { name: "Production ledger" })).toBe(
+        screen.getByTestId("ledger")
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("terminates on a reference cycle instead of recursing", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div id="left" role="region" ariaLabelledBy="right">
+            <text>Left</text>
+          </div>
+          <div id="right" role="region" ariaLabelledBy="left">
+            <text>Right</text>
+          </div>
+          <div data-testid="target" role="button" ariaLabelledBy="left" />
+        </div>
+      )
+
+      // One level only: "left" resolves through "right", which stops following
+      // references and contributes its own contents instead of recursing.
+      expect(screen.getByRole("button", { name: "Right" })).toBe(screen.getByTestId("target"))
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("describes a node from the text of the element it references", () => {
     const screen = createTestRoot()
 

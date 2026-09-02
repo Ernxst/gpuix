@@ -277,52 +277,107 @@ fn parse_aria_current(value: &serde_json::Value) -> Option<gpui::accesskit::Aria
     }
 }
 
-/// Flatten an element's subtree to the string the accessible name computation
-/// reads from it. Hidden subtrees contribute nothing, as in the DOM.
-pub(crate) fn subtree_text(tree: &RetainedTree, element: &RetainedElement) -> String {
-    let mut descendants = vec![element];
-    let mut words = Vec::new();
-    while let Some(descendant) = descendants.pop() {
-        if is_hidden(descendant) {
+/// The text a `aria-labelledby` / `aria-describedby` target contributes.
+///
+/// An authored `ariaLabel` replaces the subtree it names, at the target and at
+/// every descendant, and painted text is read where there is no such label. A
+/// node named directly by a reference contributes even when it is hidden — the
+/// `<span ariaHidden id="label">` pattern relies on that — while a hidden
+/// descendant of one never does.
+///
+/// This is deliberately not the renderer's build-time flattener. That one lives
+/// on `BuildCtx` and reads the element's own cached `InlineText`, neither of
+/// which exists for an element the build is not currently visiting. The
+/// divergence is therefore real and bounded: this walk does not apply
+/// `text-transform`, does not substitute an `<img>`'s `alt`, and does not read
+/// an `<input>`'s value, so referencing one of those yields its text content
+/// rather than its computed value. Referencing a plain text subtree, which is
+/// what labelling patterns use, agrees with the renderer exactly.
+fn referenced_text(
+    tree: &RetainedTree,
+    element: &RetainedElement,
+    follow_references: bool,
+) -> String {
+    let mut pending = vec![(element, true)];
+    let mut words: Vec<String> = Vec::new();
+
+    while let Some((node, is_target)) = pending.pop() {
+        if !is_target && is_hidden(node) {
             continue;
         }
-        if let Some(content) = &descendant.content {
-            words.extend(content.split_whitespace());
+        // A reference list on the target replaces its contents, but accname
+        // stops following once it is already resolving a reference. One level
+        // is both what the spec computes and what keeps a cycle finite.
+        if is_target && follow_references {
+            if let Some(text) = node
+                .custom_props
+                .get("ariaLabelledBy")
+                .and_then(|value| resolve_references(tree, value, false))
+            {
+                return text;
+            }
         }
-        descendants.extend(
-            descendant
-                .children
+        if let Some(label) = node
+            .custom_props
+            .get("ariaLabel")
+            .and_then(serde_json::Value::as_str)
+            .filter(|label| !label.trim().is_empty())
+        {
+            words.extend(label.split_whitespace().map(str::to_owned));
+            continue;
+        }
+        if let Some(content) = &node.content {
+            words.extend(content.split_whitespace().map(str::to_owned));
+        }
+        pending.extend(
+            node.children
                 .iter()
                 .rev()
-                .filter_map(|id| tree.elements.get(id)),
+                .filter_map(|id| tree.elements.get(id))
+                .map(|child| (child, false)),
         );
     }
     words.join(" ")
 }
 
 /// Resolve an `aria-labelledby` / `aria-describedby` IDREF list to the text its
-/// targets contribute.
+/// targets contribute, joined by a single space in the order written.
 ///
-/// Each reference contributes its own `ariaLabel` when it has one and its
-/// flattened contents otherwise, joined by a single space in the order written.
 /// An id that matches nothing contributes nothing rather than failing the whole
 /// list, which is what the accname spec's traversal does.
 fn resolve_id_references(tree: &RetainedTree, value: &serde_json::Value) -> Option<String> {
+    resolve_references(tree, value, true)
+}
+
+fn resolve_references(
+    tree: &RetainedTree,
+    value: &serde_json::Value,
+    follow_references: bool,
+) -> Option<String> {
     let references = value.as_str()?;
-    let mut parts = Vec::new();
-    for reference in references.split_whitespace() {
-        let Some(target) = tree
-            .find_by_element_id(reference)
-            .and_then(|id| tree.elements.get(&id))
-        else {
+    // One pass over the tree for the whole list. Resolving each id on its own
+    // rescans every element per reference, which turns a handful of labelled
+    // controls into a quadratic walk on a large tree.
+    let mut targets: std::collections::HashMap<&str, Option<&RetainedElement>> =
+        references.split_whitespace().map(|id| (id, None)).collect();
+    if targets.is_empty() {
+        return None;
+    }
+    for element in tree.elements.values() {
+        let Some(author_id) = element.author_id.as_deref() else {
             continue;
         };
-        let text = target
-            .custom_props
-            .get("ariaLabel")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned)
-            .unwrap_or_else(|| subtree_text(tree, target));
+        if let Some(slot) = targets.get_mut(author_id) {
+            slot.get_or_insert(element);
+        }
+    }
+
+    let mut parts = Vec::new();
+    for reference in references.split_whitespace() {
+        let Some(Some(target)) = targets.get(reference) else {
+            continue;
+        };
+        let text = referenced_text(tree, target, follow_references);
         if !text.is_empty() {
             parts.push(text);
         }
