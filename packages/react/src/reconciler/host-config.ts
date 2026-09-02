@@ -756,6 +756,8 @@ const IMPLICIT_ROLES: Readonly<Record<string, NonNullable<Props["role"]>>> = {
   main: "main",
   nav: "navigation",
   ol: "list",
+  // SVG-AAM gives a bare `<svg>` the graphics-document role.
+  svg: "graphics-document",
   ul: "list",
 }
 
