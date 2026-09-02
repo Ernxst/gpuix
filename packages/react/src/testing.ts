@@ -17,6 +17,15 @@ import { fileURLToPath } from "node:url"
 import { createElement, createRef, type ReactNode } from "react"
 import type { EventPayload, MenuSpec } from "@gpuix/native"
 import {
+  getDefaultNormalizer,
+  matches as matchesMatcher,
+  resolveTestId,
+  type Matcher,
+  type MatcherOptions as TestingMatcherOptions,
+  type NormalizerFn,
+  type NormalizerOptions,
+} from "./testing-matchers.js"
+import {
   normalizeScrollWheelOptions,
   type NativeScrollWheelOptions,
   type ScrollWheelInput,
@@ -325,22 +334,27 @@ export interface TestElement {
   events: Set<string>
   children: number[]
   parentId: number | null
+  /** The legacy locator prop. Only used when `data-testid` is absent. */
   testId?: string
-  /** The standard `data-testid` attribute used by the test renderer lookup. */
+  /** The standard `data-testid` attribute. Wins over `testId` on the same element. */
   dataTestId?: string
   /** The author-defined `id` attribute, distinct from the numeric renderer ID. */
   authorId?: string
   customProps?: Record<string, unknown>
 }
 
-export type TextMatcher = RegExp | string
-export type TestIdMatcher = RegExp | string
+export type MatcherOptions = TestingMatcherOptions
+export type { NormalizerFn, NormalizerOptions }
+export { getDefaultNormalizer }
+export type TextMatcher = Matcher<TestElement>
+export type TestIdMatcher = Matcher<TestElement>
 export type AccessibleNameMatcher =
   | RegExp
   | string
   | ((accessibleName: string, element: TestElement) => boolean)
 
-export interface ByRoleOptions {
+/** As in Testing Library, the matcher options apply to the accessible `name`. */
+export interface ByRoleOptions extends MatcherOptions {
   name?: AccessibleNameMatcher
   level?: number
   /** Defaults to false. `true` awaits native hidden-node snapshot support. */
@@ -349,18 +363,18 @@ export interface ByRoleOptions {
 
 /** Text queries over the GPU-IX desktop test renderer. */
 export interface TextQueries {
-  getByText: (text: TextMatcher) => TestElement
-  queryByText: (text: TextMatcher) => TestElement | null
-  getAllByText: (text: TextMatcher) => TestElement[]
-  queryAllByText: (text: TextMatcher) => TestElement[]
+  getByText: (text: TextMatcher, options?: MatcherOptions) => TestElement
+  queryByText: (text: TextMatcher, options?: MatcherOptions) => TestElement | null
+  getAllByText: (text: TextMatcher, options?: MatcherOptions) => TestElement[]
+  queryAllByText: (text: TextMatcher, options?: MatcherOptions) => TestElement[]
 }
 
 /** Test ID queries over the GPU-IX desktop test renderer. */
 export interface TestIdQueries {
-  getByTestId: (testId: TestIdMatcher) => TestElement
-  queryByTestId: (testId: TestIdMatcher) => TestElement | null
-  getAllByTestId: (testId: TestIdMatcher) => TestElement[]
-  queryAllByTestId: (testId: TestIdMatcher) => TestElement[]
+  getByTestId: (testId: TestIdMatcher, options?: MatcherOptions) => TestElement
+  queryByTestId: (testId: TestIdMatcher, options?: MatcherOptions) => TestElement | null
+  getAllByTestId: (testId: TestIdMatcher, options?: MatcherOptions) => TestElement[]
+  queryAllByTestId: (testId: TestIdMatcher, options?: MatcherOptions) => TestElement[]
 }
 
 /** Computed accessibility-tree queries over the GPU-IX desktop test renderer. */
@@ -1002,17 +1016,28 @@ export class TestRenderer implements NativeRenderer {
     return [...this.buildElementMap().values()].filter((el) => el.type === type)
   }
 
-  /** Find the first text element containing the given string. */
-  findByText(text: string): TestElement | undefined {
+  /** Find the first element whose own text matches, on the shared matcher
+   *  semantics: exact after trimming and collapsing whitespace unless the
+   *  matcher or options say otherwise. */
+  findByText(text: TextMatcher, options?: MatcherOptions): TestElement | undefined {
     return [...this.buildElementMap().values()].find(
-      (el) => el.text != null && el.text.includes(text)
+      (el) => el.text != null && matchesMatcher(el.text, el, text, options)
     )
   }
 
-  findByTestId(testId: string): TestElement | undefined {
-    const dataTestId = this.native.findByDataTestId(testId)
-    if (dataTestId != null) return this.getElement(dataTestId)
-    return [...this.buildElementMap().values()].find((el) => el.testId === testId)
+  /** Find the first element whose resolved test ID matches, on the same
+   *  `data-testid`-wins-per-element rule as the bound `*ByTestId` queries.
+   *
+   *  There is no native `data-testid` index shortcut: on a tree that mixes
+   *  `data-testid` and the legacy `testId`, the index answers with its own hit
+   *  while this scan answers with the first match in tree order, so a shortcut
+   *  taken only when no options are passed would return a different element
+   *  with and without them. */
+  findByTestId(testId: TestIdMatcher, options?: MatcherOptions): TestElement | undefined {
+    return [...this.buildElementMap().values()].find((el) => {
+      const resolved = resolveTestId(el)
+      return resolved !== undefined && matchesMatcher(resolved, el, testId, options)
+    })
   }
 
   /** Resolve an author-defined `id` attribute in the native retained tree. */
@@ -1308,9 +1333,9 @@ function getQueries(
   includeScope: boolean
 ): TestQueries {
   return {
-    getByText: (text) => {
+    getByText: (text, options) => {
       const scope = resolveScope()
-      const matches = findAllByText(renderer, scope, text, includeScope)
+      const matches = findAllByText(renderer, scope, text, includeScope, options)
 
       if (matches.length === 0) throw noTextMatchError(renderer, scope, text, includeScope)
       if (matches.length > 1) throw multipleTextMatchesError(renderer, text, matches)
@@ -1320,26 +1345,27 @@ function getQueries(
 
       return match
     },
-    queryByText: (text) => {
+    queryByText: (text, options) => {
       const scope = resolveScope()
-      const matches = findAllByText(renderer, scope, text, includeScope)
+      const matches = findAllByText(renderer, scope, text, includeScope, options)
 
       if (matches.length > 1) throw multipleTextMatchesError(renderer, text, matches)
 
       return matches[0] ?? null
     },
-    getAllByText: (text) => {
+    getAllByText: (text, options) => {
       const scope = resolveScope()
-      const matches = findAllByText(renderer, scope, text, includeScope)
+      const matches = findAllByText(renderer, scope, text, includeScope, options)
 
       if (matches.length === 0) throw noTextMatchError(renderer, scope, text, includeScope)
 
       return matches
     },
-    queryAllByText: (text) => findAllByText(renderer, resolveScope(), text, includeScope),
-    getByTestId: (testId) => {
+    queryAllByText: (text, options) =>
+      findAllByText(renderer, resolveScope(), text, includeScope, options),
+    getByTestId: (testId, options) => {
       const scope = resolveScope()
-      const matches = findAllByTestId(renderer, scope, testId, includeScope)
+      const matches = findAllByTestId(renderer, scope, testId, includeScope, options)
 
       if (matches.length === 0) throw noTestIdMatchError(renderer, scope, testId)
       if (matches.length > 1) throw multipleTestIdMatchesError(renderer, testId, matches)
@@ -1349,22 +1375,23 @@ function getQueries(
 
       return match
     },
-    queryByTestId: (testId) => {
-      const matches = findAllByTestId(renderer, resolveScope(), testId, includeScope)
+    queryByTestId: (testId, options) => {
+      const matches = findAllByTestId(renderer, resolveScope(), testId, includeScope, options)
 
       if (matches.length > 1) throw multipleTestIdMatchesError(renderer, testId, matches)
 
       return matches[0] ?? null
     },
-    getAllByTestId: (testId) => {
+    getAllByTestId: (testId, options) => {
       const scope = resolveScope()
-      const matches = findAllByTestId(renderer, scope, testId, includeScope)
+      const matches = findAllByTestId(renderer, scope, testId, includeScope, options)
 
       if (matches.length === 0) throw noTestIdMatchError(renderer, scope, testId)
 
       return matches
     },
-    queryAllByTestId: (testId) => findAllByTestId(renderer, resolveScope(), testId, includeScope),
+    queryAllByTestId: (testId, options) =>
+      findAllByTestId(renderer, resolveScope(), testId, includeScope, options),
     getByRole: (role, options = {}) => {
       const scope = resolveScope()
       const matches = findAllByRole(renderer, scope, role, options, includeScope)
@@ -1407,12 +1434,13 @@ function findAllByText(
   renderer: TestRenderer,
   scope: TestElement,
   text: TextMatcher,
-  includeScope: boolean
+  includeScope: boolean,
+  options?: MatcherOptions
 ): TestElement[] {
   return getElements(renderer, scope, includeScope).filter(
     (element) =>
-      matchesText(textContent(renderer, element), text) &&
-      !hasMatchingChild(renderer, element, text)
+      matchesMatcher(nodeText(renderer, element), element, text, options) &&
+      !hasMatchingTextChild(renderer, element, text, options)
   )
 }
 
@@ -1420,13 +1448,13 @@ function findAllByTestId(
   renderer: TestRenderer,
   scope: TestElement,
   testId: TestIdMatcher,
-  includeScope: boolean
+  includeScope: boolean,
+  options?: MatcherOptions
 ): TestElement[] {
-  return getElements(renderer, scope, includeScope).filter(
-    (element) =>
-      (element.dataTestId !== undefined && matchesTestId(element.dataTestId, testId)) ||
-      (element.testId !== undefined && matchesTestId(element.testId, testId))
-  )
+  return getElements(renderer, scope, includeScope).filter((element) => {
+    const resolved = resolveTestId(element)
+    return resolved !== undefined && matchesMatcher(resolved, element, testId, options)
+  })
 }
 
 interface AccessibleHost {
@@ -1466,7 +1494,7 @@ function findAllByRole(
     .filter(
       (candidate) =>
         options.name === undefined ||
-        matchesAccessibleName(candidate.name, options.name, candidate.element)
+        matchesAccessibleName(candidate.name, options.name, candidate.element, options)
     )
     .map((candidate) => candidate.element)
 }
@@ -1538,27 +1566,31 @@ function describeComputedRole(role: string): string {
   return normalized
 }
 
+/** The accessible name goes through the same matcher as text and test IDs, so
+ *  `{ exact: false }`, a `normalizer`, and predicates read the normalized name. */
 function matchesAccessibleName(
   accessibleName: string,
   matcher: AccessibleNameMatcher,
-  element: TestElement
+  element: TestElement,
+  options?: MatcherOptions
 ): boolean {
-  if (typeof matcher === "function") return matcher(accessibleName, element)
-  if (!(matcher instanceof RegExp)) return accessibleName === matcher
-
-  matcher.lastIndex = 0
-  const matches = matcher.test(accessibleName)
-  matcher.lastIndex = 0
-  return matches
+  return matchesMatcher(accessibleName, element, matcher, options)
 }
 
-function hasMatchingChild(
+function nodeText(renderer: TestRenderer, element: TestElement): string {
+  return `${element.text ?? ""}${getChildren(renderer, element)
+    .map((child) => child.text ?? "")
+    .join("")}`
+}
+
+function hasMatchingTextChild(
   renderer: TestRenderer,
   element: TestElement,
-  text: TextMatcher
+  text: TextMatcher,
+  options?: MatcherOptions
 ): boolean {
   return getChildren(renderer, element).some((child) =>
-    matchesText(textContent(renderer, child), text)
+    matchesMatcher(nodeText(renderer, child), child, text, options)
   )
 }
 
@@ -1583,24 +1615,6 @@ function getElement(renderer: TestRenderer, id: number, relationship: string): T
   return element
 }
 
-function matchesText(content: string, text: TextMatcher): boolean {
-  if (!(text instanceof RegExp)) return content === text
-
-  text.lastIndex = 0
-  const matches = text.test(content)
-  text.lastIndex = 0
-  return matches
-}
-
-function matchesTestId(value: string, testId: TestIdMatcher): boolean {
-  if (!(testId instanceof RegExp)) return value === testId
-
-  testId.lastIndex = 0
-  const matches = testId.test(value)
-  testId.lastIndex = 0
-  return matches
-}
-
 function noTextMatchError(
   renderer: TestRenderer,
   scope: TestElement,
@@ -1608,10 +1622,9 @@ function noTextMatchError(
   includeScope: boolean
 ): Error {
   const nearMisses = getElements(renderer, scope, includeScope)
-    .map((element) => ({ element, content: textContent(renderer, element) }))
-    .filter(({ element, content }) => element.text !== null && content.length > 0)
+    .filter((element) => element.text !== null && element.text.length > 0)
     .slice(0, 5)
-    .map(({ element }) => `  ${describeElement(renderer, element)}`)
+    .map((element) => `  ${describeElement(renderer, element)}`)
   const nearby =
     nearMisses.length === 0 ? "No text was rendered in this scope." : nearMisses.join("\n")
 
@@ -1720,6 +1733,7 @@ function describeElement(renderer: TestRenderer, element: TestElement): string {
 }
 
 function describeMatcher(text: TextMatcher): string {
+  if (typeof text === "function") return `[function ${text.name || "anonymous"}]`
   return text instanceof RegExp ? text.toString() : JSON.stringify(text)
 }
 

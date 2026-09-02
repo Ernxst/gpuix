@@ -1,6 +1,11 @@
 import React from "react"
 import { describe, expect, it } from "vitest"
-import { createTestRoot, isNativeTestRendererAvailable, textContent } from "../testing.js"
+import {
+  createTestRoot,
+  getDefaultNormalizer,
+  isNativeTestRendererAvailable,
+  textContent,
+} from "../testing.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -74,6 +79,163 @@ describeNative("createTestRoot bound queries", () => {
       expect(() => scoped.getByTestId("details")).toThrowError(
         'Unable to find an element with test ID "details" within <div testId="summary"'
       )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("uses Testing Library matcher normalization, options, and predicates", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text testId="  Primary   Action  ">{"  Save\n  factory  "}</text>
+          <text data-testid="secondary-action">Delete factory</text>
+          <div testId="wrapper">
+            <text>Nested only</text>
+          </div>
+        </div>
+      )
+
+      const save = screen.getByText("Save factory")
+      expect(save.text).toBe("  Save\n  factory  ")
+      expect(screen.queryByText("Save")).toBeNull()
+      expect(screen.getByText("save", { exact: false }).text).toContain("Save")
+      expect(
+        screen.getByText(
+          (content, element) =>
+            content === "Save factory" && element.text === "  Save\n  factory  "
+        )
+      ).toBe(save)
+      expect(
+        screen.getByText("save factory", {
+          normalizer: (content) => content.trim().replace(/\s+/g, " ").toLowerCase(),
+        })
+      ).toBe(save)
+
+      expect(screen.queryByTestId("primary")).toBeNull()
+      expect(screen.getByTestId("primary", { exact: false }).testId).toContain("Primary")
+      expect(
+        screen.getByTestId(
+          (content, element) =>
+            content === "secondary-action" && element.dataTestId === "secondary-action"
+        ).dataTestId
+      ).toBe("secondary-action")
+      expect(
+        screen.getByTestId("PRIMARY ACTION", {
+          normalizer: (content) => content.trim().replace(/\s+/g, " ").toUpperCase(),
+        }).testId
+      ).toBe("  Primary   Action  ")
+
+      expect(screen.getAllByText("Nested only")).toHaveLength(1)
+      expect(screen.getByTestId("wrapper").text).toBeNull()
+
+      // trim and collapseWhitespace switch off the default normalizer's parts,
+      // and getDefaultNormalizer composes them into a custom one.
+      expect(screen.queryByText("Save factory", { collapseWhitespace: false })).toBeNull()
+      expect(screen.getByText("Save\n  factory", { collapseWhitespace: false })).toBe(save)
+      expect(screen.getByText(" Save factory ", { trim: false })).toBe(save)
+      expect(
+        screen.getByText("SAVE FACTORY", {
+          normalizer: (content) => getDefaultNormalizer()(content).toUpperCase(),
+        })
+      ).toBe(save)
+      expect(() =>
+        screen.getByText("Save factory", { trim: false, normalizer: (content) => content })
+      ).toThrowError(/trim and collapseWhitespace are not supported with a normalizer/)
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("resolves one test ID per element, preferring data-testid", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text testId="legacy-only">Legacy</text>
+          <text data-testid="standard" testId="shadowed">
+            Standard
+          </text>
+        </div>
+      )
+
+      const standard = screen.getByTestId("standard")
+      expect(standard.testId).toBe("shadowed")
+      expect(screen.getAllByTestId("legacy-only")).toHaveLength(1)
+
+      // The legacy prop no longer answers on an element that has data-testid,
+      // so a mixed tree cannot report different counts to different query paths.
+      expect(screen.queryAllByTestId("shadowed")).toEqual([])
+      expect(screen.queryByTestId("shadowed")).toBeNull()
+      expect(screen.renderer.findByTestId("shadowed")).toBeUndefined()
+      expect(screen.renderer.findByTestId("standard")).toBe(standard)
+      expect(screen.renderer.findByTestId("legacy-only")?.testId).toBe("legacy-only")
+
+      // renderer.findByText runs on the shared matcher, not a raw substring.
+      const label = screen.renderer.findByText("Standard")
+      expect(label?.text).toBe("Standard")
+      expect(screen.renderer.findByText("Stand")).toBeUndefined()
+      expect(screen.renderer.findByText("stand", { exact: false })).toBe(label)
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("answers findByTestId the same with and without matcher options", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text testId="target">Legacy</text>
+          <text data-testid="target">Standard</text>
+        </div>
+      )
+
+      // Both elements resolve to the same test ID, so the answer is the first
+      // in tree order. Passing options must not move the query onto a native
+      // data-testid index that would answer with the second one instead.
+      const first = screen.renderer.findByTestId("target")
+      expect(first).toBeDefined()
+      expect(textContent(screen.renderer, first!)).toBe("Legacy")
+      expect(first?.dataTestId).toBeUndefined()
+      expect(screen.renderer.findByTestId("target", {})).toBe(first)
+      expect(screen.renderer.findByTestId("target", { exact: false })).toBe(first)
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("matches accessible names through the shared matcher", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div testId="output" role="heading" ariaLabel="  Iron   Output  " ariaLevel={2} />
+        </div>
+      )
+
+      const output = screen.getByTestId("output")
+
+      expect(screen.getByRole("heading", { name: "Iron Output" })).toBe(output)
+      expect(screen.queryByRole("heading", { name: "  Iron   Output  " })).toBeNull()
+      expect(screen.getByRole("heading", { name: "iron out", exact: false })).toBe(output)
+      expect(
+        screen.getByRole("heading", {
+          name: "IRON OUTPUT",
+          normalizer: (content) => getDefaultNormalizer()(content).toUpperCase(),
+        })
+      ).toBe(output)
+      expect(screen.getByRole("heading", { name: /^Iron Output$/, level: 2 })).toBe(output)
+      expect(
+        screen.getByRole("heading", {
+          name: (name, element) => name === "Iron Output" && element.testId === "output",
+        })
+      ).toBe(output)
     } finally {
       screen.unmount()
     }

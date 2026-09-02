@@ -3180,7 +3180,7 @@ two disagree.
 
 | Call | Matches |
 |---|---|
-| `app.getByTestId('send')` | The `testId` prop |
+| `app.getByTestId('send')` | The `data-testid` prop, or `testId` when absent |
 | `app.getByText('New chat')` | A node's own text |
 | `app.getByType('textarea')` | The host element type |
 | `locator.getByText('...')` | A descendant of another locator |
@@ -3189,6 +3189,13 @@ two disagree.
 focused editor contents. `press('enter')` sends one key. `waitFor()` polls until
 exactly one match exists. `textContent()` returns the node's own text plus every
 descendant's, like DOM `textContent`.
+
+Text and test-ID locators use Testing Library matcher semantics: strings are
+exact after trimming and collapsing whitespace, `{ exact: false }` enables a
+case-insensitive substring match, and regular expressions, predicate matchers,
+`{ trim }`, `{ collapseWhitespace }`, and custom `{ normalizer }` functions are
+supported. A node has one test ID: `data-testid` if present, otherwise the
+legacy `testId` prop — the same rule the in-process queries use.
 
 ### Mouse, wheel, and drag
 
@@ -3358,8 +3365,8 @@ native renderer can initialize. The old `hasNativeTestRenderer` export remains
 removed.
 
 `createTestRoot()` returns synchronous queries bound to its renderer. Text
-queries match retained `<text>` content, test ID queries match both `testId`
-and the standard `data-testid` prop, and role queries match GPUI's computed
+queries match retained `<text>` content, test ID queries match one test ID per
+element, and role queries match GPUI's computed
 accessibility role, accessible name, and heading level. Role names are ARIA
 names such as `button`, `heading`, and `region`; `name` accepts a string,
 regular expression, or predicate. The singular `getBy...` and `queryBy...`
@@ -3367,6 +3374,20 @@ methods throw when more than one element matches; required `getBy...` /
 `getAllBy...` methods also throw when none match. Their `queryBy...` /
 `queryAllBy...` counterparts return `null` / `[]` for a miss. `within(element)`
 returns the same query families scoped to that element's descendants.
+
+Text, test-ID, and accessible-name matching trims and collapses whitespace
+before matching exactly. All three also accept regular expressions, predicate
+matchers, `{ exact: false }`, `{ trim: false }`, `{ collapseWhitespace: false }`,
+and a custom `{ normalizer }` — composable with the exported
+`getDefaultNormalizer({ trim, collapseWhitespace })` — following Testing
+Library's matcher semantics. Passing `normalizer` together with `trim` or
+`collapseWhitespace` throws, as it does there.
+
+An element has exactly one test ID, as in Testing Library. `data-testid` is the
+standard attribute and wins; the legacy `testId` prop answers only for elements
+that carry no `data-testid`. The retained-tree queries, `renderer.findByTestId`,
+and the automation locators all resolve it that way, so a tree that mixes the
+two props returns the same nodes through every path.
 
 Role queries currently search the visible accessibility tree. `hidden` defaults
 to `false`, and `{ hidden: false }` is supported explicitly. `{ hidden: true }`

@@ -1630,6 +1630,29 @@ describeNative("automation", () => {
     expect(renderer.findByTestId("true")?.dataTestId).toBe("true")
   })
 
+  it("counts the same test IDs in-process and over automation on a mixed tree", async () => {
+    const screen = createTestRoot()
+    screen.render(
+      <div>
+        <div testId="legacy-only" />
+        <div data-testid="standard" testId="shadowed" />
+      </div>
+    )
+    const app = await connectTest(screen.renderer)
+
+    for (const testId of ["legacy-only", "standard", "shadowed"]) {
+      expect([testId, await app.getByTestId(testId).count()]).toEqual([
+        testId,
+        screen.queryAllByTestId(testId).length,
+      ])
+    }
+    expect(await app.getByTestId("shadowed").count()).toBe(0)
+    expect(await app.getByTestId("standard").count()).toBe(1)
+
+    await app.close()
+    screen.unmount()
+  })
+
   it("clicks a testId locator and waits for text", async () => {
     const { render, renderer } = createTestRoot()
     render(<Counter />)

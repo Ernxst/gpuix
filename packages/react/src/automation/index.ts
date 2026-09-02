@@ -17,6 +17,8 @@ export type {
   AutomationBackend,
   DragOptions,
   LiveAutomationRenderer,
+  LocatorMatcher,
+  LocatorMatcherOptions,
   MouseOptions,
   PointTarget,
   TestAutomationRenderer,
