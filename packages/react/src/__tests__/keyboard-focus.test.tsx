@@ -628,6 +628,10 @@ describeNative("keyboard focus", () => {
       testRoot.renderer.simulateKeystrokes("escape")
       testRoot.renderer.simulateKeystrokes("cmd-shift-p")
 
+      // `"p"` for `cmd-shift-p` is a known divergence in the shared key-name
+      // normalization, not a property of this path: UI Events reports the
+      // shifted character, `"P"`. Asserted as it behaves so a later parity fix
+      // reads as the fix it is.
       expect(events.map((event) => event.key)).toEqual(["k", "Escape", "p"])
       expect(events.every((event) => event.target.id === rootRef.current!.id)).toBe(true)
       expect(events.every((event) => event.repeat === false)).toBe(true)
@@ -658,7 +662,11 @@ describeNative("keyboard focus", () => {
       ])
     })
 
-    it("stops once something is focused, and resumes when focus is dropped", () => {
+    // Counts, not targets. A root listener is told about the keys of a focused
+    // descendant too, with its own id as `event.target` — pre-existing in
+    // ancestor key delivery, so the assertion here is that the no-focus
+    // fallback adds no delivery on top of it.
+    it("adds no delivery once something is focused, and resumes when focus is dropped", () => {
       let deliveries = 0
       const rootRef = React.createRef<PublicInstance>()
       const controlRef = React.createRef<PublicInstance>()
@@ -683,8 +691,8 @@ describeNative("keyboard focus", () => {
       testRoot.renderer.flush()
       testRoot.renderer.simulateKeystrokes("k")
 
-      // The root's own key handler already hears the key while focus is
-      // inside it; the no-focus fallback must not deliver a second copy.
+      // One more, from the root's own handler hearing the focused element's
+      // key — not two, which is what a second copy from the fallback would be.
       expect(deliveries).toBe(2)
 
       controlRef.current!.blur()

@@ -1877,9 +1877,33 @@ work on first paint.
 
 `event.target` is that root element, and its capture and bubble listeners both
 run at `AT_TARGET`, as they do for any DOM event whose target is the listener.
-Once anything takes focus the key belongs to the focused element and this
-fallback goes quiet, so a key is never delivered twice. `Tab` is unaffected: it
-still traverses, and `preventDefault()` still cancels the traversal.
+`Tab` is unaffected: it still traverses, and `preventDefault()` still cancels
+the traversal.
+
+**A root listener is not only the no-focus path.** An element that listens for
+keys is told about every key event that passes through it, including the ones
+travelling up from a focused descendant, and it is told with **its own id as
+`event.target`** — so a root handler also runs for each character typed into a
+focused `<input>`, and the target does not say so. The no-focus fallback adds no
+delivery there (it stays quiet while anything is focused), but a root listener
+cannot tell the two situations apart from the event alone. Gate on the focus
+read when the difference matters:
+
+```tsx
+<div
+  onKeyDown={(event) => {
+    // Ignore keys that belong to whatever is focused, the way a `document`
+    // listener would check `event.target`.
+    if (renderer.getActiveElement() !== null) return
+    if (event.key === '/') openSearch()
+  }}
+>
+```
+
+That divergence is in ancestor key delivery generally, not in this fallback: it
+is why `event.target` on a key event names the listening element rather than the
+focused one. Treat `getActiveElement()` as the reliable answer until it is
+fixed.
 
 ### Imperative focus
 
