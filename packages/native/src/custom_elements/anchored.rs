@@ -302,6 +302,9 @@ impl CustomElement for AnchoredElement {
         content =
             crate::automation::track_own_bounds(content, ctx.id, ctx.paint_bounds_listener.clone());
         content = super::wire_standard_events(content, &ctx, cx);
+        // A popover or menu is a dialog to a screen reader, and `role` is how an
+        // author says so. Project it here, on the node that owns the host id.
+        content = super::apply_accessibility(content, &ctx);
         if let Some(style) = ctx.style {
             content = crate::renderer::apply_interactive_styles(content, style);
         }

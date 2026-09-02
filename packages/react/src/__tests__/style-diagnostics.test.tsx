@@ -58,10 +58,10 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
           tabIndex={0}
         />
         <markdown
-          data-testid="unsupported-host"
+          data-testid="semantic-markdown"
           role="heading"
-          ariaLabel="Unsupported host"
-          source="Unsupported host contents"
+          ariaLabel="Semantic markdown"
+          source="Semantic markdown contents"
         />
         <div
           data-testid="malformed-label"
@@ -101,7 +101,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       testRoot.render(cases(false, true))
 
       const diagnostics = testRoot.renderer.drainStyleDiagnostics()
-      expect(diagnostics).toHaveLength(15)
+      expect(diagnostics).toHaveLength(14)
       const byTestId = (testId: string) => {
         const diagnostic = diagnostics.find((candidate) => candidate.dataTestId === testId)
         expect(diagnostic, testId).toBeDefined()
@@ -197,14 +197,11 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         "applied",
         "removes the focusable control from the accessibility tree; an ariaHidden subtree must not contain or be a focusable control"
       )
-      expectDiagnostic(
-        "unsupported-host",
-        "markdown",
-        "role",
-        '"heading"',
-        "rejected",
-        "<markdown> does not support accessibility semantics; use a <div>, <text>, <input>, <textarea>, or <img> semantic root"
-      )
+      // A custom element projects what it is given, so a semantic <markdown> is
+      // no longer a problem to report.
+      expect(
+        diagnostics.find((candidate) => candidate.dataTestId === "semantic-markdown")
+      ).toBeUndefined()
       expectDiagnostic(
         "malformed-label",
         "div",

@@ -31,6 +31,10 @@ pub struct CustomRenderContext<'a> {
     /// Full retained declaration. Accessibility is universal rather than a
     /// custom-adapter prop, so supported hosts read it from this shared seam.
     pub retained_element: &'a crate::retained_tree::RetainedElement,
+    /// The tree the declaration sits in. `ariaLabelledBy` and `ariaDescribedBy`
+    /// name other elements by id, so the projection cannot be computed from the
+    /// element alone.
+    pub tree: &'a crate::retained_tree::RetainedTree,
     /// Event types registered by React (e.g. "keyDown", "click").
     pub events: &'a HashSet<String>,
     /// Whether this element or a retained ancestor declares mouse enter/leave.
@@ -155,6 +159,35 @@ pub(crate) fn custom_surface(
         ctx.paint_bounds_listener.clone(),
     ));
     wire_standard_events(el, ctx, cx)
+}
+
+/// Project this element's accessibility props onto a custom element's gpui root.
+///
+/// `role`, `ariaLabel`, `ariaHidden` and the rest are universal host props: they
+/// are declared on `<canvas>` or `<anchored>` exactly as on a `<div>`. Without
+/// this call they reach the retained tree and stop there, so even an explicit
+/// `role` never becomes an AccessKit node.
+///
+/// Call it on the element that owns the host's id — gpui keys the accessibility
+/// node off that id, so a projection applied to an inner child is dropped.
+/// `<img>` and `<input>` project their own, because both need the name and value
+/// sources that only they can compute.
+pub(crate) fn apply_accessibility<E: gpui::StatefulInteractiveElement>(
+    el: E,
+    ctx: &CustomRenderContext,
+) -> E {
+    crate::accessibility::apply(
+        el,
+        ctx.tree,
+        ctx.retained_element,
+        ctx.event_callback,
+        ctx.focus_handle,
+        ctx.accessibility_hidden,
+        // These elements paint their own content, which reaches AccessKit as the
+        // value of the node that draws it. Neither name source belongs here.
+        None,
+        None,
+    )
 }
 
 /// Attach the mouse events a custom element declares in `supported_events`.
