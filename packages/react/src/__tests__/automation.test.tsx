@@ -1652,6 +1652,51 @@ describeNative("automation", () => {
     screen.unmount()
   })
 
+  it("locates by label, placeholder, and display value over the automation tree", async () => {
+    const screen = createTestRoot()
+    screen.render(
+      <div>
+        <input
+          data-testid="search"
+          ariaLabel="Recipe search"
+          placeholder="Search recipes"
+          value="iron plate"
+        />
+        <input
+          data-testid="notes"
+          ariaLabel="Build notes"
+          placeholder="Add a note"
+          value="needs coal"
+        />
+      </div>
+    )
+    const app = await connectTest(screen.renderer)
+
+    // The locator tree drops customProps, so these can only come from
+    // `semantics` — the point of promoting the block in the first place.
+    const node = await app.getByLabelText("Recipe search").element()
+    expect(node.customProps).toBeUndefined()
+    expect(node.semantics).toEqual({
+      label: "Recipe search",
+      placeholder: "Search recipes",
+      value: "iron plate",
+    })
+
+    expect((await app.getByPlaceholderText("Add a note").element()).id).toBe(
+      screen.getByTestId("notes").id
+    )
+    expect((await app.getByDisplayValue(/coal/).element()).id).toBe(
+      screen.getByTestId("notes").id
+    )
+    expect(await app.getByLabelText("Missing").count()).toBe(0)
+    expect(
+      await app.getByTestId("search").getByPlaceholderText("Add a note").count()
+    ).toBe(0)
+
+    await app.close()
+    screen.unmount()
+  })
+
   it("clicks a testId locator and waits for text", async () => {
     const { render, renderer } = createTestRoot()
     render(<Counter />)
@@ -1778,6 +1823,95 @@ describeNative("automation", () => {
       { button: 2 },
       { aux: true },
     ])
+    await app.close()
+  })
+
+  it("carries a click count through the automation dispatchers", async () => {
+    const calls: Array<{ type: string; detail: number }> = []
+
+    function Target() {
+      return (
+        <div
+          data-testid="target"
+          style={{ width: 200, height: 80, backgroundColor: "#101010" }}
+          onClick={(event) => calls.push({ type: "click", detail: event.detail })}
+          onDoubleClick={(event) =>
+            calls.push({ type: "doubleClick", detail: event.detail })
+          }
+          onMouseDown={(event) => calls.push({ type: "mouseDown", detail: event.detail })}
+        >
+          <text>target</text>
+        </div>
+      )
+    }
+
+    const { render, renderer } = createTestRoot()
+    render(<Target />)
+    const app = await connectTest(renderer)
+
+    await app.getByTestId("target").dblclick()
+    expect(calls).toEqual([
+      { type: "mouseDown", detail: 1 },
+      { type: "click", detail: 1 },
+      { type: "mouseDown", detail: 2 },
+      { type: "click", detail: 2 },
+      { type: "doubleClick", detail: 2 },
+    ])
+
+    // The press and release dispatchers carry it too, not only `click`.
+    calls.length = 0
+    const point = await app.getByTestId("target").center()
+    await app.mouse.down(point, { clickCount: 2 })
+    await app.mouse.up(point, { clickCount: 2 })
+    expect(calls).toEqual([
+      { type: "mouseDown", detail: 2 },
+      { type: "click", detail: 2 },
+      { type: "doubleClick", detail: 2 },
+    ])
+
+    await app.close()
+  })
+
+  it("rejects a click count of zero on both sides of the protocol", async () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div data-testid="target" style={{ width: 200, height: 80 }}>
+        <text>target</text>
+      </div>
+    )
+    const app = await connectTest(renderer)
+
+    // The protocol schema rejects it before dispatch...
+    await expect(
+      app.getByTestId("target").click({ clickCount: 0 })
+    ).rejects.toThrow()
+
+    // ...and so does the native entry point, reached directly. Clamping 0 to 1
+    // would repair a caller's nonsense silently, which is what the modifier
+    // parse in this same change stopped doing.
+    expect(() => renderer.nativeSimulateClick(10, 10, 0, undefined, 0)).toThrow(
+      /clickCount 0/
+    )
+
+    await app.close()
+  })
+
+  it("rejects an unknown modifier name rather than dropping it", async () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div data-testid="target" style={{ width: 200, height: 80 }}>
+        <text>target</text>
+      </div>
+    )
+    const app = await connectTest(renderer)
+
+    await expect(
+      app.getByTestId("target").click({ modifiers: "comand" })
+    ).rejects.toThrow(/Unknown modifier 'comand'/)
+    await expect(
+      app.getByTestId("target").click({ modifiers: "cmd-shift" })
+    ).resolves.toBeUndefined()
+
     await app.close()
   })
 

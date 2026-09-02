@@ -512,4 +512,135 @@ describeNative("createTestRoot bound queries", () => {
       root.unmount()
     }
   })
+
+  it("queries labels, placeholders, and display values from the semantics block", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div>
+          <input
+            data-testid="search"
+            ariaLabel="Recipe search"
+            placeholder="Search recipes"
+            value="iron plate"
+          />
+          <textarea
+            data-testid="notes"
+            ariaLabel="Build notes"
+            placeholder="Add a note"
+            value="needs coal"
+          />
+          <div data-testid="panel" ariaLabel="Production ledger" />
+        </div>
+      )
+
+      expect(root.getByLabelText("Recipe search")).toBe(root.getByTestId("search"))
+      expect(root.getByLabelText(/build notes/i)).toBe(root.getByTestId("notes"))
+      // A label is not restricted to controls, and it is not the node's text.
+      expect(root.getByLabelText("Production ledger")).toBe(root.getByTestId("panel"))
+      expect(root.getByPlaceholderText("Search recipes")).toBe(root.getByTestId("search"))
+      expect(root.getByPlaceholderText("add a note", { exact: false })).toBe(
+        root.getByTestId("notes")
+      )
+      expect(root.getByDisplayValue("iron plate")).toBe(root.getByTestId("search"))
+      expect(root.getByDisplayValue(/coal/)).toBe(root.getByTestId("notes"))
+
+      // The block reaches the element itself, not only the query.
+      expect(root.getByTestId("search").semantics).toEqual({
+        label: "Recipe search",
+        placeholder: "Search recipes",
+        value: "iron plate",
+      })
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("implements singular, all, nullable, and scoped semantics queries", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div ariaLabel="Outer" data-testid="outer">
+          <input data-testid="first" ariaLabel="Amount" placeholder="Qty" value="1" />
+          <input data-testid="second" ariaLabel="Amount" placeholder="Qty" value="2" />
+        </div>
+      )
+
+      expect(root.getAllByLabelText("Amount")).toHaveLength(2)
+      expect(root.getAllByPlaceholderText("Qty")).toHaveLength(2)
+      expect(root.getAllByDisplayValue(/[12]/)).toHaveLength(2)
+      expect(root.queryByLabelText("Missing")).toBeNull()
+      expect(root.queryAllByPlaceholderText("Missing")).toEqual([])
+      expect(root.queryAllByDisplayValue("3")).toEqual([])
+      expect(() => root.queryByLabelText("Amount")).toThrowError(
+        /Found multiple elements with label text "Amount"/
+      )
+
+      // `within` searches descendants only, so the scope's own label is absent.
+      const scoped = root.within(root.getByTestId("outer"))
+      expect(scoped.queryByLabelText("Outer")).toBeNull()
+      expect(scoped.getByDisplayValue("1")).toBe(root.getByTestId("first"))
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("reports the declared labels, placeholders, and values on a miss", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div>
+          <input data-testid="search" ariaLabel="Recipe search" placeholder="Search" value="ore" />
+        </div>
+      )
+
+      expect(() => root.getByLabelText("Missing")).toThrowError(
+        /Unable to find an element with label text "Missing"[\s\S]*Here is the label text that was declared:[\s\S]*"Recipe search"/
+      )
+      expect(() => root.getByPlaceholderText("Missing")).toThrowError(
+        /placeholder text "Missing"[\s\S]*"Search"/
+      )
+      expect(() => root.getByDisplayValue("missing")).toThrowError(
+        /display value "missing"[\s\S]*"ore"/
+      )
+      expect(() => root.getAllByLabelText("Missing")).toThrowError(
+        /Unable to find an element with label text "Missing"/
+      )
+
+      // Nothing declared at all reads differently from "declared, but other".
+      root.render(<div data-testid="empty" />)
+      expect(() => root.getByPlaceholderText("Missing")).toThrowError(
+        /No element in this scope declares placeholder\./
+      )
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("retries semantics queries through findBy while the clocks are pumped", async () => {
+    const root = createTestRoot()
+
+    try {
+      function Deferred() {
+        const [ready, setReady] = React.useState(false)
+        React.useEffect(() => {
+          const timer = setTimeout(() => setReady(true), 30)
+          return () => clearTimeout(timer)
+        }, [])
+        return <div>{ready ? <input ariaLabel="Recipe search" value="ore" /> : null}</div>
+      }
+
+      root.render(<Deferred />)
+      expect(root.queryByLabelText("Recipe search")).toBeNull()
+
+      const found = await root.findByLabelText("Recipe search")
+      expect(found.semantics?.value).toBe("ore")
+      expect(await root.findAllByDisplayValue("ore")).toHaveLength(1)
+    } finally {
+      root.unmount()
+    }
+  })
 })
