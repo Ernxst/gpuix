@@ -4038,9 +4038,10 @@ relationships in the DOM shape. A previously returned element re-resolves
 those relationships after a rerender; accessing them after that element was
 removed throws instead of returning a stale snapshot.
 
-`TestElement.getBoundingClientRect()` returns the element's painted box in the
-DOM's `DOMRect` shape — `{ x, y, width, height, top, right, bottom, left }`,
-with the derived fields computed as a browser computes them. The coordinates
+`TestElement.getBoundingClientRect()` returns the element's painted **border
+box** — the box a browser reports, borders and padding included — in the DOM's
+`DOMRect` shape: `{ x, y, width, height, top, right, bottom, left }`, with the
+derived fields computed as a browser computes them. The coordinates
 are the ones `renderer.getElementBounds` reports: logical pixels relative to
 the window, the desktop's analogue of viewport-relative. It re-resolves the
 element on every call, as `children` does. One departure from the DOM: a
@@ -4362,9 +4363,11 @@ await expect(screen.getByTestId('tile')).toMatchScreenshot('tile')
 
 The receiver is a `render()` result, a `TestRenderer`, or a `TestElement`. An
 element capture takes the window screenshot and crops it to the element's
-`getBoundingClientRect()` scaled by the window's `scaleFactor`, so an element
-golden is in device pixels like the window one, and an element that painted
-nothing throws rather than comparing an empty box.
+`getBoundingClientRect()` — the border box, exactly what Playwright and vitest
+browser mode clip to, so a border-colour regression is caught by the golden —
+scaled by the window's `scaleFactor`. An element golden is therefore in device
+pixels like the window one, and an element that painted nothing throws rather
+than comparing an empty box.
 
 Called without a name, the golden is named after the test and a per-test
 counter — `my-test-1.png`, `my-test-2.png` — exactly as in vitest, counter
