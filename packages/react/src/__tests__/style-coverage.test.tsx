@@ -201,11 +201,14 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     )
 
     expect(boundsFor(renderer, "containing-block")[2]).toBeCloseTo(400, 0)
-    // The test window's root reserves a 10px inset on each side, so Taffy
-    // gives this nested 400px box a resolved 380px content basis: 50% + 20px.
-    // A viewport resolver changes this value when the window is resized.
+    // 50% of the 400px containing block plus 20px. The old expectation of
+    // 210 was the calc scale bug at this scaleFactor: 2 window — absolute
+    // atoms resolved unscaled against a device-pixel basis — rationalized at
+    // the time as a root inset that does not exist. A viewport resolver
+    // would change this value when the window is resized; the containing
+    // block does not.
     expect(boundsFor(renderer, "containing-block-calc")[2]).toBeCloseTo(
-      210,
+      220,
       0,
     )
     expect(boundsFor(renderer, "inherited-ch")[2]).toBeGreaterThan(
@@ -214,7 +217,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
 
     renderer.simulateResize(800, 600)
     expect(boundsFor(renderer, "containing-block-calc")[2]).toBeCloseTo(
-      210,
+      220,
       0,
     )
 

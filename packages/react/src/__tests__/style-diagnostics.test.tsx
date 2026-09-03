@@ -560,7 +560,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         message:
           `[gpuix] Invalid style on <div data-testid="bad-width"> (element ${element.id}): ` +
           'property "width" rejected value "banana": invalid length at byte 0: ' +
-          "expected a number with px, %, or ch",
+          "expected a number with px, %, ch, vw, or vh",
       })
       expect(invalid.renderer.drainStyleDiagnostics()).toEqual([])
     } finally {

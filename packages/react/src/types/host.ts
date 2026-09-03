@@ -12,11 +12,14 @@ import type { AccessibilityRole } from "../index.js"
  * Keep this aligned with `DimensionValue::deserialize` in
  * `packages/native/src/style.rs`.
  */
-type LengthAtom = `${number}px` | `${number}%` | `${number}ch`
+type LengthAtom = `${number}px` | `${number}%` | `${number}ch` | `${number}vw` | `${number}vh`
 type CalcExpression = `${LengthAtom} + ${LengthAtom}` | `${LengthAtom} - ${LengthAtom}`
 export type DimensionValue =
   | number
   | "auto"
+  | "min-content"
+  | "max-content"
+  | "fit-content"
   | LengthAtom
   | `calc(${CalcExpression})`
   | `clamp(${LengthAtom}, ${LengthAtom}, ${LengthAtom})`

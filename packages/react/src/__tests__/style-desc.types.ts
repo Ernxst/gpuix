@@ -40,6 +40,17 @@ const validStyle = {
   ],
 } satisfies StyleDesc
 
+const intrinsicAndViewportLengths = {
+  width: "max-content",
+  minWidth: "min-content",
+  maxWidth: "fit-content",
+  height: "100vh",
+  minHeight: "calc(50vh - 10px)",
+  maxHeight: "12.5vw",
+} satisfies StyleDesc
+
+void intrinsicAndViewportLengths
+
 const pathImage: ImageSource = { kind: "path", path: "/tmp/avatar.png" }
 const sourceProps: ImgProps[] = [
   { src: "https://example.com/avatar.png" },

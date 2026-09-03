@@ -86,6 +86,16 @@ pub enum DimensionValue {
     Pixels(f64),
     Percentage(f64), // 0.0 to 1.0
     Ch(f64),
+    /// 1vw is 1% of the window's viewport width, as in a browser.
+    Vw(f64),
+    /// 1vh is 1% of the window's viewport height.
+    Vh(f64),
+    /// CSS `min-content`: the smallest size the content can take.
+    MinContent,
+    /// CSS `max-content`: the content laid out without wrapping.
+    MaxContent,
+    /// CSS `fit-content`: `clamp(min-content, stretch, max-content)`.
+    FitContent,
     Calc {
         source: String,
         left: Box<DimensionValue>,
@@ -308,7 +318,9 @@ impl<'de> Deserialize<'de> for DimensionValue {
             type Value = DimensionValue;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a number, px, %, ch, calc(), clamp(), or 'auto'")
+                formatter.write_str(
+                    "a number, px, %, ch, vw, vh, calc(), clamp(), 'auto', or an intrinsic sizing keyword",
+                )
             }
 
             fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
@@ -356,6 +368,11 @@ impl Serialize for DimensionValue {
             // Preserve that public diagnostic/test representation.
             Self::Percentage(value) => serializer.serialize_f64(*value),
             Self::Ch(value) => serializer.serialize_str(&format!("{value}ch")),
+            Self::Vw(value) => serializer.serialize_str(&format!("{value}vw")),
+            Self::Vh(value) => serializer.serialize_str(&format!("{value}vh")),
+            Self::MinContent => serializer.serialize_str("min-content"),
+            Self::MaxContent => serializer.serialize_str("max-content"),
+            Self::FitContent => serializer.serialize_str("fit-content"),
             Self::Calc { source, .. } | Self::Clamp { source, .. } => {
                 serializer.serialize_str(source)
             }
@@ -430,6 +447,14 @@ fn parse_dimension(value: &str) -> Result<DimensionValue, String> {
     if value == "auto" {
         return Ok(DimensionValue::Auto);
     }
+    // CSS intrinsic sizing keywords are lengths only at the top level; calc()
+    // and clamp() reject them, exactly as a browser does.
+    match value {
+        "min-content" => return Ok(DimensionValue::MinContent),
+        "max-content" => return Ok(DimensionValue::MaxContent),
+        "fit-content" => return Ok(DimensionValue::FitContent),
+        _ => {}
+    }
     if let Some(inner) = value
         .strip_prefix("calc(")
         .and_then(|value| value.strip_suffix(')'))
@@ -490,7 +515,13 @@ fn parse_length_atom(value: &str) -> Result<DimensionValue, String> {
     if let Some(number) = value.strip_suffix("ch") {
         return parse(number, "ch").map(DimensionValue::Ch);
     }
-    Err("invalid length at byte 0: expected a number with px, %, or ch".into())
+    if let Some(number) = value.strip_suffix("vw") {
+        return parse(number, "vw").map(DimensionValue::Vw);
+    }
+    if let Some(number) = value.strip_suffix("vh") {
+        return parse(number, "vh").map(DimensionValue::Vh);
+    }
+    Err("invalid length at byte 0: expected a number with px, %, ch, vw, or vh".into())
 }
 
 fn find_calc_operator(value: &str) -> Option<(usize, CalcOperator)> {
@@ -2143,6 +2174,55 @@ mod tests {
             serde_json::to_value(parsed.style).unwrap()["width"],
             "calc(100% - 4ch)"
         );
+    }
+
+    #[test]
+    fn parses_intrinsic_keywords_and_viewport_units() {
+        let parsed = parse_style_value(&json!({
+            "width": "max-content",
+            "minWidth": "min-content",
+            "maxWidth": "fit-content",
+            "height": "100vh",
+            "minHeight": "calc(50vh - 10px)",
+            "maxHeight": "12.5vw",
+        }));
+
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.width, Some(DimensionValue::MaxContent));
+        assert_eq!(parsed.style.min_width, Some(DimensionValue::MinContent));
+        assert_eq!(parsed.style.max_width, Some(DimensionValue::FitContent));
+        assert_eq!(parsed.style.height, Some(DimensionValue::Vh(100.0)));
+        assert!(matches!(
+            parsed.style.min_height,
+            Some(DimensionValue::Calc { ref left, .. }) if **left == DimensionValue::Vh(50.0)
+        ));
+        assert_eq!(parsed.style.max_height, Some(DimensionValue::Vw(12.5)));
+
+        let serialized = serde_json::to_value(parsed.style).unwrap();
+        assert_eq!(serialized["width"], "max-content");
+        assert_eq!(serialized["minWidth"], "min-content");
+        assert_eq!(serialized["maxWidth"], "fit-content");
+        assert_eq!(serialized["height"], "100vh");
+        assert_eq!(serialized["maxHeight"], "12.5vw");
+    }
+
+    #[test]
+    fn rejects_intrinsic_keywords_inside_expressions() {
+        // A browser rejects `calc(max-content + 4px)` and
+        // `clamp(min-content, 50%, max-content)` too: the keywords are not
+        // <length-percentage> terms. `fit-content(240px)` is different — it
+        // is valid CSS on width — but the functional form is a deliberate
+        // scope cut here (README documents it); this pins the rejection so
+        // adding it later is a conscious change.
+        for (property, value) in [
+            ("width", "calc(max-content + 4px)"),
+            ("width", "clamp(min-content, 50%, 240px)"),
+            ("width", "fit-content(240px)"),
+        ] {
+            let parsed = parse_style_value(&json!({ property: value }));
+            assert_eq!(parsed.problems.len(), 1, "{value}");
+            assert_eq!(parsed.problems[0].property, property, "{value}");
+        }
     }
 
     #[test]
