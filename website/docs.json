@@ -47,7 +47,7 @@
         "href": "https://github.com/Ernxst/gpuix"
       },
       {
-        "tab": "npm",
+        "tab": "npm (upstream)",
         "icon": "lucide:package",
         "href": "https://www.npmjs.com/package/@gpuix/react"
       }
