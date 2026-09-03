@@ -12,10 +12,11 @@
 >
 > **The `@gpuix/native` and `@gpuix/react` packages on the npm registry are upstream's**,
 > published by upstream's maintainer, so `bun add @gpuix/react` installs upstream, not this fork.
-> This fork does **not** publish to npm. Its builds will be distributed as tarballs attached to
+> This fork does **not** publish to npm. Its builds are distributed as tarballs attached to
 > [this repository's GitHub releases](https://github.com/Ernxst/gpuix/releases) under the same two
-> names; none are published yet, so
-> [build from a checkout](#consuming-an-unpublished-checkout) for now.
+> names — install those per
+> [Consuming an unpublished checkout](#consuming-an-unpublished-checkout) (the `overrides`
+> entry is required), or build from a checkout.
 
 React bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) - Zed's GPU-accelerated UI framework.
 
@@ -205,9 +206,10 @@ The rest live in [`examples/`](https://github.com/Ernxst/gpuix/tree/main/example
 CI compiles a standalone **chat** binary on `workflow_dispatch` runs, one per target, and uploads
 each as a `example-chat-<target>` **workflow artifact**. Running one needs no Bun and no Rust
 install. Nothing attaches those artifacts to a [release](https://github.com/Ernxst/gpuix/releases)
-automatically — a release asset is put there by hand — and this fork has published no releases
-yet. For now the example comes from a checkout; the commands below are what an unpacked download
-looks like.
+automatically — a release asset is put there by hand. The fork's
+[releases](https://github.com/Ernxst/gpuix/releases) carry the package tarballs; chat binaries
+are attached when a dispatch run has built them. If a release has none, the example comes from a
+checkout; the commands below are what an unpacked download looks like.
 
 ```bash
 tar -xzf example-chat-aarch64-apple-darwin.tar.gz
