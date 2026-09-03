@@ -503,6 +503,22 @@ export interface StyleDesc {
   borderBottomWidth?: number
   borderLeftWidth?: number
   borderColor?: GpuixColor
+  /**
+   * CSS `border-style` line style. `"none"` and `"hidden"` compute the used
+   * border width to zero, like CSS. GPUI paints only solid and dashed lines:
+   * `"dotted"` degrades to dashed, and the 3D styles degrade to solid.
+   */
+  borderStyle?:
+    | "none"
+    | "hidden"
+    | "dotted"
+    | "dashed"
+    | "solid"
+    | "double"
+    | "groove"
+    | "ridge"
+    | "inset"
+    | "outset"
   borderRadius?: number
   borderTopLeftRadius?: number
   borderTopRightRadius?: number

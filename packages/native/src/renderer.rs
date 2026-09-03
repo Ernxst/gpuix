@@ -8952,7 +8952,6 @@ fn build_virtual_list(
             .relative()
             .group(gpui::SharedString::from(group.to_owned()))
             .child(list)
-            .child(crate::automation::bounds_tracker(id, None, None))
             .on_hover(cx.listener(move |view, is_hovered: &bool, _window, cx| {
                 if view
                     .interactive_style_states
@@ -8966,6 +8965,7 @@ fn build_virtual_list(
         if style.and_then(|style| style.pointer_events.as_deref()) == Some("none") {
             surface = surface.ignore_mouse();
         }
+        let surface = crate::automation::track_own_bounds(surface, id, None, None);
         return surface.into_any_element();
     }
     list.into_any_element()
@@ -9118,12 +9118,14 @@ fn direct_child_index(tree: &RetainedTree, ancestor_id: u64, element_id: u64) ->
 /// `index`th retained child.
 ///
 /// gpui counts the children it painted, and `build_host_container` paints up to
-/// three of its own before the retained ones, in this order:
+/// two of its own before the retained ones, in this order:
 ///
-/// 1. the automation bounds tracker, on every element;
-/// 2. the scroll-position tracker, on a scroller carrying an `onScroll`
+/// 1. the scroll-position tracker, on a scroller carrying an `onScroll`
 ///    listener — the same `events.contains("scroll")` gate that attaches it;
-/// 3. the element's own text, when it has `content`.
+/// 2. the element's own text, when it has `content`.
+///
+/// Automation bounds are recorded through `on_painted` on the element itself
+/// (issue #301), so they no longer occupy a child slot.
 ///
 /// The index is only ever *used* on an element that owns a
 /// `gpui::ScrollHandle`, so the scroll tracker's other condition (the element
@@ -9153,9 +9155,8 @@ fn painted_index_of_child(tree: &RetainedTree, scroller_id: u64, index: usize) -
     if scroller.element_type == "text" || index >= scroller.children.len() {
         return None;
     }
-    let leading = 1
-        + usize::from(scroller.events.contains("scroll"))
-        + usize::from(scroller.content.is_some());
+    let leading =
+        usize::from(scroller.events.contains("scroll")) + usize::from(scroller.content.is_some());
     Some(index + leading)
 }
 
@@ -9191,7 +9192,9 @@ mod painted_child_index_tests {
     }
 
     #[test]
-    fn div_scroller_child_index_skips_the_automation_tracker() {
+    fn div_scroller_child_index_matches_the_retained_index() {
+        // Automation bounds record through `on_painted`, not a child, so a
+        // plain scroller's painted children ARE its retained children.
         let tree = tree_from(serde_json::json!([
             ["createElement", 1, "div"],
             ["createElement", 2, "div"],
@@ -9201,8 +9204,8 @@ mod painted_child_index_tests {
             ["setRoot", 1]
         ]));
 
-        assert_eq!(painted_child_index(&tree, 1, 2), Some(1));
-        assert_eq!(painted_child_index(&tree, 1, 3), Some(2));
+        assert_eq!(painted_child_index(&tree, 1, 2), Some(0));
+        assert_eq!(painted_child_index(&tree, 1, 3), Some(1));
     }
 
     #[test]
@@ -9222,7 +9225,7 @@ mod painted_child_index_tests {
     }
 
     #[test]
-    fn child_index_from_the_public_api_skips_the_automation_tracker_too() {
+    fn child_index_from_the_public_api_matches_the_retained_index_too() {
         let tree = tree_from(serde_json::json!([
             ["createElement", 1, "div"],
             ["createElement", 2, "div"],
@@ -9232,14 +9235,14 @@ mod painted_child_index_tests {
             ["setRoot", 1]
         ]));
 
-        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(1));
-        assert_eq!(painted_index_of_child(&tree, 1, 1), Some(2));
+        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(0));
+        assert_eq!(painted_index_of_child(&tree, 1, 1), Some(1));
     }
 
-    /// An `onScroll` listener puts a second canvas of gpui's own in front of
-    /// the retained children, so the same child moves one further along.
+    /// An `onScroll` listener puts a canvas of gpui's own in front of the
+    /// retained children, so the same child moves one further along.
     #[test]
-    fn an_onscroll_listener_adds_a_second_leading_child() {
+    fn an_onscroll_listener_adds_a_leading_child() {
         let mut tree = tree_from(serde_json::json!([
             ["createElement", 1, "div"],
             ["createElement", 2, "div"],
@@ -9250,18 +9253,18 @@ mod painted_child_index_tests {
         ]));
         tree.set_event_listener(1, "scroll".to_string(), true);
 
-        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(2));
-        assert_eq!(painted_index_of_child(&tree, 1, 1), Some(3));
-        assert_eq!(painted_child_index(&tree, 1, 3), Some(3));
+        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(1));
+        assert_eq!(painted_index_of_child(&tree, 1, 1), Some(2));
+        assert_eq!(painted_child_index(&tree, 1, 3), Some(2));
 
-        // The scroller's own text paints after both trackers.
+        // The scroller's own text paints after the tracker.
         tree.set_text(1, "leading text".to_string());
-        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(3));
+        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(2));
 
         // A listener the scroller does not carry moves nothing.
         tree.set_event_listener(1, "scroll".to_string(), false);
         tree.set_event_listener(1, "click".to_string(), true);
-        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(2));
+        assert_eq!(painted_index_of_child(&tree, 1, 0), Some(1));
     }
 
     /// gpui holds an unsatisfiable `scroll_to_item` request until a frame can
@@ -9277,7 +9280,7 @@ mod painted_child_index_tests {
             ["setRoot", 1]
         ]));
 
-        assert_eq!(painted_index_of_child(&tree, 1, 1), Some(2));
+        assert_eq!(painted_index_of_child(&tree, 1, 1), Some(1));
         assert_eq!(painted_index_of_child(&tree, 1, 2), None);
         assert_eq!(painted_index_of_child(&tree, 1, 6), None);
     }
@@ -9633,11 +9636,12 @@ pub(crate) fn build_host_container(
         el = el.relative();
     }
     let paint_bounds_listener = focus_paint_bounds_listener(element.id, ctx);
-    el = el.child(crate::automation::bounds_tracker(
+    el = crate::automation::track_own_bounds(
+        el,
         element.id,
         selection_start_flag(style),
         paint_bounds_listener,
-    ));
+    );
     if let Some(scroll_tracker) = scroll_tracker {
         el = el.child(scroll_tracker);
     }
@@ -10699,22 +10703,41 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(radius) = style.border_bottom_right_radius {
         el = el.rounded_br(gpui::px(radius as f32));
     }
+    // CSS `border-style: none` (and `hidden`) computes the used border width
+    // to zero: the space returns to the content box and nothing paints.
+    // Clearing rather than skipping matters in state overlays —
+    // `hover: { borderStyle: "none" }` must remove the base border, exactly
+    // like `borderWidth: 0` below.
+    let border_suppressed = matches!(style.border_style.as_deref(), Some("none" | "hidden"));
+    if border_suppressed {
+        el = el.border_0();
+    }
     // `borderWidth: 0` must clear a border, not be ignored: an element that
     // draws its own border needs a way for the caller to remove it.
-    if let Some(width) = style.border_width {
-        el = el.border(gpui::px(width.max(0.0) as f32));
+    if !border_suppressed {
+        if let Some(width) = style.border_width {
+            el = el.border(gpui::px(width.max(0.0) as f32));
+        }
+        if let Some(width) = style.border_top_width {
+            el = el.border_t(gpui::px(width.max(0.0) as f32));
+        }
+        if let Some(width) = style.border_right_width {
+            el = el.border_r(gpui::px(width.max(0.0) as f32));
+        }
+        if let Some(width) = style.border_bottom_width {
+            el = el.border_b(gpui::px(width.max(0.0) as f32));
+        }
+        if let Some(width) = style.border_left_width {
+            el = el.border_l(gpui::px(width.max(0.0) as f32));
+        }
     }
-    if let Some(width) = style.border_top_width {
-        el = el.border_t(gpui::px(width.max(0.0) as f32));
-    }
-    if let Some(width) = style.border_right_width {
-        el = el.border_r(gpui::px(width.max(0.0) as f32));
-    }
-    if let Some(width) = style.border_bottom_width {
-        el = el.border_b(gpui::px(width.max(0.0) as f32));
-    }
-    if let Some(width) = style.border_left_width {
-        el = el.border_l(gpui::px(width.max(0.0) as f32));
+    match style.border_style.as_deref() {
+        // GPUI's only non-solid line is dashed, so `dotted` degrades to it;
+        // the 3D styles (`double`, `groove`, `ridge`, `inset`, `outset`)
+        // degrade to gpui's default solid line, the fallback CSS 2.1 §8.5.3
+        // permits. `solid` is that default, so it needs no call.
+        Some("dotted" | "dashed") => el = el.border_dashed(),
+        _ => {}
     }
     if let Some(ref color) = style.border_color {
         if let Some(color) = crate::color::parse_color_rgba(color) {

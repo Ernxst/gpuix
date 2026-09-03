@@ -570,6 +570,12 @@ pub struct StyleDesc {
     pub border_bottom_width: Option<f64>,
     pub border_left_width: Option<f64>,
     pub border_color: Option<String>,
+    /// CSS `border-style` line style. `"none"` and `"hidden"` compute the used
+    /// border width to zero. GPUI paints only solid and dashed lines, so
+    /// `"dotted"` degrades to dashed and the 3D styles (`"double"`,
+    /// `"groove"`, `"ridge"`, `"inset"`, `"outset"`) degrade to solid, the
+    /// fallback CSS 2.1 §8.5.3 permits.
+    pub border_style: Option<String>,
     pub border_radius: Option<f64>,
     pub border_top_left_radius: Option<f64>,
     pub border_top_right_radius: Option<f64>,
@@ -1515,6 +1521,16 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         number_field!(key, value, "borderRightWidth", border_right_width);
         number_field!(key, value, "borderBottomWidth", border_bottom_width);
         number_field!(key, value, "borderLeftWidth", border_left_width);
+        enum_field!(
+            key,
+            value,
+            "borderStyle",
+            border_style,
+            [
+                "none", "hidden", "dotted", "dashed", "solid", "double", "groove", "ridge",
+                "inset", "outset"
+            ]
+        );
         number_field!(key, value, "borderRadius", border_radius);
         number_field!(key, value, "borderTopLeftRadius", border_top_left_radius);
         number_field!(key, value, "borderTopRightRadius", border_top_right_radius);
@@ -2546,6 +2562,7 @@ mod tests {
             "borderBottomWidth": 1,
             "borderLeftWidth": 1,
             "borderColor": "red",
+            "borderStyle": "solid",
             "borderRadius": 1,
             "borderTopLeftRadius": 1,
             "borderTopRightRadius": 1,
@@ -2722,5 +2739,24 @@ mod tests {
     fn ignores_an_unknown_cursor() {
         assert_eq!(parse_cursor("zoom-in"), None);
         assert_eq!(parse_cursor("POINTER"), None);
+    }
+
+    // Issue #301: `borderStyle: "solid"` used to be rejected outright, so a
+    // border could not be declared the way a browser stylesheet declares one.
+    #[test]
+    fn border_style_accepts_the_css_set_and_rejects_others() {
+        for value in [
+            "none", "hidden", "dotted", "dashed", "solid", "double", "groove", "ridge", "inset",
+            "outset",
+        ] {
+            let parsed = parse_style_value(&json!({ "borderStyle": value }));
+            assert!(parsed.problems.is_empty(), "{value}: {:?}", parsed.problems);
+            assert_eq!(parsed.style.border_style.as_deref(), Some(value));
+        }
+
+        let rejected = parse_style_value(&json!({ "borderStyle": "wavy" }));
+        assert_eq!(rejected.style.border_style, None);
+        assert_eq!(rejected.problems.len(), 1);
+        assert_eq!(rejected.problems[0].property, "borderStyle");
     }
 }
