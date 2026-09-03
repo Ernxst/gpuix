@@ -47,8 +47,7 @@ waiting on GPUI's headless wgpu backend.
 
 **How this differs from upstream**
 
-- **Goal:** this fork aims specifically at one codebase shared between a GPUI desktop app
-  and a `react-dom` web app; upstream's direction is upstream's to state.
+- **Goal:** one codebase shared between a GPUI desktop app and a `react-dom` web app.
 - **Source of truth:** web DOM/CSS semantics, not GPUI's own behavior, decide how a public API
   should work here.
 - **Packages:** `@gpuix/native` and `@gpuix/react` on npm are upstream's packages. This fork does
