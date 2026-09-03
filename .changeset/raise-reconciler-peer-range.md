@@ -1,5 +1,5 @@
 ---
-"@gpuix/react": patch
+"@gpuix/react": minor
 ---
 
 Declare the reconciler versions GPUIX actually tests. The `react-reconciler`
