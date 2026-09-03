@@ -793,6 +793,14 @@ Load the `changesets` skill for format and rules. If the change fixes a GitHub i
 
 ## Publishing
 
+> [!IMPORTANT]
+> **This fork does not publish to npm.** `@gpuix/native` and `@gpuix/react` on the registry are
+> upstream's packages, published by upstream's maintainer. The fork's release path packs the same
+> two names into tarballs and attaches them to its own GitHub releases; neither manifest carries a
+> `publishConfig` any more. Everything below describes the inherited npm pipeline — read it for
+> the build matrix, the publish ordering constraint, and the release-asset rules, all of which
+> still apply, but not as an instruction to run `npm publish` here.
+
 **Never publish from a local machine.** CI is the only release path.
 
 `.github/workflows/ci.yml` builds `@gpuix/native` for **one target per OS**, uploads the `.node` artifacts, then the `publish` job downloads them, runs `napi create-npm-dirs` + `napi artifacts`, and publishes `@gpuix/native` and `@gpuix/react`.

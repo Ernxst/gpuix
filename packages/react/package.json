@@ -68,11 +68,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/Ernxst/gpuix"
-  },
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org/",
-    "access": "public"
+    "url": "git+https://github.com/Ernxst/gpuix.git"
   },
   "scripts": {
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/react locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
