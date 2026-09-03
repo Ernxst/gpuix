@@ -36,7 +36,9 @@ import {
 import { toMatchScreenshot, type ToMatchScreenshotOptions } from "./testing-screenshot.js"
 import { TEXT_EDITING_TYPES } from "./reconciler/text-editing.js"
 
+export { configureScreenshots } from "./testing-screenshot.js"
 export type {
+  ConfigureScreenshotsOptions,
   ResolveScreenshotPath,
   ScreenshotComparatorOptions,
   ScreenshotPathContext,

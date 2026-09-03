@@ -74,11 +74,51 @@ export type ResolveScreenshotPath = (context: ScreenshotPathContext) => string
 export interface ToMatchScreenshotOptions {
   comparatorOptions?: ScreenshotComparatorOptions
   /**
-   * Overrides the golden's path.
+   * Overrides the golden's path, for this one assertion. Wins over a
+   * `configureScreenshots` default, which wins over the built-in path.
    *
    * @default `${root}/${testFileDirectory}/__screenshots__/${testFileName}/${arg}${ext}`
    */
   resolveScreenshotPath?: ResolveScreenshotPath
+}
+
+/** The suite-wide defaults `configureScreenshots` accepts. */
+export interface ConfigureScreenshotsOptions {
+  /**
+   * Default `resolveScreenshotPath` for every `toMatchScreenshot` call that
+   * does not pass its own.
+   */
+  resolveScreenshotPath?: ResolveScreenshotPath
+}
+
+let screenshotDefaults: ConfigureScreenshotsOptions = {}
+
+/**
+ * Suite-wide defaults for `toMatchScreenshot`, set once from a vitest setup
+ * file instead of repeating the same option at every call site:
+ *
+ * ```ts
+ * // vitest setup file
+ * configureScreenshots({
+ *   resolveScreenshotPath: ({ root, testFileDirectory, testFileName, arg, ext, platform }) =>
+ *     path.join(root, testFileDirectory, "__goldens__", testFileName, `${arg}-${platform}${ext}`),
+ * })
+ * ```
+ *
+ * This is the desktop seat of vitest browser mode's
+ * `browser.expect.toMatchScreenshot` config, with the same precedence: a
+ * per-call option wins over the configured default, which wins over the
+ * built-in one. It is a function call rather than the vitest config key
+ * because `resolveScreenshotPath` is a function, and vitest only delivers the
+ * browser config's functions inside the browser runtime — a node worker,
+ * where this renderer lives, never receives them. A setup file is the nearest
+ * point that runs in the worker before every suite.
+ *
+ * Each call replaces the previous defaults wholesale, as a config object
+ * would: `configureScreenshots({})` restores the built-in behaviour.
+ */
+export function configureScreenshots(options: ConfigureScreenshotsOptions): void {
+  screenshotDefaults = { ...options }
 }
 
 /** vitest's snapshot update mode: `--update` is `"all"`, CI is `"none"`. */
@@ -515,7 +555,9 @@ export async function toMatchScreenshot(
     testPath: this.testPath,
     testName: this.currentTestName,
   })
-  const referencePath = (options.resolveScreenshotPath ?? defaultResolveScreenshotPath)(pathContext)
+  const referencePath = (options.resolveScreenshotPath ??
+    screenshotDefaults.resolveScreenshotPath ??
+    defaultResolveScreenshotPath)(pathContext)
 
   const target = resolveCaptureTarget(received)
   const scratch = mkdtempSync(path.join(os.tmpdir(), "gpuix-screenshot-"))

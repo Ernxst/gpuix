@@ -17,7 +17,7 @@ import React from "react"
 import { describe, expect, it } from "vitest"
 
 import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
-import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
+import { configureScreenshots, gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
 import { decodePng, readPngSize } from "../testing-png.js"
 import {
   decideScreenshotOutcome,
@@ -263,6 +263,84 @@ describeNative("toMatchScreenshot", () => {
       expect(path.resolve(seen[0]!.root, seen[0]!.testFileDirectory)).toBe(here)
       expect(seen[0]!.testName).toMatch(/toMatchScreenshot-honours-resolveScreenshotPath/)
     })
+  })
+
+  it("uses the configureScreenshots default when a call passes no resolveScreenshotPath", async () => {
+    await withScene(async (screen, directory) => {
+      screen.render(<Scene />)
+      const seen: ScreenshotPathContext[] = []
+      configureScreenshots({
+        resolveScreenshotPath: (context) => {
+          seen.push(context)
+          return path.join(directory, "configured", `${context.arg}${context.ext}`)
+        },
+      })
+
+      try {
+        const golden = path.join(directory, "configured", "suite-default.png")
+        await expect(expect(screen).toMatchScreenshot("suite-default")).rejects.toThrowError(
+          /a new one was created/
+        )
+        expect(existsSync(golden)).toBe(true)
+        // The configured resolver is handed the same context a per-call one is.
+        expect(seen).toHaveLength(1)
+        expect(seen[0]).toMatchObject({
+          arg: "suite-default",
+          ext: ".png",
+          testFileName: "testing-screenshot.test.tsx",
+          screenshotDirectory: "__screenshots__",
+          platform: process.platform,
+        })
+
+        // And the next run passes against the golden it resolved.
+        await expect(screen).toMatchScreenshot("suite-default")
+      } finally {
+        configureScreenshots({})
+      }
+    })
+  })
+
+  it("lets a per-call resolveScreenshotPath override the configured default, as vitest does", async () => {
+    await withScene(async (screen, directory) => {
+      screen.render(<Scene />)
+      const configured = path.join(directory, "configured", "shot.png")
+      const perCall = path.join(directory, "per-call", "shot.png")
+      configureScreenshots({ resolveScreenshotPath: () => configured })
+
+      try {
+        await expect(
+          expect(screen).toMatchScreenshot({ resolveScreenshotPath: () => perCall })
+        ).rejects.toThrowError(/a new one was created/)
+
+        expect(existsSync(perCall)).toBe(true)
+        expect(existsSync(configured)).toBe(false)
+      } finally {
+        configureScreenshots({})
+      }
+    })
+  })
+
+  it("restores the built-in path when reconfigured with no default", async () => {
+    const directory = path.join(here, "__screenshots__", "testing-screenshot.test.tsx")
+    const screen = createTestRoot({ width: 200, height: 120 })
+    try {
+      screen.render(<Scene />)
+      configureScreenshots({
+        resolveScreenshotPath: () => {
+          throw new Error("a cleared default must not be consulted")
+        },
+      })
+      configureScreenshots({})
+
+      await expect(expect(screen).toMatchScreenshot("back-to-default")).rejects.toThrowError(
+        /a new one was created/
+      )
+      expect(existsSync(path.join(directory, "back-to-default.png"))).toBe(true)
+    } finally {
+      screen.unmount()
+      configureScreenshots({})
+      rmSync(path.join(here, "__screenshots__"), { recursive: true, force: true })
+    }
   })
 
   it("defaults to __screenshots__ beside the test file, named after the test", async () => {

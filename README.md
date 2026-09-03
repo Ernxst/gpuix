@@ -4368,6 +4368,32 @@ await expect(screen).toMatchScreenshot('panel', {
 })
 ```
 
+A suite that aligns every golden with a browser project's layout does not
+repeat that lambda per call: `configureScreenshots` (exported beside
+`gpuixMatchers` from `@gpuix/react/testing/matchers`) sets a suite-wide
+default from a vitest setup file, with vitest's precedence — a per-call
+`resolveScreenshotPath` wins over the configured default, which wins over the
+built-in path:
+
+```ts
+// vitest setup file
+import { configureScreenshots } from '@gpuix/react/testing/matchers'
+
+configureScreenshots({
+  resolveScreenshotPath: ({ root, testFileDirectory, testFileName, arg, ext, platform }) =>
+    path.join(root, testFileDirectory, '__goldens__', testFileName, `${arg}-${platform}${ext}`),
+})
+```
+
+This is the desktop seat of vitest browser mode's
+`browser.expect.toMatchScreenshot` config. It is a function call rather than
+that config key because `resolveScreenshotPath` is a function, and vitest only
+delivers the browser config's functions inside the browser runtime — a node
+worker, where this renderer lives, never receives them; a setup file is the
+nearest point that runs in the worker before every suite. Each call replaces
+the previous defaults wholesale, as a config object would, so
+`configureScreenshots({})` restores the built-in behaviour.
+
 The comparison is the native one `expectCanvasMatchesBrowser` uses, and the
 defaults are exact: the renderer that wrote a golden reproduces it byte for
 byte, so a difference is a real difference until you say otherwise.
