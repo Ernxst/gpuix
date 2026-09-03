@@ -602,6 +602,11 @@ pub struct StyleDesc {
     pub user_select: Option<String>,
     pub selection_color: Option<String>,
 
+    /// CSS `interpolate-size`. `"allow-keywords"` lets a `width` or `height`
+    /// transition travel to or from `auto` by taking the laid-out size of the
+    /// intrinsic endpoint as the number. Inherited, like the CSS property.
+    pub interpolate_size: Option<String>,
+
     pub transition: Option<StyleTransition>,
     pub hover_group: Option<String>,
 
@@ -1695,6 +1700,13 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             user_select,
             ["auto", "text", "none"]
         );
+        enum_field!(
+            key,
+            value,
+            "interpolateSize",
+            interpolate_size,
+            ["numeric-only", "allow-keywords"]
+        );
 
         if matches!(
             key.as_str(),
@@ -2568,6 +2580,7 @@ mod tests {
             "pointerEvents": "auto",
             "userSelect": "text",
             "selectionColor": "red",
+            "interpolateSize": "allow-keywords",
             "transition": {
                 "properties": ["opacity", "backgroundColor", "width"],
                 "durationMs": 140,
