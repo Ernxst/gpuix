@@ -3345,9 +3345,12 @@ and the 3D styles (`"double"`, `"groove"`, `"ridge"`, `"inset"`, `"outset"`)
 degrade to solid — the fallback CSS 2.1 permits. State overlays resolve like
 CSS: `hover: { borderStyle: "solid" }` overrides a dashed base, and it turns
 a border suppressed by `borderStyle: "none"` back on at the base's declared
-width. A border still paints when only `borderWidth` and `borderColor` are
-declared; GPUIX does not require an explicit `borderStyle` the way a
-stylesheet does.
+width. One divergence from strict CSS follows from GPUIX's
+declaring-a-width-requests-a-border convention: an overlay authoring only
+`borderWidth` over a `borderStyle: "none"` base paints a solid border, where
+CSS would keep it hidden. A border still paints when only `borderWidth` and
+`borderColor` are declared; GPUIX does not require an explicit `borderStyle`
+the way a stylesheet does.
 
 `background` accepts a solid color, a CSS `linear-gradient()` with two through
 eight stops, or a structured native gradient:

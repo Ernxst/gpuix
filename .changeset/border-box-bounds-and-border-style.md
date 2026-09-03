@@ -18,7 +18,9 @@ dashed and the 3D styles (`"double"`, `"groove"`, `"ridge"`, `"inset"`,
 `"outset"`) degrade to solid, the fallback CSS 2.1 permits. State overlays
 resolve like CSS: `hover: { borderStyle: "solid" }` overrides a dashed base,
 and it turns a border suppressed by `borderStyle: "none"` back on at the
-base's declared width. Declaring only `borderWidth` and `borderColor` still
-paints a solid border.
+base's declared width — with one divergence from strict CSS: an overlay
+authoring only `borderWidth` over a `borderStyle: "none"` base paints a solid
+border, following GPUIX's declaring-a-width-requests-a-border convention.
+Declaring only `borderWidth` and `borderColor` still paints a solid border.
 
 Fixes #301
