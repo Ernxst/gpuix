@@ -1,11 +1,58 @@
 # GPUIX
 
 > [!NOTE]
-> **Ernxst/gpuix** is a fork of [remorses/gpuix](https://github.com/remorses/gpuix) that keeps one codebase for web and desktop, with DOM/CSS semantics as the source of truth. It tracks and reconciles with upstream regularly; fork-specific divergences are recorded in [`.changeset/`](./.changeset). This fork intentionally does **not** publish packages to npm.
+> **Ernxst/gpuix** is a fork of [remorses/gpuix](https://github.com/remorses/gpuix). Upstream's
+> goal is a library-neutral way to build native desktop apps in React; this fork's goal is
+> narrower and stricter: **one codebase for desktop and web**, with DOM and CSS semantics as the
+> source of truth. Every public-surface decision here is tested against one question — does the
+> same consumer code behave identically when it runs under `react-dom` in a browser? Upstream and
+> this fork will keep diverging on that basis; the fork tracks and reconciles with upstream
+> regularly. Full credit to [@remorses](https://github.com/remorses) for the renderer this fork
+> builds on.
+>
+> **The `@gpuix/native` and `@gpuix/react` packages on the npm registry are upstream's**,
+> published by upstream's maintainer. This fork does **not** publish to npm. Its builds carry the
+> same two names but are distributed as tarballs attached to
+> [this repository's GitHub releases](https://github.com/Ernxst/gpuix/releases).
+> `bun add @gpuix/react` installs upstream, not this fork.
 
 React bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) - Zed's GPU-accelerated UI framework.
 
 Build native GPU-accelerated desktop apps with React and TypeScript. Your components render directly to the GPU via Metal, DirectX, or Vulkan. No Electron, no web views.
+
+This fork's premise is that desktop and the browser should be one codebase, not two: a component
+written against `<div>`, `<text>`, refs, events, and `style` should need no renderer-specific
+branch to run correctly on both. GPUI drives the desktop through napi-rs and the browser through
+wasm-bindgen and WebGPU. Where the two disagree, the browser's behavior wins and GPUIX is changed
+to match it, not the other way around.
+
+What's solid today: the mutation-based reconciler and event system, an AccessKit-backed
+accessibility tree (including live regions), and a test/automation story — `createTestRoot()`,
+`render()` and `TestElement` under `@gpuix/react/testing`, `toMatchScreenshot()`, and an
+instance-ref API shaped like DOM elements (`scrollTop`, `getBoundingClientRect()`, and friends).
+Native text, forms, virtualization, and animation are implemented and documented in this README.
+
+Still open: full CSS Grid parity with the browser, and a `<canvas>` 2D drawing context (the
+element exists and is typed, but `CanvasRenderingContext2D` calls are not implemented yet).
+Browser event callbacks in the wasm build are not wired up yet either — see the web example notes
+below.
+
+**Platform status:** macOS is the only platform this fork verifies today. The desktop renderer
+also targets Windows and Linux through GPUI, but they are not part of this fork's regular
+verification loop; treat them as unverified until stated otherwise.
+
+**How this differs from upstream**
+
+- **Goal:** upstream aims for a library-neutral desktop React renderer; this fork aims
+  specifically at one codebase shared between a GPUI desktop app and a `react-dom` web app.
+- **Source of truth:** web DOM/CSS semantics, not GPUI's own behavior, decide how a public API
+  should work here.
+- **Packages:** `@gpuix/native` and `@gpuix/react` on npm are upstream's packages. This fork does
+  not publish to npm; it ships the same two package names as tarballs attached to its GitHub
+  releases.
+- **Scope:** the fork carries features upstream may not (e.g. AccessKit live regions, the
+  `@gpuix/react/testing` and automation surfaces) and can accept behavior changes upstream would
+  not, when they bring GPUIX closer to `react-dom` parity.
 
 ![The GPUIX chat example running natively](./docs/images/chat-app.png)
 
@@ -26,6 +73,15 @@ platform, so there is nothing to build and no Rust toolchain to install.
 bun add @gpuix/react react
 bun add -d @types/react typescript
 ```
+
+> [!IMPORTANT]
+> Those names resolve to **upstream's** packages on the npm registry, not to this fork. To use
+> this fork, take the `@gpuix/native` and `@gpuix/react` tarballs from a
+> [GitHub release](https://github.com/Ernxst/gpuix/releases) and add them by path instead:
+>
+> ```bash
+> bun add ./gpuix-native-<version>.tgz ./gpuix-react-<version>.tgz react
+> ```
 
 ### 1. Point TypeScript at the GPUIX JSX types
 
@@ -107,8 +163,8 @@ The binary carries the renderer, so it runs with no Bun and no Node install.
 
 [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) is a complete todo app in one file, with `dev`,
 `build`, `web:dev` and `typecheck` scripts already wired. Copy the folder,
-change `@gpuix/react` from `workspace:^` to a version range, and run
-`bun install`.
+change `@gpuix/react` from `workspace:^` to a release tarball path (see the
+install note above), and run `bun install`.
 
 ![The GPUIX todo example app](./docs/images/todo-app.png)
 
