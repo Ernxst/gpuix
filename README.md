@@ -1,9 +1,8 @@
 # GPUIX
 
 > [!NOTE]
-> **Ernxst/gpuix** is a fork of [remorses/gpuix](https://github.com/remorses/gpuix). Upstream's
-> goal is a library-neutral way to build native desktop apps in React; this fork's goal is
-> narrower and stricter: **one codebase for desktop and web**, with DOM and CSS semantics as the
+> **Ernxst/gpuix** is a fork of [remorses/gpuix](https://github.com/remorses/gpuix), built
+> around one specific goal: **one codebase for desktop and web**, with DOM and CSS semantics as the
 > source of truth. Every public-surface decision here is tested against one question — does the
 > same consumer code behave identically when it runs under `react-dom` in a browser? Upstream and
 > this fork will keep diverging on that basis; the fork tracks and reconciles with upstream
@@ -48,8 +47,8 @@ waiting on GPUI's headless wgpu backend.
 
 **How this differs from upstream**
 
-- **Goal:** upstream aims for a library-neutral desktop React renderer; this fork aims
-  specifically at one codebase shared between a GPUI desktop app and a `react-dom` web app.
+- **Goal:** this fork aims specifically at one codebase shared between a GPUI desktop app
+  and a `react-dom` web app; upstream's direction is upstream's to state.
 - **Source of truth:** web DOM/CSS semantics, not GPUI's own behavior, decide how a public API
   should work here.
 - **Packages:** `@gpuix/native` and `@gpuix/react` on npm are upstream's packages. This fork does
