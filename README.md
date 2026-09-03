@@ -1359,7 +1359,9 @@ await app.clock.resume()
 
 ## Scrolling
 
-Containers with `overflow: "scroll"` become natively scrollable. GPUI handles scroll physics, clipping, and offset persistence automatically.
+Containers with `overflow: "scroll"` or `overflow: "auto"` become natively scrollable. GPUI handles scroll physics, clipping, and offset persistence automatically.
+
+`"auto"` behaves exactly like `"scroll"` here. A browser's only difference between the two is scrollbar reservation — `scroll` always shows a gutter, `auto` only once content overflows. GPUIX paints no scrollbar gutter at all and GPUI's scroll handles no-op when there is nothing to scroll, so the two collapse to the same scroll container, which is the overlay-scrollbar behaviour macOS browsers default to anyway.
 
 Plain scroll containers still build every child. Use `<virtual-list>` below when the collection can grow large.
 
@@ -1392,9 +1394,9 @@ function ScrollableList() {
 }
 ```
 
-Per-axis scrolling: use `overflowX: "scroll"` or `overflowY: "scroll"`.
-`overflow: "scroll"` scrolls both axes at once from a single diagonal gesture,
-like a browser.
+Per-axis scrolling: use `overflowX: "scroll"` or `overflowY: "scroll"`
+(`"auto"` works the same on both). `overflow: "scroll"` scrolls both axes at
+once from a single diagonal gesture, like a browser.
 
 A flex column stretches its children to the cross axis, so a two-axis container
 needs its rows to state a width. Without one there is nothing to pan on **X**:
@@ -1504,8 +1506,8 @@ element with no painted box reports an all-zero rect, as the DOM does. Use
 `getBounds()` when the distinction between "no box" and "a zero box" matters;
 it returns `null` for the former.
 
-Only `overflow: "scroll"` elements and `<virtual-list>` are scroll containers
-here. Everything else — **including `overflow: "hidden"`, which the web does
+Only `overflow: "scroll"` / `"auto"` elements and `<virtual-list>` are scroll
+containers here. Everything else — **including `overflow: "hidden"`, which the web does
 treat as a programmatically scrollable container** — reports its viewport for
 `clientWidth` / `clientHeight`, a matching scroll extent, and `0` offsets, and
 drops writes to `scrollTop` / `scrollLeft`.
@@ -3470,7 +3472,7 @@ Limited relative-color forms can derive a new color from a base value:
 />
 ```
 
-**Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` creates a native scrollable container with persistent scroll state
+**Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` and `"auto"` create a native scrollable container with persistent scroll state (`"auto"` is identical to `"scroll"`: no scrollbar gutter is painted either way, so there is nothing to reserve)
 
 **Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textDecoration` (`"underline"` | `"line-through"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A numeric `lineHeight` is the legacy pixel form; a unitless string such as `"1.4"` multiplies the resolved font size.
 

@@ -8497,7 +8497,7 @@ fn content_sized_intrinsic_axes(
     let scrolls = |axis: fn(&StyleDesc) -> Option<&str>| {
         parent_style
             .and_then(|style| axis(style).or(style.overflow.as_deref()))
-            .is_some_and(|overflow| overflow == "scroll")
+            .is_some_and(overflow_scrolls)
     };
     let flex_row_scrollport = scrolls(|style| style.overflow_x.as_deref())
         && !scrolls(|style| style.overflow_y.as_deref());
@@ -9062,6 +9062,16 @@ pub(crate) enum FocusDirection {
     Previous,
 }
 
+/// `auto` scrolls exactly like `scroll`. A browser's only difference between
+/// the two is scrollbar reservation — `scroll` always shows a gutter, `auto`
+/// only once content overflows. GPUIX paints no scrollbar gutter at all and
+/// GPUI's scroll handles no-op when there is nothing to scroll, so the two
+/// collapse to the same scroll container here, which is the overlay-scrollbar
+/// behaviour macOS browsers default to anyway.
+fn overflow_scrolls(value: &str) -> bool {
+    matches!(value, "scroll" | "auto")
+}
+
 fn is_overflow_scroller(element: &crate::retained_tree::RetainedElement) -> bool {
     element.style.as_deref().is_some_and(|style| {
         [
@@ -9071,7 +9081,7 @@ fn is_overflow_scroller(element: &crate::retained_tree::RetainedElement) -> bool
         ]
         .into_iter()
         .flatten()
-        .any(|value| value == "scroll")
+        .any(overflow_scrolls)
     })
 }
 
@@ -9080,7 +9090,11 @@ fn is_overflow_scroller(element: &crate::retained_tree::RetainedElement) -> bool
 /// shorthand.
 fn scrolls_vertically(element: &crate::retained_tree::RetainedElement) -> bool {
     element.style.as_deref().is_some_and(|style| {
-        style.overflow_y.as_deref().or(style.overflow.as_deref()) == Some("scroll")
+        style
+            .overflow_y
+            .as_deref()
+            .or(style.overflow.as_deref())
+            .is_some_and(overflow_scrolls)
     })
 }
 
@@ -9311,7 +9325,7 @@ fn has_interactive_behavior(
         ]
         .into_iter()
         .flatten()
-        .any(|value| value == "scroll")
+        .any(overflow_scrolls)
     });
 
     !element.events.is_empty()
@@ -9572,8 +9586,8 @@ pub(crate) fn build_host_container(
         let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
         let resolved_y = style.overflow_y.as_deref().or(style.overflow.as_deref());
 
-        let needs_scroll_x = resolved_x == Some("scroll");
-        let needs_scroll_y = resolved_y == Some("scroll");
+        let needs_scroll_x = resolved_x.is_some_and(overflow_scrolls);
+        let needs_scroll_y = resolved_y.is_some_and(overflow_scrolls);
 
         if needs_scroll_x && needs_scroll_y {
             el = el.overflow_scroll();

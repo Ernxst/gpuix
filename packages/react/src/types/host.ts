@@ -249,7 +249,7 @@ export type AlignContent =
   | "stretch"
 export type JustifyContent = Exclude<AlignContent, "normal" | "stretch">
 export type Position = "relative" | "absolute"
-export type Overflow = "visible" | "hidden" | "scroll"
+export type Overflow = "visible" | "hidden" | "scroll" | "auto"
 export type Cursor = "default" | "pointer"
 
 export interface MotionStyle {
@@ -1230,9 +1230,9 @@ export interface NativeRenderer {
   releasePointerCapture?(elementId: number): void
 
   // ── Scroll API ─────────────────────────────────────────────────
-  /** Set the scroll offset of a scrollable element (overflow: "scroll").
-   *  x and y are negative pixel values (scroll down = more negative y).
-   *  This is gpui's sign convention; `PublicInstance.scrollTo()` and
+  /** Set the scroll offset of a scrollable element (overflow: "scroll" or
+   *  "auto"). x and y are negative pixel values (scroll down = more negative
+   *  y). This is gpui's sign convention; `PublicInstance.scrollTo()` and
    *  `PublicInstance.scrollTop` expose the same scroll under the DOM's. */
   scrollTo?(elementId: number, x: number, y: number): void
   /** Scroll a child into view by its index in the children list.
@@ -1475,8 +1475,8 @@ export interface PublicInstance {
    * `Element.scrollTop`: 0 at the top, growing positive as content scrolls up
    * out of view. Assigning scrolls the element and is clamped natively.
    *
-   * Only `overflow: "scroll"` elements and `<virtual-list>` are scroll
-   * containers here. `overflow: "hidden"` is a scroll container on the web,
+   * Only `overflow: "scroll"` / `"auto"` elements and `<virtual-list>` are
+   * scroll containers here. `overflow: "hidden"` is a scroll container on the web,
    * programmatically scrollable with a `scrollHeight` past its viewport; in
    * this renderer it reports `0` and drops assignments, like a plain element.
    *
