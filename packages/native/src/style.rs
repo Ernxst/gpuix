@@ -2194,7 +2194,10 @@ mod tests {
     fn rejects_intrinsic_keywords_inside_expressions() {
         // A browser rejects `calc(max-content + 4px)` and
         // `clamp(min-content, 50%, max-content)` too: the keywords are not
-        // <length-percentage> terms.
+        // <length-percentage> terms. `fit-content(240px)` is different — it
+        // is valid CSS on width — but the functional form is a deliberate
+        // scope cut here (README documents it); this pins the rejection so
+        // adding it later is a conscious change.
         for (property, value) in [
             ("width", "calc(max-content + 4px)"),
             ("width", "clamp(min-content, 50%, 240px)"),

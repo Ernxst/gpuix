@@ -8775,8 +8775,10 @@ fn measure_intrinsic_size(
 /// `gpui::AnyElement::layout_as_root` under the available space that defines
 /// the keyword (`AvailableSpace::MinContent` / `MaxContent`). The same
 /// measured numbers substitute the keyword everywhere it appears on this
-/// element — base props and state refinements alike — since both size the same
-/// content.
+/// element, state refinements included. The element is probed once, at its
+/// base style, so a refinement keyword receives the base content's
+/// measurement; a refinement that also changes a content-affecting property
+/// (its padding, a font) is sized as if it had not.
 ///
 /// `fit-content` becomes its CSS definition, `clamp(min-content, stretch,
 /// max-content)`, with the stretch term expressed as `100%` of the containing

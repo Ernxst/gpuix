@@ -132,13 +132,13 @@ describe("intrinsic and viewport lengths (issue #300)", () => {
 
   it("clamps fit-content between min-content, the available space, and max-content, and composes vw inside calc()", () => {
     // fit-content resolves to its CSS definition, clamp(min-content, stretch,
-    // max-content). scaleFactor 1 because GPUI's CalcLength::resolve leaves
-    // absolute atoms unscaled while taffy hands it a scaled basis, so any
-    // calc()/clamp() mixing px with % is off by the scale factor on a hidpi
-    // window. That pre-dates this test (`calc(50% - 20px)` misses by the same
-    // amount on main) and belongs to the gpui fork, not to the values under
-    // test here.
-    const root = createTestRoot({ width: 400, height: 300, scaleFactor: 1 })
+    // max-content), which rides GPUI's calc engine. The default test window
+    // is scale 2, so this doubles as the regression test for the gpui fix
+    // that scales calc()'s absolute atoms into Taffy's device-pixel space:
+    // before it, every calc()/clamp() mixing px with % — the plain
+    // `calc(50% - 20px)` control below included — was off by the scale
+    // factor on any hidpi window.
+    const root = createTestRoot({ width: 400, height: 300 })
     try {
       root.render(
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
@@ -163,12 +163,14 @@ describe("intrinsic and viewport lengths (issue #300)", () => {
             </div>
           </div>
           <div data-testid="viewport-calc" style={{ width: "calc(50vw - 20px)", height: 10 }} />
+          <div data-testid="percent-calc" style={{ width: "calc(50% - 20px)", height: 10 }} />
         </div>,
       )
 
       expect(boundsFor(root.renderer, "fit-content-roomy").width).toBeCloseTo(160, 4)
       expect(boundsFor(root.renderer, "fit-content-tight").width).toBeCloseTo(120, 4)
       expect(boundsFor(root.renderer, "viewport-calc").width).toBeCloseTo(180, 4)
+      expect(boundsFor(root.renderer, "percent-calc").width).toBeCloseTo(180, 4)
     } finally {
       root.unmount()
     }
