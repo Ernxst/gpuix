@@ -1966,7 +1966,7 @@ describeNative("automation", () => {
   })
 
   // Custom elements paint themselves, so they only appear in the bounds
-  // registry if their builder attaches `automation::bounds_tracker`. Without
+  // registry if their builder attaches `automation::track_own_bounds`. Without
   // it, `click()` on an editor fails with "Element has no painted bounds" and
   // the only workaround is a hard-coded pixel coordinate.
   it("gives an input and a textarea painted bounds", async () => {

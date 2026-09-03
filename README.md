@@ -3331,7 +3331,26 @@ object with a `type`: `px`, `fr`, `auto`, `min-content`, `max-content`,
 
 **Position:** `position` (`"relative"` | `"absolute"` | `"fixed"`), `top`, `right`, `bottom`, `left` — `"fixed"` lays out like `"absolute"`, because GPUI has no scrolling document to be fixed against
 
-**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`, `outlineColor`, `outlineWidth`, `outlineOffset`
+**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `borderStyle`, `boxShadow`, `outlineColor`, `outlineWidth`, `outlineOffset`
+
+Boxes are sized **border-box** — the near-universal stylesheet convention
+(`box-sizing: border-box`; the DOM's own default is `content-box`):
+`borderWidth` shrinks the content box, never the element's own box, and
+`getBounds()` / `getElementBounds()` report the border box the way
+`getBoundingClientRect()` does. `borderStyle` accepts the full CSS
+`border-style` value set. `"none"` and `"hidden"` compute the used border
+width to zero, exactly like CSS. GPUI paints only solid and dashed lines, so
+`"solid"` and `"dashed"` paint true to name, `"dotted"` degrades to dashed,
+and the 3D styles (`"double"`, `"groove"`, `"ridge"`, `"inset"`, `"outset"`)
+degrade to solid — the fallback CSS 2.1 permits. State overlays resolve like
+CSS: `hover: { borderStyle: "solid" }` overrides a dashed base, and it turns
+a border suppressed by `borderStyle: "none"` back on at the base's declared
+width. One divergence from strict CSS follows from GPUIX's
+declaring-a-width-requests-a-border convention: an overlay authoring only
+`borderWidth` over a `borderStyle: "none"` base paints a solid border, where
+CSS would keep it hidden. A border still paints when only `borderWidth` and
+`borderColor` are declared; GPUIX does not require an explicit `borderStyle`
+the way a stylesheet does.
 
 `background` accepts a solid color, a CSS `linear-gradient()` with two through
 eight stops, or a structured native gradient:

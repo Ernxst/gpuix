@@ -144,8 +144,8 @@ pub(crate) fn custom_surface(
     if let Some(style) = ctx.style {
         el = crate::renderer::apply_interactive_styles(el, style);
     }
-    // `bounds_tracker` is `absolute().size_full()`, so it needs a positioned
-    // parent to measure.
+    // Keep the surface positioned so absolutely placed descendants anchor to
+    // it, like every `<div>`.
     if ctx
         .style
         .and_then(|style| style.position.as_deref())
@@ -153,11 +153,7 @@ pub(crate) fn custom_surface(
     {
         el = el.relative();
     }
-    el = el.child(crate::automation::bounds_tracker(
-        ctx.id,
-        None,
-        ctx.paint_bounds_listener.clone(),
-    ));
+    el = crate::automation::track_own_bounds(el, ctx.id, None, ctx.paint_bounds_listener.clone());
     wire_standard_events(el, ctx, cx)
 }
 

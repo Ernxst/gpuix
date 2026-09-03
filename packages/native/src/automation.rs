@@ -114,19 +114,29 @@ pub fn bounds_frame_reset() -> impl IntoElement {
 
 /// Record this element's own painted box, with no extra element in the tree.
 ///
-/// `bounds_tracker` needs a positioned parent and one canvas child, which a leaf
-/// such as `gpui::img` cannot have. Wrapping the leaf in a div instead would
-/// move the layout box: the wrapper would become the flex item and the image
-/// would lose intrinsic sizing and corner clipping.
+/// This is the border box, like `getBoundingClientRect()`. An earlier version
+/// measured containers through an `absolute().size_full()` canvas child, but a
+/// percentage-sized absolute child resolves against the container minus its
+/// borders (issue #301): a 400px scroller with a 4px border reported 392px.
+/// `on_painted` hands us the element's own bounds instead, and works on leaves
+/// such as `gpui::img` too, which cannot carry a canvas child.
+///
+/// `selection_start` also claims the same box as a selection-start region;
+/// `Some(false)` marks it non-selectable (a drag there must not start a
+/// document selection).
 pub fn track_own_bounds<E: gpui::InteractiveElement>(
     el: E,
     id: u64,
+    selection_start: Option<bool>,
     listener: Option<PaintBoundsListener>,
 ) -> E {
     el.on_painted(move |bounds, window, cx| {
         record_bounds(id, bounds);
         if let Some(listener) = &listener {
             listener(bounds, window, cx);
+        }
+        if let Some(selectable) = selection_start {
+            crate::text::record_start_region(bounds, selectable);
         }
     })
 }
@@ -144,27 +154,6 @@ pub fn get_bounds(id: u64) -> Option<ElementBounds> {
 
 pub fn all_bounds() -> HashMap<u64, ElementBounds> {
     BOUNDS.with(|cell| cell.borrow().clone())
-}
-
-pub fn bounds_tracker(
-    id: u64,
-    selection_start: Option<bool>,
-    listener: Option<PaintBoundsListener>,
-) -> impl IntoElement {
-    canvas(
-        |bounds, _, _| bounds,
-        move |bounds, _, window, cx| {
-            record_bounds(id, bounds);
-            if let Some(listener) = &listener {
-                listener(bounds, window, cx);
-            }
-            if let Some(selectable) = selection_start {
-                crate::text::record_start_region(bounds, selectable);
-            }
-        },
-    )
-    .absolute()
-    .size_full()
 }
 
 enum ClockMode {

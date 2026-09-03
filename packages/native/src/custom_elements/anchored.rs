@@ -291,16 +291,20 @@ impl CustomElement for AnchoredElement {
 
         // The overlay, not the trigger, is what a user clicks, so the recorded
         // box has to be this content div after `anchored` placed it. Only gpui
-        // knows where that is, so it reports its own painted box instead of
-        // carrying a `bounds_tracker` child.
+        // knows where that is, so it reports its own painted box after
+        // `anchored` snapped it into place.
         let mut content = gpui::div()
             .id(gpui::SharedString::from(format!(
                 "__gpuix_anchored_{}",
                 ctx.id
             )))
             .flex_col();
-        content =
-            crate::automation::track_own_bounds(content, ctx.id, ctx.paint_bounds_listener.clone());
+        content = crate::automation::track_own_bounds(
+            content,
+            ctx.id,
+            None,
+            ctx.paint_bounds_listener.clone(),
+        );
         content = super::wire_standard_events(content, &ctx, cx);
         // A popover or menu is a dialog to a screen reader, and `role` is how an
         // author says so. Project it here, on the node that owns the host id.

@@ -116,7 +116,7 @@ pub fn selection_frame_reset(
 
 /// Record a selection-start region from an element's painted box.
 ///
-/// Only `bounds_tracker` calls this, so a start region is always the same box
+/// Only `track_own_bounds` calls this, so a start region is always the same box
 /// automation already uses. Last painted region that contains the point wins.
 pub fn record_start_region(bounds: Bounds<gpui::Pixels>, selectable: bool) {
     START_REGIONS.with(|r| r.borrow_mut().push(StartRegion { bounds, selectable }));

@@ -361,24 +361,25 @@ host id. Every per-row id here is a formatted name for that reason:
 that applies only the base styles type-checks the prop, serializes it, and drops
 it. `custom_surface` in `custom_elements/mod.rs` does this for you.
 
-## Bounds: a container uses a tracker, a leaf uses `on_painted`
+## Bounds: every element records its own painted box
 
-`getByTestId(..).click()` needs a recorded box. Two mechanisms, both required:
+`getByTestId(..).click()` needs a recorded box. Every element — containers
+(`<div>`, `<text>`, `<code>`, `<diff>`, `<markdown>`, `<input>`) and leaves
+(`<img>`, `<svg>`, `<anchored>`) alike — goes through
+`crate::automation::track_own_bounds(el, id, selection_start, listener)`, which
+is gpui's `on_painted`. The recorded box is the element's **border box**, like
+`getBoundingClientRect()`. Containers used to measure through an
+`absolute().size_full()` canvas child instead, but a percentage-sized absolute
+child resolves against the container minus its borders, so a bordered scroller
+under-reported its own width (issue #301). Pass `Some(selectable)` when the
+element also owns a selection-start region; the editor uses `Some(false)` so a
+drag moves the caret instead of starting a document selection. `custom_surface`
+attaches it. Leaves cannot carry a canvas child anyway, and wrapping one in a
+div would move the layout box: the wrapper becomes the flex item, and the image
+loses intrinsic sizing and corner clipping. `<anchored>` records after gpui
+placed the overlay, because only gpui knows where it landed after snapping.
 
-- **Containers** (`<div>`, `<text>`, `<code>`, `<diff>`, `<markdown>`, `<input>`)
-  add `crate::automation::bounds_tracker(id, selection_start)` as a child. It is
-  `absolute().size_full()`, so the parent must be positioned. Pass
-  `Some(selectable)` when the element also owns a selection-start region; the
-  editor uses `Some(false)` so a drag moves the caret instead of starting a
-  document selection. `custom_surface` attaches it.
-- **Leaves** (`<img>`, `<svg>`) and **`<anchored>`** use
-  `crate::automation::track_own_bounds(el, id)`, which is gpui's `on_painted`.
-  Wrapping a leaf in a div instead would move the layout box: the wrapper
-  becomes the flex item, and the image loses intrinsic sizing and corner
-  clipping. `<anchored>` uses it because only gpui knows where the overlay
-  landed after snapping.
-
-Both record during **paint**, and `bounds_frame_reset` clears the registry
+It records during **paint**, and `bounds_frame_reset` clears the registry
 during paint too. Never move any of them to prepaint: `gpui::list()` prepaints a
 speculative row range, then rolls the window back through `Window::transact` and
 prepaints a different one, so a prepaint-recorded box can belong to a row that

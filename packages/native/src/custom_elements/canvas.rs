@@ -1626,13 +1626,13 @@ impl CustomElement for CanvasElement {
                 root = root.block_mouse_except_scroll();
             }
         }
-        root = root
-            .child(crate::automation::bounds_tracker(
-                ctx.id,
-                None,
-                ctx.paint_bounds_listener.clone(),
-            ))
-            .child(drawing);
+        root = crate::automation::track_own_bounds(
+            root,
+            ctx.id,
+            None,
+            ctx.paint_bounds_listener.clone(),
+        );
+        root = root.child(drawing);
         let root = self.attach_mouse_events(root, &ctx, cx);
         super::apply_accessibility(root, &ctx).into_any_element()
     }

@@ -2049,7 +2049,7 @@ impl CustomElement for ImgElement {
             element: el,
             accessibility,
         };
-        crate::automation::track_own_bounds(el, ctx.id, ctx.paint_bounds_listener.clone())
+        crate::automation::track_own_bounds(el, ctx.id, None, ctx.paint_bounds_listener.clone())
             .into_any_element()
     }
 
@@ -2215,7 +2215,7 @@ impl CustomElement for SvgElement {
             element: icon,
             accessibility: super::apply_accessibility(gpui::div().id(element_id), &ctx),
         };
-        crate::automation::track_own_bounds(icon, ctx.id, ctx.paint_bounds_listener.clone())
+        crate::automation::track_own_bounds(icon, ctx.id, None, ctx.paint_bounds_listener.clone())
             .into_any_element()
     }
 
