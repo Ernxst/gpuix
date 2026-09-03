@@ -3757,11 +3757,14 @@ or regenerate the `file:` pins per worktree after cloning.
 }
 ```
 
-`react`, `react-reconciler`, and `scheduler` are peer dependencies. Install
-versions compatible with your React runtime in the consuming app. If you still
-use a directory link, configure Vitest to dedupe `react`, `react-dom`,
-`react-reconciler`, and `scheduler`; that is only a fallback, not a supported
-way to consume the unpublished fork under Bun.
+`react`, `react-reconciler`, and `scheduler` are peer dependencies. The declared
+ranges are `react ^19.2.0`, `react-reconciler ^0.33.0`, and `scheduler ^0.27.0`
+— the versions React 19.2 ships with, and the only ones GPUIX builds and tests
+against. React 18 is not supported: `react-reconciler` 0.33 declares `react
+^19.2.0` itself, so a React 18 install could only ever be a silenced peer
+conflict. If you still use a directory link, configure Vitest to dedupe `react`,
+`react-dom`, `react-reconciler`, and `scheduler`; that is only a fallback, not a
+supported way to consume the unpublished fork under Bun.
 
 The native package exports `TestGpuixRenderer` on every platform. Construction
 on Linux or a build without GPU test support throws a clear availability error;

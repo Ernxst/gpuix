@@ -75,8 +75,10 @@ and it installs from npm:
 ```json
 {
   "dependencies": {
-    "@gpuix/react": "^0.4.0",
-    "react": "^19.2.4"
+    "@gpuix/react": "^0.8.0",
+    "react": "^19.2.4",
+    "react-reconciler": "^0.33.0",
+    "scheduler": "^0.27.0"
   }
 }
 ```
