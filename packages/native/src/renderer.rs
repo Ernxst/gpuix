@@ -6279,6 +6279,8 @@ impl GpuixView {
             highlight_events: &mut highlight_events,
             accessibility_host_ids,
             gpui_element_path,
+            measuring: false,
+            intrinsic_probe: None,
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
@@ -6459,6 +6461,15 @@ pub(crate) struct BuildCtx<'a> {
     highlight_events: &'a mut Vec<(u64, usize)>,
     accessibility_host_ids: Option<&'a mut HashMap<u64, u64>>,
     gpui_element_path: Option<Vec<gpui::ElementId>>,
+    /// Set while an `interpolateSize: "allow-keywords"` endpoint is being laid
+    /// out. The subtree built under it is measured and dropped, never painted,
+    /// so this build must not advance any retained track or register anything
+    /// the real build is about to register itself.
+    measuring: bool,
+    /// The element whose intrinsic size is being measured, with the style to
+    /// measure it at: the transition's target with the intrinsic axes forced
+    /// back to `auto`.
+    intrinsic_probe: Option<(u64, StyleDesc)>,
 }
 
 /// Style properties that cascade into descendants.
@@ -6481,6 +6492,10 @@ pub(crate) struct Inherited {
     pub selection_wash: gpui::Hsla,
     /// Text case transformation inherited by plain text descendants.
     pub text_transform: TextTransform,
+    /// True once this element or an ancestor sets
+    /// `interpolateSize: "allow-keywords"`. CSS inherits `interpolate-size`,
+    /// so a lane can opt its whole subtree in from one declaration.
+    pub interpolate_size_keywords: bool,
     /// Resolved CSS currentColor value for custom image elements.
     pub current_color: gpui::Rgba,
     /// Every marked ancestor that can activate descendant `hoverWithin`
@@ -6522,6 +6537,7 @@ impl Inherited {
             text_accessibility_owned_by_role: false,
             selection_wash: wash,
             text_transform: TextTransform::None,
+            interpolate_size_keywords: false,
             current_color: gpui::rgba(0xe2e2e2ff),
             hover_groups: Vec::new(),
             highlight: None,
@@ -6568,6 +6584,8 @@ impl Inherited {
                 Some("lowercase") => self.text_transform = TextTransform::Lowercase,
                 _ => {}
             }
+            self.interpolate_size_keywords =
+                interpolate_size_keywords(Some(style), self.interpolate_size_keywords);
             if let Some(color) = style
                 .color
                 .as_deref()
@@ -6587,6 +6605,16 @@ impl Inherited {
         }
         self.font = Some(font);
         self
+    }
+}
+
+/// Resolve `interpolate-size` the way CSS does: an own declaration wins for
+/// this element and its subtree, otherwise the inherited value stands.
+fn interpolate_size_keywords(style: Option<&StyleDesc>, inherited: bool) -> bool {
+    match style.and_then(|style| style.interpolate_size.as_deref()) {
+        Some("allow-keywords") => true,
+        Some("numeric-only") => false,
+        _ => inherited,
     }
 }
 
@@ -7795,6 +7823,8 @@ impl gpui::Render for GpuixView {
                     highlight_events: &mut highlight_events,
                     accessibility_host_ids,
                     gpui_element_path,
+                    measuring: false,
+                    intrinsic_probe: None,
                 };
                 build_element(root_id, &mut ctx, window, cx)
             }
@@ -8028,12 +8058,16 @@ fn build_element_with_parent_layout(
         return gpui::Empty.into_any_element();
     };
 
-    let tracks_accessibility_host_identity = track_accessibility_host_identity(
-        element.id,
-        ctx.gpui_element_path.as_mut(),
-        ctx.accessibility_host_ids.as_deref_mut(),
-        || retained_gpui_element_id(element),
-    );
+    // A measured subtree is dropped before prepaint, so its GPUI element path
+    // is not the one the painted element gets. Recording it would overwrite the
+    // real identity with a path no frame ever drew.
+    let tracks_accessibility_host_identity = !ctx.measuring
+        && track_accessibility_host_identity(
+            element.id,
+            ctx.gpui_element_path.as_mut(),
+            ctx.accessibility_host_ids.as_deref_mut(),
+            || retained_gpui_element_id(element),
+        );
 
     if crate::accessibility::is_visually_hidden(ctx.tree, element) {
         ctx.custom_registry.destroy(id);
@@ -8050,7 +8084,16 @@ fn build_element_with_parent_layout(
         return built;
     }
 
-    let declared_style = element.style.as_deref();
+    // An intrinsic-size probe replaces this element's declared style with the
+    // transition target it is being measured at. Taken, not borrowed, so the
+    // descendants below build from their own styles.
+    let probe_style = match ctx.intrinsic_probe.as_ref() {
+        Some((probe_id, _)) if *probe_id == id => {
+            ctx.intrinsic_probe.take().map(|(_, style)| style)
+        }
+        _ => None,
+    };
+    let declared_style = probe_style.as_ref().or(element.style.as_deref());
     let parent_inherited = ctx.inherited.clone();
     let hover_within = parent_inherited.hover_groups.iter().any(|group| {
         ctx.interactive_style_states
@@ -8070,36 +8113,127 @@ fn build_element_with_parent_layout(
             | "markdown"
             | "anchored"
     );
-    let transitioned_style = if supports_style_transitions {
-        if let Some(style) = declared_style.filter(|style| style.transition.is_some()) {
-            let focused = ctx
-                .focus_handles
-                .get(&id)
-                .is_some_and(|handle| handle.is_focused(window));
-            let focus_state = crate::motion::StyleState {
-                focused,
-                focus_visible: focused && window.last_input_was_keyboard(),
-            };
-            let state = ctx.transition_states.entry(id).or_insert_with(|| {
-                crate::motion::StyleTransitionState::new(style, focus_state, hover_within, ctx.now)
-            });
-            state.sync(style, focus_state, hover_within, ctx.now, ctx.reduce_motion);
-            let frame = state.frame(ctx.now, ctx.reduce_motion);
-            *ctx.animation_active |= frame.active;
-            *ctx.style_transition_active |= frame.active;
-            Some(frame.style)
-        } else {
-            ctx.transition_states.remove(&id);
-            None
-        }
-    } else {
+    let transitioned_style = if !supports_style_transitions {
         // Virtual lists and custom renderers outside the supported surface
         // family receive the declared target immediately and retain no track.
+        if !ctx.measuring {
+            ctx.transition_states.remove(&id);
+        }
+        None
+    } else if ctx.measuring {
+        // The probe element is measured at the style it was handed, which is
+        // already the transition's target. Descendants keep the frame they are
+        // painting, read-only: a second `sync` on this clock would retarget
+        // their retained tracks against a style this frame never paints.
+        if probe_style.is_some() {
+            None
+        } else {
+            ctx.transition_states
+                .get(&id)
+                .map(|state| state.frame(ctx.now, ctx.reduce_motion).style)
+        }
+    } else if let Some(style) = declared_style.filter(|style| style.transition.is_some()) {
+        let focused = ctx
+            .focus_handles
+            .get(&id)
+            .is_some_and(|handle| handle.is_focused(window));
+        let focus_state = crate::motion::StyleState {
+            focused,
+            focus_visible: focused && window.last_input_was_keyboard(),
+        };
+        // Intrinsic endpoints are measured on the shared host container only.
+        // Measuring a custom surface means re-entering its own `render` inside
+        // the frame that is already rendering it, and a custom renderer is not
+        // required to be idempotent under that.
+        let measurable = matches!(element.element_type.as_str(), "div" | "text")
+            && interpolate_size_keywords(declared_style, parent_inherited.interpolate_size_keywords);
+        // Both questions are about the style the transition is aiming at, not
+        // the base declaration: `hover: { width: "auto" }` or an inset
+        // refinement changes the answer. Layout-mode properties (`alignSelf`,
+        // `position`, `flexGrow`, `flexBasis`) are not transitionable and so
+        // are still read from the base declaration. Resolved once here, and
+        // only for an element that opted in.
+        let intrinsic_target = measurable.then(|| {
+            crate::motion::transition_target_style(
+                style,
+                focus_state,
+                hover_within,
+                ctx.transition_states.get(&id),
+            )
+        });
+        let content_sized = intrinsic_target.as_ref().map_or_else(
+            crate::motion::IntrinsicAxes::default,
+            |target| {
+                let parent = element
+                    .parent
+                    .and_then(|parent_id| ctx.tree.elements.get(&parent_id));
+                content_sized_intrinsic_axes(parent, Some(target))
+            },
+        );
+        let intrinsic = crate::motion::IntrinsicInput {
+            content_sized,
+            measured: match intrinsic_target.as_ref() {
+                Some(target) => intrinsic_transition_size(
+                    id,
+                    target,
+                    style.transition.as_ref().expect("a declared transition"),
+                    content_sized,
+                    ctx,
+                    window,
+                    cx,
+                ),
+                None => crate::motion::IntrinsicSize::default(),
+            },
+        };
+        let state = ctx.transition_states.entry(id).or_insert_with(|| {
+            crate::motion::StyleTransitionState::new(style, focus_state, hover_within, ctx.now)
+        });
+        state.sync(
+            style,
+            focus_state,
+            hover_within,
+            ctx.now,
+            ctx.reduce_motion,
+            intrinsic,
+        );
+        let frame = state.frame(ctx.now, ctx.reduce_motion);
+        *ctx.animation_active |= frame.active;
+        *ctx.style_transition_active |= frame.active;
+        Some(frame.style)
+    } else {
         ctx.transition_states.remove(&id);
         None
     };
 
-    let motion_style = if let Some(source) = element.custom_props.get("motion") {
+    let motion_style = if ctx.measuring {
+        // `MotionState::sync` advances a retained track, and the real build of
+        // this same element is still to come this frame. Measure against the
+        // frame the track is already on instead.
+        element
+            .custom_props
+            .get("motion")
+            .and_then(|_| ctx.motion_states.get(&id))
+            .filter(|state| state.is_valid())
+            .map(|state| {
+                let frame = state.frame(ctx.now, ctx.reduce_motion);
+                let mut resolved = transitioned_style
+                    .clone()
+                    .or_else(|| declared_style.cloned())
+                    .unwrap_or_default();
+                // `MotionStyle` carries width and height, and the probe exists
+                // for the `auto` forced onto the measured axis. Let motion
+                // decide everything else it animates.
+                let probe_sizes = probe_style
+                    .as_ref()
+                    .map(|style| (style.width.clone(), style.height.clone()));
+                frame.style.apply_to(&mut resolved);
+                if let Some((width, height)) = probe_sizes {
+                    resolved.width = width;
+                    resolved.height = height;
+                }
+                resolved
+            })
+    } else if let Some(source) = element.custom_props.get("motion") {
         let state = match ctx.motion_states.entry(id) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::hash_map::Entry::Vacant(entry) => {
@@ -8201,7 +8335,11 @@ fn build_element_with_parent_layout(
             has_listener,
         );
         if let Some((_, Some(total))) = &resolved {
-            ctx.highlight_events.push((id, *total));
+            // `onHighlight` is reported once per frame by the painted build.
+            // Queueing from a measurement would fire the handler twice.
+            if !ctx.measuring {
+                ctx.highlight_events.push((id, *total));
+            }
         }
         ctx.inherited.highlight = resolved.map(|(context, _)| context);
     }
@@ -8269,6 +8407,357 @@ fn build_element_with_parent_layout(
     }
     ctx.inherited = parent_inherited;
     built
+}
+
+/// The pixel size of this element's intrinsic (`auto`) transition endpoint, or
+/// nothing when no axis needs one.
+///
+/// GPUI owns layout, so the number comes from GPUI rather than from a JS
+/// measurement: the element is built once more at its intrinsic style and
+/// handed to `gpui::AnyElement::layout_as_root`, which runs taffy on it as its
+/// own root through `gpui::Window::compute_layout`. `build_element` runs inside
+/// `GpuixView::render`, i.e. during GPUI's prepaint phase, which is the phase
+/// `Window::request_layout` and `Window::compute_layout` both assert on.
+fn intrinsic_transition_size(
+    id: u64,
+    target: &StyleDesc,
+    transition: &crate::style::StyleTransition,
+    content_sized: crate::motion::IntrinsicAxes,
+    ctx: &mut BuildCtx,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<GpuixView>,
+) -> crate::motion::IntrinsicSize {
+    // Reduced motion snaps to the target style, so the measurement would be
+    // paid for and thrown away.
+    if ctx.reduce_motion || ctx.measuring {
+        return crate::motion::IntrinsicSize::default();
+    }
+    // `intrinsic_probe` answers `None` unless an endpoint is changing to or
+    // from `auto` this frame, so a settled element and every frame of a run
+    // cost nothing.
+    let Some(probe) = crate::motion::intrinsic_probe(
+        target,
+        transition,
+        content_sized,
+        ctx.transition_states.get(&id),
+    ) else {
+        return crate::motion::IntrinsicSize::default();
+    };
+    measure_intrinsic_size(id, probe, ctx, window, cx)
+}
+
+/// Which axes take their `auto` from this element's own content.
+///
+/// GPUI resolves `auto` through the parent's layout algorithm, and only some of
+/// those resolutions are content-based: a flex item's main axis, a flex cross
+/// axis whose alignment is not `stretch`, a block child's height, and an
+/// out-of-flow box without both insets. A stretched cross axis, a block child's
+/// *width*, and a grid item all resolve to the parent's size instead, where a
+/// content measurement is a number the settled element never paints — a lane
+/// that crawls and then jumps, which is worse than the step it replaces. Those
+/// axes keep CSS's step.
+///
+/// Anything this cannot read confidently — a custom-element parent, the app
+/// root, an unrecognised parent layout — is treated as stretched.
+fn content_sized_intrinsic_axes(
+    parent: Option<&crate::retained_tree::RetainedElement>,
+    style: Option<&StyleDesc>,
+) -> crate::motion::IntrinsicAxes {
+    use crate::motion::IntrinsicAxes;
+
+    const STRETCHED: IntrinsicAxes = IntrinsicAxes {
+        width: false,
+        height: false,
+    };
+    let inset = |start: Option<f64>, end: Option<f64>| start.is_some() && end.is_some();
+    if let Some(style) = style {
+        if matches!(style.position.as_deref(), Some("absolute") | Some("fixed")) {
+            return IntrinsicAxes {
+                width: !inset(style.left, style.right),
+                height: !inset(style.top, style.bottom),
+            };
+        }
+    }
+
+    let Some(parent) = parent else {
+        return STRETCHED;
+    };
+    // Only a host container's own style describes how its children are laid
+    // out. A custom element renders its children through its own element.
+    if !matches!(parent.element_type.as_str(), "div" | "text") {
+        return STRETCHED;
+    }
+    let parent_style = parent.style.as_deref();
+    let parent_declares = |field: fn(&StyleDesc) -> Option<&str>| parent_style.and_then(field);
+    // `build_host_container` makes an x-only scrollport a flex row, because
+    // overflow-x only works as a flex viewport. A two-axis scrollport keeps
+    // its authored display, so this has to read both axes exactly the way that
+    // branch does.
+    let scrolls = |axis: fn(&StyleDesc) -> Option<&str>| {
+        parent_style
+            .and_then(|style| axis(style).or(style.overflow.as_deref()))
+            .is_some_and(|overflow| overflow == "scroll")
+    };
+    let flex_row_scrollport = scrolls(|style| style.overflow_x.as_deref())
+        && !scrolls(|style| style.overflow_y.as_deref());
+
+    let main_is_width = match parent_declares(|style| style.display.as_deref()) {
+        Some("flex") => parent_declares(|style| style.flex_direction.as_deref()) != Some("column"),
+        // A grid item is stretched into its area on both axes by default, and
+        // GPUIX has no `justify-items` / `align-items` override to read there.
+        Some("grid") => return STRETCHED,
+        _ if flex_row_scrollport => true,
+        // Block layout: a child's width fills the containing block, and its
+        // height comes from its own content.
+        _ => {
+            return IntrinsicAxes {
+                width: false,
+                height: true,
+            }
+        }
+    };
+
+    let stretched = matches!(
+        style
+            .and_then(|style| style.align_self.as_deref())
+            .or_else(|| parent_declares(|style| style.align_items.as_deref())),
+        None | Some("stretch")
+    );
+    // A grown or basis-sized item takes its main size from the container's
+    // free space rather than from its content. `flexShrink` still measures
+    // as content: a squeezed lane travels at the content rate and arrives
+    // early, which README documents.
+    let main_from_content = style
+        .is_none_or(|style| style.flex_grow.unwrap_or(0.0) == 0.0 && style.flex_basis.is_none());
+    IntrinsicAxes {
+        width: if main_is_width {
+            main_from_content
+        } else {
+            !stretched
+        },
+        height: if main_is_width {
+            !stretched
+        } else {
+            main_from_content
+        },
+    }
+}
+
+#[cfg(test)]
+mod content_sized_intrinsic_axes_tests {
+    use super::*;
+
+    fn element(element_type: &str, style: serde_json::Value) -> crate::retained_tree::RetainedElement {
+        let mut element =
+            crate::retained_tree::RetainedElement::new(1, element_type.to_owned(), 0);
+        let parsed = crate::style::parse_style_value(&style);
+        assert_eq!(parsed.problems, [], "{style}");
+        element.style = Some(Arc::new(parsed.style));
+        element
+    }
+
+    fn own(style: serde_json::Value) -> StyleDesc {
+        let parsed = crate::style::parse_style_value(&style);
+        assert_eq!(parsed.problems, [], "{style}");
+        parsed.style
+    }
+
+    /// Every parent layout GPUIX can produce, against the axes whose `auto`
+    /// comes from the element's own content. `auto` on a stretched axis is the
+    /// parent's size, which no content measurement describes.
+    #[test]
+    fn answers_each_parent_layout() {
+        let cases: Vec<(&str, serde_json::Value, serde_json::Value, (bool, bool))> = vec![
+            (
+                "flex row: width is the main axis, height is stretched",
+                serde_json::json!({ "display": "flex" }),
+                serde_json::json!({}),
+                (true, false),
+            ),
+            (
+                "flex column, default alignment: width is stretched",
+                serde_json::json!({ "display": "flex", "flexDirection": "column" }),
+                serde_json::json!({}),
+                (false, true),
+            ),
+            (
+                "flex column, alignItems flex-start: both axes are content",
+                serde_json::json!({
+                    "display": "flex",
+                    "flexDirection": "column",
+                    "alignItems": "flex-start"
+                }),
+                serde_json::json!({}),
+                (true, true),
+            ),
+            (
+                "flex column, alignSelf flex-start on the element",
+                serde_json::json!({ "display": "flex", "flexDirection": "column" }),
+                serde_json::json!({ "alignSelf": "flex-start" }),
+                (true, true),
+            ),
+            (
+                "block parent: width fills the containing block, height is content",
+                serde_json::json!({}),
+                serde_json::json!({}),
+                (false, true),
+            ),
+            (
+                "grid parent: stretched into the area on both axes",
+                serde_json::json!({ "display": "grid" }),
+                serde_json::json!({}),
+                (false, false),
+            ),
+            (
+                "flex row, flexGrow: the main size comes from the free space",
+                serde_json::json!({ "display": "flex" }),
+                serde_json::json!({ "flexGrow": 1 }),
+                (false, false),
+            ),
+            (
+                "flex row, flexBasis: the main size comes from the basis",
+                serde_json::json!({ "display": "flex" }),
+                serde_json::json!({ "flexBasis": 0 }),
+                (false, false),
+            ),
+            (
+                "flex row, flexShrink 0: still content, and it cannot be squeezed",
+                serde_json::json!({ "display": "flex" }),
+                serde_json::json!({ "flexShrink": 0 }),
+                (true, false),
+            ),
+            (
+                "flex row, wrapping: the main axis is still content",
+                serde_json::json!({ "display": "flex", "flexWrap": "wrap" }),
+                serde_json::json!({}),
+                (true, false),
+            ),
+            (
+                "x-only scrollport: `build_host_container` makes it a flex row",
+                serde_json::json!({ "overflowX": "scroll" }),
+                serde_json::json!({}),
+                (true, false),
+            ),
+            (
+                "two-axis scrollport: display stays block",
+                serde_json::json!({ "overflow": "scroll" }),
+                serde_json::json!({}),
+                (false, true),
+            ),
+            (
+                "absolute, no insets on either axis: shrink to fit",
+                serde_json::json!({ "display": "flex", "flexDirection": "column" }),
+                serde_json::json!({ "position": "absolute" }),
+                (true, true),
+            ),
+            (
+                "absolute with both horizontal insets: the insets size it",
+                serde_json::json!({ "display": "flex" }),
+                serde_json::json!({ "position": "absolute", "left": 0, "right": 0 }),
+                (false, true),
+            ),
+        ];
+
+        for (name, parent_style, own_style, (width, height)) in cases {
+            let parent = element("div", parent_style);
+            let style = own(own_style);
+            assert_eq!(
+                content_sized_intrinsic_axes(Some(&parent), Some(&style)),
+                crate::motion::IntrinsicAxes { width, height },
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn treats_an_unreadable_parent_as_stretched() {
+        let style = own(serde_json::json!({}));
+        // No parent: the app root is laid out inside GPUIX's full-size wrapper.
+        assert_eq!(
+            content_sized_intrinsic_axes(None, Some(&style)),
+            crate::motion::IntrinsicAxes::default()
+        );
+        // A custom element lays its children out through its own element, so
+        // its style says nothing about them.
+        let custom = element("code", serde_json::json!({ "display": "flex" }));
+        assert_eq!(
+            content_sized_intrinsic_axes(Some(&custom), Some(&style)),
+            crate::motion::IntrinsicAxes::default()
+        );
+        // A `<text>` parent is a host container and reads like a `<div>`.
+        let text = element("text", serde_json::json!({ "display": "flex" }));
+        assert_eq!(
+            content_sized_intrinsic_axes(Some(&text), Some(&style)),
+            crate::motion::IntrinsicAxes {
+                width: true,
+                height: false
+            }
+        );
+    }
+}
+
+/// Lay the probe subtree out and read its size.
+///
+/// What is guaranteed: the probe is never prepainted and never painted, so
+/// hitboxes, the dispatch tree, accessibility nodes, painted text, the
+/// selection registry and the bounds registry are untouched by it, and its
+/// taffy nodes are an orphan root no painted node references. `ctx.measuring`
+/// covers what GPUIX itself records during a build: retained transition and
+/// motion tracks are read, not advanced, `onHighlight` is not queued, no
+/// accessibility host identity is recorded, and nested probes are skipped.
+///
+/// What it does touch, because it walks the real build path: a descendant
+/// custom element's `sync` and `render` run a second time this frame, so an
+/// `<input>` refreshes its cached measured layout, an `<img>` creates GPUI
+/// `ImgState` and can request an animation frame, and a `<virtual-list>`
+/// consumes its pending scroll request (harmless only because its `ListState`
+/// is `Rc`-shared with the painted build). GPUI element states are keyed by
+/// the same element-id path as the painted element, so the probe borrows and
+/// returns them rather than allocating a parallel set, and any state it
+/// creates for an element the painted build does not reach is dropped with the
+/// frame. This is why the probe is limited to endpoint edges rather than run
+/// on every frame.
+fn measure_intrinsic_size(
+    id: u64,
+    probe: crate::motion::IntrinsicProbe,
+    ctx: &mut BuildCtx,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<GpuixView>,
+) -> crate::motion::IntrinsicSize {
+    use gpui::AvailableSpace;
+
+    let crate::motion::IntrinsicProbe {
+        style,
+        width: measure_width,
+        height: measure_height,
+    } = probe;
+    let measuring = std::mem::replace(&mut ctx.measuring, true);
+    let outer_probe = ctx.intrinsic_probe.replace((id, style));
+    let mut element = build_element(id, ctx, window, cx);
+    ctx.measuring = measuring;
+    ctx.intrinsic_probe = outer_probe;
+
+    // A measured axis must be offered unbounded space, or taffy answers with
+    // the constraint rather than the content. The other axis keeps the width
+    // the element last painted at, so a `height` endpoint wraps its text the
+    // way the settled element does; before the first paint there is no such
+    // width and max-content stands in.
+    let available_width = if measure_width {
+        AvailableSpace::MaxContent
+    } else {
+        crate::automation::get_bounds(id)
+            .map(|bounds| AvailableSpace::Definite(gpui::px(bounds.width as f32)))
+            .unwrap_or(AvailableSpace::MaxContent)
+    };
+    let size = element.layout_as_root(
+        gpui::size(available_width, AvailableSpace::MaxContent),
+        window,
+        cx,
+    );
+    crate::motion::IntrinsicSize {
+        width: measure_width.then(|| f64::from(f32::from(size.width))),
+        height: measure_height.then(|| f64::from(f32::from(size.height))),
+    }
 }
 
 fn default_flex_none_for_parent_layout(style: &mut StyleDesc) {

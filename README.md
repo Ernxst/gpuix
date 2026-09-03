@@ -1072,11 +1072,112 @@ use a proportionally smaller threshold so the exact final value does not make a
 visible end-snap. An interrupted spring retargets from the painted value and
 carries its current channel velocity into the new trajectory.
 
-Pixel lengths interpolate with pixels and percentages with percentages.
-Incompatible endpoints such as `auto` to pixels snap to the new value.
+Pixel lengths interpolate with pixels and percentages with percentages. By
+default, incompatible endpoints such as `auto` to pixels snap to the new value;
+`interpolateSize` (below) lifts that for `width` and `height`.
 Malformed transition objects, including spring objects with unknown `type`
 values or invalid physical parameters, are rejected as a whole through the
 strict style-diagnostic channel.
+
+#### `interpolateSize`: transitions that target an intrinsic size
+
+A container whose target size is intrinsic cannot animate open, because `auto`
+has no number to travel to. CSS lifts that with `interpolate-size:
+allow-keywords`, and GPUIX mirrors it:
+
+```tsx
+const lane = {
+  display: 'flex',
+  minWidth: 0,
+  overflow: 'hidden',
+  transition: { properties: ['width'], durationMs: 120 },
+}
+
+function Lane({ open, children }) {
+  return (
+    <div style={{ interpolateSize: 'allow-keywords' }}>
+      <div style={{ ...lane, width: open ? 'auto' : 0 }}>{children}</div>
+    </div>
+  )
+}
+```
+
+`interpolateSize` accepts `"numeric-only"` (the default: an intrinsic endpoint
+steps) and `"allow-keywords"`. It is **inherited**, like the CSS property, so
+one declaration opts a whole subtree in and a nested `"numeric-only"` turns it
+back off for that subtree. No measurement in JavaScript is involved: GPUI lays
+the intrinsic state out during the same frame, and that size becomes the
+transition's numeric endpoint. It works in both directions — `0` to `auto`
+opens, `auto` to `0` closes — and through state refinements such as
+`hover: { width: 'auto' }`.
+
+The **settled** element is `auto` again, not a pinned pixel width, so later
+content changes resize it on the next frame with no second transition — and
+that holds while another transitioned property is animating, so an `opacity`
+run does not pin the size.
+
+The endpoint is measured once, when the run starts, and held for the run:
+content that changes while it is in flight — streaming text, a nested
+transition — does not move the finish line, so the declared duration is the
+duration. When the run ends the element is content-sized again, so it picks up
+whatever the content grew to, in one step. That step is deliberate: an endpoint
+that chased the content would push the finish line out on every frame and the
+run would never end, and re-aiming mid-run either jumps or changes the declared
+rate. It is a bounded catch-up to a size the element really has, which is why
+it is allowed where the stretched-axis case below is not: there the measured
+number is one the element never paints at all.
+
+Bounds:
+
+- `width` and `height` only. `auto` is the only intrinsic keyword GPUIX's
+  dimension grammar has, and `minWidth`, `minHeight`, `maxWidth`, and
+  `maxHeight` keywords keep stepping.
+- `<div>` and `<text>` only. Measuring a custom surface's outer container means
+  re-entering that element's own render inside the frame already rendering it,
+  so `<img>`, `<canvas>`, `<code>`, `<diff>`, `<input>`, `<textarea>`,
+  `<markdown>`, and `<anchored>` keep stepping on an intrinsic endpoint. A
+  `<div>` lane wrapping any of them animates normally.
+- **The axis must be content-sized, not stretched.** GPUI resolves `auto`
+  through the parent's layout, and only some of those resolutions come from the
+  element's own content: a flex item's main axis, a flex cross axis whose
+  `alignItems` / `alignSelf` is not `stretch`, a block child's height, and an
+  absolutely positioned box without both insets on that axis. A stretched cross
+  axis (the flex default), a block child's *width*, and a grid item resolve to
+  the parent's size instead, and those keep stepping — a lane that crawled
+  toward its content width and then jumped to its parent's width would be worse
+  than the step. So a `width` transition wants a `display: flex` row parent, or
+  `alignItems: 'start'` if the parent is a column. This is narrower than the
+  browser, which resolves the keyword to the used value and so interpolates a
+  stretched axis too; GPUIX measures content, and declines rather than animate
+  toward a number the settled element never paints. The element's own side of
+  this is read from the style it is transitioning to for the transitionable
+  properties only: a `hover: { width: 'auto' }` or an inset refinement counts,
+  but layout-mode properties (`alignSelf`, `position`, `flexGrow`, `flexBasis`)
+  are read from the base declaration. The parent is read from its base
+  declaration too, so a state refinement on the *parent's* `display`,
+  `flexDirection`, or `alignItems` is not consulted.
+- The measured endpoint is the element's **max-content** size on the animated
+  axis. A lane that settles narrower than its content — a `flexShrink` sibling
+  squeezes it, or the parent is narrower — travels at the max-content rate and
+  therefore arrives early: it reaches its real width partway through the
+  declared duration and sits there until the run ends. Give such a lane
+  `flexShrink: 0`, or transition it between two numbers instead.
+- The axis that is *not* travelling to `auto` is offered the width the element
+  last painted at, so a `height` endpoint wraps its text the way the settled
+  element does. When both axes travel to `auto` at once, both are offered
+  unbounded space, so the height is the one the content takes unwrapped.
+- A percentage length inside the lane cannot resolve on the measured axis,
+  because that axis is offered unbounded space and so has no containing block
+  size to be a percentage of. It contributes nothing, the way it does in any
+  max-content pass. A lane whose content is sized entirely in percentages
+  therefore measures near zero; size it in pixels, `ch`, or intrinsic terms.
+- Reduced motion snaps, like every other transition: the element is at its end
+  state immediately and no intermediate frames are requested.
+- Cost: one extra build and GPUI layout of that subtree, taken only on the
+  frame an endpoint becomes or stops being intrinsic. A settled element and
+  every frame of a run in flight cost nothing. The probe is never painted, so
+  it is invisible to hit-testing, painted text, selection, and
+  `getElementBounds`.
 
 Radius shorthand and corner longhands are resolved to four painted corners
 before interpolation, so either form can override the other without a stale
@@ -3223,6 +3324,8 @@ object with a `type`: `px`, `fr`, `auto`, `min-content`, `max-content`,
 ```
 
 **Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accept pixels, percentages, `ch`, and `calc()` / `clamp()` expressions. `ch` uses the shaped advance of `0` in the resolved font.
+
+**Size interpolation:** `interpolateSize` (`"numeric-only"` | `"allow-keywords"`) — inherited; `"allow-keywords"` lets a `width` or `height` transition travel to or from `auto`. See [`interpolateSize`](#interpolatesize-transitions-that-target-an-intrinsic-size).
 
 **Spacing:** `padding`, `paddingTop/Right/Bottom/Left`, `margin`, `marginTop/Right/Bottom/Left`
 

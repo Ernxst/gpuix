@@ -545,6 +545,15 @@ export interface StyleDesc {
   /** Native, interruptible interpolation for the named properties. */
   transition?: StyleTransition
 
+  /** CSS `interpolate-size`. `"allow-keywords"` lets a `width` or `height`
+   *  transition travel to or from `auto`: the intrinsic endpoint contributes
+   *  the size GPUI lays that state out at, and the settled element is
+   *  content-sized again. Inherited like the CSS property, so one declaration
+   *  opts a whole subtree in. Defaults to `"numeric-only"`, where an `auto`
+   *  endpoint steps. `<div>` and `<text>` only, and `minWidth` / `maxWidth` /
+   *  `minHeight` / `maxHeight` keywords keep stepping. */
+  interpolateSize?: "numeric-only" | "allow-keywords"
+
   /** Marks this element as the ancestor for descendant `hoverWithin` styles. */
   hoverGroup?: string
 

@@ -1002,3 +1002,544 @@ describeNative("motion spring easing", () => {
     }
   })
 })
+
+describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
+  const LANE_TEXT = "Lane contents"
+  const laneBase = {
+    display: "flex" as const,
+    minWidth: 0,
+    overflow: "hidden" as const,
+    height: 40,
+  }
+  const laneTransition = {
+    properties: ["width"] as Array<"width">,
+    durationMs: 120,
+    easing: "linear" as const,
+  }
+
+  /** The lane, plus an untransitioned reference carrying the same content at
+   *  `width: "auto"`. The reference's painted width is the number the
+   *  transition must travel to, so a wrong measurement basis fails. */
+  const lanes = (
+    open: boolean,
+    options: {
+      interpolateSize?: "numeric-only" | "allow-keywords"
+      laneInterpolateSize?: "numeric-only" | "allow-keywords"
+      content?: string
+    } = {}
+  ) => (
+    <div
+      style={{
+        display: "flex",
+        width: 600,
+        height: 120,
+        interpolateSize: options.interpolateSize,
+      }}
+    >
+      <div
+        data-testid="lane"
+        style={{
+          ...laneBase,
+          interpolateSize: options.laneInterpolateSize,
+          width: open ? "auto" : 0,
+          transition: laneTransition,
+        }}
+      >
+        <text style={{ whiteSpace: "nowrap" }}>{options.content ?? LANE_TEXT}</text>
+      </div>
+      <div data-testid="reference" style={{ ...laneBase, flexShrink: 0, width: "auto" }}>
+        <text style={{ whiteSpace: "nowrap" }}>{options.content ?? LANE_TEXT}</text>
+      </div>
+    </div>
+  )
+
+  const widths = (root: ReturnType<typeof createTestRoot>) => {
+    const lane = root.renderer.findByTestId("lane")!
+    const reference = root.renderer.findByTestId("reference")!
+    return {
+      lane: root.renderer.getElementBounds(lane.id)![2],
+      reference: root.renderer.getElementBounds(reference.id)![2],
+    }
+  }
+
+  it("opens a width transition to the laid-out intrinsic size and settles content-sized", () => {
+    const root = createTestRoot({ strictStyles: true })
+    try {
+      root.renderer.clockPause()
+      root.render(lanes(false, { interpolateSize: "allow-keywords" }))
+      expect(widths(root).lane).toBeCloseTo(0, 1)
+      const content = widths(root).reference
+      expect(content).toBeGreaterThan(20)
+
+      root.render(lanes(true, { interpolateSize: "allow-keywords" }))
+      expect(widths(root).lane).toBeCloseTo(0, 1)
+
+      const samples: number[] = []
+      for (let elapsed = 30; elapsed <= 90; elapsed += 30) {
+        root.renderer.advanceAsyncClock(30)
+        samples.push(widths(root).lane)
+      }
+      for (const [index, sample] of samples.entries()) {
+        expect(sample).toBeGreaterThan(index === 0 ? 0 : samples[index - 1]!)
+        expect(sample).toBeLessThan(content)
+      }
+      // Halfway through a linear 120ms run.
+      expect(samples[1]).toBeCloseTo(content / 2, 0)
+
+      root.renderer.advanceAsyncClock(30)
+      expect(widths(root).lane).toBeCloseTo(content, 1)
+
+      // Settled means `width: auto` again, not a pinned pixel width: new
+      // content resizes the lane on the next frame with no second transition.
+      root.render(lanes(true, { interpolateSize: "allow-keywords", content: `${LANE_TEXT} widened` }))
+      const grown = widths(root)
+      expect(grown.reference).toBeGreaterThan(content)
+      expect(grown.lane).toBeCloseTo(grown.reference, 1)
+      expect(root.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("closes a width transition from the laid-out intrinsic size", () => {
+    const root = createTestRoot()
+    try {
+      root.renderer.clockPause()
+      root.render(lanes(true, { interpolateSize: "allow-keywords" }))
+      const content = widths(root).reference
+      expect(widths(root).lane).toBeCloseTo(content, 1)
+
+      root.render(lanes(false, { interpolateSize: "allow-keywords" }))
+      expect(widths(root).lane).toBeCloseTo(content, 1)
+
+      root.renderer.advanceAsyncClock(60)
+      const middle = widths(root).lane
+      expect(middle).toBeLessThan(content)
+      expect(middle).toBeGreaterThan(0)
+      expect(middle).toBeCloseTo(content / 2, 0)
+
+      root.renderer.advanceAsyncClock(60)
+      expect(widths(root).lane).toBeCloseTo(0, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("keeps the declared duration when the content changes mid-run", () => {
+    const root = createTestRoot()
+    try {
+      root.renderer.clockPause()
+      root.render(lanes(false, { interpolateSize: "allow-keywords" }))
+      root.render(lanes(true, { interpolateSize: "allow-keywords" }))
+      const latched = widths(root).reference
+
+      // Content grows on every frame, the way streaming text does. The
+      // endpoint the run latched holds, so the clock is never pushed out.
+      let content = LANE_TEXT
+      for (let frame = 0; frame < 6; frame += 1) {
+        content += " x"
+        root.render(lanes(true, { interpolateSize: "allow-keywords", content }))
+        const running = widths(root)
+        expect(running.lane).toBeLessThanOrEqual(latched + 0.5)
+        root.renderer.advanceAsyncClock(20)
+      }
+
+      // 120ms of clock has elapsed, so the run is over and the lane is
+      // content-sized again: it paints the content it has now, not the size it
+      // was aiming at when it started.
+      const settled = widths(root)
+      expect(settled.reference).toBeGreaterThan(latched)
+      expect(settled.lane).toBeCloseTo(settled.reference, 1)
+      root.renderer.advanceAsyncClock(20)
+      expect(widths(root).lane).toBeCloseTo(settled.reference, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("finishes on time when a nested transition resizes the content", () => {
+    const root = createTestRoot()
+    const view = (open: boolean, inner: number) => (
+      <div style={{ display: "flex", width: 600, height: 120, interpolateSize: "allow-keywords" }}>
+        <div
+          data-testid="lane"
+          style={{ ...laneBase, width: open ? "auto" : 0, transition: laneTransition }}
+        >
+          <div
+            data-testid="inner"
+            style={{
+              width: inner,
+              height: 20,
+              flexShrink: 0,
+              transition: { properties: ["width"], durationMs: 480, easing: "linear" },
+            }}
+          />
+        </div>
+      </div>
+    )
+    const width = (testId: string) =>
+      root.renderer.getElementBounds(root.renderer.findByTestId(testId)!.id)![2]
+
+    try {
+      root.renderer.clockPause()
+      root.render(view(false, 40))
+      root.render(view(true, 40))
+      // The inner element starts its own, four times longer run.
+      root.render(view(true, 200))
+
+      root.renderer.advanceAsyncClock(60)
+      expect(width("lane")).toBeLessThan(width("inner"))
+
+      // 120ms: the outer run is over on its own clock, so the lane is
+      // content-sized around whatever the inner element is now.
+      root.renderer.advanceAsyncClock(60)
+      expect(width("lane")).toBeCloseTo(width("inner"), 1)
+      root.renderer.advanceAsyncClock(60)
+      expect(width("lane")).toBeCloseTo(width("inner"), 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("keeps a settled intrinsic width while another property animates", () => {
+    const root = createTestRoot()
+    const view = (content: string, opacity: number) => (
+      <div style={{ display: "flex", width: 600, height: 120, interpolateSize: "allow-keywords" }}>
+        <div
+          data-testid="lane"
+          style={{
+            ...laneBase,
+            width: "auto",
+            opacity,
+            transition: {
+              properties: ["width", "opacity"],
+              durationMs: 120,
+              easing: "linear",
+            },
+          }}
+        >
+          <text style={{ whiteSpace: "nowrap" }}>{content}</text>
+        </div>
+        <div data-testid="reference" style={{ ...laneBase, flexShrink: 0, width: "auto" }}>
+          <text style={{ whiteSpace: "nowrap" }}>{content}</text>
+        </div>
+      </div>
+    )
+
+    try {
+      root.renderer.clockPause()
+      root.render(view(LANE_TEXT, 1))
+      root.renderer.advanceAsyncClock(200)
+      const initial = widths(root)
+      expect(initial.lane).toBeCloseTo(initial.reference, 1)
+
+      // Settled at `auto` means content-sized, so growing the content moves
+      // the lane with no transition involved.
+      const grown = `${LANE_TEXT} and then some more`
+      root.render(view(grown, 1))
+      const wide = widths(root)
+      expect(wide.reference).toBeGreaterThan(initial.reference)
+      expect(wide.lane).toBeCloseTo(wide.reference, 1)
+
+      // An opacity-only run must not pin the width to the number that was
+      // latched when the endpoint was last measured.
+      root.render(view(grown, 0.2))
+      for (let frame = 0; frame < 4; frame += 1) {
+        root.renderer.advanceAsyncClock(30)
+        expect(widths(root).lane).toBeCloseTo(wide.reference, 1)
+      }
+      expect(root.renderer.getResolvedStyle(root.renderer.findByTestId("lane")!.id)?.opacity)
+        .toBeCloseTo(0.2)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("reads a scrollport parent the way the renderer lays it out", () => {
+    const root = createTestRoot()
+    const view = (open: boolean, overflow: "scroll-x" | "scroll-both") => (
+      <div
+        style={{
+          width: 500,
+          height: 200,
+          interpolateSize: "allow-keywords",
+          ...(overflow === "scroll-x" ? { overflowX: "scroll" as const } : { overflow: "scroll" as const }),
+        }}
+      >
+        <div
+          data-testid="lane"
+          style={{ ...laneBase, width: open ? "auto" : 0, transition: laneTransition }}
+        >
+          <text style={{ whiteSpace: "nowrap" }}>{LANE_TEXT}</text>
+        </div>
+      </div>
+    )
+    const laneWidth = () =>
+      root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)![2]
+
+    try {
+      root.renderer.clockPause()
+      // Two-axis `overflow: "scroll"` keeps block display, so the child's
+      // width is stretched to the scrollport and the endpoint steps.
+      root.render(view(false, "scroll-both"))
+      expect(laneWidth()).toBeCloseTo(0, 1)
+      root.render(view(true, "scroll-both"))
+      expect(laneWidth()).toBeCloseTo(500, 1)
+      root.renderer.advanceAsyncClock(60)
+      expect(laneWidth()).toBeCloseTo(500, 1)
+    } finally {
+      root.unmount()
+    }
+
+    const xOnly = createTestRoot()
+    try {
+      xOnly.renderer.clockPause()
+      // `overflowX: "scroll"` alone is laid out as a flex row, so the same
+      // child's width is content-sized and interpolates.
+      xOnly.render(view(false, "scroll-x"))
+      const width = () =>
+        xOnly.renderer.getElementBounds(xOnly.renderer.findByTestId("lane")!.id)![2]
+      expect(width()).toBeCloseTo(0, 1)
+      xOnly.render(view(true, "scroll-x"))
+      xOnly.renderer.advanceAsyncClock(60)
+      const middle = width()
+      expect(middle).toBeGreaterThan(0)
+      expect(middle).toBeLessThan(200)
+      xOnly.renderer.advanceAsyncClock(60)
+      expect(width()).toBeGreaterThan(middle)
+      expect(width()).toBeLessThan(500)
+    } finally {
+      xOnly.unmount()
+    }
+  })
+
+  it("keeps the step on an axis the parent stretches", () => {
+    const root = createTestRoot()
+    const column = (open: boolean, alignItems?: "start") => (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems,
+          width: 400,
+          height: 200,
+          interpolateSize: "allow-keywords",
+        }}
+      >
+        <div
+          data-testid="lane"
+          style={{ ...laneBase, width: open ? "auto" : 0, transition: laneTransition }}
+        >
+          <text style={{ whiteSpace: "nowrap" }}>{LANE_TEXT}</text>
+        </div>
+      </div>
+    )
+    const laneWidth = () =>
+      root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)![2]
+
+    try {
+      root.renderer.clockPause()
+      // Cross axis of a column, default `stretch`: `auto` is the parent's
+      // width, which no content measurement describes. Stepping is honest;
+      // crawling from 0 toward the content width and then jumping to 400
+      // would not be.
+      root.render(column(false))
+      expect(laneWidth()).toBeCloseTo(0, 1)
+      root.render(column(true))
+      expect(laneWidth()).toBeCloseTo(400, 1)
+      root.renderer.advanceAsyncClock(60)
+      expect(laneWidth()).toBeCloseTo(400, 1)
+
+      // `alignItems: "start"` makes the same axis content-sized, so the same
+      // declaration interpolates — and to a number far from the stretched one.
+      // Closing under the new alignment is itself a transition, so let it land
+      // before opening again.
+      root.render(column(false, "start"))
+      root.renderer.advanceAsyncClock(200)
+      expect(laneWidth()).toBeCloseTo(0, 1)
+      root.render(column(true, "start"))
+      root.renderer.advanceAsyncClock(60)
+      const middle = laneWidth()
+      expect(middle).toBeGreaterThan(0)
+      expect(middle).toBeLessThan(200)
+      root.renderer.advanceAsyncClock(60)
+      const settled = laneWidth()
+      expect(settled).toBeGreaterThan(middle)
+      expect(settled).toBeLessThan(400)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("interpolates an intrinsic height on <text>", () => {
+    const root = createTestRoot()
+    const paragraph =
+      "A paragraph long enough to wrap over several lines inside a narrow column."
+    const view = (open: boolean) => (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          width: 220,
+          height: 400,
+          interpolateSize: "allow-keywords",
+        }}
+      >
+        <text
+          data-testid="lane"
+          style={{
+            overflow: "hidden",
+            height: open ? "auto" : 0,
+            transition: { properties: ["height"], durationMs: 120, easing: "linear" },
+          }}
+        >
+          {paragraph}
+        </text>
+        <text data-testid="reference" style={{ flexShrink: 0, height: "auto" }}>
+          {paragraph}
+        </text>
+      </div>
+    )
+    const height = (testId: string) =>
+      root.renderer.getElementBounds(root.renderer.findByTestId(testId)!.id)![3]
+
+    try {
+      root.renderer.clockPause()
+      root.render(view(false))
+      expect(height("lane")).toBeCloseTo(0, 1)
+      const content = height("reference")
+      // Several wrapped lines: the endpoint is measured at the width the
+      // element paints at, not at max-content on one line.
+      expect(content).toBeGreaterThan(40)
+
+      root.render(view(true))
+      expect(height("lane")).toBeCloseTo(0, 1)
+      root.renderer.advanceAsyncClock(60)
+      const middle = height("lane")
+      expect(middle).toBeGreaterThan(0)
+      expect(middle).toBeLessThan(content)
+      expect(middle).toBeCloseTo(content / 2, 0)
+      root.renderer.advanceAsyncClock(60)
+      expect(height("lane")).toBeCloseTo(content, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("steps an intrinsic endpoint by default and under numeric-only", () => {
+    const root = createTestRoot({ strictStyles: true })
+    try {
+      root.renderer.clockPause()
+      // No declaration anywhere in the ancestor chain.
+      root.render(lanes(false))
+      const content = widths(root).reference
+      root.render(lanes(true))
+      expect(widths(root).lane).toBeCloseTo(content, 1)
+      root.renderer.advanceAsyncClock(60)
+      expect(widths(root).lane).toBeCloseTo(content, 1)
+
+      // An own `numeric-only` turns the inherited opt-in back off.
+      root.render(
+        lanes(false, { interpolateSize: "allow-keywords", laneInterpolateSize: "numeric-only" })
+      )
+      expect(widths(root).lane).toBeCloseTo(0, 1)
+      root.render(
+        lanes(true, { interpolateSize: "allow-keywords", laneInterpolateSize: "numeric-only" })
+      )
+      expect(widths(root).lane).toBeCloseTo(content, 1)
+      expect(root.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("snaps an intrinsic endpoint with reduced motion and requests no extra frames", () => {
+    const root = createTestRoot()
+    try {
+      root.renderer.clockPause()
+      root.renderer.setReducedMotion(true)
+      root.render(lanes(false, { interpolateSize: "allow-keywords" }))
+      const content = widths(root).reference
+      const requests = root.renderer.getStyleTransitionFrameRequestCount()
+
+      root.render(lanes(true, { interpolateSize: "allow-keywords" }))
+      expect(widths(root).lane).toBeCloseTo(content, 1)
+      expect(root.renderer.getStyleTransitionFrameRequestCount()).toBe(requests)
+    } finally {
+      root.renderer.setReducedMotion(false)
+      root.unmount()
+    }
+  })
+
+  it("interpolates a hover refinement that targets an intrinsic width", () => {
+    const root = createTestRoot()
+    try {
+      root.renderer.clockPause()
+      root.render(
+        <div style={{ display: "flex", width: 600, height: 120, interpolateSize: "allow-keywords" }}>
+          <div
+            data-testid="hover-lane"
+            style={{
+              ...laneBase,
+              width: 40,
+              hover: { width: "auto" },
+              transition: laneTransition,
+            }}
+          >
+            <text style={{ whiteSpace: "nowrap" }}>{LANE_TEXT}</text>
+          </div>
+          <div data-testid="reference" style={{ ...laneBase, flexShrink: 0, width: "auto" }}>
+            <text style={{ whiteSpace: "nowrap" }}>{LANE_TEXT}</text>
+          </div>
+        </div>
+      )
+      const lane = root.renderer.findByTestId("hover-lane")!
+      const content = root.renderer.getElementBounds(
+        root.renderer.findByTestId("reference")!.id
+      )![2]
+      const [x, y, width, height] = root.renderer.getElementBounds(lane.id)!
+      expect(width).toBeCloseTo(40, 1)
+
+      root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      root.renderer.advanceAsyncClock(60)
+      const middle = root.renderer.getElementBounds(lane.id)![2]
+      expect(middle).toBeGreaterThan(40)
+      expect(middle).toBeLessThan(content)
+
+      root.renderer.advanceAsyncClock(60)
+      expect(root.renderer.getElementBounds(lane.id)![2]).toBeCloseTo(content, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("rejects an unknown interpolateSize value through the strict style channel", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const root = createTestRoot({ strictStyles: true })
+    try {
+      root.render(
+        <div
+          data-testid="bad-interpolate-size"
+          style={{
+            width: 40,
+            height: 40,
+            interpolateSize: "allow-keywords-please" as "allow-keywords",
+          }}
+        />
+      )
+      const diagnostics = root.renderer.drainStyleDiagnostics()
+      expect(diagnostics).toHaveLength(1)
+      expect(diagnostics[0]).toMatchObject({
+        dataTestId: "bad-interpolate-size",
+        property: "interpolateSize",
+        value: '"allow-keywords-please"',
+      })
+      expect(diagnostics[0]!.message).toContain(
+        "expected one of numeric-only, allow-keywords"
+      )
+    } finally {
+      root.unmount()
+      warn.mockRestore()
+    }
+  })
+})

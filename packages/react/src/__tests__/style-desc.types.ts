@@ -20,6 +20,7 @@ const validStyle = {
   letterSpacing: 0.25,
   textTransform: "uppercase",
   textWrap: "wrap",
+  interpolateSize: "allow-keywords",
   hoverGroup: "destination-row",
   hoverWithin: {
     borderColor: "#7c86ff",
@@ -57,6 +58,11 @@ const invalidDisplay: StyleDesc = {
 const invalidDimension: StyleDesc = {
   // @ts-expect-error Native dimensions do not accept CSS inheritance keywords or unsupported units.
   width: "12em",
+}
+
+const invalidInterpolateSize: StyleDesc = {
+  // @ts-expect-error interpolateSize takes CSS's two keywords, kebab-cased.
+  interpolateSize: "allowKeywords",
 }
 
 const invalidCalc: StyleDesc = {
@@ -174,6 +180,7 @@ const invalidImage: ImgProps = {
 }
 
 void invalidDisplay
+void invalidInterpolateSize
 void invalidDimension
 void invalidCalc
 void invalidBareDimensionString
