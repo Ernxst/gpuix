@@ -22,7 +22,7 @@ import {
 import { attachRoot, detachRoot } from "./event-registry.js"
 import { hostConfig } from "./host-config.js"
 
-// Cast to any because @types/react-reconciler is out of date with react-reconciler 0.31.0
+// Cast to any because @types/react-reconciler is out of date with react-reconciler 0.33.0
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const reconciler = ReactReconciler(hostConfig as any)
 

@@ -3757,9 +3757,10 @@ or regenerate the `file:` pins per worktree after cloning.
 }
 ```
 
-`react`, `react-reconciler`, and `scheduler` are peer dependencies. Install
-versions compatible with your React runtime in the consuming app. If you still
-use a directory link, configure Vitest to dedupe `react`, `react-dom`,
+`react`, `react-reconciler`, and `scheduler` are peer dependencies. The declared
+ranges are `react-reconciler ^0.33.0` and `scheduler ^0.27.0` — the versions
+React 19.2 ships with, and the only ones GPUIX builds and tests against. If you
+still use a directory link, configure Vitest to dedupe `react`, `react-dom`,
 `react-reconciler`, and `scheduler`; that is only a fallback, not a supported
 way to consume the unpublished fork under Bun.
 
