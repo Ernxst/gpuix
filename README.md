@@ -3323,7 +3323,9 @@ object with a `type`: `px`, `fr`, `auto`, `min-content`, `max-content`,
 }} />
 ```
 
-**Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accept pixels, percentages, `ch`, and `calc()` / `clamp()` expressions. `ch` uses the shaped advance of `0` in the resolved font.
+**Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accept pixels, percentages, `ch`, `vw` / `vh`, `calc()` / `clamp()` expressions, and the CSS intrinsic sizing keywords `min-content`, `max-content`, and `fit-content`. `ch` uses the shaped advance of `0` in the resolved font; `vw` / `vh` resolve against the window's viewport, as in a browser.
+
+The intrinsic keywords are measured per frame on `<div>` and `<text>` (a custom element cannot be re-entered to measure, so a keyword there behaves as `auto`). `fit-content` resolves to its CSS definition `clamp(min-content, stretch, max-content)`, with `stretch` expressed as `100%` of the containing block; on `minWidth` / `maxWidth` that same clamp is the substituted value. On the block (height) axis all three keywords resolve to the content's laid-out height, matching browser behavior there.
 
 **Size interpolation:** `interpolateSize` (`"numeric-only"` | `"allow-keywords"`) — inherited; `"allow-keywords"` lets a `width` or `height` transition travel to or from `auto`. See [`interpolateSize`](#interpolatesize-transitions-that-target-an-intrinsic-size).
 

@@ -8278,10 +8278,13 @@ fn build_element_with_parent_layout(
     // elements see the same cascade.
     let font = parent_inherited.font_for(layered_style, window);
     // Percentage terms stay deferred through GPUI/Taffy, where the layout
-    // algorithm supplies the containing block's content size. Only `ch` is
-    // reduced here, using the inherited font chain above.
+    // algorithm supplies the containing block's content size. Only `ch`, `vw`,
+    // and `vh` are reduced here, using the inherited font chain above.
     let mut resolved_style =
         layered_style.map(|style| resolve_length_expressions(style, window, &font));
+    if let Some(style) = resolved_style.as_mut() {
+        resolve_intrinsic_keywords(id, style, &element.element_type, ctx, window, cx);
+    }
     if default_flex_none {
         default_flex_none_for_parent_layout(resolved_style.get_or_insert_default());
     }
@@ -8758,6 +8761,247 @@ fn measure_intrinsic_size(
         width: measure_width.then(|| f64::from(f32::from(size.width))),
         height: measure_height.then(|| f64::from(f32::from(size.height))),
     }
+}
+
+/// Substitute the CSS intrinsic sizing keywords (`min-content`, `max-content`,
+/// `fit-content`) on this element's dimension props with measured pixel
+/// values before the style reaches GPUI.
+///
+/// Neither GPUI's `Length` nor taffy's flex/block algorithms carry an
+/// intrinsic keyword (taffy 0.13 reserves those tags for grid tracks), so the
+/// number has to come from a content measurement. The probe mechanism is the
+/// one `measure_intrinsic_size` documents: the element is built once more with
+/// its keyword props forced back to `auto` and handed to
+/// `gpui::AnyElement::layout_as_root` under the available space that defines
+/// the keyword (`AvailableSpace::MinContent` / `MaxContent`). The same
+/// measured numbers substitute the keyword everywhere it appears on this
+/// element — base props and state refinements alike — since both size the same
+/// content.
+///
+/// `fit-content` becomes its CSS definition, `clamp(min-content, stretch,
+/// max-content)`, with the stretch term expressed as `100%` of the containing
+/// block; taffy resolves that basis at layout time. On the block axis the
+/// three keywords all resolve to the content's laid-out height, which is what
+/// a browser computes for them there.
+///
+/// Only the shared host containers are measurable, for the reason
+/// `build_element` gives for transition endpoints: a custom element's `render`
+/// is not required to be idempotent under re-entry. Everything else falls
+/// through to `dimension_to_length`, which maps an unmeasured keyword to
+/// `auto`. Inside a measurement pass the keywords fall through the same way —
+/// under `MaxContent` available space an `auto` axis already resolves to its
+/// content size, and probing from inside a probe would compound builds
+/// exponentially in nesting depth.
+fn resolve_intrinsic_keywords(
+    id: u64,
+    style: &mut StyleDesc,
+    element_type: &str,
+    ctx: &mut BuildCtx,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<GpuixView>,
+) {
+    use crate::style::DimensionValue as Dim;
+    use gpui::AvailableSpace;
+
+    fn is_keyword(dim: Option<&Dim>) -> bool {
+        matches!(
+            dim,
+            Some(Dim::MinContent | Dim::MaxContent | Dim::FitContent)
+        )
+    }
+
+    /// Which measurements this style (base and refinements) asks for:
+    /// `(min-content width, max-content width, content height)`.
+    fn measurement_needs(style: &StyleDesc) -> (bool, bool, bool) {
+        let widths = [
+            style.width.as_ref(),
+            style.min_width.as_ref(),
+            style.max_width.as_ref(),
+        ];
+        let heights = [
+            style.height.as_ref(),
+            style.min_height.as_ref(),
+            style.max_height.as_ref(),
+        ];
+        let mut min_w = widths
+            .iter()
+            .any(|dim| matches!(dim, Some(Dim::MinContent | Dim::FitContent)));
+        let mut max_w = widths
+            .iter()
+            .any(|dim| matches!(dim, Some(Dim::MaxContent | Dim::FitContent)));
+        let mut height = heights.iter().any(|dim| is_keyword(*dim));
+        for refinement in [
+            style.hover.as_deref(),
+            style.hover_within.as_deref(),
+            style.active.as_deref(),
+            style.focus.as_deref(),
+            style.focus_visible.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let (nested_min_w, nested_max_w, nested_height) = measurement_needs(refinement);
+            min_w |= nested_min_w;
+            max_w |= nested_max_w;
+            height |= nested_height;
+        }
+        (min_w, max_w, height)
+    }
+
+    let (needs_min_width, needs_max_width, needs_height) = measurement_needs(style);
+    if !(needs_min_width || needs_max_width || needs_height) {
+        return;
+    }
+    if ctx.measuring || !matches!(element_type, "div" | "text") {
+        return;
+    }
+
+    /// The keyword props forced back to their pre-keyword defaults, so the
+    /// probe answers with the content's own size instead of the constraint.
+    fn neutralize_keywords(style: &mut StyleDesc) {
+        for dim in [&mut style.width, &mut style.height] {
+            if is_keyword(dim.as_ref()) {
+                *dim = Some(Dim::Auto);
+            }
+        }
+        for dim in [
+            &mut style.min_width,
+            &mut style.max_width,
+            &mut style.min_height,
+            &mut style.max_height,
+        ] {
+            if is_keyword(dim.as_ref()) {
+                *dim = None;
+            }
+        }
+    }
+
+    fn measure(
+        id: u64,
+        probe_style: StyleDesc,
+        available: gpui::Size<AvailableSpace>,
+        ctx: &mut BuildCtx,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<GpuixView>,
+    ) -> gpui::Size<gpui::Pixels> {
+        let measuring = std::mem::replace(&mut ctx.measuring, true);
+        let outer_probe = ctx.intrinsic_probe.replace((id, probe_style));
+        let mut element = build_element(id, ctx, window, cx);
+        ctx.measuring = measuring;
+        ctx.intrinsic_probe = outer_probe;
+        element.layout_as_root(available, window, cx)
+    }
+
+    let mut width_probe = style.clone();
+    neutralize_keywords(&mut width_probe);
+    let min_width = needs_min_width.then(|| {
+        let size = measure(
+            id,
+            width_probe.clone(),
+            gpui::size(AvailableSpace::MinContent, AvailableSpace::MaxContent),
+            ctx,
+            window,
+            cx,
+        );
+        f64::from(f32::from(size.width))
+    });
+    let max_width = needs_max_width.then(|| {
+        let size = measure(
+            id,
+            width_probe.clone(),
+            gpui::size(AvailableSpace::MaxContent, AvailableSpace::MaxContent),
+            ctx,
+            window,
+            cx,
+        );
+        f64::from(f32::from(size.width))
+    });
+
+    fn substitute_width(dim: &mut Option<Dim>, min_width: Option<f64>, max_width: Option<f64>) {
+        let replaced = match dim {
+            Some(Dim::MinContent) => min_width.map(Dim::Pixels),
+            Some(Dim::MaxContent) => max_width.map(Dim::Pixels),
+            Some(Dim::FitContent) => min_width.zip(max_width).map(|(min, max)| Dim::Clamp {
+                source: "fit-content".to_owned(),
+                min: Box::new(Dim::Pixels(min)),
+                preferred: Box::new(Dim::Percentage(1.0)),
+                max: Box::new(Dim::Pixels(max)),
+            }),
+            _ => return,
+        };
+        *dim = replaced;
+    }
+
+    fn substitute_widths(style: &mut StyleDesc, min_width: Option<f64>, max_width: Option<f64>) {
+        for dim in [&mut style.width, &mut style.min_width, &mut style.max_width] {
+            substitute_width(dim, min_width, max_width);
+        }
+        for refinement in [
+            style.hover.as_deref_mut(),
+            style.hover_within.as_deref_mut(),
+            style.active.as_deref_mut(),
+            style.focus.as_deref_mut(),
+            style.focus_visible.as_deref_mut(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            substitute_widths(refinement, min_width, max_width);
+        }
+    }
+    substitute_widths(style, min_width, max_width);
+
+    if !needs_height {
+        return;
+    }
+    // The content height depends on the width the content wraps at, so the
+    // probe is offered the width this frame resolves to: the element's own
+    // definite width when it has one (the width props above are already
+    // substituted), otherwise the width it last painted at, the same
+    // convention `measure_intrinsic_size` uses. Before the first paint,
+    // max-content stands in.
+    let mut height_probe = style.clone();
+    neutralize_keywords(&mut height_probe);
+    let available_width = match style.width {
+        Some(Dim::Pixels(width)) => AvailableSpace::Definite(gpui::px(width as f32)),
+        _ => crate::automation::get_bounds(id)
+            .map(|bounds| AvailableSpace::Definite(gpui::px(bounds.width as f32)))
+            .unwrap_or(AvailableSpace::MaxContent),
+    };
+    let size = measure(
+        id,
+        height_probe,
+        gpui::size(available_width, AvailableSpace::MaxContent),
+        ctx,
+        window,
+        cx,
+    );
+    let content_height = f64::from(f32::from(size.height));
+
+    fn substitute_heights(style: &mut StyleDesc, content_height: f64) {
+        for dim in [
+            &mut style.height,
+            &mut style.min_height,
+            &mut style.max_height,
+        ] {
+            if is_keyword(dim.as_ref()) {
+                *dim = Some(Dim::Pixels(content_height));
+            }
+        }
+        for refinement in [
+            style.hover.as_deref_mut(),
+            style.hover_within.as_deref_mut(),
+            style.active.as_deref_mut(),
+            style.focus.as_deref_mut(),
+            style.focus_visible.as_deref_mut(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            substitute_heights(refinement, content_height);
+        }
+    }
+    substitute_heights(style, content_height);
 }
 
 fn default_flex_none_for_parent_layout(style: &mut StyleDesc) {
@@ -10192,9 +10436,10 @@ pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::Dimension
 fn dimension_to_calc(value: &crate::style::DimensionValue) -> gpui::CalcLength {
     use crate::style::{CalcOperator, DimensionValue};
     match value {
-        DimensionValue::Pixels(value) | DimensionValue::Ch(value) => {
-            gpui::CalcLength::absolute(gpui::px(*value as f32))
-        }
+        DimensionValue::Pixels(value)
+        | DimensionValue::Ch(value)
+        | DimensionValue::Vw(value)
+        | DimensionValue::Vh(value) => gpui::CalcLength::absolute(gpui::px(*value as f32)),
         DimensionValue::Percentage(value) => gpui::CalcLength::relative(*value as f32),
         DimensionValue::Calc {
             left,
@@ -10220,23 +10465,41 @@ fn dimension_to_calc(value: &crate::style::DimensionValue) -> gpui::CalcLength {
             dimension_to_calc(max),
         ),
         DimensionValue::Auto => unreachable!("auto cannot be part of a calc expression"),
+        DimensionValue::MinContent | DimensionValue::MaxContent | DimensionValue::FitContent => {
+            unreachable!("intrinsic sizing keywords cannot be part of a calc expression")
+        }
     }
 }
 
 fn dimension_to_length(value: &crate::style::DimensionValue) -> gpui::Length {
     use crate::style::DimensionValue;
     match value {
-        DimensionValue::Pixels(value) | DimensionValue::Ch(value) => gpui::px(*value as f32).into(),
+        // `ch`/`vw`/`vh` are reduced to pixels by `resolve_length_expressions`
+        // before styles reach GPUI; treating a stray one as pixels mirrors the
+        // long-standing `ch` fallback in `dimension_to_calc`.
+        DimensionValue::Pixels(value)
+        | DimensionValue::Ch(value)
+        | DimensionValue::Vw(value)
+        | DimensionValue::Vh(value) => gpui::px(*value as f32).into(),
         DimensionValue::Percentage(value) => gpui::relative(*value as f32).into(),
         DimensionValue::Calc { .. } | DimensionValue::Clamp { .. } => {
             gpui::Length::Calc(dimension_to_calc(value))
         }
         DimensionValue::Auto => gpui::Length::Auto,
+        // Intrinsic keywords are measured and substituted by
+        // `resolve_intrinsic_keywords` on the host containers that can be
+        // probed. A surface that cannot be measured falls back to `auto`, the
+        // closest layout GPUI can produce without a content measurement.
+        DimensionValue::MinContent | DimensionValue::MaxContent | DimensionValue::FitContent => {
+            gpui::Length::Auto
+        }
     }
 }
 
-/// Resolve the font-relative part of a length before handing percentages to
-/// GPUI/Taffy. Taffy supplies the containing-block basis at layout time.
+/// Resolve the font-relative and viewport-relative parts of a length before
+/// handing percentages to GPUI/Taffy. Taffy supplies the containing-block
+/// basis at layout time; the window supplies the viewport basis here, exactly
+/// once per frame, so `vw`/`vh` track a window resize the way a browser does.
 fn resolve_length_expressions(
     style: &StyleDesc,
     window: &gpui::Window,
@@ -10250,13 +10513,19 @@ fn resolve_length_expressions(
             .ch_advance(font_id, font.size)
             .unwrap_or(font.size * 0.5),
     ));
+    let viewport = window.viewport_size();
+    let units = LengthUnits {
+        ch,
+        vw: f64::from(f32::from(viewport.width)) / 100.0,
+        vh: f64::from(f32::from(viewport.height)) / 100.0,
+    };
 
-    resolved.width = resolve_dimension(style.width.as_ref(), ch);
-    resolved.min_width = resolve_dimension(style.min_width.as_ref(), ch);
-    resolved.max_width = resolve_dimension(style.max_width.as_ref(), ch);
-    resolved.height = resolve_dimension(style.height.as_ref(), ch);
-    resolved.min_height = resolve_dimension(style.min_height.as_ref(), ch);
-    resolved.max_height = resolve_dimension(style.max_height.as_ref(), ch);
+    resolved.width = resolve_dimension(style.width.as_ref(), units);
+    resolved.min_width = resolve_dimension(style.min_width.as_ref(), units);
+    resolved.max_width = resolve_dimension(style.max_width.as_ref(), units);
+    resolved.height = resolve_dimension(style.height.as_ref(), units);
+    resolved.min_height = resolve_dimension(style.min_height.as_ref(), units);
+    resolved.max_height = resolve_dimension(style.max_height.as_ref(), units);
     // State refinements go through the same expression resolver. Without this
     // a typed `hover: { width: "24ch" }` could reach StyleRefinement and be
     // ignored by its old pixels-only helpers.
@@ -10283,17 +10552,37 @@ fn resolve_length_expressions(
     resolved
 }
 
+/// The pixel value of one unit of each font- or viewport-relative length,
+/// resolved once per element per frame.
+#[derive(Clone, Copy)]
+struct LengthUnits {
+    ch: f64,
+    vw: f64,
+    vh: f64,
+}
+
 fn resolve_dimension(
     value: Option<&crate::style::DimensionValue>,
-    ch: f64,
+    units: LengthUnits,
 ) -> Option<crate::style::DimensionValue> {
     let value = value?;
     match value {
         crate::style::DimensionValue::Percentage(_)
         | crate::style::DimensionValue::Pixels(_)
         | crate::style::DimensionValue::Auto => Some(value.clone()),
+        // Intrinsic sizing keywords need a content measurement, which only the
+        // build pass can take; `resolve_intrinsic_keywords` owns them.
+        crate::style::DimensionValue::MinContent
+        | crate::style::DimensionValue::MaxContent
+        | crate::style::DimensionValue::FitContent => Some(value.clone()),
         crate::style::DimensionValue::Ch(value) => {
-            Some(crate::style::DimensionValue::Pixels(value * ch))
+            Some(crate::style::DimensionValue::Pixels(value * units.ch))
+        }
+        crate::style::DimensionValue::Vw(value) => {
+            Some(crate::style::DimensionValue::Pixels(value * units.vw))
+        }
+        crate::style::DimensionValue::Vh(value) => {
+            Some(crate::style::DimensionValue::Pixels(value * units.vh))
         }
         crate::style::DimensionValue::Calc {
             source,
@@ -10302,9 +10591,9 @@ fn resolve_dimension(
             right,
         } => Some(crate::style::DimensionValue::Calc {
             source: source.clone(),
-            left: Box::new(resolve_dimension(Some(left), ch)?),
+            left: Box::new(resolve_dimension(Some(left), units)?),
             operator: *operator,
-            right: Box::new(resolve_dimension(Some(right), ch)?),
+            right: Box::new(resolve_dimension(Some(right), units)?),
         }),
         crate::style::DimensionValue::Clamp {
             source,
@@ -10314,9 +10603,9 @@ fn resolve_dimension(
             ..
         } => Some(crate::style::DimensionValue::Clamp {
             source: source.clone(),
-            min: Box::new(resolve_dimension(Some(min), ch)?),
-            preferred: Box::new(resolve_dimension(Some(preferred), ch)?),
-            max: Box::new(resolve_dimension(Some(max), ch)?),
+            min: Box::new(resolve_dimension(Some(min), units)?),
+            preferred: Box::new(resolve_dimension(Some(preferred), units)?),
+            max: Box::new(resolve_dimension(Some(max), units)?),
         }),
     }
 }
