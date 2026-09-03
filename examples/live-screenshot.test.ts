@@ -6,6 +6,11 @@
  * entity reentrancy panic, and the client then waited forever for a reply that
  * could never arrive (#291). The offscreen `TestRenderer` never covered this:
  * it captures through the test app context, not a live window.
+ *
+ * macOS only: the Windows capture path defers `render_to_image` into
+ * `on_next_frame`, outside any typed lease, so it never had this bug — but it
+ * depends on a frame being serviced, which an occluded runner window under
+ * GPUIX_BACKGROUND cannot guarantee.
  */
 
 import fs from 'node:fs'
