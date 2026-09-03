@@ -42,6 +42,46 @@ describeNative("TestElement.getBoundingClientRect", () => {
     }
   })
 
+  it("reports the border box, as the DOM does", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div style={{ display: "flex", padding: 20, width: 200, height: 100 }}>
+          <div
+            data-testid="mark"
+            style={{
+              width: 12,
+              height: 12,
+              padding: 3,
+              borderWidth: 2,
+              borderColor: "#00ff00",
+              backgroundColor: "#ff0000",
+            }}
+          />
+        </div>
+      )
+
+      // Sizes are border-box here, so the mark's painted border box is exactly
+      // its declared 12×12, at the parent's content origin. The recorded box
+      // used to be the padding-box size at the content-box origin, so a border
+      // or padding shrank and shifted the rect (#298).
+      const rect = screen.getByTestId("mark").getBoundingClientRect()
+      expect(rect).toEqual({
+        x: 20,
+        y: 20,
+        width: 12,
+        height: 12,
+        top: 20,
+        right: 32,
+        bottom: 32,
+        left: 20,
+      })
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("throws instead of reporting zeros for an element that painted nothing", () => {
     const screen = createTestRoot()
 

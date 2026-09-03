@@ -39,6 +39,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 
 const RED = "#ff0000"
 const BLUE = "#0000ff"
+const GREEN = "#00ff00"
 
 function Scene({
   color = RED,
@@ -211,6 +212,68 @@ describeNative("toMatchScreenshot", () => {
       await expect(expect(screen).toMatchScreenshot(options)).rejects.toThrowError(
         /Expected image dimensions to be/
       )
+    })
+  })
+
+  it("clips an element capture to its border box, so a golden can catch a border regression", async () => {
+    await withScene(async (screen, directory) => {
+      // A 12px mark inside a 2px border: the border box is 16×16 logical
+      // pixels. Playwright and vitest browser mode clip element screenshots to
+      // the border box, and a border-colour regression is exactly what a
+      // golden exists to catch — a content-box clip silently excludes it.
+      screen.render(
+        <div
+          style={{
+            display: "flex",
+            width: 200,
+            height: 120,
+            padding: 20,
+            backgroundColor: "#102030",
+          }}
+        >
+          <div
+            data-testid="mark"
+            style={{
+              width: 16,
+              height: 16,
+              backgroundColor: RED,
+              borderWidth: 2,
+              borderColor: GREEN,
+            }}
+          />
+        </div>
+      )
+      const golden = path.join(directory, "mark.png")
+      const options = { resolveScreenshotPath: () => golden }
+      const mark = screen.getByTestId("mark")
+
+      await expect(expect(mark).toMatchScreenshot(options)).rejects.toThrowError(
+        /a new one was created/
+      )
+      await expect(mark).toMatchScreenshot(options)
+
+      const { scaleFactor } = screen.renderer.getWindowSize()
+      const image = decodePng(readFileSync(golden), golden)
+      expect({ width: image.width, height: image.height }).toEqual({
+        width: 16 * scaleFactor,
+        height: 16 * scaleFactor,
+      })
+
+      // The outermost ring of pixels is the border, the centre is the fill.
+      const rgba = (x: number, y: number): number[] => {
+        const at = (y * image.width + x) * 4
+        return [image.data[at]!, image.data[at + 1]!, image.data[at + 2]!, image.data[at + 3]!]
+      }
+      const green = [0, 255, 0, 255]
+      for (let x = 0; x < image.width; x += 1) {
+        expect(rgba(x, 0)).toEqual(green)
+        expect(rgba(x, image.height - 1)).toEqual(green)
+      }
+      for (let y = 0; y < image.height; y += 1) {
+        expect(rgba(0, y)).toEqual(green)
+        expect(rgba(image.width - 1, y)).toEqual(green)
+      }
+      expect(rgba(image.width / 2, image.height / 2)).toEqual([255, 0, 0, 255])
     })
   })
 
