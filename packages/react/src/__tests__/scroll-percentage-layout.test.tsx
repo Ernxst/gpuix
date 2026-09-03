@@ -101,6 +101,108 @@ describe("percentage layout inside scroll containers", () => {
     }
   })
 
+  // Issue #294: the scroll axis is the *main* axis of the scroller. The cases
+  // above all put `overflowX: "scroll"` on a `flexDirection: "column"` box,
+  // where x is the cross axis.
+  it("resolves a percentage minWidth against a row scrollport wider than its content", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div style={{ display: "flex", flexDirection: "column", width: 400, height: 200 }}>
+          <div
+            data-testid="main-axis-outer"
+            style={{ display: "flex", flexDirection: "row", flexGrow: 1, overflowX: "scroll" }}
+          >
+            <div
+              data-testid="main-axis-inner"
+              style={{ display: "flex", flexDirection: "column", flexShrink: 0, minWidth: "100%" }}
+            >
+              <div style={{ width: 80, height: 20 }} />
+              <div style={{ width: 120, height: 20 }} />
+            </div>
+          </div>
+        </div>,
+      )
+
+      const outer = boundsFor(root.renderer, "main-axis-outer")
+      const inner = boundsFor(root.renderer, "main-axis-inner")
+
+      expect(outer.width).toBeCloseTo(400, 4)
+      expect(inner.width).toBeCloseTo(outer.width, 4)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  // The percentage is the binding constraint here: 150% of the 400px scrollport
+  // is 600px, while the widest row is only 200px. Resolving `minWidth` against
+  // the child's own content instead of the scrollport would yield 200px.
+  it("resolves a percentage minWidth larger than the row scrollport into overflow", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div style={{ display: "flex", flexDirection: "column", width: 400, height: 200 }}>
+          <div
+            data-testid="wide-main-axis-outer"
+            style={{ display: "flex", flexDirection: "row", flexGrow: 1, overflowX: "scroll" }}
+          >
+            <div
+              data-testid="wide-main-axis-inner"
+              style={{ display: "flex", flexDirection: "column", flexShrink: 0, minWidth: "150%" }}
+            >
+              <div style={{ width: 80, height: 20 }} />
+              <div style={{ width: 200, height: 20 }} />
+            </div>
+          </div>
+        </div>,
+      )
+
+      const outer = boundsFor(root.renderer, "wide-main-axis-outer")
+      const inner = boundsFor(root.renderer, "wide-main-axis-inner")
+
+      expect(outer.width).toBeCloseTo(400, 4)
+      expect(inner.width).toBeCloseTo(600, 4)
+      expect(inner.width).toBeGreaterThan(outer.width)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  // No `flexGrow`/`flexShrink`/`flexBasis` authored, so the child takes GPUIX's
+  // internal `flex_none` default; the percentage must still see the scrollport.
+  it("resolves a percentage minWidth on a row scrollport child with no authored flex", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div style={{ display: "flex", flexDirection: "column", width: 400, height: 200 }}>
+          <div
+            data-testid="default-flex-outer"
+            style={{ display: "flex", flexDirection: "row", flexGrow: 1, overflowX: "scroll" }}
+          >
+            <div
+              data-testid="default-flex-inner"
+              style={{ display: "flex", flexDirection: "column", minWidth: "100%" }}
+            >
+              <div style={{ width: 80, height: 20 }} />
+              <div style={{ width: 120, height: 20 }} />
+            </div>
+          </div>
+        </div>,
+      )
+
+      const outer = boundsFor(root.renderer, "default-flex-outer")
+      const inner = boundsFor(root.renderer, "default-flex-inner")
+
+      expect(outer.width).toBeCloseTo(400, 4)
+      expect(inner.width).toBeCloseTo(outer.width, 4)
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("preserves an authored flex basis on a scroll-container child", () => {
     const root = createTestRoot()
 
