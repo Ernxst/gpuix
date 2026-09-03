@@ -1130,7 +1130,7 @@ here. Never run `git reset` in `zed/` to "undo" PR work.
 
 ### PRs to GPUIX
 
-When you open a PR with `gh pr create` against **this repo** (`remorses/gpuix`),
+When you open a PR with `gh pr create` against **this repo** (`Ernxst/gpuix`),
 the body must name the **harness**, **agent**, and **model** that wrote the
 change. Then put **every user prompt** from the session in a collapsed
 `<details>` block. Reviewers use that to judge prompt quality and how much
