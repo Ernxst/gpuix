@@ -15,7 +15,10 @@ Layout was always border-box; only the measurement lied.
 to zero, exactly like CSS — the space returns to the content box and nothing
 paints. `"solid"` and `"dashed"` paint true to name; `"dotted"` degrades to
 dashed and the 3D styles (`"double"`, `"groove"`, `"ridge"`, `"inset"`,
-`"outset"`) degrade to solid, the fallback CSS 2.1 permits. Declaring only
-`borderWidth` and `borderColor` still paints a solid border.
+`"outset"`) degrade to solid, the fallback CSS 2.1 permits. State overlays
+resolve like CSS: `hover: { borderStyle: "solid" }` overrides a dashed base,
+and it turns a border suppressed by `borderStyle: "none"` back on at the
+base's declared width. Declaring only `borderWidth` and `borderColor` still
+paints a solid border.
 
 Fixes #301

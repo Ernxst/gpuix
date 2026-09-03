@@ -29,6 +29,7 @@ use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 #[cfg(target_os = "macos")]
 use objc::{class, msg_send, sel, sel_impl};
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash as _, Hasher as _};
@@ -10330,12 +10331,103 @@ pub(crate) fn apply_focus_styles<E: gpui::StatefulInteractiveElement>(
     style: &StyleDesc,
 ) -> E {
     if let Some(ref focus_style) = style.focus {
-        el = el.focus(|refinement| apply_styles(refinement, focus_style));
+        let focus_style = effective_state_style(style, focus_style);
+        el = el.focus(|refinement| apply_styles(refinement, &focus_style));
     }
     if let Some(ref focus_visible_style) = style.focus_visible {
-        el = el.focus_visible(|refinement| apply_styles(refinement, focus_visible_style));
+        let focus_visible_style = effective_state_style(style, focus_visible_style);
+        el = el.focus_visible(|refinement| apply_styles(refinement, &focus_visible_style));
     }
     el
+}
+
+/// The state style as `apply_styles` must see it, given the base it overlays.
+///
+/// A gpui state overlay refines the *computed* base style, so a field the
+/// overlay leaves unset falls through to the base. That model cannot express
+/// "turn a suppressed border back on": with base `borderStyle: "none"` the
+/// base pass wrote zero widths, and an overlay declaring only
+/// `borderStyle: "solid"` would refine the line style while inheriting those
+/// zeros. CSS resolves the cascade per state instead, and shows the declared
+/// `borderWidth`. Close the gap by copying the base widths into the overlay
+/// whenever it un-suppresses a border without authoring widths of its own.
+fn effective_state_style<'a>(base: &StyleDesc, state: &'a StyleDesc) -> Cow<'a, StyleDesc> {
+    let suppressed =
+        |style: &StyleDesc| matches!(style.border_style.as_deref(), Some("none" | "hidden"));
+    let unsuppresses = state.border_style.is_some() && !suppressed(state);
+    if !(suppressed(base) && unsuppresses) {
+        return Cow::Borrowed(state);
+    }
+    let mut merged = state.clone();
+    merged.border_width = merged.border_width.or(base.border_width);
+    merged.border_top_width = merged.border_top_width.or(base.border_top_width);
+    merged.border_right_width = merged.border_right_width.or(base.border_right_width);
+    merged.border_bottom_width = merged.border_bottom_width.or(base.border_bottom_width);
+    merged.border_left_width = merged.border_left_width.or(base.border_left_width);
+    Cow::Owned(merged)
+}
+
+#[cfg(test)]
+mod effective_state_style_tests {
+    use super::*;
+
+    #[test]
+    fn restores_base_widths_when_an_overlay_unsuppresses_the_border() {
+        let base = StyleDesc {
+            border_width: Some(2.0),
+            border_style: Some("none".into()),
+            ..Default::default()
+        };
+        let hover = StyleDesc {
+            border_style: Some("solid".into()),
+            ..Default::default()
+        };
+        assert_eq!(effective_state_style(&base, &hover).border_width, Some(2.0));
+
+        // Widths the overlay authors itself win over the restored base widths.
+        let authored = StyleDesc {
+            border_style: Some("dashed".into()),
+            border_width: Some(5.0),
+            ..Default::default()
+        };
+        assert_eq!(
+            effective_state_style(&base, &authored).border_width,
+            Some(5.0)
+        );
+    }
+
+    #[test]
+    fn leaves_the_overlay_alone_outside_the_unsuppression_case() {
+        // A visible base needs no width restoration…
+        let dashed_base = StyleDesc {
+            border_width: Some(2.0),
+            border_style: Some("dashed".into()),
+            ..Default::default()
+        };
+        let hover = StyleDesc {
+            border_style: Some("solid".into()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            effective_state_style(&dashed_base, &hover),
+            Cow::Borrowed(_)
+        ));
+
+        // …and an overlay that also suppresses inherits the zeros it wants.
+        let none_base = StyleDesc {
+            border_width: Some(2.0),
+            border_style: Some("none".into()),
+            ..Default::default()
+        };
+        let hidden_overlay = StyleDesc {
+            border_style: Some("hidden".into()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            effective_state_style(&none_base, &hidden_overlay),
+            Cow::Borrowed(_)
+        ));
+    }
 }
 
 /// Base styles plus GPUI's native interaction refinements and hover groups.
@@ -10352,18 +10444,21 @@ where
         el = el.group(gpui::SharedString::from(group.to_owned()));
     }
     if let Some(hover_style) = style.hover.as_deref() {
-        el = el.hover(|refinement| apply_styles(refinement, hover_style));
+        let hover_style = effective_state_style(style, hover_style);
+        el = el.hover(|refinement| apply_styles(refinement, &hover_style));
     }
     if let Some(active_style) = style.active.as_deref() {
-        el = el.active(|refinement| apply_styles(refinement, active_style));
+        let active_style = effective_state_style(style, active_style);
+        el = el.active(|refinement| apply_styles(refinement, &active_style));
     }
     el = apply_focus_styles(el, style);
     if let (Some(group), Some(hover_within_style)) = (
         style.hover_within_group.clone(),
         style.hover_within.as_deref(),
     ) {
+        let hover_within_style = effective_state_style(style, hover_within_style);
         el = el.group_hover(group, |refinement| {
-            apply_styles(refinement, hover_within_style)
+            apply_styles(refinement, &hover_within_style)
         });
     }
     el
@@ -10734,9 +10829,15 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.border_style.as_deref() {
         // GPUI's only non-solid line is dashed, so `dotted` degrades to it;
         // the 3D styles (`double`, `groove`, `ridge`, `inset`, `outset`)
-        // degrade to gpui's default solid line, the fallback CSS 2.1 §8.5.3
-        // permits. `solid` is that default, so it needs no call.
+        // degrade to solid, the fallback CSS 2.1 §8.5.3 permits. Solid is
+        // gpui's default, but it must still be written explicitly: this same
+        // function fills the state-overlay refinements, and an unset field
+        // there falls through to the base — `hover: { borderStyle: "solid" }`
+        // over a dashed base must override it, like CSS.
         Some("dotted" | "dashed") => el = el.border_dashed(),
+        Some("solid" | "double" | "groove" | "ridge" | "inset" | "outset") => {
+            el.style().border_style = Some(gpui::BorderStyle::Solid);
+        }
         _ => {}
     }
     if let Some(ref color) = style.border_color {

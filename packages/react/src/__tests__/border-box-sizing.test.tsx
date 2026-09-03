@@ -165,6 +165,82 @@ describe("borderStyle (issue #301)", () => {
     )
   })
 
+  // State overlays refine the computed base style, so the two directions CSS
+  // resolves per state must both hold: an overlay can change the line style of
+  // a visible border, and it can turn a border suppressed by
+  // `borderStyle: "none"` back on at the base's declared width.
+  const hoverable = (style: StyleDesc) => (
+    <div
+      style={{
+        display: "flex",
+        width: 400,
+        height: 100,
+        backgroundColor: "#101010",
+        padding: 10,
+      }}
+    >
+      <div style={{ width: 200, height: 60, borderColor: "#ff0000", ...style }} />
+    </div>
+  )
+
+  function shootPointer(name: string, tree: React.ReactElement, hover: boolean) {
+    const file = path.join(SHOTS_DIR, `${name}.png`)
+    const root = createTestRoot()
+    try {
+      root.render(tree)
+      // Park the pointer over the box or far away, so every capture in a
+      // comparison carries an explicit pointer state.
+      root.renderer.nativeSimulateMouseMove(hover ? 100 : 1200, hover ? 40 : 700)
+      root.renderer.flush()
+      root.renderer.captureScreenshot(file)
+    } finally {
+      root.unmount()
+    }
+    return file
+  }
+
+  it('hover: { borderStyle: "solid" } overrides a dashed base', () => {
+    const hovered = shootPointer(
+      "border-style-hover-solid-over-dashed",
+      hoverable({ borderWidth: 4, borderStyle: "dashed", hover: { borderStyle: "solid" } }),
+      true,
+    )
+    const solidReference = shootPointer(
+      "border-style-solid-reference",
+      hoverable({ borderWidth: 4, borderStyle: "solid" }),
+      true,
+    )
+    const dashedReference = shootPointer(
+      "border-style-dashed-reference",
+      hoverable({ borderWidth: 4, borderStyle: "dashed" }),
+      true,
+    )
+
+    expectScreenshotsEqual(hovered, solidReference)
+    expectScreenshotsDiffer(hovered, dashedReference)
+  })
+
+  it('hover: { borderStyle: "solid" } restores a border suppressed by none', () => {
+    const tree = hoverable({
+      borderWidth: 4,
+      borderStyle: "none",
+      hover: { borderStyle: "solid" },
+    })
+
+    const hovered = shootPointer("border-style-hover-restores-border", tree, true)
+    const unhovered = shootPointer("border-style-none-unhovered", tree, false)
+    const solidReference = shootPointer(
+      "border-style-solid-reference-b",
+      hoverable({ borderWidth: 4, borderStyle: "solid" }),
+      true,
+    )
+
+    // Hovered, the base's 4px width returns at the overlay's solid style…
+    expectScreenshotsEqual(hovered, solidReference)
+    // …and only then: the unhovered box still paints no border.
+    expectScreenshotsDiffer(hovered, unhovered)
+  })
+
   it("rejects a value outside the CSS border-style set", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const root = createTestRoot({ strictStyles: true })

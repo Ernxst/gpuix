@@ -3333,7 +3333,8 @@ object with a `type`: `px`, `fr`, `auto`, `min-content`, `max-content`,
 
 **Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `borderStyle`, `boxShadow`, `outlineColor`, `outlineWidth`, `outlineOffset`
 
-Boxes are sized **border-box**, like the DOM default for design systems:
+Boxes are sized **border-box** — the near-universal stylesheet convention
+(`box-sizing: border-box`; the DOM's own default is `content-box`):
 `borderWidth` shrinks the content box, never the element's own box, and
 `getBounds()` / `getElementBounds()` report the border box the way
 `getBoundingClientRect()` does. `borderStyle` accepts the full CSS
@@ -3341,9 +3342,12 @@ Boxes are sized **border-box**, like the DOM default for design systems:
 width to zero, exactly like CSS. GPUI paints only solid and dashed lines, so
 `"solid"` and `"dashed"` paint true to name, `"dotted"` degrades to dashed,
 and the 3D styles (`"double"`, `"groove"`, `"ridge"`, `"inset"`, `"outset"`)
-degrade to solid — the fallback CSS 2.1 permits. A border still paints when
-only `borderWidth` and `borderColor` are declared; GPUIX does not require an
-explicit `borderStyle` the way a stylesheet does.
+degrade to solid — the fallback CSS 2.1 permits. State overlays resolve like
+CSS: `hover: { borderStyle: "solid" }` overrides a dashed base, and it turns
+a border suppressed by `borderStyle: "none"` back on at the base's declared
+width. A border still paints when only `borderWidth` and `borderColor` are
+declared; GPUIX does not require an explicit `borderStyle` the way a
+stylesheet does.
 
 `background` accepts a solid color, a CSS `linear-gradient()` with two through
 eight stops, or a structured native gradient:
