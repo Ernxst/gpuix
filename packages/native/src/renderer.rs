@@ -4603,8 +4603,11 @@ impl GpuixRenderer {
     pub fn capture_screenshot(&self, _env: Env, path: String) -> Result<()> {
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         {
-            let image = update_window(move |_view, window, cx| {
-                cx.notify();
+            // Leases the window untyped, as `draw_window_for_automation_read`
+            // does. Drawing renders `GpuixView`, so holding a typed lease on it
+            // across the draw aborts the process with an entity reentrancy
+            // panic instead of answering the automation request.
+            let image = update_window_without_view(move |window, cx| {
                 window.refresh();
                 window.draw(cx).clear(cx);
                 window.render_to_image()
