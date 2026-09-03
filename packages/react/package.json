@@ -83,7 +83,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@gpuix/native": "workspace:^",
+    "@gpuix/native": "0.8.0-fork.1",
     "eventsource-parser": "^4.1.0",
     "zod": "^4.4.3"
   },

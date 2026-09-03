@@ -34,11 +34,12 @@ instance-ref API shaped like DOM elements (`scrollTop`, `getBoundingClientRect()
 Native text, native `<input>` and `<textarea>`, virtualization, and animation are implemented and
 documented in this README.
 
-Still open: full CSS Grid parity with the browser. `<canvas>` and its 2D context are implemented
-— paths, fills, strokes, gradients, transforms, text, and images all rasterize natively — but a
-direct-GPU canvas keeps no CPU pixel buffer, so the **pixel readback** family (`toDataURL()`,
-`getImageData()`, `putImageData()`) reports a diagnostic instead of returning pixels. Browser
-event callbacks in the wasm build are not wired up yet either — see the web example notes below.
+Still open: full CSS Grid parity with the browser, and parts of `<canvas>`. The element and its 2D
+context exist — paths, fills, strokes, transforms, and images rasterize natively — but pixel
+readback (`toDataURL()`, `getImageData()`, `putImageData()`), gradients and patterns, and canvas
+text (`fillText()`, `strokeText()`, `measureText()`) are not implemented; each reports a
+diagnostic instead. Browser event callbacks in the wasm build are not wired up yet either — see
+the web example notes below.
 
 **Platform status:** macOS is this fork's primary platform. Windows builds and runs the same CI
 test suite as macOS on dispatch runs. Linux builds, but nothing tests it — the test renderer is
@@ -80,7 +81,8 @@ cd packages/native && bun pm pack
 cd ../react && bun pm pack
 ```
 
-Pin the two generated `.tgz` files in your app, then add the types.
+Pin the two generated `.tgz` files in your app — plus an `overrides` entry for
+`@gpuix/native`, without which the install fails — then add the types.
 [Consuming an unpublished checkout](#consuming-an-unpublished-checkout) has the
 exact `package.json` shape and the peer-dependency rules.
 
@@ -200,10 +202,12 @@ packed in [Quickstart](#quickstart), and run `bun install`.
 The todo app lives in [`example-app/`](https://github.com/Ernxst/gpuix/tree/main/example-app) and is meant to be copied.
 The rest live in [`examples/`](https://github.com/Ernxst/gpuix/tree/main/examples). All of them use hardcoded data.
 
-CI compiles a standalone **chat** binary for every build target and attaches it to a
-[GitHub release](https://github.com/Ernxst/gpuix/releases) as `example-chat-<target>`. Running one
-needs no Bun and no Rust install. This fork has published no releases yet, so for now the example
-comes from a checkout; the commands below are what a release download looks like.
+CI compiles a standalone **chat** binary on `workflow_dispatch` runs, one per target, and uploads
+each as a `example-chat-<target>` **workflow artifact**. Running one needs no Bun and no Rust
+install. Nothing attaches those artifacts to a [release](https://github.com/Ernxst/gpuix/releases)
+automatically — a release asset is put there by hand — and this fork has published no releases
+yet. For now the example comes from a checkout; the commands below are what an unpacked download
+looks like.
 
 ```bash
 tar -xzf example-chat-aarch64-apple-darwin.tar.gz
@@ -2918,7 +2922,7 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `img`           | Raster or full-colour SVG images from paths, URLs, or bytes |
 | `svg`           | Tintable monochrome SVG icons from source or disk |
 | `anchored`      | Positioned overlay                               |
-| `canvas`        | Immediate-mode 2D drawing. No pixel readback     |
+| `canvas`        | Immediate-mode 2D paths, fills, strokes, transforms, and images |
 
 ### Inline text runs
 
@@ -3826,9 +3830,19 @@ or regenerate the `file:` pins per worktree after cloning.
   "dependencies": {
     "@gpuix/native": "file:../gpuix/packages/native/gpuix-native-0.4.0.tgz",
     "@gpuix/react": "file:../gpuix/packages/react/gpuix-react-0.4.0.tgz"
+  },
+  "overrides": {
+    "@gpuix/native": "file:../gpuix/packages/native/gpuix-native-0.4.0.tgz"
   }
 }
 ```
+
+**The `overrides` entry is required, not decoration.** `@gpuix/react` depends on
+`@gpuix/native` by name, and bun resolves that inner dependency from the registry
+rather than from your top-level tarball pin — where it finds upstream's package
+under the same name. Without the override the install fails outright, and at a
+version upstream also publishes it would quietly give you upstream's native
+binary under this fork's React. Point the override at the same tarball.
 
 `react`, `react-reconciler`, and `scheduler` are peer dependencies. The declared
 ranges are `react ^19.2.0`, `react-reconciler ^0.33.0`, and `scheduler ^0.27.0`
@@ -4478,7 +4492,8 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Background launch (`focus`, `show`, `activateWindow`)
 - [x] Last window close terminates through the shared graceful lifecycle
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
-- [x] Canvas element and 2D context (no pixel readback: `toDataURL`, `getImageData`, `putImageData`)
+- [x] Canvas element and 2D context — paths, fills, strokes, transforms, images
+- [ ] Canvas pixel readback (`toDataURL`, `getImageData`, `putImageData`), gradients and patterns, and canvas text (`fillText`, `strokeText`, `measureText`)
 - [ ] Multiple windows
 - [x] JS remount under `bun --hot` (`render()` keeps the native window)
 - [ ] React Refresh during `bun --hot` (needs a Bun runtime transform)
