@@ -1214,9 +1214,9 @@ export interface NativeRenderer {
   releasePointerCapture?(elementId: number): void
 
   // ── Scroll API ─────────────────────────────────────────────────
-  /** Set the scroll offset of a scrollable element (overflow: "scroll").
-   *  x and y are negative pixel values (scroll down = more negative y).
-   *  This is gpui's sign convention; `PublicInstance.scrollTo()` and
+  /** Set the scroll offset of a scrollable element (overflow: "scroll" or
+   *  "auto"). x and y are negative pixel values (scroll down = more negative
+   *  y). This is gpui's sign convention; `PublicInstance.scrollTo()` and
    *  `PublicInstance.scrollTop` expose the same scroll under the DOM's. */
   scrollTo?(elementId: number, x: number, y: number): void
   /** Scroll a child into view by its index in the children list.

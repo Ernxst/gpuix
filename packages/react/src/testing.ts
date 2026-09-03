@@ -1293,9 +1293,9 @@ export class TestRenderer implements NativeRenderer {
 
   // ── Scroll API ──────────────────────────────────────────────────
 
-  /** Set the scroll offset of a scrollable element (overflow: "scroll").
-   *  x and y are negative pixel values (scroll down = more negative y).
-   *  Call flush() internally to apply. */
+  /** Set the scroll offset of a scrollable element (overflow: "scroll" or
+   *  "auto"). x and y are negative pixel values (scroll down = more negative
+   *  y). Call flush() internally to apply. */
   scrollTo(elementId: number, x: number, y: number): void {
     this.native.flush()
     this.native.scrollTo(elementId, x, y)
