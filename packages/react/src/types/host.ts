@@ -249,7 +249,7 @@ export type AlignContent =
   | "stretch"
 export type JustifyContent = Exclude<AlignContent, "normal" | "stretch">
 export type Position = "relative" | "absolute"
-export type Overflow = "visible" | "hidden" | "scroll"
+export type Overflow = "visible" | "hidden" | "scroll" | "auto"
 export type Cursor = "default" | "pointer"
 
 export interface MotionStyle {
@@ -1459,8 +1459,8 @@ export interface PublicInstance {
    * `Element.scrollTop`: 0 at the top, growing positive as content scrolls up
    * out of view. Assigning scrolls the element and is clamped natively.
    *
-   * Only `overflow: "scroll"` elements and `<virtual-list>` are scroll
-   * containers here. `overflow: "hidden"` is a scroll container on the web,
+   * Only `overflow: "scroll"` / `"auto"` elements and `<virtual-list>` are
+   * scroll containers here. `overflow: "hidden"` is a scroll container on the web,
    * programmatically scrollable with a `scrollHeight` past its viewport; in
    * this renderer it reports `0` and drops assignments, like a plain element.
    *

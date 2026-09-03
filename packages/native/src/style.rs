@@ -1659,21 +1659,21 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             value,
             "overflow",
             overflow,
-            ["visible", "hidden", "scroll"]
+            ["visible", "hidden", "scroll", "auto"]
         );
         enum_field!(
             key,
             value,
             "overflowX",
             overflow_x,
-            ["visible", "hidden", "scroll"]
+            ["visible", "hidden", "scroll", "auto"]
         );
         enum_field!(
             key,
             value,
             "overflowY",
             overflow_y,
-            ["visible", "hidden", "scroll"]
+            ["visible", "hidden", "scroll", "auto"]
         );
         if key == "cursor" {
             let property = property!("cursor");
