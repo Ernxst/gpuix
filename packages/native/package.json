@@ -15,11 +15,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/remorses/gpuix"
-  },
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org/",
-    "access": "public"
+    "url": "git+https://github.com/Ernxst/gpuix.git"
   },
   "scripts": {
     "artifacts": "napi artifacts",

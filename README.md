@@ -1,11 +1,62 @@
 # GPUIX
 
 > [!NOTE]
-> **Ernxst/gpuix** is a fork of [remorses/gpuix](https://github.com/remorses/gpuix) that keeps one codebase for web and desktop, with DOM/CSS semantics as the source of truth. It tracks and reconciles with upstream regularly; fork-specific divergences are recorded in [`.changeset/`](./.changeset). This fork intentionally does **not** publish packages to npm.
+> **Ernxst/gpuix** is a fork of [remorses/gpuix](https://github.com/remorses/gpuix). Upstream's
+> goal is a library-neutral way to build native desktop apps in React; this fork's goal is
+> narrower and stricter: **one codebase for desktop and web**, with DOM and CSS semantics as the
+> source of truth. Every public-surface decision here is tested against one question — does the
+> same consumer code behave identically when it runs under `react-dom` in a browser? Upstream and
+> this fork will keep diverging on that basis; the fork tracks and reconciles with upstream
+> regularly. Full credit to [@remorses](https://github.com/remorses) for the renderer this fork
+> builds on.
+>
+> **The `@gpuix/native` and `@gpuix/react` packages on the npm registry are upstream's**,
+> published by upstream's maintainer, so `bun add @gpuix/react` installs upstream, not this fork.
+> This fork does **not** publish to npm. Its builds will be distributed as tarballs attached to
+> [this repository's GitHub releases](https://github.com/Ernxst/gpuix/releases) under the same two
+> names; none are published yet, so
+> [build from a checkout](#consuming-an-unpublished-checkout) for now.
 
 React bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) - Zed's GPU-accelerated UI framework.
 
 Build native GPU-accelerated desktop apps with React and TypeScript. Your components render directly to the GPU via Metal, DirectX, or Vulkan. No Electron, no web views.
+
+This fork's premise is that desktop and the browser should be one codebase, not two: a component
+written against `<div>`, `<text>`, refs, events, and `style` should need no renderer-specific
+branch to run correctly on both. GPUI drives the desktop through napi-rs and the browser through
+wasm-bindgen and WebGPU. Where the two disagree, the browser's behavior wins and GPUIX is changed
+to match it, not the other way around.
+
+What's solid today: the mutation-based reconciler and event system, an AccessKit-backed
+accessibility tree (including live regions), and a test/automation story — `createTestRoot()`,
+`render()` and `TestElement` under `@gpuix/react/testing`, `toMatchScreenshot()`, and an
+instance-ref API shaped like DOM elements (`scrollTop`, `getBoundingClientRect()`, and friends).
+Native text, native `<input>` and `<textarea>`, virtualization, and animation are implemented and
+documented in this README.
+
+Still open: full CSS Grid parity with the browser, and parts of `<canvas>`. The element and its 2D
+context exist — paths, fills, strokes, transforms, and images rasterize natively — but pixel
+readback (`toDataURL()`, `getImageData()`, `putImageData()`), gradients and patterns, and canvas
+text (`fillText()`, `strokeText()`, `measureText()`) are not implemented; each reports a
+diagnostic instead. Browser event callbacks in the wasm build are not wired up yet either — see
+the web example notes below.
+
+**Platform status:** macOS is this fork's primary platform. Windows builds and runs the same CI
+test suite as macOS on dispatch runs. Linux builds, but nothing tests it — the test renderer is
+waiting on GPUI's headless wgpu backend.
+
+**How this differs from upstream**
+
+- **Goal:** upstream aims for a library-neutral desktop React renderer; this fork aims
+  specifically at one codebase shared between a GPUI desktop app and a `react-dom` web app.
+- **Source of truth:** web DOM/CSS semantics, not GPUI's own behavior, decide how a public API
+  should work here.
+- **Packages:** `@gpuix/native` and `@gpuix/react` on npm are upstream's packages. This fork does
+  not publish to npm; it will ship the same two package names as tarballs attached to its own
+  GitHub releases, and until the first of those lands you build from a checkout.
+- **Scope:** the fork carries features upstream may not (e.g. AccessKit live regions, the
+  `@gpuix/react/testing` and automation surfaces) and can accept behavior changes upstream would
+  not, when they bring GPUIX closer to `react-dom` parity.
 
 ![The GPUIX chat example running natively](./docs/images/chat-app.png)
 
@@ -19,13 +70,34 @@ cd examples && bun --hot chat.tsx
 
 ## Quickstart
 
-Install two packages. `@gpuix/react` pulls the native renderer for your
-platform, so there is nothing to build and no Rust toolchain to install.
+This fork ships from no registry yet, so you build the two packages from a
+checkout once and pin the packed tarballs. That needs a Rust toolchain — see
+[Building](#building) for the prerequisites.
 
 ```bash
-bun add @gpuix/react react
+git clone --recurse-submodules https://github.com/Ernxst/gpuix
+cd gpuix && bun install && bun run build
+cd packages/native && bun pm pack
+cd ../react && bun pm pack
+```
+
+Pin the two generated `.tgz` files in your app — plus an `overrides` entry for
+`@gpuix/native`, without which the install fails — then add the types.
+[Consuming an unpublished checkout](#consuming-an-unpublished-checkout) has the
+exact `package.json` shape and the peer-dependency rules.
+
+```bash
 bun add -d @types/react typescript
 ```
+
+> [!IMPORTANT]
+> `bun add @gpuix/react react` installs **upstream's** packages, not this fork. Those two names on
+> the npm registry belong to [remorses/gpuix](https://github.com/remorses/gpuix) and are published
+> by upstream's maintainer. This fork will attach its own tarballs to
+> [its GitHub releases](https://github.com/Ernxst/gpuix/releases) under the same names, but none
+> are published yet.
+
+The rest of this Quickstart is the same whichever packages you installed.
 
 ### 1. Point TypeScript at the GPUIX JSX types
 
@@ -105,10 +177,10 @@ The binary carries the renderer, so it runs with no Bun and no Node install.
 
 ### Start from the example app
 
-[`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) is a complete todo app in one file, with `dev`,
+[`example-app/`](https://github.com/Ernxst/gpuix/tree/main/example-app) is a complete todo app in one file, with `dev`,
 `build`, `web:dev` and `typecheck` scripts already wired. Copy the folder,
-change `@gpuix/react` from `workspace:^` to a version range, and run
-`bun install`.
+change `@gpuix/native` and `@gpuix/react` from `workspace:^` to the tarballs you
+packed in [Quickstart](#quickstart), and run `bun install`.
 
 ![The GPUIX todo example app](./docs/images/todo-app.png)
 
@@ -116,7 +188,7 @@ change `@gpuix/react` from `workspace:^` to a version range, and run
 
 | Example | Run | What it shows |
 |---|---|---|
-| **todo** | `bun run dev` in [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) | The starting point: one file, a `<virtual-list>`, a native `<input>`, and an animated sidebar |
+| **todo** | `bun run dev` in [`example-app/`](https://github.com/Ernxst/gpuix/tree/main/example-app) | The starting point: one file, a `<virtual-list>`, a native `<input>`, and an animated sidebar |
 | **blurred window** | `bun run blurred-window` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
 | **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, message list, composer, `<markdown>` |
 | **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
@@ -127,10 +199,15 @@ change `@gpuix/react` from `workspace:^` to a version range, and run
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **web** | `bun run web` from the repository root | The ChatGPT example rendered in a browser canvas with WebGPU |
 
-The todo app lives in [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) and is meant to be copied.
-The rest live in [`examples/`](https://github.com/remorses/gpuix/tree/main/examples). All of them use hardcoded data.
+The todo app lives in [`example-app/`](https://github.com/Ernxst/gpuix/tree/main/example-app) and is meant to be copied.
+The rest live in [`examples/`](https://github.com/Ernxst/gpuix/tree/main/examples). All of them use hardcoded data.
 
-Or download a standalone **chat** build from the [GitHub release](https://github.com/remorses/gpuix/releases). No Bun or Rust install is required.
+CI compiles a standalone **chat** binary on `workflow_dispatch` runs, one per target, and uploads
+each as a `example-chat-<target>` **workflow artifact**. Running one needs no Bun and no Rust
+install. Nothing attaches those artifacts to a [release](https://github.com/Ernxst/gpuix/releases)
+automatically — a release asset is put there by hand — and this fork has published no releases
+yet. For now the example comes from a checkout; the commands below are what an unpacked download
+looks like.
 
 ```bash
 tar -xzf example-chat-aarch64-apple-darwin.tar.gz
@@ -339,8 +416,8 @@ prevented Tab or Shift+Tab keydown likewise keeps focus on the current element.
 ## Building
 
 This section is for **working on GPUIX itself**. To build an app with it, see
-[Quickstart](#quickstart) instead. Installing the packages needs no Rust
-toolchain and no submodule.
+[Quickstart](#quickstart) instead — which, until this fork publishes releases,
+starts from the same checkout and the same prerequisites.
 
 ### Prerequisites
 
@@ -2845,7 +2922,7 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `img`           | Raster or full-colour SVG images from paths, URLs, or bytes |
 | `svg`           | Tintable monochrome SVG icons from source or disk |
 | `anchored`      | Positioned overlay                               |
-| `canvas`        | Custom drawing (planned)                         |
+| `canvas`        | Immediate-mode 2D paths, fills, strokes, transforms, and images |
 
 ### Inline text runs
 
@@ -3458,7 +3535,7 @@ await app.screenshot({ path: 'sent.png' })
 ```
 
 That is the chat example. The real test lives in
-[`examples/chat.test.tsx`](https://github.com/remorses/gpuix/blob/main/examples/chat.test.tsx).
+[`examples/chat.test.tsx`](https://github.com/Ernxst/gpuix/blob/main/examples/chat.test.tsx).
 
 ```
 createTestRoot()          browser render()          launch({ command, args })
@@ -3753,9 +3830,19 @@ or regenerate the `file:` pins per worktree after cloning.
   "dependencies": {
     "@gpuix/native": "file:../gpuix/packages/native/gpuix-native-0.4.0.tgz",
     "@gpuix/react": "file:../gpuix/packages/react/gpuix-react-0.4.0.tgz"
+  },
+  "overrides": {
+    "@gpuix/native": "file:../gpuix/packages/native/gpuix-native-0.4.0.tgz"
   }
 }
 ```
+
+**The `overrides` entry is required, not decoration.** `@gpuix/react` depends on
+`@gpuix/native` by name, and bun resolves that inner dependency from the registry
+rather than from your top-level tarball pin — where it finds upstream's package
+under the same name. Without the override the install fails outright, and at a
+version upstream also publishes it would quietly give you upstream's native
+binary under this fork's React. Point the override at the same tarball.
 
 `react`, `react-reconciler`, and `scheduler` are peer dependencies. The declared
 ranges are `react ^19.2.0`, `react-reconciler ^0.33.0`, and `scheduler ^0.27.0`
@@ -4405,7 +4492,8 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Background launch (`focus`, `show`, `activateWindow`)
 - [x] Last window close terminates through the shared graceful lifecycle
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
-- [ ] Canvas element
+- [x] Canvas element and 2D context — paths, fills, strokes, transforms, images
+- [ ] Canvas pixel readback (`toDataURL`, `getImageData`, `putImageData`), gradients and patterns, and canvas text (`fillText`, `strokeText`, `measureText`)
 - [ ] Multiple windows
 - [x] JS remount under `bun --hot` (`render()` keeps the native window)
 - [ ] React Refresh during `bun --hot` (needs a Bun runtime transform)
@@ -4414,8 +4502,8 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 
 ## Documentation
 
-See [AGENTS.md](https://github.com/remorses/gpuix/blob/main/AGENTS.md) for detailed architecture, communication flow, and contributing guide.
+See [AGENTS.md](https://github.com/Ernxst/gpuix/blob/main/AGENTS.md) for detailed architecture, communication flow, and contributing guide.
 
 ## License
 
-[Apache-2.0](https://github.com/remorses/gpuix/blob/main/LICENSE)
+[Apache-2.0](https://github.com/Ernxst/gpuix/blob/main/LICENSE)

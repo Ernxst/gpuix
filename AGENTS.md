@@ -793,6 +793,14 @@ Load the `changesets` skill for format and rules. If the change fixes a GitHub i
 
 ## Publishing
 
+> [!IMPORTANT]
+> **This fork does not publish to npm.** `@gpuix/native` and `@gpuix/react` on the registry are
+> upstream's packages, published by upstream's maintainer. The fork's release path packs the same
+> two names into tarballs and attaches them to its own GitHub releases; neither manifest carries a
+> `publishConfig` any more. Everything below describes the inherited npm pipeline — read it for
+> the build matrix, the publish ordering constraint, and the release-asset rules, all of which
+> still apply, but not as an instruction to run `npm publish` here.
+
 **Never publish from a local machine.** CI is the only release path.
 
 `.github/workflows/ci.yml` builds `@gpuix/native` for **one target per OS**, uploads the `.node` artifacts, then the `publish` job downloads them, runs `napi create-npm-dirs` + `napi artifacts`, and publishes `@gpuix/native` and `@gpuix/react`.
@@ -813,10 +821,14 @@ Each build job also compiles `examples/chat.tsx` with `bun build --compile` agai
 that target's `.node`. A release asset is served as raw bytes, so a download loses
 the executable bit and, on macOS and Linux, arrives with no extension. The job packs
 those two into `example-chat-<target>.tar.gz`, which keeps the mode and names itself.
-Windows ships the `.exe` as it is. On `main`, the publish job attaches them to the
-`@gpuix/react@x.y.z` GitHub release.
+Windows ships the `.exe` as it is. Each build job then uploads that as a
+`example-chat-<target>` **workflow artifact** — `ci.yml` has no publish job and no
+`gh release upload` step, so nothing lands on a GitHub release unless someone
+attaches it by hand.
 
-Publish order is required. `@gpuix/react` depends on `@gpuix/native` (`workspace:^`). If React publishes first, an install in that window cannot resolve native.
+If the fork ever publishes to a registry, publish order is required. `@gpuix/react`
+depends on `@gpuix/native` at a concrete version. If React publishes first, an install
+in that window cannot resolve native.
 
 1. `napi pre-publish` publishes the per-platform packages (`darwin-arm64`, `linux-x64-gnu`, …)
 2. `npm publish` publishes `@gpuix/native`
@@ -825,6 +837,11 @@ Publish order is required. `@gpuix/react` depends on `@gpuix/native` (`workspace
 A local `npm publish` / `bun publish` would ship only the host binary and break every other platform. `prepublishOnly` exits if `CI` is unset.
 
 ### Create the GitHub release before CI gets to the publish job
+
+> [!NOTE]
+> Upstream's pipeline, kept for when the fork grows one. This fork's `ci.yml` has no
+> publish job and no release-upload step, so today the release and its assets are both
+> created by hand and the ordering below does not bind.
 
 The example binaries are attached by tag, and **the upload step gives up when that
 release does not exist**:
@@ -845,9 +862,13 @@ Do not let them move through your machine.
 
 Release order:
 
-1. Consume the changesets, bump both packages, write `CHANGELOG.md`, commit
+1. Consume the changesets, bump both packages, write `CHANGELOG.md`, commit. Bump
+   `dependencies["@gpuix/native"]` in `packages/react/package.json` in the same step
+   — it is a concrete version now, not `workspace:^`, and this repo has no
+   `.changeset/config.json`, so nothing bumps it for you. A stale value there ships
+   in the packed tarball and breaks every consumer install.
 2. `git push origin HEAD:main`. CI starts
-3. Tag and create the release **now**, while the six native builds run:
+3. Tag and create the release **now**, while the native builds run:
 
 ```bash
 git tag '@gpuix/native@0.5.0' && git tag '@gpuix/react@0.5.0'
@@ -856,7 +877,8 @@ gh release create '@gpuix/react@0.5.0' --title '@gpuix/react@0.5.0' \
   --notes-file /tmp/notes.md --latest
 ```
 
-4. CI publishes npm, then uploads `example-chat-*` to that release with `--clobber`
+4. Download the `example-chat-*` workflow artifacts and attach them to that release
+   yourself. `ci.yml` uploads them as artifacts only; no job pushes them to a release.
 
 The `publish` job only runs after every build and both test jobs, which is more than
 ten minutes, so step 3 has plenty of slack. Use the current `CHANGELOG.md` section
@@ -1122,7 +1144,7 @@ here. Never run `git reset` in `zed/` to "undo" PR work.
 
 ### PRs to GPUIX
 
-When you open a PR with `gh pr create` against **this repo** (`remorses/gpuix`),
+When you open a PR with `gh pr create` against **this repo** (`Ernxst/gpuix`),
 the body must name the **harness**, **agent**, and **model** that wrote the
 change. Then put **every user prompt** from the session in a collapsed
 `<details>` block. Reviewers use that to judge prompt quality and how much

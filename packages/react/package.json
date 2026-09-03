@@ -68,11 +68,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/remorses/gpuix"
-  },
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org/",
-    "access": "public"
+    "url": "git+https://github.com/Ernxst/gpuix.git"
   },
   "scripts": {
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/react locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
@@ -87,7 +83,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@gpuix/native": "workspace:^",
+    "@gpuix/native": "0.8.0-fork.1",
     "eventsource-parser": "^4.1.0",
     "zod": "^4.4.3"
   },

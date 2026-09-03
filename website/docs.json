@@ -18,7 +18,7 @@
     "links": [
       {
         "type": "github",
-        "href": "https://github.com/remorses/gpuix"
+        "href": "https://github.com/Ernxst/gpuix"
       }
     ]
   },
@@ -38,16 +38,16 @@
       {
         "tab": "Changelog",
         "icon": "lucide:newspaper",
-        "changelog": "https://github.com/remorses/gpuix",
+        "changelog": "https://github.com/Ernxst/gpuix",
         "initialContent": "changelog/intro"
       },
       {
         "tab": "GitHub",
         "icon": "lucide:github",
-        "href": "https://github.com/remorses/gpuix"
+        "href": "https://github.com/Ernxst/gpuix"
       },
       {
-        "tab": "npm",
+        "tab": "npm (upstream)",
         "icon": "lucide:package",
         "href": "https://www.npmjs.com/package/@gpuix/react"
       }

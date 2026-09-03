@@ -13,3 +13,13 @@ packages/native/wasm/
 examples/web-dist/
 # Test output churns every run; the curated set the README links to lives in
 # docs/images and is regenerated with `bun scripts/screenshots.ts`.
+
+# Local-only working files. None of these belong to anyone who clones the repo,
+# and a stray `git add .` would publish them.
+docs/agents/
+/ORCHESTRATION.md
+/UPSTREAMING-PLAN.md
+.claude/settings.local.json
+# `bun pm pack` output. The tarballs are built per consumer, not committed.
+packages/native/*.tgz
+packages/react/*.tgz

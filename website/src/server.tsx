@@ -9,7 +9,7 @@ const chatHtml = chatExampleHtml.replace('./web-chat.tsx', '/chat-example/chat.j
 
 export const app = new Spiceflow()
   .get('/gh', () => {
-    return Response.redirect('https://github.com/remorses/gpuix', 302)
+    return Response.redirect('https://github.com/Ernxst/gpuix', 302)
   })
   .get('/chat-example', ({ request }) => {
     if (!new URL(request.url).pathname.endsWith('/')) {
