@@ -644,3 +644,112 @@ describeNative("createTestRoot bound queries", () => {
     }
   })
 })
+
+/** A component that renders nothing, so the renderer holds no root element. */
+function Empty(): React.ReactNode {
+  return null
+}
+
+/** Every query family, paired with the noun its "Unable to find" message uses. */
+const EMPTY_TREE_FAMILIES = [
+  { family: "Text", argument: "Missing", noun: 'element with text "Missing"' },
+  { family: "TestId", argument: "missing", noun: 'element with test ID "missing"' },
+  { family: "Role", argument: "button", noun: 'accessible element with the role "button"' },
+  { family: "LabelText", argument: "Missing", noun: 'element with label text "Missing"' },
+  {
+    family: "PlaceholderText",
+    argument: "Missing",
+    noun: 'element with placeholder text "Missing"',
+  },
+  { family: "DisplayValue", argument: "missing", noun: 'element with display value "missing"' },
+] as const
+
+describeNative("queries against an empty rendered tree", () => {
+  const waitForOptions = { timeout: 30, interval: 5 }
+
+  for (const { family, argument, noun } of EMPTY_TREE_FAMILIES) {
+    it(`resolves the ${family} family against a component that renders null`, async () => {
+      const root = createTestRoot()
+
+      try {
+        root.render(<Empty />)
+        expect(root.renderer.getRoot()).toBeUndefined()
+
+        const queries = root as unknown as Record<string, (...args: unknown[]) => unknown>
+        const notFound = new RegExp(`Unable to find an? ${noun}`)
+
+        expect(queries[`queryBy${family}`]!(argument)).toBeNull()
+        expect(queries[`queryAllBy${family}`]!(argument)).toEqual([])
+        expect(() => queries[`getBy${family}`]!(argument)).toThrowError(notFound)
+        expect(() => queries[`getAllBy${family}`]!(argument)).toThrowError(notFound)
+        await expect(
+          queries[`findBy${family}`]!(argument, undefined, waitForOptions)
+        ).rejects.toThrowError(notFound)
+        await expect(
+          queries[`findAllBy${family}`]!(argument, undefined, waitForOptions)
+        ).rejects.toThrowError(notFound)
+      } finally {
+        root.unmount()
+      }
+    })
+  }
+
+  it("names the empty tree as the searched scope", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(<Empty />)
+
+      expect(() => root.getByText("Missing")).toThrowError(/within the empty render tree/)
+      expect(() => root.getByTestId("missing")).toThrowError(/within the empty render tree/)
+      expect(() => root.getByRole("button")).toThrowError(/within the empty render tree/)
+      expect(() => root.getByLabelText("Missing")).toThrowError(/within the empty render tree/)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("keeps querying after a tree empties and refills", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(<text>Present</text>)
+      expect(root.getByText("Present").text).toBe("Present")
+
+      root.render(<Empty />)
+      expect(root.queryByText("Present")).toBeNull()
+      expect(root.queryAllByText("Present")).toEqual([])
+
+      root.render(<text>Present</text>)
+      expect(root.getByText("Present").text).toBe("Present")
+    } finally {
+      root.unmount()
+    }
+  })
+
+  for (const { family, argument, noun } of EMPTY_TREE_FAMILIES) {
+    it(`resolves the ${family} family within an element with an empty subtree`, async () => {
+      const root = createTestRoot()
+
+      try {
+        root.render(<div data-testid="shell" />)
+
+        const scoped = root.within(root.getByTestId("shell")) as unknown as Record<
+          string,
+          (...args: unknown[]) => unknown
+        >
+        const notFound = new RegExp(`Unable to find an? ${noun}`)
+
+        expect(scoped[`queryBy${family}`]!(argument)).toBeNull()
+        expect(scoped[`queryAllBy${family}`]!(argument)).toEqual([])
+        expect(() => scoped[`getBy${family}`]!(argument)).toThrowError(notFound)
+        expect(() => scoped[`getAllBy${family}`]!(argument)).toThrowError(notFound)
+        await expect(
+          scoped[`findBy${family}`]!(argument, undefined, waitForOptions)
+        ).rejects.toThrowError(notFound)
+      } finally {
+        root.unmount()
+      }
+    })
+  }
+})
