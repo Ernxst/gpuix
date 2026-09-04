@@ -305,21 +305,20 @@ let testWindowDefaults: TestWindowOptions = {}
  * the built-in geometry.
  *
  * Windows already open do not change shape — a window's geometry is fixed when
- * it is constructed — so this drops the window `render()` shares and the probe
- * window the first `TestRenderer` reuses. The next call of either opens a window
- * at the new geometry.
+ * it is constructed — so this drops the window `render()` shares, and the probe
+ * window the first `TestRenderer` reuses unless the new defaults resolve to the
+ * geometry it was opened at. The next call of either opens a window at the new
+ * geometry.
  */
 export function configureTestWindow(options: TestWindowOptions): void {
   testWindowDefaults = { ...options }
-  // The probe window was opened at the previous geometry, so it can no longer
-  // stand in for the first `TestRenderer`.
-  if (probedNativeTestRenderer) {
-    probedNativeTestRenderer.dispose()
-    probedNativeTestRenderer = null
-  }
-  // Same for the shared window: `render()` records the geometry it was built
-  // with, so without this a `configureTestWindow` after the first `render()` in
-  // a file would be a silent no-op for every later one.
+  // A probe window opened at the previous geometry can no longer stand in for
+  // the first `TestRenderer`. One opened at geometry these defaults resolve to
+  // still can — a call that restores what was already configured keeps it.
+  releaseProbeWindowUnlessOpenedAt(resolveTestWindowOptions())
+  // The shared window is unconditional: `render()` records the geometry it was
+  // built with, so without this a `configureTestWindow` after the first
+  // `render()` in a file would be a silent no-op for every later one.
   if (activeRenderRoot !== null) disposeSharedRoot(activeRenderRoot)
 }
 
@@ -338,6 +337,28 @@ function resolveTestWindowOptions(options: TestWindowOptions = {}): TestWindowOp
   }
 }
 
+/** Two resolved geometries name the same window. */
+function sameTestWindowGeometry(a: TestWindowOptions, b: TestWindowOptions): boolean {
+  return a.width === b.width && a.height === b.height && a.scaleFactor === b.scaleFactor
+}
+
+/**
+ * Close the probe window unless it was opened at `geometry`.
+ *
+ * The probe exists so that "the native renderer is available" means it
+ * initialized, not merely that the binding exported a constructor, and the
+ * first `TestRenderer` inherits it rather than paying for a second window. What
+ * makes it reusable is its geometry, not whether the caller passed options: a
+ * suite that configures 640x480 keeps its probe in every file, and a call that
+ * asks for the geometry already open reuses it too.
+ */
+function releaseProbeWindowUnlessOpenedAt(geometry: TestWindowOptions): void {
+  if (probedNativeTestRenderer === null) return
+  if (sameTestWindowGeometry(probedTestWindow, geometry)) return
+  probedNativeTestRenderer.dispose()
+  probedNativeTestRenderer = null
+}
+
 // The native test renderer is exported by macOS and Windows builds.
 //
 // Loaded through `createRequire`, never a bare `require`. This file ships as
@@ -348,6 +369,9 @@ function resolveTestWindowOptions(options: TestWindowOptions = {}): TestWindowOp
 // silently skipped for anyone consuming the published package.
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
 let probedNativeTestRenderer: NativeTestRendererApi | null = null
+/** The geometry the probe window was opened at, so a request that resolves to
+ *  the same three values can still use it. Only read while the probe is live. */
+let probedTestWindow: TestWindowOptions = {}
 let nativeTestRendererInitialized = false
 /** The native binding error when the test renderer cannot be loaded. */
 export let nativeTestRendererLoadError: Error | null = null
@@ -371,11 +395,11 @@ function initializeNativeTestRenderer(): NativeTestRendererConstructor | null {
       // merely whether the binding exports its constructor. The first
       // TestRenderer reuses this instance, so it is opened at whatever
       // `configureTestWindow` has already been told.
-      const probeWindow = resolveTestWindowOptions()
+      probedTestWindow = resolveTestWindowOptions()
       probedNativeTestRenderer = new native.TestGpuixRenderer(
-        probeWindow.width,
-        probeWindow.height,
-        probeWindow.scaleFactor
+        probedTestWindow.width,
+        probedTestWindow.height,
+        probedTestWindow.scaleFactor
       )
     } else if (native.TestGpuixRenderer) {
       // hasTestGpuixRenderer() === false. Construct the stub anyway and let it
@@ -701,14 +725,7 @@ export class TestRenderer implements NativeRenderer {
       )
     }
     const geometry = resolveTestWindowOptions(options)
-    const customWindow =
-      options.width !== undefined ||
-      options.height !== undefined ||
-      options.scaleFactor !== undefined
-    if (probedNativeTestRenderer && customWindow) {
-      probedNativeTestRenderer.dispose()
-      probedNativeTestRenderer = null
-    }
+    releaseProbeWindowUnlessOpenedAt(geometry)
     this.native =
       probedNativeTestRenderer ??
       new NativeTestRendererConstructor(geometry.width, geometry.height, geometry.scaleFactor)

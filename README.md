@@ -4183,12 +4183,22 @@ registry would keep the first file's window for the whole run.
 `scaleFactor`, `allowPrivateNetworkImages`, `strictStyles` — and every one of
 them is fixed when the window is constructed. A call whose options match the
 live window's reuses it; a call whose options differ tears that window down and
-opens a fresh one. The comparison is field by field on what you passed, so an
-omitted option is *not* the same request as one passed explicitly at its
-default value: `render(node)` and `render(node, { width: 1280 })` rebuild the
-window every time they alternate, even when the window would be identical. Keep
-the options object identical across a file — or omit it everywhere — to keep the
-window.
+opens a fresh one.
+
+The comparison is field by field, and the two halves of `TestRootOptions` are
+compared differently. `width`, `height`, and `scaleFactor` are compared *after*
+any `configureTestWindow` default is applied, because that is the geometry the
+window would actually be built at: under `configureTestWindow({ width: 640 })`,
+`render(node)` and `render(node, { width: 640 })` are the same request and share
+one window. A value equal to a *built-in* default is still a different request
+from omitting the field, because nothing fills it in before the comparison:
+`render(node)` and `render(node, { width: 1280 })` rebuild the window every time
+they alternate,
+even though the window is identical. `allowPrivateNetworkImages` and
+`strictStyles` are compared as passed, with no defaults applied.
+
+Keep the options object identical across a file — or omit it everywhere — to
+keep the window.
 
 **The default window is fixed, not the host's.** A window you do not size opens
 at **1280x800 logical pixels with `scaleFactor: 2`**, on every machine and every
