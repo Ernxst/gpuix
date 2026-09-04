@@ -28,6 +28,11 @@ import {
 } from "./event-registry.js"
 import { TEXT_EDITING_TYPES } from "./text-editing.js"
 import {
+  ARIA_PROP_ALIASES,
+  AUTHORED_ROLE_PROP,
+  isAuthorVisibleProp,
+} from "./aria-props.js"
+import {
   DEFAULT_VIRTUAL_LIST_ESTIMATED_ITEM_HEIGHT,
   VirtualListRowContractError,
 } from "../components/virtual-list-contract.js"
@@ -507,37 +512,6 @@ function diagnoseUnsupportedAccessibilityRoleProp(
   console.warn(message)
 }
 
-/**
- * The DOM spelling of every supported ARIA attribute, and the prop key the
- * retained tree stores it under. Exported so a matcher asking for the attribute
- * by its DOM name translates through the same table the reconciler wrote with.
- */
-export const ARIA_PROP_ALIASES = {
-  "aria-label": "ariaLabel",
-  "aria-labelledby": "ariaLabelledBy",
-  "aria-description": "ariaDescription",
-  "aria-describedby": "ariaDescribedBy",
-  "aria-checked": "ariaChecked",
-  "aria-expanded": "ariaExpanded",
-  "aria-current": "ariaCurrent",
-  "aria-live": "ariaLive",
-  "aria-atomic": "ariaAtomic",
-  "aria-selected": "ariaSelected",
-  "aria-valuetext": "ariaValue",
-  "aria-valuemin": "ariaValueMin",
-  "aria-valuemax": "ariaValueMax",
-  "aria-valuenow": "ariaValueNow",
-  "aria-level": "ariaLevel",
-  "aria-rowindex": "ariaRowIndex",
-  "aria-colindex": "ariaColIndex",
-  "aria-rowcount": "ariaRowCount",
-  "aria-colcount": "ariaColCount",
-  "aria-rowspan": "ariaRowSpan",
-  "aria-colspan": "ariaColSpan",
-  "aria-disabled": "ariaDisabled",
-  "aria-hidden": "ariaHidden",
-} as const
-
 function diagnoseUnsupportedAriaProp(
   instance: Instance,
   container: Container,
@@ -674,10 +648,6 @@ const UNIVERSAL_PROPS = new Set([
   // the prop silently never arrives in Rust.
   "highlight",
 ])
-
-function isIdentityProp(name: string): boolean {
-  return name === "id" || name.startsWith("data-")
-}
 
 function isReservedProp(name: string): boolean {
   return RESERVED_PROPS.has(name) || EVENT_PROP_NAMES.has(name)
@@ -970,6 +940,11 @@ function customPropEntries(
   if (activationKind) entries.push(["activationKind", activationKind])
   const role = nativeRole(type, props, instance)
   if (role !== undefined) entries.push(["role", role])
+  // `role` above is the *resolved* role the accessibility projection needs, so
+  // an `<img>` carries one with nothing declared. The DOM has no attribute for
+  // that, so the authored role is retained beside it, and it is the one a query
+  // for the `role` attribute answers with.
+  if (typeof props.role === "string") entries.push([AUTHORED_ROLE_PROP, props.role])
   const headingLevel = nativeHeadingLevel(type, props)
   if (headingLevel !== undefined) entries.push(["ariaLevel", headingLevel])
   const imageLabel = nativeImageLabel(type, props)
@@ -995,7 +970,7 @@ function syncCustomProps(
   const builtIn = BUILT_IN_TYPES.has(type)
   for (const [key, value] of customPropEntries(instance, props)) {
     if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isIdentityProp(key)) continue
+    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isAuthorVisibleProp(key)) continue
     renderer.setCustomProp(id, key, serializeCustomProp(type, key, value))
   }
 }
@@ -1015,7 +990,7 @@ function diffCustomProps(
   // Updated or added props
   for (const [key, value] of newEntries) {
     if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isIdentityProp(key)) continue
+    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isAuthorVisibleProp(key)) continue
     const oldValue = oldEntries.find(([oldKey]) => oldKey === key)?.[1]
     if (oldValue !== value) {
       renderer.setCustomProp(id, key, serializeCustomProp(type, key, value))
@@ -1024,7 +999,7 @@ function diffCustomProps(
   // Removed props
   for (const [key] of oldEntries) {
     if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isIdentityProp(key)) continue
+    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isAuthorVisibleProp(key)) continue
     if (!newKeys.includes(key)) {
       renderer.setCustomProp(id, key, null)
     }

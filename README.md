@@ -4367,23 +4367,29 @@ queries never take the native path at all — `getByDisplayValue` and
 `TestElement.semantics.value` stay the declaration-flavoured surface, matching
 the prop the author set.
 
-`toHaveAttribute(name, value?)` asks for the attribute by its DOM name, and
-reads it from the retained tree — which is where the desktop keeps what a
-browser would keep in an attribute:
+`toHaveAttribute(name, value?)` asks for the attribute by its DOM name and
+answers with `getAttribute` semantics, reading the retained tree — which is
+where the desktop keeps what a browser keeps in an attribute:
 
 ```ts
 expect(screen.getByRole('img', { name: 'Cable' })).toHaveAttribute('src', '/icons/cable.png')
 expect(screen.getByTestId('panel')).toHaveAttribute('data-state', 'open')
 expect(screen.getByTestId('save')).toHaveAttribute('aria-label', 'Save')
+expect(screen.getByRole('link', { name: 'Docs' })).toHaveAttribute('href', '/docs')
 ```
 
-`id`, `data-*`, `aria-*` (under their DOM spelling, whichever spelling the prop
-used) and every host prop such as `<img src>` all answer. The name alone
-asserts presence; a value is compared as text, so a prop declared `tabIndex={0}`
-matches both `0` and `'0'`. Two consequences of the source being props rather
-than markup: `role` reads as resolved, so an `<img>` reports `role="img"` where
-a browser would report no `role` attribute at all, and a boolean prop reads as
-`"true"` rather than the empty string HTML gives a bare boolean attribute.
+`id`, `role`, `data-*`, `aria-*` (under their DOM spelling, whichever spelling
+the prop used) and every host attribute — `<a href>`, `<a target>`,
+`<button type>`, `<img src>`, `<input placeholder>` — all answer, including on
+the types the renderer builds as native divs. The name alone asserts presence,
+names are case-insensitive as they are in a document (`tabindex` and `tabIndex`
+are one attribute), and a value is compared as text: `tabIndex={0}` answers
+`'0'`, `<div disabled>` answers `''`, `disabled={false}` declares no attribute
+at all, and an `aria-*` or `data-*` boolean carries the words `'true'` and
+`'false'` the way an enumerated attribute does. `role` is the authored role, so
+an `<img>` reports no `role` attribute even though the accessibility tree
+projects the implicit one. `toHaveAttribute('class')` throws instead of
+answering: there is no class attribute here for it to be about.
 
 `toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
 node, which exists only where the element projects accessibility semantics: a

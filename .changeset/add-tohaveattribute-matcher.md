@@ -1,11 +1,19 @@
 ---
-"@gpuix/react": patch
+"@gpuix/react": minor
 ---
 
-Add `toHaveAttribute(name, value?)` to the desktop matcher pack, with jest-dom's
-name-only, name-and-value, and negated forms. Attributes are asked for by their
-DOM name — `id`, `data-*`, `aria-*`, and host props such as `<img src>` — so a
-test states what an element was given instead of reading the renderer's record
-of how it was built.
+Add `toHaveAttribute(name, value?)` to the desktop matcher pack, with DOM
+`getAttribute` semantics: case-insensitive names, values as text, `<div
+disabled>` reading `""` while `disabled={false}` declares nothing, and `aria-*`
+and `data-*` booleans carrying the words `"true"` and `"false"`. A test states
+what an element was given instead of reading the renderer's record of how it was
+built.
+
+Authored HTML attributes now survive to the test surface on the element types
+the renderer builds as native divs, so `<a href>`, `<a target>` and
+`<button type>` are assertable where they were dropped before. The role the
+author wrote is retained beside the resolved role the accessibility projection
+uses, so `role` answers as an attribute: an `<img>` with no declared role
+reports none, as in a browser.
 
 Fixes #331

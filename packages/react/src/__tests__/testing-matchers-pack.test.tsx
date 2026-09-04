@@ -458,6 +458,9 @@ describeNative("gpuix matcher pack", () => {
             style={{ width: 40, height: 40 }}
           />
           <div data-testid="save" role="button" ariaLabel="Save" tabIndex={0} />
+          <a data-testid="docs" href="/docs" target="_blank">
+            <text>Docs</text>
+          </a>
         </div>
       )
 
@@ -481,19 +484,93 @@ describeNative("gpuix matcher pack", () => {
       // The DOM spelling answers, though the prop behind it is camelCase.
       expect(save).toHaveAttribute("aria-label", "Save")
       expect(save).toHaveAttribute("role", "button")
-      // A declared number compares as the text a browser attribute would hold.
-      expect(save).toHaveAttribute("tabIndex", 0)
+      // Attribute names are case-insensitive in a document, so both spellings
+      // are one attribute — and its value is the text a document would hold.
+      expect(save).toHaveAttribute("tabindex", "0")
       expect(save).toHaveAttribute("tabIndex", "0")
-      // The tree keeps a resolved role, so an implicit one reads as declared —
-      // a browser would report no `role` attribute on an `<img>` at all.
-      expect(screen.getByTestId("icon")).toHaveAttribute("role", "img")
-      expect(screen.getByTestId("icon")).toHaveAttribute("alt", "Cable")
+
+      // An HTML attribute on a type the renderer builds as a native div still
+      // reaches the test surface, so the link's target is assertable.
+      const docs = screen.getByTestId("docs")
+      expect(docs).toHaveAttribute("href", "/docs")
+      expect(docs).toHaveAttribute("target", "_blank")
+      expect(docs).not.toHaveAttribute("rel")
+      expect(() => expect(docs).not.toHaveAttribute("href")).toThrowError(
+        /not to have attribute "href"[\s\S]*attribute "href" is "\/docs"/
+      )
+
+      // `role` is the authored one. An `<img>` has an implicit role that the
+      // accessibility tree projects and a browser reports no attribute for.
+      const icon = screen.getByTestId("icon")
+      expect(icon).not.toHaveAttribute("role")
+      expect(icon).toHaveAttribute("alt", "Cable")
+      expect(screen.getByRole("img", { name: "Cable" })).toBe(icon)
 
       expect(() => expect(panel).toHaveAttribute("data-state", "closed")).toThrowError(
         /have attribute "data-state" with value "closed"[\s\S]*attribute "data-state" is "open"/
       )
       expect(() => expect(panel).toHaveAttribute("href")).toThrowError(
         /attribute "href" is not declared/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("serializes an attribute value the way a document does", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div data-testid="off" role="button" ariaLabel="Save" disabled={false} />
+          <div
+            data-testid="on"
+            role="button"
+            ariaLabel="Delete"
+            disabled
+            ariaDisabled
+            data-ready={true}
+          />
+        </div>
+      )
+
+      // A bare boolean attribute is present with an empty value, exactly as
+      // `<button disabled>` is in HTML.
+      const on = screen.getByTestId("on")
+      expect(on).toHaveAttribute("disabled")
+      expect(on).toHaveAttribute("disabled", "")
+      // `aria-*` and `data-*` carry the words instead: they are enumerated
+      // attributes in HTML, not boolean ones.
+      expect(on).toHaveAttribute("aria-disabled", "true")
+      expect(on).toHaveAttribute("data-ready", "true")
+
+      // `false` declares no attribute at all, so there is nothing to read.
+      const off = screen.getByTestId("off")
+      expect(off).not.toHaveAttribute("disabled")
+      expect(off).not.toHaveAttribute("disabled", "")
+      expect(() => expect(off).toHaveAttribute("disabled")).toThrowError(
+        /attribute "disabled" is not declared/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("rejects the class attribute this tree does not have", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(<div data-testid="panel" />)
+      const panel = screen.getByTestId("panel")
+
+      // Answering "absent" would read as a passing negative assertion about a
+      // concept the fork does not have, so both forms throw.
+      expect(() => expect(panel).toHaveAttribute("class")).toThrowError(
+        /no class attribute/
+      )
+      expect(() => expect(panel).not.toHaveAttribute("className", "row")).toThrowError(
+        /no class attribute/
       )
     } finally {
       screen.unmount()
