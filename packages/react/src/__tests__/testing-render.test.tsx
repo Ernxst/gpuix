@@ -35,6 +35,41 @@ function Boom(): React.ReactElement {
   throw new Error("render exploded")
 }
 
+const registrationCleanups: string[] = []
+
+/** A child that only announces itself through an effect, the way a portal
+ *  registers with its outlet. It renders nothing; the label reaches the screen
+ *  through the state its effect sets on the parent. */
+function Registrar({
+  label,
+  register,
+}: {
+  label: string
+  register: (label: string | null) => void
+}): null {
+  React.useEffect(() => {
+    register(label)
+    return () => {
+      register(null)
+      registrationCleanups.push(label)
+    }
+  }, [label, register])
+  return null
+}
+
+function Outlet({ label }: { label: string }): React.ReactElement {
+  const [registered, setRegistered] = React.useState<string | null>(null)
+  const register = React.useCallback((next: string | null) => {
+    setRegistered(next)
+  }, [])
+  return (
+    <div>
+      <Registrar label={label} register={register} />
+      <text data-testid="outlet">{registered ?? "empty"}</text>
+    </div>
+  )
+}
+
 describeNative("render", () => {
   // This suite imports the framework-free entry, so it owns its own cleanup.
   afterEach(() => {
@@ -47,6 +82,26 @@ describeNative("render", () => {
     expect(textContent(screen.renderer, screen.getByTestId("count"))).toBe("count 0")
     await screen.userEvent.click(screen.getByRole("button", { name: "Bump" }))
     expect(textContent(screen.renderer, screen.getByTestId("count"))).toBe("count 1")
+  })
+
+  it("flushes passive effects before render, rerender and unmount return", () => {
+    registrationCleanups.length = 0
+
+    const screen = render(<Outlet label="LEGEND" />)
+
+    // Synchronously on screen: no findBy*, no waitFor, no clock.
+    expect(screen.getByText("LEGEND")).not.toBeNull()
+    expect(textContent(screen.renderer, screen.getByTestId("outlet"))).toBe("LEGEND")
+
+    screen.rerender(<Outlet label="SECOND" />)
+
+    expect(screen.getByText("SECOND")).not.toBeNull()
+    // Changing the effect's dependency ran the old registration's cleanup.
+    expect(registrationCleanups).toEqual(["LEGEND"])
+
+    screen.unmount()
+
+    expect(registrationCleanups).toEqual(["LEGEND", "SECOND"])
   })
 
   it("rerenders in place, keeping the same renderer and window", () => {

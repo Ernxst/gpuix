@@ -75,6 +75,16 @@ export interface Root {
   unmount: () => void
   /** The root stays failed after cleanup so consumers can inspect the fatal cause. */
   getStatus: () => RootStatus
+  /**
+   * Record an uncaught render error that reached the caller instead of this
+   * root.
+   *
+   * React normally hands such an error to the root's own handler. Inside
+   * `act` it does not: it collects the errors and rethrows them out of the
+   * `act` call, so a caller that renders inside `act` — the test renderer —
+   * has to hand them back for the root to read as dead.
+   */
+  reportUncaughtError: (error: unknown) => void
 }
 
 export interface RootOptions {
@@ -226,5 +236,8 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
 
     unmount: cleanup,
     getStatus: (): RootStatus => status,
+    reportUncaughtError: (error): void => {
+      handleUncaughtError(error)
+    },
   }
 }

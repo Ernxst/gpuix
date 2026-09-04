@@ -14,7 +14,7 @@ import { existsSync, mkdirSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { createElement, createRef, type ReactNode } from "react"
+import { act, createElement, createRef, type ReactNode } from "react"
 import type { EventPayload, MenuSpec } from "@gpuix/native"
 import {
   getDefaultNormalizer,
@@ -2351,6 +2351,57 @@ function createTestUserEvent(renderer: TestRenderer): TestUserEvent {
   }
 }
 
+/** React reads this global to decide whether `act` is legitimate. Testing
+ *  Library sets it around each `act` call and restores it afterwards, so code
+ *  running outside an act scope — the native event pipeline here — is not held
+ *  to act's rules. */
+const ACT_ENVIRONMENT_GLOBAL = "IS_REACT_ACT_ENVIRONMENT"
+
+/**
+ * Run React work the way Testing Library's `render` does: commit it **and**
+ * flush the passive effects, plus every update those effects schedule, before
+ * returning.
+ *
+ * `flushSync` is not enough. It commits, and it does run the effects that
+ * commit queued, but the state those effects set is scheduled at default
+ * priority — work only the Scheduler's next task picks up. So a component whose
+ * visible result comes from a `useEffect` that sets state, a portal registering
+ * with an outlet say, is still off screen when `flushSync` returns and is
+ * reachable only by waiting on the clock through `findBy*`. Inside an `act`
+ * scope React queues that work on the act queue instead and drains it —
+ * renders, commits, and the effects those commits queue included — before `act`
+ * returns from a synchronous scope, which is why the returned thenable needs no
+ * await.
+ *
+ * `act` also takes React's uncaught-error path: rather than calling the root's
+ * handler it collects those errors and rethrows them here, which would turn
+ * this renderer's dead-root reporting into a throw out of `render()`. They are
+ * handed back to the root, minus the component stack React no longer passes
+ * along with them. An error thrown by `scope` itself is the caller's, not
+ * React's, and is rethrown.
+ */
+function actSync(root: Root, scope: () => void): void {
+  const previous = Reflect.get(globalThis, ACT_ENVIRONMENT_GLOBAL)
+  Reflect.set(globalThis, ACT_ENVIRONMENT_GLOBAL, true)
+  let scopeThrew = false
+  let scopeError: unknown
+  try {
+    void act(() => {
+      try {
+        scope()
+      } catch (error) {
+        scopeThrew = true
+        scopeError = error
+      }
+    })
+  } catch (error) {
+    root.reportUncaughtError(error)
+  } finally {
+    Reflect.set(globalThis, ACT_ENVIRONMENT_GLOBAL, previous)
+  }
+  if (scopeThrew) throw scopeError
+}
+
 export interface TestRootOptions extends TestWindowOptions {
   /** Opt in to loopback/private URL images for local fixture servers. */
   allowPrivateNetworkImages?: boolean
@@ -2381,8 +2432,8 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   let unmounted = false
 
   const render = (node: ReactNode): void => {
-    flushSync(() => root.render(node))
-    // Trigger GPUI rendering pipeline after the synchronous React commit.
+    actSync(root, () => root.render(node))
+    // Trigger GPUI rendering pipeline after the React commit and its effects.
     renderer.flush()
   }
 
@@ -2390,7 +2441,9 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
     if (unmounted) return
     unmounted = true
     try {
-      root.unmount()
+      // Inside act, so a `useEffect` cleanup — passive like the effect itself —
+      // has run before the window it may touch is disposed.
+      actSync(root, () => root.unmount())
     } finally {
       renderer.dispose()
     }
@@ -2524,6 +2577,13 @@ export function cleanup(): void {
  * await screen.userEvent.click(screen.getByRole("button", { name: "Save" }))
  * expect(screen.getByText("Saved")).toBeInTheDocument()
  * ```
+ *
+ * **The effects have run.** Like Testing Library's, this `render` — and
+ * `rerender`, and `unmount` — does its React work inside `act`: the passive
+ * effects the commit queued, and the state those effects set, are on screen
+ * before it returns. A mount that reaches the screen through a `useEffect` is
+ * therefore a `getBy*` away, not a `findBy*`; the async queries remain for work
+ * that is genuinely asynchronous.
  *
  * **One window per test file.** Opening an offscreen GPUI window costs about a
  * second, so the window created by the first `render()` is reused by every
