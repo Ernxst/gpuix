@@ -4279,7 +4279,17 @@ captured before a rerender reports current state — the same contract
 `TestElement.children` and `parentElement` already keep. An element that has
 since been removed **fails** the assertion rather than throwing, so
 `expect(removed).not.toBeVisible()` works after an unmount, as it does in
-jest-dom. Only a receiver that was never a `TestElement` throws.
+jest-dom. Only a receiver that was never a `TestElement` throws — with
+jest-dom's one exception, `null`:
+
+```ts
+expect(screen.queryByText('gone')).not.toBeInTheDocument()
+```
+
+`queryBy…` answers `null` when nothing matched, and that assertion is what the
+`null` is for, so the negated `toBeInTheDocument` takes it and passes. The
+positive form still rejects it — `null` names no element that could be in the
+document — and every other matcher rejects it in both forms.
 
 Five behaviours differ from jest-dom, and each difference is the desktop being
 honest rather than the matcher being incomplete:
