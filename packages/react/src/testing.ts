@@ -269,12 +269,56 @@ interface NativeTestRendererConstructor {
   new (width?: number, height?: number, scaleFactor?: number): NativeTestRendererApi
 }
 
-/** Offscreen window geometry for a test root. Size defaults to 1280x800 in native. */
+/**
+ * Offscreen window geometry for a test root. Every field has a fixed default in
+ * native — 1280x800 at scale factor 2 — chosen so a window never inherits the
+ * host display's size or scale.
+ */
 export interface TestWindowOptions {
   width?: number
   height?: number
   /** Virtual display scale factor. Unsupported or invalid requests throw. */
   scaleFactor?: number
+}
+
+let testWindowDefaults: TestWindowOptions = {}
+
+/**
+ * Suite-wide defaults for the offscreen test window, set once from a vitest
+ * setup file instead of repeating the same geometry at every `createTestRoot()`
+ * and `render()`:
+ *
+ * ```ts
+ * // vitest setup file
+ * configureTestWindow({ width: 1024, height: 768, scaleFactor: 1 })
+ * ```
+ *
+ * This is `configureScreenshots` for window geometry, with the same precedence:
+ * a per-call `width` / `height` / `scaleFactor` wins over the configured
+ * default, which wins over the built-in one. Precedence is per field, so
+ * `createTestRoot({ width: 320 })` under the call above still gets height 768 at
+ * scale factor 1.
+ *
+ * Each call replaces the previous defaults wholesale, as a config object would:
+ * `configureTestWindow({})` restores the built-in geometry.
+ */
+export function configureTestWindow(options: TestWindowOptions): void {
+  testWindowDefaults = { ...options }
+  // The probe window was opened at the built-in geometry, so it can no longer
+  // stand in for the first `TestRenderer`.
+  if (probedNativeTestRenderer) {
+    probedNativeTestRenderer.dispose()
+    probedNativeTestRenderer = null
+  }
+}
+
+/** The configured defaults a call did not override, field by field. */
+function resolveTestWindowOptions(options: TestWindowOptions = {}): TestWindowOptions {
+  return {
+    width: options.width ?? testWindowDefaults.width,
+    height: options.height ?? testWindowDefaults.height,
+    scaleFactor: options.scaleFactor ?? testWindowDefaults.scaleFactor,
+  }
 }
 
 // The native test renderer is exported by macOS and Windows builds.
@@ -308,8 +352,14 @@ function initializeNativeTestRenderer(): NativeTestRendererConstructor | null {
       NativeTestRenderer = native.TestGpuixRenderer
       // Construct once here so availability includes native initialization, not
       // merely whether the binding exports its constructor. The first
-      // TestRenderer reuses this instance.
-      probedNativeTestRenderer = new native.TestGpuixRenderer()
+      // TestRenderer reuses this instance, so it is opened at whatever
+      // `configureTestWindow` has already been told.
+      const probeWindow = resolveTestWindowOptions()
+      probedNativeTestRenderer = new native.TestGpuixRenderer(
+        probeWindow.width,
+        probeWindow.height,
+        probeWindow.scaleFactor
+      )
     } else if (native.TestGpuixRenderer) {
       // hasTestGpuixRenderer() === false. Construct the stub anyway and let it
       // throw into the catch below, so the reason comes from the native build
@@ -633,6 +683,7 @@ export class TestRenderer implements NativeRenderer {
         }`
       )
     }
+    const geometry = resolveTestWindowOptions(options)
     const customWindow =
       options.width !== undefined ||
       options.height !== undefined ||
@@ -643,7 +694,7 @@ export class TestRenderer implements NativeRenderer {
     }
     this.native =
       probedNativeTestRenderer ??
-      new NativeTestRendererConstructor(options.width, options.height, options.scaleFactor)
+      new NativeTestRendererConstructor(geometry.width, geometry.height, geometry.scaleFactor)
     probedNativeTestRenderer = null
   }
 
@@ -2365,9 +2416,11 @@ export interface TestRootOptions extends TestWindowOptions {
  * and convenience methods.
  *
  * Pass `width` / `height` to size the offscreen window, and `scaleFactor` to
- * override its virtual display scale. The 1280x800 default is
- * wide enough to keep a centered max-width column capped, so a layout test that
- * needs to observe re-wrapping must ask for a narrower window.
+ * override its virtual display scale. The default window is a fixed 1280x800 at
+ * scale factor 2, never the host display's geometry: 1280 is wide enough to keep
+ * a centered max-width column capped, so a layout test that needs to observe
+ * re-wrapping must ask for a narrower window. `configureTestWindow` moves that
+ * default for a whole suite.
  */
 export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   const renderer = new TestRenderer(options)

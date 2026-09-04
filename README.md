@@ -4190,6 +4190,34 @@ window every time they alternate, even when the window would be identical. Keep
 the options object identical across a file — or omit it everywhere — to keep the
 window.
 
+**The default window is fixed, not the host's.** A window you do not size opens
+at **1280x800 logical pixels with `scaleFactor: 2`**, on every machine and every
+run. Nothing about it is read from the display the tests happen to run on: 1280
+is wide enough to keep a centered max-width column capped, so a layout test that
+needs to observe re-wrapping asks for a narrower window, and the scale is the
+device pixel ratio every golden in this repository was rendered at, so a
+screenshot is `1280 × 2` by `800 × 2` device pixels unless you say otherwise.
+
+A suite that wants different geometry everywhere sets it once rather than at
+every call site, the way `configureScreenshots` sets golden paths:
+
+```ts
+// vitest setup file
+import { configureTestWindow } from '@gpuix/react/testing'
+
+configureTestWindow({ width: 1024, height: 768, scaleFactor: 1 })
+```
+
+Precedence is the same, and per field: a `width` passed to `createTestRoot()` or
+`render()` wins over the configured `width`, which wins over the built-in 1280,
+while the fields the call omits keep the configured values. Each call replaces
+the previous defaults wholesale, so `configureTestWindow({})` restores the
+built-in geometry.
+
+On Windows the scale factor still follows the monitor's DPI — GPUI has no
+virtual display scale there, which is also why an explicit `scaleFactor` throws
+on that platform. The size is fixed on both.
+
 **Every `render()` starts from a reset window.** The tree from the previous
 `render()` is unmounted first, so component state and mount effects do not
 survive into the new tree: a reused window is not a reused tree. Then the window
@@ -4372,6 +4400,11 @@ browser mode clip to, so a border-colour regression is caught by the golden —
 scaled by the window's `scaleFactor`. An element golden is therefore in device
 pixels like the window one, and an element that painted nothing throws rather
 than comparing an empty box.
+
+Both are therefore sized by the window, whose default is a fixed 1280x800 at
+`scaleFactor: 2` — a golden's pixel dimensions do not move with the display the
+suite runs on. [`configureTestWindow`](#render) sets a different default for a
+whole suite the way `configureScreenshots` below sets golden paths.
 
 Called without a name, the golden is named after the test and a per-test
 counter — `my-test-1.png`, `my-test-2.png` — exactly as in vitest, counter

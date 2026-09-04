@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url"
 import React, { useState } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
 import {
+  configureTestWindow,
   createTestRoot,
   isNativeTestRendererAvailable,
   nativeTestRendererLoadError,
@@ -598,6 +599,48 @@ describeNative("render()", () => {
     expect(() => new TestRenderer({ scaleFactor: Number.MAX_VALUE })).toThrow(
       "TestGpuixRenderer scale factor must be a positive, finite number"
     )
+  })
+
+  // The window used to take its size and scale from whatever display the host
+  // had attached, so the same test measured differently between machines — and
+  // between runs on one machine, when the display changed under it.
+  it("opens every default window at the same fixed geometry", () => {
+    const geometry = () => {
+      const root = createTestRoot()
+      try {
+        return root.renderer.getWindowSize()
+      } finally {
+        root.unmount()
+      }
+    }
+
+    const first = geometry()
+    const second = geometry()
+
+    expect(first).toEqual({ width: 1280, height: 800, scaleFactor: 2 })
+    expect(second).toEqual(first)
+  })
+
+  it("takes window geometry from configureTestWindow, and lets a call override it", () => {
+    const geometry = (options?: Parameters<typeof createTestRoot>[0]) => {
+      const root = createTestRoot(options)
+      try {
+        return root.renderer.getWindowSize()
+      } finally {
+        root.unmount()
+      }
+    }
+
+    try {
+      configureTestWindow({ width: 640, height: 480, scaleFactor: 1 })
+      expect(geometry()).toEqual({ width: 640, height: 480, scaleFactor: 1 })
+      // Per field: the call moves the width and inherits the rest.
+      expect(geometry({ width: 320 })).toEqual({ width: 320, height: 480, scaleFactor: 1 })
+    } finally {
+      configureTestWindow({})
+    }
+
+    expect(geometry()).toEqual({ width: 1280, height: 800, scaleFactor: 2 })
   })
 
   it("updates every useWindowSize consumer from a native resize and releases the handler", () => {

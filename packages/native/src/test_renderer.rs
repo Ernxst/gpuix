@@ -134,6 +134,24 @@ fn dispose_test_state(state_id: u64) {
 const DEFAULT_WINDOW_WIDTH: f64 = 1280.0;
 const DEFAULT_WINDOW_HEIGHT: f64 = 800.0;
 
+/// Default virtual display scale factor.
+///
+/// Without one the window reports whatever the host display is attached at, so
+/// the same test rendered at 1x on one machine and 2x on another — and, when the
+/// display changed under it, at two different scales on the same machine between
+/// runs. Pinning it makes a layout measurement and a golden's pixel dimensions a
+/// property of the test rather than of the desk it runs on. 2 is the ratio every
+/// golden committed here was rendered at (`CANVAS_GOLDEN_DPR`), so the pin keeps
+/// them valid.
+///
+/// Only platforms whose visual-test window honours a virtual scale factor get
+/// the pin; GPUI rejects one on Windows, where the window still follows the
+/// monitor's DPI.
+#[cfg(target_os = "macos")]
+const DEFAULT_WINDOW_SCALE_FACTOR: Option<f64> = Some(2.0);
+#[cfg(not(target_os = "macos"))]
+const DEFAULT_WINDOW_SCALE_FACTOR: Option<f64> = None;
+
 /// Validate a caller-supplied window dimension, falling back to `default`.
 ///
 /// Checks the value *after* the `f32` cast: a finite `f64` such as `1e300`
@@ -151,9 +169,10 @@ fn window_dimension(value: Option<f64>, default: f64, label: &str) -> Result<f32
     Ok(pixels)
 }
 
-/// Validate a caller-supplied virtual display scale factor.
+/// Validate a caller-supplied virtual display scale factor, falling back to the
+/// fixed default so an omitted `scaleFactor` never means "ask the host display".
 fn window_scale_factor(value: Option<f64>) -> Result<Option<f32>> {
-    let Some(value) = value else {
+    let Some(value) = value.or(DEFAULT_WINDOW_SCALE_FACTOR) else {
         return Ok(None);
     };
     let scale_factor = value as f32;
