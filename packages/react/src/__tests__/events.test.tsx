@@ -165,7 +165,7 @@ describe("frame loop", () => {
     loop.stop()
   })
 
-  it.skipIf(process.platform !== "darwin")(
+  it.skipIf(process.platform !== "darwin" || !isNativeTestRendererAvailable())(
     "returns control to JavaScript while AppKit is idle",
     () => {
       const script = [
@@ -1401,11 +1401,12 @@ describeNative("events", () => {
 
       testRoot.renderer.nativeSimulateMouseDown(10, 10, 0)
       testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
-      // The primary-button mouseup is missing for the same reason the
-      // right-button one is above: GPUI resolves its click gesture inside the
-      // mouse-up dispatch and stops propagation before this element's own
-      // mouse-up listener runs. The DOM fires mousedown, mouseup, then click.
-      // That divergence predates this test and is not what it locks in.
+      // Only the primary button loses its `mouseUp`: GPUI resolves the click
+      // gesture inside the primary mouse-up dispatch and stops propagation, so
+      // this element's own `mouseUp` listener never runs. The middle and right
+      // buttons above have no click to resolve and keep theirs. The DOM order
+      // is mousedown, mouseup, click; update this assertion when #329 is
+      // fixed.
       expect(received).toEqual([
         "down:1",
         "up:1",

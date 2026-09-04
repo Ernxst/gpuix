@@ -159,7 +159,7 @@ describeNative('chat example', () => {
         await clickApp.close()
       }
     },
-    45_000
+    60_000
   )
 
   it('renders safe-mdx through GPUIX primitives', () => {

@@ -59,9 +59,9 @@ waiting on GPUI's headless wgpu backend.
 
 ![mail.tax example](./docs/images/mail-app.jpg)
 
-Everything above is GPUIX: the sidebar, the thread list, the reading pane,
-and native `<markdown>`. Start it with **`bun --hot`** so a save remounts React
-and reconnects its event handlers on the same window:
+Everything above is GPUIX: the sidebar, the thread list, the reading pane, and
+the native `<img>` avatars. Start it with **`bun --hot`** so a save remounts
+React and reconnects its event handlers on the same window:
 
 ```bash
 cd examples && bun --hot mail.tsx
@@ -3279,9 +3279,11 @@ is one event per pointer move.
 Capture arms on the **left** button only. A right-button drag is not captured,
 so it ends when the pointer leaves the element.
 
-`onClick` fires on primary-button mouse-up. Use **`onAuxClick`** for the others,
-and read `event.isRightClick`. `onMouseDown` and `onMouseUp` see every
-button through `event.button` (`0` left, `1` middle, `2` right).
+`onClick` is the primary button too, like the DOM, and also fires for keyboard
+activation — read `event.inputSource` to tell the two apart. Use
+**`onAuxClick`** for the other buttons, and read `event.isRightClick`.
+`onMouseDown` and `onMouseUp` see every button through `event.button` (`0`
+left, `1` middle, `2` right).
 
 `onDoubleClick` follows the second `onClick` of a primary-button pair; a
 repeated keyboard activation is two clicks and never a double click.

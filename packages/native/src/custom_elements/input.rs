@@ -493,8 +493,8 @@ impl CustomElement for TextEditorElement {
                     payload.x = Some(x);
                     payload.y = Some(y);
                     payload.modifiers = Some(event.modifiers().into());
-                    // React reads this to keep `doubleClick` primary-only, and
-                    // every other click path reports it.
+                    // Reported for payload consistency with the other click
+                    // paths; consumers read it off the payload.
                     payload.is_right_click = Some(event.is_right_click());
                 });
             });

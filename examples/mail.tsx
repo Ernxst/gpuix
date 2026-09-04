@@ -106,7 +106,7 @@ function IconButton({
 }) {
   return (
     <div
-      testId={testId}
+      data-testid={testId}
       onClick={onClick}
       style={{
         width: pad,
@@ -553,7 +553,7 @@ function ChannelRow({
   const color = active || unread ? C.text : C.muted
   return (
     <div
-      testId={`channel-${channel.id}`}
+      data-testid={`channel-${channel.id}`}
       onClick={onSelect}
       style={{
         height: 26,
@@ -603,7 +603,7 @@ function SidebarThreadRow({
   const color = selected || thread.unread ? C.text : C.muted
   return (
     <div
-      testId={`nav-thread-${thread.id}`}
+      data-testid={`nav-thread-${thread.id}`}
       onClick={onSelect}
       style={{
         position: 'relative',
@@ -669,7 +669,7 @@ function TimelineRow({
 }) {
   return (
     <div
-      testId={`thread-${thread.id}`}
+      data-testid={`thread-${thread.id}`}
       onClick={onSelect}
       style={{
         display: 'flex',
@@ -827,7 +827,7 @@ function SearchField({
       }}
     >
       <input
-        testId={testId}
+        data-testid={testId}
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.value ?? '')}
@@ -1202,7 +1202,7 @@ export function MailApp() {
               }}
             >
               <input
-                testId="composer"
+                data-testid="composer"
                 value={draft}
                 placeholder="Ask anything, @ for more..."
                 onChange={(event) => setDraft(event.value ?? '')}
