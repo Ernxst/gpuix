@@ -70,6 +70,58 @@ function Outlet({ label }: { label: string }): React.ReactElement {
   )
 }
 
+/** A component whose re-render throws, so the error surfaces from an event
+ *  dispatch rather than from `render`. */
+function ExplodeOnClick(): React.ReactElement {
+  const [exploded, setExploded] = React.useState(false)
+  if (exploded) throw new Error("click exploded")
+  return (
+    <div
+      data-testid="detonate"
+      role="button"
+      ariaLabel="Detonate"
+      style={{ width: 120, height: 40 }}
+      onClick={() => setExploded(true)}
+    />
+  )
+}
+
+/** React expects a caller opening its own `act` scope to have declared the
+ *  environment, which a Testing Library setup does globally. Scoped here,
+ *  because the rest of this file drives React through `render`. */
+function withActEnvironment(scope: () => void): void {
+  const previous = Reflect.get(globalThis, "IS_REACT_ACT_ENVIRONMENT")
+  Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
+  try {
+    scope()
+  } finally {
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", previous)
+  }
+}
+
+/** A click whose result only appears once the effect the click's state change
+ *  scheduled has run and set state of its own. */
+function ConfirmOnClick(): React.ReactElement {
+  const [clicks, setClicks] = React.useState(0)
+  const [confirmed, setConfirmed] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    if (clicks === 0) return
+    setConfirmed(`confirmed ${clicks}`)
+  }, [clicks])
+  return (
+    <div>
+      <div
+        data-testid="press"
+        role="button"
+        ariaLabel="Press"
+        style={{ width: 120, height: 40 }}
+        onClick={() => setClicks((count) => count + 1)}
+      />
+      <text data-testid="confirmed">{confirmed ?? "idle"}</text>
+    </div>
+  )
+}
+
 describeNative("render", () => {
   // This suite imports the framework-free entry, so it owns its own cleanup.
   afterEach(() => {
@@ -102,6 +154,75 @@ describeNative("render", () => {
     screen.unmount()
 
     expect(registrationCleanups).toEqual(["LEGEND", "SECOND"])
+  })
+
+  it("flushes passive effects before a dispatched event returns", async () => {
+    const screen = render(<ConfirmOnClick />)
+
+    expect(textContent(screen.renderer, screen.getByTestId("confirmed"))).toBe("idle")
+
+    await screen.userEvent.click(screen.getByRole("button", { name: "Press" }))
+
+    // The click set state, that state's effect set more, and both are on screen
+    // — no findBy*, no waitFor, no clock.
+    expect(screen.getByText("confirmed 1")).not.toBeNull()
+    expect(textContent(screen.renderer, screen.getByTestId("confirmed"))).toBe("confirmed 1")
+
+    await screen.userEvent.click(screen.getByRole("button", { name: "Press" }))
+
+    expect(textContent(screen.renderer, screen.getByTestId("confirmed"))).toBe("confirmed 2")
+  })
+
+  it("hands an event's uncaught render error back to the root, not the caller", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const screen = render(<ExplodeOnClick />)
+
+      // `act` collects React's uncaught errors and rethrows them at whoever
+      // called it. The dispatch puts them back where React would have: the
+      // root reads as dead, and the click itself does not throw.
+      await screen.userEvent.click(screen.getByRole("button", { name: "Detonate" }))
+
+      expect(screen.root.getStatus().status).toBe("failed")
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it("commits and unmounts inside a caller's own act scope, which owns the queue", () => {
+    // React keeps one act queue and leaves it to the outermost scope to drain,
+    // so nesting `act` here would commit nothing before returning. These calls
+    // fall back to a synchronous flush instead.
+    const textAfterRender: string[][] = []
+    const textAfterUnmount: string[][] = []
+
+    withActEnvironment(() => {
+      void React.act(() => {
+        const screen = render(<text data-testid="nested">nested</text>)
+        textAfterRender.push(screen.renderer.getAllText())
+        screen.unmount()
+        textAfterUnmount.push(screen.renderer.getAllText())
+      })
+    })
+
+    expect(textAfterRender[0]).toEqual(["nested"])
+    expect(textAfterUnmount[0]).toEqual([])
+  })
+
+  it("leaves effect-scheduled work to the caller's act scope to drain", () => {
+    registrationCleanups.length = 0
+    let screen: ReturnType<typeof render> | undefined
+
+    withActEnvironment(() => {
+      void React.act(() => {
+        screen = render(<Outlet label="NESTED" />)
+      })
+    })
+
+    // Painting is the frame loop's job, and no `render()` ran after the
+    // caller's scope drained its queue.
+    screen!.renderer.flush()
+    expect(textContent(screen!.renderer, screen!.getByTestId("outlet"))).toBe("NESTED")
   })
 
   it("rerenders in place, keeping the same renderer and window", () => {
