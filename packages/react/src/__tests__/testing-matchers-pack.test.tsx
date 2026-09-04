@@ -445,6 +445,197 @@ describeNative("gpuix matcher pack", () => {
     }
   })
 
+  it("reads attributes by their DOM names, not by the props behind them", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div id="panel" data-testid="panel" data-state="open">
+          <img
+            data-testid="icon"
+            alt="Cable"
+            src="/assets/icons/items/desc-cable-c.png"
+            style={{ width: 40, height: 40 }}
+          />
+          <div data-testid="save" role="button" ariaLabel="Save" tabIndex={0} />
+          <a data-testid="docs" href="/docs" target="_blank">
+            <text>Docs</text>
+          </a>
+          <input data-testid="field" placeholder="Search" value="iron" />
+        </div>
+      )
+
+      // The form this replaces: which file the image was given, said as a
+      // matcher over the element rather than a read of how it was built.
+      expect(screen.getByRole("img", { name: "Cable" })).toHaveAttribute(
+        "src",
+        "/assets/icons/items/desc-cable-c.png"
+      )
+
+      const panel = screen.getByTestId("panel")
+      expect(panel).toHaveAttribute("id", "panel")
+      expect(panel).toHaveAttribute("data-testid", "panel")
+      // Name only asserts presence; name and value assert the value.
+      expect(panel).toHaveAttribute("data-state")
+      expect(panel).toHaveAttribute("data-state", "open")
+      expect(panel).not.toHaveAttribute("data-state", "closed")
+      expect(panel).not.toHaveAttribute("data-missing")
+
+      const save = screen.getByTestId("save")
+      // The DOM spelling answers, though the prop behind it is camelCase.
+      expect(save).toHaveAttribute("aria-label", "Save")
+      expect(save).toHaveAttribute("role", "button")
+      // Attribute names are case-insensitive in a document, so both spellings
+      // are one attribute — and its value is the text a document would hold.
+      expect(save).toHaveAttribute("tabindex", "0")
+      expect(save).toHaveAttribute("tabIndex", "0")
+
+      // An HTML attribute on a type the renderer builds as a native div still
+      // reaches the test surface, so the link's target is assertable.
+      const docs = screen.getByTestId("docs")
+      expect(docs).toHaveAttribute("href", "/docs")
+      expect(docs).toHaveAttribute("target", "_blank")
+      expect(docs).not.toHaveAttribute("rel")
+      expect(() => expect(docs).not.toHaveAttribute("href")).toThrowError(
+        /not to have attribute "href"[\s\S]*attribute "href" is "\/docs"/
+      )
+
+      // `role` is the authored one. An `<img>` has an implicit role that the
+      // accessibility tree projects and a browser reports no attribute for.
+      const icon = screen.getByTestId("icon")
+      expect(icon).not.toHaveAttribute("role")
+      expect(icon).toHaveAttribute("alt", "Cable")
+      expect(screen.getByRole("img", { name: "Cable" })).toBe(icon)
+
+      // `<input>` is not a type built as a native div, so it forwards every
+      // prop and its attributes answer without being listed anywhere.
+      const field = screen.getByTestId("field")
+      expect(field).toHaveAttribute("placeholder", "Search")
+      expect(field).toHaveAttribute("value", "iron")
+
+      // The renderer's own bookkeeping is not an attribute. `activationKind`
+      // records how the element activates and the authored role is the sibling
+      // of the resolved one `role` already answers with; neither was written by
+      // an author, so neither answers to a name.
+      expect(docs).not.toHaveAttribute("activationKind")
+      expect(docs).not.toHaveAttribute("activationkind")
+      expect(save).not.toHaveAttribute("authoredRole")
+      // Nor is a name that only `Object.prototype` would answer.
+      expect(save).not.toHaveAttribute("constructor")
+      expect(save).not.toHaveAttribute("toString")
+
+      expect(() => expect(panel).toHaveAttribute("data-state", "closed")).toThrowError(
+        /have attribute "data-state" with value "closed"[\s\S]*attribute "data-state" is "open"/
+      )
+      expect(() => expect(panel).toHaveAttribute("href")).toThrowError(
+        /attribute "href" is not declared/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("serializes an attribute value the way a document does", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div data-testid="off" role="button" ariaLabel="Save" disabled={false} />
+          <div
+            data-testid="on"
+            role="button"
+            ariaLabel="Delete"
+            disabled
+            ariaDisabled
+            data-ready={true}
+          />
+          <img
+            data-testid="bytes"
+            alt="Tile"
+            src={{ kind: "url", url: "https://example.com/tile.png" }}
+            style={{ width: 20, height: 20 }}
+          />
+        </div>
+      )
+
+      // A bare boolean attribute is present with an empty value, exactly as
+      // `<button disabled>` is in HTML.
+      const on = screen.getByTestId("on")
+      expect(on).toHaveAttribute("disabled")
+      expect(on).toHaveAttribute("disabled", "")
+      // `aria-*` and `data-*` carry the words instead: they are enumerated
+      // attributes in HTML, not boolean ones.
+      expect(on).toHaveAttribute("aria-disabled", "true")
+      expect(on).toHaveAttribute("data-ready", "true")
+
+      // `false` declares no attribute at all, so there is nothing to read.
+      const off = screen.getByTestId("off")
+      expect(off).not.toHaveAttribute("disabled")
+      expect(off).not.toHaveAttribute("disabled", "")
+      expect(() => expect(off).toHaveAttribute("disabled")).toThrowError(
+        /attribute "disabled" is not declared/
+      )
+
+      // An image source given as a desktop object has no text a document could
+      // have held, so it answers presence and no value at all — rather than
+      // matching the "[object Object]" a stringified one would produce.
+      const bytes = screen.getByTestId("bytes")
+      expect(bytes).toHaveAttribute("src")
+      expect(bytes).not.toHaveAttribute("src", "https://example.com/tile.png")
+      expect(bytes).not.toHaveAttribute("src", "[object Object]")
+      expect(() =>
+        expect(bytes).toHaveAttribute("src", "https://example.com/tile.png")
+      ).toThrowError(/attribute "src" is declared with a value no document could hold/)
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("rejects an attribute name it could not answer honestly", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div data-testid="panel">
+          <input data-testid="field" autoFocus value="" />
+        </div>
+      )
+      const panel = screen.getByTestId("panel")
+
+      // Answering "absent" would read as a passing negative assertion about a
+      // concept the fork does not have, so both forms throw.
+      expect(() => expect(panel).toHaveAttribute("class")).toThrowError(
+        /no class attribute/
+      )
+      expect(() => expect(panel).not.toHaveAttribute("className", "row")).toThrowError(
+        /no class attribute/
+      )
+
+      // `autoFocus` is declared and acted on, but the tree lifts it onto the
+      // element as a flag rather than keeping it as a prop, so this matcher
+      // cannot see it — and says so instead of calling it absent.
+      const field = screen.getByTestId("field")
+      expect(() => expect(field).toHaveAttribute("autofocus")).toThrowError(
+        /autoFocus is lifted onto the element/
+      )
+      expect(() => expect(field).not.toHaveAttribute("autoFocus")).toThrowError(
+        /Assert the effect instead, with toHaveFocus/
+      )
+
+      // The receiver is checked before the name, so a bad receiver is reported
+      // as one whatever name follows it.
+      expect(() => expect(null).toHaveAttribute("class")).toThrowError(
+        /toHaveAttribute expects a TestElement/
+      )
+      expect(() => expect(undefined).not.toHaveAttribute("autofocus")).toThrowError(
+        /toHaveAttribute expects a TestElement/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("fails rather than throws for every matcher on an unmounted element", () => {
     const screen = createTestRoot()
 
@@ -477,6 +668,7 @@ describeNative("gpuix matcher pack", () => {
       expect(field).not.toHaveValue("one")
       expect(field).not.toHaveDisplayValue("one")
       expect(field).not.toHaveAccessibleName()
+      expect(field).not.toHaveAttribute("aria-label", "Amount")
 
       // The positive form fails, and says why.
       expect(() => expect(field).toBeVisible()).toThrowError(

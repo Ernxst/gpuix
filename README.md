@@ -4338,6 +4338,7 @@ declare module 'vitest' {
 | `toHaveValue(value)` | Its current value, exactly |
 | `toHaveDisplayValue(matcher, options?)` | Its current value, through the Testing Library matcher |
 | `toHaveAccessibleName(matcher?)` | Its computed accessible name |
+| `toHaveAttribute(name, value?)` | The attribute it was given, by its DOM name |
 | `await toMatchScreenshot(name?, options?)` | The window, or the element's box, against a stored golden |
 
 Every matcher re-resolves the element against its renderer first, so an element
@@ -4418,6 +4419,39 @@ built no editor to hold one, and the prop is the only value there is. The
 queries never take the native path at all — `getByDisplayValue` and
 `TestElement.semantics.value` stay the declaration-flavoured surface, matching
 the prop the author set.
+
+`toHaveAttribute(name, value?)` asks for the attribute by its DOM name and
+answers with `getAttribute` semantics, reading the retained tree — which is
+where the desktop keeps what a browser keeps in an attribute:
+
+```ts
+expect(screen.getByRole('img', { name: 'Cable' })).toHaveAttribute('src', '/icons/cable.png')
+expect(screen.getByTestId('panel')).toHaveAttribute('data-state', 'open')
+expect(screen.getByTestId('save')).toHaveAttribute('aria-label', 'Save')
+expect(screen.getByRole('link', { name: 'Docs' })).toHaveAttribute('href', '/docs')
+```
+
+`id`, `role`, `data-*`, `aria-*` (under their DOM spelling, whichever spelling
+the prop used) and every host attribute — `<a href>`, `<a target>`,
+`<button type>`, `<img src>`, `<input placeholder>` — all answer, including on
+the types the renderer builds as native divs. The name alone asserts presence,
+names are case-insensitive as they are in a document (`tabindex` and `tabIndex`
+are one attribute), and a value is compared as text: `tabIndex={0}` answers
+`'0'`, `<div disabled>` answers `''`, `disabled={false}` declares no attribute
+at all, and an `aria-*` or `data-*` boolean carries the words `'true'` and
+`'false'` the way an enumerated attribute does. `role` is the authored role, so
+an `<img>` reports no `role` attribute even though the accessibility tree
+projects the implicit one, and the renderer's own bookkeeping — `activationKind`
+and the retained authored role — answers to no attribute name at all.
+
+An `<img src={{ kind: 'data', bytes }}>` holds a desktop image source with no
+text a document could have held, so it answers the presence form only; the value
+form fails rather than comparing against a stringified object.
+
+Two names throw instead of answering, because no answer would be honest:
+`class`, which this tree has no equivalent for at all, and `autofocus`, which is
+declared and acted on but lifted onto the element as a flag rather than retained
+as a prop — assert its effect with `toHaveFocus()`.
 
 `toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
 node, which exists only where the element projects accessibility semantics: a

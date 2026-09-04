@@ -36,6 +36,11 @@ import {
 } from "./testing.js"
 import { toMatchScreenshot, type ToMatchScreenshotOptions } from "./testing-screenshot.js"
 import { TEXT_EDITING_TYPES } from "./reconciler/text-editing.js"
+import {
+  ARIA_PROP_ALIASES,
+  ATTRIBUTE_PROP_ALIASES,
+  AUTHORED_ROLE_PROP,
+} from "./reconciler/aria-props.js"
 
 export { configureScreenshots } from "./testing-screenshot.js"
 export type {
@@ -50,6 +55,9 @@ export type {
 export type TextContentOptions = Omit<MatcherOptions, "exact">
 
 export type TextContentMatcher = Matcher<TestElement>
+
+type AriaAttributeName = keyof typeof ARIA_PROP_ALIASES
+type AliasedAttributeName = keyof typeof ATTRIBUTE_PROP_ALIASES
 
 /** What a runner needs back from a matcher. Shaped for Vitest and Jest alike. */
 export interface GpuixMatcherResult {
@@ -90,6 +98,11 @@ export interface GpuixMatchers<R = unknown> {
   toHaveDisplayValue(expected: TextContentMatcher, options?: MatcherOptions): R
   /** The element's computed accessible name matches, or is non-empty. */
   toHaveAccessibleName(expected?: TextContentMatcher, options?: MatcherOptions): R
+  /**
+   * The attribute is declared on the element, with this text if one is given.
+   * `getAttribute` semantics: names are case-insensitive and values are text.
+   */
+  toHaveAttribute(name: string, value?: string): R
   /**
    * The window — or the element's box within it — matches its stored golden.
    *
@@ -241,6 +254,112 @@ function declaredContent(
   const prop = CONTENT_PROPS[element.type]!
   const value = element.customProps?.[prop]
   return { prop, value: typeof value === "string" ? value : "" }
+}
+
+/** One resolved attribute: the prop key holding it, and the declared value. */
+interface DeclaredAttribute {
+  key: string
+  value: unknown
+}
+
+/** A prop read that cannot be fooled by `Object.prototype`. */
+function ownProp(
+  props: Record<string, unknown> | undefined,
+  key: string
+): DeclaredAttribute | undefined {
+  if (props === undefined) return undefined
+  if (Object.hasOwn(props, key)) return { key, value: props[key] }
+  // Attribute names are case-insensitive in an HTML document, and the props
+  // behind them are not: `tabindex` has to find `tabIndex`.
+  const lowered = key.toLowerCase()
+  const match = Object.keys(props).find((candidate) => candidate.toLowerCase() === lowered)
+  return match === undefined ? undefined : { key: match, value: props[match] }
+}
+
+/**
+ * Custom-prop keys that are the renderer's bookkeeping, not an author's
+ * attribute, and so answer for no attribute name at all.
+ *
+ * Both are written by the reconciler rather than declared in JSX:
+ * `activationKind` records how the element is activated, and the authored role
+ * is the sibling of the resolved one that `role` already answers with. Reading
+ * them through their own names would turn an implementation detail into an
+ * attribute a test could assert on.
+ */
+const RENDERER_BOOKKEEPING_PROPS: readonly string[] = [AUTHORED_ROLE_PROP, "activationKind"]
+
+/**
+ * The prop holding the attribute of this name, if the element declares one.
+ *
+ * Attributes live in the retained tree as the props the reconciler sent, and
+ * three names do not survive the trip verbatim: the author's `id` is lifted out
+ * of the custom-prop map onto the element, every `aria-*` attribute is stored
+ * under the camelCase prop it aliases (`aria-labelledby` as `ariaLabelledBy`),
+ * and `role` is stored twice — the resolved role the accessibility projection
+ * needs, and the authored one, which is the attribute. Each translation reads
+ * the same table the reconciler wrote with.
+ */
+function declaredAttribute(element: TestElement, name: string): DeclaredAttribute | undefined {
+  const lowered = name.toLowerCase()
+  if (lowered === "id") {
+    return element.authorId === undefined ? undefined : { key: "id", value: element.authorId }
+  }
+  if (lowered === "role") return ownProp(element.customProps, AUTHORED_ROLE_PROP)
+  if (Object.hasOwn(ARIA_PROP_ALIASES, lowered)) {
+    return ownProp(element.customProps, ARIA_PROP_ALIASES[lowered as AriaAttributeName])
+  }
+  if (Object.hasOwn(ATTRIBUTE_PROP_ALIASES, lowered)) {
+    return ownProp(element.customProps, ATTRIBUTE_PROP_ALIASES[lowered as AliasedAttributeName])
+  }
+  if (RENDERER_BOOKKEEPING_PROPS.some((key) => key.toLowerCase() === lowered)) return undefined
+  return ownProp(element.customProps, lowered)
+}
+
+/**
+ * The text `getAttribute` would return for a declared value: `undefined` where
+ * it would return `null`, and `null` where the attribute is there but holds no
+ * text a document could have held.
+ *
+ * An attribute is text in a document, so a declared number is its digits. A
+ * boolean follows the two rules HTML has for one: `aria-*` and `data-*` carry
+ * the words `"true"` and `"false"`, and every other attribute is present or
+ * absent, with present reading as the empty string — `<div disabled>` has
+ * `disabled=""`, and `disabled={false}` has no attribute at all.
+ *
+ * An object is the `null` case, and `<img src={{ kind: "data", bytes }}>` is
+ * why: the value is a desktop image source with no text form, so the attribute
+ * answers the presence question and nothing more. Stringifying it would compare
+ * every such assertion against `"[object Object]"`, which is a value no test
+ * meant and no browser would ever have shown.
+ */
+function attributeText({ key, value }: DeclaredAttribute): string | null | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value === "object") return null
+  if (typeof value !== "boolean") return String(value)
+  if (key.startsWith("aria") || key.startsWith("data-")) return String(value)
+  return value ? "" : undefined
+}
+
+/**
+ * Attribute names this tree cannot answer for, and why, rather than a quiet
+ * "absent" that reads as a passing negative assertion about nothing.
+ *
+ * `class` has no equivalent here at all. `autoFocus` does — it is declared in
+ * JSX and acted on — but the retained tree lifts it onto the element as a flag
+ * and never keeps it as a prop, so the honest answer is that this matcher
+ * cannot see it, not that the element lacks it.
+ */
+const UNANSWERABLE_ATTRIBUTES: Readonly<Record<string, string>> = {
+  class:
+    "GPUIX elements have no class attribute. Style them with the `style` prop " +
+    "and assert on `TestElement.style`, or mark them with `data-*` and assert on that.",
+  classname:
+    "GPUIX elements have no class attribute. Style them with the `style` prop " +
+    "and assert on `TestElement.style`, or mark them with `data-*` and assert on that.",
+  autofocus:
+    "autoFocus is lifted onto the element as a flag and is not retained as an " +
+    "attribute, so no answer here would be honest. Assert the effect instead, " +
+    "with toHaveFocus().",
 }
 
 function describeMatcher(matcher: TextContentMatcher): string {
@@ -551,6 +670,69 @@ export const gpuixMatchers = {
               ? name.length > 0
               : matchesMatcher(name, element, expected, options),
           actual: `  ${describe()}\n  accessible name ${JSON.stringify(name)}`,
+        }
+      }
+    )
+  },
+
+  /**
+   * The attribute the element was given, by its DOM name — `getAttribute`
+   * semantics, with no desktop dialect to learn.
+   *
+   * Called with a name alone it asserts only that the attribute is declared, as
+   * jest-dom does; with a value it compares the attribute's text, because an
+   * attribute in a document is text. `tabIndex={0}` answers `'0'`, `<div
+   * disabled>` answers `''`, `disabled={false}` is not declared at all, and an
+   * `aria-*` or `data-*` boolean carries the words `'true'` and `'false'`.
+   * Names are case-insensitive, as they are in an HTML document, so
+   * `tabindex` and `tabIndex` are one attribute.
+   *
+   * The source is the retained tree, which is where the desktop keeps what a
+   * browser keeps in an attribute — `<a href>`, `<img src>`, `data-*`,
+   * `aria-*`, the author's `id` and `role`. `class` and `autofocus` throw
+   * rather than answering: see {@link UNANSWERABLE_ATTRIBUTES}.
+   */
+  toHaveAttribute(
+    this: MatcherContext,
+    received: unknown,
+    name: string,
+    expected?: string
+  ): GpuixMatcherResult {
+    // The receiver is checked first, so a typo in the receiver is reported as
+    // one whatever name follows it.
+    asTestElement(received, "toHaveAttribute")
+
+    // Rejected rather than answered, as `toHaveTextContent('')` is: an answer
+    // this tree cannot give honestly would read as a passing assertion about
+    // nothing, in the negated form especially.
+    const lowered = name.toLowerCase()
+    if (Object.hasOwn(UNANSWERABLE_ATTRIBUTES, lowered)) {
+      throw new TypeError(`toHaveAttribute: ${UNANSWERABLE_ATTRIBUTES[lowered]}`)
+    }
+
+    return against(
+      this,
+      received,
+      "toHaveAttribute",
+      expected === undefined
+        ? `have attribute ${JSON.stringify(name)}`
+        : `have attribute ${JSON.stringify(name)} with value ${JSON.stringify(expected)}`,
+      ({ element, describe }) => {
+        const declared = declaredAttribute(element, name)
+        const text = declared === undefined ? undefined : attributeText(declared)
+        return {
+          // `null` is declared with no text to compare, so it answers the
+          // presence question and fails every value one.
+          pass:
+            text !== undefined &&
+            (expected === undefined ? true : text !== null && text === expected),
+          actual: `  ${describe()}\n  attribute ${JSON.stringify(name)} ${
+            text === undefined
+              ? "is not declared"
+              : text === null
+                ? "is declared with a value no document could hold"
+                : `is ${JSON.stringify(text)}`
+          }`,
         }
       }
     )
