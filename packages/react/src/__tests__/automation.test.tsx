@@ -1162,21 +1162,32 @@ describeNative("automation", () => {
 
   it("names a label element from its only text child", () => {
     // The downstream shape this was reported for: an element used as a label,
-    // holding nothing but a string. The string is what names it, and what names
-    // the control it points at.
+    // holding nothing but a string. The named node is the inner text element the
+    // reconciler makes for that string, not the wrapper — the DOM's text node —
+    // and it is reached by role. `getByLabelText` reads the retained `ariaLabel`
+    // verbatim, so it does not see a name that came from painted content.
     const screen = createTestRoot()
 
     try {
       screen.render(
         <div>
-          <span id="amount-label">Amount</span>
+          <span id="amount-label" data-testid="label">
+            Amount
+          </span>
           <input data-testid="field" role="textbox" ariaLabelledBy="amount-label" />
         </div>
       )
       screen.renderer.flush()
       screen.renderer.drawPendingFrame()
 
-      expect(screen.getByRole("label", { name: "Amount" }).text).toBe("Amount")
+      const label = screen.getByRole("label", { name: "Amount" })
+      expect(label.type).toBe("text")
+      expect(label.text).toBe("Amount")
+      expect(label.parentElement?.id).toBe(screen.getByTestId("label").id)
+      expect(screen.queryByLabelText("Amount")).toBeNull()
+
+      // The reference already resolved before this change; it is here to pin
+      // that naming the text node did not disturb it.
       expect(screen.getByRole("textbox", { name: "Amount" }).id).toBe(
         screen.getByTestId("field").id
       )

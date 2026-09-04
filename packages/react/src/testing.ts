@@ -2018,6 +2018,9 @@ function accessibleHosts(
  * which every consumer honours, including the one that resolves a `labelled_by`
  * reference. Reading `label` alone left every plain `<span>Hello</span>`
  * nameless here while a screen reader announced it.
+ *
+ * @internal Exported only for the matcher pack, which must compute the same
+ * name for `toHaveAccessibleName`. Not part of the public testing surface.
  */
 export function accessibleNameOf(node: AccessKitNodeSnapshot): string {
   if (nameComesFromValue(node)) return node.aria.value ?? node.aria.label ?? ""

@@ -2396,6 +2396,18 @@ flattened inline string as one label, while native `<code>`, `<markdown>`, and
 line-number gutters, language tags, and diff file headers remains excluded so a
 screen reader does not announce implementation decoration as peer content.
 
+Only a `<text>` label carries the identity of the element that painted it, and
+the two kinds are not interchangeable because of it. A `<text>` run belongs to a
+retained element, so its label resolves back to one:
+`getByRole('label', { name })` returns that `<text>` element, and
+`toHaveAccessibleName` reads the string off it. AccessKit names a `Label` node
+from its `value` rather than its `label` field — `label_comes_from_value` is
+true for exactly that role — and the queries follow it there. The `<code>`,
+`<markdown>`, and `<diff>` labels have no element to belong to: their runs are
+adapter-internal lines the retained tree never sees, so a screen reader
+announces them but no element query addresses them. Reach those through
+`renderer.getAccessibilityTree()` or `renderer.getPaintedText()` instead.
+
 An explicitly roled `<text>` owns its accessible name instead of adding a
 duplicate child label. `ariaLabel` wins when present; otherwise GPUIX derives
 the name from the flattened, non-`ariaHidden` text content. This fallback is
@@ -4340,9 +4352,13 @@ queries never take the native path at all — `getByDisplayValue` and
 the prop the author set.
 
 `toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
-node, which exists only where the element projects accessibility semantics. An
-`ariaLabel` with no declared role has no accessible name, and the matcher
-reports that rather than falling back to the raw prop — use `getByLabelText` or
+node, which exists only where the element projects accessibility semantics: a
+declared role, a name from contents, or painted text of its own. An `ariaLabel`
+with no declared role never becomes that name. A `<div ariaLabel="Save" />`
+projects no node and so has no accessible name at all, while a
+`<text ariaLabel="Save">Hello</text>` is named `"Hello"` — the string it paints,
+not the prop it declares. Either way the matcher reports the computation rather
+than falling back to the raw prop; use `getByLabelText` or
 `TestElement.semantics.label` for the declaration.
 
 `toBeChecked`, `toHaveClass`, and `toBeEmptyDOMElement` are deliberately absent:

@@ -8039,6 +8039,17 @@ fn track_accessibility_host_identity(
 /// nothing is built below it, so its segment is popped again here rather than
 /// left for the caller as [`track_accessibility_host_identity`] leaves the
 /// host's own.
+///
+/// Only the flattened `<text>` branch of `build_host_container` calls this, and
+/// that is every painted run the retained tree can own. `element.content` is set
+/// by `setText`, which the reconciler calls only on the `"text"` element it
+/// creates for a React text node, so the `text_content` path on a non-`"text"`
+/// host is unreachable from React and has no element identity to record. The
+/// runs `<code>`, `<markdown>`, and `<diff>` paint are adapter-internal lines,
+/// keyed by the adapter's own element and a per-line `sub`, with no retained
+/// element behind the line itself; nothing calls this for them, so their `Label`
+/// nodes stay unmapped by design. A screen reader reads them, but no element
+/// query can address them.
 fn track_accessibility_text_run_identity(
     host_id: u64,
     sub: usize,
