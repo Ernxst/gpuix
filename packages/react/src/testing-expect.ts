@@ -26,6 +26,7 @@ import {
   type MatcherOptions,
 } from "./testing-matchers.js"
 import {
+  accessibleNameOf,
   describeElement,
   rendererOf,
   textContent,
@@ -177,13 +178,23 @@ function against(
   return report(context, pass, expectation, actual)
 }
 
-/** The AccessKit node projected from this element, if it has one. */
+/**
+ * The AccessKit node projected from this element, if it has one.
+ *
+ * An element that both carries a role and paints text projects two: its own,
+ * and the static-text node its painted string reaches AccessKit as — the same
+ * pair `<p>Hi</p>` makes in the DOM. An element-level assertion is about the
+ * element's own node, so a static-text node is only the fallback, which is what
+ * a plain `<span>Hello</span>` has and nothing else.
+ */
 function accessibilityNodeOf(
   renderer: TestRenderer,
   element: TestElement
 ): AccessKitNodeSnapshot | undefined {
-  const tree = renderer.getAccessibilityTree()
-  return Object.values(tree.nodes).find((node) => node.host_id === element.id)
+  const nodes = Object.values(renderer.getAccessibilityTree().nodes).filter(
+    (node) => node.host_id === element.id
+  )
+  return nodes.find((node) => node.aria.role !== "Label") ?? nodes[0]
 }
 
 /**
@@ -453,9 +464,9 @@ export const gpuixMatchers = {
    *
    * Called with no argument it asserts only that a name exists, as jest-dom
    * does. The name is GPUI's computation, so an element that projects no
-   * accessibility node — no declared role and no name from contents — has no
-   * accessible name to assert on, and this reports that rather than falling
-   * back to the raw `ariaLabel` prop.
+   * accessibility node — no declared role, no name from contents, and no
+   * painted text of its own — has no accessible name to assert on, and this
+   * reports that rather than falling back to the raw `ariaLabel` prop.
    */
   toHaveAccessibleName(
     this: MatcherContext,
@@ -471,7 +482,8 @@ export const gpuixMatchers = {
         ? "have an accessible name"
         : `have accessible name ${describeMatcher(expected)}`,
       ({ renderer, element, describe }) => {
-        const name = accessibilityNodeOf(renderer, element)?.aria.label ?? ""
+        const node = accessibilityNodeOf(renderer, element)
+        const name = node === undefined ? "" : accessibleNameOf(node)
         return {
           pass:
             expected === undefined

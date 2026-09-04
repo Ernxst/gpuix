@@ -2004,10 +2004,32 @@ function accessibleHosts(
         element,
         node,
         role: describeComputedRole(node.aria.role),
-        name: node.aria.label ?? "",
+        name: accessibleNameOf(node),
       },
     ]
   })
+}
+
+/**
+ * The name a platform computes for one AccessKit node.
+ *
+ * A painted string is a static-text node, and AccessKit takes such a node's
+ * name from its value rather than its label — `Node::label_comes_from_value`,
+ * which every consumer honours, including the one that resolves a `labelled_by`
+ * reference. Reading `label` alone left every plain `<span>Hello</span>`
+ * nameless here while a screen reader announced it.
+ *
+ * @internal Exported only for the matcher pack, which must compute the same
+ * name for `toHaveAccessibleName`. Not part of the public testing surface.
+ */
+export function accessibleNameOf(node: AccessKitNodeSnapshot): string {
+  if (nameComesFromValue(node)) return node.aria.value ?? node.aria.label ?? ""
+  return node.aria.label ?? ""
+}
+
+/** AccessKit's rule, for the one role it applies to: static text. */
+function nameComesFromValue(node: AccessKitNodeSnapshot): boolean {
+  return normalizeRole(node.aria.role) === "label"
 }
 
 function accessibilityNodesInOrder(tree: AccessKitTreeSnapshot): AccessKitNodeSnapshot[] {

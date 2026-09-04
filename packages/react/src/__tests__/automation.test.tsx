@@ -1129,6 +1129,99 @@ describeNative("automation", () => {
     expect(labels).toEqual(["Standalone status"])
   })
 
+  it("maps a painted Label back to the element whose text it is", () => {
+    // The static-text node a painted string reaches AccessKit as belongs to the
+    // element that drew it, exactly as a DOM text node belongs to its parent.
+    // Without that provenance the node was unreachable: nothing tied it to an
+    // element, so no role query could return one and no name could be read off
+    // it. AccessKit computes a Label's name from its value, so the query layer
+    // reads it from there — see `Node::label_comes_from_value`.
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <span data-testid="span">Hello</span>
+        </div>
+      )
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      const text = screen.getByRole("label", { name: "Hello" })
+      expect(text.type).toBe("text")
+      expect(text.parentElement?.id).toBe(screen.getByTestId("span").id)
+
+      const node = Object.values(screen.renderer.getAccessibilityTree().nodes).find(
+        (candidate) => candidate.aria.role === "Label"
+      )
+      expect(node).toMatchObject({ host_id: text.id, aria: { value: "Hello" } })
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("names a label element from its only text child", () => {
+    // The downstream shape this was reported for: an element used as a label,
+    // holding nothing but a string. The named node is the inner text element the
+    // reconciler makes for that string, not the wrapper — the DOM's text node —
+    // and it is reached by role. `getByLabelText` reads the retained `ariaLabel`
+    // verbatim, so it does not see a name that came from painted content.
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <span id="amount-label" data-testid="label">
+            Amount
+          </span>
+          <input data-testid="field" role="textbox" ariaLabelledBy="amount-label" />
+        </div>
+      )
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      const label = screen.getByRole("label", { name: "Amount" })
+      expect(label.type).toBe("text")
+      expect(label.text).toBe("Amount")
+      expect(label.parentElement?.id).toBe(screen.getByTestId("label").id)
+      expect(screen.queryByLabelText("Amount")).toBeNull()
+
+      // The reference already resolved before this change; it is here to pin
+      // that naming the text node did not disturb it.
+      expect(screen.getByRole("textbox", { name: "Amount" }).id).toBe(
+        screen.getByTestId("field").id
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("keeps a roled text host's own node for an element-level assertion", () => {
+    // A role that does not name itself from its contents leaves the painted
+    // Label in place beneath it, so the element has two nodes — the pair
+    // `<p>Hi</p>` makes in the DOM. The element's own node is the one an
+    // element-level query is about.
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text data-testid="paragraph" role="paragraph">
+            Coal
+          </text>
+        </div>
+      )
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      const paragraph = screen.getByTestId("paragraph")
+      expect(screen.getByRole("paragraph").id).toBe(paragraph.id)
+      expect(screen.getByRole("label", { name: "Coal" }).id).toBe(paragraph.id)
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("keeps a roled element nested inside a roled ancestor", () => {
     const { render, renderer } = createTestRoot()
 

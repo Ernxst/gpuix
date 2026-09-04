@@ -277,6 +277,18 @@ impl SelectableText {
     }
 }
 
+/// The GPUI element id of the painted run that carries `element_id`'s text into
+/// the accessibility tree.
+///
+/// A run reaches AccessKit as a `Label` node of its own, one level below the
+/// host that draws it, so this id is the last segment of the `GlobalElementId`
+/// path AccessKit hashes into that node's id. The renderer records the same
+/// path to map the node back to the element whose text it is, which is why this
+/// is not private to the paint.
+pub fn text_run_element_id(element_id: u64, sub: usize) -> ElementId {
+    ElementId::Name(format!("__gpuix_text_run_{element_id}_{sub}").into())
+}
+
 type StyledTextAccessibility = Option<(ElementId, SharedString)>;
 
 fn apply_styled_text_accessibility(
@@ -450,12 +462,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     let key = selection_key(element_id, sub);
     let accessibility = accessibility_value
         .filter(|value| !value.is_empty())
-        .map(|value| {
-            (
-                ElementId::Name(format!("__gpuix_text_run_{element_id}_{sub}").into()),
-                value,
-            )
-        });
+        .map(|value| (text_run_element_id(element_id, sub), value));
 
     debug_assert!(runs.is_none() || run_styles.is_none());
     let (layout, styled) = match run_styles {

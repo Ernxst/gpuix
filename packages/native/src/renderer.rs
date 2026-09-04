@@ -8026,6 +8026,45 @@ fn track_accessibility_host_identity(
     true
 }
 
+/// Records the painted text run of `host_id` as belonging to that element.
+///
+/// The run is a GPUI element of its own nested inside the host, and AccessKit
+/// gives it a `Label` node carrying the string — the static-text child a browser
+/// puts under the element that paints it. Without this, that node is the only
+/// one a plain `<span>Hello</span>` contributes and nothing maps it back to an
+/// element, so no role query could reach it and no name assertion could read it.
+///
+/// The run's own accessibility is what decides whether a node exists at all, so
+/// the caller records only when it passed the run a value. The run is a leaf:
+/// nothing is built below it, so its segment is popped again here rather than
+/// left for the caller as [`track_accessibility_host_identity`] leaves the
+/// host's own.
+///
+/// Only the flattened `<text>` branch of `build_host_container` calls this, and
+/// that is every painted run the retained tree can own. `element.content` is set
+/// by `setText`, which the reconciler calls only on the `"text"` element it
+/// creates for a React text node, so the `text_content` path on a non-`"text"`
+/// host is unreachable from React and has no element identity to record. The
+/// runs `<code>`, `<markdown>`, and `<diff>` paint are adapter-internal lines,
+/// keyed by the adapter's own element and a per-line `sub`, with no retained
+/// element behind the line itself; nothing calls this for them, so their `Label`
+/// nodes stay unmapped by design. A screen reader reads them, but no element
+/// query can address them.
+fn track_accessibility_text_run_identity(
+    host_id: u64,
+    sub: usize,
+    path: Option<&mut Vec<gpui::ElementId>>,
+    identities: Option<&mut HashMap<u64, u64>>,
+) {
+    let (Some(path), Some(identities)) = (path, identities) else {
+        return;
+    };
+
+    path.push(crate::text::text_run_element_id(host_id, sub));
+    record_accessibility_host_identity(host_id, path, identities);
+    path.pop();
+}
+
 #[cfg(test)]
 mod accessibility_host_identity_tests {
     use super::*;
@@ -8043,6 +8082,25 @@ mod accessibility_host_identity_tests {
         assert!(!tracked);
         assert!(!resolved_element_id);
         assert!(path.is_none());
+    }
+
+    #[test]
+    fn a_painted_text_run_is_recorded_under_the_host_that_draws_it() {
+        let mut path = Some(vec![gpui::ElementId::Integer(7)]);
+        let mut identities = Some(HashMap::new());
+
+        track_accessibility_text_run_identity(7, 0, path.as_mut(), identities.as_mut());
+
+        let mut expected = std::collections::hash_map::DefaultHasher::new();
+        [
+            gpui::ElementId::Integer(7),
+            crate::text::text_run_element_id(7, 0),
+        ]
+        .hash(&mut expected);
+
+        assert_eq!(identities.unwrap().get(&expected.finish()), Some(&7));
+        // The run is a leaf, so the host's path is exactly as it was.
+        assert_eq!(path.unwrap(), vec![gpui::ElementId::Integer(7)]);
     }
 }
 
@@ -10229,6 +10287,16 @@ pub(crate) fn build_host_container(
             && !ctx.inherited.text_accessibility_owned_by_role
             && !inline.accessibility_text.is_empty())
         .then(|| gpui::SharedString::from(inline.accessibility_text.clone()));
+        // A measured subtree is dropped before prepaint, so its path is not the
+        // one the painted run gets, exactly as for the host's own identity.
+        if accessibility_value.is_some() && !ctx.measuring {
+            track_accessibility_text_run_identity(
+                element.id,
+                0,
+                ctx.gpui_element_path.as_mut(),
+                ctx.accessibility_host_ids.as_deref_mut(),
+            );
+        }
         el = el.child(flattened_text_content(
             element,
             ctx,

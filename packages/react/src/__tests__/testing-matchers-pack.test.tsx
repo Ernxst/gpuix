@@ -349,6 +349,29 @@ describeNative("gpuix matcher pack", () => {
     }
   })
 
+  it("names a plain text node from the string it paints", () => {
+    // A painted string is a static-text node, and AccessKit takes such a node's
+    // name from its value rather than its label. Reading the label alone left
+    // every `<span>Hello</span>` nameless here while a screen reader announced
+    // it, and left the node with no element to be asserted against at all.
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <span data-testid="span">Hello</span>
+        </div>
+      )
+
+      const text = screen.getByRole("label", { name: "Hello" })
+      expect(text).toHaveAccessibleName()
+      expect(text).toHaveAccessibleName("Hello")
+      expect(text).toHaveAccessibleName(/ell/)
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("fails rather than throws for every matcher on an unmounted element", () => {
     const screen = createTestRoot()
 
