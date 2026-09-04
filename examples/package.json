@@ -20,6 +20,7 @@
     "chat": "bun --hot chat.tsx",
     "infinite-chat": "bun --hot infinite-chat.tsx",
     "timeline": "bun --hot timeline.tsx",
+    "mail": "bun --hot mail.tsx",
     "compile": "bun compile-chat.ts",
     "bench:serde": "bun bench-serialization.ts"
   },

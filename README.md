@@ -57,14 +57,14 @@ waiting on GPUI's headless wgpu backend.
   `@gpuix/react/testing` and automation surfaces) and can accept behavior changes upstream would
   not, when they bring GPUIX closer to `react-dom` parity.
 
-![The GPUIX chat example running natively](./docs/images/chat-app.png)
+![mail.tax example](./docs/images/mail-app.jpg)
 
-Everything above is GPUIX: the sidebar, the scrolling list, the composer,
+Everything above is GPUIX: the sidebar, the thread list, the reading pane,
 and native `<markdown>`. Start it with **`bun --hot`** so a save remounts React
 and reconnects its event handlers on the same window:
 
 ```bash
-cd examples && bun --hot chat.tsx
+cd examples && bun --hot mail.tsx
 ```
 
 ## Quickstart
@@ -191,6 +191,7 @@ packed in [Quickstart](#quickstart), and run `bun install`.
 | **blurred window** | `bun run blurred-window` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
 | **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, message list, composer, `<markdown>` |
 | **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
+| **mail** | `bun --hot mail.tsx` | A Superhuman-style mail client: three panes, thread list, and a Framer newsletter |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **reduced-motion** | `bun --hot reduced-motion.tsx` | Style and `motion.div` transitions following macOS Reduce Motion live |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
@@ -3202,7 +3203,7 @@ text imports no longer need a runtime flag.
 
 | Event | Props | Payload fields |
 |-------|-------|----------------|
-| Click | `onClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` — primary button only |
+| Click | `onClick` | `x`, `y`, `button`, `clickCount`, `isRightClick`, `modifiers` — primary button only |
 | Double click | `onDoubleClick` | Same fields, after the second `onClick`; primary button only |
 | Aux click | `onAuxClick` | Same fields, for the non-primary buttons |
 | Context menu | `onContextMenu` | Same fields as `onMouseDown`, on the right-button press; cancelable |
@@ -3278,8 +3279,8 @@ is one event per pointer move.
 Capture arms on the **left** button only. A right-button drag is not captured,
 so it ends when the pointer leaves the element.
 
-`onClick` is the primary button too, like the DOM. Use **`onAuxClick`** for the
-others, and read `event.isRightClick`. `onMouseDown` and `onMouseUp` see every
+`onClick` fires on primary-button mouse-up. Use **`onAuxClick`** for the others,
+and read `event.isRightClick`. `onMouseDown` and `onMouseUp` see every
 button through `event.button` (`0` left, `1` middle, `2` right).
 
 `onDoubleClick` follows the second `onClick` of a primary-button pair; a
@@ -3627,6 +3628,7 @@ wrapping `<div>`.
 
 Mark elements with **`data-testid`**, then drive them like Playwright. The same
 client works in vitest, inside browser pages, and against a child process.
+Mouse actions use the normal GPUI input path in all three hosts.
 
 Standard `id` and `data-*` attributes are also preserved on every host element,
 so shared DOM/native JSX can use semantic IDs. GPU-backed tests can resolve an
