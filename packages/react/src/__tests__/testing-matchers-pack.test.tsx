@@ -103,6 +103,79 @@ describeNative("gpuix matcher pack", () => {
     }
   })
 
+  it("calls an element empty only with no children and no text", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div data-testid="empty" />
+          <div data-testid="holds-text">
+            <text>Coal</text>
+          </div>
+          <div data-testid="holds-an-empty-child">
+            <div />
+          </div>
+          <text data-testid="text-node">Iron</text>
+          <text data-testid="blank-text">{" "}</text>
+        </div>
+      )
+
+      expect(screen.getByTestId("empty")).toBeEmptyDOMElement()
+      expect(screen.getByTestId("holds-text")).not.toBeEmptyDOMElement()
+      expect(screen.getByTestId("text-node")).not.toBeEmptyDOMElement()
+      // Whitespace is content, as it is in jest-dom.
+      expect(screen.getByTestId("blank-text")).not.toBeEmptyDOMElement()
+      // Stronger than the `toHaveTextContent(/^$/)` it replaces: this subtree
+      // has no text at all, and is still not empty.
+      expect(screen.getByTestId("holds-an-empty-child")).toHaveTextContent(/^$/)
+      expect(screen.getByTestId("holds-an-empty-child")).not.toBeEmptyDOMElement()
+
+      expect(() => expect(screen.getByTestId("holds-text")).toBeEmptyDOMElement()).toThrowError(
+        /be an empty element[\s\S]*contains 1 child/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("counts the content prop of a host that renders from one", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <code data-testid="code" code={"const x = 1\nconst y = 2"} language="ts" />
+          <markdown data-testid="markdown" source="# Title" />
+          <diff
+            data-testid="diff"
+            patch={
+              "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new"
+            }
+          />
+          <code data-testid="no-code" language="ts" />
+          <markdown data-testid="blank-source" source="" />
+        </div>
+      )
+
+      // All three paint their content from a prop and hold no children, so the
+      // retained tree alone would call a screenful of text empty.
+      expect(screen.getByTestId("code")).not.toBeEmptyDOMElement()
+      expect(screen.getByTestId("markdown")).not.toBeEmptyDOMElement()
+      expect(screen.getByTestId("diff")).not.toBeEmptyDOMElement()
+
+      // No content prop, or an empty one, renders nothing and is empty.
+      expect(screen.getByTestId("no-code")).toBeEmptyDOMElement()
+      expect(screen.getByTestId("blank-source")).toBeEmptyDOMElement()
+
+      expect(() => expect(screen.getByTestId("markdown")).toBeEmptyDOMElement()).toThrowError(
+        /be an empty element[\s\S]*and source "# Title"/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("follows the window's keyboard focus, with or without a declared role", () => {
     const screen = createTestRoot()
 
@@ -398,6 +471,7 @@ describeNative("gpuix matcher pack", () => {
       expect(field).not.toBeInTheDocument()
       expect(field).not.toBeVisible()
       expect(field).not.toBeDisabled()
+      expect(field).not.toBeEmptyDOMElement()
       expect(field).not.toHaveFocus()
       expect(field).not.toHaveTextContent("one")
       expect(field).not.toHaveValue("one")

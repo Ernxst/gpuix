@@ -4279,6 +4279,7 @@ declare module 'vitest' {
 | `toBeInTheDocument()` | The element still resolves in the retained tree |
 | `toBeVisible()` | The element painted a box in the last frame |
 | `toBeDisabled()` | `disabled` or `ariaDisabled` is declared on it |
+| `toBeEmptyDOMElement()` | It has no children and no text of its own |
 | `toHaveFocus()` | It holds the window's keyboard focus |
 | `toHaveTextContent(matcher, options?)` | Its text plus every descendant's |
 | `toHaveValue(value)` | Its current value, exactly |
@@ -4375,9 +4376,17 @@ not the prop it declares. Either way the matcher reports the computation rather
 than falling back to the raw prop; use `getByLabelText` or
 `TestElement.semantics.label` for the declaration.
 
-`toBeChecked`, `toHaveClass`, and `toBeEmptyDOMElement` are deliberately absent:
-there is no class attribute, no empty-DOM notion worth asserting on this tree,
-and checked state is already covered by `getByRole` with `ariaChecked`.
+`toBeEmptyDOMElement` passes for an element with no retained children and no
+text of its own — the claim `toHaveTextContent(/^$/)` was standing in for, and a
+stronger one: an element holding an empty `<div>` has no text content but is not
+empty. Whitespace counts as content, as it does in jest-dom. `<code>`, `<diff>`,
+and `<markdown>` render their content from the `code`, `patch`, and `source`
+props rather than from children, so a declared one counts as content too — a
+screenful of painted text is never called empty.
+
+`toBeChecked` and `toHaveClass` are deliberately absent: there is no class
+attribute, and checked state is already covered by `getByRole` with
+`ariaChecked`.
 
 #### toMatchScreenshot
 
