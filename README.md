@@ -4388,8 +4388,17 @@ are one attribute), and a value is compared as text: `tabIndex={0}` answers
 at all, and an `aria-*` or `data-*` boolean carries the words `'true'` and
 `'false'` the way an enumerated attribute does. `role` is the authored role, so
 an `<img>` reports no `role` attribute even though the accessibility tree
-projects the implicit one. `toHaveAttribute('class')` throws instead of
-answering: there is no class attribute here for it to be about.
+projects the implicit one, and the renderer's own bookkeeping — `activationKind`
+and the retained authored role — answers to no attribute name at all.
+
+An `<img src={{ kind: 'data', bytes }}>` holds a desktop image source with no
+text a document could have held, so it answers the presence form only; the value
+form fails rather than comparing against a stringified object.
+
+Two names throw instead of answering, because no answer would be honest:
+`class`, which this tree has no equivalent for at all, and `autofocus`, which is
+declared and acted on but lifted onto the element as a flag rather than retained
+as a prop — assert its effect with `toHaveFocus()`.
 
 `toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
 node, which exists only where the element projects accessibility semantics: a

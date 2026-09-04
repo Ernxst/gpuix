@@ -59,6 +59,17 @@ export function isIdentityProp(name: string): boolean {
  * author wrote is an attribute the test surface can answer for. Names the fork
  * does not accept yet cost nothing here and keep the surface honest when it
  * does.
+ *
+ * **A name may be added only if no Rust code reads that custom-prop key by
+ * name.** Forwarding a key the native side interprets changes behaviour rather
+ * than just recording an attribute, and it does so for the element types the
+ * key was never meant for. `value` and `placeholder` are the worked example and
+ * the reason this rule is written down: `semantics_to_json` reads both with no
+ * element-type gate, so retaining them here gave a `<div value="7">` a
+ * `semantics.value`, and with it an answer to `queryByDisplayValue` and
+ * `toHaveValue` that the DOM gives inputs alone. `<input>` and `<textarea>` are
+ * not built-in types, so they forward every prop regardless and lose nothing by
+ * their absence.
  */
 export const HTML_ATTRIBUTE_PROPS = new Set([
   "alt",
@@ -66,13 +77,11 @@ export const HTML_ATTRIBUTE_PROPS = new Set([
   "href",
   "htmlFor",
   "name",
-  "placeholder",
   "rel",
   "src",
   "target",
   "title",
   "type",
-  "value",
 ])
 
 /**

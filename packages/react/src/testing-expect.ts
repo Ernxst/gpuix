@@ -277,6 +277,18 @@ function ownProp(
 }
 
 /**
+ * Custom-prop keys that are the renderer's bookkeeping, not an author's
+ * attribute, and so answer for no attribute name at all.
+ *
+ * Both are written by the reconciler rather than declared in JSX:
+ * `activationKind` records how the element is activated, and the authored role
+ * is the sibling of the resolved one that `role` already answers with. Reading
+ * them through their own names would turn an implementation detail into an
+ * attribute a test could assert on.
+ */
+const RENDERER_BOOKKEEPING_PROPS: readonly string[] = [AUTHORED_ROLE_PROP, "activationKind"]
+
+/**
  * The prop holding the attribute of this name, if the element declares one.
  *
  * Attributes live in the retained tree as the props the reconciler sent, and
@@ -299,24 +311,55 @@ function declaredAttribute(element: TestElement, name: string): DeclaredAttribut
   if (Object.hasOwn(ATTRIBUTE_PROP_ALIASES, lowered)) {
     return ownProp(element.customProps, ATTRIBUTE_PROP_ALIASES[lowered as AliasedAttributeName])
   }
+  if (RENDERER_BOOKKEEPING_PROPS.some((key) => key.toLowerCase() === lowered)) return undefined
   return ownProp(element.customProps, lowered)
 }
 
 /**
- * The text `getAttribute` would return for a declared value, or `undefined`
- * where it would return `null`.
+ * The text `getAttribute` would return for a declared value: `undefined` where
+ * it would return `null`, and `null` where the attribute is there but holds no
+ * text a document could have held.
  *
  * An attribute is text in a document, so a declared number is its digits. A
  * boolean follows the two rules HTML has for one: `aria-*` and `data-*` carry
  * the words `"true"` and `"false"`, and every other attribute is present or
  * absent, with present reading as the empty string — `<div disabled>` has
  * `disabled=""`, and `disabled={false}` has no attribute at all.
+ *
+ * An object is the `null` case, and `<img src={{ kind: "data", bytes }}>` is
+ * why: the value is a desktop image source with no text form, so the attribute
+ * answers the presence question and nothing more. Stringifying it would compare
+ * every such assertion against `"[object Object]"`, which is a value no test
+ * meant and no browser would ever have shown.
  */
-function attributeText({ key, value }: DeclaredAttribute): string | undefined {
+function attributeText({ key, value }: DeclaredAttribute): string | null | undefined {
   if (value === undefined || value === null) return undefined
+  if (typeof value === "object") return null
   if (typeof value !== "boolean") return String(value)
   if (key.startsWith("aria") || key.startsWith("data-")) return String(value)
   return value ? "" : undefined
+}
+
+/**
+ * Attribute names this tree cannot answer for, and why, rather than a quiet
+ * "absent" that reads as a passing negative assertion about nothing.
+ *
+ * `class` has no equivalent here at all. `autoFocus` does — it is declared in
+ * JSX and acted on — but the retained tree lifts it onto the element as a flag
+ * and never keeps it as a prop, so the honest answer is that this matcher
+ * cannot see it, not that the element lacks it.
+ */
+const UNANSWERABLE_ATTRIBUTES: Readonly<Record<string, string>> = {
+  class:
+    "GPUIX elements have no class attribute. Style them with the `style` prop " +
+    "and assert on `TestElement.style`, or mark them with `data-*` and assert on that.",
+  classname:
+    "GPUIX elements have no class attribute. Style them with the `style` prop " +
+    "and assert on `TestElement.style`, or mark them with `data-*` and assert on that.",
+  autofocus:
+    "autoFocus is lifted onto the element as a flag and is not retained as an " +
+    "attribute, so no answer here would be honest. Assert the effect instead, " +
+    "with toHaveFocus().",
 }
 
 function describeMatcher(matcher: TextContentMatcher): string {
@@ -646,8 +689,8 @@ export const gpuixMatchers = {
    *
    * The source is the retained tree, which is where the desktop keeps what a
    * browser keeps in an attribute — `<a href>`, `<img src>`, `data-*`,
-   * `aria-*`, the author's `id` and `role`. `class` throws rather than
-   * answering: the fork has no class attribute for it to be about.
+   * `aria-*`, the author's `id` and `role`. `class` and `autofocus` throw
+   * rather than answering: see {@link UNANSWERABLE_ATTRIBUTES}.
    */
   toHaveAttribute(
     this: MatcherContext,
@@ -655,15 +698,16 @@ export const gpuixMatchers = {
     name: string,
     expected?: string
   ): GpuixMatcherResult {
-    // Rejected rather than answered, as `toHaveTextContent('')` is: there is no
-    // class attribute in this tree, so both `toHaveAttribute('class', …)` and
-    // its negation would be answering a question about nothing.
-    if (name.toLowerCase() === "class" || name.toLowerCase() === "classname") {
-      throw new TypeError(
-        "toHaveAttribute: GPUIX elements have no class attribute. " +
-          "Style them with the `style` prop and assert on `TestElement.style`, " +
-          "or mark them with `data-*` and assert on that."
-      )
+    // The receiver is checked first, so a typo in the receiver is reported as
+    // one whatever name follows it.
+    asTestElement(received, "toHaveAttribute")
+
+    // Rejected rather than answered, as `toHaveTextContent('')` is: an answer
+    // this tree cannot give honestly would read as a passing assertion about
+    // nothing, in the negated form especially.
+    const lowered = name.toLowerCase()
+    if (Object.hasOwn(UNANSWERABLE_ATTRIBUTES, lowered)) {
+      throw new TypeError(`toHaveAttribute: ${UNANSWERABLE_ATTRIBUTES[lowered]}`)
     }
 
     return against(
@@ -677,9 +721,17 @@ export const gpuixMatchers = {
         const declared = declaredAttribute(element, name)
         const text = declared === undefined ? undefined : attributeText(declared)
         return {
-          pass: text !== undefined && (expected === undefined || text === expected),
+          // `null` is declared with no text to compare, so it answers the
+          // presence question and fails every value one.
+          pass:
+            text !== undefined &&
+            (expected === undefined ? true : text !== null && text === expected),
           actual: `  ${describe()}\n  attribute ${JSON.stringify(name)} ${
-            text === undefined ? "is not declared" : `is ${JSON.stringify(text)}`
+            text === undefined
+              ? "is not declared"
+              : text === null
+                ? "is declared with a value no document could hold"
+                : `is ${JSON.stringify(text)}`
           }`,
         }
       }

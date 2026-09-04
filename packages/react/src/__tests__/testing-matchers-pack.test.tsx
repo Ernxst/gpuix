@@ -461,6 +461,7 @@ describeNative("gpuix matcher pack", () => {
           <a data-testid="docs" href="/docs" target="_blank">
             <text>Docs</text>
           </a>
+          <input data-testid="field" placeholder="Search" value="iron" />
         </div>
       )
 
@@ -506,6 +507,23 @@ describeNative("gpuix matcher pack", () => {
       expect(icon).toHaveAttribute("alt", "Cable")
       expect(screen.getByRole("img", { name: "Cable" })).toBe(icon)
 
+      // `<input>` is not a type built as a native div, so it forwards every
+      // prop and its attributes answer without being listed anywhere.
+      const field = screen.getByTestId("field")
+      expect(field).toHaveAttribute("placeholder", "Search")
+      expect(field).toHaveAttribute("value", "iron")
+
+      // The renderer's own bookkeeping is not an attribute. `activationKind`
+      // records how the element activates and the authored role is the sibling
+      // of the resolved one `role` already answers with; neither was written by
+      // an author, so neither answers to a name.
+      expect(docs).not.toHaveAttribute("activationKind")
+      expect(docs).not.toHaveAttribute("activationkind")
+      expect(save).not.toHaveAttribute("authoredRole")
+      // Nor is a name that only `Object.prototype` would answer.
+      expect(save).not.toHaveAttribute("constructor")
+      expect(save).not.toHaveAttribute("toString")
+
       expect(() => expect(panel).toHaveAttribute("data-state", "closed")).toThrowError(
         /have attribute "data-state" with value "closed"[\s\S]*attribute "data-state" is "open"/
       )
@@ -532,6 +550,12 @@ describeNative("gpuix matcher pack", () => {
             ariaDisabled
             data-ready={true}
           />
+          <img
+            data-testid="bytes"
+            alt="Tile"
+            src={{ kind: "url", url: "https://example.com/tile.png" }}
+            style={{ width: 20, height: 20 }}
+          />
         </div>
       )
 
@@ -552,16 +576,31 @@ describeNative("gpuix matcher pack", () => {
       expect(() => expect(off).toHaveAttribute("disabled")).toThrowError(
         /attribute "disabled" is not declared/
       )
+
+      // An image source given as a desktop object has no text a document could
+      // have held, so it answers presence and no value at all — rather than
+      // matching the "[object Object]" a stringified one would produce.
+      const bytes = screen.getByTestId("bytes")
+      expect(bytes).toHaveAttribute("src")
+      expect(bytes).not.toHaveAttribute("src", "https://example.com/tile.png")
+      expect(bytes).not.toHaveAttribute("src", "[object Object]")
+      expect(() =>
+        expect(bytes).toHaveAttribute("src", "https://example.com/tile.png")
+      ).toThrowError(/attribute "src" is declared with a value no document could hold/)
     } finally {
       screen.unmount()
     }
   })
 
-  it("rejects the class attribute this tree does not have", () => {
+  it("rejects an attribute name it could not answer honestly", () => {
     const screen = createTestRoot()
 
     try {
-      screen.render(<div data-testid="panel" />)
+      screen.render(
+        <div data-testid="panel">
+          <input data-testid="field" autoFocus value="" />
+        </div>
+      )
       const panel = screen.getByTestId("panel")
 
       // Answering "absent" would read as a passing negative assertion about a
@@ -571,6 +610,26 @@ describeNative("gpuix matcher pack", () => {
       )
       expect(() => expect(panel).not.toHaveAttribute("className", "row")).toThrowError(
         /no class attribute/
+      )
+
+      // `autoFocus` is declared and acted on, but the tree lifts it onto the
+      // element as a flag rather than keeping it as a prop, so this matcher
+      // cannot see it — and says so instead of calling it absent.
+      const field = screen.getByTestId("field")
+      expect(() => expect(field).toHaveAttribute("autofocus")).toThrowError(
+        /autoFocus is lifted onto the element/
+      )
+      expect(() => expect(field).not.toHaveAttribute("autoFocus")).toThrowError(
+        /Assert the effect instead, with toHaveFocus/
+      )
+
+      // The receiver is checked before the name, so a bad receiver is reported
+      // as one whatever name follows it.
+      expect(() => expect(null).toHaveAttribute("class")).toThrowError(
+        /toHaveAttribute expects a TestElement/
+      )
+      expect(() => expect(undefined).not.toHaveAttribute("autofocus")).toThrowError(
+        /toHaveAttribute expects a TestElement/
       )
     } finally {
       screen.unmount()
