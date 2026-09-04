@@ -207,6 +207,28 @@ function currentValue(renderer: TestRenderer, element: TestElement): string | un
   return renderer.getInputValue(element.id) ?? element.semantics?.value
 }
 
+/**
+ * The prop a content-from-a-prop host renders, where it has one.
+ *
+ * Three host types take their whole content as a prop rather than as children,
+ * so the retained tree shows them with no children and no text however much
+ * they paint. Anything else answers `undefined` and is judged by its tree.
+ */
+const CONTENT_PROPS: Readonly<Record<string, string>> = {
+  code: "code",
+  diff: "patch",
+  markdown: "source",
+}
+
+function declaredContent(
+  element: TestElement
+): { prop: string; value: string } | undefined {
+  if (!Object.hasOwn(CONTENT_PROPS, element.type)) return undefined
+  const prop = CONTENT_PROPS[element.type]!
+  const value = element.customProps?.[prop]
+  return { prop, value: typeof value === "string" ? value : "" }
+}
+
 function describeMatcher(matcher: TextContentMatcher): string {
   if (typeof matcher === "function") return `[function ${matcher.name || "anonymous"}]`
   return matcher instanceof RegExp ? matcher.toString() : JSON.stringify(matcher)
@@ -300,6 +322,11 @@ export const gpuixMatchers = {
    * comments; there are no comments in this tree, so the rule is simply that
    * any child and any text at all make the element non-empty.
    *
+   * `<code>`, `<diff>`, and `<markdown>` render their content from a prop
+   * rather than from children — `code`, `patch`, and `source` — so a declared
+   * one counts as content here. Without that they would read as empty while
+   * painting a screenful of text.
+   *
    * It says what `toHaveTextContent(/^$/)` was standing in for, and says more:
    * an element holding an empty `<div>` has no text content but is not empty.
    */
@@ -312,11 +339,14 @@ export const gpuixMatchers = {
       ({ element, describe }) => {
         const text = element.text ?? ""
         const children = element.children.length
+        const content = declaredContent(element)
         return {
-          pass: children === 0 && text === "",
+          pass: children === 0 && text === "" && (content?.value ?? "") === "",
           actual: `  ${describe()}\n  contains ${children} ${
             children === 1 ? "child" : "children"
-          } and text ${JSON.stringify(text)}`,
+          } and text ${JSON.stringify(text)}${
+            content === undefined ? "" : ` and ${content.prop} ${JSON.stringify(content.value)}`
+          }`,
         }
       }
     )

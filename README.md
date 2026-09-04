@@ -4349,7 +4349,10 @@ reports that rather than falling back to the raw prop — use `getByLabelText` o
 `toBeEmptyDOMElement` passes for an element with no retained children and no
 text of its own — the claim `toHaveTextContent(/^$/)` was standing in for, and a
 stronger one: an element holding an empty `<div>` has no text content but is not
-empty. Whitespace counts as content, as it does in jest-dom.
+empty. Whitespace counts as content, as it does in jest-dom. `<code>`, `<diff>`,
+and `<markdown>` render their content from the `code`, `patch`, and `source`
+props rather than from children, so a declared one counts as content too — a
+screenful of painted text is never called empty.
 
 `toBeChecked` and `toHaveClass` are deliberately absent: there is no class
 attribute, and checked state is already covered by `getByRole` with

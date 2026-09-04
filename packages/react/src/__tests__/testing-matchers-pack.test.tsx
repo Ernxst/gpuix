@@ -139,6 +139,43 @@ describeNative("gpuix matcher pack", () => {
     }
   })
 
+  it("counts the content prop of a host that renders from one", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <code data-testid="code" code={"const x = 1\nconst y = 2"} language="ts" />
+          <markdown data-testid="markdown" source="# Title" />
+          <diff
+            data-testid="diff"
+            patch={
+              "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new"
+            }
+          />
+          <code data-testid="no-code" language="ts" />
+          <markdown data-testid="blank-source" source="" />
+        </div>
+      )
+
+      // All three paint their content from a prop and hold no children, so the
+      // retained tree alone would call a screenful of text empty.
+      expect(screen.getByTestId("code")).not.toBeEmptyDOMElement()
+      expect(screen.getByTestId("markdown")).not.toBeEmptyDOMElement()
+      expect(screen.getByTestId("diff")).not.toBeEmptyDOMElement()
+
+      // No content prop, or an empty one, renders nothing and is empty.
+      expect(screen.getByTestId("no-code")).toBeEmptyDOMElement()
+      expect(screen.getByTestId("blank-source")).toBeEmptyDOMElement()
+
+      expect(() => expect(screen.getByTestId("markdown")).toBeEmptyDOMElement()).toThrowError(
+        /be an empty element[\s\S]*and source "# Title"/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("follows the window's keyboard focus, with or without a declared role", () => {
     const screen = createTestRoot()
 
