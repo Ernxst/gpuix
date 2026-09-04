@@ -103,6 +103,42 @@ describeNative("gpuix matcher pack", () => {
     }
   })
 
+  it("calls an element empty only with no children and no text", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div data-testid="empty" />
+          <div data-testid="holds-text">
+            <text>Coal</text>
+          </div>
+          <div data-testid="holds-an-empty-child">
+            <div />
+          </div>
+          <text data-testid="text-node">Iron</text>
+          <text data-testid="blank-text">{" "}</text>
+        </div>
+      )
+
+      expect(screen.getByTestId("empty")).toBeEmptyDOMElement()
+      expect(screen.getByTestId("holds-text")).not.toBeEmptyDOMElement()
+      expect(screen.getByTestId("text-node")).not.toBeEmptyDOMElement()
+      // Whitespace is content, as it is in jest-dom.
+      expect(screen.getByTestId("blank-text")).not.toBeEmptyDOMElement()
+      // Stronger than the `toHaveTextContent(/^$/)` it replaces: this subtree
+      // has no text at all, and is still not empty.
+      expect(screen.getByTestId("holds-an-empty-child")).toHaveTextContent(/^$/)
+      expect(screen.getByTestId("holds-an-empty-child")).not.toBeEmptyDOMElement()
+
+      expect(() => expect(screen.getByTestId("holds-text")).toBeEmptyDOMElement()).toThrowError(
+        /be an empty element[\s\S]*contains 1 child/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("follows the window's keyboard focus, with or without a declared role", () => {
     const screen = createTestRoot()
 
@@ -375,6 +411,7 @@ describeNative("gpuix matcher pack", () => {
       expect(field).not.toBeInTheDocument()
       expect(field).not.toBeVisible()
       expect(field).not.toBeDisabled()
+      expect(field).not.toBeEmptyDOMElement()
       expect(field).not.toHaveFocus()
       expect(field).not.toHaveTextContent("one")
       expect(field).not.toHaveValue("one")

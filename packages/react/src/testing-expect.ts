@@ -15,9 +15,9 @@
 ///
 /// The pack is deliberately small. A matcher is here when it replaces an
 /// assertion a test would otherwise have to spell out against the renderer, and
-/// absent when the desktop has nothing for it to be about: `toBeChecked`,
-/// `toHaveClass`, and `toBeEmptyDOMElement` were all judged low-value against
-/// this tree and are not shipped.
+/// absent when the desktop has nothing for it to be about: `toBeChecked` and
+/// `toHaveClass` were both judged low-value against this tree and are not
+/// shipped.
 
 import {
   matches as matchesMatcher,
@@ -74,6 +74,8 @@ export interface GpuixMatchers<R = unknown> {
   toBeVisible(): R
   /** `disabled` or `ariaDisabled` is declared on the element. */
   toBeDisabled(): R
+  /** The element has no children and no text of its own. */
+  toBeEmptyDOMElement(): R
   /** The element holds the window's keyboard focus. */
   toHaveFocus(): R
   /** The element's text, plus every descendant's, contains or matches this. */
@@ -289,6 +291,35 @@ export const gpuixMatchers = {
         actual: `  ${describe()} is ${disabled ? "" : "not "}disabled`,
       }
     })
+  },
+
+  /**
+   * The element renders nothing: no retained children, and no text of its own.
+   *
+   * jest-dom counts child nodes and treats whitespace as content, skipping only
+   * comments; there are no comments in this tree, so the rule is simply that
+   * any child and any text at all make the element non-empty.
+   *
+   * It says what `toHaveTextContent(/^$/)` was standing in for, and says more:
+   * an element holding an empty `<div>` has no text content but is not empty.
+   */
+  toBeEmptyDOMElement(this: MatcherContext, received: unknown): GpuixMatcherResult {
+    return against(
+      this,
+      received,
+      "toBeEmptyDOMElement",
+      "be an empty element",
+      ({ element, describe }) => {
+        const text = element.text ?? ""
+        const children = element.children.length
+        return {
+          pass: children === 0 && text === "",
+          actual: `  ${describe()}\n  contains ${children} ${
+            children === 1 ? "child" : "children"
+          } and text ${JSON.stringify(text)}`,
+        }
+      }
+    )
   },
 
   /**
