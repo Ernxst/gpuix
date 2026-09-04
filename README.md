@@ -4001,8 +4001,12 @@ declared `ariaLabel`, `getByPlaceholderText` the `placeholder` prop, and
 `getByDisplayValue` the `value` prop. The singular `getBy...` and `queryBy...`
 methods throw when more than one element matches; required `getBy...` /
 `getAllBy...` methods also throw when none match. Their `queryBy...` /
-`queryAllBy...` counterparts return `null` / `[]` for a miss. `within(element)`
-returns the same query families scoped to that element's descendants.
+`queryAllBy...` counterparts return `null` / `[]` for a miss. A component that
+renders `null` leaves no root element, and every family searches that as an empty
+tree: `queryBy...` returns `null`, `queryAllBy...` returns `[]`, and the required
+forms throw their usual not-found error naming the empty render tree as the
+scope. `within(element)` returns the same query families scoped to that
+element's descendants.
 
 Text, test-ID, and accessible-name matching trims and collapses whitespace
 before matching exactly. All three also accept regular expressions, predicate

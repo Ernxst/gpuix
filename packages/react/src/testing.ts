@@ -1653,7 +1653,7 @@ function waitForSync(
 
 function getQueries(
   renderer: TestRenderer,
-  resolveScope: () => TestElement,
+  resolveScope: () => QueryScope,
   includeScope: boolean
 ): TestQueries {
   const waitFor = createWaitFor(renderer)
@@ -1847,7 +1847,7 @@ function getQueries(
 
 function findAllByText(
   renderer: TestRenderer,
-  scope: TestElement,
+  scope: QueryScope,
   text: TextMatcher,
   includeScope: boolean,
   options?: MatcherOptions
@@ -1861,7 +1861,7 @@ function findAllByText(
 
 function findAllByTestId(
   renderer: TestRenderer,
-  scope: TestElement,
+  scope: QueryScope,
   testId: TestIdMatcher,
   includeScope: boolean,
   options?: MatcherOptions
@@ -1891,7 +1891,7 @@ const SEMANTICS_FIELD_PROPS: Readonly<Record<SemanticsField, string>> = {
 
 function findAllBySemantics(
   renderer: TestRenderer,
-  scope: TestElement,
+  scope: QueryScope,
   field: SemanticsField,
   matcher: TextMatcher,
   includeScope: boolean,
@@ -1905,7 +1905,7 @@ function findAllBySemantics(
 
 function noSemanticsMatchError(
   renderer: TestRenderer,
-  scope: TestElement,
+  scope: QueryScope,
   field: SemanticsField,
   matcher: TextMatcher,
   includeScope: boolean
@@ -1925,7 +1925,7 @@ function noSemanticsMatchError(
           .join("\n")
 
   return new Error(
-    `Unable to find an element with ${SEMANTICS_FIELD_NOUNS[field]} ${describeMatcher(matcher)} within ${describeElement(renderer, scope)}.\n\nHere is the ${SEMANTICS_FIELD_NOUNS[field]} that was declared:\n\n${available}`
+    `Unable to find an element with ${SEMANTICS_FIELD_NOUNS[field]} ${describeMatcher(matcher)} within ${describeScope(renderer, scope)}.\n\nHere is the ${SEMANTICS_FIELD_NOUNS[field]} that was declared:\n\n${available}`
   )
 }
 
@@ -1966,7 +1966,7 @@ const HIDDEN_ROLE_ERROR =
 
 function findAllByRole(
   renderer: TestRenderer,
-  scope: TestElement,
+  scope: QueryScope,
   role: string,
   options: ByRoleOptions,
   includeScope: boolean
@@ -1986,7 +1986,7 @@ function findAllByRole(
 
 function accessibleHosts(
   renderer: TestRenderer,
-  scope: TestElement,
+  scope: QueryScope,
   includeScope: boolean
 ): AccessibleHost[] {
   const scopedIds = new Set(
@@ -2079,18 +2079,21 @@ function hasMatchingTextChild(
   )
 }
 
-function getElements(renderer: TestRenderer, scope: TestElement, includeScope = true): TestElement[] {
+/**
+ * What a query searches within: an element, or nothing at all when the
+ * component rendered `null` and the renderer has no root. An absent scope
+ * searches an empty tree — the web's equivalent of an empty `<body>` — so every
+ * query family reports "no match" rather than failing to search.
+ */
+type QueryScope = TestElement | undefined
+
+function getElements(renderer: TestRenderer, scope: QueryScope, includeScope = true): TestElement[] {
+  if (scope === undefined) return []
+
   return [
     ...(includeScope ? [scope] : []),
     ...scope.children.flatMap((child) => getElements(renderer, child)),
   ]
-}
-
-function getRoot(renderer: TestRenderer): TestElement {
-  const root = renderer.getRoot()
-  if (root === undefined) throw missingRootError()
-
-  return root
 }
 
 function getElement(renderer: TestRenderer, id: number, relationship: string): TestElement {
@@ -2102,7 +2105,7 @@ function getElement(renderer: TestRenderer, id: number, relationship: string): T
 
 function noTextMatchError(
   renderer: TestRenderer,
-  scope: TestElement,
+  scope: QueryScope,
   text: TextMatcher,
   includeScope: boolean
 ): Error {
@@ -2114,7 +2117,7 @@ function noTextMatchError(
     nearMisses.length === 0 ? "No text was rendered in this scope." : nearMisses.join("\n")
 
   return new Error(
-    `Unable to find an element with text ${describeMatcher(text)} within ${describeElement(renderer, scope)}. Near misses:\n${nearby}`
+    `Unable to find an element with text ${describeMatcher(text)} within ${describeScope(renderer, scope)}. Near misses:\n${nearby}`
   )
 }
 
@@ -2132,11 +2135,11 @@ function multipleTextMatchesError(
 
 function noTestIdMatchError(
   renderer: TestRenderer,
-  scope: TestElement,
+  scope: QueryScope,
   testId: TestIdMatcher
 ): Error {
   return new Error(
-    `Unable to find an element with test ID ${describeMatcher(testId)} within ${describeElement(renderer, scope)}`
+    `Unable to find an element with test ID ${describeMatcher(testId)} within ${describeScope(renderer, scope)}`
   )
 }
 
@@ -2154,7 +2157,7 @@ function multipleTestIdMatchesError(
 
 function noRoleMatchError(
   renderer: TestRenderer,
-  scope: TestElement,
+  scope: QueryScope,
   role: string,
   options: ByRoleOptions,
   includeScope: boolean
@@ -2173,7 +2176,7 @@ function noRoleMatchError(
           .join("\n\n")
 
   return new Error(
-    `Unable to find an accessible element with the role ${JSON.stringify(role)}${describeRoleOptions(options)} within ${describeElement(renderer, scope)}.\n\nHere are the accessible roles:\n\n${available}`
+    `Unable to find an accessible element with the role ${JSON.stringify(role)}${describeRoleOptions(options)} within ${describeScope(renderer, scope)}.\n\nHere are the accessible roles:\n\n${available}`
   )
 }
 
@@ -2217,13 +2220,16 @@ export function describeElement(renderer: TestRenderer, element: TestElement): s
   return `<${element.type} ${attributes}>`
 }
 
+/** The searched scope, or a stand-in when the tree is empty, for failure messages. */
+function describeScope(renderer: TestRenderer, scope: QueryScope): string {
+  if (scope === undefined) return "the empty render tree"
+
+  return describeElement(renderer, scope)
+}
+
 function describeMatcher(text: TextMatcher): string {
   if (typeof text === "function") return `[function ${text.name || "anonymous"}]`
   return text instanceof RegExp ? text.toString() : JSON.stringify(text)
-}
-
-function missingRootError(): Error {
-  return new Error("Unable to search rendered text because the renderer has no root element")
 }
 
 function missingElementError(id: number, relationship: string): Error {
@@ -2377,7 +2383,7 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   })
   renderer.setAllowPrivateNetworkImages(options.allowPrivateNetworkImages ?? false)
   const root = createRoot(renderer, { strictStyles: options.strictStyles })
-  const queries = getQueries(renderer, () => getRoot(renderer), true)
+  const queries = getQueries(renderer, () => renderer.getRoot(), true)
   let unmounted = false
 
   const render = (node: ReactNode): void => {
