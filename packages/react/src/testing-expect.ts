@@ -68,7 +68,10 @@ interface MatcherContext {
  * promise under `expect(...).resolves`.
  */
 export interface GpuixMatchers<R = unknown> {
-  /** The element is still reachable in the renderer's retained tree. */
+  /**
+   * The element is still reachable in the renderer's retained tree. Negated,
+   * it also accepts the `null` a `queryBy…` returns when nothing matched.
+   */
   toBeInTheDocument(): R
   /** The element painted a box in the last frame. See the caveats below. */
   toBeVisible(): R
@@ -222,8 +225,19 @@ export const gpuixMatchers = {
    *
    * The element map is built by walking from the root, so an unmounted or
    * detached element is absent — this is attachment, not mere existence.
+   *
+   * This is the one matcher that takes `null`, and only when negated, exactly
+   * as jest-dom does: `queryBy…` answers `null` when nothing matched, and
+   * `expect(screen.queryByText('gone')).not.toBeInTheDocument()` is the
+   * assertion that result exists to state. The positive form still rejects it —
+   * `null` names no element that could be in the document — and every other
+   * matcher rejects it in both forms.
    */
   toBeInTheDocument(this: MatcherContext, received: unknown): GpuixMatcherResult {
+    if (received === null && this.isNot === true) {
+      return report(this, false, "be in the document", "  received null")
+    }
+
     const element = asTestElement(received, "toBeInTheDocument")
     const renderer = rendererOf(element)
     const current = renderer.getElement(element.id)

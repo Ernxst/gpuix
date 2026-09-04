@@ -423,6 +423,43 @@ describeNative("gpuix matcher pack", () => {
     )
   })
 
+  it("states absence directly on the null a query returns", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text data-testid="row">Coal</text>
+        </div>
+      )
+
+      // The form the assertion exists for: a query that found nothing, said as
+      // absence rather than as `toBeNull()` over the query's return value.
+      expect(screen.queryByTestId("gone")).not.toBeInTheDocument()
+      expect(screen.queryByText("gone")).not.toBeInTheDocument()
+      expect(null).not.toBeInTheDocument()
+      // A query that did find something is unaffected.
+      expect(screen.queryByTestId("row")).toBeInTheDocument()
+
+      // Only `null`, only negated, and only this matcher: everything else
+      // still throws, because no assertion about it could mean anything.
+      expect(() => expect(null).toBeInTheDocument()).toThrowError(
+        /toBeInTheDocument expects a TestElement/
+      )
+      expect(() => expect(undefined).not.toBeInTheDocument()).toThrowError(
+        /toBeInTheDocument expects a TestElement/
+      )
+      expect(() => expect(null).not.toBeVisible()).toThrowError(
+        /toBeVisible expects a TestElement/
+      )
+      expect(() => expect(null).not.toHaveTextContent("Coal")).toThrowError(
+        /toHaveTextContent expects a TestElement/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("tracks live state through the same captured element", () => {
     const screen = createTestRoot()
 
