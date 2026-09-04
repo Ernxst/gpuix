@@ -4199,12 +4199,65 @@ registry would keep the first file's window for the whole run.
 `scaleFactor`, `allowPrivateNetworkImages`, `strictStyles` — and every one of
 them is fixed when the window is constructed. A call whose options match the
 live window's reuses it; a call whose options differ tears that window down and
-opens a fresh one. The comparison is field by field on what you passed, so an
-omitted option is *not* the same request as one passed explicitly at its
-default value: `render(node)` and `render(node, { width: 1280 })` rebuild the
-window every time they alternate, even when the window would be identical. Keep
-the options object identical across a file — or omit it everywhere — to keep the
-window.
+opens a fresh one.
+
+The comparison is field by field, and the two halves of `TestRootOptions` are
+compared differently. `width`, `height`, and `scaleFactor` are compared *after*
+any `configureTestWindow` default is applied, because that is the geometry the
+window would actually be built at: under `configureTestWindow({ width: 640 })`,
+`render(node)` and `render(node, { width: 640 })` are the same request and share
+one window. A value equal to a *built-in* default is still a different request
+from omitting the field, because nothing fills it in before the comparison:
+`render(node)` and `render(node, { width: 1280 })` rebuild the window every time
+they alternate,
+even though the window is identical. `allowPrivateNetworkImages` and
+`strictStyles` are compared as passed, with no defaults applied.
+
+Keep the options object identical across a file — or omit it everywhere — to
+keep the window.
+
+**The default window is fixed, not the host's.** A window you do not size opens
+at **1280x800 logical pixels with `scaleFactor: 2`**, on every machine and every
+run. Nothing about it is read from the display the tests happen to run on: 1280
+is wide enough to keep a centered max-width column capped, so a layout test that
+needs to observe re-wrapping asks for a narrower window, and the scale is the
+device pixel ratio every golden in this repository was rendered at, so a
+screenshot is `1280 × 2` by `800 × 2` device pixels unless you say otherwise.
+
+A suite that wants different geometry everywhere sets it once rather than at
+every call site, the way `configureScreenshots` sets golden paths:
+
+```ts
+// vitest setup file
+import { configureTestWindow } from '@gpuix/react/testing'
+
+configureTestWindow({ width: 1024, height: 768, scaleFactor: 1 })
+```
+
+Precedence is the same, and per field: a `width` passed to `createTestRoot()` or
+`render()` wins over the configured `width`, which wins over the built-in 1280,
+while the fields the call omits keep the configured values. Each call replaces
+the previous defaults wholesale, so `configureTestWindow({})` restores the
+built-in geometry, and `configuredTestWindow()` reads back what was last set for
+a test that wants to put it back rather than reset it.
+
+A window's geometry is fixed when it is constructed, so nothing already open
+changes shape: calling it drops the window `render()` shares and reopens at the
+new geometry on the next `render()`. Put it in a setup file and no window is
+thrown away.
+
+On Windows the scale factor still follows the monitor's DPI — GPUI has no
+virtual display scale there, which is also why an explicit `scaleFactor` throws
+on that platform. The size is fixed on both.
+
+**`simulateResize` moves the reported size, not the window.** It is GPUI's test
+hook for a native resize, so `useWindowSize()`, layout, and
+`renderer.getWindowSize()` all follow it — but the window's drawable is still
+the one it was opened with, so a screenshot taken after it keeps the *opened*
+dimensions until `render()`'s reset puts the size back. Size the window through
+`width` / `height` (or `configureTestWindow`) when a golden is involved, and use
+`simulateResize` for what it is named after: observing how a component reacts to
+a resize.
 
 **Every `render()` starts from a reset window.** The tree from the previous
 `render()` is unmounted first, so component state and mount effects do not
@@ -4411,6 +4464,11 @@ browser mode clip to, so a border-colour regression is caught by the golden —
 scaled by the window's `scaleFactor`. An element golden is therefore in device
 pixels like the window one, and an element that painted nothing throws rather
 than comparing an empty box.
+
+Both are therefore sized by the window, whose default is a fixed 1280x800 at
+`scaleFactor: 2` — a golden's pixel dimensions do not move with the display the
+suite runs on. [`configureTestWindow`](#render) sets a different default for a
+whole suite the way `configureScreenshots` below sets golden paths.
 
 Called without a name, the golden is named after the test and a per-test
 counter — `my-test-1.png`, `my-test-2.png` — exactly as in vitest, counter

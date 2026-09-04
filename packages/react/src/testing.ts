@@ -269,12 +269,94 @@ interface NativeTestRendererConstructor {
   new (width?: number, height?: number, scaleFactor?: number): NativeTestRendererApi
 }
 
-/** Offscreen window geometry for a test root. Size defaults to 1280x800 in native. */
+/**
+ * Offscreen window geometry for a test root. Every field has a fixed default in
+ * native — 1280x800 at scale factor 2 — chosen so a window never inherits the
+ * host display's size or scale.
+ */
 export interface TestWindowOptions {
   width?: number
   height?: number
   /** Virtual display scale factor. Unsupported or invalid requests throw. */
   scaleFactor?: number
+}
+
+let testWindowDefaults: TestWindowOptions = {}
+
+/**
+ * Suite-wide defaults for the offscreen test window, set once from a vitest
+ * setup file instead of repeating the same geometry at every `createTestRoot()`
+ * and `render()`:
+ *
+ * ```ts
+ * // vitest setup file
+ * configureTestWindow({ width: 1024, height: 768, scaleFactor: 1 })
+ * ```
+ *
+ * This is `configureScreenshots` for window geometry, with the same precedence:
+ * a per-call `width` / `height` / `scaleFactor` wins over the configured
+ * default, which wins over the built-in one. Precedence is per field, so
+ * `createTestRoot({ width: 320 })` under the call above still gets height 768 at
+ * scale factor 1.
+ *
+ * Each call replaces the previous defaults wholesale, as a config object would:
+ * `configureTestWindow({})` restores the built-in geometry. Pair it with
+ * `configuredTestWindow()` to put back what a suite had configured rather than
+ * the built-in geometry.
+ *
+ * Windows already open do not change shape — a window's geometry is fixed when
+ * it is constructed — so this drops the window `render()` shares, and the probe
+ * window the first `TestRenderer` reuses unless the new defaults resolve to the
+ * geometry it was opened at. The next call of either opens a window at the new
+ * geometry.
+ */
+export function configureTestWindow(options: TestWindowOptions): void {
+  testWindowDefaults = { ...options }
+  // A probe window opened at the previous geometry can no longer stand in for
+  // the first `TestRenderer`. One opened at geometry these defaults resolve to
+  // still can — a call that restores what was already configured keeps it.
+  releaseProbeWindowUnlessOpenedAt(resolveTestWindowOptions())
+  // The shared window is unconditional: `render()` records the geometry it was
+  // built with, so without this a `configureTestWindow` after the first
+  // `render()` in a file would be a silent no-op for every later one.
+  if (activeRenderRoot !== null) disposeSharedRoot(activeRenderRoot)
+}
+
+/** What `configureTestWindow` was last given, for a caller that wants to
+ *  restore it after changing it for one test. */
+export function configuredTestWindow(): TestWindowOptions {
+  return { ...testWindowDefaults }
+}
+
+/** The configured defaults a call did not override, field by field. */
+function resolveTestWindowOptions(options: TestWindowOptions = {}): TestWindowOptions {
+  return {
+    width: options.width ?? testWindowDefaults.width,
+    height: options.height ?? testWindowDefaults.height,
+    scaleFactor: options.scaleFactor ?? testWindowDefaults.scaleFactor,
+  }
+}
+
+/** Two resolved geometries name the same window. */
+function sameTestWindowGeometry(a: TestWindowOptions, b: TestWindowOptions): boolean {
+  return a.width === b.width && a.height === b.height && a.scaleFactor === b.scaleFactor
+}
+
+/**
+ * Close the probe window unless it was opened at `geometry`.
+ *
+ * The probe exists so that "the native renderer is available" means it
+ * initialized, not merely that the binding exported a constructor, and the
+ * first `TestRenderer` inherits it rather than paying for a second window. What
+ * makes it reusable is its geometry, not whether the caller passed options: a
+ * suite that configures 640x480 keeps its probe in every file, and a call that
+ * asks for the geometry already open reuses it too.
+ */
+function releaseProbeWindowUnlessOpenedAt(geometry: TestWindowOptions): void {
+  if (probedNativeTestRenderer === null) return
+  if (sameTestWindowGeometry(probedTestWindow, geometry)) return
+  probedNativeTestRenderer.dispose()
+  probedNativeTestRenderer = null
 }
 
 // The native test renderer is exported by macOS and Windows builds.
@@ -287,6 +369,9 @@ export interface TestWindowOptions {
 // silently skipped for anyone consuming the published package.
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
 let probedNativeTestRenderer: NativeTestRendererApi | null = null
+/** The geometry the probe window was opened at, so a request that resolves to
+ *  the same three values can still use it. Only read while the probe is live. */
+let probedTestWindow: TestWindowOptions = {}
 let nativeTestRendererInitialized = false
 /** The native binding error when the test renderer cannot be loaded. */
 export let nativeTestRendererLoadError: Error | null = null
@@ -308,8 +393,14 @@ function initializeNativeTestRenderer(): NativeTestRendererConstructor | null {
       NativeTestRenderer = native.TestGpuixRenderer
       // Construct once here so availability includes native initialization, not
       // merely whether the binding exports its constructor. The first
-      // TestRenderer reuses this instance.
-      probedNativeTestRenderer = new native.TestGpuixRenderer()
+      // TestRenderer reuses this instance, so it is opened at whatever
+      // `configureTestWindow` has already been told.
+      probedTestWindow = resolveTestWindowOptions()
+      probedNativeTestRenderer = new native.TestGpuixRenderer(
+        probedTestWindow.width,
+        probedTestWindow.height,
+        probedTestWindow.scaleFactor
+      )
     } else if (native.TestGpuixRenderer) {
       // hasTestGpuixRenderer() === false. Construct the stub anyway and let it
       // throw into the catch below, so the reason comes from the native build
@@ -633,17 +724,11 @@ export class TestRenderer implements NativeRenderer {
         }`
       )
     }
-    const customWindow =
-      options.width !== undefined ||
-      options.height !== undefined ||
-      options.scaleFactor !== undefined
-    if (probedNativeTestRenderer && customWindow) {
-      probedNativeTestRenderer.dispose()
-      probedNativeTestRenderer = null
-    }
+    const geometry = resolveTestWindowOptions(options)
+    releaseProbeWindowUnlessOpenedAt(geometry)
     this.native =
       probedNativeTestRenderer ??
-      new NativeTestRendererConstructor(options.width, options.height, options.scaleFactor)
+      new NativeTestRendererConstructor(geometry.width, geometry.height, geometry.scaleFactor)
     probedNativeTestRenderer = null
   }
 
@@ -2393,9 +2478,11 @@ export interface TestRootOptions extends TestWindowOptions {
  * and convenience methods.
  *
  * Pass `width` / `height` to size the offscreen window, and `scaleFactor` to
- * override its virtual display scale. The 1280x800 default is
- * wide enough to keep a centered max-width column capped, so a layout test that
- * needs to observe re-wrapping must ask for a narrower window.
+ * override its virtual display scale. The default window is a fixed 1280x800 at
+ * scale factor 2, never the host display's geometry: 1280 is wide enough to keep
+ * a centered max-width column capped, so a layout test that needs to observe
+ * re-wrapping must ask for a narrower window. `configureTestWindow` moves that
+ * default for a whole suite.
  */
 export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   const renderer = new TestRenderer(options)
@@ -2570,6 +2657,9 @@ export function cleanup(): void {
  * uncaught render error.
  */
 export function render(node: ReactNode, options: TestRootOptions = {}): RenderResult {
+  // Reuse is decided on the geometry the window would actually be built at, so
+  // a `configureTestWindow` default counts the same as a value passed here.
+  const request: TestRootOptions = { ...options, ...resolveTestWindowOptions(options) }
   const live = activeRenderRoot
   if (
     live !== null &&
@@ -2577,7 +2667,7 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
     // will even paint, but `getStatus()` reads `failed` forever. `cleanup()`
     // refuses to hand such a root to the next test; a second `render()` in
     // the same test must refuse it too.
-    (!sameTestRootOptions(live.options, options) ||
+    (!sameTestRootOptions(live.options, request) ||
       live.root.root.getStatus().status !== "active")
   ) {
     disposeSharedRoot(live)
@@ -2595,7 +2685,7 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
 
   let active = activeRenderRoot
   if (active === null) {
-    const root = createTestRoot(options)
+    const root = createTestRoot(request)
     const size = root.renderer.getWindowSize()
     const rerender = (next: ReactNode): void => root.render(next)
     active = {
@@ -2603,11 +2693,11 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
       // Copied, so a caller reusing and mutating one options object cannot
       // change what this window is recorded as having been built with.
       options: {
-        width: options.width,
-        height: options.height,
-        scaleFactor: options.scaleFactor,
-        allowPrivateNetworkImages: options.allowPrivateNetworkImages,
-        strictStyles: options.strictStyles,
+        width: request.width,
+        height: request.height,
+        scaleFactor: request.scaleFactor,
+        allowPrivateNetworkImages: request.allowPrivateNetworkImages,
+        strictStyles: request.strictStyles,
       },
       windowSize: { width: size.width, height: size.height },
       result: {
