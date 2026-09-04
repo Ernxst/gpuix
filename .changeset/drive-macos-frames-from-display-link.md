@@ -18,11 +18,13 @@ path's pump p95 to stay below one refresh period. It first proves the window is 
 callbacks, briefly reactivates an occluded window, and skips with an explicit diagnostic when the
 platform cannot provide a measurable window.
 
-The embedded AppKit pump now stops at `kCFRunLoopBeforeWaiting`, which bounds the pump even when its
-pre-posted wake event is processed without a sleep/wake transition. A real native-to-JavaScript race
+The embedded AppKit pump never sleeps: it drains up to 256 already-queued events with
+`nextEventMatchingMask` against `distantPast`, updates windows, then services ready Core Foundation
+sources with a single zero-timeout `CFRunLoopRunInMode`. That bounds the pump whether or not its
+pre-posted wake event arrives with a sleep/wake transition. A real native-to-JavaScript race
 regression queues a frame callback after the idle precheck and verifies both bounded pump return and
 eventual TSFN service. The outstanding-callback check remains a latency optimization, not the pump's
-correctness boundary. This pump-phase correction benefits the timer path too; the display-link clock's
+correctness boundary. This bounded pump benefits the timer path too; the display-link clock's
 remaining advantage is refresh alignment without polling to choose presentation times. A separate
 idle-wake pump remains responsible for input and application lifecycle progress between frames.
 

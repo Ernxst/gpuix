@@ -40,7 +40,7 @@ async function scrollWithoutSynchronousDraw(
 
 describeNative('chat example', () => {
   it(
-    'keeps live automation reads fresh without synchronous input draws',
+    'drives live mouse and keyboard input without synchronous input draws',
     async () => {
       const cwd = path.dirname(fileURLToPath(import.meta.url))
       const app = await launch({
@@ -51,8 +51,17 @@ describeNative('chat example', () => {
       })
 
       try {
+        const sidebar = app.getByTestId('sidebar-collapse')
+        await sidebar.waitFor({ timeoutMs: 30_000 })
+        await Promise.race([
+          sidebar.click(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('live click timed out')), 5_000)
+          ),
+        ])
+        await app.getByTestId('sidebar-expand').waitFor()
+
         const composer = app.getByTestId('composer')
-        await composer.waitFor({ timeoutMs: 30_000 })
         await composer.fill('hello gpuix')
         // This raw painted-text read is deliberately the first read after the
         // input mutation. It must draw its own fresh frame rather than relying
@@ -150,7 +159,7 @@ describeNative('chat example', () => {
         await clickApp.close()
       }
     },
-    45_000
+    60_000
   )
 
   it('renders safe-mdx through GPUIX primitives', () => {
