@@ -36,6 +36,7 @@ import {
 } from "./testing.js"
 import { toMatchScreenshot, type ToMatchScreenshotOptions } from "./testing-screenshot.js"
 import { TEXT_EDITING_TYPES } from "./reconciler/text-editing.js"
+import { ARIA_PROP_ALIASES } from "./reconciler/host-config.js"
 
 export { configureScreenshots } from "./testing-screenshot.js"
 export type {
@@ -50,6 +51,14 @@ export type {
 export type TextContentOptions = Omit<MatcherOptions, "exact">
 
 export type TextContentMatcher = Matcher<TestElement>
+
+/**
+ * What `toHaveAttribute` compares against. The DOM has only strings here, so a
+ * string is the usual spelling; a number or a boolean is accepted and compared
+ * by its text, because the retained tree keeps the value the author declared
+ * rather than a serialized attribute.
+ */
+export type AttributeValue = string | number | boolean
 
 /** What a runner needs back from a matcher. Shaped for Vitest and Jest alike. */
 export interface GpuixMatcherResult {
@@ -90,6 +99,8 @@ export interface GpuixMatchers<R = unknown> {
   toHaveDisplayValue(expected: TextContentMatcher, options?: MatcherOptions): R
   /** The element's computed accessible name matches, or is non-empty. */
   toHaveAccessibleName(expected?: TextContentMatcher, options?: MatcherOptions): R
+  /** The attribute is declared on the element, with this value if one is given. */
+  toHaveAttribute(name: string, value?: AttributeValue): R
   /**
    * The window — or the element's box within it — matches its stored golden.
    *
@@ -241,6 +252,37 @@ function declaredContent(
   const prop = CONTENT_PROPS[element.type]!
   const value = element.customProps?.[prop]
   return { prop, value: typeof value === "string" ? value : "" }
+}
+
+/**
+ * The value a DOM attribute of this name carries on this element.
+ *
+ * Attributes live in the retained tree as the props the reconciler sent, with
+ * two names that do not survive the trip verbatim: the author's `id` is lifted
+ * out of the custom-prop map onto the element itself, and every `aria-*`
+ * attribute is stored under the camelCase prop it aliases — `aria-labelledby`
+ * as `ariaLabelledBy` — so the DOM spelling is translated back through the
+ * reconciler's own table. `data-*` names pass through unchanged.
+ */
+function attributeValue(element: TestElement, name: string): unknown {
+  if (name === "id") return element.authorId
+  const key = ARIA_PROP_ALIASES[name as keyof typeof ARIA_PROP_ALIASES] ?? name
+  return element.customProps?.[key]
+}
+
+/**
+ * Attribute equality, against a value the tree kept in its declared type.
+ *
+ * A browser compares the attribute's text, and so does this once the declared
+ * value is coerced: `toHaveAttribute('tabIndex', '0')` and `('tabIndex', 0)`
+ * both hold for `tabIndex={0}`. An object-valued prop — an `<img src>` given
+ * bytes rather than a path — has no text a browser would have produced, so it
+ * answers only the presence form.
+ */
+function attributeMatches(actual: unknown, expected: AttributeValue): boolean {
+  if (actual === expected) return true
+  if (actual === null || typeof actual === "object") return false
+  return String(actual) === String(expected)
 }
 
 function describeMatcher(matcher: TextContentMatcher): string {
@@ -551,6 +593,49 @@ export const gpuixMatchers = {
               ? name.length > 0
               : matchesMatcher(name, element, expected, options),
           actual: `  ${describe()}\n  accessible name ${JSON.stringify(name)}`,
+        }
+      }
+    )
+  },
+
+  /**
+   * The attribute the element was given, by its DOM name.
+   *
+   * Called with a name alone it asserts only that the attribute is declared, as
+   * jest-dom does; with a value it compares, coercing the declared value to
+   * text the way a browser's attribute would already be text.
+   *
+   * The source is the retained tree, which is where the desktop keeps what a
+   * browser would keep in an attribute — `<img src>`, `data-*`, `aria-*`, the
+   * author's `id`. Two consequences follow from that being props rather than
+   * markup. A `role` reads as declared even where the DOM would compute it: an
+   * `<img>` reports `role="img"`, because the tree stores the resolved role and
+   * has no separate attribute record to disagree with it. And a value the
+   * author declared as a boolean reads as `"true"`, not the empty string HTML
+   * gives a bare boolean attribute.
+   */
+  toHaveAttribute(
+    this: MatcherContext,
+    received: unknown,
+    name: string,
+    expected?: AttributeValue
+  ): GpuixMatcherResult {
+    return against(
+      this,
+      received,
+      "toHaveAttribute",
+      expected === undefined
+        ? `have attribute ${JSON.stringify(name)}`
+        : `have attribute ${JSON.stringify(name)} with value ${JSON.stringify(expected)}`,
+      ({ element, describe }) => {
+        const value = attributeValue(element, name)
+        return {
+          pass:
+            value !== undefined &&
+            (expected === undefined || attributeMatches(value, expected)),
+          actual: `  ${describe()}\n  attribute ${JSON.stringify(name)} ${
+            value === undefined ? "is not declared" : `is ${JSON.stringify(value)}`
+          }`,
         }
       }
     )

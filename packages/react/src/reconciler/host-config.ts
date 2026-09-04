@@ -507,7 +507,12 @@ function diagnoseUnsupportedAccessibilityRoleProp(
   console.warn(message)
 }
 
-const ARIA_PROP_ALIASES = {
+/**
+ * The DOM spelling of every supported ARIA attribute, and the prop key the
+ * retained tree stores it under. Exported so a matcher asking for the attribute
+ * by its DOM name translates through the same table the reconciler wrote with.
+ */
+export const ARIA_PROP_ALIASES = {
   "aria-label": "ariaLabel",
   "aria-labelledby": "ariaLabelledBy",
   "aria-description": "ariaDescription",

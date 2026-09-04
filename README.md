@@ -4285,6 +4285,7 @@ declare module 'vitest' {
 | `toHaveValue(value)` | Its current value, exactly |
 | `toHaveDisplayValue(matcher, options?)` | Its current value, through the Testing Library matcher |
 | `toHaveAccessibleName(matcher?)` | Its computed accessible name |
+| `toHaveAttribute(name, value?)` | The attribute it was given, by its DOM name |
 | `await toMatchScreenshot(name?, options?)` | The window, or the element's box, against a stored golden |
 
 Every matcher re-resolves the element against its renderer first, so an element
@@ -4365,6 +4366,24 @@ built no editor to hold one, and the prop is the only value there is. The
 queries never take the native path at all — `getByDisplayValue` and
 `TestElement.semantics.value` stay the declaration-flavoured surface, matching
 the prop the author set.
+
+`toHaveAttribute(name, value?)` asks for the attribute by its DOM name, and
+reads it from the retained tree — which is where the desktop keeps what a
+browser would keep in an attribute:
+
+```ts
+expect(screen.getByRole('img', { name: 'Cable' })).toHaveAttribute('src', '/icons/cable.png')
+expect(screen.getByTestId('panel')).toHaveAttribute('data-state', 'open')
+expect(screen.getByTestId('save')).toHaveAttribute('aria-label', 'Save')
+```
+
+`id`, `data-*`, `aria-*` (under their DOM spelling, whichever spelling the prop
+used) and every host prop such as `<img src>` all answer. The name alone
+asserts presence; a value is compared as text, so a prop declared `tabIndex={0}`
+matches both `0` and `'0'`. Two consequences of the source being props rather
+than markup: `role` reads as resolved, so an `<img>` reports `role="img"` where
+a browser would report no `role` attribute at all, and a boolean prop reads as
+`"true"` rather than the empty string HTML gives a bare boolean attribute.
 
 `toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
 node, which exists only where the element projects accessibility semantics: a

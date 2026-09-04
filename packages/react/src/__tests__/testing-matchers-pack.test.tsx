@@ -445,6 +445,61 @@ describeNative("gpuix matcher pack", () => {
     }
   })
 
+  it("reads attributes by their DOM names, not by the props behind them", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div id="panel" data-testid="panel" data-state="open">
+          <img
+            data-testid="icon"
+            alt="Cable"
+            src="/assets/icons/items/desc-cable-c.png"
+            style={{ width: 40, height: 40 }}
+          />
+          <div data-testid="save" role="button" ariaLabel="Save" tabIndex={0} />
+        </div>
+      )
+
+      // The form this replaces: which file the image was given, said as a
+      // matcher over the element rather than a read of how it was built.
+      expect(screen.getByRole("img", { name: "Cable" })).toHaveAttribute(
+        "src",
+        "/assets/icons/items/desc-cable-c.png"
+      )
+
+      const panel = screen.getByTestId("panel")
+      expect(panel).toHaveAttribute("id", "panel")
+      expect(panel).toHaveAttribute("data-testid", "panel")
+      // Name only asserts presence; name and value assert the value.
+      expect(panel).toHaveAttribute("data-state")
+      expect(panel).toHaveAttribute("data-state", "open")
+      expect(panel).not.toHaveAttribute("data-state", "closed")
+      expect(panel).not.toHaveAttribute("data-missing")
+
+      const save = screen.getByTestId("save")
+      // The DOM spelling answers, though the prop behind it is camelCase.
+      expect(save).toHaveAttribute("aria-label", "Save")
+      expect(save).toHaveAttribute("role", "button")
+      // A declared number compares as the text a browser attribute would hold.
+      expect(save).toHaveAttribute("tabIndex", 0)
+      expect(save).toHaveAttribute("tabIndex", "0")
+      // The tree keeps a resolved role, so an implicit one reads as declared —
+      // a browser would report no `role` attribute on an `<img>` at all.
+      expect(screen.getByTestId("icon")).toHaveAttribute("role", "img")
+      expect(screen.getByTestId("icon")).toHaveAttribute("alt", "Cable")
+
+      expect(() => expect(panel).toHaveAttribute("data-state", "closed")).toThrowError(
+        /have attribute "data-state" with value "closed"[\s\S]*attribute "data-state" is "open"/
+      )
+      expect(() => expect(panel).toHaveAttribute("href")).toThrowError(
+        /attribute "href" is not declared/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("fails rather than throws for every matcher on an unmounted element", () => {
     const screen = createTestRoot()
 
@@ -477,6 +532,7 @@ describeNative("gpuix matcher pack", () => {
       expect(field).not.toHaveValue("one")
       expect(field).not.toHaveDisplayValue("one")
       expect(field).not.toHaveAccessibleName()
+      expect(field).not.toHaveAttribute("aria-label", "Amount")
 
       // The positive form fails, and says why.
       expect(() => expect(field).toBeVisible()).toThrowError(
