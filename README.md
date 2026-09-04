@@ -4212,11 +4212,26 @@ Precedence is the same, and per field: a `width` passed to `createTestRoot()` or
 `render()` wins over the configured `width`, which wins over the built-in 1280,
 while the fields the call omits keep the configured values. Each call replaces
 the previous defaults wholesale, so `configureTestWindow({})` restores the
-built-in geometry.
+built-in geometry, and `configuredTestWindow()` reads back what was last set for
+a test that wants to put it back rather than reset it.
+
+A window's geometry is fixed when it is constructed, so nothing already open
+changes shape: calling it drops the window `render()` shares and reopens at the
+new geometry on the next `render()`. Put it in a setup file and no window is
+thrown away.
 
 On Windows the scale factor still follows the monitor's DPI — GPUI has no
 virtual display scale there, which is also why an explicit `scaleFactor` throws
 on that platform. The size is fixed on both.
+
+**`simulateResize` moves the reported size, not the window.** It is GPUI's test
+hook for a native resize, so `useWindowSize()`, layout, and
+`renderer.getWindowSize()` all follow it — but the window's drawable is still
+the one it was opened with, so a screenshot taken after it keeps the *opened*
+dimensions until `render()`'s reset puts the size back. Size the window through
+`width` / `height` (or `configureTestWindow`) when a golden is involved, and use
+`simulateResize` for what it is named after: observing how a component reacts to
+a resize.
 
 **Every `render()` starts from a reset window.** The tree from the previous
 `render()` is unmounted first, so component state and mount effects do not

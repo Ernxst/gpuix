@@ -300,16 +300,33 @@ let testWindowDefaults: TestWindowOptions = {}
  * scale factor 1.
  *
  * Each call replaces the previous defaults wholesale, as a config object would:
- * `configureTestWindow({})` restores the built-in geometry.
+ * `configureTestWindow({})` restores the built-in geometry. Pair it with
+ * `configuredTestWindow()` to put back what a suite had configured rather than
+ * the built-in geometry.
+ *
+ * Windows already open do not change shape — a window's geometry is fixed when
+ * it is constructed — so this drops the window `render()` shares and the probe
+ * window the first `TestRenderer` reuses. The next call of either opens a window
+ * at the new geometry.
  */
 export function configureTestWindow(options: TestWindowOptions): void {
   testWindowDefaults = { ...options }
-  // The probe window was opened at the built-in geometry, so it can no longer
+  // The probe window was opened at the previous geometry, so it can no longer
   // stand in for the first `TestRenderer`.
   if (probedNativeTestRenderer) {
     probedNativeTestRenderer.dispose()
     probedNativeTestRenderer = null
   }
+  // Same for the shared window: `render()` records the geometry it was built
+  // with, so without this a `configureTestWindow` after the first `render()` in
+  // a file would be a silent no-op for every later one.
+  if (activeRenderRoot !== null) disposeSharedRoot(activeRenderRoot)
+}
+
+/** What `configureTestWindow` was last given, for a caller that wants to
+ *  restore it after changing it for one test. */
+export function configuredTestWindow(): TestWindowOptions {
+  return { ...testWindowDefaults }
 }
 
 /** The configured defaults a call did not override, field by field. */
@@ -2595,6 +2612,9 @@ export function cleanup(): void {
  * uncaught render error.
  */
 export function render(node: ReactNode, options: TestRootOptions = {}): RenderResult {
+  // Reuse is decided on the geometry the window would actually be built at, so
+  // a `configureTestWindow` default counts the same as a value passed here.
+  const request: TestRootOptions = { ...options, ...resolveTestWindowOptions(options) }
   const live = activeRenderRoot
   if (
     live !== null &&
@@ -2602,7 +2622,7 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
     // will even paint, but `getStatus()` reads `failed` forever. `cleanup()`
     // refuses to hand such a root to the next test; a second `render()` in
     // the same test must refuse it too.
-    (!sameTestRootOptions(live.options, options) ||
+    (!sameTestRootOptions(live.options, request) ||
       live.root.root.getStatus().status !== "active")
   ) {
     disposeSharedRoot(live)
@@ -2620,7 +2640,7 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
 
   let active = activeRenderRoot
   if (active === null) {
-    const root = createTestRoot(options)
+    const root = createTestRoot(request)
     const size = root.renderer.getWindowSize()
     const rerender = (next: ReactNode): void => root.render(next)
     active = {
@@ -2628,11 +2648,11 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
       // Copied, so a caller reusing and mutating one options object cannot
       // change what this window is recorded as having been built with.
       options: {
-        width: options.width,
-        height: options.height,
-        scaleFactor: options.scaleFactor,
-        allowPrivateNetworkImages: options.allowPrivateNetworkImages,
-        strictStyles: options.strictStyles,
+        width: request.width,
+        height: request.height,
+        scaleFactor: request.scaleFactor,
+        allowPrivateNetworkImages: request.allowPrivateNetworkImages,
+        strictStyles: request.strictStyles,
       },
       windowSize: { width: size.width, height: size.height },
       result: {

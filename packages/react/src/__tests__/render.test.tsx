@@ -9,10 +9,13 @@ import { fileURLToPath } from "node:url"
 import React, { useState } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
 import {
+  cleanup as cleanupShared,
+  configuredTestWindow,
   configureTestWindow,
   createTestRoot,
   isNativeTestRendererAvailable,
   nativeTestRendererLoadError,
+  render as renderShared,
   TestRenderer,
 } from "../testing.js"
 import { useWindowSize } from "../hooks/use-window-size.js"
@@ -631,16 +634,43 @@ describeNative("render()", () => {
       }
     }
 
+    const configured = configuredTestWindow()
     try {
       configureTestWindow({ width: 640, height: 480, scaleFactor: 1 })
       expect(geometry()).toEqual({ width: 640, height: 480, scaleFactor: 1 })
       // Per field: the call moves the width and inherits the rest.
       expect(geometry({ width: 320 })).toEqual({ width: 320, height: 480, scaleFactor: 1 })
     } finally {
-      configureTestWindow({})
+      configureTestWindow(configured)
     }
 
     expect(geometry()).toEqual({ width: 1280, height: 800, scaleFactor: 2 })
+  })
+
+  // `render()` records the geometry its shared window was built with, so a
+  // `configureTestWindow` after the first render has to drop that window or it
+  // would go unnoticed for the rest of the file.
+  it("applies configureTestWindow to the next render() after one already ran", () => {
+    const configured = configuredTestWindow()
+    try {
+      const before = renderShared(<text>before</text>)
+      expect(before.renderer.getWindowSize()).toEqual({
+        width: 1280,
+        height: 800,
+        scaleFactor: 2,
+      })
+
+      configureTestWindow({ width: 640, height: 480, scaleFactor: 1 })
+      const after = renderShared(<text>after</text>)
+      expect(after.renderer.getWindowSize()).toEqual({
+        width: 640,
+        height: 480,
+        scaleFactor: 1,
+      })
+    } finally {
+      configureTestWindow(configured)
+      cleanupShared()
+    }
   })
 
   it("updates every useWindowSize consumer from a native resize and releases the handler", () => {
