@@ -4046,7 +4046,11 @@ semantics for `ariaHidden` subtrees.
 
 These are Testing Library-shaped call sites, not DOM locators: `getBy*` and
 `queryBy*` return a `TestElement` immediately, `findBy*` returns a promise that
-retries, and none of them add browser accessibility semantics.
+retries, and none of them add browser accessibility semantics. A synchronous
+query sees everything the last `render`, `rerender`, or dispatched event
+committed, the effects it scheduled included — reach for `findBy*` when the work
+you are waiting on finishes later, not because a mount goes through
+`useEffect`.
 
 `TestElement.children` and `TestElement.parentElement` expose current retained
 relationships in the DOM shape. A previously returned element re-resolves
@@ -4185,6 +4189,31 @@ it('saves the recipe', async () => {
 The returned object is what `createTestRoot()` returns — every query,
 `within`, `userEvent`, `waitFor`, `renderer`, `root` — plus **`rerender(node)`**,
 which re-renders into the same root.
+
+**The effects have run.** `render`, `rerender`, `unmount`, and each event the
+`userEvent` helpers and `nativeSimulate*` methods dispatch do their React work
+inside `act`, as Testing Library does. When one returns, the tree holds the
+passive effects that update queued, the state those effects set, and the
+re-renders that state scheduled. So a component that reaches the screen through
+a `useEffect` — a portal registering with its outlet, a provider measuring on
+mount — is one `getByText` away:
+
+```tsx
+const screen = render(<Legend />) // its outlet fills from an effect
+expect(screen.getByText('LEGEND')).toBeInTheDocument() // no await
+```
+
+Events are delivered one act scope at a time, so a handler's state change and
+everything it schedules have landed before the next event is delivered, the way
+a browser dispatches. `findBy*` and `waitFor` are then for work that is
+genuinely asynchronous — a fetch, an image decode, an animation — rather than
+for a mount.
+
+Two cases fall back to a plain synchronous flush, which still commits before
+returning but leaves effect-scheduled state to whoever owns the act queue:
+calling `render` inside your own `act` scope, since React keeps one queue and
+drains it when the outermost scope exits, and a production React build, which
+ships no `act` at all.
 
 **One window per test file.** Opening an offscreen GPUI window costs about a
 second, so the window the first `render()` opens is reused by every later
@@ -4602,6 +4631,11 @@ clamped to 1ms rather than rejected, since a zero advance would freeze the very
 clocks the pump exists to turn. `findBy*` is `waitFor(() => getBy*(...))`,
 taking the matcher options first and the waitFor options second, and is
 available on `screen` and on `within(element)`.
+
+Neither is needed to see an effect. `render`, `rerender`, `unmount`, and event
+dispatch flush the passive effects and the re-renders they schedule before they
+return, so a mount that arrives through `useEffect` is already there for
+`getBy*`; keep this pump for work that finishes on a clock or a promise.
 
 `expectCanvasMatchesBrowser` polls on the same loop but with a repaint-only
 pump: image decoding runs off the renderer's clocks, so advancing them there

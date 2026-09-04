@@ -19,7 +19,7 @@ import {
   enqueueRendererDiagnostic,
   installRendererDiagnosticChannel,
 } from "./renderer-diagnostics.js"
-import { attachRoot, detachRoot } from "./event-registry.js"
+import { attachRoot, containerForRenderer, detachRoot } from "./event-registry.js"
 import { hostConfig } from "./host-config.js"
 
 // Cast to any because @types/react-reconciler is out of date with react-reconciler 0.33.0
@@ -58,6 +58,10 @@ const _r = reconciler as typeof reconciler & {
 }
 export const flushSync = _r.flushSyncFromReconciler ?? _r.flushSync
 
+/** Run the passive effects (`useEffect`) the last commit queued instead of
+ *  leaving them to the scheduler's next task. Returns whether any ran. */
+export const flushPassiveEffects = _r.flushPassiveEffects
+
 export interface RootFailure {
   readonly status: "failed"
   readonly error: unknown
@@ -75,6 +79,45 @@ export interface Root {
   unmount: () => void
   /** The root stays failed after cleanup so consumers can inspect the fatal cause. */
   getStatus: () => RootStatus
+}
+
+/**
+ * Uncaught-error handlers, keyed by the two objects a caller can be holding:
+ * the root itself, and the container the event registry resolves from a
+ * renderer.
+ *
+ * Deliberately not on `Root`. Reporting an error into somebody else's root is
+ * not something an application does; it exists for the one caller that takes
+ * React's error path away from it, below.
+ */
+const uncaughtErrorHandlers = new WeakMap<object, (error: unknown) => void>()
+
+/**
+ * Hand a root an uncaught render error that reached the caller instead of it.
+ *
+ * React normally routes such an error to the root's own handler. Inside `act`
+ * it does not: it collects those errors and rethrows them out of the `act`
+ * call, so a caller that renders inside `act` — the test renderer — has to hand
+ * them back for the root to go on reporting itself as dead. A root this module
+ * did not create is ignored.
+ */
+export function reportUncaughtErrorToRoot(root: Root, error: unknown): void {
+  uncaughtErrorHandlers.get(root)?.(error)
+}
+
+/**
+ * As `reportUncaughtErrorToRoot`, for a caller holding the renderer rather than
+ * the root: the native event pipeline, which reaches React through the root the
+ * event registry attached to that renderer. A renderer with no attached root —
+ * one already unmounted — is ignored.
+ */
+export function reportUncaughtErrorToRenderer(
+  renderer: NativeRenderer,
+  error: unknown
+): void {
+  const container = containerForRenderer(renderer)
+  if (container === undefined) return
+  uncaughtErrorHandlers.get(container)?.(error)
 }
 
 export interface RootOptions {
@@ -186,9 +229,12 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     }
     status = failure
     enqueueRendererDiagnostic(renderer, diagnostic)
-    // Keep React's established `(error, errorInfo)` leading arguments for
-    // error observers while adding the otherwise-missing dead-root outcome.
-    console.error(error, errorInfo, diagnostic.message)
+    // Keep React's established `(error, errorInfo)` leading arguments for error
+    // observers while adding the otherwise-missing dead-root outcome. The
+    // errorInfo is rebuilt rather than passed through, so a caller that had no
+    // stack to give — React drops it when `act` intercepts the error — logs
+    // React's shape with a null stack instead of a bare `undefined`.
+    console.error(error, { componentStack: failure.componentStack }, diagnostic.message)
     options.onUncaughtError?.(failure)
   }
 
@@ -206,7 +252,7 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     null
   )
 
-  return {
+  const root: Root = {
     render: (node): void => {
       const activeContainer = container
       if (!activeContainer) {
@@ -227,4 +273,11 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     unmount: cleanup,
     getStatus: (): RootStatus => status,
   }
+
+  // Reachable from either handle a caller can have: the root, or — through the
+  // event registry — the renderer this container is attached to.
+  uncaughtErrorHandlers.set(root, handleUncaughtError)
+  uncaughtErrorHandlers.set(gpuixContainer, handleUncaughtError)
+
+  return root
 }
