@@ -4444,6 +4444,7 @@ declare module 'vitest' {
 |---|---|
 | `toBeInTheDocument()` | The element still resolves in the retained tree |
 | `toBeVisible()` | The element painted a box in the last frame |
+| `toBeInViewport(options?)` | The box it painted lies inside the window |
 | `toBeDisabled()` | `disabled` or `ariaDisabled` is declared on it |
 | `toBeEnabled()` | Neither is: the exact inverse of `toBeDisabled()` |
 | `toBeChecked()` | Its computed checked state is on |
@@ -4657,6 +4658,47 @@ aria-checked attribute can be used with .toBeChecked(). Use .toHaveValue()
 instead`, and fails. As in jest-dom, the negated form of a question that was
 never about a checked state passes. `toBePartiallyChecked` is the assertion for
 `ariaChecked="mixed"`.
+
+`toBeInViewport(options?)` is vitest browser mode's matcher over the desktop's
+one viewport: the window. It compares the box the element painted against the
+window's logical bounds, the same window-relative pixels
+`getBoundingClientRect()` reports, and `{ ratio }` is the least fraction of the
+element's **own** area that must be on screen — an `IntersectionObserver` ratio,
+so `{ ratio: 1 }` demands the whole box and the default of `0` accepts any part
+of it:
+
+```ts
+expect(screen.getByTestId('header')).toBeInViewport()
+expect(screen.getByTestId('header')).toBeInViewport({ ratio: 1 })
+expect(screen.getByTestId('footer')).not.toBeInViewport()
+```
+
+It says directly what a hand-rolled `getBoundingClientRect()` comparison against
+the window size was claiming, which is what scrolling and culling tests are
+usually about — and it says it more accurately, because the intersection is the
+observer's: the box is clipped by **every clipping ancestor** as well as by the
+window. A row two screens down inside a 100px scroller still paints a box, and
+that box can sit inside the window while the scroller has clipped it away
+entirely; the observer calls it not intersecting, and so does this.
+
+The clip is the mask GPUI actually paints. An ancestor clips on **both** axes as
+soon as either `overflow` is not `visible` — the CSS rule, where a `visible`
+axis computes to `auto` once the other one is not — so `overflow: 'hidden'`,
+`overflow: 'scroll'` and `overflowX: 'scroll'` alone all narrow all four edges,
+while `overflow: 'visible'` narrows none. A `<virtual-list>` clips without
+declaring an overflow at all, being a scroll container by construction. And a
+clipper with a visible border clips to its content box, because GPUI insets the
+mask by the border widths — a child flush with the border box's outer edge is
+partly clipped away.
+
+An element that painted no box has nothing to measure and is not in the
+viewport, which is the `toBeVisible` caveat above reaching this matcher: a
+culled `<virtual-list>` row reports as off screen. An element with no *area*
+follows the observer's own rule for a zero-area target — the ratio is 1 when the
+box intersects the viewport or merely touches its edge, and 0 otherwise — so a
+zero-height element on screen is in the viewport at every `ratio`. Unlike
+vitest's, this matcher is **synchronous**: vitest's is asynchronous only because
+an `IntersectionObserver` is, and painted bounds are already recorded here.
 
 `toHaveClass` is deliberately absent: there is no class attribute.
 

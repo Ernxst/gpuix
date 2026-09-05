@@ -37,6 +37,7 @@ import {
   type TestRenderer,
 } from "./testing.js"
 import { toMatchScreenshot, type ToMatchScreenshotOptions } from "./testing-screenshot.js"
+import type { Overflow, StyleDesc } from "./types/host.js"
 import { TEXT_EDITING_TYPES } from "./reconciler/text-editing.js"
 import {
   ARIA_PROP_ALIASES,
@@ -57,6 +58,15 @@ export type {
 export type TextContentOptions = Omit<MatcherOptions, "exact">
 
 export type TextContentMatcher = Matcher<TestElement>
+
+/** vitest browser mode's `toBeInViewport` options. */
+export interface ToBeInViewportOptions {
+  /**
+   * The least fraction of the element's own area that must be inside the
+   * window, between 0 and 1. Defaults to 0: any painted part of it will do.
+   */
+  ratio?: number
+}
 
 type AriaAttributeName = keyof typeof ARIA_PROP_ALIASES
 type AliasedAttributeName = keyof typeof ATTRIBUTE_PROP_ALIASES
@@ -86,6 +96,11 @@ export interface GpuixMatchers<R = unknown> {
   toBeInTheDocument(): R
   /** The element painted a box in the last frame. See the caveats below. */
   toBeVisible(): R
+  /**
+   * The box the element painted lies inside the window — vitest browser mode's
+   * matcher, with `{ ratio }` the least fraction of it that must be on screen.
+   */
+  toBeInViewport(options?: ToBeInViewportOptions): R
   /** `disabled` or `ariaDisabled` is declared on the element. */
   toBeDisabled(): R
   /** Neither `disabled` nor `ariaDisabled` is declared: the exact inverse. */
@@ -242,6 +257,160 @@ function accessibilityNodesOf(
   return Object.values(renderer.getAccessibilityTree().nodes).filter(
     (node) => node.host_id === element.id
   )
+}
+
+/** A window-relative box in the form the intersection arithmetic wants. */
+interface ClipRect {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+function rectOf(bounds: readonly number[]): ClipRect {
+  const [x = 0, y = 0, width = 0, height = 0] = bounds
+  return { left: x, top: y, right: x + width, bottom: y + height }
+}
+
+/** An overflow value that establishes a clip, which is every one but `visible`. */
+function clipsAxis(overflow: Overflow | undefined): boolean {
+  return overflow !== undefined && overflow !== "visible"
+}
+
+/** The four edges of a box, as pixels to inset by. */
+interface Edges {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+const NO_EDGES: Edges = { left: 0, top: 0, right: 0, bottom: 0 }
+
+/**
+ * The border widths GPUI insets a mask by, which are none at all unless the
+ * border would paint: `Style::mask_bounds` insets only when a border colour is
+ * set and not transparent, and CSS computes a `none` or `hidden` border style
+ * to a zero used width.
+ *
+ * Transparency is judged by the one value that names it. A border colour is a
+ * CSS colour string, and the parser that could tell `rgba(0, 0, 0, 0)` from an
+ * opaque one lives in native; an alpha-zero border would inset this clip by up
+ * to a border width where GPUI would not.
+ */
+function borderInset(style: StyleDesc | undefined): Edges {
+  if (style === undefined) return NO_EDGES
+  if (style.borderColor === undefined) return NO_EDGES
+  if (style.borderColor.toLowerCase() === "transparent") return NO_EDGES
+  if (style.borderStyle === "none" || style.borderStyle === "hidden") return NO_EDGES
+
+  const all = style.borderWidth ?? 0
+  return {
+    left: style.borderLeftWidth ?? all,
+    top: style.borderTopWidth ?? all,
+    right: style.borderRightWidth ?? all,
+    bottom: style.borderBottomWidth ?? all,
+  }
+}
+
+/**
+ * The mask GPUI paints for one clipping element — `Style::mask_bounds`.
+ *
+ * It covers **both** axes whenever either overflow is not `visible`, which is
+ * CSS's own rule: a `visible` axis computes to `auto` once the other one is
+ * not, so there is no such thing as clipping one axis alone. The border inset
+ * carries the asymmetry instead, and this carries it the same way: an axis is
+ * inset unless it is the hidden one while the other stays visible.
+ */
+function maskOf(box: ClipRect, style: StyleDesc | undefined, visibleX: boolean, visibleY: boolean): ClipRect {
+  const border = borderInset(style)
+  const insetX = visibleX || !visibleY
+  const insetY = visibleY || !visibleX
+
+  return {
+    left: box.left + (insetX ? border.left : 0),
+    top: box.top + (insetY ? border.top : 0),
+    right: box.right - (insetX ? border.right : 0),
+    bottom: box.bottom - (insetY ? border.bottom : 0),
+  }
+}
+
+/**
+ * The clip an `IntersectionObserver` computes for one target: the root's
+ * bounds, narrowed by the mask of every clipping ancestor between the target
+ * and the root.
+ *
+ * This is the half of the observer's algorithm that a bare
+ * `getBoundingClientRect()` comparison against the window misses. A row two
+ * screens down inside a 100px scroller still paints a box, and that box can sit
+ * inside the window while the scroller has clipped it away entirely; the
+ * observer reports it as not intersecting, and so must this.
+ *
+ * A `<virtual-list>` clips without declaring an overflow at all — it is a
+ * scroll container by construction — and an ancestor that painted no box of its
+ * own contributes no clip, because there is no box to clip against.
+ */
+function clipRectFor(
+  renderer: TestRenderer,
+  element: TestElement,
+  window: { width: number; height: number }
+): ClipRect {
+  let clip: ClipRect = { left: 0, top: 0, right: window.width, bottom: window.height }
+
+  for (
+    let ancestor = element.parentElement;
+    ancestor !== null;
+    ancestor = ancestor.parentElement
+  ) {
+    const style = renderer.getResolvedStyle(ancestor.id)
+    const scroller = ancestor.type === "virtual-list"
+    const visibleX = !scroller && !clipsAxis(style?.overflowX ?? style?.overflow)
+    const visibleY = !scroller && !clipsAxis(style?.overflowY ?? style?.overflow)
+    if (visibleX && visibleY) continue
+
+    const bounds = renderer.getElementBounds(ancestor.id)
+    if (bounds === null) continue
+    const mask = maskOf(rectOf(bounds), style, visibleX, visibleY)
+
+    clip = {
+      left: Math.max(clip.left, mask.left),
+      top: Math.max(clip.top, mask.top),
+      right: Math.min(clip.right, mask.right),
+      bottom: Math.min(clip.bottom, mask.bottom),
+    }
+  }
+
+  return clip
+}
+
+/**
+ * The fraction of a painted box that lies inside the clip — an
+ * `IntersectionObserver`'s `intersectionRatio`, computed from the same
+ * window-relative logical pixels `getBoundingClientRect()` reports.
+ *
+ * The observer has a special rule for a target with no area, and this follows
+ * it: the ratio is 1 when such a box intersects the root or merely touches its
+ * edge, and 0 otherwise. Dividing by zero area would answer nothing, and a
+ * zero-height element that is plainly on screen is intersecting.
+ */
+function visibleRatio(bounds: readonly number[], clip: ClipRect): number {
+  const box = rectOf(bounds)
+  const area = (box.right - box.left) * (box.bottom - box.top)
+  if (area <= 0) {
+    const touches =
+      box.left <= clip.right &&
+      box.right >= clip.left &&
+      box.top <= clip.bottom &&
+      box.bottom >= clip.top
+    return touches ? 1 : 0
+  }
+
+  const visibleWidth = Math.max(0, Math.min(box.right, clip.right) - Math.max(box.left, clip.left))
+  const visibleHeight = Math.max(
+    0,
+    Math.min(box.bottom, clip.bottom) - Math.max(box.top, clip.top)
+  )
+  return (visibleWidth * visibleHeight) / area
 }
 
 /**
@@ -507,6 +676,62 @@ export const gpuixMatchers = {
             bounds === null
               ? `  ${describe()} painted no bounds`
               : `  ${describe()} painted [x=${bounds[0]}, y=${bounds[1]}, width=${bounds[2]}, height=${bounds[3]}]`,
+        }
+      }
+    )
+  },
+
+  /**
+   * The box the element painted lies inside the viewport — vitest browser
+   * mode's `toBeInViewport`, over the desktop's one viewport: the window.
+   *
+   * `{ ratio }` is the least fraction of the element's *own* area that must be
+   * visible, so `{ ratio: 1 }` demands the whole box and the default of `0`
+   * accepts any part of it, exactly as an `IntersectionObserver` ratio against
+   * the viewport does. The intersection is the observer's, so it is clipped by
+   * every clipping ancestor as well as by the window — see {@link clipRectFor}.
+   *
+   * An element that painted no box at all is not in the viewport: a culled
+   * `<virtual-list>` row has no bounds to measure, which is the
+   * {@link gpuixMatchers.toBeVisible} caveat reaching this matcher.
+   *
+   * The one shape that differs from vitest's is that this is **synchronous**.
+   * vitest's is asynchronous only because an `IntersectionObserver` is; painted
+   * bounds are already recorded here, and `toMatchScreenshot` stays the single
+   * matcher in this pack that must be awaited.
+   */
+  toBeInViewport(
+    this: MatcherContext,
+    received: unknown,
+    options: ToBeInViewportOptions = {}
+  ): GpuixMatcherResult {
+    // Unvalidated, as vitest leaves it: a ratio above 1 simply never passes.
+    const ratio = options.ratio ?? 0
+
+    return against(
+      this,
+      received,
+      "toBeInViewport",
+      // Keyed on what was passed rather than on its value, so a `ratio: 0` and
+      // a `ratio: NaN` both read back as the demand the test actually made.
+      options.ratio === undefined
+        ? "be in the viewport"
+        : `be in the viewport with ratio ${options.ratio}`,
+      ({ renderer, element, describe }) => {
+        const bounds = renderer.getElementBounds(element.id)
+        if (bounds === null) {
+          return { pass: false, actual: `  ${describe()} painted no bounds` }
+        }
+
+        const window = renderer.getWindowSize()
+        const visible = visibleRatio(bounds, clipRectFor(renderer, element, window))
+        return {
+          // vitest's own comparison, epsilon included: a box that is exactly
+          // whole must satisfy `{ ratio: 1 }` through floating-point division.
+          pass: visible > 0 && visible > ratio - 1e-9,
+          actual:
+            `  ${describe()} painted [x=${bounds[0]}, y=${bounds[1]}, width=${bounds[2]}, height=${bounds[3]}]\n` +
+            `  in a ${window.width}x${window.height} window, visible ratio ${visible.toFixed(3)}`,
         }
       }
     )
