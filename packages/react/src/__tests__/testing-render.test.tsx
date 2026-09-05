@@ -452,22 +452,50 @@ describeNative("render", () => {
       expect(textContent(screen.renderer, screen.getByTestId("second"))).toBe("second")
     })
 
-    it("remembers both handles after unmount so matchers can report them gone", () => {
-      const screen = render(<Decoration />)
+    it("leaves the container mounted and empty after unmount", () => {
+      const screen = render(
+        <div data-testid="tree">
+          <Decoration />
+        </div>
+      )
       const containerId = screen.container.id
+      const tree = screen.getByTestId("tree")
 
       screen.unmount()
 
-      // Testing Library's container outlives its tree; here the handle does,
-      // and answers the assertion a test writes next rather than throwing.
+      // Testing Library's `unmount` empties its container and leaves it in the
+      // page. Both handles are still the same mounted elements.
+      expect(screen.container.id).toBe(containerId)
+      expect(screen.container).toBeInTheDocument()
+      expect(screen.baseElement).toBeInTheDocument()
+      expect(screen.container).toBeEmptyDOMElement()
+      // What went is the tree that was inside it.
+      expect(tree).not.toBeInTheDocument()
+    })
+
+    it("takes both handles out of the window on cleanup", () => {
+      const screen = render(<Decoration />)
+      const containerId = screen.container.id
+
+      // `cleanup()` is the between-tests teardown, not `unmount`: this is what
+      // the vitest entry's afterEach and the next render()'s window reuse do.
+      cleanup()
+
       expect(screen.container.id).toBe(containerId)
       expect(screen.container).not.toBeInTheDocument()
       expect(screen.baseElement).not.toBeInTheDocument()
-      // The window holds no detached elements, so a matcher that must look
-      // inside reports the element as absent rather than as empty.
-      expect(() => expect(screen.container).toBeEmptyDOMElement()).toThrowError(
-        /no longer in the renderer's tree/
-      )
+    })
+
+    it("runs unmount effects before returning, with the container still mounted", () => {
+      registrationCleanups.length = 0
+      const screen = render(<Outlet label="HANDLE" />)
+
+      screen.unmount()
+
+      // #332's guarantee survives the split: the empty container is rendered
+      // inside the same act scope, so the cleanup has run before this returns.
+      expect(registrationCleanups).toEqual(["HANDLE"])
+      expect(screen.container).toBeEmptyDOMElement()
     })
 
     it("wraps the render inherited from createTestRoot()", () => {

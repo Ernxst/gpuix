@@ -43,11 +43,16 @@ render(<Panel style={{ height: 600 }} />)  // or the tree is
 `createTestRoot()` is unaffected: it still renders the node as the window's
 root.
 
-Two smaller changes fall out of having a container to append into. A top-level
-fragment now mounts **every** child — each one used to overwrite the window's
-single root, so only the last survived. And both handles are remembered after
-`unmount()`, the way Testing Library's `container` outlives its tree, so
-`expect(screen.container).not.toBeInTheDocument()` answers rather than the
-property read throwing.
+A top-level fragment now mounts **every** child, which also falls out of having
+a container to append into: each child used to overwrite the window's single
+root, so only the last survived.
+
+`result.unmount()` now takes Testing Library's meaning rather than standing in
+for `cleanup()`. It removes the component from `container` and leaves the
+container mounted and empty, so `expect(screen.container).toBeEmptyDOMElement()`
+holds after one, while `cleanup()` — the `afterEach` from
+`@gpuix/react/testing/vitest`, and what the next `render()` runs before reusing
+the window — is what takes the window's tree down. An unmount effect still runs
+before `unmount()` returns.
 
 Closes #347

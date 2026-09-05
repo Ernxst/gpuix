@@ -2631,9 +2631,12 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
  * `rerender`, `container` and `baseElement`.
  *
  * `unmount` here is vitest-browser-react's `unmount`, not `createTestRoot`'s:
- * it unmounts the rendered tree and **keeps the offscreen window**, which is
- * the whole point of sharing one window across a test file. Call
- * `createTestRoot()` directly when you want to own the window's lifetime.
+ * it removes the component from `container` and **keeps the offscreen window**,
+ * along with `container` and `baseElement` themselves, exactly as Testing
+ * Library's `unmount` leaves its container standing and empty in the page.
+ * Sharing one window across a test file is the whole point. `cleanup()` is what
+ * takes the window's tree down between tests; call `createTestRoot()` directly
+ * when you want to own the window's lifetime.
  */
 export interface RenderResult extends TestRoot {
   /** Re-render into the same root, keeping the window and the renderer. */
@@ -2654,8 +2657,10 @@ export interface RenderResult extends TestRoot {
    * resolves against an auto-height container. Size the window instead, or
    * give the tree an explicit height.
    *
-   * Re-read on every access, so it stays valid across `rerender`, and
-   * remembered after an unmount so the matchers can report it as gone.
+   * Re-read on every access, so it stays valid across `rerender`. `unmount()`
+   * empties it and leaves it mounted, as Testing Library's does, so
+   * `expect(result.container).toBeEmptyDOMElement()` is the assertion after
+   * one. Only `cleanup()` takes it out of the window.
    */
   readonly container: TestElement
   /**
@@ -2663,8 +2668,8 @@ export interface RenderResult extends TestRoot {
    * `container` is mounted into. It is the scope the result's own queries
    * search, and it fills the window the way the viewport sizes the body.
    *
-   * Re-read on every access, so it stays valid across `rerender`, and
-   * remembered after an unmount so the matchers can report it as gone.
+   * Re-read on every access, so it stays valid across `rerender` and an
+   * `unmount()`, which leaves it mounted holding the emptied `container`.
    */
   readonly baseElement: TestElement
 }
@@ -2700,13 +2705,11 @@ function wrapForRender(node: ReactNode): ReactNode {
  * resolves the live element rather than a snapshot taken at `render()` time —
  * what keeps them valid across a `rerender`.
  *
- * **After an unmount they keep answering.** Testing Library's `container`
- * outlives the tree it held — it is a detached `div`, and
- * `expect(container).not.toBeInTheDocument()` is the assertion a test writes
- * next. A desktop window has no detached state, so the last handles are
- * remembered instead: the matchers then take their established
- * absent-element path and report the element as no longer in the tree, which
- * is the true answer here rather than a throw from the property read.
+ * `unmount()` leaves both mounted, so they answer there without any of this —
+ * it empties the container, as Testing Library's does. Only `cleanup()` takes
+ * the window's tree down, and the last handles are remembered for after it, so
+ * the matchers take their established absent-element path rather than the
+ * property read throwing at a test asking the reasonable question.
  */
 function renderResult(
   root: TestRoot,
@@ -2926,10 +2929,25 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
         ...root,
         render: renderWrapped,
         rerender: renderWrapped,
-        // Tree-only unmount: vitest-browser-react's `unmount` removes the
-        // component, not the page it rendered into.
+        // Tree-only unmount, Testing Library's: it removes the component from
+        // the container and leaves the page it rendered into standing. The
+        // container is then mounted and empty — which is what
+        // `expect(container).toBeEmptyDOMElement()` asks about — until
+        // `cleanup()` takes the window's tree down.
+        //
+        // Rendering the empty wrappers goes through the same `act` scope every
+        // other render does, so an unmount effect has run before this returns.
         unmount: () => {
-          if (activeRenderRoot === active) cleanup()
+          if (activeRenderRoot !== active) return
+          // A root that died on an uncaught render error can never be rendered
+          // into again, so there is no empty container to leave behind. Hand it
+          // to `cleanup()`, which drops the window rather than poisoning the
+          // next test with it.
+          if (root.root.getStatus().status !== "active") {
+            cleanup()
+            return
+          }
+          renderWrapped(null)
         },
       }),
     }

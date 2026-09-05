@@ -4244,19 +4244,29 @@ const screen = render(
 screen.getByTestId('first') // both are mounted now
 ```
 
-**Both handles outlive the tree.** Testing Library's `container` is still an
-element after `unmount()`, and the assertion a test writes next is about its
-absence. Reading either handle after an unmount gives back the element the tree
-had, so the matchers answer rather than the property read throwing:
+**`unmount()` empties the container; `cleanup()` removes it.** This is Testing
+Library's own split. `unmount()` takes the component out of `container` and
+leaves the container standing in the page, so the assertion after one is that
+it is empty:
 
 ```tsx
 screen.unmount()
+expect(screen.container).toBeEmptyDOMElement()
+expect(tree).not.toBeInTheDocument()   // what was inside it is gone
+```
+
+`cleanup()` is the between-tests teardown — the `afterEach` that
+`@gpuix/react/testing/vitest` registers, and what the next `render()` runs
+before it reuses the window. That takes the window's tree down, container
+included, and both handles then report their absence:
+
+```tsx
+cleanup()
 expect(screen.container).not.toBeInTheDocument()
 ```
 
-The window holds no detached elements, so a matcher that has to look *inside*
-the element — `toBeEmptyDOMElement()`, say — reports it as no longer in the
-renderer's tree rather than as empty.
+An unmount effect has still run before `unmount()` returns: emptying the
+container is a render like any other, inside the same `act` scope.
 
 **The effects have run.** `render`, `rerender`, `unmount`, and each event the
 `userEvent` helpers and `nativeSimulate*` methods dispatch do their React work
