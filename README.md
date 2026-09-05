@@ -4188,7 +4188,31 @@ it('saves the recipe', async () => {
 
 The returned object is what `createTestRoot()` returns — every query,
 `within`, `userEvent`, `waitFor`, `renderer`, `root` — plus **`rerender(node)`**,
-which re-renders into the same root.
+which re-renders into the same root, and the two mount handles Testing Library
+returns, **`container`** and **`baseElement`**.
+
+**`container` and `baseElement`.** The tree is mounted the way Testing Library
+mounts it: into a `container` element, itself inside a `baseElement` that stands
+in for `document.body`. The rendered nodes are the container's *children*, not
+the container itself, and both handles are ordinary `TestElement`s — every
+query, matcher and `getBoundingClientRect()` takes them:
+
+```tsx
+const screen = render(<Sparkline />)
+
+screen.within(screen.container).getByRole('img')
+await expect(screen.container).toMatchScreenshot()
+```
+
+They are re-read on every access, so they stay valid across a `rerender`.
+
+`baseElement` fills the window, as the viewport sizes `document.body`, and is
+the scope the result's own `getBy*` search. `container` is the DOM's block box
+inside it: the window's width,
+and the height of the tree inside it. So `expect(screen.container)` captures the
+rendered component's band of the window while `expect(screen)` captures the
+whole window — which is the only golden available for a tree that is
+`aria-hidden`, or carries no text, and so has no query that reaches it.
 
 **The effects have run.** `render`, `rerender`, `unmount`, and each event the
 `userEvent` helpers and `nativeSimulate*` methods dispatch do their React work
