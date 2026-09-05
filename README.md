@@ -4367,6 +4367,7 @@ declare module 'vitest' {
 | `toHaveValue(value)` | Its current value, exactly |
 | `toHaveDisplayValue(matcher, options?)` | Its current value, through the Testing Library matcher |
 | `toHaveAccessibleName(matcher?)` | Its computed accessible name |
+| `toHaveRole(role)` | Its computed role, authored or implicit |
 | `toHaveAttribute(name, value?)` | The attribute it was given, by its DOM name |
 | `await toMatchScreenshot(name?, options?)` | The window, or the element's box, against a stored golden |
 
@@ -4491,6 +4492,25 @@ projects no node and so has no accessible name at all, while a
 not the prop it declares. Either way the matcher reports the computation rather
 than falling back to the raw prop; use `getByLabelText` or
 `TestElement.semantics.label` for the declaration.
+
+`toHaveRole(role)` reads the role that element resolves to — the one it
+declares, or the one its host type implies where it declares none — through the
+same resolution `getByRole` uses, so a matcher and a query can never disagree
+about an element:
+
+```ts
+expect(screen.getByTestId('save')).toHaveRole('button')
+expect(screen.getByTestId('icon')).toHaveRole('img')
+```
+
+It is the assertion for a test that already holds the element by other means.
+`toHaveAttribute('role')` is the other half of the pair, and answers about the
+*authored* role: an `<img>` has the role `img` and no `role` attribute at all.
+An element that both carries a role and paints text projects two accessibility
+nodes, as `<p>Hi</p>` does in the DOM, and has both roles — the same two a role
+query would find it under. An element that projects no node has no role here:
+there is no `generic` to fall back to, and a plain `<input>` is invisible to the
+accessibility tree, so `getByRole('textbox')` does not find it either.
 
 `toBeEmptyDOMElement` passes for an element with no retained children and no
 text of its own — the claim `toHaveTextContent(/^$/)` was standing in for, and a

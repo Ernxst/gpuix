@@ -2121,6 +2121,29 @@ export function accessibleNameOf(node: AccessKitNodeSnapshot): string {
   return node.aria.label ?? ""
 }
 
+/**
+ * The role a role query answers with for one AccessKit node: the WAI-ARIA
+ * spelling of GPUI's computed role, aliases resolved.
+ *
+ * @internal Exported only for the matcher pack, which must resolve roles
+ * exactly as the queries do so that a matcher and `getByRole` can never
+ * disagree. Not part of the public testing surface.
+ */
+export function computedRoleOf(node: AccessKitNodeSnapshot): string {
+  return describeComputedRole(node.aria.role)
+}
+
+/**
+ * `getByRole`'s own comparison for one node: role names are normalized on both
+ * sides and AccessKit's aliases resolved before they are compared.
+ *
+ * @internal Exported only for the matcher pack. Not part of the public testing
+ * surface.
+ */
+export function matchesComputedRole(node: AccessKitNodeSnapshot, role: string): boolean {
+  return matchesRole(node.aria.role, role)
+}
+
 /** AccessKit's rule, for the one role it applies to: static text. */
 function nameComesFromValue(node: AccessKitNodeSnapshot): boolean {
   return normalizeRole(node.aria.role) === "label"
