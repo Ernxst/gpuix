@@ -4367,6 +4367,7 @@ declare module 'vitest' {
 | `toHaveValue(value)` | Its current value, exactly |
 | `toHaveDisplayValue(matcher, options?)` | Its current value, through the Testing Library matcher |
 | `toHaveAccessibleName(matcher?)` | Its computed accessible name |
+| `toHaveAccessibleDescription(matcher?)` | Its computed accessible description |
 | `toHaveRole(role)` | Its computed role, authored or implicit |
 | `toHaveAttribute(name, value?)` | The attribute it was given, by its DOM name |
 | `await toMatchScreenshot(name?, options?)` | The window, or the element's box, against a stored golden |
@@ -4492,6 +4493,28 @@ projects no node and so has no accessible name at all, while a
 not the prop it declares. Either way the matcher reports the computation rather
 than falling back to the raw prop; use `getByLabelText` or
 `TestElement.semantics.label` for the declaration.
+
+`toHaveAccessibleDescription` reads the same node's description, computed the
+same way a browser computes it: an `ariaDescribedBy` reference resolves to the
+flattened text of the elements it names — several ids joined with spaces, in the
+order they are written — and wins over an `ariaDescription` written beside it.
+So a card that carries a signal and a response beside its title asserts them as
+what they are:
+
+```ts
+expect(screen.getByRole('button', { name: 'Coal line' })).toHaveAccessibleDescription(
+  'Throughput fell 12% Rebalance the belt'
+)
+```
+
+The node requirement is the accessible name's. A role — explicit or implicit —
+is what gives an element a node of its own to carry the description: an `<img>`
+or a `<button>` has one implicitly and keeps its description, while an element
+with neither projects no such node, and a description authored there is not
+observable in the tree. A plain `<div>` projects nothing at all, and a painted
+`<text>` projects only the static-text node its string becomes, which carries a
+value and no description. Either way the matcher reports the empty computation
+rather than the raw prop; see issue #353.
 
 `toHaveRole(role)` reads the role that element resolves to — the one it
 declares, or the one its host type implies where it declares none — through the

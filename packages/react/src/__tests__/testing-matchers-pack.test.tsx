@@ -445,6 +445,94 @@ describeNative("gpuix matcher pack", () => {
     }
   })
 
+  it("reads the computed accessible description, references and all", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text id="signal">Throughput fell 12%</text>
+          <text id="response">Rebalance the belt</text>
+          <div
+            data-testid="referenced"
+            role="button"
+            ariaLabel="Coal line"
+            ariaDescribedBy="signal"
+          />
+          <div
+            data-testid="joined"
+            role="button"
+            ariaLabel="Iron line"
+            ariaDescribedBy="signal response"
+          />
+          <div
+            data-testid="direct"
+            role="button"
+            ariaLabel="Copper line"
+            ariaDescription="Throughput fell 12%"
+          />
+          <div
+            data-testid="both"
+            role="button"
+            ariaLabel="Steel line"
+            ariaDescription="Ignored beside a reference"
+            ariaDescribedBy="response"
+          />
+        </div>
+      )
+
+      const referenced = screen.getByTestId("referenced")
+      expect(referenced).toHaveAccessibleDescription()
+      expect(referenced).toHaveAccessibleDescription("Throughput fell 12%")
+      expect(referenced).toHaveAccessibleDescription(/fell/)
+      expect(referenced).not.toHaveAccessibleDescription("Coal line")
+
+      // Several references flatten into one description, joined with spaces in
+      // the order they are written — the accname computation, not a list.
+      expect(screen.getByTestId("joined")).toHaveAccessibleDescription(
+        "Throughput fell 12% Rebalance the belt"
+      )
+
+      expect(screen.getByTestId("direct")).toHaveAccessibleDescription("Throughput fell 12%")
+
+      // A reference wins over an ariaDescription written beside it.
+      expect(screen.getByTestId("both")).toHaveAccessibleDescription("Rebalance the belt")
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("reports an absent accessible description rather than the raw prop", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div data-testid="undescribed" role="button" ariaLabel="Save factory" />
+          <div data-testid="unroled" ariaDescription="Ignored without a role" />
+        </div>
+      )
+
+      const undescribed = screen.getByTestId("undescribed")
+      expect(undescribed).not.toHaveAccessibleDescription()
+      expect(undescribed).not.toHaveAccessibleDescription("Save factory")
+      expect(() => expect(undescribed).toHaveAccessibleDescription()).toThrowError(
+        /accessible description ""/
+      )
+
+      // A role, explicit or implicit, is what gives an element a node of its
+      // own for a description to sit on. This one has neither.
+      expect(screen.getByTestId("unroled")).not.toHaveAccessibleDescription()
+      expect(() =>
+        expect(screen.getByTestId("unroled")).toHaveAccessibleDescription(
+          "Ignored without a role"
+        )
+      ).toThrowError(/accessible description ""/)
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("reads the role the queries resolve, authored or implicit", () => {
     const screen = createTestRoot()
 
