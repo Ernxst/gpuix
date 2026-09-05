@@ -27,7 +27,9 @@ import {
 } from "./testing-matchers.js"
 import {
   accessibleNameOf,
+  computedRoleOf,
   describeElement,
+  matchesComputedRole,
   rendererOf,
   textContent,
   type AccessKitNodeSnapshot,
@@ -98,6 +100,8 @@ export interface GpuixMatchers<R = unknown> {
   toHaveDisplayValue(expected: TextContentMatcher, options?: MatcherOptions): R
   /** The element's computed accessible name matches, or is non-empty. */
   toHaveAccessibleName(expected?: TextContentMatcher, options?: MatcherOptions): R
+  /** The element's computed role — explicit, or implicit where none is authored. */
+  toHaveRole(role: string): R
   /**
    * The attribute is declared on the element, with this text if one is given.
    * `getAttribute` semantics: names are case-insensitive and values are text.
@@ -206,10 +210,25 @@ function accessibilityNodeOf(
   renderer: TestRenderer,
   element: TestElement
 ): AccessKitNodeSnapshot | undefined {
-  const nodes = Object.values(renderer.getAccessibilityTree().nodes).filter(
+  const nodes = accessibilityNodesOf(renderer, element)
+  return nodes.find((node) => node.aria.role !== "Label") ?? nodes[0]
+}
+
+/**
+ * Every AccessKit node this element projects, in tree order.
+ *
+ * Usually one, or none at all. The pair described above is why this exists: a
+ * role query walks every node, so a question about *which roles an element
+ * has* must walk them too, or the matcher and `getByRole` would answer
+ * differently about the same element.
+ */
+function accessibilityNodesOf(
+  renderer: TestRenderer,
+  element: TestElement
+): AccessKitNodeSnapshot[] {
+  return Object.values(renderer.getAccessibilityTree().nodes).filter(
     (node) => node.host_id === element.id
   )
-  return nodes.find((node) => node.aria.role !== "Label") ?? nodes[0]
 }
 
 /**
@@ -670,6 +689,45 @@ export const gpuixMatchers = {
               ? name.length > 0
               : matchesMatcher(name, element, expected, options),
           actual: `  ${describe()}\n  accessible name ${JSON.stringify(name)}`,
+        }
+      }
+    )
+  },
+
+  /**
+   * The role the element resolves to: the one it declares, or the one its host
+   * type implies where it declares none.
+   *
+   * The role is read through the same resolution `getByRole` uses — GPUI's
+   * computed role off the element's AccessKit nodes, normalized and aliased by
+   * the same rule — so the matcher and the query can never disagree about an
+   * element. An `<img>` therefore has the role `img` with no `role` attribute
+   * to show for it, and `toHaveAttribute('role')` is the matcher for the
+   * authored one.
+   *
+   * An element that both carries a role and paints text projects two nodes, as
+   * `<p>Hi</p>` does in the DOM, and has both roles — the same two a role query
+   * would find it under. An element that projects no node at all has no role
+   * here: the desktop has no `generic` to fall back to.
+   */
+  toHaveRole(this: MatcherContext, received: unknown, role: string): GpuixMatcherResult {
+    return against(
+      this,
+      received,
+      "toHaveRole",
+      `have role ${JSON.stringify(role)}`,
+      ({ renderer, element, describe }) => {
+        const nodes = accessibilityNodesOf(renderer, element)
+        const roles = nodes.map(computedRoleOf)
+        return {
+          pass: nodes.some((node) => matchesComputedRole(node, role)),
+          actual: `  ${describe()}\n  ${
+            roles.length === 0
+              ? "projects no accessibility node, so it has no role"
+              : `${roles.length === 1 ? "role" : "roles"} ${roles
+                  .map((computed) => JSON.stringify(computed))
+                  .join(", ")}`
+          }`,
         }
       }
     )

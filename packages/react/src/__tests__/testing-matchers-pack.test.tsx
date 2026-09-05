@@ -445,6 +445,102 @@ describeNative("gpuix matcher pack", () => {
     }
   })
 
+  it("reads the role the queries resolve, authored or implicit", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div data-testid="save" role="button" ariaLabel="Save" />
+          <button data-testid="button" ariaLabel="Go" />
+          <img
+            data-testid="icon"
+            alt="Cable"
+            src="/assets/icons/items/desc-cable-c.png"
+            style={{ width: 40, height: 40 }}
+          />
+          <a data-testid="docs" href="/docs">
+            <text>Docs</text>
+          </a>
+          <div data-testid="heading" role="heading" ariaLevel={2}>
+            <text>Build list</text>
+          </div>
+        </div>
+      )
+
+      const save = screen.getByTestId("save")
+      expect(save).toHaveRole("button")
+      expect(save).not.toHaveRole("link")
+      expect(screen.getByTestId("heading")).toHaveRole("heading")
+
+      // The role a host type implies, with no `role` attribute to show for it —
+      // which is the pair `toHaveAttribute('role')` answers the other half of.
+      const icon = screen.getByTestId("icon")
+      expect(icon).toHaveRole("img")
+      expect(icon).not.toHaveAttribute("role")
+      expect(screen.getByTestId("button")).toHaveRole("button")
+      expect(screen.getByTestId("docs")).toHaveRole("link")
+
+      // The role resolution is the queries', so the two cannot disagree.
+      expect(screen.getByRole("button", { name: "Save" })).toHaveRole("button")
+      expect(screen.getByRole("img", { name: "Cable" })).toHaveRole("img")
+      expect(screen.getByRole("link", { name: "Docs" })).toHaveRole("link")
+
+      expect(() => expect(save).toHaveRole("link")).toThrowError(
+        /have role "link"[\s\S]*role "button"/
+      )
+      expect(() => expect(save).not.toHaveRole("button")).toThrowError(
+        /not to have role "button"[\s\S]*role "button"/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("answers with every role the element projects, and with none where it projects nothing", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text data-testid="status" role="status">
+            Copper
+          </text>
+          <div data-testid="plain" />
+          <input data-testid="field" value="" style={{ width: 100, height: 30 }} />
+        </div>
+      )
+
+      // An element that both carries a role and paints text projects two nodes,
+      // as `<p>Hi</p>` does in the DOM, and a role query finds it under either.
+      const status = screen.getByTestId("status")
+      expect(status).toHaveRole("status")
+      expect(status).toHaveRole("label")
+      expect(status).not.toHaveRole("alert")
+      expect(screen.getByRole("status")).toBe(status)
+      expect(screen.getByRole("label", { name: "Copper" })).toBe(status)
+
+      // A role exists here only where the element projects accessibility
+      // semantics. There is no `generic` to fall back to, and a plain `<input>`
+      // is invisible to the accessibility tree — so `getByRole('textbox')` does
+      // not find it either, and the two still agree.
+      const plain = screen.getByTestId("plain")
+      const field = screen.getByTestId("field")
+      expect(plain).not.toHaveRole("generic")
+      expect(field).not.toHaveRole("textbox")
+      expect(screen.queryAllByRole("textbox")).toHaveLength(0)
+
+      expect(() => expect(plain).toHaveRole("generic")).toThrowError(
+        /have role "generic"[\s\S]*projects no accessibility node, so it has no role/
+      )
+      expect(() => expect(status).not.toHaveRole("status")).toThrowError(
+        /not to have role "status"[\s\S]*roles "label", "status"/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("reads attributes by their DOM names, not by the props behind them", () => {
     const screen = createTestRoot()
 
@@ -668,6 +764,7 @@ describeNative("gpuix matcher pack", () => {
       expect(field).not.toHaveValue("one")
       expect(field).not.toHaveDisplayValue("one")
       expect(field).not.toHaveAccessibleName()
+      expect(field).not.toHaveRole("textbox")
       expect(field).not.toHaveAttribute("aria-label", "Amount")
 
       // The positive form fails, and says why.
