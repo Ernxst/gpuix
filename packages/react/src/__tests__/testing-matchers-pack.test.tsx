@@ -236,6 +236,7 @@ describeNative("gpuix matcher pack", () => {
           <div data-testid="on" role="checkbox" ariaLabel="Coal" ariaChecked />
           <div data-testid="stateless" role="checkbox" ariaLabel="Copper" />
           <div data-testid="switch" role="switch" ariaLabel="Power" ariaChecked="mixed" />
+          <div data-testid="radio" role="radio" ariaLabel="Belt" ariaChecked="mixed" />
         </div>
       )
 
@@ -260,6 +261,17 @@ describeNative("gpuix matcher pack", () => {
       const binary = screen.getByTestId("switch")
       expect(binary).not.toBePartiallyChecked()
       expect(() => expect(binary).toBePartiallyChecked()).toThrowError(refusal)
+
+      // A radio is binary too, and the renderer computes its `mixed` as
+      // `false` — so it is neither partially checked nor checked, and the
+      // false it computed is what `toBeChecked` reads.
+      const radio = screen.getByTestId("radio")
+      expect(radio).not.toBePartiallyChecked()
+      expect(radio).not.toBeChecked()
+      expect(() => expect(radio).toBePartiallyChecked()).toThrowError(refusal)
+      expect(() => expect(radio).toBeChecked()).toThrowError(
+        /be checked[\s\S]*is not checked/
+      )
 
       expect(() => expect(screen.getByTestId("on")).toBePartiallyChecked()).toThrowError(
         /be partially checked[\s\S]*is not partially checked/
