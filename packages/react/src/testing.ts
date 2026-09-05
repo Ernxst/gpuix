@@ -2651,16 +2651,129 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
 
 /**
  * What `render()` returns: everything `createTestRoot()` gives, plus
- * `rerender`.
+ * `rerender`, `container` and `baseElement`.
  *
  * `unmount` here is vitest-browser-react's `unmount`, not `createTestRoot`'s:
- * it unmounts the rendered tree and **keeps the offscreen window**, which is
- * the whole point of sharing one window across a test file. Call
- * `createTestRoot()` directly when you want to own the window's lifetime.
+ * it removes the component from `container` and **keeps the offscreen window**,
+ * along with `container` and `baseElement` themselves, exactly as Testing
+ * Library's `unmount` leaves its container standing and empty in the page.
+ * Sharing one window across a test file is the whole point. `cleanup()` is what
+ * takes the window's tree down between tests; call `createTestRoot()` directly
+ * when you want to own the window's lifetime.
+ *
+ * `render` and `rerender` here both mount into `container`, which is narrower
+ * than the `render` a plain `TestRoot` carries: that one makes the node the
+ * window's root. `root` and `renderer` are the raw handles either way and go
+ * straight to the window, so `result.root.render(...)` bypasses the wrappers
+ * and leaves `container` pointing at whatever the node put in their place.
  */
 export interface RenderResult extends TestRoot {
-  /** Re-render into the same root, keeping the window and the renderer. */
+  /** Re-render into `container`, keeping the window and the renderer. */
   rerender: (node: ReactNode) => void
+  /**
+   * The element the tree was rendered into, Testing Library's `container`:
+   * the rendered nodes are its children, not the element itself.
+   *
+   * Like the DOM's, this is a block-level box inside `baseElement` — it spans
+   * the window's width and takes its height from the tree inside it — so
+   * `expect(result.container).toMatchScreenshot()` captures the rendered
+   * component's band of the window rather than the whole window, and reaches a
+   * tree no query can reach because it is `aria-hidden` or has no text.
+   *
+   * Because its height comes from the tree, a top-level `height: "100%"` or
+   * `flexGrow: 1` resolves against it rather than against the window and
+   * measures nothing — as it does in a browser, where the same percentage
+   * resolves against an auto-height container. Give the tree an explicit
+   * height, or use `createTestRoot()`, which renders the node as the window's
+   * root. Sizing the window does not help: the container is auto-height at
+   * every window size.
+   *
+   * Re-read on every access, so it stays valid across `rerender`. `unmount()`
+   * empties it and leaves it mounted, as Testing Library's does, so
+   * `expect(result.container).toBeEmptyDOMElement()` is the assertion after
+   * one. Only `cleanup()` takes it out of the window.
+   */
+  readonly container: TestElement
+  /**
+   * The window's root element: `document.body`'s analogue, and the element
+   * `container` is mounted into. It is the scope the result's own queries
+   * search, and it fills the window the way the viewport sizes the body.
+   *
+   * Re-read on every access, so it stays valid across `rerender` and an
+   * `unmount()`, which leaves it mounted holding the emptied `container`.
+   */
+  readonly baseElement: TestElement
+}
+
+/** `document.body`'s analogue: the element `render()` mounts its container
+ *  into, filling the window the way the viewport sizes the body. */
+const BASE_ELEMENT_STYLE = { width: "100%", height: "100%" } as const
+
+/** Testing Library's container: a block-level box appended to the base
+ *  element, spanning its width and taking its height from the tree inside. */
+const CONTAINER_STYLE = { width: "100%" } as const
+
+/**
+ * The `body > div > tree` shape Testing Library renders into, expressed with
+ * the two host elements a desktop window has no built-in equivalent of: GPUI's
+ * own window root is not a retained element, so it can be neither queried nor
+ * screenshotted.
+ *
+ * Both wrappers are laid out exactly as the DOM lays out `body` and a plain
+ * `div` inside it, which is why they are transparent to everything mounted
+ * under them.
+ */
+function wrapForRender(node: ReactNode): ReactNode {
+  return createElement(
+    "div",
+    { style: BASE_ELEMENT_STYLE },
+    createElement("div", { style: CONTAINER_STYLE }, node)
+  )
+}
+
+/**
+ * Add the two mount handles to a render result as accessors, so each read
+ * resolves the live element rather than a snapshot taken at `render()` time —
+ * what keeps them valid across a `rerender`.
+ *
+ * `unmount()` leaves both mounted, so they answer there without any of this —
+ * it empties the container, as Testing Library's does. Only `cleanup()` takes
+ * the window's tree down, and the last handles are remembered for after it, so
+ * the matchers take their established absent-element path rather than the
+ * property read throwing at a test asking the reasonable question.
+ */
+function renderResult(
+  root: TestRoot,
+  fields: TestRoot & Pick<RenderResult, "rerender">
+): RenderResult {
+  let lastBaseElement: TestElement | undefined
+  let lastContainer: TestElement | undefined
+
+  const baseElement = (): TestElement => {
+    const base = root.renderer.getRoot()
+    if (base !== undefined) lastBaseElement = base
+    if (lastBaseElement === undefined) {
+      throw new Error("The render result has no baseElement: render() mounted no tree")
+    }
+    return lastBaseElement
+  }
+
+  const container = (): TestElement => {
+    const base = root.renderer.getRoot()
+    // Read through the live root, not through `baseElement()`: a remembered
+    // base cannot be walked, since resolving a dead element's children throws.
+    const current = base === undefined ? undefined : base.children[0]
+    if (current !== undefined) lastContainer = current
+    if (lastContainer === undefined) {
+      throw new Error("The render result has no container: render() mounted no tree")
+    }
+    return lastContainer
+  }
+
+  return Object.defineProperties(fields, {
+    baseElement: { enumerable: true, get: baseElement },
+    container: { enumerable: true, get: container },
+  }) as RenderResult
 }
 
 interface ActiveRenderRoot {
@@ -2764,6 +2877,14 @@ export function cleanup(): void {
  * expect(screen.getByText("Saved")).toBeInTheDocument()
  * ```
  *
+ * **`container` and `baseElement`.** The tree is mounted the way Testing
+ * Library mounts it: into a `container` element, itself inside a `baseElement`
+ * that stands in for `document.body`. Both are on the result, both are ordinary
+ * `TestElement`s, so `within(result.container)` scopes a query to the rendered
+ * tree and `expect(result.container).toMatchScreenshot()` captures it without a
+ * query reaching it — which is the only handle a tree that is `aria-hidden`, or
+ * carries no text at all, has.
+ *
  * **The effects have run.** Like Testing Library's, this `render` — and
  * `rerender`, and `unmount` — does its React work inside `act`: the passive
  * effects the commit queued, and the state those effects set, are on screen
@@ -2818,7 +2939,11 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
   if (active === null) {
     const root = createTestRoot(request)
     const size = root.renderer.getWindowSize()
-    const rerender = (next: ReactNode): void => root.render(next)
+    // Every way into the shared root goes through the wrappers, `render`
+    // inherited from `createTestRoot()` included: one that mounted the node
+    // bare would leave the result's own `container` pointing into the tree
+    // rather than around it.
+    const renderWrapped = (next: ReactNode): void => root.render(wrapForRender(next))
     active = {
       root,
       // Copied, so a caller reusing and mutating one options object cannot
@@ -2831,20 +2956,43 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
         strictStyles: request.strictStyles,
       },
       windowSize: { width: size.width, height: size.height },
-      result: {
+      result: renderResult(root, {
         ...root,
-        rerender,
-        // Tree-only unmount: vitest-browser-react's `unmount` removes the
-        // component, not the page it rendered into.
+        render: renderWrapped,
+        rerender: renderWrapped,
+        // Tree-only unmount, Testing Library's: it removes the component from
+        // the container and leaves the page it rendered into standing. The
+        // container is then mounted and empty — which is what
+        // `expect(container).toBeEmptyDOMElement()` asks about — until
+        // `cleanup()` takes the window's tree down.
+        //
+        // Rendering the empty wrappers goes through the same `act` scope every
+        // other render does, so an unmount effect has run before this returns.
         unmount: () => {
-          if (activeRenderRoot === active) cleanup()
+          if (activeRenderRoot !== active) return
+          // A root that died on an uncaught render error can never be rendered
+          // into again, so there is no empty container to leave behind. Hand it
+          // to `cleanup()`, which drops the window rather than poisoning the
+          // next test with it.
+          if (root.root.getStatus().status !== "active") {
+            cleanup()
+            return
+          }
+          renderWrapped(null)
         },
-      },
+      }),
     }
     activeRenderRoot = active
   }
 
-  active.root.render(node)
+  active.root.render(wrapForRender(node))
+  // Prime both handles while the tree is up. They remember the last element
+  // they resolved so that they can answer after a `cleanup()`, and a cache
+  // filled only by a caller's own read would leave
+  // `render(); cleanup(); result.container` — a test asserting exactly that
+  // teardown — throwing instead of reporting the element as gone.
+  void active.result.baseElement
+  void active.result.container
   return active.result
 }
 

@@ -4188,7 +4188,91 @@ it('saves the recipe', async () => {
 
 The returned object is what `createTestRoot()` returns — every query,
 `within`, `userEvent`, `waitFor`, `renderer`, `root` — plus **`rerender(node)`**,
-which re-renders into the same root.
+which re-renders into the same root, and the two mount handles Testing Library
+returns, **`container`** and **`baseElement`**.
+
+**`container` and `baseElement`.** The tree is mounted the way Testing Library
+mounts it: into a `container` element, itself inside a `baseElement` that stands
+in for `document.body`. The rendered nodes are the container's *children*, not
+the container itself, and both handles are ordinary `TestElement`s — every
+query, matcher and `getBoundingClientRect()` takes them:
+
+```tsx
+const screen = render(<Sparkline />)
+
+screen.within(screen.container).getByRole('img')
+await expect(screen.container).toMatchScreenshot()
+```
+
+They are re-read on every access, so they stay valid across a `rerender`.
+
+`render` and `rerender` on the result both mount into `container` — narrower
+than the `render` a plain `TestRoot` carries, which makes the node the window's
+root. `root` and `renderer` stay the raw handles, so `screen.root.render(...)`
+bypasses the wrappers and leaves `container` pointing at whatever replaced them.
+
+`baseElement` fills the window, as the viewport sizes `document.body`, and is
+the scope the result's own `getBy*` search. `container` is the DOM's block box
+inside it: the window's width,
+and the height of the tree inside it. So `expect(screen.container)` captures the
+rendered component's band of the window while `expect(screen)` captures the
+whole window — which is the only golden available for a tree that is
+`aria-hidden`, or carries no text, and so has no query that reaches it.
+
+**Breaking: a top-level `height: '100%'` or `flexGrow: 1` no longer fills the
+window.** The tree used to *be* the window's root, so a percentage height
+resolved against the window. It now sits inside `container`, whose height comes
+from the tree, so that percentage resolves against auto and measures nothing —
+exactly as it does in a browser, where the same declaration inside an
+auto-height container collapses. Give the tree an explicit height:
+
+```tsx
+render(<Panel style={{ height: 600 }} />)
+```
+
+Sizing the window does not help — the container is auto-height at every window
+size, so `render(<Panel />, { height: 600 })` still measures nothing.
+
+`createTestRoot()` is unaffected — it renders the node as the window's root, so
+a suite that wants the old resolution can use it directly.
+
+**A top-level fragment mounts every child.** A desktop window has one root, and
+before there was a container to append into each top-level child overwrote the
+last, so only the final one survived:
+
+```tsx
+const screen = render(
+  <>
+    <text data-testid="first">first</text>
+    <text data-testid="second">second</text>
+  </>
+)
+screen.getByTestId('first') // both are mounted now
+```
+
+**`unmount()` empties the container; `cleanup()` removes it.** This is Testing
+Library's own split. `unmount()` takes the component out of `container` and
+leaves the container standing in the page, so the assertion after one is that
+it is empty:
+
+```tsx
+screen.unmount()
+expect(screen.container).toBeEmptyDOMElement()
+expect(tree).not.toBeInTheDocument()   // what was inside it is gone
+```
+
+`cleanup()` is the between-tests teardown — the `afterEach` that
+`@gpuix/react/testing/vitest` registers, and what the next `render()` runs
+before it reuses the window. That takes the window's tree down, container
+included, and both handles then report their absence:
+
+```tsx
+cleanup()
+expect(screen.container).not.toBeInTheDocument()
+```
+
+An unmount effect has still run before `unmount()` returns: emptying the
+container is a render like any other, inside the same `act` scope.
 
 **The effects have run.** `render`, `rerender`, `unmount`, and each event the
 `userEvent` helpers and `nativeSimulate*` methods dispatch do their React work

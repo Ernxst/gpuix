@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
 import React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
@@ -7,8 +11,30 @@ import {
   textContent,
   type TestRenderer,
 } from "../testing.js"
+import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
+import { readPngSize } from "../testing-png.js"
+
+expect.extend(gpuixMatchers)
+
+declare module "vitest" {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  interface Matchers<T = any> extends GpuixMatchers<T> {}
+}
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+
+const TILE_WIDTH = 160
+const TILE_HEIGHT = 90
+
+/** Decorative and textless: exactly the tree no query can reach. */
+function Decoration({ color = "#ff0000" }: { color?: string }): React.ReactElement {
+  return (
+    <div
+      ariaHidden
+      style={{ width: TILE_WIDTH, height: TILE_HEIGHT, backgroundColor: color }}
+    />
+  )
+}
 
 const mounts: string[] = []
 
@@ -330,5 +356,222 @@ describeNative("render", () => {
     // The clock is live again *and* re-anchored: a bare resume would have kept
     // the 60s offset as this test's baseline.
     expect(renderer.clockPause()).toBeLessThan(5_000)
+  })
+
+  // Testing Library's two mount handles. The golden the screenshot test needs
+  // is written into a temporary directory and thrown away: the assertion is
+  // about which box the matcher captured, not about particular pixels.
+  describe("container and baseElement", () => {
+    it("mounts the tree as the container's children, inside the base element", () => {
+      const screen = render(<text data-testid="leaf">hello</text>)
+
+      const { container, baseElement } = screen
+      expect(container.children.map((child) => child.type)).toEqual(["text"])
+      expect(container.parentElement).toEqual(baseElement)
+      expect(baseElement.parentElement).toBeNull()
+      // The bound queries search the base element, so the mounted tree is under
+      // both handles and neither handle is the rendered node itself.
+      expect(screen.getByTestId("leaf").parentElement).toEqual(container)
+    })
+
+    it("scopes queries when passed to within()", () => {
+      const screen = render(
+        <div>
+          <text data-testid="inside">scoped</text>
+        </div>
+      )
+
+      expect(screen.within(screen.container).getByText("scoped")).toEqual(
+        screen.getByText("scoped")
+      )
+      expect(screen.within(screen.container).getByTestId("inside")).toEqual(
+        screen.getByTestId("inside")
+      )
+    })
+
+    it("is a TestElement every matcher and box read accepts", () => {
+      const screen = render(<Decoration />)
+
+      expect(screen.container).toBeInTheDocument()
+      expect(screen.container).toBeVisible()
+      // The base element is the window's own box: `document.body`'s analogue.
+      const window = screen.renderer.getWindowSize()
+      expect(screen.baseElement.getBoundingClientRect()).toMatchObject({
+        x: 0,
+        y: 0,
+        width: window.width,
+        height: window.height,
+      })
+      // The container is the DOM's block box: the base element's width, and the
+      // height of the tree inside it.
+      expect(screen.container.getBoundingClientRect()).toMatchObject({
+        x: 0,
+        y: 0,
+        width: window.width,
+        height: TILE_HEIGHT,
+      })
+    })
+
+    it("resolves a top-level percentage height against the container, not the window", () => {
+      // Breaking, and the DOM's own answer: the container's height comes from
+      // the tree, so a percentage of it resolves against auto and measures
+      // nothing. Size the window, or give the tree an explicit height.
+      const screen = render(<div data-testid="filler" style={{ height: "100%" }} />)
+
+      expect(screen.getByTestId("filler").getBoundingClientRect()).toMatchObject({
+        y: 0,
+        height: 0,
+      })
+      expect(screen.container.getBoundingClientRect()).toMatchObject({ height: 0 })
+
+      // `flexGrow` has nothing to grow into for the same reason.
+      screen.rerender(<div data-testid="filler" style={{ flexGrow: 1 }} />)
+      expect(screen.getByTestId("filler").getBoundingClientRect()).toMatchObject({
+        height: 0,
+      })
+
+      // An explicit height is unaffected, and so is a window-sized tree.
+      screen.rerender(<div data-testid="filler" style={{ height: 120 }} />)
+      expect(screen.getByTestId("filler").getBoundingClientRect()).toMatchObject({
+        height: 120,
+      })
+    })
+
+    it("mounts every child of a top-level fragment", () => {
+      // The window has one root, so before there was a container to append
+      // into each top-level child overwrote the last and only one survived.
+      const screen = render(
+        <>
+          <text data-testid="first">first</text>
+          <text data-testid="second">second</text>
+        </>
+      )
+
+      expect(screen.container.children).toHaveLength(2)
+      expect(textContent(screen.renderer, screen.getByTestId("first"))).toBe("first")
+      expect(textContent(screen.renderer, screen.getByTestId("second"))).toBe("second")
+    })
+
+    it("leaves the container mounted and empty after unmount", () => {
+      const screen = render(
+        <div data-testid="tree">
+          <Decoration />
+        </div>
+      )
+      const containerId = screen.container.id
+      const tree = screen.getByTestId("tree")
+
+      screen.unmount()
+
+      // Testing Library's `unmount` empties its container and leaves it in the
+      // page. Both handles are still the same mounted elements.
+      expect(screen.container.id).toBe(containerId)
+      expect(screen.container).toBeInTheDocument()
+      expect(screen.baseElement).toBeInTheDocument()
+      expect(screen.container).toBeEmptyDOMElement()
+      // What went is the tree that was inside it.
+      expect(tree).not.toBeInTheDocument()
+    })
+
+    it("takes both handles out of the window on cleanup", () => {
+      const screen = render(<Decoration />)
+      const containerId = screen.container.id
+
+      // `cleanup()` is the between-tests teardown, not `unmount`: this is what
+      // the vitest entry's afterEach and the next render()'s window reuse do.
+      cleanup()
+
+      expect(screen.container.id).toBe(containerId)
+      expect(screen.container).not.toBeInTheDocument()
+      expect(screen.baseElement).not.toBeInTheDocument()
+    })
+
+    it("answers after cleanup with no read while the tree was up", () => {
+      // The handles remember the last element they resolved, and `render()`
+      // primes them itself. Without that priming this — the documented
+      // teardown assertion, and the shortest form anyone would write — throws
+      // instead of answering, because nothing had read them yet.
+      const screen = render(<Decoration />)
+
+      cleanup()
+
+      expect(screen.container).not.toBeInTheDocument()
+      expect(screen.baseElement).not.toBeInTheDocument()
+    })
+
+    it("runs unmount effects before returning, with the container still mounted", () => {
+      registrationCleanups.length = 0
+      const screen = render(<Outlet label="HANDLE" />)
+
+      screen.unmount()
+
+      // #332's guarantee survives the split: the empty container is rendered
+      // inside the same act scope, so the cleanup has run before this returns.
+      expect(registrationCleanups).toEqual(["HANDLE"])
+      expect(screen.container).toBeEmptyDOMElement()
+    })
+
+    it("wraps the render inherited from createTestRoot()", () => {
+      const screen = render(<text data-testid="first">first</text>)
+
+      // Not `rerender`: the `render` every TestRoot carries must mount through
+      // the same wrappers, or the container would point inside the tree.
+      screen.render(<text data-testid="second">second</text>)
+
+      expect(screen.container.children.map((child) => child.type)).toEqual(["text"])
+      expect(screen.getByTestId("second").parentElement).toEqual(screen.container)
+    })
+
+    it("keeps both handles pointing at the live elements across rerender", () => {
+      const screen = render(<Decoration color="#ff0000" />)
+      const container = screen.container
+      const baseElement = screen.baseElement
+
+      screen.rerender(
+        <div>
+          <Decoration color="#0000ff" />
+          <text data-testid="added">added</text>
+        </div>
+      )
+
+      expect(screen.container.id).toBe(container.id)
+      expect(screen.baseElement.id).toBe(baseElement.id)
+      // Live, not a snapshot: the handle reaches the tree the rerender mounted.
+      expect(screen.within(screen.container).getByTestId("added")).not.toBeNull()
+    })
+
+    it("captures the container's box rather than the whole window", async () => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), "gpuix-container-test-"))
+      try {
+        const screen = render(<Decoration />)
+        const golden = path.join(directory, "container.png")
+
+        // The first run always writes the golden and fails; the file it wrote
+        // is what this test is about.
+        await expect(
+          expect(screen.container).toMatchScreenshot({
+            resolveScreenshotPath: () => golden,
+          })
+        ).rejects.toThrowError(/a new one was created/)
+
+        const window = screen.renderer.getWindowSize()
+        expect(readPngSize(readFileSync(golden), golden)).toEqual({
+          width: window.width * window.scaleFactor,
+          height: TILE_HEIGHT * window.scaleFactor,
+        })
+
+        // The result itself is still the whole offscreen window.
+        const windowGolden = path.join(directory, "window.png")
+        await expect(
+          expect(screen).toMatchScreenshot({ resolveScreenshotPath: () => windowGolden })
+        ).rejects.toThrowError(/a new one was created/)
+        expect(readPngSize(readFileSync(windowGolden), windowGolden)).toEqual({
+          width: window.width * window.scaleFactor,
+          height: window.height * window.scaleFactor,
+        })
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    })
   })
 })
