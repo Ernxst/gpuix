@@ -2637,9 +2637,15 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
  * Sharing one window across a test file is the whole point. `cleanup()` is what
  * takes the window's tree down between tests; call `createTestRoot()` directly
  * when you want to own the window's lifetime.
+ *
+ * `render` and `rerender` here both mount into `container`, which is narrower
+ * than the `render` a plain `TestRoot` carries: that one makes the node the
+ * window's root. `root` and `renderer` are the raw handles either way and go
+ * straight to the window, so `result.root.render(...)` bypasses the wrappers
+ * and leaves `container` pointing at whatever the node put in their place.
  */
 export interface RenderResult extends TestRoot {
-  /** Re-render into the same root, keeping the window and the renderer. */
+  /** Re-render into `container`, keeping the window and the renderer. */
   rerender: (node: ReactNode) => void
   /**
    * The element the tree was rendered into, Testing Library's `container`:
@@ -2654,8 +2660,10 @@ export interface RenderResult extends TestRoot {
    * Because its height comes from the tree, a top-level `height: "100%"` or
    * `flexGrow: 1` resolves against it rather than against the window and
    * measures nothing — as it does in a browser, where the same percentage
-   * resolves against an auto-height container. Size the window instead, or
-   * give the tree an explicit height.
+   * resolves against an auto-height container. Give the tree an explicit
+   * height, or use `createTestRoot()`, which renders the node as the window's
+   * root. Sizing the window does not help: the container is auto-height at
+   * every window size.
    *
    * Re-read on every access, so it stays valid across `rerender`. `unmount()`
    * empties it and leaves it mounted, as Testing Library's does, so
@@ -2955,6 +2963,13 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
   }
 
   active.root.render(wrapForRender(node))
+  // Prime both handles while the tree is up. They remember the last element
+  // they resolved so that they can answer after a `cleanup()`, and a cache
+  // filled only by a caller's own read would leave
+  // `render(); cleanup(); result.container` — a test asserting exactly that
+  // teardown — throwing instead of reporting the element as gone.
+  void active.result.baseElement
+  void active.result.container
   return active.result
 }
 

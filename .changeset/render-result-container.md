@@ -32,16 +32,17 @@ window under `render()`.** The tree used to be the window's root and resolved
 percentages against the window itself. It now sits inside `container`, whose
 height comes from the tree, so a top-level percentage height resolves against
 auto and measures nothing — exactly as it does in a browser, where the same
-declaration inside an auto-height container collapses. **Size the window
-instead, or give the tree an explicit height:**
+declaration inside an auto-height container collapses. **Give the tree an
+explicit height:**
 
 ```tsx
-render(<Panel />, { height: 600 })         // the window is the fixed thing
-render(<Panel style={{ height: 600 }} />)  // or the tree is
+render(<Panel style={{ height: 600 }} />)
 ```
 
-`createTestRoot()` is unaffected: it still renders the node as the window's
-root.
+Sizing the window does not help — the container is auto-height at every window
+size, so `render(<Panel />, { height: 600 })` still measures nothing. What is
+unaffected is `createTestRoot()`, which still renders the node as the window's
+root, so a suite that wants the old resolution can use it directly.
 
 A top-level fragment now mounts **every** child, which also falls out of having
 a container to append into: each child used to overwrite the window's single

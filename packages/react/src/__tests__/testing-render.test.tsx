@@ -486,6 +486,19 @@ describeNative("render", () => {
       expect(screen.baseElement).not.toBeInTheDocument()
     })
 
+    it("answers after cleanup with no read while the tree was up", () => {
+      // The handles remember the last element they resolved, and `render()`
+      // primes them itself. Without that priming this — the documented
+      // teardown assertion, and the shortest form anyone would write — throws
+      // instead of answering, because nothing had read them yet.
+      const screen = render(<Decoration />)
+
+      cleanup()
+
+      expect(screen.container).not.toBeInTheDocument()
+      expect(screen.baseElement).not.toBeInTheDocument()
+    })
+
     it("runs unmount effects before returning, with the container still mounted", () => {
       registrationCleanups.length = 0
       const screen = render(<Outlet label="HANDLE" />)

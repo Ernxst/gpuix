@@ -4206,6 +4206,11 @@ await expect(screen.container).toMatchScreenshot()
 
 They are re-read on every access, so they stay valid across a `rerender`.
 
+`render` and `rerender` on the result both mount into `container` — narrower
+than the `render` a plain `TestRoot` carries, which makes the node the window's
+root. `root` and `renderer` stay the raw handles, so `screen.root.render(...)`
+bypasses the wrappers and leaves `container` pointing at whatever replaced them.
+
 `baseElement` fills the window, as the viewport sizes `document.body`, and is
 the scope the result's own `getBy*` search. `container` is the DOM's block box
 inside it: the window's width,
@@ -4219,13 +4224,14 @@ window.** The tree used to *be* the window's root, so a percentage height
 resolved against the window. It now sits inside `container`, whose height comes
 from the tree, so that percentage resolves against auto and measures nothing —
 exactly as it does in a browser, where the same declaration inside an
-auto-height container collapses. Size the window instead, or give the tree an
-explicit height:
+auto-height container collapses. Give the tree an explicit height:
 
 ```tsx
-render(<Panel />, { height: 600 })         // the window is the fixed thing
-render(<Panel style={{ height: 600 }} />)  // or the tree is
+render(<Panel style={{ height: 600 }} />)
 ```
+
+Sizing the window does not help — the container is auto-height at every window
+size, so `render(<Panel />, { height: 600 })` still measures nothing.
 
 `createTestRoot()` is unaffected — it renders the node as the window's root, so
 a suite that wants the old resolution can use it directly.
