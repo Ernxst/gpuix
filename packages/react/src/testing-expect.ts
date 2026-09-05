@@ -100,6 +100,8 @@ export interface GpuixMatchers<R = unknown> {
   toHaveDisplayValue(expected: TextContentMatcher, options?: MatcherOptions): R
   /** The element's computed accessible name matches, or is non-empty. */
   toHaveAccessibleName(expected?: TextContentMatcher, options?: MatcherOptions): R
+  /** The element's computed accessible description matches, or is non-empty. */
+  toHaveAccessibleDescription(expected?: TextContentMatcher, options?: MatcherOptions): R
   /** The element's computed role — explicit, or implicit where none is authored. */
   toHaveRole(role: string): R
   /**
@@ -689,6 +691,47 @@ export const gpuixMatchers = {
               ? name.length > 0
               : matchesMatcher(name, element, expected, options),
           actual: `  ${describe()}\n  accessible name ${JSON.stringify(name)}`,
+        }
+      }
+    )
+  },
+
+  /**
+   * The element's computed accessible description, from its AccessKit node.
+   *
+   * Called with no argument it asserts only that a description exists, as
+   * jest-dom does. The description is the accname computation GPUI already
+   * ran: an `ariaDescribedBy` reference resolves to the flattened text of the
+   * elements it names — several ids joined with spaces, in the order they are
+   * written — and wins over an `ariaDescription` written beside it.
+   *
+   * The node requirement is the accessible name's. A role, explicit or
+   * implicit, is what gives an element a node of its own to carry the
+   * description, so an element with neither has nowhere for one to land and
+   * this reports the empty computation rather than the raw prop.
+   */
+  toHaveAccessibleDescription(
+    this: MatcherContext,
+    received: unknown,
+    expected?: TextContentMatcher,
+    options: MatcherOptions = {}
+  ): GpuixMatcherResult {
+    return against(
+      this,
+      received,
+      "toHaveAccessibleDescription",
+      expected === undefined
+        ? "have an accessible description"
+        : `have accessible description ${describeMatcher(expected)}`,
+      ({ renderer, element, describe }) => {
+        const node = accessibilityNodeOf(renderer, element)
+        const description = node?.aria.description ?? ""
+        return {
+          pass:
+            expected === undefined
+              ? description.length > 0
+              : matchesMatcher(description, element, expected, options),
+          actual: `  ${describe()}\n  accessible description ${JSON.stringify(description)}`,
         }
       }
     )
