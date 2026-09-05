@@ -103,6 +103,187 @@ describeNative("gpuix matcher pack", () => {
     }
   })
 
+  it("reads enabled as the exact inverse of disabled", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div data-testid="native" role="button" ariaLabel="Save" disabled />
+          <div data-testid="aria" role="button" ariaLabel="Delete" ariaDisabled />
+          <div data-testid="enabled" role="button" ariaLabel="Build" />
+          <div data-testid="plain" />
+        </div>
+      )
+
+      // The form it replaces, said directly.
+      expect(screen.getByTestId("enabled")).toBeEnabled()
+      expect(screen.getByTestId("enabled")).not.toBeDisabled()
+      expect(screen.getByTestId("native")).not.toBeEnabled()
+      expect(screen.getByTestId("aria")).not.toBeEnabled()
+      // Nothing declares disabled, so an element with no semantics at all is
+      // enabled, exactly as a `<div>` is in a document.
+      expect(screen.getByTestId("plain")).toBeEnabled()
+
+      expect(() => expect(screen.getByTestId("native")).toBeEnabled()).toThrowError(
+        /be enabled[\s\S]*is not enabled/
+      )
+      expect(() => expect(screen.getByTestId("enabled")).not.toBeEnabled()).toThrowError(
+        /not to be enabled[\s\S]*is enabled/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("reads the checked state GPUI computed, for the roles that carry one", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div data-testid="on" role="checkbox" ariaLabel="Coal" ariaChecked />
+          <div data-testid="off" role="checkbox" ariaLabel="Iron" ariaChecked={false} />
+          <div data-testid="switch-on" role="switch" ariaLabel="Power" ariaChecked />
+          <div data-testid="switch-off" role="switch" ariaLabel="Vent" ariaChecked={false} />
+          <div data-testid="radio-on" role="radio" ariaLabel="Belt" ariaChecked />
+          <div data-testid="radio-off" role="radio" ariaLabel="Pipe" ariaChecked={false} />
+          <div data-testid="menu-on" role="menuitemcheckbox" ariaLabel="Grid" ariaChecked />
+          <div data-testid="menu-off" role="menuitemcheckbox" ariaLabel="Ruler" ariaChecked={false} />
+        </div>
+      )
+
+      expect(screen.getByTestId("on")).toBeChecked()
+      expect(screen.getByTestId("off")).not.toBeChecked()
+      expect(screen.getByTestId("switch-on")).toBeChecked()
+      expect(screen.getByTestId("switch-off")).not.toBeChecked()
+      // Every role WAI-ARIA gives `aria-checked` computes one here, so the
+      // matcher answers for the whole set jest-dom answers for.
+      expect(screen.getByTestId("radio-on")).toBeChecked()
+      expect(screen.getByTestId("radio-off")).not.toBeChecked()
+      expect(screen.getByTestId("menu-on")).toBeChecked()
+      expect(screen.getByTestId("menu-off")).not.toBeChecked()
+
+      // The state comes off the same accessibility node `getByRole` searches,
+      // so the matcher and the query cannot disagree.
+      expect(screen.getByRole("checkbox", { name: "Coal" })).toBeChecked()
+      expect(screen.getByRole("radio", { name: "Belt" })).toBeChecked()
+      expect(screen.getByRole("menuitemcheckbox", { name: "Ruler" })).not.toBeChecked()
+
+      expect(() => expect(screen.getByTestId("off")).toBeChecked()).toThrowError(
+        /be checked[\s\S]*is not checked/
+      )
+      expect(() => expect(screen.getByTestId("on")).not.toBeChecked()).toThrowError(
+        /not to be checked[\s\S]*is checked/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("answers an element with no checked state in jest-dom's own words", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div data-testid="button" role="button" ariaLabel="Save" />
+          <div data-testid="stateless" role="checkbox" ariaLabel="Copper" />
+          <div data-testid="mixed" role="checkbox" ariaLabel="Steel" ariaChecked="mixed" />
+          <div data-testid="plain" />
+        </div>
+      )
+
+      // jest-dom's sentence, over jest-dom's role set, and jest-dom's control
+      // flow: the assertion is not about a checked state, so it simply fails,
+      // and the negated form passes.
+      const refusal =
+        'only elements with role="checkbox", role="menuitemcheckbox", role="menuitemradio", ' +
+        'role="option", role="radio", role="switch" or role="treeitem" and a valid ' +
+        "aria-checked attribute can be used with .toBeChecked(). Use .toHaveValue() instead"
+
+      const button = screen.getByTestId("button")
+      expect(button).not.toBeChecked()
+      expect(() => expect(button).toBeChecked()).toThrowError(refusal)
+
+      // A checkable element that declares no checked state has none to read,
+      // which is what jest-dom means by "a valid aria-checked attribute".
+      const stateless = screen.getByTestId("stateless")
+      expect(stateless).not.toBeChecked()
+      expect(() => expect(stateless).toBeChecked()).toThrowError(refusal)
+
+      // An element that projects no accessibility node at all has no role.
+      const plain = screen.getByTestId("plain")
+      expect(plain).not.toBeChecked()
+      expect(() => expect(plain).toBeChecked()).toThrowError(refusal)
+
+      // "mixed" is not a checked state either, as in jest-dom.
+      const mixed = screen.getByTestId("mixed")
+      expect(mixed).not.toBeChecked()
+      expect(() => expect(mixed).toBeChecked()).toThrowError(refusal)
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("asserts the third state of a tri-state checkbox", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <div data-testid="mixed" role="checkbox" ariaLabel="Steel" ariaChecked="mixed" />
+          <div data-testid="on" role="checkbox" ariaLabel="Coal" ariaChecked />
+          <div data-testid="stateless" role="checkbox" ariaLabel="Copper" />
+          <div data-testid="switch" role="switch" ariaLabel="Power" ariaChecked="mixed" />
+          <div data-testid="radio" role="radio" ariaLabel="Belt" ariaChecked="mixed" />
+        </div>
+      )
+
+      expect(screen.getByTestId("mixed")).toBePartiallyChecked()
+      expect(screen.getByTestId("on")).not.toBePartiallyChecked()
+      // A checkbox with no checked state is simply not partially checked; only
+      // a role that carries no checked state at all is refused.
+      expect(screen.getByTestId("stateless")).not.toBePartiallyChecked()
+
+      // The two assertions are disjoint: `mixed` is not checked, and being
+      // told so is what sends you here.
+      expect(() => expect(screen.getByTestId("mixed")).toBeChecked()).toThrowError(
+        "can be used with .toBeChecked()"
+      )
+
+      const refusal =
+        'only elements with role="checkbox" and a valid aria-checked attribute can be used ' +
+        "with .toBePartiallyChecked(). Use .toHaveValue() instead"
+      // A switch is binary — WAI-ARIA computes its `mixed` as `false`, which
+      // the renderer applies — so it is answered with the sentence, exactly as
+      // jest-dom answers every role but checkbox.
+      const binary = screen.getByTestId("switch")
+      expect(binary).not.toBePartiallyChecked()
+      expect(() => expect(binary).toBePartiallyChecked()).toThrowError(refusal)
+
+      // A radio is binary too, and the renderer computes its `mixed` as
+      // `false` — so it is neither partially checked nor checked, and the
+      // false it computed is what `toBeChecked` reads.
+      const radio = screen.getByTestId("radio")
+      expect(radio).not.toBePartiallyChecked()
+      expect(radio).not.toBeChecked()
+      expect(() => expect(radio).toBePartiallyChecked()).toThrowError(refusal)
+      expect(() => expect(radio).toBeChecked()).toThrowError(
+        /be checked[\s\S]*is not checked/
+      )
+
+      expect(() => expect(screen.getByTestId("on")).toBePartiallyChecked()).toThrowError(
+        /be partially checked[\s\S]*is not partially checked/
+      )
+      expect(() => expect(screen.getByTestId("mixed")).not.toBePartiallyChecked()).toThrowError(
+        /not to be partially checked[\s\S]*is partially checked/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("calls an element empty only with no children and no text", () => {
     const screen = createTestRoot()
 
@@ -846,6 +1027,11 @@ describeNative("gpuix matcher pack", () => {
       expect(field).not.toBeInTheDocument()
       expect(field).not.toBeVisible()
       expect(field).not.toBeDisabled()
+      // Including the ones that would otherwise refuse this element: a removed
+      // node is answered before its role is ever consulted.
+      expect(field).not.toBeEnabled()
+      expect(field).not.toBeChecked()
+      expect(field).not.toBePartiallyChecked()
       expect(field).not.toBeEmptyDOMElement()
       expect(field).not.toHaveFocus()
       expect(field).not.toHaveTextContent("one")

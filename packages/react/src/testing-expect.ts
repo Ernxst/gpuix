@@ -15,9 +15,9 @@
 ///
 /// The pack is deliberately small. A matcher is here when it replaces an
 /// assertion a test would otherwise have to spell out against the renderer, and
-/// absent when the desktop has nothing for it to be about: `toBeChecked` and
-/// `toHaveClass` were both judged low-value against this tree and are not
-/// shipped.
+/// absent when the desktop has nothing for it to be about: `toHaveClass` was
+/// judged low-value against this tree — there is no class attribute — and is
+/// not shipped.
 
 import {
   matches as matchesMatcher,
@@ -88,6 +88,12 @@ export interface GpuixMatchers<R = unknown> {
   toBeVisible(): R
   /** `disabled` or `ariaDisabled` is declared on the element. */
   toBeDisabled(): R
+  /** Neither `disabled` nor `ariaDisabled` is declared: the exact inverse. */
+  toBeEnabled(): R
+  /** The element's checked state is on. Only a checkbox or a switch has one. */
+  toBeChecked(): R
+  /** The element's checked state is mixed. Only a checkbox has one. */
+  toBePartiallyChecked(): R
   /** The element has no children and no text of its own. */
   toBeEmptyDOMElement(): R
   /** The element holds the window's keyboard focus. */
@@ -170,13 +176,17 @@ function report(
  * The re-resolution itself matters because `TestElement.children` and
  * `parentElement` already re-resolve after a rerender; a matcher reading the
  * captured snapshot would be the one stale surface on the object.
+ *
+ * A `read` may answer with a whole `GpuixMatcherResult` instead of the usual
+ * `{ pass, actual }`, which is how `toBeChecked` says the one thing jest-dom
+ * says in its own words rather than this pack's shape.
  */
 function against(
   context: MatcherContext,
   received: unknown,
   matcher: string,
   expectation: string,
-  read: (resolved: Resolved) => { pass: boolean; actual: string }
+  read: (resolved: Resolved) => { pass: boolean; actual: string } | GpuixMatcherResult
 ): GpuixMatcherResult {
   const captured = asTestElement(received, matcher)
   const renderer = rendererOf(captured)
@@ -190,13 +200,14 @@ function against(
     )
   }
 
-  const { pass, actual } = read({
+  const result = read({
     renderer,
     element,
     describe: () => describeElement(renderer, element),
   })
 
-  return report(context, pass, expectation, actual)
+  if ("message" in result) return result
+  return report(context, result.pass, expectation, result.actual)
 }
 
 /**
@@ -231,6 +242,48 @@ function accessibilityNodesOf(
   return Object.values(renderer.getAccessibilityTree().nodes).filter(
     (node) => node.host_id === element.id
   )
+}
+
+/**
+ * The roles that carry a checked state, in the WAI-ARIA spelling the role
+ * queries answer with.
+ *
+ * jest-dom's set, which it derives from aria-query — every role whose
+ * properties include `aria-checked` — and the same set the accessibility
+ * projection computes a checked state for.
+ */
+const CHECKED_ROLES: readonly string[] = [
+  "checkbox",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "option",
+  "radio",
+  "switch",
+  "treeitem",
+]
+
+/** jest-dom's `supportedRolesSentence`, over the same roles. */
+function checkedRolesSentence(roles: readonly string[]): string {
+  const quoted = roles.map((role) => `role="${role}"`)
+  if (quoted.length < 2) return quoted.join("")
+  return `${quoted.slice(0, -1).join(", ")} or ${quoted[quoted.length - 1]}`
+}
+
+/**
+ * The checked state GPUI computed for this element, and the role it computed it
+ * under.
+ *
+ * `toggled` is absent for every element whose role carries no checked state,
+ * and for a checkable element that declared none — the two cases jest-dom
+ * spells "not a valid aria-checked attribute".
+ */
+function checkedState(
+  renderer: TestRenderer,
+  element: TestElement
+): { role?: string; toggled?: "False" | "True" | "Mixed" } {
+  const node = accessibilityNodeOf(renderer, element)
+  if (node === undefined) return {}
+  return { role: computedRoleOf(node), toggled: node.aria.toggled }
 }
 
 /**
@@ -478,6 +531,104 @@ export const gpuixMatchers = {
         actual: `  ${describe()} is ${disabled ? "" : "not "}disabled`,
       }
     })
+  },
+
+  /**
+   * The exact inverse of {@link gpuixMatchers.toBeDisabled}: the element
+   * declares neither `disabled` nor `ariaDisabled`, so it is enabled.
+   *
+   * It replaces `not.toBeDisabled()`, and reads better than it, but the two are
+   * not interchangeable on an element that has since been unmounted: a removed
+   * node fails whatever it is asked, so both `toBeEnabled()` and
+   * `toBeDisabled()` fail there rather than one of them passing.
+   */
+  toBeEnabled(this: MatcherContext, received: unknown): GpuixMatcherResult {
+    return against(this, received, "toBeEnabled", "be enabled", ({ element, describe }) => {
+      const disabled = element.semantics?.disabled === true
+      return {
+        pass: !disabled,
+        actual: `  ${describe()} is ${disabled ? "not " : ""}enabled`,
+      }
+    })
+  },
+
+  /**
+   * The element's checked state is on.
+   *
+   * The state is GPUI's computed one, read from the element's AccessKit node —
+   * the same projection `getByRole` searches — so a checked assertion and a
+   * role query can never disagree about what the platform would announce.
+   *
+   * The checkable elements are the ones carrying a role that computes a checked
+   * state — jest-dom's set, and the same one the projection computes for — and
+   * the element must declare a state for there to be one to read. There is no
+   * `<input type="checkbox">` on the desktop, so the role is the whole rule.
+   *
+   * Anything else answers `pass: false` with jest-dom's own sentence, which is
+   * jest-dom's control flow exactly: the assertion is not about a checked state,
+   * so `.not.toBeChecked()` passes on it. `ariaChecked="mixed"` is one of those
+   * cases, as an `aria-checked="mixed"` is in jest-dom — mixed is not a checked
+   * state, and {@link gpuixMatchers.toBePartiallyChecked} is the assertion for
+   * it.
+   */
+  toBeChecked(this: MatcherContext, received: unknown): GpuixMatcherResult {
+    return against(this, received, "toBeChecked", "be checked", ({ renderer, element, describe }) => {
+      const { role, toggled } = checkedState(renderer, element)
+      if (
+        role === undefined ||
+        !CHECKED_ROLES.includes(role) ||
+        toggled === undefined ||
+        toggled === "Mixed"
+      ) {
+        return {
+          pass: false,
+          message: () =>
+            `only elements with ${checkedRolesSentence(CHECKED_ROLES)} and a valid ` +
+            "aria-checked attribute can be used with .toBeChecked(). " +
+            "Use .toHaveValue() instead",
+        }
+      }
+
+      return {
+        pass: toggled === "True",
+        actual: `  ${describe()} is ${toggled === "True" ? "" : "not "}checked`,
+      }
+    })
+  },
+
+  /**
+   * The element's checked state is mixed — the third state of a tri-state
+   * checkbox, `ariaChecked="mixed"`.
+   *
+   * A checkbox alone, as in jest-dom: a switch is binary, and WAI-ARIA computes
+   * its `mixed` as `false`, which the renderer applies and reports as a style
+   * diagnostic. Any other role answers `pass: false` with jest-dom's sentence,
+   * the way {@link gpuixMatchers.toBeChecked} does. A checkbox that declares no
+   * checked state at all simply is not partially checked, and fails.
+   */
+  toBePartiallyChecked(this: MatcherContext, received: unknown): GpuixMatcherResult {
+    return against(
+      this,
+      received,
+      "toBePartiallyChecked",
+      "be partially checked",
+      ({ renderer, element, describe }) => {
+        const { role, toggled } = checkedState(renderer, element)
+        if (role !== "checkbox") {
+          return {
+            pass: false,
+            message: () =>
+              'only elements with role="checkbox" and a valid aria-checked attribute ' +
+              "can be used with .toBePartiallyChecked(). Use .toHaveValue() instead",
+          }
+        }
+
+        return {
+          pass: toggled === "Mixed",
+          actual: `  ${describe()} is ${toggled === "Mixed" ? "" : "not "}partially checked`,
+        }
+      }
+    )
   },
 
   /**

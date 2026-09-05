@@ -228,11 +228,35 @@ impl AccessibilityRole {
         }
     }
 
+    /// Whether this role's checked state is binary, so `aria-checked="mixed"`
+    /// has no meaning on it.
+    ///
+    /// WAI-ARIA gives `mixed` a meaning only where a third state exists: a
+    /// switch, a radio and a menu item radio are each on or off, and `mixed`
+    /// computes as `false` on all three.
+    fn is_binary_checked(self) -> bool {
+        matches!(
+            self.role,
+            gpui::Role::Switch | gpui::Role::RadioButton | gpui::Role::MenuItemRadio
+        )
+    }
+
     fn supports(self, property: &str) -> bool {
         use gpui::Role;
 
         match property {
-            "ariaChecked" => matches!(self.role, Role::CheckBox | Role::Switch),
+            // Every WAI-ARIA role that carries `aria-checked`, so a checked
+            // state is projected wherever a browser would compute one.
+            "ariaChecked" => matches!(
+                self.role,
+                Role::CheckBox
+                    | Role::ListBoxOption
+                    | Role::MenuItemCheckBox
+                    | Role::MenuItemRadio
+                    | Role::RadioButton
+                    | Role::Switch
+                    | Role::TreeItem
+            ),
             "ariaExpanded" => matches!(self.role, Role::Button | Role::Link),
             "ariaCurrent" => {
                 // GPUIX currently exposes current-item state only for links.
@@ -1066,13 +1090,18 @@ pub(crate) fn element_problems(
 
         if property == "ariaChecked"
             && value.as_str() == Some("mixed")
-            && role.is_some_and(|role| role.role == gpui::Role::Switch)
+            && role.is_some_and(AccessibilityRole::is_binary_checked)
         {
+            let authored = role_value
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
             problems.push(applied_as_problem(
                 property,
                 value,
                 "false",
-                "role=\"switch\" is binary; WAI-ARIA computes ariaChecked=\"mixed\" as false",
+                format!(
+                    "role=\"{authored}\" is binary; WAI-ARIA computes ariaChecked=\"mixed\" as false"
+                ),
             ));
             continue;
         }
@@ -1256,9 +1285,7 @@ where
         el = el.aria_description(description);
     }
     if let Some(checked) = props.checked.filter(|_| props.supports("ariaChecked")) {
-        let checked = if props
-            .role
-            .is_some_and(|role| role.role == gpui::Role::Switch)
+        let checked = if props.role.is_some_and(AccessibilityRole::is_binary_checked)
             && checked == gpui::Toggled::Mixed
         {
             gpui::Toggled::False
@@ -1808,6 +1835,19 @@ mod tests {
             .insert("ariaChecked".into(), "mixed".into());
         let switch_problem = &element_problems(&detached_tree(), &switch)[0];
         assert!(switch_problem.problem.reason.contains("binary"));
+        assert!(switch_problem.problem.reason.contains("role=\"switch\""));
+
+        // Every binary role, not the switch alone: WAI-ARIA gives `mixed` no
+        // meaning on a radio either, and the diagnostic names the role it is
+        // talking about.
+        let mut radio = RetainedElement::new(14, "div".to_string(), 1);
+        radio.custom_props.insert("role".into(), "radio".into());
+        radio
+            .custom_props
+            .insert("ariaChecked".into(), "mixed".into());
+        let radio_problem = &element_problems(&detached_tree(), &radio)[0];
+        assert!(radio_problem.problem.reason.contains("binary"));
+        assert!(radio_problem.problem.reason.contains("role=\"radio\""));
 
         let mut heading = RetainedElement::new(9, "text".to_string(), 1);
         heading.custom_props.insert("role".into(), "heading".into());
