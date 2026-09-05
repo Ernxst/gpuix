@@ -4445,6 +4445,9 @@ declare module 'vitest' {
 | `toBeInTheDocument()` | The element still resolves in the retained tree |
 | `toBeVisible()` | The element painted a box in the last frame |
 | `toBeDisabled()` | `disabled` or `ariaDisabled` is declared on it |
+| `toBeEnabled()` | Neither is: the exact inverse of `toBeDisabled()` |
+| `toBeChecked()` | Its computed checked state is on |
+| `toBePartiallyChecked()` | Its computed checked state is mixed |
 | `toBeEmptyDOMElement()` | It has no children and no text of its own |
 | `toHaveFocus()` | It holds the window's keyboard focus |
 | `toHaveTextContent(matcher, options?)` | Its text plus every descendant's |
@@ -4490,7 +4493,8 @@ two are a single predicate all the way down to the accessibility tree
 (`is_action_disabled`), so a disabled query cannot disagree with a disabled
 accessibility node. GPUIX also has no disabling container — no
 `<fieldset disabled>` — so the matcher reports the element's own state and
-invents no ancestor rule.
+invents no ancestor rule. `toBeEnabled()` is its exact inverse, over the same
+predicate, and says what `not.toBeDisabled()` was standing in for.
 
 **`toHaveFocus` reads the window's focus**, the direct analogue of
 `document.activeElement`, rather than the accessibility snapshot's `gpui_focus`.
@@ -4627,9 +4631,29 @@ and `<markdown>` render their content from the `code`, `patch`, and `source`
 props rather than from children, so a declared one counts as content too — a
 screenful of painted text is never called empty.
 
-`toBeChecked` and `toHaveClass` are deliberately absent: there is no class
-attribute, and checked state is already covered by `getByRole` with
-`ariaChecked`.
+`toBeChecked` and `toBePartiallyChecked` read the checked state GPUI computed,
+off the same accessibility node `getByRole` searches, so a checked assertion and
+a role query can never disagree about what a screen reader would announce:
+
+```ts
+expect(screen.getByRole('checkbox', { name: 'Coal' })).toBeChecked()
+expect(screen.getByRole('switch', { name: 'Power' })).not.toBeChecked()
+expect(screen.getByRole('checkbox', { name: 'Steel' })).toBePartiallyChecked()
+```
+
+There is no `<input type="checkbox">` on the desktop, so the checkable elements
+are the ones carrying a role that computes a checked state: `checkbox` and
+`switch` for `toBeChecked`, and `checkbox` alone for `toBePartiallyChecked`,
+because a switch is binary and WAI-ARIA computes its `ariaChecked="mixed"` as
+`false`. Anything else **throws** jest-dom's sentence rather than failing —
+`only elements with role="checkbox" or role="switch" and a valid aria-checked
+attribute can be used with .toBeChecked()` — so `.not.toBeChecked()` cannot
+quietly "pass" on an element that could never have been checked. An
+`ariaChecked="mixed"` throws from `toBeChecked` for the same reason it does in
+jest-dom: mixed is not a checked state, and `toBePartiallyChecked` is the
+assertion for it.
+
+`toHaveClass` is deliberately absent: there is no class attribute.
 
 #### toMatchScreenshot
 
