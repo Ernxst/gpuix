@@ -76,6 +76,316 @@ describeNative("gpuix matcher pack", () => {
     }
   })
 
+  it("measures the painted box against the window, as an intersection ratio does", () => {
+    const screen = createTestRoot({ width: 400, height: 300 })
+
+    try {
+      screen.render(
+        <div style={{ width: 400, height: 900 }}>
+          <div data-testid="flat" style={{ width: 100, height: 0 }} />
+          <div data-testid="fully" style={{ width: 100, height: 50 }} />
+          {/* 250 of its 500 rows are above the fold. */}
+          <div data-testid="half" style={{ width: 100, height: 500 }} />
+          <div data-testid="below" style={{ width: 100, height: 50 }} />
+          <div data-testid="empty" style={{ width: 0, height: 0 }} />
+          {/* 40 of its 100 columns are inside the left edge. */}
+          <div
+            data-testid="left"
+            style={{ position: "absolute", left: -60, top: 10, width: 100, height: 50 }}
+          />
+        </div>
+      )
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      const fully = screen.getByTestId("fully")
+      const half = screen.getByTestId("half")
+      const below = screen.getByTestId("below")
+      const left = screen.getByTestId("left")
+
+      // Any painted part on screen is enough by default.
+      expect(fully).toBeInViewport()
+      expect(half).toBeInViewport()
+      expect(left).toBeInViewport()
+      expect(below).not.toBeInViewport()
+
+      // `ratio` is the fraction of the element's own area, so the same element
+      // passes and fails as the demand crosses what is on screen.
+      expect(fully).toBeInViewport({ ratio: 1 })
+      expect(half).toBeInViewport({ ratio: 0.5 })
+      expect(half).not.toBeInViewport({ ratio: 0.51 })
+      expect(half).not.toBeInViewport({ ratio: 1 })
+      expect(left).toBeInViewport({ ratio: 0.4 })
+      expect(left).not.toBeInViewport({ ratio: 0.5 })
+      expect(below).not.toBeInViewport({ ratio: 0 })
+
+      // The observer's rule for a target with no area: intersecting the
+      // viewport — or merely touching its edge — is a ratio of 1, and being
+      // outside it is 0. There is no area to take a fraction of.
+      expect(screen.getByTestId("flat")).toBeInViewport()
+      expect(screen.getByTestId("flat")).toBeInViewport({ ratio: 1 })
+      expect(screen.getByTestId("empty")).not.toBeInViewport()
+
+      expect(() => expect(below).toBeInViewport()).toThrowError(
+        /be in the viewport[\s\S]*visible ratio 0\.000/
+      )
+      expect(() => expect(half).toBeInViewport({ ratio: 1 })).toThrowError(
+        /be in the viewport with ratio 1[\s\S]*visible ratio 0\.500/
+      )
+      expect(() => expect(fully).not.toBeInViewport()).toThrowError(
+        /not to be in the viewport[\s\S]*400x300 window, visible ratio 1\.000/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("follows an element scrolled into and out of the window", () => {
+    const screen = createTestRoot({ width: 400, height: 300 })
+
+    try {
+      screen.render(
+        <div style={{ width: 400, height: 300, overflow: "scroll" }}>
+          {Array.from({ length: 20 }, (_, index) => (
+            <div
+              key={index}
+              data-testid={`row-${index}`}
+              style={{ width: 400, height: 100, flexShrink: 0 }}
+            />
+          ))}
+        </div>
+      )
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      // Three 100px rows fit the 300px window exactly; the fourth is below it.
+      expect(screen.getByTestId("row-0")).toBeInViewport({ ratio: 1 })
+      expect(screen.getByTestId("row-2")).toBeInViewport({ ratio: 1 })
+      expect(screen.getByTestId("row-4")).not.toBeInViewport()
+
+      // A platform delta, where scrolling down is negative.
+      screen.renderer.nativeSimulateScrollWheel(200, 150, 0, -250)
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      // The claim the hand-rolled `getBoundingClientRect()` comparison was
+      // making: scrolling moved a row on screen and took another off it.
+      expect(screen.getByTestId("row-4")).toBeInViewport()
+      expect(screen.getByTestId("row-0")).not.toBeInViewport()
+      // Half of row 2 is left below the fold.
+      expect(screen.getByTestId("row-2")).toBeInViewport({ ratio: 0.5 })
+      expect(screen.getByTestId("row-2")).not.toBeInViewport({ ratio: 0.51 })
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("clips the ratio by every clipping ancestor, not by the window alone", () => {
+    const screen = createTestRoot({ width: 400, height: 600 })
+
+    try {
+      screen.render(
+        // The scroller is 100px tall at y=300, well inside a 600px window, so
+        // a row it has clipped away still paints a box inside the window. An
+        // `IntersectionObserver` reports that row as not intersecting, and a
+        // bare `getBoundingClientRect()` comparison against the window size —
+        // the thing this matcher replaces — would call it visible.
+        <div style={{ width: 400, height: 600 }}>
+          <div style={{ width: 400, height: 300, flexShrink: 0 }} />
+          <div
+            data-testid="scroller"
+            style={{ width: 400, height: 100, overflow: "scroll", flexShrink: 0 }}
+          >
+            {Array.from({ length: 10 }, (_, index) => (
+              <div
+                key={index}
+                data-testid={`row-${index}`}
+                style={{ width: 400, height: 40, flexShrink: 0 }}
+              />
+            ))}
+          </div>
+          <div
+            data-testid="hidden"
+            style={{ width: 400, height: 50, overflow: "hidden", flexShrink: 0 }}
+          >
+            <div data-testid="hidden-child" style={{ width: 400, height: 200, flexShrink: 0 }} />
+          </div>
+          <div
+            data-testid="open"
+            style={{ width: 400, height: 20, overflow: "visible", flexShrink: 0 }}
+          >
+            <div data-testid="open-child" style={{ width: 400, height: 80, flexShrink: 0 }} />
+          </div>
+        </div>
+      )
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      // Two 40px rows fit the 100px scroller; the third straddles its bottom
+      // edge and the rest are clipped away.
+      expect(screen.getByTestId("row-0")).toBeInViewport({ ratio: 1 })
+      expect(screen.getByTestId("row-1")).toBeInViewport({ ratio: 1 })
+
+      const straddling = screen.getByTestId("row-2")
+      expect(straddling).toBeInViewport()
+      expect(straddling).toBeInViewport({ ratio: 0.5 })
+      expect(straddling).not.toBeInViewport({ ratio: 0.51 })
+      expect(straddling).not.toBeInViewport({ ratio: 1 })
+
+      // Painted inside the window, clipped out of the scroller.
+      const clipped = screen.getByTestId("row-3")
+      expect(screen.renderer.getElementBounds(clipped.id)).toEqual([0, 420, 400, 40])
+      expect(clipped).not.toBeInViewport()
+      expect(screen.getByTestId("row-5")).not.toBeInViewport()
+
+      // `hidden` clips as much as `scroll` does: 50 of the child's 200 rows
+      // survive the mask.
+      const hiddenChild = screen.getByTestId("hidden-child")
+      expect(hiddenChild).toBeInViewport()
+      expect(hiddenChild).toBeInViewport({ ratio: 0.25 })
+      expect(hiddenChild).not.toBeInViewport({ ratio: 0.26 })
+
+      // `visible` establishes no clip at all, so a child that overflows its
+      // parent is judged against the window alone and is wholly in view.
+      expect(screen.getByTestId("open-child")).toBeInViewport({ ratio: 1 })
+
+      expect(() => expect(clipped).toBeInViewport()).toThrowError(
+        /be in the viewport[\s\S]*visible ratio 0\.000/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("masks both axes when either overflow clips, as GPUI and CSS do", () => {
+    const screen = createTestRoot({ width: 400, height: 600 })
+
+    try {
+      screen.render(
+        <div style={{ width: 400, height: 600 }}>
+          <div
+            data-testid="sideways"
+            style={{ width: 200, height: 100, overflowX: "scroll", flexShrink: 0 }}
+          >
+            <div data-testid="tall" style={{ width: 200, height: 300, flexShrink: 0 }} />
+          </div>
+        </div>
+      )
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      // Only the horizontal axis was asked to clip, and the child overflows
+      // vertically — but a `visible` axis computes to `auto` once the other one
+      // is not, so GPUI masks both and 100 of the child's 300 rows survive.
+      const tall = screen.getByTestId("tall")
+      expect(screen.renderer.getElementBounds(tall.id)).toEqual([0, 0, 200, 300])
+      expect(tall).toBeInViewport()
+      expect(tall).toBeInViewport({ ratio: 0.33 })
+      expect(tall).not.toBeInViewport({ ratio: 0.34 })
+      expect(tall).not.toBeInViewport({ ratio: 1 })
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("insets a clipping ancestor's mask by its visible border", () => {
+    const screen = createTestRoot({ width: 400, height: 600 })
+
+    try {
+      screen.render(
+        <div style={{ width: 400, height: 600 }}>
+          {/* The border box is 200x100 and the content box 180x80, offset by
+              the 10px border on every side. */}
+          <div
+            style={{
+              width: 200,
+              height: 100,
+              overflow: "scroll",
+              borderWidth: 10,
+              borderColor: "#ff0000",
+              flexShrink: 0,
+            }}
+          >
+            <div data-testid="flush" style={{ width: 180, height: 80, flexShrink: 0 }} />
+          </div>
+          <div
+            style={{
+              width: 200,
+              height: 100,
+              overflow: "scroll",
+              borderWidth: 10,
+              borderColor: "#ff0000",
+              flexShrink: 0,
+            }}
+          >
+            <div data-testid="over-border" style={{ width: 190, height: 90, flexShrink: 0 }} />
+          </div>
+        </div>
+      )
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      // A child flush with the content box is wholly visible.
+      const flush = screen.getByTestId("flush")
+      expect(screen.renderer.getElementBounds(flush.id)).toEqual([10, 10, 180, 80])
+      expect(flush).toBeInViewport({ ratio: 1 })
+
+      // A child that reaches the border box's outer edge is clipped by the
+      // border, not by the box: 180x80 of its 190x90 survives the mask. Judged
+      // against the unindented box it would have been wholly visible.
+      const overBorder = screen.getByTestId("over-border")
+      expect(screen.renderer.getElementBounds(overBorder.id)).toEqual([10, 110, 190, 90])
+      expect(overBorder).toBeInViewport({ ratio: 0.84 })
+      expect(overBorder).not.toBeInViewport({ ratio: 0.85 })
+      expect(overBorder).not.toBeInViewport({ ratio: 1 })
+      expect(() => expect(overBorder).toBeInViewport({ ratio: 1 })).toThrowError(
+        /be in the viewport with ratio 1[\s\S]*visible ratio 0\.842/
+      )
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("lets an out-of-range ratio fail rather than validating it", () => {
+    const screen = createTestRoot({ width: 400, height: 300 })
+
+    try {
+      screen.render(<div data-testid="panel" style={{ width: 100, height: 50 }} />)
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+      const panel = screen.getByTestId("panel")
+
+      // vitest does not validate the option, and neither does this: a demand
+      // above 1 is simply never met.
+      expect(panel).not.toBeInViewport({ ratio: 1.5 })
+      expect(() => expect(panel).toBeInViewport({ ratio: 1.5 })).toThrowError(
+        /be in the viewport with ratio 1\.5[\s\S]*visible ratio 1\.000/
+      )
+
+      // Nor is a ratio that is not a number, and the message reads back the
+      // demand the test made rather than the zero it would default to.
+      expect(panel).not.toBeInViewport({ ratio: Number.NaN })
+      expect(() => expect(panel).toBeInViewport({ ratio: Number.NaN })).toThrowError(
+        /be in the viewport with ratio NaN/
+      )
+      // An explicit `ratio: 0` is the default demand, and says so.
+      expect(() => expect(panel).not.toBeInViewport({ ratio: 0 })).toThrowError(
+        /not to be in the viewport with ratio 0/
+      )
+
+      // A receiver that was never a TestElement still throws.
+      expect(() => expect(null).toBeInViewport({ ratio: 1 })).toThrowError(
+        /toBeInViewport expects a TestElement/
+      )
+
+      // The documented range answers throughout.
+      expect(panel).toBeInViewport({ ratio: 0 })
+      expect(panel).toBeInViewport({ ratio: 1 })
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("asserts the element's own disabled state, declared either way", () => {
     const screen = createTestRoot()
 
@@ -1026,6 +1336,7 @@ describeNative("gpuix matcher pack", () => {
       // must answer, not throw. Throwing made `.not.` unusable after unmount.
       expect(field).not.toBeInTheDocument()
       expect(field).not.toBeVisible()
+      expect(field).not.toBeInViewport()
       expect(field).not.toBeDisabled()
       // Including the ones that would otherwise refuse this element: a removed
       // node is answered before its role is ever consulted.
