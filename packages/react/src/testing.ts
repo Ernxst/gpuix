@@ -2648,7 +2648,14 @@ export interface RenderResult extends TestRoot {
    * component's band of the window rather than the whole window, and reaches a
    * tree no query can reach because it is `aria-hidden` or has no text.
    *
-   * Re-read on every access, so it stays valid across `rerender`.
+   * Because its height comes from the tree, a top-level `height: "100%"` or
+   * `flexGrow: 1` resolves against it rather than against the window and
+   * measures nothing — as it does in a browser, where the same percentage
+   * resolves against an auto-height container. Size the window instead, or
+   * give the tree an explicit height.
+   *
+   * Re-read on every access, so it stays valid across `rerender`, and
+   * remembered after an unmount so the matchers can report it as gone.
    */
   readonly container: TestElement
   /**
@@ -2656,7 +2663,8 @@ export interface RenderResult extends TestRoot {
    * `container` is mounted into. It is the scope the result's own queries
    * search, and it fills the window the way the viewport sizes the body.
    *
-   * Re-read on every access, so it stays valid across `rerender`.
+   * Re-read on every access, so it stays valid across `rerender`, and
+   * remembered after an unmount so the matchers can report it as gone.
    */
   readonly baseElement: TestElement
 }
@@ -2691,36 +2699,46 @@ function wrapForRender(node: ReactNode): ReactNode {
  * Add the two mount handles to a render result as accessors, so each read
  * resolves the live element rather than a snapshot taken at `render()` time —
  * what keeps them valid across a `rerender`.
+ *
+ * **After an unmount they keep answering.** Testing Library's `container`
+ * outlives the tree it held — it is a detached `div`, and
+ * `expect(container).not.toBeInTheDocument()` is the assertion a test writes
+ * next. A desktop window has no detached state, so the last handles are
+ * remembered instead: the matchers then take their established
+ * absent-element path and report the element as no longer in the tree, which
+ * is the true answer here rather than a throw from the property read.
  */
 function renderResult(
   root: TestRoot,
   fields: TestRoot & Pick<RenderResult, "rerender">
 ): RenderResult {
+  let lastBaseElement: TestElement | undefined
+  let lastContainer: TestElement | undefined
+
   const baseElement = (): TestElement => {
     const base = root.renderer.getRoot()
-    if (base === undefined) {
-      throw new Error(
-        "The render result has no baseElement: its tree has been unmounted"
-      )
+    if (base !== undefined) lastBaseElement = base
+    if (lastBaseElement === undefined) {
+      throw new Error("The render result has no baseElement: render() mounted no tree")
     }
-    return base
+    return lastBaseElement
+  }
+
+  const container = (): TestElement => {
+    const base = root.renderer.getRoot()
+    // Read through the live root, not through `baseElement()`: a remembered
+    // base cannot be walked, since resolving a dead element's children throws.
+    const current = base === undefined ? undefined : base.children[0]
+    if (current !== undefined) lastContainer = current
+    if (lastContainer === undefined) {
+      throw new Error("The render result has no container: render() mounted no tree")
+    }
+    return lastContainer
   }
 
   return Object.defineProperties(fields, {
     baseElement: { enumerable: true, get: baseElement },
-    container: {
-      enumerable: true,
-      get(): TestElement {
-        const base = baseElement()
-        const container = base.children[0]
-        if (container === undefined) {
-          throw new Error(
-            "The render result has no container: its tree has been unmounted"
-          )
-        }
-        return container
-      },
-    },
+    container: { enumerable: true, get: container },
   }) as RenderResult
 }
 
@@ -2887,7 +2905,11 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
   if (active === null) {
     const root = createTestRoot(request)
     const size = root.renderer.getWindowSize()
-    const rerender = (next: ReactNode): void => root.render(wrapForRender(next))
+    // Every way into the shared root goes through the wrappers, `render`
+    // inherited from `createTestRoot()` included: one that mounted the node
+    // bare would leave the result's own `container` pointing into the tree
+    // rather than around it.
+    const renderWrapped = (next: ReactNode): void => root.render(wrapForRender(next))
     active = {
       root,
       // Copied, so a caller reusing and mutating one options object cannot
@@ -2902,7 +2924,8 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
       windowSize: { width: size.width, height: size.height },
       result: renderResult(root, {
         ...root,
-        rerender,
+        render: renderWrapped,
+        rerender: renderWrapped,
         // Tree-only unmount: vitest-browser-react's `unmount` removes the
         // component, not the page it rendered into.
         unmount: () => {

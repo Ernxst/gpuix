@@ -4214,6 +4214,50 @@ rendered component's band of the window while `expect(screen)` captures the
 whole window — which is the only golden available for a tree that is
 `aria-hidden`, or carries no text, and so has no query that reaches it.
 
+**Breaking: a top-level `height: '100%'` or `flexGrow: 1` no longer fills the
+window.** The tree used to *be* the window's root, so a percentage height
+resolved against the window. It now sits inside `container`, whose height comes
+from the tree, so that percentage resolves against auto and measures nothing —
+exactly as it does in a browser, where the same declaration inside an
+auto-height container collapses. Size the window instead, or give the tree an
+explicit height:
+
+```tsx
+render(<Panel />, { height: 600 })         // the window is the fixed thing
+render(<Panel style={{ height: 600 }} />)  // or the tree is
+```
+
+`createTestRoot()` is unaffected — it renders the node as the window's root, so
+a suite that wants the old resolution can use it directly.
+
+**A top-level fragment mounts every child.** A desktop window has one root, and
+before there was a container to append into each top-level child overwrote the
+last, so only the final one survived:
+
+```tsx
+const screen = render(
+  <>
+    <text data-testid="first">first</text>
+    <text data-testid="second">second</text>
+  </>
+)
+screen.getByTestId('first') // both are mounted now
+```
+
+**Both handles outlive the tree.** Testing Library's `container` is still an
+element after `unmount()`, and the assertion a test writes next is about its
+absence. Reading either handle after an unmount gives back the element the tree
+had, so the matchers answer rather than the property read throwing:
+
+```tsx
+screen.unmount()
+expect(screen.container).not.toBeInTheDocument()
+```
+
+The window holds no detached elements, so a matcher that has to look *inside*
+the element — `toBeEmptyDOMElement()`, say — reports it as no longer in the
+renderer's tree rather than as empty.
+
 **The effects have run.** `render`, `rerender`, `unmount`, and each event the
 `userEvent` helpers and `nativeSimulate*` methods dispatch do their React work
 inside `act`, as Testing Library does. When one returns, the tree holds the

@@ -412,6 +412,75 @@ describeNative("render", () => {
       })
     })
 
+    it("resolves a top-level percentage height against the container, not the window", () => {
+      // Breaking, and the DOM's own answer: the container's height comes from
+      // the tree, so a percentage of it resolves against auto and measures
+      // nothing. Size the window, or give the tree an explicit height.
+      const screen = render(<div data-testid="filler" style={{ height: "100%" }} />)
+
+      expect(screen.getByTestId("filler").getBoundingClientRect()).toMatchObject({
+        y: 0,
+        height: 0,
+      })
+      expect(screen.container.getBoundingClientRect()).toMatchObject({ height: 0 })
+
+      // `flexGrow` has nothing to grow into for the same reason.
+      screen.rerender(<div data-testid="filler" style={{ flexGrow: 1 }} />)
+      expect(screen.getByTestId("filler").getBoundingClientRect()).toMatchObject({
+        height: 0,
+      })
+
+      // An explicit height is unaffected, and so is a window-sized tree.
+      screen.rerender(<div data-testid="filler" style={{ height: 120 }} />)
+      expect(screen.getByTestId("filler").getBoundingClientRect()).toMatchObject({
+        height: 120,
+      })
+    })
+
+    it("mounts every child of a top-level fragment", () => {
+      // The window has one root, so before there was a container to append
+      // into each top-level child overwrote the last and only one survived.
+      const screen = render(
+        <>
+          <text data-testid="first">first</text>
+          <text data-testid="second">second</text>
+        </>
+      )
+
+      expect(screen.container.children).toHaveLength(2)
+      expect(textContent(screen.renderer, screen.getByTestId("first"))).toBe("first")
+      expect(textContent(screen.renderer, screen.getByTestId("second"))).toBe("second")
+    })
+
+    it("remembers both handles after unmount so matchers can report them gone", () => {
+      const screen = render(<Decoration />)
+      const containerId = screen.container.id
+
+      screen.unmount()
+
+      // Testing Library's container outlives its tree; here the handle does,
+      // and answers the assertion a test writes next rather than throwing.
+      expect(screen.container.id).toBe(containerId)
+      expect(screen.container).not.toBeInTheDocument()
+      expect(screen.baseElement).not.toBeInTheDocument()
+      // The window holds no detached elements, so a matcher that must look
+      // inside reports the element as absent rather than as empty.
+      expect(() => expect(screen.container).toBeEmptyDOMElement()).toThrowError(
+        /no longer in the renderer's tree/
+      )
+    })
+
+    it("wraps the render inherited from createTestRoot()", () => {
+      const screen = render(<text data-testid="first">first</text>)
+
+      // Not `rerender`: the `render` every TestRoot carries must mount through
+      // the same wrappers, or the container would point inside the tree.
+      screen.render(<text data-testid="second">second</text>)
+
+      expect(screen.container.children.map((child) => child.type)).toEqual(["text"])
+      expect(screen.getByTestId("second").parentElement).toEqual(screen.container)
+    })
+
     it("keeps both handles pointing at the live elements across rerender", () => {
       const screen = render(<Decoration color="#ff0000" />)
       const container = screen.container
