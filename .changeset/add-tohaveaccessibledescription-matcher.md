@@ -20,8 +20,10 @@ element's AccessKit node through the same host identity `toHaveAccessibleName`
 uses: an `ariaDescribedBy` reference resolves to the flattened text of the
 elements it names — several ids joined with spaces, in the order they are
 written — and wins over an `ariaDescription` written beside it. The node
-requirement is the accessible name's, exactly: a description declared on an
-element that projects no accessibility node has nowhere to land, and the matcher
-reports the empty computation rather than falling back to the raw prop.
+requirement is the accessible name's: a role, explicit or implicit, is what
+gives an element a node of its own to carry the description, so an `<img>` or a
+`<button>` keeps one while an element with neither has nowhere for a description
+to land, and the matcher reports the empty computation rather than falling back
+to the raw prop.
 
 Fixes #344
