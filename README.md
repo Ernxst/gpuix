@@ -4494,7 +4494,10 @@ two are a single predicate all the way down to the accessibility tree
 accessibility node. GPUIX also has no disabling container — no
 `<fieldset disabled>` — so the matcher reports the element's own state and
 invents no ancestor rule. `toBeEnabled()` is its exact inverse, over the same
-predicate, and says what `not.toBeDisabled()` was standing in for.
+predicate, and says what `not.toBeDisabled()` was standing in for — with the
+one exception every matcher here shares: an element that has been unmounted
+fails whatever it is asked, so `toBeDisabled()` and `toBeEnabled()` both fail on
+it rather than one of them passing.
 
 **`toHaveFocus` reads the window's focus**, the direct analogue of
 `document.activeElement`, rather than the accessibility snapshot's `gpui_focus`.
@@ -4641,17 +4644,19 @@ expect(screen.getByRole('switch', { name: 'Power' })).not.toBeChecked()
 expect(screen.getByRole('checkbox', { name: 'Steel' })).toBePartiallyChecked()
 ```
 
-There is no `<input type="checkbox">` on the desktop, so the checkable elements
-are the ones carrying a role that computes a checked state: `checkbox` and
-`switch` for `toBeChecked`, and `checkbox` alone for `toBePartiallyChecked`,
-because a switch is binary and WAI-ARIA computes its `ariaChecked="mixed"` as
-`false`. Anything else **throws** jest-dom's sentence rather than failing —
-`only elements with role="checkbox" or role="switch" and a valid aria-checked
-attribute can be used with .toBeChecked()` — so `.not.toBeChecked()` cannot
-quietly "pass" on an element that could never have been checked. An
-`ariaChecked="mixed"` throws from `toBeChecked` for the same reason it does in
-jest-dom: mixed is not a checked state, and `toBePartiallyChecked` is the
-assertion for it.
+The checkable elements are jest-dom's: `checkbox`, `menuitemcheckbox`,
+`menuitemradio`, `option`, `radio`, `switch`, and `treeitem` for `toBeChecked`,
+and `checkbox` alone for `toBePartiallyChecked`, because a switch is binary and
+WAI-ARIA computes its `ariaChecked="mixed"` as `false`. There is no
+`<input type="checkbox">` on the desktop, so the role is the whole rule.
+
+An element with no checked state to read — the wrong role, no `ariaChecked` at
+all, or an `ariaChecked="mixed"` under `toBeChecked` — is answered with
+jest-dom's own sentence, `only elements with role="checkbox", … and a valid
+aria-checked attribute can be used with .toBeChecked(). Use .toHaveValue()
+instead`, and fails. As in jest-dom, the negated form of a question that was
+never about a checked state passes. `toBePartiallyChecked` is the assertion for
+`ariaChecked="mixed"`.
 
 `toHaveClass` is deliberately absent: there is no class attribute.
 

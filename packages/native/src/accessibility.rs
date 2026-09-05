@@ -232,7 +232,18 @@ impl AccessibilityRole {
         use gpui::Role;
 
         match property {
-            "ariaChecked" => matches!(self.role, Role::CheckBox | Role::Switch),
+            // Every WAI-ARIA role that carries `aria-checked`, so a checked
+            // state is projected wherever a browser would compute one.
+            "ariaChecked" => matches!(
+                self.role,
+                Role::CheckBox
+                    | Role::ListBoxOption
+                    | Role::MenuItemCheckBox
+                    | Role::MenuItemRadio
+                    | Role::RadioButton
+                    | Role::Switch
+                    | Role::TreeItem
+            ),
             "ariaExpanded" => matches!(self.role, Role::Button | Role::Link),
             "ariaCurrent" => {
                 // GPUIX currently exposes current-item state only for links.
