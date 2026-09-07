@@ -3138,11 +3138,13 @@ implicit role that carries it.
 `"scaleDown"`, or `"none"`. `bytes` accepts an `ArrayBuffer`, `Uint8Array`
 (including Node.js `Buffer`), or a number array. Every source is capped at
 **10 MiB** before decode. URL responses are cached by URL and revalidated with
-`ETag` or `Last-Modified` when another image instance needs the same asset.
-Failed requests retry with bounded backoff, successful path and URL loads have
-a five-minute revalidation deadline, and unmounting an image cancels its active
-load. HTTP requests have a 15-second total deadline and follow at most five
-redirects.
+`ETag` or `Last-Modified`. Each renderer keeps up to 64 decoded images without
+live users in a least-recently-used cache, so reinserting an `<img>` with the
+same source and tint paints immediately. URL images revalidate after five
+minutes while the current image stays on screen; path and in-memory sources
+never revalidate. Failed loads retry with bounded backoff, and unmounting an
+image cancels its in-flight load. HTTP requests have a 15-second total deadline
+and follow at most five redirects.
 
 URL images are public-network-only by default. GPUIX rejects URL credentials,
 resolves and validates every redirect target before connecting, and never

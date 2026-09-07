@@ -68,6 +68,8 @@ pub struct CustomRenderContext<'a> {
     pub current_color: gpui::Rgba,
     /// Renderer-owned HTTP policy and client for URL-backed images.
     pub image_network_policy: &'a img::ImageNetworkPolicy,
+    /// Renderer-local decoded images shared by every `<img>`.
+    pub img_image_store: &'a img::SharedImgImageStore,
     /// Renderer-local decoded images shared by every retained canvas.
     pub canvas_image_store: &'a img::SharedCanvasImageStore,
     /// Retained Canvas 2D display lists updated independently of React commits.
