@@ -626,6 +626,46 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(diagnostics[0].message).toContain('"uppercase"')
   })
 
+  it("accepts listStyle none and rejects other markers", () => {
+    const renderer = new TestRenderer()
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 42, "div"],
+        ["setStyle", 42, { listStyle: "none", listStyleType: "none" }],
+        ["createElement", 43, "div"],
+        ["setStyle", 43, { listStyleType: "disc" }],
+      ])
+    )
+
+    const diagnostics = renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementId: 43,
+      elementType: "div",
+      property: "listStyleType",
+      value: '"disc"',
+    })
+  })
+
+  it("accepts the react-dom list fixture under strict styles and keeps list semantics", () => {
+    const screen = createTestRoot({ strictStyles: true })
+
+    try {
+      screen.render(
+        <ul style={{ display: "flex", flexDirection: "column", margin: 0, padding: 0, listStyle: "none" }}>
+          <li data-testid="row">
+            <text>Destination</text>
+          </li>
+        </ul>
+      )
+
+      expect(screen.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(screen.getByRole("listitem")).toBe(screen.getByTestId("row"))
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("reports an invalid length expression with element, property, value, and parse position", () => {
     const renderer = new TestRenderer()
     renderer.applyBatch(

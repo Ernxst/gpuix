@@ -1776,6 +1776,17 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             text_transform,
             ["none", "uppercase", "lowercase"]
         );
+        // Native lists paint no marker, so `none` is the only value that
+        // describes what is drawn. Validated and then dropped: there is
+        // no field because no renderer path would read it.
+        if key == "listStyle" {
+            let _ = decode_enum(&property!("listStyle"), value, &["none"], &mut parsed.problems);
+            continue;
+        }
+        if key == "listStyleType" {
+            let _ = decode_enum(&property!("listStyleType"), value, &["none"], &mut parsed.problems);
+            continue;
+        }
         enum_field!(
             key,
             value,
@@ -2972,6 +2983,26 @@ mod tests {
             assert!(parsed.problems.is_empty(), "{value}: {:?}", parsed.problems);
             assert_eq!(parsed.style.text_decoration.as_deref(), Some(value));
         }
+    }
+
+    #[test]
+    fn list_style_accepts_only_none() {
+        let parsed = parse_style_value(&json!({ "listStyle": "none" }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+
+        let parsed = parse_style_value(&json!({ "listStyle": "disc" }));
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "listStyle");
+
+        let parsed = parse_style_value(&json!({ "listStyleType": "none" }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+
+        let parsed = parse_style_value(&json!({ "listStyleType": "decimal" }));
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "listStyleType");
+
+        let parsed = parse_style_value(&json!({ "hover": { "listStyle": "none" } }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
     }
 
     #[test]
