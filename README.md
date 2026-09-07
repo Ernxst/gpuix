@@ -119,6 +119,79 @@ For a smaller ship set, run the same React app on
 [hermes-node](./website/src/guides/hermes.mdx) instead of Bun. That path is
 **12 MB** plus a **22 MB** native sidecar. The steps are in that guide.
 
+### 5. Wrap it in an app with an icon
+
+A raw Mach-O has no Dock icon. Use
+[cargo-packager](https://github.com/crabnebula-dev/cargo-packager) to wrap the
+binary. Config: [Config](https://docs.rs/cargo-packager/latest/cargo_packager/config/struct.Config.html).
+CLI: [docs.rs/cargo-packager](https://docs.rs/cargo-packager/latest/cargo_packager/).
+
+```bash
+cargo install cargo-packager --locked
+```
+
+Build an `.icns` from a 1024 PNG, then pack. Pass the `.icns`, not a 1024 PNG.
+cargo-packager rejected a 1024 PNG with `No matching IconType`.
+
+```bash
+mkdir AppIcon.iconset
+sips -z 16 16 icon-1024.png --out AppIcon.iconset/icon_16x16.png
+sips -z 32 32 icon-1024.png --out AppIcon.iconset/icon_16x16@2x.png
+sips -z 32 32 icon-1024.png --out AppIcon.iconset/icon_32x32.png
+sips -z 64 64 icon-1024.png --out AppIcon.iconset/icon_32x32@2x.png
+sips -z 128 128 icon-1024.png --out AppIcon.iconset/icon_128x128.png
+sips -z 256 256 icon-1024.png --out AppIcon.iconset/icon_128x128@2x.png
+sips -z 256 256 icon-1024.png --out AppIcon.iconset/icon_256x256.png
+sips -z 512 512 icon-1024.png --out AppIcon.iconset/icon_256x256@2x.png
+sips -z 512 512 icon-1024.png --out AppIcon.iconset/icon_512x512.png
+sips -z 1024 1024 icon-1024.png --out AppIcon.iconset/icon_512x512@2x.png
+iconutil -c icns AppIcon.iconset -o AppIcon.icns
+```
+
+**Bun** (one binary):
+
+```json
+{
+  "productName": "My App",
+  "version": "0.1.0",
+  "identifier": "dev.example.app",
+  "binariesDir": "dist",
+  "outDir": "bundle",
+  "binaries": [{ "path": "app", "main": true }],
+  "icons": ["AppIcon.icns"],
+  "formats": ["app"]
+}
+```
+
+```bash
+cargo packager --release --config packager.json
+open "bundle/My App.app"
+```
+
+**Hermes** needs the `.node` next to the exe. List it as a **second binary**,
+not a resource. Resources go in `Contents/Resources`. `dlopen` looks in
+`Contents/MacOS`.
+
+```json
+{
+  "binaries": [
+    { "path": "gpuix-hermes", "main": true },
+    { "path": "gpuix-native.darwin-arm64.node", "main": false }
+  ]
+}
+```
+
+`formats` is the host OS only:
+
+| OS | `formats` | Output |
+|---|---|---|
+| macOS | `"app"`, then `"dmg"` | `.app`, optional `.dmg` |
+| Windows | `"nsis"` | setup `.exe` |
+| Linux | `"appimage"` | `.AppImage` |
+
+On this machine the Bun chat `.app` is **82 MB**. The Hermes counter `.app`
+is **34 MB**.
+
 ### Start from the example app
 
 [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) is a complete todo app in one file, with `dev`,
