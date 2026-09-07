@@ -224,7 +224,7 @@ export interface ComboboxInputProps extends InputProps {
 
 export const ComboboxInput = forwardRef<PublicInstance, ComboboxInputProps>(
   function ComboboxInput(
-    { onChange, onClick, onFocus, onKeyDown, onKeyUp, onSubmit, disabled: disabledProp, ...props },
+    { onChange, onClick, onFocus, onKeyDown, onKeyUp, disabled: disabledProp, ...props },
     forwardedRef
   ) {
     const context = useComboboxContext("ComboboxInput")
@@ -262,18 +262,18 @@ export const ComboboxInput = forwardRef<PublicInstance, ComboboxInputProps>(
             context.moveActive(1)
           } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
             context.moveActive(-1)
+          } else if (event.key === "Enter") {
+            if (context.activeIndex !== null) {
+              const item = context.filteredItems[context.activeIndex]
+              if (item !== undefined) {
+                event.preventDefault()
+                context.selectItem(item)
+              }
+            }
           }
         }}
         onKeyUp={(event: GpuixSyntheticEvent) => {
           onKeyUp?.(event)
-        }}
-        onSubmit={(event: GpuixSyntheticEvent) => {
-          onSubmit?.(event)
-          if (disabled) return
-          if (context.activeIndex !== null) {
-            const item = context.filteredItems[context.activeIndex]
-            if (item !== undefined) context.selectItem(item)
-          }
         }}
       />
     )

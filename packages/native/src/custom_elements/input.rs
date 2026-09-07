@@ -61,8 +61,6 @@ actions!(
         Paste,
         Undo,
         Redo,
-        Newline,
-        Submit,
     ]
 );
 
@@ -177,8 +175,6 @@ fn text_editor_bindings(
 ) -> Vec<KeyBinding> {
     let context = Some(context);
     let mut bindings = vec![
-        KeyBinding::new("enter", Submit, context),
-        KeyBinding::new("shift-enter", Newline, context),
         KeyBinding::new("backspace", Backspace, context),
         KeyBinding::new("delete", Delete, context),
         KeyBinding::new("left", Left, context),
@@ -371,7 +367,6 @@ impl CustomElement for TextEditorElement {
             .cloned()
             .unwrap_or_else(|| cx.focus_handle());
         let emits_change = ctx.events.contains("change");
-        let emits_submit = ctx.events.contains("submit");
         let emits_key_down = ctx.events.contains("keyDown");
         let emits_key_up = ctx.events.contains("keyUp");
         let callback = ctx.event_callback.clone();
@@ -395,7 +390,6 @@ impl CustomElement for TextEditorElement {
                     element_id: id,
                     callback,
                     emits_change,
-                    emits_submit,
                     emits_key_down,
                     emits_key_up,
                     focus_handle: state_focus_handle,
@@ -430,6 +424,7 @@ impl CustomElement for TextEditorElement {
                     blink_anchor: cx.background_executor().now(),
                     blink_task: None,
                     pending_values: VecDeque::new(),
+                    pending_newlines: 0,
                     undo_stack: VecDeque::new(),
                     redo_stack: Vec::new(),
                     last_edit: None,
@@ -441,7 +436,6 @@ impl CustomElement for TextEditorElement {
         state.update(cx, |state, cx| {
             state.callback = callback;
             state.emits_change = emits_change;
-            state.emits_submit = emits_submit;
             state.emits_key_down = emits_key_down;
             state.emits_key_up = emits_key_up;
             state.placeholder = self.placeholder.clone().into();
@@ -563,7 +557,7 @@ impl CustomElement for TextEditorElement {
 
     fn supported_events(&self) -> &'static [&'static str] {
         &[
-            "change", "submit", "click", "keyDown", "keyUp", "focus", "blur",
+            "change", "click", "keyDown", "keyUp", "focus", "blur",
         ]
     }
 
@@ -577,6 +571,16 @@ impl CustomElement for TextEditorElement {
 
     fn set_text_value(&self, value: String, cx: &mut App) -> bool {
         TextEditorElement::set_value(self, value, cx)
+    }
+
+    fn resolve_key_down_default(
+        &self,
+        default_prevented: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        let Some(state) = &self.state else { return false };
+        state.update(cx, |state, cx| state.resolve_key_down_default(default_prevented, window, cx))
     }
 
     fn destroy(&mut self) {
@@ -758,7 +762,6 @@ struct TextEditorState {
     element_id: u64,
     callback: Option<EventCallback>,
     emits_change: bool,
-    emits_submit: bool,
     emits_key_down: bool,
     emits_key_up: bool,
     focus_handle: FocusHandle,
@@ -793,6 +796,7 @@ struct TextEditorState {
     blink_anchor: Instant,
     blink_task: Option<Task<()>>,
     pending_values: VecDeque<String>,
+    pending_newlines: usize,
     undo_stack: VecDeque<EditSnapshot>,
     redo_stack: Vec<EditSnapshot>,
     last_edit: Option<LastEdit>,
@@ -904,14 +908,6 @@ impl TextEditorState {
         if self.emits_change {
             record_pending_echo(&mut self.pending_values, self.content.clone());
             emit_event_full(&self.callback, self.element_id, "change", |payload| {
-                payload.value = Some(self.content.clone());
-            });
-        }
-    }
-
-    fn emit_submit(&self) {
-        if self.emits_submit {
-            emit_event_full(&self.callback, self.element_id, "submit", |payload| {
                 payload.value = Some(self.content.clone());
             });
         }
@@ -1283,17 +1279,64 @@ impl TextEditorState {
         }
     }
 
-    fn newline(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
+    fn insert_newline(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.multiline && !self.read_only {
             self.replace_text_in_range(None, "\n", window, cx);
         }
     }
 
-    fn submit(&mut self, _: &Submit, _: &mut Window, _: &mut Context<Self>) {
-        if self.action_disabled {
+    /// DOM order is keydown then default. Stopping propagation keeps gpui's
+    /// key-char path and the platform from inserting their own newline.
+    fn on_key_down(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.emits_key_down {
+            emit_event_full(&self.callback, self.element_id, "keyDown", |payload| {
+                payload.key = Some(event.keystroke.key.clone());
+                payload.key_char = event.keystroke.key_char.clone();
+                payload.is_held = Some(event.is_held);
+                payload.modifiers = Some(event.keystroke.modifiers.into());
+            });
+        }
+
+        if event.keystroke.key != "enter" {
             return;
         }
-        self.emit_submit();
+        cx.stop_propagation();
+        let modifiers = event.keystroke.modifiers;
+        if !self.multiline
+            || self.read_only
+            || modifiers.control
+            || modifiers.alt
+            || modifiers.platform
+            || modifiers.function
+        {
+            return;
+        }
+        if self.emits_key_down {
+            self.pending_newlines += 1;
+        } else {
+            self.insert_newline(window, cx);
+        }
+    }
+
+    pub(crate) fn resolve_key_down_default(
+        &mut self,
+        default_prevented: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.pending_newlines == 0 {
+            return false;
+        }
+        self.pending_newlines -= 1;
+        if !default_prevented {
+            self.insert_newline(window, cx);
+        }
+        true
     }
 
     fn vertical_target(&self, direction: f32) -> Option<usize> {
@@ -1815,7 +1858,6 @@ impl EntityInputHandler for TextEditorState {
 
 impl gpui::Render for TextEditorState {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let key_down_callback = self.callback.clone();
         let key_up_callback = self.callback.clone();
         let element_id = self.element_id;
         div()
@@ -1858,22 +1900,11 @@ impl gpui::Render for TextEditorState {
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
-            .on_action(cx.listener(Self::newline))
-            .on_action(cx.listener(Self::submit))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
-            .when(self.emits_key_down, move |editor| {
-                editor.on_key_down(move |event, _window, _cx| {
-                    emit_event_full(&key_down_callback, element_id, "keyDown", |payload| {
-                        payload.key = Some(event.keystroke.key.clone());
-                        payload.key_char = event.keystroke.key_char.clone();
-                        payload.is_held = Some(event.is_held);
-                        payload.modifiers = Some(event.keystroke.modifiers.into());
-                    });
-                })
-            })
+            .on_key_down(cx.listener(Self::on_key_down))
             .when(self.emits_key_up, move |editor| {
                 editor.on_key_up(move |event, _window, _cx| {
                     emit_event_full(&key_up_callback, element_id, "keyUp", |payload| {
@@ -2162,6 +2193,25 @@ mod tests {
         assert_eq!(pending.len(), MAX_PENDING_ECHOES);
         // The oldest edits were dropped, not the newest.
         assert_eq!(pending.back().map(String::as_str), Some("39"));
+    }
+
+    #[test]
+    fn enter_is_not_a_key_binding() {
+        for bindings in [
+            text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true),
+            text_editor_bindings(TEXTAREA_KEY_CONTEXT, true, true, true),
+        ] {
+            assert!(bindings.iter().all(|binding| {
+                binding.match_keystrokes(std::slice::from_ref(
+                    &gpui::Keystroke::parse("enter").unwrap(),
+                )) != Some(false)
+            }));
+            assert!(bindings.iter().all(|binding| {
+                binding.match_keystrokes(std::slice::from_ref(
+                    &gpui::Keystroke::parse("shift-enter").unwrap(),
+                )) != Some(false)
+            }));
+        }
     }
 
     #[test]

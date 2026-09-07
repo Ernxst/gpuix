@@ -436,6 +436,17 @@ pub trait CustomElement: 'static {
         false
     }
 
+    /// Complete the DOM default of an Enter keydown after React has had its
+    /// chance to cancel it; false for an element with nothing pending.
+    fn resolve_key_down_default(
+        &self,
+        _default_prevented: bool,
+        _window: &mut gpui::Window,
+        _cx: &mut gpui::App,
+    ) -> bool {
+        false
+    }
+
     /// Clean up resources (GPUI entities, subscriptions, etc.)
     fn destroy(&mut self);
 }
@@ -621,6 +632,22 @@ impl CustomElementRegistry {
         self.instances
             .get(&id)
             .is_some_and(|entry| entry.element.set_text_value(value, cx))
+    }
+
+    /// Complete the DOM default of an editor's Enter keydown after React has
+    /// had its chance to cancel it.
+    pub fn resolve_editor_key_down(
+        &self,
+        id: u64,
+        default_prevented: bool,
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) -> bool {
+        self.instances.get(&id).is_some_and(|entry| {
+            entry
+                .element
+                .resolve_key_down_default(default_prevented, window, cx)
+        })
     }
 
     /// Remove and destroy instances whose IDs no longer exist in the tree.

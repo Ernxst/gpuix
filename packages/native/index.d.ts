@@ -136,6 +136,7 @@ export declare class GpuixRenderer {
    * bubble handlers have had a chance to call preventDefault().
    */
   resolveTabKeyDown(defaultPrevented: boolean): void
+  resolveEditorKeyDown(elementId: number, defaultPrevented: boolean): void
   /**
    * The focused host element id, analogous to `document.activeElement`, or null.
    * This reads GPUI focus directly, so role-less focusable elements are included.
@@ -429,6 +430,7 @@ export declare class TestGpuixRenderer {
   focusNext(): void
   focusPrevious(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
+  resolveEditorKeyDown(elementId: number, defaultPrevented: boolean): void
   setPointerCapture(id: number): void
   releasePointerCapture(id: number): void
   /** Simulate a platform window activation change through the production observer path. */

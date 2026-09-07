@@ -1308,6 +1308,10 @@ enum UiCommand {
     ResolveTabKeyDown {
         default_prevented: bool,
     },
+    ResolveEditorKeyDown {
+        id: u64,
+        default_prevented: bool,
+    },
     GetActiveElement {
         response: SyncSender<Option<u64>>,
     },
@@ -1638,6 +1642,13 @@ async fn run_ui_commands(
                     view.resolve_tab_key_down(default_prevented, window, cx);
                 })
             }
+            UiCommand::ResolveEditorKeyDown {
+                id,
+                default_prevented,
+            } => window.update(cx, move |view, window, cx| {
+                view.custom_registry
+                    .resolve_editor_key_down(id, default_prevented, window, cx);
+            }),
             UiCommand::GetActiveElement { response } => {
                 window.update(cx, move |view, window, _cx| {
                     response.send(view.active_element_id(window)).ok();
@@ -3557,6 +3568,37 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Complete the DOM default of an editor's Enter keydown after React capture and
+    /// bubble handlers have had a chance to call preventDefault().
+    #[napi]
+    pub fn resolve_editor_key_down(
+        &self,
+        element_id: f64,
+        default_prevented: bool,
+    ) -> Result<()> {
+        let id = to_element_id(element_id)?;
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.custom_registry
+                .resolve_editor_key_down(id, default_prevented, window, cx);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ResolveEditorKeyDown {
+            id,
+            default_prevented,
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// The focused host element id, analogous to `document.activeElement`, or null.
     /// This reads GPUI focus directly, so role-less focusable elements are included.
     #[napi]
@@ -5257,6 +5299,19 @@ impl WebGpuixRenderer {
     ) -> Result<(), wasm_bindgen::JsValue> {
         update_web_view(move |view, window, cx| {
             view.resolve_tab_key_down(default_prevented, window, cx);
+        })
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = resolveEditorKeyDown)]
+    pub fn resolve_editor_key_down(
+        &self,
+        element_id: f64,
+        default_prevented: bool,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_view(move |view, window, cx| {
+            view.custom_registry
+                .resolve_editor_key_down(id, default_prevented, window, cx);
         })
     }
 
