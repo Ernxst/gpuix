@@ -609,10 +609,34 @@ describeNative("automation", () => {
           aria-valuemax={3}
           aria-valuenow={2}
         />
-        <div role="meter" ariaLabel="Camel meter built-in" ariaValueText="40 percent" ariaValueMin={0} ariaValueMax={100} ariaValueNow={40} />
-        <div role="meter" aria-label="Hyphen meter built-in" aria-valuetext="40 percent" aria-valuemin={0} aria-valuemax={100} aria-valuenow={40} />
-        <div role="progressbar" ariaLabel="Camel progress built-in" ariaValueMin={0} ariaValueMax={100} />
-        <div role="progressbar" aria-label="Hyphen progress built-in" aria-valuemin={0} aria-valuemax={100} />
+        <div
+          role="meter"
+          ariaLabel="Camel meter built-in"
+          ariaValueText="40 percent"
+          ariaValueMin={0}
+          ariaValueMax={100}
+          ariaValueNow={40}
+        />
+        <div
+          role="meter"
+          aria-label="Hyphen meter built-in"
+          aria-valuetext="40 percent"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={40}
+        />
+        <div
+          role="progressbar"
+          ariaLabel="Camel progress built-in"
+          ariaValueMin={0}
+          ariaValueMax={100}
+        />
+        <div
+          role="progressbar"
+          aria-label="Hyphen progress built-in"
+          aria-valuemin={0}
+          aria-valuemax={100}
+        />
         <div ariaHidden>
           <div role="button" ariaLabel="Camel hidden built-in" />
         </div>
@@ -672,6 +696,7 @@ describeNative("automation", () => {
       expect(byLabel(hyphen)).toMatchObject(expected)
     }
     expect(byLabel("Camel progress built-in")).not.toHaveProperty("numeric_value")
+    expect(byLabel("Hyphen progress built-in")).not.toHaveProperty("numeric_value")
     expect(nodes.map((node) => node.aria.label)).not.toEqual(
       expect.arrayContaining([
         "Camel hidden built-in",
@@ -1600,6 +1625,38 @@ describeNative("automation", () => {
       ([, node]) => node.accesskit_id === control.accesskit_id
     )
     expect(focused.gpui_focus).toBe(focusedEntry?.[0])
+  })
+
+
+  it("keeps meter and progressbar read-only: focus but no value actions", () => {
+    const { render, renderer } = createTestRoot()
+
+    render(
+      <div>
+        <div
+          role="meter"
+          ariaLabel="Power demand"
+          ariaValueNow={40}
+          tabIndex={0}
+          onAccessibilityAction={() => {}}
+        />
+        <div
+          role="progressbar"
+          ariaLabel="Import"
+          ariaValueNow={40}
+          tabIndex={0}
+          onAccessibilityAction={() => {}}
+        />
+      </div>
+    )
+
+    const tree = renderer.getAccessibilityTree()
+    for (const label of ["Power demand", "Import"]) {
+      const node = Object.values(tree.nodes).find((candidate) => candidate.aria.label === label)!
+      expect(node.aria.on_action).toContain("Focus")
+      expect(node.aria.on_action).not.toContain("Increment")
+      expect(node.aria.on_action).not.toContain("Decrement")
+    }
   })
 
   it("keeps semantic IDs stable across reorder and removes stale nodes", () => {

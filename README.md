@@ -2450,8 +2450,8 @@ Role/state combinations are validated rather than silently approximated:
 | `heading` | positive `ariaLevel` |
 | `img` | accessible name and description |
 | `link` | `ariaExpanded`; Activate uses `onClick` |
+| `meter`, `progressbar` | value text/range; read-only, so no Increment or Decrement action; omit `ariaValueNow` on `progressbar` for indeterminate progress |
 | `option` | `ariaSelected` |
-| `meter`, `progressbar` | value text/range; read-only, so no Increment or Decrement action; omit `ariaValueNow` for indeterminate progress |
 | `slider`, `spinbutton` | value text/range; Increment and Decrement use `onAccessibilityAction` |
 | `switch` | boolean `ariaChecked` only; `"mixed"` is computed as `false` with a normalization diagnostic; Activate uses `onClick` |
 | `textbox` | accessible name and description |

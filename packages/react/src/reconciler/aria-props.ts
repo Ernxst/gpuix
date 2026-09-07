@@ -9,8 +9,9 @@
  * The DOM spelling of every supported ARIA attribute, and the prop key the
  * retained tree stores it under.
  *
- * The mapping is not mechanical — `aria-labelledby` is stored as `ariaLabelledBy` — so both sides read this one table
- * rather than camel-casing and hoping.
+ * The mapping is not mechanical — `aria-valuetext` is stored as
+ * `ariaValueText` and `aria-labelledby` as `ariaLabelledBy` — so both sides
+ * read this one table rather than camel-casing and hoping.
  */
 export const ARIA_PROP_ALIASES = {
   "aria-label": "ariaLabel",
