@@ -3431,6 +3431,15 @@ from `0` through `1`. Native interpolation supports `srgb` and `oklab`.
 Radial gradients are explicitly rejected until GPUI has a radial background
 primitive.
 
+`repeating-linear-gradient()` is accepted in exactly one shape, the 135deg
+two-stop pixel hatch `repeating-linear-gradient(135deg, <color> 0 <w>px,
+transparent <w>px <p>px)`, which GPUI paints with its native slash pattern
+(stripes `w` px wide every `p` px, running bottom-left to top-right, as the
+browser paints the same string); every other repeating gradient, including
+`45deg`, percent positions and more stops, is rejected with a strict-style
+diagnostic naming the accepted shape until the shader gains a general repeat
+mode.
+
 ### Cursors
 
 `cursor` takes the CSS keyword. An unlisted keyword is ignored, like any other

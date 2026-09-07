@@ -2,6 +2,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
 
 const MAX_LINEAR_GRADIENT_STOPS: usize = 8;
+const REPEATING_GRADIENT_REJECTION: &str = "repeating-linear-gradient() is painted only as a 135deg two-stop pixel hatch: `135deg, <color> 0 <w>px, transparent <w>px <p>px`";
 
 /// Font weight value — accepts both CSS strings ("bold", "700") and numbers (700).
 /// JS style objects commonly use both `fontWeight: "bold"` and `fontWeight: 700`.
@@ -2102,6 +2103,12 @@ fn parse_background_string(value: &str) -> Result<gpui::Background, String> {
     if trimmed.starts_with("radial-gradient(") {
         return Err("radial gradients are not supported by GPUI".into());
     }
+    if let Some(body) = trimmed
+        .strip_prefix("repeating-linear-gradient(")
+        .and_then(|body| body.strip_suffix(')'))
+    {
+        return parse_repeating_linear_gradient(body);
+    }
     if !trimmed.starts_with("linear-gradient(") {
         return crate::color::parse_color_rgba(trimmed)
             .map(Into::into)
@@ -2147,6 +2154,56 @@ fn parse_background_string(value: &str) -> Result<gpui::Background, String> {
     }
 
     native_linear_gradient(angle, &stops, color_space.as_deref())
+}
+
+fn parse_repeating_linear_gradient(body: &str) -> Result<gpui::Background, String> {
+    fn px_length(token: &str) -> Option<f64> {
+        let value = token.strip_suffix("px").unwrap_or(token).parse::<f64>().ok()?;
+        value.is_finite().then_some(value)
+    }
+
+    let parts = split_top_level(body, ',');
+    if parts.len() != 3 || parts[0].trim() != "135deg" {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    }
+
+    let first_stop = parts[1].split_whitespace().collect::<Vec<_>>();
+    let [color, start, width] = first_stop.as_slice() else {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    };
+    if !matches!(*start, "0" | "0px") {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    }
+    let Some(width) = px_length(width) else {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    };
+
+    let second_stop = parts[2].split_whitespace().collect::<Vec<_>>();
+    let [keyword, second_start, period] = second_stop.as_slice() else {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    };
+    if !keyword.eq_ignore_ascii_case("transparent") {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    }
+    let Some(second_start) = px_length(second_start) else {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    };
+    let Some(period) = px_length(period) else {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    };
+    if second_start != width || !(0.0 < width && width < period) {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    }
+
+    let Some(color) = crate::color::parse_color_rgba(color) else {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    };
+    let sqrt_2 = std::f64::consts::SQRT_2;
+    Ok(gpui::pattern_slash(
+        color,
+        (width * sqrt_2) as f32,
+        ((period - width) * sqrt_2) as f32,
+    ))
 }
 
 fn parse_gradient_direction(value: &str) -> Option<(f64, Option<String>)> {
@@ -2266,6 +2323,7 @@ pub fn parse_cursor(name: &str) -> Option<gpui::CursorStyle> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::f64::consts::SQRT_2;
 
     #[test]
     fn transition_deserialization_defaults_optional_fields() {
@@ -2722,6 +2780,41 @@ mod tests {
         assert_eq!(malformed.problems.len(), 1);
         assert_eq!(malformed.problems[0].property, "background");
         assert!(malformed.problems[0].value.contains("colourSpace"));
+    }
+
+    #[test]
+    fn parses_the_pixel_hatch_form_of_repeating_linear_gradient() {
+        for value in [
+            "repeating-linear-gradient(135deg, #888 0 2px, transparent 2px 5px)",
+            "repeating-linear-gradient(135deg, #888 0px 2px, transparent 2px 5px)",
+            "repeating-linear-gradient( 135deg , #888 0 2px , transparent 2px 5px )",
+        ] {
+            assert_eq!(
+                parse_background(&BackgroundValue::String(value.into())),
+                Ok(gpui::pattern_slash(
+                    crate::color::parse_color_rgba("#888").unwrap(),
+                    (2.0 * SQRT_2) as f32,
+                    (3.0 * SQRT_2) as f32,
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_every_other_repeating_linear_gradient() {
+        for value in [
+            "repeating-linear-gradient(45deg, #888 0 2px, transparent 2px 5px)",
+            "repeating-linear-gradient(135deg, #888 0 20%, transparent 20% 50%)",
+            "repeating-linear-gradient(135deg, #888 0 2px, transparent 2px 5px, #888 5px 6px)",
+            "repeating-linear-gradient(135deg, #888 0 2px, #000 2px 5px)",
+            "repeating-linear-gradient(135deg, #888 0 5px, transparent 5px 5px)",
+            "repeating-linear-gradient(135deg, #888 0 2px, transparent 3px 5px)",
+        ] {
+            assert_eq!(
+                parse_background(&BackgroundValue::String(value.into())),
+                Err(REPEATING_GRADIENT_REJECTION.to_string())
+            );
+        }
     }
 
     #[test]

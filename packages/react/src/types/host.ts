@@ -215,6 +215,9 @@ export type GpuixColor =
 /** The native renderer supports CSS linear gradients as background strings. */
 export type CssLinearGradient = `linear-gradient(${string})`
 
+/** The one repeating form the native renderer paints: a 135deg two-stop pixel hatch. */
+export type CssRepeatingLinearGradient = `repeating-linear-gradient(${string})`
+
 export type FontWeight =
   | number
   | `${number}`
@@ -398,7 +401,11 @@ export interface LinearGradient {
   colorSpace?: "srgb" | "oklab"
 }
 
-export type BackgroundValue = GpuixColor | CssLinearGradient | LinearGradient
+export type BackgroundValue =
+  | GpuixColor
+  | CssLinearGradient
+  | CssRepeatingLinearGradient
+  | LinearGradient
 
 export type GridTrackSizing =
   | { type: "px"; value: number }
