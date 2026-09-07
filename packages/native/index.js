@@ -576,6 +576,8 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
+module.exports.AvailableUpdate = nativeBinding.AvailableUpdate
 module.exports.GpuixRenderer = nativeBinding.GpuixRenderer
 module.exports.TestGpuixRenderer = nativeBinding.TestGpuixRenderer
+module.exports.checkUpdate = nativeBinding.checkUpdate
 module.exports.hasTestGpuixRenderer = nativeBinding.hasTestGpuixRenderer

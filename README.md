@@ -192,6 +192,132 @@ not a resource. Resources go in `Contents/Resources`. `dlopen` looks in
 On this machine the Bun chat `.app` is **82 MB**. The Hermes counter `.app`
 is **34 MB**.
 
+### 6. Auto-update
+
+Packaging does **not** turn on updates. The running app calls
+`checkUpdate` on `@gpuix/native`. That is a port of
+[cargo-packager-updater](https://docs.rs/cargo-packager-updater/latest/cargo_packager_updater/)
+inside the same `.node`. HTTP uses the same `reqwest_client` as `<img>`.
+There is no second native addon and no extra TLS stack.
+
+Host the feed on **GitHub Releases**. Create the release first. CI then packs
+on each OS, signs, and uploads onto that tag with
+[`gh release upload`](https://cli.github.com/manual/gh_release_upload).
+The app hits
+`https://github.com/OWNER/REPO/releases/latest/download/latest.json`.
+GitHub 302s that to the current tag.
+
+Sign once:
+
+```bash
+cargo packager signer generate
+```
+
+Store the private key and its password as repo secrets
+`CARGO_PACKAGER_SIGN_PRIVATE_KEY` and
+`CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD`. Put the **public** key in the app.
+
+```tsx
+import { checkUpdate } from '@gpuix/native'
+import { render } from '@gpuix/react'
+import { App } from './app'
+
+async function maybeUpdate() {
+  const update = await checkUpdate('0.1.0', {
+    endpoints: [
+      'https://github.com/OWNER/REPO/releases/latest/download/latest.json',
+    ],
+    pubkey: '<public key from signer generate>',
+  })
+  if (update) await update.downloadAndInstall()
+}
+
+maybeUpdate()
+render(<App />)
+```
+
+Packager only builds the **host** OS. Run it on macOS, Linux, and Windows.
+`--release` is the packager profile (look in `binariesDir` for a release
+binary). It is not `cargo build --release`. Signing is automatic when those
+two env vars are set. Source:
+[cargo-packager CLI](https://docs.rs/cargo-packager/latest/cargo_packager/).
+
+With `productName: "My App"`, `version: "0.1.0"`, and
+`binaries: [{ "path": "app", "main": true }]`, packager writes:
+
+| OS | `formats` | Files in `outDir` (`bundle/`) |
+|---|---|---|
+| macOS | `"app"` | `My App.app`, then on sign `My App.app.tar.gz` + `My App.app.tar.gz.sig` |
+| Linux | `"appimage"` | `app_0.1.0_x86_64.AppImage` + `.sig` |
+| Windows | `"nsis"` | `app_0.1.0_x64-setup.exe` + `.sig` |
+
+The macOS updater wants the **`.app.tar.gz`**, not the `.app` and not a
+`.dmg`. Packager tars the `.app` only when it signs. Linux and Windows names
+use the **binary stem** (`app`), not `productName`. NSIS arch is `x64`, not
+`x86_64`.
+
+Create the GitHub release yourself, then pack and upload. `--clobber`
+replaces an asset if CI retries. Paste each `.sig` into `latest.json` and
+upload that too:
+
+```json
+{
+  "version": "0.1.0",
+  "platforms": {
+    "macos-aarch64": {
+      "url": "https://github.com/OWNER/REPO/releases/download/v0.1.0/My%20App.app.tar.gz",
+      "signature": "<contents of My App.app.tar.gz.sig>",
+      "format": "app"
+    },
+    "linux-x86_64": {
+      "url": "https://github.com/OWNER/REPO/releases/download/v0.1.0/app_0.1.0_x86_64.AppImage",
+      "signature": "<contents of app_0.1.0_x86_64.AppImage.sig>",
+      "format": "appimage"
+    },
+    "windows-x86_64": {
+      "url": "https://github.com/OWNER/REPO/releases/download/v0.1.0/app_0.1.0_x64-setup.exe",
+      "signature": "<contents of app_0.1.0_x64-setup.exe.sig>",
+      "format": "nsis"
+    }
+  }
+}
+```
+
+```bash
+# macOS
+bun build --compile app.tsx --outfile dist/app
+cargo packager --release --config packager.json
+gh release upload v0.1.0 \
+  "bundle/My App.app.tar.gz" \
+  "bundle/My App.app.tar.gz.sig" \
+  --clobber
+
+# Linux
+bun build --compile app.tsx --outfile dist/app
+cargo packager --release --config packager.json
+gh release upload v0.1.0 \
+  bundle/app_0.1.0_x86_64.AppImage \
+  bundle/app_0.1.0_x86_64.AppImage.sig \
+  --clobber
+
+# Windows
+bun build --compile app.tsx --outfile dist/app.exe
+cargo packager --release --config packager.json
+gh release upload v0.1.0 \
+  bundle/app_0.1.0_x64-setup.exe \
+  bundle/app_0.1.0_x64-setup.exe.sig \
+  --clobber
+
+gh release upload v0.1.0 latest.json --clobber
+```
+
+`downloadAndInstall()` replaces the packaged files. It does **not** relaunch.
+Quit after it returns, or the next start uses the new app.
+
+HTTPS is in the native crate. This works on **Bun** and **hermes-node**. It
+does not exist in the browser wasm build. The repo must be **public**, or
+GitHub will 404 the download.
+
 ### Start from the example app
 
 [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) is a complete todo app in one file, with `dev`,

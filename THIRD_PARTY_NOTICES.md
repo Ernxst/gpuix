@@ -29,6 +29,7 @@ behavior reviewed at
 | `packages/native/src/custom_elements/code.rs` | `render_code_block` in `crates/ui/src/markdown/render.rs` |
 | `packages/native/src/custom_elements/input.rs` | [caret blink sections of `crates/ui/src/composer.rs`](https://github.com/zeronsh/comet/blob/main/crates/ui/src/composer.rs) |
 | `packages/native/src/theme.rs` | `crates/ui/src/theme.rs` |
+| `packages/native/src/updater.rs` | [cargo-packager-updater 0.2.3](https://github.com/crabnebula-dev/cargo-packager/blob/v0.2.3/crates/updater/src/lib.rs) (MIT OR Apache-2.0). HTTP uses GPUIX `reqwest_client`, not crates.io `reqwest`. |
 
 ## Example icons
 

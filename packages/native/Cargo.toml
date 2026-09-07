@@ -47,7 +47,16 @@ gpui = { path = "../../zed/crates/gpui", default-features = false, features = ["
 gpui_platform = { path = "../../zed/crates/gpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
 # Same client GPUI's image examples and Zed use. `img(SharedUri)` fetches
 # through `App::http_client`; without this, GPUI's NullHttpClient fails every URL.
+# The updater uses this too. Do not add crates.io `reqwest`: that is a second
+# HTTP+TLS stack next to Zed's `zed-reqwest` fork.
 reqwest_client = { path = "../../zed/crates/reqwest_client" }
+http_client = { path = "../../zed/crates/http_client" }
+semver = "1"
+minisign-verify = "0.2"
+tempfile = "3"
+percent-encoding = "2"
+time = { version = "0.3", features = ["parsing", "formatting"] }
+url = { version = "2", features = ["serde"] }
 
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
 napi = { version = "3", features = ["napi8", "serde-json"] }
@@ -71,6 +80,8 @@ web-sys = { version = "0.3", features = ["Navigator", "Window"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 core-text = "=21.0.0"
 core-graphics = "=0.24.0"
+tar = "0.4"
+flate2 = "1"
 # Production uses the embedded AppKit loop; tests use the native Metal renderer.
 gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, features = ["font-kit"] }
 

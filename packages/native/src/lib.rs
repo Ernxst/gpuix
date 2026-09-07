@@ -29,6 +29,9 @@ pub mod style;
 mod syntax;
 mod text;
 mod theme;
+// Desktop only. HTTP goes through reqwest_client, not crates.io reqwest.
+#[cfg(not(target_family = "wasm"))]
+mod updater;
 
 #[cfg(all(
     feature = "test-support",
