@@ -3433,12 +3433,17 @@ primitive.
 
 `repeating-linear-gradient()` is accepted in exactly one shape, the 135deg
 two-stop pixel hatch `repeating-linear-gradient(135deg, <color> 0 <w>px,
-transparent <w>px <p>px)`, which GPUI paints with its native slash pattern
-(stripes `w` px wide every `p` px, running bottom-left to top-right, as the
-browser paints the same string); every other repeating gradient, including
+transparent <w>px <p>px)`, where `<w>` and `<p>` are the stripe width and
+period in CSS logical pixels; every other repeating gradient, including
 `45deg`, percent positions and more stops, is rejected with a strict-style
 diagnostic naming the accepted shape until the shader gains a general repeat
 mode.
+
+The accepted shape is painted with a dedicated GPUI primitive, not the
+unrelated `pattern_slash` GPUI primitive: hard, undithered stripe edges
+(`floor-mod(t, period) < width` along the 135deg axis), repeated by tiling the
+CSS `background-origin: padding-box` area into the border box, matching how
+Chromium paints the same string.
 
 ### Cursors
 

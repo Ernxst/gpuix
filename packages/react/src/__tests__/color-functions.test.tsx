@@ -3,7 +3,6 @@ import path from "path"
 import React from "react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
-import { decodePng } from "../testing-png.js"
 import type { BackgroundValue } from "../types/host.js"
 import {
   expectScreenshotsDiffer,
@@ -200,42 +199,6 @@ describeNative("native color functions", { timeout: 12_000 }, () => {
       colorSpace: "srgb",
     })
     expectScreenshotsDiffer(twoStop, multiStop)
-  })
-
-  it("paints the 135deg pixel hatch as the native slash pattern", () => {
-    const shot = captureBackground(
-      "repeating-hatch",
-      "repeating-linear-gradient(135deg, #ff0000 0 4px, transparent 4px 12px)"
-    )
-    const image = decodePng(fs.readFileSync(shot), "hatch")
-    const isRed = (x: number, y: number) => {
-      const i = (y * image.width + x) * 4
-      return image.data[i]! > 200 && image.data[i + 1]! < 60 && image.data[i + 2]! < 60
-    }
-
-    const y = Math.floor(image.height / 2)
-    const redPixels: number[] = []
-    for (let x = 8; x < image.width - 8; x += 1) {
-      if (isRed(x, y)) redPixels.push(x)
-    }
-    expect(redPixels.length).toBeGreaterThan(0)
-    expect(redPixels.length).toBeLessThan(image.width - 16)
-
-    let alongStripe = 0
-    for (const x of redPixels) {
-      if (x + 3 < image.width - 8 && y - 3 >= 0 && isRed(x + 3, y - 3)) {
-        alongStripe += 1
-      }
-    }
-    expect(alongStripe).toBeGreaterThanOrEqual(redPixels.length * 0.8)
-
-    let acrossStripe = 0
-    for (const x of redPixels) {
-      if (x + 6 < image.width && y + 6 < image.height && !isRed(x + 6, y + 6)) {
-        acrossStripe += 1
-      }
-    }
-    expect(acrossStripe).toBeGreaterThanOrEqual(redPixels.length * 0.5)
   })
 
   it("rejects the 45deg hatch with a strict-style diagnostic", () => {

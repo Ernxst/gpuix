@@ -2209,12 +2209,19 @@ fn parse_repeating_linear_gradient(body: &str) -> Result<gpui::Background, Strin
     let Some(color) = crate::color::parse_color_rgba(color) else {
         return Err(REPEATING_GRADIENT_REJECTION.into());
     };
-    let sqrt_2 = std::f64::consts::SQRT_2;
-    Ok(gpui::pattern_slash(
-        color,
-        (width * sqrt_2) as f32,
-        ((period - width) * sqrt_2) as f32,
-    ))
+
+    let width = width as f32;
+    let period = period as f32;
+    if !width.is_finite()
+        || !period.is_finite()
+        || width <= 0.0
+        || period <= 0.0
+        || width >= period
+    {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    }
+
+    Ok(gpui::repeating_hatch_135(color, width, period))
 }
 
 fn parse_gradient_direction(value: &str) -> Option<(f64, Option<String>)> {
@@ -2334,7 +2341,6 @@ pub fn parse_cursor(name: &str) -> Option<gpui::CursorStyle> {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::f64::consts::SQRT_2;
 
     #[test]
     fn transition_deserialization_defaults_optional_fields() {
@@ -2802,13 +2808,39 @@ mod tests {
         ] {
             assert_eq!(
                 parse_background(&BackgroundValue::String(value.into())),
-                Ok(gpui::pattern_slash(
+                Ok(gpui::repeating_hatch_135(
                     crate::color::parse_color_rgba("#888").unwrap(),
-                    (2.0 * SQRT_2) as f32,
-                    (3.0 * SQRT_2) as f32,
+                    2.0,
+                    5.0,
                 ))
             );
         }
+    }
+
+    #[test]
+    fn accepts_wide_repeating_linear_gradient_hatch() {
+        // Regression: the old `pattern_slash` translation packed width/interval
+        // into a single u32, which overflowed well below these logical-pixel
+        // values. `repeating_hatch_135` carries width/period as plain f32s.
+        let value = "repeating-linear-gradient(135deg, #888 0 200px, transparent 200px 500px)";
+        assert_eq!(
+            parse_background(&BackgroundValue::String(value.into())),
+            Ok(gpui::repeating_hatch_135(
+                crate::color::parse_color_rgba("#888").unwrap(),
+                200.0,
+                500.0,
+            ))
+        );
+    }
+
+    #[test]
+    fn rejects_repeating_linear_gradient_hatch_with_width_unrepresentable_in_f32() {
+        // Finite as f64 but overflows to infinity once narrowed to f32.
+        let value = "repeating-linear-gradient(135deg, #888 0 5e38px, transparent 5e38px 6e38px)";
+        assert_eq!(
+            parse_background(&BackgroundValue::String(value.into())),
+            Err(REPEATING_GRADIENT_REJECTION.to_string())
+        );
     }
 
     #[test]
@@ -2842,10 +2874,10 @@ mod tests {
                 format!("repeating-linear-gradient(135deg, {color} 0 2px, transparent 2px 5px)");
             assert_eq!(
                 parse_background(&BackgroundValue::String(value)),
-                Ok(gpui::pattern_slash(
+                Ok(gpui::repeating_hatch_135(
                     crate::color::parse_color_rgba(color).unwrap(),
-                    (2.0 * SQRT_2) as f32,
-                    (3.0 * SQRT_2) as f32,
+                    2.0,
+                    5.0,
                 ))
             );
         }
@@ -2857,10 +2889,10 @@ mod tests {
             format!("repeating-linear-gradient(135deg,  {color}   0   2px , transparent 2px 5px)");
         assert_eq!(
             parse_background(&BackgroundValue::String(value)),
-            Ok(gpui::pattern_slash(
+            Ok(gpui::repeating_hatch_135(
                 crate::color::parse_color_rgba(color).unwrap(),
-                (2.0 * SQRT_2) as f32,
-                (3.0 * SQRT_2) as f32,
+                2.0,
+                5.0,
             ))
         );
     }
