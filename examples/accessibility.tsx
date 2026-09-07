@@ -64,7 +64,7 @@ function App() {
       <div
         role="spinbutton"
         ariaLabel="Machine count"
-        ariaValue={`${machines} machines`}
+        ariaValueText={`${machines} machines`}
         ariaValueMin={0}
         ariaValueMax={20}
         ariaValueNow={machines}

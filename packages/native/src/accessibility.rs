@@ -20,7 +20,7 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaLive",
     "ariaAtomic",
     "ariaSelected",
-    "ariaValue",
+    "ariaValueText",
     "ariaValueMin",
     "ariaValueMax",
     "ariaValueNow",
@@ -265,8 +265,11 @@ impl AccessibilityRole {
                 matches!(self.role, Role::Link)
             }
             "ariaSelected" => matches!(self.role, Role::ListBoxOption),
-            "ariaValue" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
-                matches!(self.role, Role::Slider | Role::SpinButton)
+            "ariaValueText" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
+                matches!(
+                    self.role,
+                    Role::Slider | Role::SpinButton | Role::Meter | Role::ProgressIndicator
+                )
             }
             "ariaLevel" => matches!(self.role, Role::Heading),
             "ariaRowIndex" => matches!(
@@ -655,7 +658,7 @@ impl<'a> AccessibilityProps<'a> {
                 .and_then(parse_booleanish),
             value: element
                 .custom_props
-                .get("ariaValue")
+                .get("ariaValueText")
                 .and_then(serde_json::Value::as_str),
             value_min: finite_number(element.custom_props.get("ariaValueMin")),
             value_max: finite_number(element.custom_props.get("ariaValueMax")),
@@ -1033,7 +1036,7 @@ pub(crate) fn element_problems(
 
     for (property, value) in &element.custom_props {
         let malformed = match property.as_str() {
-            "ariaLabel" | "ariaDescription" | "ariaValue" | "ariaLabelledBy"
+            "ariaLabel" | "ariaDescription" | "ariaValueText" | "ariaLabelledBy"
             | "ariaDescribedBy" => !value.is_string(),
             "ariaChecked" => !(value.is_boolean() || value.as_str() == Some("mixed")),
             "ariaCurrent" => parse_aria_current(value).is_none(),
@@ -1052,7 +1055,7 @@ pub(crate) fn element_problems(
         };
         if malformed {
             let expected = match property.as_str() {
-                "ariaLabel" | "ariaDescription" | "ariaValue" => "a string",
+                "ariaLabel" | "ariaDescription" | "ariaValueText" => "a string",
                 "ariaLabelledBy" | "ariaDescribedBy" => "a string of space-separated element ids",
                 "ariaChecked" => "a boolean or \"mixed\"",
                 "ariaCurrent" => {
@@ -1118,7 +1121,7 @@ pub(crate) fn element_problems(
                 | "ariaLive"
                 | "ariaAtomic"
                 | "ariaSelected"
-                | "ariaValue"
+                | "ariaValueText"
                 | "ariaValueMin"
                 | "ariaValueMax"
                 | "ariaValueNow"
@@ -1315,7 +1318,7 @@ where
     }
     if let Some(value) = props
         .value
-        .filter(|_| props.supports("ariaValue"))
+        .filter(|_| props.supports("ariaValueText"))
         .or(content_value)
         .or(live_contents_value)
     {
@@ -1718,7 +1721,7 @@ mod tests {
             .insert("ariaDescription".into(), "Factory output".into());
         element
             .custom_props
-            .insert("ariaValue".into(), "42 percent".into());
+            .insert("ariaValueText".into(), "42 percent".into());
         element.custom_props.insert("ariaValueMin".into(), 0.into());
         element
             .custom_props
@@ -1744,6 +1747,45 @@ mod tests {
         assert_eq!(props.value_now, Some(42.0));
         assert!(props.disabled);
         assert!(element_problems(&detached_tree(), &element).is_empty());
+    }
+
+    #[test]
+    fn parses_numeric_values_on_meter_and_progressbar() {
+        for role in ["meter", "progressbar"] {
+            let mut element = RetainedElement::new(7, "div".to_string(), 1);
+            element.custom_props.insert("role".into(), role.into());
+            element
+                .custom_props
+                .insert("ariaLabel".into(), "Power demand".into());
+            element
+                .custom_props
+                .insert("ariaValueText".into(), "40 percent".into());
+            element.custom_props.insert("ariaValueMin".into(), 0.into());
+            element.custom_props.insert("ariaValueMax".into(), 100.into());
+            element.custom_props.insert("ariaValueNow".into(), 40.into());
+
+            let props = AccessibilityProps::from_element(&detached_tree(), &element);
+            assert_eq!(props.value, Some("40 percent"));
+            assert_eq!(props.value_min, Some(0.0));
+            assert_eq!(props.value_max, Some(100.0));
+            assert_eq!(props.value_now, Some(40.0));
+            assert!(element_problems(&detached_tree(), &element).is_empty());
+        }
+
+        let mut progressbar = RetainedElement::new(7, "div".to_string(), 1);
+        progressbar.custom_props.insert("role".into(), "progressbar".into());
+        progressbar
+            .custom_props
+            .insert("ariaLabel".into(), "Import".into());
+        progressbar.custom_props.insert("ariaValueMin".into(), 0.into());
+        progressbar.custom_props.insert("ariaValueMax".into(), 100.into());
+
+        let props = AccessibilityProps::from_element(&detached_tree(), &progressbar);
+        assert_eq!(props.value, None);
+        assert_eq!(props.value_min, Some(0.0));
+        assert_eq!(props.value_max, Some(100.0));
+        assert_eq!(props.value_now, None);
+        assert!(element_problems(&detached_tree(), &progressbar).is_empty());
     }
 
     #[test]
