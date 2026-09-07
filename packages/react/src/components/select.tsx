@@ -1,18 +1,18 @@
 /** Headless shadcn-shaped Select components rendered with GPUIX host elements. */
 
 import React, {
-  Children,
   createContext,
   forwardRef,
-  isValidElement,
+  useCallback,
   useContext,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react"
 import type { ReactElement, ReactNode } from "react"
 import type { EventPayload } from "@gpuix/native"
-import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
+import type { Props, PublicInstance } from "../types/host.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
   FloatingLayer,
@@ -24,10 +24,14 @@ import {
 } from "./floating.js"
 import type { FloatingContentProps, StateStyle } from "./floating.js"
 
+export interface SelectItemData {
+  value: string
+  label?: ReactNode
+  textValue?: string
+}
+
 interface SelectItemRecord {
   value: string
-  label: ReactNode
-  textValue: string
   disabled: boolean
 }
 
@@ -35,7 +39,7 @@ interface SelectContextValue {
   open: boolean
   value: string | undefined
   disabled: boolean
-  items: SelectItemRecord[]
+  labels: Map<string, ReactNode>
   activeValue: string | null
   triggerPressedWhileOpen: React.MutableRefObject<boolean>
   dismissedByOutsidePress: React.MutableRefObject<boolean>
@@ -44,6 +48,7 @@ interface SelectContextValue {
   setActiveValue: (value: string | null) => void
   moveActive: (delta: number) => void
   selectValue: (value: string) => void
+  registerItem: (item: SelectItemRecord & { mounted: boolean }) => void
 }
 
 const SelectContext = createContext<SelectContextValue | null>(null)
@@ -54,36 +59,9 @@ function useSelectContext(name: string): SelectContextValue {
   return context
 }
 
-function textContent(node: ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") return String(node)
-  if (!isValidElement<{ children?: ReactNode }>(node)) return ""
-  return Children.toArray(node.props.children).map(textContent).join("")
-}
-
-function collectItems(node: ReactNode, items: SelectItemRecord[] = []): SelectItemRecord[] {
-  for (const child of Children.toArray(node)) {
-    if (isValidElement<SelectItemProps>(child) && child.type === SelectItem) {
-      const props = child.props
-      items.push({
-        value: props.value,
-        label: typeof props.children === "function" ? props.textValue : props.children,
-        textValue:
-          props.textValue ??
-          (typeof props.children === "function" ? "" : textContent(props.children)),
-        disabled: props.disabled ?? false,
-      })
-    } else if (
-      isValidElement<{ children?: ReactNode }>(child) &&
-      child.props.children !== undefined
-    ) {
-      collectItems(child.props.children, items)
-    }
-  }
-  return items
-}
-
 export interface SelectProps extends Omit<Props, "children" | "onChange"> {
   children?: ReactNode
+  items?: readonly SelectItemData[]
   value?: string
   defaultValue?: string
   onValueChange?: (value: string) => void
@@ -95,6 +73,7 @@ export interface SelectProps extends Omit<Props, "children" | "onChange"> {
 
 export function Select({
   children,
+  items: itemsProp,
   value: valueProp,
   defaultValue,
   onValueChange,
@@ -119,23 +98,59 @@ export function Select({
     onChange: onOpenChange,
   })
   const [activeValue, setActiveValue] = useState<string | null>(null)
+  const [itemsVersion, setItemsVersion] = useState(0)
   const triggerPressedWhileOpen = useRef(false)
   const dismissedByOutsidePress = useRef(false)
   const triggerRef = useRef<PublicInstance | null>(null)
-  const items = useMemo(() => collectItems(children), [children])
+  const registeredItems = useRef<SelectItemRecord[]>([])
+  const labels = useMemo(() => {
+    const next = new Map<string, ReactNode>()
+    for (const item of itemsProp ?? []) {
+      next.set(item.value, item.label ?? item.textValue ?? item.value)
+    }
+    return next
+  }, [itemsProp])
 
   const setOpen = (nextOpen: boolean) => {
     setOpenState(nextOpen)
-    if (nextOpen) {
-      const selected = items.find((item) => item.value === value && !item.disabled)
-      setActiveValue(selected?.value ?? null)
-    } else if (triggerRef.current) {
+    if (!nextOpen && triggerRef.current) {
       renderer?.focusElement?.(triggerRef.current.id)
     }
   }
 
+  const registerItem = useCallback(
+    ({ value: itemValue, disabled: itemDisabled, mounted }: SelectItemRecord & { mounted: boolean }) => {
+      const existing = registeredItems.current.findIndex((item) => item.value === itemValue)
+      if (!mounted) {
+        if (existing < 0) return
+        registeredItems.current = registeredItems.current.filter((item) => item.value !== itemValue)
+        setItemsVersion((version) => version + 1)
+        return
+      }
+      if (existing >= 0) {
+        registeredItems.current[existing] = { value: itemValue, disabled: itemDisabled }
+        return
+      }
+      registeredItems.current = [
+        ...registeredItems.current,
+        { value: itemValue, disabled: itemDisabled },
+      ]
+      setItemsVersion((version) => version + 1)
+    },
+    []
+  )
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const selected = registeredItems.current.find(
+      (item) => item.value === value && !item.disabled
+    )
+    setActiveValue(selected?.value ?? null)
+  }, [open, value, itemsVersion])
+
   const moveActive = (delta: number) => {
-    const enabled = items.filter((item) => !item.disabled)
+    if (disabled) return
+    const enabled = registeredItems.current.filter((item) => !item.disabled)
     if (enabled.length === 0) return
     const currentIndex = enabled.findIndex((item) => item.value === activeValue)
     const start = currentIndex < 0 ? (delta > 0 ? -1 : 0) : currentIndex
@@ -144,7 +159,8 @@ export function Select({
   }
 
   const selectValue = (nextValue: string) => {
-    const item = items.find((candidate) => candidate.value === nextValue)
+    if (disabled) return
+    const item = registeredItems.current.find((candidate) => candidate.value === nextValue)
     if (!item || item.disabled) return
     setValue(nextValue)
     setOpen(false)
@@ -155,7 +171,7 @@ export function Select({
       open,
       value,
       disabled,
-      items,
+      labels,
       activeValue,
       triggerPressedWhileOpen,
       dismissedByOutsidePress,
@@ -164,8 +180,9 @@ export function Select({
       setActiveValue,
       moveActive,
       selectValue,
+      registerItem,
     }),
-    [open, value, disabled, items, activeValue]
+    [open, value, disabled, labels, activeValue, registerItem]
   )
 
   return (
@@ -232,10 +249,10 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
           context.setOpen(false)
         } else if (event.key === "down" || (event.key === "n" && event.modifiers?.ctrl)) {
           if (!context.open) context.setOpen(true)
-          context.moveActive(1)
+          else context.moveActive(1)
         } else if (event.key === "up" || (event.key === "p" && event.modifiers?.ctrl)) {
           if (!context.open) context.setOpen(true)
-          context.moveActive(-1)
+          else context.moveActive(-1)
         } else if (event.key === "enter" || event.key === "space") {
           context.setOpen(!context.open)
         }
@@ -252,8 +269,8 @@ export interface SelectValueProps extends Props {
 export const SelectValue = forwardRef<PublicInstance, SelectValueProps>(
   function SelectValue({ placeholder, children, ...props }, ref) {
     const context = useSelectContext("SelectValue")
-    const item = context.items.find((candidate) => candidate.value === context.value)
-    return <div {...props} ref={ref}>{children ?? item?.label ?? placeholder}</div>
+    const label = context.value === undefined ? undefined : context.labels.get(context.value)
+    return <div {...props} ref={ref}>{children ?? label ?? context.value ?? placeholder}</div>
   }
 )
 
@@ -287,7 +304,10 @@ export const SelectContent = forwardRef<PublicInstance, SelectContentProps>(
           if (event.key === "escape") {
             onEscapeKeyDown?.(event)
             context.setOpen(false)
-          } else if (event.key === "down" || (event.key === "n" && event.modifiers?.ctrl)) {
+            return
+          }
+          if (context.disabled) return
+          if (event.key === "down" || (event.key === "n" && event.modifiers?.ctrl)) {
             context.moveActive(1)
           } else if (event.key === "up" || (event.key === "p" && event.modifiers?.ctrl)) {
             context.moveActive(-1)
@@ -311,7 +331,6 @@ export interface SelectItemState {
 export interface SelectItemProps extends Omit<Props, "children" | "style"> {
   value: string
   disabled?: boolean
-  textValue?: string
   children?: ReactNode | ((state: SelectItemState) => ReactNode)
   style?: StateStyle<SelectItemState>
 }
@@ -327,6 +346,10 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
       highlighted: context.activeValue === value,
       disabled,
     }
+    useLayoutEffect(() => {
+      context.registerItem({ value, disabled, mounted: true })
+      return () => context.registerItem({ value, disabled, mounted: false })
+    }, [context.registerItem, value, disabled])
     return (
       <div
         {...props}
@@ -334,11 +357,11 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
         style={resolveStyle(style, state)}
         onMouseEnter={(event: EventPayload) => {
           onMouseEnter?.(event)
-          if (!disabled) context.setActiveValue(value)
+          if (!disabled && !context.disabled) context.setActiveValue(value)
         }}
         onClick={(event: EventPayload) => {
           onClick?.(event)
-          if (!disabled) context.selectValue(value)
+          if (!disabled && !context.disabled) context.selectValue(value)
         }}
       >
         {typeof children === "function" ? children(state) : children}

@@ -612,8 +612,18 @@ export interface NativeRenderer {
   focusElement?(elementId: number): void
   focusNext?(): void
   focusPrevious?(): void
+  /** Host id of the focused element, or null when nothing is focused. */
+  getFocusedElementId?(): number | null
+  /** Next tab stop inside `elementId`, wrapping in that subtree. */
+  focusNextWithin?(elementId: number): void
+  /** Previous tab stop inside `elementId`, wrapping in that subtree. */
+  focusPreviousWithin?(elementId: number): void
   blur?(): void
   setWindowKeyEvents?(keyDown: boolean, keyUp: boolean, eventId: number): void
+
+  // ── Bounds API ─────────────────────────────────────────────────
+  /** Last painted box `[x, y, width, height]`, or null if the node did not paint. */
+  getElementBounds?(elementId: number): number[] | null
 
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll").

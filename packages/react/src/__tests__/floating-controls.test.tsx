@@ -26,6 +26,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../index"
+import { useFocusTrap } from "../components/floating"
 // `../index` does not re-export the test helpers, so importing them from there
 // left `hasNativeTestRenderer` undefined and skipped this whole suite silently.
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
@@ -64,11 +65,16 @@ describeNative("floating controls", () => {
   })
 
   it("composes a headless Select and supports keyboard selection", () => {
+    const items = [
+      { value: "alpha", label: "Alpha" },
+      { value: "disabled", label: "Disabled" },
+      { value: "beta", label: "Beta" },
+    ]
     function Demo() {
       const [value, setValue] = useState("alpha")
       return (
         <div style={{ width: 400, height: 300, padding: 12 }}>
-          <SelectPrimitive.Root value={value} onValueChange={setValue}>
+          <SelectPrimitive.Root items={items} value={value} onValueChange={setValue}>
             <SelectPrimitive.Trigger style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
@@ -115,7 +121,7 @@ describeNative("floating controls", () => {
     function Demo() {
       return (
         <div style={{ width: 400, height: 260, padding: 12 }}>
-          <Select defaultValue="one">
+          <Select items={[{ value: "one", label: "One" }, { value: "two", label: "Two" }]} defaultValue="one">
             <SelectTrigger style={triggerStyle}>
               <SelectValue />
             </SelectTrigger>
@@ -256,7 +262,7 @@ describeNative("floating controls", () => {
           >
             <text>Behind</text>
           </div>
-          <Select value={value} onValueChange={setValue}>
+          <Select items={[{ value: "one", label: "One" }, { value: "two", label: "Two" }]} value={value} onValueChange={setValue}>
             <SelectTrigger style={triggerStyle}><SelectValue /></SelectTrigger>
             <SelectContent sideOffset={4} style={contentStyle}>
               <SelectItem value="one" style={itemStyle}>One</SelectItem>
@@ -518,5 +524,292 @@ describeNative("floating controls", () => {
     testRoot.renderer.simulateKeystrokes("a")
 
     expect(testRoot.renderer.getAllText()).toContain("Focused: first")
+  })
+
+  it("selects from children when Root has no items", () => {
+    function Demo() {
+      const [value, setValue] = useState("one")
+      return (
+        <div style={{ width: 400, height: 300, padding: 12 }}>
+          <Select value={value} onValueChange={setValue}>
+            <SelectTrigger style={triggerStyle}>
+              <SelectValue placeholder="Choose" />
+            </SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              <SelectItem value="one" style={itemStyle}>One</SelectItem>
+              <SelectItem value="two" style={itemStyle}>Two</SelectItem>
+            </SelectContent>
+          </Select>
+          <text>{`Value: ${value}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    expect(testRoot.renderer.getAllText()).toEqual(["one", "Value: one"])
+
+    testRoot.renderer.nativeSimulateClick(30, 25)
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toEqual(["two", "Value: two"])
+  })
+
+  it("keeps SelectValue working when items are wrapped components", () => {
+    const items = [
+      { value: "one", label: "One" },
+      { value: "two", label: "Two" },
+    ]
+    const StyledItem = React.forwardRef((props, ref) => (
+      <SelectItem {...props} ref={ref} style={itemStyle} />
+    ))
+
+    function Demo() {
+      const [value, setValue] = useState("one")
+      return (
+        <div style={{ width: 400, height: 300, padding: 12 }}>
+          <Select items={items} value={value} onValueChange={setValue}>
+            <SelectTrigger style={triggerStyle}>
+              <SelectValue placeholder="Choose" />
+            </SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              <StyledItem value="one">One</StyledItem>
+              <StyledItem value="two">Two</StyledItem>
+            </SelectContent>
+          </Select>
+          <text>{`Value: ${value}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    expect(testRoot.renderer.getAllText()).toEqual(["One", "Value: one"])
+
+    testRoot.renderer.nativeSimulateClick(30, 25)
+    expect(testRoot.renderer.getAllText()).toContain("Two")
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toEqual(["Two", "Value: two"])
+  })
+
+  it("does not select a highlighted item after it unmounts", () => {
+    function Demo() {
+      const [value, setValue] = useState("one")
+      const [showTwo, setShowTwo] = useState(true)
+      return (
+        <div style={{ width: 400, height: 320, padding: 12 }}>
+          <Select value={value} onValueChange={setValue} defaultOpen>
+            <SelectTrigger style={triggerStyle}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              <SelectItem value="one" style={itemStyle}>One</SelectItem>
+              {showTwo ? <SelectItem value="two" style={itemStyle}>Two</SelectItem> : null}
+              <div
+                testId="hide-two"
+                style={{ height: 24, backgroundColor: "#334155" }}
+                onClick={() => setShowTwo(false)}
+              >
+                Hide
+              </div>
+            </SelectContent>
+          </Select>
+          <text>{`Value: ${value}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    testRoot.renderer.simulateKeystrokes("down")
+    const hide = testRoot.renderer.findByTestId("hide-two")
+    const bounds = testRoot.renderer.getElementBounds(hide.id)
+    testRoot.renderer.nativeSimulateClick(bounds[0] + 8, bounds[1] + 8)
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toContain("Value: one")
+  })
+
+  it("highlights a selected item that mounts after the popup is open", () => {
+    function Demo({ showOne }: { showOne: boolean }) {
+      const [value, setValue] = useState("one")
+      return (
+        <div style={{ width: 400, height: 320, padding: 12 }}>
+          <Select value={value} onValueChange={setValue} defaultOpen>
+            <SelectTrigger style={triggerStyle}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              {showOne ? <SelectItem value="one" style={itemStyle}>One</SelectItem> : null}
+              <SelectItem value="two" style={itemStyle}>Two</SelectItem>
+            </SelectContent>
+          </Select>
+          <text>{`Value: ${value}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo showOne={false} />)
+    testRoot.render(<Demo showOne={true} />)
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toContain("Value: two")
+  })
+
+  it("keeps keyboard order when a middle item re-renders alone", () => {
+    function Demo() {
+      const [value, setValue] = useState("one")
+      const [tick, setTick] = useState(0)
+      return (
+        <div style={{ width: 400, height: 340, padding: 12 }}>
+          <Select value={value} onValueChange={setValue} defaultOpen>
+            <SelectTrigger style={triggerStyle}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              <SelectItem value="one" style={itemStyle}>One</SelectItem>
+              <SelectItem value="two" style={itemStyle}>{`Two ${tick}`}</SelectItem>
+              <SelectItem value="three" style={itemStyle}>Three</SelectItem>
+              <div
+                testId="nudge"
+                style={{ height: 24, backgroundColor: "#334155" }}
+                onClick={() => setTick((count) => count + 1)}
+              >
+                Nudge
+              </div>
+            </SelectContent>
+          </Select>
+          <text>{`Value: ${value}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    const nudge = testRoot.renderer.findByTestId("nudge")
+    const bounds = testRoot.renderer.getElementBounds(nudge.id)
+    testRoot.renderer.nativeSimulateClick(bounds[0] + 8, bounds[1] + 8)
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toContain("Value: two")
+  })
+
+  it("does not select from a disabled open Select", () => {
+    function Demo() {
+      const [value, setValue] = useState("one")
+      return (
+        <div style={{ width: 400, height: 300, padding: 12 }}>
+          <Select disabled defaultOpen value={value} onValueChange={setValue}>
+            <SelectTrigger style={triggerStyle}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              <SelectItem value="one" style={itemStyle}>One</SelectItem>
+              <SelectItem value="two" testId="two" style={itemStyle}>Two</SelectItem>
+            </SelectContent>
+          </Select>
+          <text>{`Value: ${value}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    const two = testRoot.renderer.findByTestId("two")
+    const twoBounds = testRoot.renderer.getElementBounds(two.id)
+    testRoot.renderer.nativeSimulateClick(twoBounds[0] + 8, twoBounds[1] + 8)
+    expect(testRoot.renderer.getAllText()).toContain("Value: one")
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toContain("Value: one")
+  })
+
+  it("wraps tab order inside a subtree", () => {
+    function Demo() {
+      const [panel, setPanel] = useState(null)
+      const trapTab = useFocusTrap(panel)
+      return (
+        <div style={{ width: 400, height: 220, padding: 12 }}>
+          <div
+            autoFocus
+            tabIndex={0}
+            testId="outside"
+            style={{ width: 100, height: 32 }}
+          >
+            Outside
+          </div>
+          <div
+            ref={setPanel}
+            testId="panel"
+            onKeyDown={trapTab}
+            style={{ width: 180, height: 80, backgroundColor: "#1e293b" }}
+          >
+            <div tabIndex={2} testId="later" style={{ width: 80, height: 32 }}>
+              Later
+            </div>
+            <div tabIndex={1} testId="first" style={{ width: 80, height: 32 }}>
+              First
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    const first = testRoot.renderer.findByTestId("first")
+    const later = testRoot.renderer.findByTestId("later")
+    const outside = testRoot.renderer.findByTestId("outside")
+    expect(first).toBeDefined()
+    expect(later).toBeDefined()
+
+    testRoot.renderer.focusElement(first.id)
+    expect(testRoot.renderer.getFocusedElementId()).toBe(first.id)
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(testRoot.renderer.getFocusedElementId()).toBe(later.id)
+    expect(testRoot.renderer.getFocusedElementId()).not.toBe(outside.id)
+
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(testRoot.renderer.getFocusedElementId()).toBe(first.id)
+
+    testRoot.renderer.simulateKeystrokes("shift-tab")
+    expect(testRoot.renderer.getFocusedElementId()).toBe(later.id)
+  })
+
+  it("skips a hidden tab stop", () => {
+    function Demo() {
+      const [panel, setPanel] = useState(null)
+      const trapTab = useFocusTrap(panel)
+      return (
+        <div style={{ width: 400, height: 220, padding: 12 }}>
+          <div
+            ref={setPanel}
+            testId="panel"
+            onKeyDown={trapTab}
+            style={{ width: 180, height: 80, backgroundColor: "#1e293b" }}
+          >
+            <div tabIndex={0} testId="first" style={{ width: 80, height: 32 }}>
+              First
+            </div>
+            <div
+              tabIndex={0}
+              testId="hidden"
+              style={{ width: 80, height: 32, visibility: "hidden" }}
+            >
+              Hidden
+            </div>
+            <div tabIndex={0} testId="second" style={{ width: 80, height: 32 }}>
+              Second
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    const first = testRoot.renderer.findByTestId("first")
+    const second = testRoot.renderer.findByTestId("second")
+    const hidden = testRoot.renderer.findByTestId("hidden")
+    expect(first).toBeDefined()
+    expect(second).toBeDefined()
+
+    testRoot.renderer.focusElement(first.id)
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(testRoot.renderer.getFocusedElementId()).toBe(second.id)
+    expect(testRoot.renderer.getFocusedElementId()).not.toBe(hidden.id)
   })
 })

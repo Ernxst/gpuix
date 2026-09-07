@@ -36,6 +36,9 @@ interface NativeTestRendererApi extends NativeRenderer {
   focusElement(elementId: number): void
   focusNext(): void
   focusPrevious(): void
+  getFocusedElementId(): number | null
+  focusNextWithin(elementId: number): void
+  focusPreviousWithin(elementId: number): void
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
@@ -482,6 +485,23 @@ export class TestRenderer implements NativeRenderer {
   focusElement(elementId: number): void {
     this.native.flush()
     this.native.focusElement(elementId)
+    this.dispatchNativeEvents()
+  }
+
+  getFocusedElementId(): number | null {
+    this.native.flush()
+    return this.native.getFocusedElementId()
+  }
+
+  focusNextWithin(elementId: number): void {
+    this.native.flush()
+    this.native.focusNextWithin(elementId)
+    this.dispatchNativeEvents()
+  }
+
+  focusPreviousWithin(elementId: number): void {
+    this.native.flush()
+    this.native.focusPreviousWithin(elementId)
     this.dispatchNativeEvents()
   }
 

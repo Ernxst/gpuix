@@ -1538,10 +1538,15 @@ render(<App />, {
 These callbacks observe native events. They do not expose GPUI's propagation
 control, so they cannot cancel or stop the native event.
 
+Do not combine this window Tab handler with `useFocusTrap`. Both move focus, and
+the window listener cannot stop the native event, so Tab would jump twice.
+
 ### Imperative focus
 
 `focusNext()` and `focusPrevious()` map directly to GPUI's
 `window.focus_next()` and `window.focus_prev()`.
+`focusNextWithin(id)` / `focusPreviousWithin(id)` wrap inside that subtree.
+`getFocusedElementId()` returns the host id, or `null`.
 
 Use a ref for imperative focus:
 
@@ -1578,6 +1583,7 @@ Each primitive has a dedicated namespace entry point:
 | `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Content`, `Item` |
 | `@gpuix/react/combobox` | `Root`, `Input`, `Content`, `List`, `Item`, `Empty` |
 | `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Content` |
+| `@gpuix/react/floating` | `FloatingLayer`, `useControllableState`, `renderSlot`, `useFocusTrap` |
 
 ### Build a local Select
 
@@ -1651,7 +1657,10 @@ export const SelectItem = React.forwardRef<
 ))
 ```
 
-Use the styled local file with the familiar shadcn shape:
+Pass **`items`** on `Root` when `SelectValue` should show a label while the
+menu is closed. Keyboard nav reads the mounted `SelectItem` children. A styled
+wrapper around `Item` is fine. Without `items`, `SelectValue` shows the raw
+value.
 
 ```tsx
 import {
@@ -1663,14 +1672,22 @@ import {
   SelectValue,
 } from './components/ui/select'
 
-<Select value={model} onValueChange={setModel}>
+const models = [
+  { value: 'sonnet', label: 'Sonnet' },
+  { value: 'opus', label: 'Opus' },
+]
+
+<Select items={models} value={model} onValueChange={setModel}>
   <SelectTrigger>
     <SelectValue placeholder="Select a model" />
   </SelectTrigger>
   <SelectContent>
     <SelectGroup>
-      <SelectItem value="sonnet">Sonnet</SelectItem>
-      <SelectItem value="opus">Opus</SelectItem>
+      {models.map((item) => (
+        <SelectItem key={item.value} value={item.value}>
+          {item.label}
+        </SelectItem>
+      ))}
     </SelectGroup>
   </SelectContent>
 </Select>
@@ -1740,7 +1757,7 @@ the virtual list. The list paints after the composer, so you still see the
 markdown through the menu, and clicks hit the text behind it.
 
 ```tsx
-<Select value={model} onValueChange={setModel}>
+<Select items={[{ value: 'flash', label: 'DeepSeek V4 Flash' }]} value={model} onValueChange={setModel}>
   <div style={{ position: 'relative' }}>
     <SelectTrigger>
       <SelectValue />
@@ -1774,6 +1791,38 @@ like a modal backdrop. `<anchored>` occludes by default and has its own
 `pointerEvents: "none"` means the element inserts **no hitbox**, so it blocks
 nothing behind it. It does not disable the listeners on that same element, and
 it does not inherit, so children keep their own hitboxes.
+
+A filled child of a click target (switch thumb, radio dot, check icon) needs
+**`pointerEvents: "none"`**, or it eats the parent's click.
+
+### Measure an element
+
+`getElementBounds(id)` returns the last painted box `[x, y, width, height]`, or
+`null` if that node did not paint. It works on the live `GpuixRenderer` and on
+the test renderer. Bounds are recorded during **paint**, so read them after a
+frame, not in the same commit as mount.
+
+```tsx
+const box = renderer.getElementBounds?.(ref.current.id)
+```
+
+### Trap Tab inside a dialog
+
+GPUIX does not bind Tab. Put `useFocusTrap` on the panel. Tab from a focused
+child bubbles to that ancestor. The trap wraps inside the subtree with
+`focusNextWithin` / `focusPreviousWithin`.
+
+```tsx
+import { useFocusTrap } from '@gpuix/react/floating'
+
+const [panel, setPanel] = useState<PublicInstance | null>(null)
+const trapTab = useFocusTrap(panel)
+
+<div ref={setPanel} onKeyDown={trapTab}>
+  <div tabIndex={0} autoFocus>Ok</div>
+  <div tabIndex={0}>Cancel</div>
+</div>
+```
 
 ## Text selection
 

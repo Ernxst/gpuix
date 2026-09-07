@@ -413,6 +413,11 @@ enum UiCommand {
     FocusElement(u64),
     FocusNext,
     FocusPrevious,
+    GetFocusedElementId {
+        response: SyncSender<Option<u64>>,
+    },
+    FocusNextWithin(u64),
+    FocusPreviousWithin(u64),
     SetWindowKeyEvents {
         key_down: bool,
         key_up: bool,
@@ -616,6 +621,21 @@ async fn run_ui_commands(
             UiCommand::FocusPrevious => {
                 window.update(cx, |_view, window, cx| window.focus_prev(cx))
             }
+            UiCommand::GetFocusedElementId { response } => {
+                window.update(cx, |view, window, _cx| {
+                    response.send(view.focused_element_id(window)).ok();
+                })
+            }
+            UiCommand::FocusNextWithin(id) => window.update(cx, |view, window, cx| {
+                view.focus_next_within(id, window, cx);
+                cx.notify();
+                window.refresh();
+            }),
+            UiCommand::FocusPreviousWithin(id) => window.update(cx, |view, window, cx| {
+                view.focus_previous_within(id, window, cx);
+                cx.notify();
+                window.refresh();
+            }),
             UiCommand::SetWindowKeyEvents {
                 key_down,
                 key_up,
@@ -1554,6 +1574,77 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Host id of the focused element, or null when nothing is focused.
+    #[napi]
+    pub fn get_focused_element_id(&self) -> Result<Option<f64>> {
+        #[cfg(target_os = "macos")]
+        return update_window(|view, window, _cx| {
+            view.focused_element_id(window).map(|id| id as f64)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetFocusedElementId { response })?;
+            return recv_ui_response(receiver, "the focused element id query")
+                .map(|id| id.map(|id| id as f64));
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Move focus to the next tab stop inside `element_id`, wrapping in that subtree.
+    #[napi]
+    pub fn focus_next_within(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.focus_next_within(id, window, cx);
+            cx.notify();
+            window.refresh();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::FocusNextWithin(id));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Move focus to the previous tab stop inside `element_id`, wrapping in that subtree.
+    #[napi]
+    pub fn focus_previous_within(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.focus_previous_within(id, window, cx);
+            cx.notify();
+            window.refresh();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::FocusPreviousWithin(id));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// Enable the window key events requested by the React renderer.
     #[napi]
     pub fn set_window_key_events(&self, key_down: bool, key_up: bool, event_id: f64) -> Result<()> {
@@ -2478,6 +2569,33 @@ impl WebGpuixRenderer {
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusPrevious)]
     pub fn focus_previous(&self) -> Result<(), wasm_bindgen::JsValue> {
         update_web_window(|_view, window, cx| window.focus_prev(cx))
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getFocusedElementId)]
+    pub fn get_focused_element_id(&self) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let id = update_web_window(|view, window, _cx| view.focused_element_id(window))?;
+        Ok(match id {
+            Some(id) => wasm_bindgen::JsValue::from_f64(id as f64),
+            None => wasm_bindgen::JsValue::NULL,
+        })
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusNextWithin)]
+    pub fn focus_next_within(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_window(move |view, window, cx| {
+            view.focus_next_within(id, window, cx);
+            cx.notify();
+        })
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusPreviousWithin)]
+    pub fn focus_previous_within(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_window(move |view, window, cx| {
+            view.focus_previous_within(id, window, cx);
+            cx.notify();
+        })
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowKeyEvents)]
@@ -3652,6 +3770,60 @@ impl VirtualListEntry {
 }
 
 impl GpuixView {
+    pub(crate) fn focused_element_id(&self, window: &gpui::Window) -> Option<u64> {
+        self.focus_handles.iter().find_map(|(id, handle)| {
+            handle.is_focused(window).then_some(*id)
+        })
+    }
+
+    fn descendant_ids(&self, ancestor: u64) -> HashSet<u64> {
+        let tree = self.tree.lock().unwrap();
+        let mut ids = HashSet::new();
+        fn walk(tree: &RetainedTree, id: u64, ids: &mut HashSet<u64>) {
+            ids.insert(id);
+            let Some(element) = tree.elements.get(&id) else {
+                return;
+            };
+            for child in &element.children {
+                walk(tree, *child, ids);
+            }
+        }
+        walk(&tree, ancestor, &mut ids);
+        ids
+    }
+
+    fn focus_among(&self, ancestor: u64, forward: bool, window: &mut gpui::Window, cx: &mut gpui::App) {
+        let ids = self.descendant_ids(ancestor);
+        let allowed: HashSet<gpui::FocusId> = self
+            .focus_handles
+            .iter()
+            .filter_map(|(id, handle)| ids.contains(id).then_some(handle.id()))
+            .collect();
+        if forward {
+            window.focus_next_among(|id| allowed.contains(id), cx);
+        } else {
+            window.focus_prev_among(|id| allowed.contains(id), cx);
+        }
+    }
+
+    pub(crate) fn focus_next_within(
+        &self,
+        ancestor: u64,
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) {
+        self.focus_among(ancestor, true, window, cx);
+    }
+
+    pub(crate) fn focus_previous_within(
+        &self,
+        ancestor: u64,
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) {
+        self.focus_among(ancestor, false, window, cx);
+    }
+
     fn on_selection_mouse_move(
         &mut self,
         position: gpui::Point<gpui::Pixels>,
@@ -5010,6 +5182,9 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
             .spread_radius(gpui::px(shadow.spread_radius as f32));
             el = el.shadow(vec![shadow]);
         }
+    }
+    if style.visibility.as_deref() == Some("hidden") {
+        el = el.invisible();
     }
     if let Some(opacity) = style.opacity {
         el = el.opacity(opacity as f32);

@@ -471,6 +471,53 @@ impl TestGpuixRenderer {
     }
 
     #[napi]
+    pub fn get_focused_element_id(&self) -> Result<Option<f64>> {
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            let id = cx
+                .update_window(window, |_, window, app| {
+                    view.read(app).focused_element_id(window).map(|id| id as f64)
+                })
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            Ok(id)
+        })
+    }
+
+    #[napi]
+    pub fn focus_next_within(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.focus_next_within(id, window, cx);
+                    cx.notify();
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn focus_previous_within(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.focus_previous_within(id, window, cx);
+                    cx.notify();
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
     pub fn set_window_key_events(&self, key_down: bool, key_up: bool, event_id: f64) -> Result<()> {
         let event_id = to_element_id(event_id)?;
         with_test_state(|cx, window, view| {
