@@ -629,7 +629,6 @@ pub struct StyleDesc {
     pub text_wrap: Option<String>,
     pub text_overflow: Option<String>,
     pub line_clamp: Option<f64>,
-    pub text_decoration: Option<String>,
 
     pub overflow: Option<String>,
     pub overflow_x: Option<String>,
