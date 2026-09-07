@@ -67,6 +67,7 @@ const ETAG = '"gpuix-image-v1"'
 
 let server: Server
 let serverPort = 0
+let fixtureRequestCount = 0
 let conditionalRequestCount = 0
 let blockedRequestCount = 0
 let retryRequestCount = 0
@@ -224,6 +225,7 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
         response.writeHead(404).end("not found")
         return
       }
+      fixtureRequestCount++
       if (request.headers["if-none-match"] === ETAG) {
         conditionalRequestCount++
         response.writeHead(304, { etag: ETAG }).end()
@@ -249,6 +251,7 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
   })
 
   beforeEach(() => {
+    fixtureRequestCount = 0
     conditionalRequestCount = 0
     blockedRequestCount = 0
     retryRequestCount = 0
@@ -423,6 +426,138 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
     await captureLoadedSource(source, "url-cache-same-key")
     expect(conditionalRequestCount).toBeGreaterThan(0)
   }, 15_000)
+
+  it("paints a remounted URL image from the decoded cache without a second request", async () => {
+    const testRoot = createImageTestRoot({ allowPrivateNetworkImages: true })
+    const source: ImageSource = {
+      kind: "url",
+      url: `http://127.0.0.1:${serverPort}/png`,
+    }
+    try {
+      testRoot.render(sourceFrame(source))
+      for (let frame = 0; frame < 100; frame++) {
+        testRoot.renderer.flush()
+        const image = testRoot.renderer.findByType("img")[0]!
+        if (testRoot.renderer.getImageLoadState(image.id)?.status === "loaded") break
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(
+        testRoot.renderer.getImageLoadState(testRoot.renderer.findByType("img")[0]!.id)
+      ).toMatchObject({ status: "loaded" })
+
+      testRoot.render(sourceFrame())
+      testRoot.renderer.flush()
+      testRoot.render(sourceFrame(source))
+      testRoot.renderer.flush()
+
+      const remounted = testRoot.renderer.findByType("img")[0]!
+      expect(testRoot.renderer.getImageLoadState(remounted.id)).toMatchObject({
+        status: "loaded",
+      })
+      expect(fixtureRequestCount).toBe(1)
+      expect(testRoot.renderer.getPaintedText().join(" ")).not.toContain("img:")
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
+  it("paints a remounted data image from the decoded cache", async () => {
+    const testRoot = createImageTestRoot()
+    const firstSource: ImageSource = {
+      kind: "data",
+      mimeType: "image/png",
+      bytes: new Uint8Array(PNG_BYTES),
+    }
+    try {
+      testRoot.render(sourceFrame(firstSource))
+      for (let frame = 0; frame < 100; frame++) {
+        testRoot.renderer.flush()
+        const image = testRoot.renderer.findByType("img")[0]!
+        if (testRoot.renderer.getImageLoadState(image.id)?.status === "loaded") break
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      const firstImage = testRoot.renderer.findByType("img")[0]!
+      expect(testRoot.renderer.getImageLoadState(firstImage.id)).toMatchObject({
+        status: "loaded",
+      })
+
+      testRoot.render(sourceFrame())
+      testRoot.renderer.flush()
+      const secondSource: ImageSource = {
+        kind: "data",
+        mimeType: "image/png",
+        bytes: new Uint8Array(PNG_BYTES),
+      }
+      testRoot.render(sourceFrame(secondSource))
+      testRoot.renderer.flush()
+
+      const remounted = testRoot.renderer.findByType("img")[0]!
+      expect(remounted.id).not.toBe(firstImage.id)
+      expect(testRoot.renderer.getImageLoadState(remounted.id)).toMatchObject({
+        status: "loaded",
+      })
+      expect(testRoot.renderer.getPaintedText().join(" ")).not.toContain("img:")
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
+  it("paints a remounted data URL image from the decoded cache", async () => {
+    const testRoot = createImageTestRoot()
+    try {
+      testRoot.render(sourceFrame(dataUrl(FIXTURES[0]!)))
+      for (let frame = 0; frame < 100; frame++) {
+        testRoot.renderer.flush()
+        const image = testRoot.renderer.findByType("img")[0]!
+        if (testRoot.renderer.getImageLoadState(image.id)?.status === "loaded") break
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      const firstImage = testRoot.renderer.findByType("img")[0]!
+      expect(testRoot.renderer.getImageLoadState(firstImage.id)).toMatchObject({
+        status: "loaded",
+      })
+
+      testRoot.render(sourceFrame())
+      testRoot.renderer.flush()
+      testRoot.render(sourceFrame(dataUrl(FIXTURES[0]!)))
+      testRoot.renderer.flush()
+
+      const remounted = testRoot.renderer.findByType("img")[0]!
+      expect(remounted.id).not.toBe(firstImage.id)
+      expect(testRoot.renderer.getImageLoadState(remounted.id)).toMatchObject({
+        status: "loaded",
+      })
+      expect(testRoot.renderer.getPaintedText().join(" ")).not.toContain("img:")
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
+  it("keeps a path image on screen past the five-minute deadline", async () => {
+    const testRoot = createImageTestRoot()
+    try {
+      testRoot.render(sourceFrame({ kind: "path", path: FIXTURE_PATHS.get("png")! }))
+      for (let frame = 0; frame < 100; frame++) {
+        testRoot.renderer.flush()
+        const image = testRoot.renderer.findByType("img")[0]!
+        if (testRoot.renderer.getImageLoadState(image.id)?.status === "loaded") break
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+
+      testRoot.renderer.advanceAsyncClock(5 * 60_000 + 1_000)
+      testRoot.renderer.flush()
+      testRoot.renderer.flush()
+      testRoot.renderer.flush()
+
+      const image = testRoot.renderer.findByType("img")[0]!
+      expect(testRoot.renderer.getImageLoadState(image.id)).toMatchObject({
+        status: "loaded",
+      })
+      expect(testRoot.renderer.getPaintedText().join(" ")).not.toContain("img:")
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
 
   it("denies sugared loopback URL images by default before opening a connection", async () => {
     const testRoot = createImageTestRoot()

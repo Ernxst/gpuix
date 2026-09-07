@@ -22,6 +22,7 @@ use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 pub(crate) const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 const CANVAS_ATLAS_TILE_BUDGET: usize = 64;
 const URL_CACHE_CAPACITY: usize = 32;
+const IMG_DECODE_CACHE_CAPACITY: usize = 64;
 const MAX_REDIRECTS: usize = 5;
 const IMAGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const URL_SUCCESS_TTL: Duration = Duration::from_secs(5 * 60);
@@ -1191,6 +1192,371 @@ async fn load_image(
         .map_err(|error| gpui::ImageCacheError::Other(Arc::new(error)))
 }
 
+#[derive(Default)]
+struct ImgImageEntry {
+    result: Arc<Mutex<Option<ImageLoadResult>>>,
+    task: Option<gpui::Task<()>>,
+    reload_wake_task: Option<gpui::Task<()>>,
+    users: HashSet<u64>,
+    completed_at: Option<Instant>,
+    reload_after: Option<Duration>,
+    retry_attempt: u32,
+    last_used: u64,
+    last_logged_error: Option<String>,
+}
+
+impl ImgImageEntry {
+    fn reload_delay(&self, request: &ImageRequest, result: &ImageLoadResult) -> Option<Duration> {
+        if result.is_err() {
+            let multiplier = 1u32 << self.retry_attempt.min(5);
+            return Some((URL_FAILURE_RETRY_MIN * multiplier).min(URL_FAILURE_RETRY_MAX));
+        }
+        matches!(request.source, ImageSource::Url(_)).then_some(URL_SUCCESS_TTL)
+    }
+
+    fn loaded_image(&self) -> Option<Arc<gpui::RenderImage>> {
+        self.result.lock().unwrap().as_ref()?.as_ref().ok().cloned()
+    }
+
+    fn take_loaded_image(&mut self) -> Option<Arc<gpui::RenderImage>> {
+        self.result.lock().unwrap().take()?.ok()
+    }
+}
+
+enum ImgImageAction {
+    None,
+    StartLoad,
+    ScheduleReload(Duration),
+}
+
+struct ImgImageAcquire {
+    request: ImageRequest,
+    result: Arc<Mutex<Option<ImageLoadResult>>>,
+    action: ImgImageAction,
+}
+
+#[derive(Default)]
+struct ImgImageStore {
+    entries: HashMap<ImageRequest, ImgImageEntry>,
+    clock: u64,
+    pending_dropped: Vec<Arc<gpui::RenderImage>>,
+}
+
+impl ImgImageStore {
+    fn acquire(
+        &mut self,
+        element_id: u64,
+        request: &ImageRequest,
+        now: Instant,
+    ) -> ImgImageAcquire {
+        let request = if self.entries.contains_key(request) {
+            request.clone()
+        } else {
+            match &request.source {
+                ImageSource::Data {
+                    mime_type,
+                    bytes,
+                } => self
+                    .entries
+                    .iter()
+                    .find_map(|(existing_request, _)| {
+                        let ImageSource::Data {
+                            mime_type: existing_mime_type,
+                            bytes: existing_bytes,
+                        } = &existing_request.source
+                        else {
+                            return None;
+                        };
+                        (existing_request.current_color == request.current_color
+                            && existing_mime_type == mime_type
+                            && existing_bytes.len() == bytes.len()
+                            && existing_bytes.as_ref() == bytes.as_ref())
+                            .then(|| existing_request.clone())
+                    })
+                    .unwrap_or_else(|| request.clone()),
+                _ => request.clone(),
+            }
+        };
+        self.clock = self.clock.wrapping_add(1);
+        let last_used = self.clock;
+        let entry = self.entries.entry(request.clone()).or_default();
+        entry.users.insert(element_id);
+        entry.last_used = last_used;
+
+        let action = if entry.task.is_some() {
+            ImgImageAction::None
+        } else if entry.result.lock().unwrap().is_none() {
+            ImgImageAction::StartLoad
+        } else if let (Some(completed_at), Some(reload_after)) =
+            (entry.completed_at, entry.reload_after)
+        {
+            let elapsed = now.duration_since(completed_at);
+            if elapsed >= reload_after {
+                entry.reload_wake_task = None;
+                ImgImageAction::StartLoad
+            } else if entry.reload_wake_task.is_none() {
+                ImgImageAction::ScheduleReload(reload_after - elapsed)
+            } else {
+                ImgImageAction::None
+            }
+        } else {
+            ImgImageAction::None
+        };
+
+        ImgImageAcquire {
+            request,
+            result: entry.result.clone(),
+            action,
+        }
+    }
+
+    fn set_load_task(&mut self, request: &ImageRequest, task: gpui::Task<()>) {
+        let Some(entry) = self.entries.get_mut(request) else {
+            return;
+        };
+        if entry.users.is_empty() || entry.task.is_some() {
+            return;
+        }
+        entry.task = Some(task);
+    }
+
+    fn set_reload_wake_task(&mut self, request: &ImageRequest, task: gpui::Task<()>) {
+        let Some(entry) = self.entries.get_mut(request) else {
+            return;
+        };
+        if entry.users.is_empty() || entry.task.is_some() || entry.reload_wake_task.is_some() {
+            return;
+        }
+        entry.reload_wake_task = Some(task);
+    }
+
+    fn finish_load(
+        &mut self,
+        request: &ImageRequest,
+        result: ImageLoadResult,
+        completed_at: Instant,
+    ) -> Option<Duration> {
+        let Some(entry) = self.entries.get_mut(request) else {
+            if let Ok(image) = result {
+                self.pending_dropped.push(image);
+            }
+            return None;
+        };
+
+        entry.task = None;
+        entry.reload_wake_task = None;
+        entry.completed_at = Some(completed_at);
+        entry.reload_after = entry.reload_delay(request, &result);
+
+        match result {
+            Ok(image) => {
+                entry.retry_attempt = 0;
+                if let Some(old_image) = entry.take_loaded_image() {
+                    self.pending_dropped.push(old_image);
+                }
+                *entry.result.lock().unwrap() = Some(Ok(image));
+            }
+            Err(error) => {
+                let message = format!("img: failed to load {}: {error}", request.source.label());
+                if entry.last_logged_error.as_deref() != Some(&message) {
+                    log::error!("{message}");
+                    entry.last_logged_error = Some(message);
+                }
+                entry.retry_attempt = entry.retry_attempt.saturating_add(1);
+                if entry.loaded_image().is_none() {
+                    *entry.result.lock().unwrap() = Some(Err(error));
+                }
+            }
+        }
+
+        (!entry.users.is_empty())
+            .then_some(entry.reload_after)
+            .flatten()
+    }
+
+    fn finish_reload_wake(&mut self, request: &ImageRequest) -> bool {
+        let Some(entry) = self.entries.get_mut(request) else {
+            return false;
+        };
+        entry.reload_wake_task = None;
+        !entry.users.is_empty()
+    }
+
+    fn release(&mut self, element_id: u64, request: &ImageRequest) -> Vec<Arc<gpui::RenderImage>> {
+        let Some(entry) = self.entries.get_mut(request) else {
+            return Vec::new();
+        };
+        entry.users.remove(&element_id);
+        if !entry.users.is_empty() {
+            return Vec::new();
+        }
+
+        entry.task = None;
+        entry.reload_wake_task = None;
+        if entry.loaded_image().is_none() {
+            self.entries.remove(request);
+            return Vec::new();
+        }
+
+        let mut dropped = Vec::new();
+        while self
+            .entries
+            .values()
+            .filter(|entry| entry.users.is_empty() && entry.loaded_image().is_some())
+            .count()
+            > IMG_DECODE_CACHE_CAPACITY
+        {
+            let Some(oldest) = self
+                .entries
+                .iter()
+                .filter(|(_, entry)| entry.users.is_empty() && entry.loaded_image().is_some())
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(request, _)| request.clone())
+            else {
+                break;
+            };
+            if let Some(mut entry) = self.entries.remove(&oldest) {
+                if let Some(image) = entry.take_loaded_image() {
+                    dropped.push(image);
+                }
+            }
+        }
+        dropped
+    }
+
+    fn status(&self, element_id: u64) -> Option<serde_json::Value> {
+        let (request, entry) = self
+            .entries
+            .iter()
+            .find(|(_, entry)| entry.users.contains(&element_id))?;
+        let status = match entry.result.lock().unwrap().as_ref() {
+            Some(Ok(_)) => serde_json::json!({ "status": "loaded" }),
+            Some(Err(error)) => serde_json::json!({
+                "status": "error",
+                "error": format!("img: failed to load {}: {error}", request.source.label()),
+            }),
+            None => serde_json::json!({ "status": "loading" }),
+        };
+        Some(status)
+    }
+}
+
+/// Renderer-local decoded-image cache for `<img>` elements.
+///
+/// A request has one load, reload timer, and decoded result regardless of how
+/// many elements use it. Successful results survive unmount for cheap remounts;
+/// at most 64 results without live users are retained, with the oldest evicted.
+#[derive(Clone, Default)]
+pub(crate) struct SharedImgImageStore {
+    state: Arc<Mutex<ImgImageStore>>,
+}
+
+impl SharedImgImageStore {
+    fn acquire(
+        &self,
+        element_id: u64,
+        request: ImageRequest,
+        policy: ImageNetworkPolicy,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
+    ) -> (ImageRequest, Arc<Mutex<Option<ImageLoadResult>>>) {
+        let acquired = self.state.lock().unwrap().acquire(
+            element_id,
+            &request,
+            cx.background_executor().now(),
+        );
+        let ImgImageAcquire {
+            request,
+            result,
+            action,
+        } = acquired;
+        match action {
+            ImgImageAction::None => {}
+            ImgImageAction::StartLoad => self.start_load(request.clone(), policy, cx),
+            ImgImageAction::ScheduleReload(delay) => {
+                self.schedule_reload(request.clone(), delay, cx)
+            }
+        }
+        (request, result)
+    }
+
+    fn start_load(
+        &self,
+        request: ImageRequest,
+        policy: ImageNetworkPolicy,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
+    ) {
+        let background = cx.background_executor().spawn(load_image(
+            request.clone(),
+            policy.client(cx.http_client()),
+            cx.svg_renderer(),
+            policy,
+        ));
+        let state = Arc::downgrade(&self.state);
+        let request_for_task = request.clone();
+        let task = cx.spawn(async move |view, cx| {
+            let result = background.await;
+            let completed_at = cx.background_executor().now();
+            let Some(state) = state.upgrade() else {
+                return;
+            };
+            let reload_after = state.lock().unwrap().finish_load(
+                &request_for_task,
+                result,
+                completed_at,
+            );
+            let store_for_update = SharedImgImageStore { state };
+            let _ = view.update(cx, move |_view, cx| {
+                if let Some(delay) = reload_after {
+                    store_for_update.schedule_reload(request_for_task, delay, cx);
+                }
+                cx.notify();
+            });
+        });
+        self.state.lock().unwrap().set_load_task(&request, task);
+    }
+
+    fn schedule_reload(
+        &self,
+        request: ImageRequest,
+        delay: Duration,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
+    ) {
+        let state = Arc::downgrade(&self.state);
+        let request_for_task = request.clone();
+        let task = cx.spawn(async move |view, cx| {
+            cx.background_executor().timer(delay).await;
+            let Some(state) = state.upgrade() else {
+                return;
+            };
+            if state
+                .lock()
+                .unwrap()
+                .finish_reload_wake(&request_for_task)
+            {
+                let _ = view.update(cx, |_view, cx| cx.notify());
+            }
+        });
+        self.state
+            .lock()
+            .unwrap()
+            .set_reload_wake_task(&request, task);
+    }
+
+    fn release(&self, element_id: u64, request: &ImageRequest) {
+        let mut state = self.state.lock().unwrap();
+        let dropped = state.release(element_id, request);
+        state.pending_dropped.extend(dropped);
+    }
+
+    pub(crate) fn take_dropped(&self) -> Vec<Arc<gpui::RenderImage>> {
+        std::mem::take(&mut self.state.lock().unwrap().pending_dropped)
+    }
+
+    fn status(&self, element_id: u64) -> Option<serde_json::Value> {
+        self.state.lock().unwrap().status(element_id)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct CanvasImageSource {
     pub key: String,
@@ -1704,12 +2070,8 @@ pub struct ImgElement {
     object_fit: ImgObjectFit,
     tint_current_color: bool,
     last_request: Option<ImageRequest>,
-    load_error: Arc<Mutex<Option<String>>>,
-    load_result: Arc<Mutex<Option<ImageLoadResult>>>,
-    load_task: Option<gpui::Task<()>>,
-    reload_wake_task: Option<gpui::Task<()>>,
-    completed_at: Option<Instant>,
-    retry_attempt: u32,
+    element_id: Option<u64>,
+    store: Option<SharedImgImageStore>,
 }
 
 impl Default for ImgElement {
@@ -1720,12 +2082,8 @@ impl Default for ImgElement {
             object_fit: ImgObjectFit::default(),
             tint_current_color: false,
             last_request: None,
-            load_error: Arc::new(Mutex::new(None)),
-            load_result: Arc::new(Mutex::new(None)),
-            load_task: None,
-            reload_wake_task: None,
-            completed_at: None,
-            retry_attempt: 0,
+            element_id: None,
+            store: None,
         }
     }
 }
@@ -1745,64 +2103,18 @@ impl ImgElement {
             .child(crate::text::chrome_text(message.into(), None))
     }
 
-    fn reset_load(&mut self) {
-        self.last_request = None;
-        self.load_task = None;
-        self.reload_wake_task = None;
-        self.completed_at = None;
-        self.retry_attempt = 0;
-        self.load_result = Arc::new(Mutex::new(None));
-        *self.load_error.lock().unwrap() = None;
-    }
-
-    fn start_load(
-        &mut self,
-        request: ImageRequest,
-        policy: ImageNetworkPolicy,
-        client: Arc<dyn gpui::http_client::HttpClient>,
-        svg_renderer: gpui::SvgRenderer,
-        cx: &mut gpui::Context<crate::renderer::GpuixView>,
-    ) {
-        self.load_task = None;
-        self.reload_wake_task = None;
-        self.completed_at = None;
-        self.load_result = Arc::new(Mutex::new(None));
-        *self.load_error.lock().unwrap() = None;
-
-        let result = self.load_result.clone();
-        let background =
-            cx.background_executor()
-                .spawn(load_image(request, client, svg_renderer, policy));
-        self.load_task = Some(cx.spawn(async move |view, cx| {
-            *result.lock().unwrap() = Some(background.await);
-            let _ = view.update(cx, |_view, cx| cx.notify());
-        }));
-    }
-
-    fn reload_delay(&self, request: &ImageRequest, result: &ImageLoadResult) -> Option<Duration> {
-        if result.is_err() {
-            let multiplier = 1u32 << self.retry_attempt.min(5);
-            return Some((URL_FAILURE_RETRY_MIN * multiplier).min(URL_FAILURE_RETRY_MAX));
+    fn release_current_request(&mut self) {
+        if let (Some(store), Some(element_id), Some(request)) =
+            (&self.store, self.element_id, self.last_request.as_ref())
+        {
+            store.release(element_id, request);
         }
-        matches!(request.source, ImageSource::Path(_) | ImageSource::Url(_))
-            .then_some(URL_SUCCESS_TTL)
-    }
-
-    fn schedule_reload(
-        &mut self,
-        delay: Duration,
-        cx: &mut gpui::Context<crate::renderer::GpuixView>,
-    ) {
-        self.reload_wake_task = Some(cx.spawn(async move |view, cx| {
-            cx.background_executor().timer(delay).await;
-            let _ = view.update(cx, |_view, cx| cx.notify());
-        }));
+        self.last_request = None;
     }
 
     fn set_source(&mut self, value: serde_json::Value) {
         self.source = None;
         self.source_error = None;
-        self.reset_load();
 
         if value.is_null() {
             return;
@@ -1939,10 +2251,26 @@ impl CustomElement for ImgElement {
     fn render(
         &mut self,
         ctx: CustomRenderContext,
-        _window: &mut gpui::Window,
+        window: &mut gpui::Window,
         cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
+
+        let request = self.source.clone().map(|source| ImageRequest {
+            source,
+            current_color: self
+                .tint_current_color
+                .then(|| u32::from(ctx.current_color)),
+        });
+        if self.last_request.as_ref() != request.as_ref() {
+            self.release_current_request();
+        }
+        let store = ctx.img_image_store.clone();
+        self.store = Some(store.clone());
+        self.element_id = Some(ctx.id);
+        for image in store.take_dropped() {
+            let _ = window.drop_image(image);
+        }
 
         if let Some(error) = self.source_error.as_deref() {
             let fallback = Self::fallback(format!("img: invalid src: {error}"))
@@ -1951,89 +2279,38 @@ impl CustomElement for ImgElement {
             return apply_image_accessibility(&ctx, fallback).into_any_element();
         }
 
-        let Some(source) = self.source.clone() else {
+        let Some(request) = request else {
             let fallback = Self::fallback("img: no src")
                 .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)));
             let fallback = super::custom_surface(fallback, &ctx, cx);
             return apply_image_accessibility(&ctx, fallback).into_any_element();
         };
-
-        let request = ImageRequest {
-            source,
-            current_color: self
-                .tint_current_color
-                .then(|| u32::from(ctx.current_color)),
-        };
-        if self.last_request.as_ref() != Some(&request) {
-            self.reset_load();
-            self.last_request = Some(request.clone());
-        }
-
-        let now = cx.background_executor().now();
-        let completed = self.load_result.lock().unwrap().clone();
-        if let Some(result) = completed.as_ref() {
-            let completed_at = *self.completed_at.get_or_insert(now);
-            if self.reload_wake_task.is_none() {
-                if let Some(delay) = self.reload_delay(&request, result) {
-                    self.schedule_reload(delay, cx);
-                }
-            }
-            if self
-                .reload_delay(&request, result)
-                .is_some_and(|delay| now.duration_since(completed_at) >= delay)
-            {
-                if result.is_err() {
-                    self.retry_attempt = self.retry_attempt.saturating_add(1);
-                } else {
-                    self.retry_attempt = 0;
-                }
-                self.start_load(
-                    request.clone(),
-                    ctx.image_network_policy.clone(),
-                    ctx.image_network_policy.client(cx.http_client()),
-                    cx.svg_renderer(),
-                    cx,
-                );
-            }
-        }
-        if self.load_task.is_none() {
-            self.start_load(
-                request.clone(),
-                ctx.image_network_policy.clone(),
-                ctx.image_network_policy.client(cx.http_client()),
-                cx.svg_renderer(),
-                cx,
-            );
-        }
+        let (request, result_handle) = store.acquire(
+            ctx.id,
+            request.clone(),
+            ctx.image_network_policy.clone(),
+            cx,
+        );
+        self.source = Some(request.source.clone());
+        self.last_request = Some(request.clone());
 
         // One GPUI identity for the image and for the accessibility projection
         // below: the projection is never laid out, painted, or hit-tested, so a
         // second id would name an element that nothing can address.
         let element_id = gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id));
-        let load_error = self.load_error.clone();
-        let loader_error = load_error.clone();
-        let load_result = self.load_result.clone();
-        let source_label = request.source.label();
-        let fallback_label = source_label.clone();
+        let fallback_result = result_handle.clone();
+        let fallback_label = request.source.label();
         let mut el = gpui::img(move |_window: &mut gpui::Window, _cx: &mut gpui::App| {
-            let result = load_result.lock().unwrap().clone();
-            if let Some(Err(error)) = result.as_ref() {
-                let message = format!("img: failed to load {source_label}: {error}");
-                let mut previous = loader_error.lock().unwrap();
-                if previous.as_deref() != Some(&message) {
-                    log::error!("{message}");
-                    *previous = Some(message);
-                }
-            }
-            result
+            result_handle.lock().unwrap().clone()
         })
         .object_fit(self.object_fit.as_gpui())
         .with_fallback(move || {
-            let message = load_error
-                .lock()
-                .unwrap()
-                .clone()
-                .unwrap_or_else(|| format!("img: loading {fallback_label}"));
+            let message = match fallback_result.lock().unwrap().as_ref() {
+                Some(Err(error)) => {
+                    format!("img: failed to load {fallback_label}: {error}")
+                }
+                _ => format!("img: loading {fallback_label}"),
+            };
             Self::fallback(message).into_any_element()
         })
         .id(element_id.clone());
@@ -2076,7 +2353,6 @@ impl CustomElement for ImgElement {
             }
             "tint" => {
                 self.tint_current_color = value.as_str() == Some("currentColor");
-                self.reset_load();
             }
             _ => {}
         }
@@ -2102,20 +2378,22 @@ impl CustomElement for ImgElement {
             return Some(serde_json::json!({ "status": "error", "error": error }));
         }
 
-        let status = match self.load_result.lock().unwrap().as_ref() {
-            Some(Ok(_)) => serde_json::json!({ "status": "loaded" }),
-            Some(Err(error)) => serde_json::json!({
-                "status": "error",
-                "error": format!("img: failed to load {}: {error}", self.last_request.as_ref()?.source.label()),
-            }),
-            None if self.source.is_some() => serde_json::json!({ "status": "loading" }),
-            None => serde_json::json!({ "status": "idle" }),
-        };
+        if self.source.is_none() {
+            return Some(serde_json::json!({ "status": "idle" }));
+        }
+        let status = self
+            .store
+            .as_ref()
+            .zip(self.element_id)
+            .and_then(|(store, element_id)| store.status(element_id))
+            .unwrap_or_else(|| serde_json::json!({ "status": "loading" }));
         Some(status)
     }
 
     fn destroy(&mut self) {
-        self.reset_load();
+        self.release_current_request();
+        self.element_id = None;
+        self.store = None;
     }
 }
 
@@ -2261,6 +2539,259 @@ impl CustomElement for SvgElement {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    fn img_image_store_test_request(index: usize) -> ImageRequest {
+        ImageRequest {
+            source: ImageSource::Path(format!("/tmp/img-image-store-{index}.png")),
+            current_color: None,
+        }
+    }
+
+    fn img_image_store_test_image(value: u8) -> Arc<gpui::RenderImage> {
+        let buffer = image::RgbaImage::from_raw(1, 1, vec![value, value, value, 255]).unwrap();
+        Arc::new(gpui::RenderImage::new(vec![image::Frame::from_parts(
+            buffer,
+            0,
+            0,
+            image::Delay::from_numer_denom_ms(17, 1),
+        )]))
+    }
+
+    #[test]
+    fn img_image_store_keeps_successful_results_for_a_second_acquire() {
+        let mut store = ImgImageStore::default();
+        let request = img_image_store_test_request(0);
+        let now = Instant::now();
+        let first = store.acquire(1, &request, now);
+        assert!(matches!(first.action, ImgImageAction::StartLoad));
+
+        let image = img_image_store_test_image(1);
+        assert_eq!(store.finish_load(&request, Ok(image.clone()), now), None);
+        assert!(store.release(1, &request).is_empty());
+        assert!(store.entries.contains_key(&request));
+
+        let second = store.acquire(2, &request, now);
+        assert!(matches!(second.action, ImgImageAction::None));
+        let loaded = second
+            .result
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|result| result.as_ref().ok())
+            .cloned()
+            .unwrap();
+        assert!(Arc::ptr_eq(&loaded, &image));
+    }
+
+    #[test]
+    fn img_image_store_reuses_equivalent_data_allocations() {
+        let mut store = ImgImageStore::default();
+        let first_request = ImageRequest {
+            source: ImageSource::Data {
+                mime_type: Some("image/png".into()),
+                bytes: Arc::from(&b"image bytes"[..]),
+            },
+            current_color: Some(0x123456),
+        };
+        let second_request = ImageRequest {
+            source: ImageSource::Data {
+                mime_type: Some("image/png".into()),
+                bytes: Arc::from(&b"image bytes"[..]),
+            },
+            current_color: Some(0x123456),
+        };
+        assert_ne!(first_request, second_request);
+
+        let now = Instant::now();
+        let first = store.acquire(1, &first_request, now);
+        assert!(matches!(first.action, ImgImageAction::StartLoad));
+        let image = img_image_store_test_image(1);
+        assert_eq!(
+            store.finish_load(&first_request, Ok(image.clone()), now),
+            None
+        );
+        assert!(store.release(1, &first_request).is_empty());
+
+        let second = store.acquire(2, &second_request, now);
+        assert!(matches!(second.action, ImgImageAction::None));
+        assert_eq!(second.request, first_request);
+        let loaded = second
+            .result
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|result| result.as_ref().ok())
+            .cloned()
+            .unwrap();
+        assert!(Arc::ptr_eq(&loaded, &image));
+        assert_eq!(store.entries.len(), 1);
+        assert!(store.release(2, &second.request).is_empty());
+    }
+
+    #[test]
+    fn img_image_store_does_not_alias_data_with_different_identity_fields() {
+        let mut store = ImgImageStore::default();
+        let first_request = ImageRequest {
+            source: ImageSource::Data {
+                mime_type: Some("image/png".into()),
+                bytes: Arc::from(&b"image bytes"[..]),
+            },
+            current_color: Some(0x123456),
+        };
+        let now = Instant::now();
+        let first = store.acquire(1, &first_request, now);
+        assert!(matches!(first.action, ImgImageAction::StartLoad));
+        let image = img_image_store_test_image(1);
+        assert_eq!(
+            store.finish_load(&first_request, Ok(image), now),
+            None
+        );
+        assert!(store.release(1, &first_request).is_empty());
+
+        let different_requests = [
+            ImageRequest {
+                source: ImageSource::Data {
+                    mime_type: Some("image/png".into()),
+                    bytes: Arc::from(&b"other bytes"[..]),
+                },
+                current_color: Some(0x123456),
+            },
+            ImageRequest {
+                source: ImageSource::Data {
+                    mime_type: Some("image/jpeg".into()),
+                    bytes: Arc::from(&b"image bytes"[..]),
+                },
+                current_color: Some(0x123456),
+            },
+            ImageRequest {
+                source: ImageSource::Data {
+                    mime_type: Some("image/png".into()),
+                    bytes: Arc::from(&b"image bytes"[..]),
+                },
+                current_color: Some(0x654321),
+            },
+        ];
+
+        for (index, request) in different_requests.iter().enumerate() {
+            let acquired = store.acquire(index as u64 + 2, request, now);
+            assert!(matches!(acquired.action, ImgImageAction::StartLoad));
+            assert_ne!(acquired.request, first_request);
+            assert!(store.release(index as u64 + 2, &acquired.request).is_empty());
+        }
+    }
+
+    #[test]
+    fn img_image_store_removes_an_unfinished_entry_on_release() {
+        let mut store = ImgImageStore::default();
+        let request = img_image_store_test_request(0);
+        let acquired = store.acquire(1, &request, Instant::now());
+        assert!(matches!(acquired.action, ImgImageAction::StartLoad));
+
+        assert!(store.release(1, &request).is_empty());
+        assert!(!store.entries.contains_key(&request));
+    }
+
+    #[test]
+    fn img_image_store_evicts_the_least_recently_used_unmounted_result() {
+        let mut store = ImgImageStore::default();
+        let now = Instant::now();
+        let mut oldest_image = None;
+        let mut evicted = Vec::new();
+
+        for index in 0..=IMG_DECODE_CACHE_CAPACITY {
+            let request = img_image_store_test_request(index);
+            let acquired = store.acquire(index as u64, &request, now);
+            assert!(matches!(acquired.action, ImgImageAction::StartLoad));
+            let image = img_image_store_test_image(index as u8);
+            if index == 0 {
+                oldest_image = Some(image.clone());
+            }
+            store.finish_load(&request, Ok(image), now);
+            evicted.extend(store.release(index as u64, &request));
+        }
+
+        assert_eq!(store.entries.len(), IMG_DECODE_CACHE_CAPACITY);
+        assert_eq!(evicted.len(), 1);
+        assert!(Arc::ptr_eq(&evicted[0], oldest_image.as_ref().unwrap()));
+        assert!(!store.entries.contains_key(&img_image_store_test_request(0)));
+    }
+
+    #[test]
+    fn img_image_store_reload_policy_only_revalidates_successful_urls() {
+        let mut entry = ImgImageEntry::default();
+        let path = img_image_store_test_request(0);
+        let url = ImageRequest {
+            source: ImageSource::Url("https://example.com/image.png".into()),
+            current_color: None,
+        };
+        let data = ImageRequest {
+            source: ImageSource::Data {
+                mime_type: Some("image/png".into()),
+                bytes: Arc::from(&b"image bytes"[..]),
+            },
+            current_color: None,
+        };
+        let image = img_image_store_test_image(1);
+        let success: ImageLoadResult = Ok(image);
+        assert_eq!(entry.reload_delay(&path, &success), None);
+        assert_eq!(entry.reload_delay(&data, &success), None);
+        assert_eq!(entry.reload_delay(&url, &success), Some(URL_SUCCESS_TTL));
+
+        let failure: ImageLoadResult = Err(gpui::ImageCacheError::Other(Arc::new(
+            anyhow::anyhow!("transient failure"),
+        )));
+        assert_eq!(
+            entry.reload_delay(&url, &failure),
+            Some(URL_FAILURE_RETRY_MIN)
+        );
+        entry.retry_attempt = 5;
+        assert_eq!(
+            entry.reload_delay(&url, &failure),
+            Some(URL_FAILURE_RETRY_MAX)
+        );
+    }
+
+    #[test]
+    fn img_image_store_keeps_a_success_during_failed_revalidation_and_drops_it_on_replacement() {
+        let mut store = ImgImageStore::default();
+        let request = ImageRequest {
+            source: ImageSource::Url("https://example.com/image.png".into()),
+            current_color: None,
+        };
+        let now = Instant::now();
+        store.acquire(1, &request, now);
+        let original = img_image_store_test_image(1);
+        store.finish_load(&request, Ok(original.clone()), now);
+
+        let failure = gpui::ImageCacheError::Other(Arc::new(anyhow::anyhow!("offline")));
+        assert_eq!(
+            store.finish_load(&request, Err(failure), now),
+            Some(URL_FAILURE_RETRY_MIN)
+        );
+        let retained = store
+            .entries
+            .get(&request)
+            .unwrap()
+            .loaded_image()
+            .unwrap();
+        assert!(Arc::ptr_eq(&retained, &original));
+        assert!(store.pending_dropped.is_empty());
+
+        let replacement = img_image_store_test_image(2);
+        assert_eq!(
+            store.finish_load(&request, Ok(replacement.clone()), now),
+            Some(URL_SUCCESS_TTL)
+        );
+        let loaded = store
+            .entries
+            .get(&request)
+            .unwrap()
+            .loaded_image()
+            .unwrap();
+        assert!(Arc::ptr_eq(&loaded, &replacement));
+        assert_eq!(store.pending_dropped.len(), 1);
+        assert!(Arc::ptr_eq(&store.pending_dropped[0], &original));
+    }
 
     #[test]
     fn canvas_image_opacity_scales_alpha_without_changing_bgra_channels() {
