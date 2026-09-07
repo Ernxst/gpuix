@@ -2269,7 +2269,7 @@ equivalents:
 
 | React prop | Native meaning |
 |---|---|
-| `ariaLabel`, `ariaDescription` | Accessible name and supplementary description; requires a supported explicit or inferred role |
+| `ariaLabel`, `ariaDescription` | Accessible name and supplementary description; on a role-less element they project a `generic` node the platform adapters prune |
 | `ariaLabelledBy`, `ariaDescribedBy` | Space-separated author `id`s whose text supplies the name or description; wins over `ariaLabel` / `ariaDescription` |
 | `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
 | `ariaExpanded`, `ariaSelected` | Boolean semantic states |
@@ -2314,6 +2314,9 @@ name through `getByRole` or assert it with `toHaveAccessibleName`.
 `semantics.role`, by contrast, does report an inferred role: it reads the same
 resolved `role` the alias mapping above produces, so an `<li>` in a list
 reports `semantics.role === "listitem"` without an authored `role`.
+
+`<input>` and `<textarea>` resolve their `textbox` role natively, so
+`semantics.role` is absent for them while `toHaveRole('textbox')` holds.
 
 The resolution reads authored `ariaLabel`s and painted text. It does not apply
 `style.textTransform`, substitute an `<img>`'s `alt`, or read an `<input>`'s
@@ -4613,14 +4616,13 @@ declared and acted on but lifted onto the element as a flag rather than retained
 as a prop — assert its effect with `toHaveFocus()`.
 
 `toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
-node, which exists only where the element projects accessibility semantics: a
-declared role, a name from contents, or painted text of its own. An `ariaLabel`
-with no declared role never becomes that name. A `<div ariaLabel="Save" />`
-projects no node and so has no accessible name at all, while a
-`<text ariaLabel="Save">Hello</text>` is named `"Hello"` — the string it paints,
-not the prop it declares. Either way the matcher reports the computation rather
-than falling back to the raw prop; use `getByLabelText` or
-`TestElement.semantics.label` for the declaration.
+node. A `<div ariaLabel="Save" />` projects a `generic` node named "Save", and
+`<text ariaLabel="Save">Hello</text>` is named "Save" on its host node while
+the painted child keeps "Hello" as its value; the platform adapters prune
+generic nodes, so give the element a role when the name must be announced.
+Either way the matcher reports the computation rather than falling back to the
+raw prop; use `getByLabelText` or `TestElement.semantics.label` for the
+declaration.
 
 `toHaveAccessibleDescription` reads the same node's description, computed the
 same way a browser computes it: an `ariaDescribedBy` reference resolves to the

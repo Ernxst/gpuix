@@ -181,11 +181,7 @@ pub(crate) fn apply_accessibility<E: gpui::StatefulInteractiveElement>(
         ctx.event_callback,
         ctx.focus_handle,
         ctx.accessibility_hidden,
-        // These elements paint their own content, which reaches AccessKit as the
-        // value of the node that draws it. Neither name source belongs here.
-        None,
-        None,
-        None,
+        crate::accessibility::AccessibleText::default(),
     )
 }
 

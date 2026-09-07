@@ -9995,10 +9995,10 @@ pub(crate) fn build_host_container(
         ctx.event_callback,
         ctx.focus_handles.get(&element.id),
         ctx.inherited.accessibility_hidden,
-        name_from_contents.as_deref(),
-        // Painted text carries its own value on the node that draws it.
-        None,
-        None,
+        crate::accessibility::AccessibleText {
+            name_from_contents: name_from_contents.as_deref(),
+            ..Default::default()
+        },
     );
     if !native_disabled {
         if let Some(tab_index) = element
@@ -10365,11 +10365,10 @@ fn build_visually_hidden_element(
     }
 
     let name_from_contents = accessible_name_from_contents(element, ctx);
-    // A role that does not name itself from its contents still keeps its text.
-    // Painted text reaches AccessKit as the value of the node that draws it, and
-    // the projection draws nothing, so the flattened string becomes this node's
-    // value the same way the painted `<text>` host sets one below. An ancestor
-    // that already owns this text as its own name suppresses the duplicate.
+    // A role that does not name itself from its contents still contributes a
+    // value. The projection paints nothing, so the flattened string becomes
+    // the projected node's value; an ancestor that already owns this text as
+    // its own name suppresses the duplicate.
     //
     // Unlike a painted value, this one is whitespace-normalized: it is built by
     // the name flattener, and the accname flat string is normalized. A `<text>`
@@ -10397,9 +10396,12 @@ fn build_visually_hidden_element(
         ctx.event_callback,
         None,
         ctx.inherited.accessibility_hidden,
-        name_from_contents.as_deref(),
-        content_value.as_deref(),
-        None,
+        crate::accessibility::AccessibleText {
+            name_from_contents: name_from_contents.as_deref(),
+            value: content_value.as_deref(),
+            projected: true,
+            ..Default::default()
+        },
     )
     .into_any_element()
 }

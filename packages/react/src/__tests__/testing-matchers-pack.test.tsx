@@ -892,7 +892,8 @@ describeNative("gpuix matcher pack", () => {
           <div data-testid="named-by-contents" role="heading" ariaLevel={2}>
             <text>Build list</text>
           </div>
-          <div data-testid="unroled" ariaLabel="Ignored without a role" />
+          <div data-testid="named-without-role" ariaLabel="Named without a role" />
+          <div data-testid="bare" />
         </div>
       )
 
@@ -901,12 +902,14 @@ describeNative("gpuix matcher pack", () => {
       expect(screen.getByTestId("save")).toHaveAccessibleName(/factory/)
       expect(screen.getByTestId("named-by-contents")).toHaveAccessibleName("Build list")
 
-      // GPUI only projects a name where the element projects semantics, so an
-      // ariaLabel with no role has no accessible name. The matcher reports the
-      // computation rather than falling back to the prop.
-      expect(screen.getByTestId("unroled")).not.toHaveAccessibleName()
+      // A role-less element with a name projects a generic node. A bare
+      // role-less element still projects no node.
+      expect(screen.getByTestId("named-without-role")).toHaveAccessibleName(
+        "Named without a role"
+      )
+      expect(screen.getByTestId("bare")).not.toHaveAccessibleName()
       expect(() =>
-        expect(screen.getByTestId("unroled")).toHaveAccessibleName("Ignored without a role")
+        expect(screen.getByTestId("bare")).toHaveAccessibleName("Named without a role")
       ).toThrowError(/accessible name ""/)
     } finally {
       screen.unmount()
@@ -1000,7 +1003,11 @@ describeNative("gpuix matcher pack", () => {
       screen.render(
         <div>
           <div data-testid="undescribed" role="button" ariaLabel="Save factory" />
-          <div data-testid="unroled" ariaDescription="Ignored without a role" />
+          <div
+            data-testid="described-without-role"
+            ariaDescription="Described without a role"
+          />
+          <div data-testid="bare" />
         </div>
       )
 
@@ -1011,12 +1018,15 @@ describeNative("gpuix matcher pack", () => {
         /accessible description ""/
       )
 
-      // A role, explicit or implicit, is what gives an element a node of its
-      // own for a description to sit on. This one has neither.
-      expect(screen.getByTestId("unroled")).not.toHaveAccessibleDescription()
+      // A role-less element with a description projects a generic node. A bare
+      // role-less element still has no node for a description to sit on.
+      expect(screen.getByTestId("described-without-role")).toHaveAccessibleDescription(
+        "Described without a role"
+      )
+      expect(screen.getByTestId("bare")).not.toHaveAccessibleDescription()
       expect(() =>
-        expect(screen.getByTestId("unroled")).toHaveAccessibleDescription(
-          "Ignored without a role"
+        expect(screen.getByTestId("bare")).toHaveAccessibleDescription(
+          "Described without a role"
         )
       ).toThrowError(/accessible description ""/)
     } finally {

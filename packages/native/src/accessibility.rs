@@ -214,10 +214,6 @@ define_accessibility_roles! {
 }
 
 impl AccessibilityRole {
-    fn into_gpui(self) -> gpui::Role {
-        self.role
-    }
-
     fn supports_specialized_action(self, action: gpui::AccessibleAction) -> bool {
         match action {
             gpui::AccessibleAction::Increment | gpui::AccessibleAction::Decrement => {
@@ -288,6 +284,7 @@ impl AccessibilityRole {
                 Role::Cell | Role::ColumnHeader | Role::GridCell | Role::RowHeader
             ),
             "disabled" | "ariaDisabled" => !matches!(self.role, Role::Heading | Role::Image),
+            "ariaLive" | "ariaAtomic" => self.role != Role::GenericContainer,
             _ => true,
         }
     }
@@ -428,9 +425,9 @@ fn flattened_text(tree: &RetainedTree, element: &RetainedElement, subject: NameS
 ///
 /// `apply` sets one only for a node whose declared role supports it, and
 /// `element_problems` tells the author when a role-less label was dropped. A
-/// name computed from contents reads the tree the platform reads, so a label
-/// the tree never carries contributes nothing to it either: the browser
-/// ignores `aria-label` on a generic just the same.
+/// Accname recurses into a role-less descendant at step 2, so a label it carries
+/// names the subtree it sits on. Chromium and dom-accessibility-api both include
+/// it.
 fn carries_authored_name(node: &RetainedElement) -> bool {
     resolved_role(node)
         .is_some_and(|role| role.supports("ariaLabel"))
@@ -953,12 +950,12 @@ fn visually_hidden_rejection(
             "ariaHidden removes the accessibility node that visuallyHidden exists to preserve; remove one property",
         );
     }
-    let Some(role) = element
+    if element
         .custom_props
         .get("role")
         .and_then(AccessibilityRole::parse)
-        .filter(|role| role.role != gpui::Role::GenericContainer)
-    else {
+        .is_none_or(|role| role.role == gpui::Role::GenericContainer)
+    {
         return Some(
             "visuallyHidden requires an explicit supported role so the accessibility-only element produces a node",
         );
@@ -1019,6 +1016,7 @@ pub(crate) fn element_problems(
     let mut problems = Vec::new();
     let role_value = element.custom_props.get("role");
     let role = resolved_role(element);
+    let explicit = role_value.and_then(AccessibilityRole::parse);
 
     if has_semantics(element)
         && !projects_accessibility(&element.element_type)
@@ -1158,6 +1156,22 @@ pub(crate) fn element_problems(
                 | "ariaDisabled"
         ) {
             match role {
+                // A generic node — implied by a name, or declared as `generic`, `none`
+                // or `presentation` — is pruned by every platform adapter before its
+                // live-region branch runs, so the politeness never lands.
+                Some(role)
+                    if role.role == gpui::Role::GenericContainer
+                        && matches!(property.as_str(), "ariaLive" | "ariaAtomic") =>
+                {
+                    problems.push(ignored_problem(property, value, roleless_reason(property)));
+                }
+                None
+                    if explicit.is_some_and(|parsed| {
+                        parsed.role == gpui::Role::GenericContainer
+                    }) && matches!(property.as_str(), "ariaLive" | "ariaAtomic") =>
+                {
+                    problems.push(ignored_problem(property, value, roleless_reason(property)));
+                }
                 Some(role) if !role.supports(property) => problems.push(ignored_problem(
                     property,
                     value,
@@ -1166,17 +1180,6 @@ pub(crate) fn element_problems(
                         role
                     ),
                 )),
-                // `presentation` and `none` parse, but they resolve to no GPUI
-                // role, so the element contributes no AccessKit node and the
-                // politeness is as inert as it is on a role-less element. Only
-                // the live-region props are reported here: the rest already
-                // read as "this element is deliberately not exposed".
-                Some(parsed)
-                    if parsed.role == gpui::Role::GenericContainer
-                        && matches!(property.as_str(), "ariaLive" | "ariaAtomic") =>
-                {
-                    problems.push(ignored_problem(property, value, roleless_reason(property)));
-                }
                 None if role_value.is_none() => {
                     problems.push(ignored_problem(property, value, roleless_reason(property)));
                 }
@@ -1219,16 +1222,29 @@ pub(crate) fn element_problems(
     problems
 }
 
+/// The text sources a host contributes beyond its ARIA props.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct AccessibleText<'a> {
+    /// The flattened contents a role that names itself from them takes as
+    /// its accessible name.
+    pub name_from_contents: Option<&'a str>,
+    /// The node's string value: an editor's current text, or the flattened
+    /// text a `visuallyHidden` projection carries because it paints nothing.
+    pub value: Option<&'a str>,
+    /// An editor's placeholder; the name of last resort per HTML-AAM.
+    pub placeholder: Option<&'a str>,
+    /// `value` is a `visuallyHidden` projection's text: a live region has no
+    /// child to speak it, so it doubles as the name there.
+    pub projected: bool,
+}
+
 /// Apply React accessibility props to GPUI's existing AccessKit-backed div API.
 ///
 /// The GPUI element id remains the stable AccessKit identity. The author `id`
 /// is additional platform-visible metadata, never the identity source.
 ///
-/// `name_from_contents` is the flattened text a role that names itself from its
-/// contents takes as its accessible name. `content_value` is the same text for a
-/// role that does not: painted text reaches AccessKit as the value of its own
-/// node, so a projection that keeps no such node carries the value here rather
-/// than dropping the content.
+/// `text` carries the host's flattened name, value, placeholder, and whether
+/// that value belongs to a `visuallyHidden` projection.
 pub(crate) fn apply<E>(
     mut el: E,
     tree: &RetainedTree,
@@ -1236,9 +1252,7 @@ pub(crate) fn apply<E>(
     callback: &Option<EventCallback>,
     focus_handle: Option<&gpui::FocusHandle>,
     hidden: bool,
-    name_from_contents: Option<&str>,
-    content_value: Option<&str>,
-    placeholder: Option<&str>,
+    text: AccessibleText<'_>,
 ) -> E
 where
     E: StatefulInteractiveElement,
@@ -1254,7 +1268,7 @@ where
     let props = AccessibilityProps::from_element(tree, element);
 
     if let Some(role) = props.role {
-        el = el.role(role.into_gpui());
+        el = el.role(role.role);
     }
     if let Some(author_id) = &element.author_id {
         el = el.accessibility_id(author_id.clone());
@@ -1267,15 +1281,12 @@ where
         .live
         .or(role_live)
         .filter(|_| props.supports("ariaLive"));
-    // A live `visuallyHidden` projection is one node with no children, so the
-    // text it carries as its value has nothing else to speak it. macOS
-    // announces `value`, but Windows and AT-SPI announce `name`, and only a
-    // `Label` role reads that name from the value. Writing the flattened text
-    // to both keeps the projection audible everywhere. `content_value` is set
-    // by that projection alone, and the doubling is confined to a live region,
-    // so an ordinary `visuallyHidden` node keeps exactly the accname it had.
-    let live_projection_name =
-        content_value.filter(|_| live.is_some_and(|live| live != gpui::Live::Off));
+    // A projected value has no child to speak it. Writing it to both name and
+    // value keeps a live visually hidden node audible everywhere; an ordinary
+    // editor value remains a value only.
+    let live_projection_name = text
+        .value
+        .filter(|_| text.projected && live.is_some_and(|live| live != gpui::Live::Off));
     // The mirror image, for a role that *does* name itself from its contents.
     // Its text becomes the node's name, and the child that painted it is
     // suppressed so the name is not announced twice — which leaves the live
@@ -1283,8 +1294,9 @@ where
     // node that has one. A live `<div role="heading">` would therefore be
     // permanently silent there. Browsers announce it, so the text goes on as
     // the value as well, for a live region alone.
-    let live_contents_value =
-        name_from_contents.filter(|_| live.is_some_and(|live| live != gpui::Live::Off));
+    let live_contents_value = text
+        .name_from_contents
+        .filter(|_| live.is_some_and(|live| live != gpui::Live::Off));
     // accname order: the referenced text wins over `ariaLabel`, which wins over
     // the name the contents would compute, then the input placeholder and the
     // live projection fallback.
@@ -1296,8 +1308,8 @@ where
             props
                 .label
                 .filter(|_| props.supports("ariaLabel"))
-                .or(name_from_contents)
-                .or(placeholder)
+                .or(text.name_from_contents)
+                .or(text.placeholder)
                 .or(live_projection_name)
                 .map(str::to_owned)
         })
@@ -1312,7 +1324,7 @@ where
     {
         el = el.aria_description(description);
     }
-    if let Some(placeholder) = placeholder {
+    if let Some(placeholder) = text.placeholder {
         el = el.aria_placeholder(placeholder.to_owned());
     }
     if let Some(checked) = props.checked.filter(|_| props.supports("ariaChecked")) {
@@ -1347,7 +1359,7 @@ where
     if let Some(value) = props
         .value
         .filter(|_| props.supports("ariaValueText"))
-        .or(content_value)
+        .or(text.value)
         .or(live_contents_value)
     {
         el = el.aria_value(value.to_owned());

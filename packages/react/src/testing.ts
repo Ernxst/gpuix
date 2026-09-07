@@ -2045,12 +2045,12 @@ interface AccessibleHost {
 }
 
 const ACCESSKIT_ROLE_ALIASES: Readonly<Record<string, string>> = {
-    contentdeletion: "deletion",
-    contentinsertion: "insertion",
-    genericcontainer: "generic",
-    image: "img",
-    listboxoption: "option",
-    multilinetextinput: "textbox",
+  contentdeletion: "deletion",
+  contentinsertion: "insertion",
+  genericcontainer: "generic",
+  image: "img",
+  listboxoption: "option",
+  multilinetextinput: "textbox",
   progressindicator: "progressbar",
   radiobutton: "radio",
   searchinput: "searchbox",

@@ -130,6 +130,13 @@ describeNative("accessibility", () => {
       testRoot.getAllByRole("textbox")[0],
     )
 
+    const input = testRoot.renderer.findByType("input")[0]!
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "x")
+    const typedTree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(typedTree, "TextInput")).toEqual([
+      expect.objectContaining({ value: "namex" }),
+    ])
+
     testRoot.render(
       <input role="searchbox" value="" style={{ width: 200, height: 30 }} />,
     )

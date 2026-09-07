@@ -504,9 +504,12 @@ impl CustomElement for TextEditorElement {
             ctx.event_callback,
             Some(&focus_handle),
             ctx.accessibility_hidden,
-            None,
-            Some(content.as_str()),
-            (!self.placeholder.is_empty()).then_some(self.placeholder.as_str()),
+            crate::accessibility::AccessibleText {
+                value: Some(content.as_str()),
+                placeholder: (!self.placeholder.is_empty())
+                    .then_some(self.placeholder.as_str()),
+                ..Default::default()
+            },
         );
         editor = super::wire_style_transition_events(editor, &ctx, cx);
         if ctx.events.contains("click") && !action_disabled {
