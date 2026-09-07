@@ -580,7 +580,7 @@ describeNative("automation", () => {
         <div
           role="slider"
           ariaLabel="Camel value built-in"
-          ariaValue="Medium"
+          ariaValueText="Medium"
           ariaValueMin={1}
           ariaValueMax={3}
           ariaValueNow={2}
@@ -596,7 +596,7 @@ describeNative("automation", () => {
         <input
           role="slider"
           ariaLabel="Camel value custom"
-          ariaValue="Medium"
+          ariaValueText="Medium"
           ariaValueMin={1}
           ariaValueMax={3}
           ariaValueNow={2}
@@ -609,6 +609,10 @@ describeNative("automation", () => {
           aria-valuemax={3}
           aria-valuenow={2}
         />
+        <div role="meter" ariaLabel="Camel meter built-in" ariaValueText="40 percent" ariaValueMin={0} ariaValueMax={100} ariaValueNow={40} />
+        <div role="meter" aria-label="Hyphen meter built-in" aria-valuetext="40 percent" aria-valuemin={0} aria-valuemax={100} aria-valuenow={40} />
+        <div role="progressbar" ariaLabel="Camel progress built-in" ariaValueMin={0} ariaValueMax={100} />
+        <div role="progressbar" aria-label="Hyphen progress built-in" aria-valuemin={0} aria-valuemax={100} />
         <div ariaHidden>
           <div role="button" ariaLabel="Camel hidden built-in" />
         </div>
@@ -653,10 +657,21 @@ describeNative("automation", () => {
         "Hyphen value custom",
         { role: "Slider", value: "Medium", min_numeric_value: 1, max_numeric_value: 3, numeric_value: 2 },
       ],
+      [
+        "Camel meter built-in",
+        "Hyphen meter built-in",
+        { role: "Meter", value: "40 percent", min_numeric_value: 0, max_numeric_value: 100, numeric_value: 40 },
+      ],
+      [
+        "Camel progress built-in",
+        "Hyphen progress built-in",
+        { role: "ProgressIndicator", min_numeric_value: 0, max_numeric_value: 100 },
+      ],
     ] as const) {
       expect(byLabel(camel)).toMatchObject(expected)
       expect(byLabel(hyphen)).toMatchObject(expected)
     }
+    expect(byLabel("Camel progress built-in")).not.toHaveProperty("numeric_value")
     expect(nodes.map((node) => node.aria.label)).not.toEqual(
       expect.arrayContaining([
         "Camel hidden built-in",
@@ -1324,7 +1339,7 @@ describeNative("automation", () => {
         <div
           role="slider"
           ariaLabel="Clock speed"
-          ariaValue="42 percent"
+          ariaValueText="42 percent"
           ariaValueMin={0}
           ariaValueMax={100}
           ariaValueNow={42}

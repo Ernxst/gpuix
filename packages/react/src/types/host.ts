@@ -873,8 +873,8 @@ export interface Props {
   /** DOM-compatible alias for ariaSelected. */
   "aria-selected"?: Booleanish
   /** Human-readable value text for a value control. */
-  ariaValue?: string
-  /** DOM-compatible semantic alias for ariaValue. */
+  ariaValueText?: string
+  /** DOM-compatible semantic alias for ariaValueText. */
   "aria-valuetext"?: string
   /** Minimum numeric value for a value control. */
   ariaValueMin?: number

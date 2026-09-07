@@ -2275,7 +2275,7 @@ equivalents:
 | `ariaExpanded`, `ariaSelected` | Boolean semantic states |
 | `ariaLive` | `off`, `polite`, or `assertive` live-region politeness; announces text changes without moving focus |
 | `ariaAtomic` | Present the whole live region rather than only the part that changed |
-| `ariaValue` | Human-readable value text |
+| `ariaValueText` | Human-readable value text |
 | `ariaValueMin`, `ariaValueMax`, `ariaValueNow` | Numeric value range and current value |
 | `ariaLevel` | One-based heading level |
 | `disabled` | Unavailable, non-activating, and removed from tab order |
@@ -2451,6 +2451,7 @@ Role/state combinations are validated rather than silently approximated:
 | `img` | accessible name and description |
 | `link` | `ariaExpanded`; Activate uses `onClick` |
 | `option` | `ariaSelected` |
+| `meter`, `progressbar` | value text/range; read-only, so no Increment or Decrement action; omit `ariaValueNow` for indeterminate progress |
 | `slider`, `spinbutton` | value text/range; Increment and Decrement use `onAccessibilityAction` |
 | `switch` | boolean `ariaChecked` only; `"mixed"` is computed as `false` with a normalization diagnostic; Activate uses `onClick` |
 | `textbox` | accessible name and description |

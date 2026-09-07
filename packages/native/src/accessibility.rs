@@ -20,7 +20,7 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaLive",
     "ariaAtomic",
     "ariaSelected",
-    "ariaValue",
+    "ariaValueText",
     "ariaValueMin",
     "ariaValueMax",
     "ariaValueNow",
@@ -265,7 +265,7 @@ impl AccessibilityRole {
                 matches!(self.role, Role::Link)
             }
             "ariaSelected" => matches!(self.role, Role::ListBoxOption),
-            "ariaValue" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
+            "ariaValueText" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
                 matches!(self.role, Role::Slider | Role::SpinButton)
             }
             "ariaLevel" => matches!(self.role, Role::Heading),
@@ -655,7 +655,7 @@ impl<'a> AccessibilityProps<'a> {
                 .and_then(parse_booleanish),
             value: element
                 .custom_props
-                .get("ariaValue")
+                .get("ariaValueText")
                 .and_then(serde_json::Value::as_str),
             value_min: finite_number(element.custom_props.get("ariaValueMin")),
             value_max: finite_number(element.custom_props.get("ariaValueMax")),
@@ -1033,7 +1033,7 @@ pub(crate) fn element_problems(
 
     for (property, value) in &element.custom_props {
         let malformed = match property.as_str() {
-            "ariaLabel" | "ariaDescription" | "ariaValue" | "ariaLabelledBy"
+            "ariaLabel" | "ariaDescription" | "ariaValueText" | "ariaLabelledBy"
             | "ariaDescribedBy" => !value.is_string(),
             "ariaChecked" => !(value.is_boolean() || value.as_str() == Some("mixed")),
             "ariaCurrent" => parse_aria_current(value).is_none(),
@@ -1052,7 +1052,7 @@ pub(crate) fn element_problems(
         };
         if malformed {
             let expected = match property.as_str() {
-                "ariaLabel" | "ariaDescription" | "ariaValue" => "a string",
+                "ariaLabel" | "ariaDescription" | "ariaValueText" => "a string",
                 "ariaLabelledBy" | "ariaDescribedBy" => "a string of space-separated element ids",
                 "ariaChecked" => "a boolean or \"mixed\"",
                 "ariaCurrent" => {
@@ -1118,7 +1118,7 @@ pub(crate) fn element_problems(
                 | "ariaLive"
                 | "ariaAtomic"
                 | "ariaSelected"
-                | "ariaValue"
+                | "ariaValueText"
                 | "ariaValueMin"
                 | "ariaValueMax"
                 | "ariaValueNow"
@@ -1315,7 +1315,7 @@ where
     }
     if let Some(value) = props
         .value
-        .filter(|_| props.supports("ariaValue"))
+        .filter(|_| props.supports("ariaValueText"))
         .or(content_value)
         .or(live_contents_value)
     {
@@ -1718,7 +1718,7 @@ mod tests {
             .insert("ariaDescription".into(), "Factory output".into());
         element
             .custom_props
-            .insert("ariaValue".into(), "42 percent".into());
+            .insert("ariaValueText".into(), "42 percent".into());
         element.custom_props.insert("ariaValueMin".into(), 0.into());
         element
             .custom_props

@@ -423,7 +423,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
           ariaExpanded
           ariaCurrent="page"
           ariaSelected
-          ariaValue="42 percent"
+          ariaValueText="42 percent"
           ariaValueMin={0}
           ariaValueMax={100}
           ariaValueNow={42}
@@ -454,10 +454,10 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         "ariaRowIndex",
         "ariaRowSpan",
         "ariaSelected",
-        "ariaValue",
         "ariaValueMax",
         "ariaValueMin",
         "ariaValueNow",
+        "ariaValueText",
         "disabled",
       ]
       expect(diagnostics.map((diagnostic) => diagnostic.property).sort()).toEqual(
