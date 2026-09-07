@@ -159,7 +159,7 @@ describeNative("render()", () => {
       expect(reload).toBeDefined()
       const bounds = renderer.getElementBounds(reload!.id)
       expect(bounds).not.toBeNull()
-      renderer.nativeSimulateClick(bounds![0] + 8, bounds![1] + 8)
+      renderer.nativeSimulateClick(bounds!.x + 8, bounds!.y + 8)
       expect(renderer.getAllText()).toEqual(["ok"])
     })
 

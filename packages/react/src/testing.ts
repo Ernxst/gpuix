@@ -16,6 +16,7 @@ import type { EventPayload } from "@gpuix/native"
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
+  ElementBounds,
   HighlightMatch,
   NativeRenderer,
   WindowKeyEventHandlers,
@@ -62,7 +63,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getA11yTree(): string
   getAutomationTree(): string
   getRetainedElementCount(): number
-  getElementBounds(elementId: number): number[] | null
+  getElementBounds(elementId: number): ElementBounds | null
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -454,7 +455,7 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getRetainedElementCount()
   }
 
-  getElementBounds(elementId: number): number[] | null {
+  getElementBounds(elementId: number): ElementBounds | null {
     return this.native.getElementBounds(elementId)
   }
 

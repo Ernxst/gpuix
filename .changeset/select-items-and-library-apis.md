@@ -31,7 +31,7 @@ const models = [
 
 **Floating helpers.** Import `FloatingLayer`, `useControllableState`, `renderSlot`, and `useFocusTrap` from `@gpuix/react/floating`.
 
-**Bounds and focus.** `getElementBounds(id)` is on the live renderer, not only tests. `getFocusedElementId()`, `focusNextWithin(id)`, and `focusPreviousWithin(id)` walk GPUI's painted tab map, so `tabIndex` order and unpainted nodes match `focusNext`. Put `useFocusTrap` on the panel. Tab from a focused child bubbles to that ancestor.
+**Bounds and focus.** `getElementBounds(id)` is on the live renderer, not only tests. It returns `{ x, y, width, height }`, or `null`. `getFocusedElementId()`, `focusNextWithin(id)`, and `focusPreviousWithin(id)` walk GPUI's painted tab map, so `tabIndex` order and unpainted nodes match `focusNext`. Put `useFocusTrap` on the panel. Tab from a focused child bubbles to that ancestor.
 
 `visibility: "hidden"` now maps to GPUI `invisible()`, so a hidden tab stop is skipped.
 

@@ -156,8 +156,8 @@ describeNative('chat example', () => {
     const itemBox = renderer.getElementBounds(item!.id)
     expect(colBox).not.toBeNull()
     expect(itemBox).not.toBeNull()
-    expect(itemBox![0] + itemBox![2]).toBeLessThanOrEqual(colBox![0] + colBox![2] + 1)
-    expect(itemBox![3]).toBeGreaterThan(20)
+    expect(itemBox!.x + itemBox!.width).toBeLessThanOrEqual(colBox!.x + colBox!.width + 1)
+    expect(itemBox!.height).toBeGreaterThan(20)
   })
 
   it('renders the sidebar, transcript and composer', () => {

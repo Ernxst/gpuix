@@ -107,7 +107,7 @@ export interface TestAutomationRenderer {
   clearSelection(): void
   captureScreenshot(path: string): void
   getAutomationTree(): string
-  getElementBounds(elementId: number): number[] | null
+  getElementBounds(elementId: number): { x: number; y: number; width: number; height: number } | null
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -241,9 +241,7 @@ export class InProcessBackend extends ValidatedAutomationBackend {
     getBounds: (params) => {
       const rect = this.renderer.getElementBounds(params.elementId)
       if (!rect) return { bounds: null }
-      return {
-        bounds: { x: rect[0], y: rect[1], width: rect[2], height: rect[3] },
-      }
+      return { bounds: rect }
     },
     getSelectedText: () => ({ text: this.renderer.getSelectedText() }),
     clearSelection: () => {
@@ -750,7 +748,7 @@ export interface LiveAutomationRenderer {
   clearSelection(): void
   captureScreenshot?(path: string): void
   getAutomationTree(): string
-  getElementBounds(elementId: number): number[] | null
+  getElementBounds(elementId: number): { x: number; y: number; width: number; height: number } | null
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number

@@ -131,7 +131,7 @@ export declare class GpuixRenderer {
    */
   getScrollOffset(elementId: number): Array<number> | null
   getAutomationTree(): string
-  getElementBounds(id: number): Array<number> | null
+  getElementBounds(id: number): ElementBounds | null
   getAllText(): Array<string>
   getPaintedText(): Array<string>
   /**
@@ -359,7 +359,7 @@ export declare class TestGpuixRenderer {
   /** Tree JSON with last-paint bounds. Used by the automation locators. */
   getAutomationTree(): string
   /** Last painted bounds for an element, or null if it was not painted. */
-  getElementBounds(id: number): Array<number> | null
+  getElementBounds(id: number): ElementBounds | null
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -414,6 +414,14 @@ export interface EdgeInsets {
   right: number
   bottom: number
   left: number
+}
+
+/** Last painted box for a host element. */
+export interface ElementBounds {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 export interface EventModifiers {

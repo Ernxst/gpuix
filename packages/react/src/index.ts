@@ -86,6 +86,7 @@ export type {
   DiffProps,
   DimensionValue,
   EdgeInsets,
+  ElementBounds,
   GpuixMetrics,
   GpuixTheme,
   HighlightMatch,

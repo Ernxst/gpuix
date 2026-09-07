@@ -603,6 +603,13 @@ export interface AnchoredProps extends Props {
   occlude?: boolean
 }
 
+export interface ElementBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 /// Native renderer transport. React sends one atomic batch per commit.
 export interface NativeRenderer {
   /** Apply one React commit. Returns every element id destroyed by the batch. */
@@ -622,8 +629,8 @@ export interface NativeRenderer {
   setWindowKeyEvents?(keyDown: boolean, keyUp: boolean, eventId: number): void
 
   // ── Bounds API ─────────────────────────────────────────────────
-  /** Last painted box `[x, y, width, height]`, or null if the node did not paint. */
-  getElementBounds?(elementId: number): number[] | null
+  /** Last painted box, or null if the node did not paint. */
+  getElementBounds?(elementId: number): ElementBounds | null
 
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll").

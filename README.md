@@ -1895,13 +1895,14 @@ A filled child of a click target (switch thumb, radio dot, check icon) needs
 
 ### Measure an element
 
-`getElementBounds(id)` returns the last painted box `[x, y, width, height]`, or
-`null` if that node did not paint. It works on the live `GpuixRenderer` and on
-the test renderer. Bounds are recorded during **paint**, so read them after a
-frame, not in the same commit as mount.
+`getElementBounds(id)` returns the last painted box, or `null` if that node did
+not paint. It works on the live `GpuixRenderer` and on the test renderer.
+Bounds are recorded during **paint**, so read them after a frame, not in the
+same commit as mount.
 
 ```tsx
 const box = renderer.getElementBounds?.(ref.current.id)
+// { x, y, width, height }
 ```
 
 ### Trap Tab inside a dialog
