@@ -536,7 +536,7 @@ export interface StyleDesc {
   fontFamily?: string
   fontWeight?: FontWeight
   letterSpacing?: number
-  textDecoration?: "underline" | "line-through"
+  textDecoration?: "underline" | "line-through" | "none"
   textTransform?: "none" | "uppercase" | "lowercase"
   textAlign?: "left" | "start" | "center" | "right"
   lineHeight?: LineHeightValue

@@ -11107,11 +11107,6 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(letter_spacing) = style.letter_spacing {
         el = el.letter_spacing(gpui::px(letter_spacing as f32));
     }
-    match style.text_decoration.as_deref() {
-        Some("underline") => el = el.underline(),
-        Some("line-through") => el = el.line_through(),
-        _ => {}
-    }
     // `textAlign` was in the style type but implemented nowhere.
     match style.text_align.as_deref() {
         Some("center") => el = el.text_center(),
@@ -11139,6 +11134,12 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         if clamp >= 1.0 {
             el = el.line_clamp(clamp as usize);
         }
+    }
+    match style.text_decoration.as_deref() {
+        Some("underline") => el = el.underline(),
+        Some("line-through") => el = el.line_through(),
+        Some("none") => el = el.text_decoration_none(),
+        _ => {}
     }
     // `line_height` was accepted by the style type but never applied, so
     // multi-line text always used gpui's default leading.

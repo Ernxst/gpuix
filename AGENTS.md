@@ -1295,9 +1295,8 @@ cd examples && GPUIX_BACKGROUND=1 bun --hot chat.tsx
 Use tuistory for the long-running process. Do not use `tsx` or raw `tmux`.
 On macOS and Windows, the background flag keeps the real GPU window from taking
 the user's keyboard; live paint, clicks, screenshots, and automation still
-work. Linux currently ignores `focus`.
-
-### Drive the live window
+work. Linux currently ignores `focus`. Leave the session running and do not
+relaunch without `--hot`.
 
 **Do not use `usecomputer`, `screencapture`, or desktop clicks.** GPUIX has a
 Playwright-like automation API. Full docs are in the README **Automation**

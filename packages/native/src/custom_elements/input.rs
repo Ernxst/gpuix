@@ -69,12 +69,30 @@ actions!(
 const INPUT_KEY_CONTEXT: &str = "GpuixInput";
 const TEXTAREA_KEY_CONTEXT: &str = "GpuixTextarea";
 const CARET_BLINK_MS: u64 = 500;
+const CARET_WIDTH: Pixels = px(2.0);
 const DRAG_SCROLL_FRAME_MS: u64 = 16;
 const UNDO_COALESCE: Duration = Duration::from_millis(700);
 const UNDO_LIMIT: usize = 200;
 
 fn caret_visible(ms_since_activity: u64) -> bool {
     (ms_since_activity / CARET_BLINK_MS) % 2 == 0
+}
+
+// Size the bar to the font's content area, not the line box, as a browser
+// does: ascent plus descent, centred in the line. Default leading is phi, so
+// a full-height caret sticks out above and below the glyphs.
+fn caret_rect(
+    origin: Point<Pixels>,
+    line_height: Pixels,
+    ascent: Pixels,
+    descent: Pixels,
+) -> Bounds<Pixels> {
+    let height = ascent + descent;
+    let y_offset = (line_height - height) / 2.;
+    Bounds::new(
+        point(origin.x, origin.y + y_offset),
+        size(CARET_WIDTH, height),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -403,6 +421,8 @@ impl CustomElement for TextEditorElement {
                     line_starts: vec![0],
                     last_bounds: None,
                     line_height: px(20.0),
+                    caret_ascent: px(12.0),
+                    caret_descent: px(4.0),
                     content_height: 20.0,
                     content_width: 0.0,
                     display_is_placeholder: false,
@@ -446,6 +466,12 @@ impl CustomElement for TextEditorElement {
             editor = editor.track_focus(&focus_handle);
         }
         editor = editor.child(state);
+        // Single-line inputs center text vertically when given extra height.
+        if !self.multiline {
+            editor = editor.items_center();
+        }
+        // Editors clip to their box, as DOM inputs and textareas do.
+        editor = editor.overflow_hidden();
         if let Some(style) = ctx.style {
             editor = crate::renderer::apply_interactive_styles(editor, style);
         }
@@ -753,6 +779,8 @@ struct TextEditorState {
     line_starts: Vec<usize>,
     last_bounds: Option<Bounds<Pixels>>,
     line_height: Pixels,
+    caret_ascent: Pixels,
+    caret_descent: Pixels,
     content_height: f32,
     content_width: f32,
     display_is_placeholder: bool,
@@ -1519,6 +1547,9 @@ impl TextEditorState {
         };
         let font_size = style.font_size.to_pixels(window.rem_size());
         self.line_height = window.line_height();
+        let font_id = window.text_system().resolve_font(&style.font());
+        self.caret_ascent = window.text_system().ascent(font_id, font_size);
+        self.caret_descent = window.text_system().descent(font_id, font_size).abs();
         let color = if is_placeholder {
             gpui::rgba(0x8f8f8fff).into()
         } else {
@@ -1735,12 +1766,14 @@ impl EntityInputHandler for TextEditorState {
     ) -> Option<Bounds<Pixels>> {
         let range = self.range_from_utf16(&range_utf16);
         let start = self.point_for_index(range.start)?;
-        Some(Bounds::new(
+        Some(caret_rect(
             point(
                 bounds.left() + start.x - px(self.scroll_left),
                 bounds.top() + start.y - px(self.scroll_top),
             ),
-            size(px(2.0), self.line_height),
+            self.line_height,
+            self.caret_ascent,
+            self.caret_descent,
         ))
     }
 
@@ -1932,9 +1965,11 @@ impl gpui::Element for EditorTextElement {
                 .point_for_index(input.cursor_offset())
                 .unwrap_or(point(px(0.0), px(0.0)));
             caret = Some(fill(
-                Bounds::new(
+                caret_rect(
                     point(origin.x + caret_point.x, origin.y + caret_point.y),
-                    size(px(2.0), input.line_height),
+                    input.line_height,
+                    input.caret_ascent,
+                    input.caret_descent,
                 ),
                 input.caret_color,
             ));
@@ -2233,6 +2268,17 @@ mod tests {
         let mut input = TextEditorElement::new(false);
         input.set_prop("theme", serde_json::json!({ "caret": "#22c55e" }));
         assert_eq!(input.theme.caret, gpui::rgba(0x22c55eff).into());
+    }
+
+    #[test]
+    fn caret_matches_the_font_size_inside_the_line() {
+        let bounds = caret_rect(point(px(10.0), px(4.0)), px(20.0), px(12.0), px(4.0));
+        assert_eq!(bounds.origin, point(px(10.0), px(6.0)));
+        assert_eq!(bounds.size, size(px(2.0), px(16.0)));
+
+        let cramped = caret_rect(point(px(10.0), px(4.0)), px(12.0), px(12.0), px(4.0));
+        assert_eq!(cramped.origin, point(px(10.0), px(2.0)));
+        assert_eq!(cramped.size.height, px(16.0));
     }
 
     #[test]
