@@ -3519,7 +3519,7 @@ Limited relative-color forms can derive a new color from a base value:
 
 **Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` and `"auto"` create a native scrollable container with persistent scroll state (`"auto"` is identical to `"scroll"`: no scrollbar gutter is painted either way, so there is nothing to reserve)
 
-**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textDecoration` (`"underline"` | `"line-through"` | `"none"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A numeric `lineHeight` is the legacy pixel form; a unitless string such as `"1.4"` multiplies the resolved font size.
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `fontVariantNumeric` (`"normal"` or a space-separated set of `lining-nums` | `oldstyle-nums`, `proportional-nums` | `tabular-nums`, `diagonal-fractions` | `stacked-fractions`, `ordinal`, `slashed-zero`; inherited), `textDecoration` (`"underline"` | `"line-through"` | `"none"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A numeric `lineHeight` is the legacy pixel form; a unitless string such as `"1.4"` multiplies the resolved font size.
 
 `textWrap` accepts `"wrap"` and `"nowrap"`. `"balance"` and `"pretty"` are
 recognized but explicitly rejected with a strict-style diagnostic because GPUI

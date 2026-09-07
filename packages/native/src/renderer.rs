@@ -11107,6 +11107,24 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(letter_spacing) = style.letter_spacing {
         el = el.letter_spacing(gpui::px(letter_spacing as f32));
     }
+    if let Some(ref variant) = style.font_variant_numeric {
+        let tags: Vec<(String, u32)> = variant
+            .split_ascii_whitespace()
+            .filter_map(|token| match token {
+                "lining-nums" => Some("lnum"),
+                "oldstyle-nums" => Some("onum"),
+                "proportional-nums" => Some("pnum"),
+                "tabular-nums" => Some("tnum"),
+                "diagonal-fractions" => Some("frac"),
+                "stacked-fractions" => Some("afrc"),
+                "ordinal" => Some("ordn"),
+                "slashed-zero" => Some("zero"),
+                _ => None,
+            })
+            .map(|tag| (tag.to_string(), 1))
+            .collect();
+        el = el.font_features(gpui::FontFeatures(std::sync::Arc::new(tags)));
+    }
     // `textAlign` was in the style type but implemented nowhere.
     match style.text_align.as_deref() {
         Some("center") => el = el.text_center(),

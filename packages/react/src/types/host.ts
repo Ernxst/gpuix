@@ -536,6 +536,8 @@ export interface StyleDesc {
   fontFamily?: string
   fontWeight?: FontWeight
   letterSpacing?: number
+  /** CSS font-variant-numeric: "normal" or a space-separated set such as "tabular-nums slashed-zero". */
+  fontVariantNumeric?: string
   textDecoration?: "underline" | "line-through" | "none"
   textTransform?: "none" | "uppercase" | "lowercase"
   textAlign?: "left" | "start" | "center" | "right"
