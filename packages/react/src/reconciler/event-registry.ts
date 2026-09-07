@@ -399,7 +399,7 @@ function dispatchGpuixEvent(
     if (
       !keyboardDispatchFinished &&
       payload.eventType === "keyDown" &&
-      activationKey(payload) === "tab"
+      (activationKey(payload) === "tab" || payload.key?.toLowerCase() === "enter")
     ) {
       finishDispatch({
         defaultPrevented: event.defaultPrevented,

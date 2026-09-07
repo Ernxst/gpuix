@@ -949,8 +949,7 @@ export class TestRenderer implements NativeRenderer {
   nativeSimulateKeystrokes(elementId: number, keystrokes: string): void {
     this.native.flush()
     this.native.focusElement(elementId)
-    this.native.simulateKeystrokes(keystrokes)
-    this.dispatchNativeEvents()
+    this.simulateKeystrokes(keystrokes)
   }
 
   /** End-to-end: focus element → simulate a single key down through GPUI →

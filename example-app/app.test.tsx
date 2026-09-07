@@ -196,6 +196,20 @@ describeNative('todo app', () => {
     await app.close()
   })
 
+  it('adds a task through Enter in the composer', async () => {
+    const { render, renderer } = createTestRoot()
+    render(<TodoApp />)
+    const app = await connectTest(renderer)
+
+    await app.getByTestId('composer').fill('Add using Enter')
+    renderer.nativeSimulateKeystrokes(renderer.findByTestId('composer')!.id, 'enter')
+
+    expect(rowTitles(renderer.getPaintedText())).toContain('Add using Enter')
+    expect(renderer.findByTestId('composer')?.semantics?.value).toBe('')
+
+    await app.close()
+  })
+
   it('keeps a new task in view once the list is taller than the viewport', async () => {
     const { render, renderer } = createTestRoot({ width: 940, height: 660 })
     render(<TodoApp />)

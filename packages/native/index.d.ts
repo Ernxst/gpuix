@@ -136,6 +136,10 @@ export declare class GpuixRenderer {
    * bubble handlers have had a chance to call preventDefault().
    */
   resolveTabKeyDown(defaultPrevented: boolean): void
+  /**
+   * Complete the DOM default of an editor's Enter keydown after React capture and
+   * bubble handlers have had a chance to call preventDefault().
+   */
   resolveEditorKeyDown(elementId: number, defaultPrevented: boolean): void
   /**
    * The focused host element id, analogous to `document.activeElement`, or null.

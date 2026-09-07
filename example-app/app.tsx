@@ -318,7 +318,12 @@ function Composer({ onAdd }: { onAdd: (title: string) => void }) {
         placeholder="Add a task"
         autoFocus
         onChange={(event) => setDraft(event.value ?? '')}
-        onSubmit={submit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault()
+            submit()
+          }
+        }}
         theme={{ caret: C.accent }}
         style={{ flexGrow: 1, fontSize: 14, fontFamily: FONT, color: C.text }}
       />
