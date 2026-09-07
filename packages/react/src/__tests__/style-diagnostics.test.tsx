@@ -27,16 +27,6 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
           ariaLabel="Bad role"
         />
         <div
-          data-testid="roleless-ledger"
-          role={validRoleAdded ? "button" : undefined}
-          ariaLabel="Production ledger"
-        />
-        <div
-          data-testid="roleless-description"
-          role={validRoleAdded ? "button" : undefined}
-          ariaDescription="Deployment summary"
-        />
-        <div
           data-testid="roleless-selected"
           role={validRoleAdded ? "option" : undefined}
           ariaSelected
@@ -101,7 +91,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       testRoot.render(cases(false, true))
 
       const diagnostics = testRoot.renderer.drainStyleDiagnostics()
-      expect(diagnostics).toHaveLength(14)
+      expect(diagnostics).toHaveLength(12)
       const byTestId = (testId: string) => {
         const diagnostic = diagnostics.find((candidate) => candidate.dataTestId === testId)
         expect(diagnostic, testId).toBeDefined()
@@ -139,22 +129,6 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         '"bogus"',
         "rejected",
         "unsupported accessibility role; expected a WAI-ARIA role with an AccessKit mapping"
-      )
-      expectDiagnostic(
-        "roleless-ledger",
-        "div",
-        "ariaLabel",
-        '"Production ledger"',
-        "ignored",
-        "a name requires an explicit supported role, so it is omitted from the accessibility tree"
-      )
-      expectDiagnostic(
-        "roleless-description",
-        "div",
-        "ariaDescription",
-        '"Deployment summary"',
-        "ignored",
-        "a description requires an explicit supported role, so it is omitted from the accessibility tree"
       )
       expectDiagnostic(
         "roleless-selected",
@@ -573,32 +547,6 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       expect(clean.renderer.drainStyleDiagnostics()).toEqual([])
     } finally {
       clean.unmount()
-    }
-  })
-
-  it("drains an ignored accessibility diagnostic with assertion metadata", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-    const testRoot = createTestRoot({ strictStyles: true })
-
-    try {
-      testRoot.render(<div data-testid="roleless-ledger" ariaLabel="Production ledger" />)
-
-      const element = testRoot.renderer.findByTestId("roleless-ledger")!
-      const diagnostics = testRoot.renderer.drainStyleDiagnostics()
-      expect(diagnostics).toHaveLength(1)
-      expect(diagnostics[0]).toMatchObject({
-        elementId: element.id,
-        elementType: "div",
-        dataTestId: "roleless-ledger",
-        property: "ariaLabel",
-        value: '"Production ledger"',
-        message:
-          `[gpuix] Accessibility issue on <div data-testid="roleless-ledger"> (element ${element.id}): ` +
-          'property "ariaLabel" ignored value "Production ledger": ' +
-          "a name requires an explicit supported role, so it is omitted from the accessibility tree",
-      })
-    } finally {
-      testRoot.unmount()
     }
   })
 

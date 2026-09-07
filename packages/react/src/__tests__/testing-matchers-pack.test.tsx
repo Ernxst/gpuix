@@ -1086,6 +1086,7 @@ describeNative("gpuix matcher pack", () => {
             Copper
           </text>
           <div data-testid="plain" />
+          <div data-testid="named" ariaLabel="Named" />
           <input data-testid="field" value="" style={{ width: 100, height: 30 }} />
         </div>
       )
@@ -1099,15 +1100,15 @@ describeNative("gpuix matcher pack", () => {
       expect(screen.getByRole("status")).toBe(status)
       expect(screen.getByRole("label", { name: "Copper" })).toBe(status)
 
-      // A role exists here only where the element projects accessibility
-      // semantics. There is no `generic` to fall back to, and a plain `<input>`
-      // is invisible to the accessibility tree — so `getByRole('textbox')` does
-      // not find it either, and the two still agree.
+      // A role-less element projects a generic node when it carries a name or
+      // description. Plain inputs and textareas project textbox nodes too.
       const plain = screen.getByTestId("plain")
+      const named = screen.getByTestId("named")
       const field = screen.getByTestId("field")
       expect(plain).not.toHaveRole("generic")
-      expect(field).not.toHaveRole("textbox")
-      expect(screen.queryAllByRole("textbox")).toHaveLength(0)
+      expect(named).toHaveRole("generic")
+      expect(field).toHaveRole("textbox")
+      expect(screen.queryAllByRole("textbox")).toHaveLength(1)
 
       expect(() => expect(plain).toHaveRole("generic")).toThrowError(
         /have role "generic"[\s\S]*projects no accessibility node, so it has no role/

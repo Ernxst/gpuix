@@ -459,6 +459,7 @@ impl CustomElement for TextEditorElement {
             }
         });
         self.last_prop_value = Some(self.value.clone());
+        let content = state.read(cx).content.clone();
 
         let element_id = gpui::SharedString::from(format!("__gpuix_editor_{}", ctx.id));
         let mut editor = div().id(element_id).flex().min_w_0().w_full();
@@ -504,7 +505,8 @@ impl CustomElement for TextEditorElement {
             Some(&focus_handle),
             ctx.accessibility_hidden,
             None,
-            None,
+            Some(content.as_str()),
+            (!self.placeholder.is_empty()).then_some(self.placeholder.as_str()),
         );
         editor = super::wire_style_transition_events(editor, &ctx, cx);
         if ctx.events.contains("click") && !action_disabled {

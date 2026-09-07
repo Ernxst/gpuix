@@ -9998,6 +9998,7 @@ pub(crate) fn build_host_container(
         name_from_contents.as_deref(),
         // Painted text carries its own value on the node that draws it.
         None,
+        None,
     );
     if !native_disabled {
         if let Some(tab_index) = element
@@ -10398,6 +10399,7 @@ fn build_visually_hidden_element(
         ctx.inherited.accessibility_hidden,
         name_from_contents.as_deref(),
         content_value.as_deref(),
+        None,
     )
     .into_any_element()
 }

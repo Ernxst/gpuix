@@ -185,6 +185,7 @@ pub(crate) fn apply_accessibility<E: gpui::StatefulInteractiveElement>(
         // value of the node that draws it. Neither name source belongs here.
         None,
         None,
+        None,
     )
 }
 
