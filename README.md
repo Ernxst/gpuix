@@ -5056,6 +5056,8 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 
 See [AGENTS.md](https://github.com/Ernxst/gpuix/blob/main/AGENTS.md) for detailed architecture, communication flow, and contributing guide.
 
+- [Layout cache measurement](docs/measurements/2026-09-07-layout-cache.md)
+
 ## License
 
 [Apache-2.0](https://github.com/Ernxst/gpuix/blob/main/LICENSE)
