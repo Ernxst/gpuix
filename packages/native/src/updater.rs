@@ -94,6 +94,8 @@ mod packager {
             Http(#[from] http_client::http::Error),
             #[error(transparent)]
             PersistError(#[from] tempfile::PersistError),
+            #[error("{0}")]
+            MissingSignature(String),
         }
 
         pub type Result<T> = std::result::Result<T, Error>;
@@ -208,6 +210,31 @@ mod packager {
         let client = reqwest_client::ReqwestClient::user_agent("gpuix-updater")
             .map_err(|err| Error::Network(err.to_string()))?;
         Ok(CLIENT.get_or_init(|| client))
+    }
+
+    pub fn rewrite_github_endpoint(url: &Url) -> Result<Url> {
+        let host = url.host_str().unwrap_or("");
+        if host != "github.com" && host != "www.github.com" {
+            return Ok(url.clone());
+        }
+        let segments = url
+            .path_segments()
+            .map(|s| s.filter(|p| !p.is_empty()))
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        if segments.len() < 2 {
+            return Ok(url.clone());
+        }
+        let owner = segments[0];
+        let repo = segments[1];
+        if owner == "repos" {
+            return Ok(url.clone());
+        }
+        Url::parse(&format!(
+            "https://api.github.com/repos/{owner}/{repo}/releases/latest"
+        ))
+        .map_err(Into::into)
     }
 
     fn get_blocking(
@@ -484,15 +511,16 @@ mod packager {
             let encoded_version = encoded_version.to_string();
 
             for url in &self.config.endpoints {
-                let url: Url = url
-                    .to_string()
-                    .replace("%7B%7Bcurrent_version%7D%7D", &encoded_version)
-                    .replace("%7B%7Btarget%7D%7D", &self.target)
-                    .replace("%7B%7Barch%7D%7D", self.arch)
-                    .replace("{{current_version}}", &encoded_version)
-                    .replace("{{target}}", &self.target)
-                    .replace("{{arch}}", self.arch)
-                    .parse()?;
+                let url: Url = rewrite_github_endpoint(
+                    &url.to_string()
+                        .replace("%7B%7Bcurrent_version%7D%7D", &encoded_version)
+                        .replace("%7B%7Btarget%7D%7D", &self.target)
+                        .replace("%7B%7Barch%7D%7D", self.arch)
+                        .replace("{{current_version}}", &encoded_version)
+                        .replace("{{target}}", &self.target)
+                        .replace("{{arch}}", self.arch)
+                        .parse()?,
+                )?;
 
                 log::debug!("checking for updates {url}");
 
@@ -507,9 +535,7 @@ mod packager {
                             let update_response: serde_json::Value = serde_json::from_slice(&body)?;
                             log::debug!("update response: {update_response:?}");
 
-                            match serde_json::from_value::<RemoteRelease>(update_response)
-                                .map_err(Into::into)
-                            {
+                            match self.parse_release_json(update_response, &headers) {
                                 Ok(release) => {
                                     log::debug!("parsed release response {release:?}");
                                     last_error = None;
@@ -562,6 +588,122 @@ mod packager {
 
             Ok(update)
         }
+
+        fn parse_release_json(
+            &self,
+            value: serde_json::Value,
+            headers: &HeaderMap,
+        ) -> Result<RemoteRelease> {
+            if value.get("version").is_some()
+                && (value.get("url").is_some() || value.get("platforms").is_some())
+            {
+                return serde_json::from_value(value).map_err(Into::into);
+            }
+            if value.get("tag_name").is_some() && value.get("assets").is_some() {
+                return github_release_to_remote(
+                    value,
+                    self.arch,
+                    &self.current_version,
+                    headers,
+                    self.timeout,
+                );
+            }
+            serde_json::from_value(value).map_err(Into::into)
+        }
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct GithubRelease {
+        tag_name: String,
+        body: Option<String>,
+        published_at: Option<String>,
+        assets: Vec<GithubAsset>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct GithubAsset {
+        name: String,
+        browser_download_url: Url,
+    }
+
+    fn github_release_to_remote(
+        value: serde_json::Value,
+        arch: &str,
+        current_version: &Version,
+        headers: &HeaderMap,
+        timeout: Option<Duration>,
+    ) -> Result<RemoteRelease> {
+        let release: GithubRelease = serde_json::from_value(value)?;
+        let version = Version::parse(release.tag_name.trim_start_matches('v'))?;
+        let (asset, format) = pick_github_asset(&release.assets, arch)?;
+        let sig_name = format!("{}.sig", asset.name);
+        let sig_asset = release.assets.iter().find(|item| item.name == sig_name);
+        let Some(sig_asset) = sig_asset else {
+            return Err(Error::MissingSignature(format!(
+                "GitHub release is missing sibling signature {}",
+                sig_name
+            )));
+        };
+        let signature = if version > *current_version {
+            let (status, _headers, sig_body) =
+                get_blocking(&sig_asset.browser_download_url, headers.clone(), timeout)?;
+            if !status.is_success() {
+                return Err(Error::MissingSignature(format!(
+                    "failed to download {sig_name}: HTTP {status}"
+                )));
+            }
+            String::from_utf8(sig_body)
+                .map_err(|_| Error::SignatureUtf8(format!("{sig_name} is not valid UTF-8")))?
+        } else {
+            String::new()
+        };
+        let pub_date = release.published_at.as_deref().and_then(|date| {
+            OffsetDateTime::parse(date, &time::format_description::well_known::Rfc3339).ok()
+        });
+        Ok(RemoteRelease {
+            version,
+            notes: release.body,
+            pub_date,
+            data: RemoteReleaseData::Dynamic(ReleaseManifestPlatform {
+                url: asset.browser_download_url.clone(),
+                signature,
+                format,
+            }),
+        })
+    }
+
+    fn pick_github_asset<'a>(
+        assets: &'a [GithubAsset],
+        arch: &str,
+    ) -> Result<(&'a GithubAsset, UpdateFormat)> {
+        let nsis_arch = if arch == "aarch64" { "arm64" } else { "x64" };
+        let mut matches = assets.iter().filter_map(|asset| {
+            let name = asset.name.as_str();
+            if name.ends_with(".sig") {
+                return None;
+            }
+            let format = if cfg!(target_os = "macos") && name.ends_with(".app.tar.gz") {
+                Some(UpdateFormat::App)
+            } else if cfg!(unix)
+                && !cfg!(target_os = "macos")
+                && name.ends_with(&format!("_{arch}.AppImage"))
+            {
+                Some(UpdateFormat::AppImage)
+            } else if cfg!(windows) && name.ends_with(&format!("_{nsis_arch}-setup.exe")) {
+                Some(UpdateFormat::Nsis)
+            } else if cfg!(windows) && name.ends_with(".msi") {
+                Some(UpdateFormat::Wix)
+            } else {
+                None
+            };
+            format.map(|format| (asset, format))
+        });
+        matches.next().ok_or_else(|| {
+            Error::TargetNotFound(format!(
+                "{os}-{arch}",
+                os = get_updater_target().unwrap_or("unknown")
+            ))
+        })
     }
 
     #[derive(Debug, Clone)]
@@ -1312,5 +1454,193 @@ mod tests {
         let endpoint = serve_once("HTTP/1.1 200 OK", body);
         let updater = build_updater("0.1.0", &options(endpoint)).unwrap();
         assert!(updater.check().unwrap().is_none());
+    }
+
+    #[test]
+    fn github_repo_url_rewrites_to_releases_latest_api() {
+        assert_eq!(
+            packager::rewrite_github_endpoint(
+                &Url::parse("https://github.com/OWNER/REPO").unwrap()
+            )
+            .unwrap()
+            .as_str(),
+            "https://api.github.com/repos/OWNER/REPO/releases/latest"
+        );
+        assert_eq!(
+            packager::rewrite_github_endpoint(
+                &Url::parse("https://github.com/OWNER/REPO/releases/latest").unwrap()
+            )
+            .unwrap()
+            .as_str(),
+            "https://api.github.com/repos/OWNER/REPO/releases/latest"
+        );
+        assert_eq!(
+            packager::rewrite_github_endpoint(
+                &Url::parse("https://github.com/OWNER/REPO/releases/latest/download/latest.json")
+                    .unwrap()
+            )
+            .unwrap()
+            .as_str(),
+            "https://api.github.com/repos/OWNER/REPO/releases/latest"
+        );
+        let other = Url::parse("https://example.com/updates").unwrap();
+        assert_eq!(
+            packager::rewrite_github_endpoint(&other).unwrap().as_str(),
+            other.as_str()
+        );
+    }
+
+    fn github_release_json(origin: &str, tag: &str, assets: &[(&str, &str)]) -> String {
+        let assets_json = assets
+            .iter()
+            .map(|(name, path)| {
+                format!(r#"{{"name":"{name}","browser_download_url":"{origin}{path}"}}"#)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            r#"{{
+                "tag_name": "{tag}",
+                "body": "bugfix",
+                "published_at": "2026-09-07T12:00:00Z",
+                "assets": [{assets_json}]
+            }}"#
+        )
+    }
+
+    fn serve_github(release: String, extra: Vec<(String, String, String)>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            for _ in 0..8 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let mut buf = [0u8; 4096];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let path = req
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                let (status, body) = if path == "/repos/OWNER/REPO/releases/latest" || path == "/" {
+                    ("HTTP/1.1 200 OK", release.clone())
+                } else {
+                    extra
+                        .iter()
+                        .find(|(p, _, _)| p == &path)
+                        .map(|(_, status, body)| (status.as_str(), body.clone()))
+                        .unwrap_or(("HTTP/1.1 404 Not Found", String::new()))
+                };
+                let response = format!(
+                    "{status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    fn host_bundle_name() -> &'static str {
+        if cfg!(target_os = "macos") {
+            "My App.app.tar.gz"
+        } else if cfg!(windows) {
+            if cfg!(target_arch = "aarch64") {
+                "app_0.2.0_arm64-setup.exe"
+            } else {
+                "app_0.2.0_x64-setup.exe"
+            }
+        } else if cfg!(target_arch = "aarch64") {
+            "app_0.2.0_aarch64.AppImage"
+        } else {
+            "app_0.2.0_x86_64.AppImage"
+        }
+    }
+
+    #[test]
+    fn github_newer_tag_returns_update() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let bundle = host_bundle_name();
+        let sig_name = format!("{bundle}.sig");
+        let release = github_release_json(
+            &origin,
+            "v0.2.0",
+            &[(bundle, "/bundle"), (&sig_name, "/bundle.sig")],
+        );
+        let extra: Vec<(String, String, String)> = vec![(
+            "/bundle.sig".into(),
+            "HTTP/1.1 200 OK".into(),
+            "untrusted comment: signature\nRWQ=\n".into(),
+        )];
+        thread::spawn(move || {
+            for _ in 0..8 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let mut buf = [0u8; 4096];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let path = req
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                let (status, body) = if path == "/" {
+                    ("HTTP/1.1 200 OK", release.clone())
+                } else {
+                    extra
+                        .iter()
+                        .find(|(p, _, _)| p == &path)
+                        .map(|(_, status, body)| (status.as_str(), body.clone()))
+                        .unwrap_or(("HTTP/1.1 404 Not Found", String::new()))
+                };
+                let response = format!(
+                    "{status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        let updater = build_updater("0.1.0", &options(origin.clone())).unwrap();
+        let found = updater.check().unwrap().expect("update");
+        assert_eq!(found.version, "0.2.0");
+        assert_eq!(found.current_version, "0.1.0");
+        assert_eq!(found.body.as_deref(), Some("bugfix"));
+        assert_eq!(found.download_url.as_str(), format!("{origin}/bundle"));
+        assert_eq!(found.signature, "untrusted comment: signature\nRWQ=\n");
+    }
+
+    #[test]
+    fn github_same_tag_is_not_an_update() {
+        let origin = "http://127.0.0.1:1";
+        let bundle = host_bundle_name();
+        let sig_name = format!("{bundle}.sig");
+        let release = github_release_json(
+            origin,
+            "v0.1.0",
+            &[(bundle, "/bundle"), (&sig_name, "/bundle.sig")],
+        );
+        let endpoint = serve_github(release, vec![]);
+        let updater = build_updater("0.1.0", &options(endpoint)).unwrap();
+        assert!(updater.check().unwrap().is_none());
+    }
+
+    #[test]
+    fn github_missing_sig_is_an_error() {
+        let origin = "http://127.0.0.1:1";
+        let bundle = host_bundle_name();
+        let release = github_release_json(origin, "v0.2.0", &[(bundle, "/bundle")]);
+        let endpoint = serve_github(release, vec![]);
+        let updater = build_updater("0.1.0", &options(endpoint)).unwrap();
+        let err = updater.check().err().expect("missing sig must fail");
+        assert!(
+            err.to_string().contains(".sig") || err.to_string().contains("signature"),
+            "{err}"
+        );
     }
 }

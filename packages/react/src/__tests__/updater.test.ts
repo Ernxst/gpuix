@@ -98,4 +98,54 @@ describeNative("checkUpdate()", () => {
     expect(update!.format).toBe("app")
     expect(update!.downloadUrl).toBe("http://127.0.0.1/MyApp.app.tar.gz")
   })
+
+  it("reads GitHub latest JSON and the sibling .sig", async () => {
+    const bundle =
+      process.platform === "darwin"
+        ? "My App.app.tar.gz"
+        : process.platform === "win32"
+          ? "app_0.2.0_x64-setup.exe"
+          : "app_0.2.0_x86_64.AppImage"
+    let origin = ""
+    const server = await listen((req, res) => {
+      if (req.url === "/" || req.url === "/repos/OWNER/REPO/releases/latest") {
+        res.setHeader("content-type", "application/json")
+        res.end(
+          JSON.stringify({
+            tag_name: "v0.2.0",
+            body: "bugfix",
+            published_at: "2026-09-07T12:00:00Z",
+            assets: [
+              {
+                name: bundle,
+                browser_download_url: `${origin}/bundle`,
+              },
+              {
+                name: `${bundle}.sig`,
+                browser_download_url: `${origin}/bundle.sig`,
+              },
+            ],
+          }),
+        )
+        return
+      }
+      if (req.url === "/bundle.sig") {
+        res.end("untrusted comment: signature\nRWQ=\n")
+        return
+      }
+      res.statusCode = 404
+      res.end()
+    })
+    origin = server.url
+    close = server.close
+    const update = await native.checkUpdate!("0.1.0", {
+      endpoints: [server.url],
+      pubkey: "not-a-real-key",
+      timeoutMs: 2000,
+    })
+    expect(update).not.toBeNull()
+    expect(update!.version).toBe("0.2.0")
+    expect(update!.notes).toBe("bugfix")
+    expect(update!.downloadUrl).toBe(`${server.url}/bundle`)
+  })
 })
