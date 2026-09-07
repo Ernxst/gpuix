@@ -15,6 +15,7 @@ import {
   resetRender,
 } from "../reconciler/renderer.js"
 import { handleGpuixEvent } from "../reconciler/event-registry.js"
+import { SHOTS_DIR } from "./test-utils.js"
 
 const srcDir = fileURLToPath(new URL("..", import.meta.url))
 
@@ -151,7 +152,7 @@ describeNative("render()", () => {
       renderer.flush()
 
       const text = renderer.getAllText().join("\n")
-      expect(text).toContain("Runtime error")
+      expect(text).toContain("Uncaught runtime errors:")
       expect(text).toContain("kaboom")
       expect(renderer.getPaintedText().join("\n")).toContain("kaboom")
       const reload = renderer.findByTestId("runtime-error-reload")
@@ -160,6 +161,41 @@ describeNative("render()", () => {
       expect(bounds).not.toBeNull()
       renderer.nativeSimulateClick(bounds![0] + 8, bounds![1] + 8)
       expect(renderer.getAllText()).toEqual(["ok"])
+    })
+
+    it("paints a webpack-style overlay screenshot of the stack", async () => {
+      const err = new Error("Cannot read properties of undefined (reading 'map')")
+      err.stack = [
+        "Error: Cannot read properties of undefined (reading 'map')",
+        "    at MailMarkdown (/Users/morse/Documents/GitHub/gpuixlocal/mail/markdown.tsx:216:32)",
+        "    at MessageBlock (/Users/morse/Documents/GitHub/gpuixlocal/mail/app.tsx:288:5)",
+        "    at Pane (/Users/morse/Documents/GitHub/gpuixlocal/mail/app.tsx:313:5)",
+        "    at MailApp (/Users/morse/Documents/GitHub/gpuixlocal/mail/app.tsx:329:27)",
+        "    at renderWithHooks (react-reconciler.development.js:3914:22)",
+        "    at updateFunctionComponent (react-reconciler.development.js:6059:19)",
+        "    at performUnitOfWork (react-reconciler.development.js:12649:22)",
+        "    at workLoopSync (react-reconciler.development.js:12461:41)",
+      ].join("\n")
+
+      function Boom() {
+        throw err
+      }
+
+      render(<Boom />, { renderer })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      renderer.flush()
+
+      const text = renderer.getAllText().join("\n")
+      expect(text).toContain("Uncaught runtime errors:")
+      expect(text).toContain("MailMarkdown")
+      expect(text).toContain("markdown.tsx:216:32")
+      const stack = renderer.findByTestId("runtime-error-stack")
+      expect(stack).toBeDefined()
+      expect(stack!.style.overflowY).toBe("scroll")
+
+      const shot = join(SHOTS_DIR, "runtime-error-overlay.png")
+      renderer.captureScreenshot(shot)
+      expect(renderer.getPaintedText().join("\n")).toContain("MailMarkdown")
     })
 
     it("does not paint a stale overlay over a later remount", async () => {
