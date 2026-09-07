@@ -1776,16 +1776,15 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             text_transform,
             ["none", "uppercase", "lowercase"]
         );
-        if key == "listStyle" || key == "listStyleType" {
-            // Native lists paint no marker, so `none` is the only value that
-            // describes what is drawn. Validated and then dropped: there is
-            // no field because no renderer path would read it.
-            let property = if prefix.is_empty() {
-                key.clone()
-            } else {
-                format!("{prefix}.{key}")
-            };
-            decode_enum(&property, value, &["none"], &mut parsed.problems);
+        // Native lists paint no marker, so `none` is the only value that
+        // describes what is drawn. Validated and then dropped: there is
+        // no field because no renderer path would read it.
+        if key == "listStyle" {
+            let _ = decode_enum(&property!("listStyle"), value, &["none"], &mut parsed.problems);
+            continue;
+        }
+        if key == "listStyleType" {
+            let _ = decode_enum(&property!("listStyleType"), value, &["none"], &mut parsed.problems);
             continue;
         }
         enum_field!(

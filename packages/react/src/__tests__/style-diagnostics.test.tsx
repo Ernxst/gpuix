@@ -647,6 +647,25 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     })
   })
 
+  it("accepts the react-dom list fixture under strict styles and keeps list semantics", () => {
+    const screen = createTestRoot({ strictStyles: true })
+
+    try {
+      screen.render(
+        <ul style={{ display: "flex", flexDirection: "column", margin: 0, padding: 0, listStyle: "none" }}>
+          <li data-testid="row">
+            <text>Destination</text>
+          </li>
+        </ul>
+      )
+
+      expect(screen.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(screen.getByRole("listitem")).toBe(screen.getByTestId("row"))
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("reports an invalid length expression with element, property, value, and parse position", () => {
     const renderer = new TestRenderer()
     renderer.applyBatch(

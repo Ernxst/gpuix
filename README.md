@@ -3528,7 +3528,7 @@ Limited relative-color forms can derive a new color from a base value:
 recognized but explicitly rejected with a strict-style diagnostic because GPUI
 does not yet implement those wrapping algorithms.
 
-**Lists:** `listStyle` and `listStyleType` accept only `"none"`. Native `<ul>`, `<ol>` and `<li>` paint no marker, so `"none"` is the one value that matches what is drawn; `"disc"`, `"decimal"` and every other marker are rejected with a strict-style diagnostic until markers are implemented.
+**Lists:** `listStyle` and `listStyleType` accept only `"none"`. Native `<ul>`, `<ol>` and `<li>` paint no marker, so `"none"` is the one value that matches what is drawn; `"disc"`, `"decimal"` and every other marker are rejected with a strict-style diagnostic until markers are implemented. `listStylePosition` and `listStyleImage` remain unsupported and are rejected the same way.
 
 **Selection:** `userSelect` (`"text"` | `"none"`), `selectionColor` — both inherit down the tree
 

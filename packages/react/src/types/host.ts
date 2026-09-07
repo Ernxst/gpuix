@@ -539,9 +539,9 @@ export interface StyleDesc {
   /** CSS font-variant-numeric: "normal" or a space-separated set such as "tabular-nums slashed-zero". */
   fontVariantNumeric?: string
   textDecoration?: "underline" | "line-through" | "none"
-  /** Only "none": native lists paint no marker. */
+  /** Only "none": native lists paint no marker. Validated and discarded; not reported in resolved styles. */
   listStyle?: "none"
-  /** Only "none": native lists paint no marker. */
+  /** Only "none": native lists paint no marker. Validated and discarded; not reported in resolved styles. */
   listStyleType?: "none"
   textTransform?: "none" | "uppercase" | "lowercase"
   textAlign?: "left" | "start" | "center" | "right"
