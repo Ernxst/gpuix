@@ -174,12 +174,12 @@ describeNative("accessible name whitespace", () => {
     }
   })
 
-  it("ignores a descendant label that no role carries", () => {
+  it("includes a descendant label a generic carries", () => {
     const screen = createTestRoot()
 
     try {
-      // A role-less label never reaches the tree — the author is told as much —
-      // and the browser ignores `aria-label` on a generic for the same reason.
+      // A role-less descendant with a name projects a generic node, and
+      // accname includes that node's label when naming the ancestor.
       screen.render(
         <div data-testid="save" role="button">
           <div ariaLabel="Save" />
@@ -187,8 +187,8 @@ describeNative("accessible name whitespace", () => {
         </div>
       )
 
-      expect(screen.getByRole("button", { name: "All" })).toBe(screen.getByTestId("save"))
-      expect(screen.queryByRole("button", { name: "Save All" })).toBeNull()
+      expect(screen.getByRole("button", { name: "Save All" })).toBe(screen.getByTestId("save"))
+      expect(screen.queryByRole("button", { name: "All" })).toBeNull()
     } finally {
       screen.unmount()
     }

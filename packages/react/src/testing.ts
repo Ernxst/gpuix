@@ -105,6 +105,7 @@ export interface AccessKitNodeSnapshot {
     label?: string
     description?: string
     value?: string
+    placeholder?: string
     selected?: boolean
     current?: "False" | "True" | "Page" | "Step" | "Location" | "Date" | "Time"
     live?: "Off" | "Polite" | "Assertive"
@@ -2046,8 +2047,10 @@ interface AccessibleHost {
 const ACCESSKIT_ROLE_ALIASES: Readonly<Record<string, string>> = {
   contentdeletion: "deletion",
   contentinsertion: "insertion",
+  genericcontainer: "generic",
   image: "img",
   listboxoption: "option",
+  multilinetextinput: "textbox",
   progressindicator: "progressbar",
   radiobutton: "radio",
   searchinput: "searchbox",

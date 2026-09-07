@@ -1126,8 +1126,9 @@ export const gpuixMatchers = {
    *
    * An element that both carries a role and paints text projects two nodes, as
    * `<p>Hi</p>` does in the DOM, and has both roles — the same two a role query
-   * would find it under. An element that projects no node at all has no role
-   * here: the desktop has no `generic` to fall back to.
+   * would find it under. A role-less element has a `generic` role only when it
+   * carries a name or description, and an element that projects no node at all
+   * has no role.
    */
   toHaveRole(this: MatcherContext, received: unknown, role: string): GpuixMatcherResult {
     return against(

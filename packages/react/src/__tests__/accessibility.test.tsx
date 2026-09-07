@@ -60,16 +60,90 @@ describeNative("accessibility", () => {
     expect(buttons[0]?.on_action).toEqual(expect.arrayContaining(["Click"]))
   })
 
-  it("omits a div with no role from the tree", () => {
+  it("omits a bare div with no role from the tree", () => {
     testRoot.render(
-      <div style={{ width: 120, height: 40 }} aria-label="silent">
+      <div style={{ width: 120, height: 40 }}>Hello</div>,
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "GenericContainer")).toEqual([])
+  })
+
+  it("projects a named role-less div as a generic container", () => {
+    testRoot.render(
+      <div
+        style={{ width: 120, height: 40 }}
+        aria-label="Ledger"
+        aria-description="Production ledger"
+      >
         Hello
       </div>,
     )
 
     const tree = testRoot.renderer.getAccessibilityTree()
-    expect(withRole(tree, "GenericContainer")).toEqual([])
-    expect(ariaOf(tree).some((aria) => aria.label === "silent")).toBe(false)
+    expect(withRole(tree, "GenericContainer")).toEqual([
+      expect.objectContaining({
+        role: "GenericContainer",
+        label: "Ledger",
+        description: "Production ledger",
+      }),
+    ])
+  })
+
+  it("gives a plain input and textarea their implicit textbox roles", () => {
+    testRoot.render(
+      <div style={{ width: 300, height: 120 }}>
+        <input
+          value="name"
+          placeholder="Your name"
+          style={{ width: 200, height: 30 }}
+        />
+        <textarea
+          value="body"
+          aria-label="Body"
+          placeholder="Write"
+          style={{ width: 200, height: 60 }}
+        />
+      </div>,
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "TextInput")).toEqual([
+      expect.objectContaining({
+        role: "TextInput",
+        value: "name",
+        label: "Your name",
+        placeholder: "Your name",
+      }),
+    ])
+    expect(withRole(tree, "MultilineTextInput")).toEqual([
+      expect.objectContaining({
+        role: "MultilineTextInput",
+        value: "body",
+        label: "Body",
+        placeholder: "Write",
+      }),
+    ])
+
+    expect(testRoot.getAllByRole("textbox")).toHaveLength(2)
+    expect(testRoot.getByRole("textbox", { name: "Your name" })).toBe(
+      testRoot.getAllByRole("textbox")[0],
+    )
+
+    const input = testRoot.renderer.findByType("input")[0]!
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "x")
+    testRoot.renderer.flush()
+    const typedTree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(typedTree, "TextInput")).toEqual([
+      expect.objectContaining({ value: "namex" }),
+    ])
+
+    testRoot.render(
+      <input role="searchbox" value="" style={{ width: 200, height: 30 }} />,
+    )
+    const explicitTree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(explicitTree, "SearchInput")).toHaveLength(1)
+    expect(withRole(explicitTree, "TextInput")).toEqual([])
   })
 
   it("drops role none and presentation", () => {

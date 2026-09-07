@@ -214,16 +214,12 @@ define_accessibility_roles! {
 }
 
 impl AccessibilityRole {
-    fn into_gpui(self) -> Option<gpui::Role> {
-        (self.role != gpui::Role::GenericContainer).then_some(self.role)
-    }
-
     fn supports_specialized_action(self, action: gpui::AccessibleAction) -> bool {
         match action {
             gpui::AccessibleAction::Increment | gpui::AccessibleAction::Decrement => {
                 matches!(self.role, gpui::Role::Slider | gpui::Role::SpinButton)
             }
-            gpui::AccessibleAction::Focus => self.into_gpui().is_some(),
+            gpui::AccessibleAction::Focus => true,
             _ => false,
         }
     }
@@ -288,9 +284,48 @@ impl AccessibilityRole {
                 Role::Cell | Role::ColumnHeader | Role::GridCell | Role::RowHeader
             ),
             "disabled" | "ariaDisabled" => !matches!(self.role, Role::Heading | Role::Image),
+            "ariaLive" | "ariaAtomic" => self.role != Role::GenericContainer,
             _ => true,
         }
     }
+}
+
+fn resolved_role(element: &RetainedElement) -> Option<AccessibilityRole> {
+    if let Some(value) = element.custom_props.get("role") {
+        return AccessibilityRole::parse(value).filter(|role| {
+            !(role.role == gpui::Role::GenericContainer
+                && matches!(value.as_str(), Some("none" | "presentation")))
+        });
+    }
+
+    let implicit = match element.element_type.as_str() {
+        "input" => Some(AccessibilityRole {
+            role: gpui::Role::TextInput,
+            name_from_contents: false,
+        }),
+        "textarea" => Some(AccessibilityRole {
+            role: gpui::Role::MultilineTextInput,
+            name_from_contents: false,
+        }),
+        _ => None,
+    };
+    if implicit.is_some() {
+        return implicit;
+    }
+
+    ["ariaLabel", "ariaLabelledBy", "ariaDescription", "ariaDescribedBy"]
+        .into_iter()
+        .any(|property| {
+            element
+                .custom_props
+                .get(property)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+        })
+        .then_some(AccessibilityRole {
+            role: gpui::Role::GenericContainer,
+            name_from_contents: false,
+        })
 }
 
 /// The live-region politeness and atomicity a role carries on its own.
@@ -388,15 +423,11 @@ fn flattened_text(tree: &RetainedTree, element: &RetainedElement, subject: NameS
 
 /// Whether an authored name on `node` reaches the accessibility tree at all.
 ///
-/// `apply` sets one only for a node whose declared role supports it, and
-/// `element_problems` tells the author when a role-less label was dropped. A
-/// name computed from contents reads the tree the platform reads, so a label
-/// the tree never carries contributes nothing to it either: the browser
-/// ignores `aria-label` on a generic just the same.
+/// Accname recurses into a role-less descendant at step 2, so a label it carries
+/// names the subtree it sits on. Chromium and dom-accessibility-api both include
+/// it.
 fn carries_authored_name(node: &RetainedElement) -> bool {
-    node.custom_props
-        .get("role")
-        .and_then(AccessibilityRole::parse)
+    resolved_role(node)
         .is_some_and(|role| role.supports("ariaLabel"))
 }
 
@@ -603,10 +634,7 @@ struct AccessibilityProps<'a> {
 impl<'a> AccessibilityProps<'a> {
     fn from_element(tree: &RetainedTree, element: &'a RetainedElement) -> Self {
         Self {
-            role: element
-                .custom_props
-                .get("role")
-                .and_then(AccessibilityRole::parse),
+            role: resolved_role(element),
             label: element
                 .custom_props
                 .get("ariaLabel")
@@ -733,11 +761,7 @@ pub(crate) fn has_semantics(element: &RetainedElement) -> bool {
 }
 
 pub(crate) fn role_supports_name_from_contents(element: &RetainedElement) -> bool {
-    element
-        .custom_props
-        .get("role")
-        .and_then(AccessibilityRole::parse)
-        .is_some_and(|role| role.into_gpui().is_some() && role.name_from_contents)
+    resolved_role(element).is_some_and(|role| role.name_from_contents)
 }
 
 pub(crate) fn is_native_disabled(element: &RetainedElement) -> bool {
@@ -838,12 +862,6 @@ fn applied_as_problem(
 /// that was resolves to no node.
 fn roleless_reason(property: &str) -> &'static str {
     match property {
-        "ariaLabel" | "ariaLabelledBy" => {
-            "a name requires an explicit supported role, so it is omitted from the accessibility tree"
-        }
-        "ariaDescription" | "ariaDescribedBy" => {
-            "a description requires an explicit supported role, so it is omitted from the accessibility tree"
-        }
         // A live region without a node has nowhere for the politeness to land.
         // The DOM allows it; GPUIX says which role to add instead of implying
         // one.
@@ -934,8 +952,7 @@ fn visually_hidden_rejection(
         .custom_props
         .get("role")
         .and_then(AccessibilityRole::parse)
-        .and_then(AccessibilityRole::into_gpui)
-        .is_none()
+        .is_none_or(|role| role.role == gpui::Role::GenericContainer)
     {
         return Some(
             "visuallyHidden requires an explicit supported role so the accessibility-only element produces a node",
@@ -996,7 +1013,8 @@ pub(crate) fn element_problems(
 ) -> Vec<AccessibilityProblem> {
     let mut problems = Vec::new();
     let role_value = element.custom_props.get("role");
-    let role = role_value.and_then(AccessibilityRole::parse);
+    let role = resolved_role(element);
+    let explicit = role_value.and_then(AccessibilityRole::parse);
 
     if has_semantics(element)
         && !projects_accessibility(&element.element_type)
@@ -1136,6 +1154,22 @@ pub(crate) fn element_problems(
                 | "ariaDisabled"
         ) {
             match role {
+                // A generic node — implied by a name, or declared as `generic`, `none`
+                // or `presentation` — is pruned by every platform adapter before its
+                // live-region branch runs, so the politeness never lands.
+                Some(role)
+                    if role.role == gpui::Role::GenericContainer
+                        && matches!(property.as_str(), "ariaLive" | "ariaAtomic") =>
+                {
+                    problems.push(ignored_problem(property, value, roleless_reason(property)));
+                }
+                None
+                    if explicit.is_some_and(|parsed| {
+                        parsed.role == gpui::Role::GenericContainer
+                    }) && matches!(property.as_str(), "ariaLive" | "ariaAtomic") =>
+                {
+                    problems.push(ignored_problem(property, value, roleless_reason(property)));
+                }
                 Some(role) if !role.supports(property) => problems.push(ignored_problem(
                     property,
                     value,
@@ -1144,18 +1178,7 @@ pub(crate) fn element_problems(
                         role
                     ),
                 )),
-                // `presentation` and `none` parse, but they resolve to no GPUI
-                // role, so the element contributes no AccessKit node and the
-                // politeness is as inert as it is on a role-less element. Only
-                // the live-region props are reported here: the rest already
-                // read as "this element is deliberately not exposed".
-                Some(parsed)
-                    if parsed.into_gpui().is_none()
-                        && matches!(property.as_str(), "ariaLive" | "ariaAtomic") =>
-                {
-                    problems.push(ignored_problem(property, value, roleless_reason(property)));
-                }
-                None if role_value.is_none() => {
+                None if role_value.is_none() || explicit.is_some() => {
                     problems.push(ignored_problem(property, value, roleless_reason(property)));
                 }
                 _ => {}
@@ -1197,16 +1220,29 @@ pub(crate) fn element_problems(
     problems
 }
 
+/// The text sources a host contributes beyond its ARIA props.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct AccessibleText<'a> {
+    /// The flattened contents a role that names itself from them takes as
+    /// its accessible name.
+    pub name_from_contents: Option<&'a str>,
+    /// The node's string value: an editor's current text, or the flattened
+    /// text a `visuallyHidden` projection carries because it paints nothing.
+    pub value: Option<&'a str>,
+    /// An editor's placeholder; the name of last resort per HTML-AAM.
+    pub placeholder: Option<&'a str>,
+    /// `value` is a `visuallyHidden` projection's text: a live region has no
+    /// child to speak it, so it doubles as the name there.
+    pub projected: bool,
+}
+
 /// Apply React accessibility props to GPUI's existing AccessKit-backed div API.
 ///
 /// The GPUI element id remains the stable AccessKit identity. The author `id`
 /// is additional platform-visible metadata, never the identity source.
 ///
-/// `name_from_contents` is the flattened text a role that names itself from its
-/// contents takes as its accessible name. `content_value` is the same text for a
-/// role that does not: painted text reaches AccessKit as the value of its own
-/// node, so a projection that keeps no such node carries the value here rather
-/// than dropping the content.
+/// `text` carries the host's flattened name, value, placeholder, and whether
+/// that value belongs to a `visuallyHidden` projection.
 pub(crate) fn apply<E>(
     mut el: E,
     tree: &RetainedTree,
@@ -1214,8 +1250,7 @@ pub(crate) fn apply<E>(
     callback: &Option<EventCallback>,
     focus_handle: Option<&gpui::FocusHandle>,
     hidden: bool,
-    name_from_contents: Option<&str>,
-    content_value: Option<&str>,
+    text: AccessibleText<'_>,
 ) -> E
 where
     E: StatefulInteractiveElement,
@@ -1230,8 +1265,8 @@ where
     // `ariaLabelledBy` and `ariaDescribedBy` name other elements by id.
     let props = AccessibilityProps::from_element(tree, element);
 
-    if let Some(role) = props.role.and_then(AccessibilityRole::into_gpui) {
-        el = el.role(role);
+    if let Some(role) = props.role {
+        el = el.role(role.role);
     }
     if let Some(author_id) = &element.author_id {
         el = el.accessibility_id(author_id.clone());
@@ -1244,15 +1279,12 @@ where
         .live
         .or(role_live)
         .filter(|_| props.supports("ariaLive"));
-    // A live `visuallyHidden` projection is one node with no children, so the
-    // text it carries as its value has nothing else to speak it. macOS
-    // announces `value`, but Windows and AT-SPI announce `name`, and only a
-    // `Label` role reads that name from the value. Writing the flattened text
-    // to both keeps the projection audible everywhere. `content_value` is set
-    // by that projection alone, and the doubling is confined to a live region,
-    // so an ordinary `visuallyHidden` node keeps exactly the accname it had.
-    let live_projection_name =
-        content_value.filter(|_| live.is_some_and(|live| live != gpui::Live::Off));
+    // A projected value has no child to speak it. Writing it to both name and
+    // value keeps a live visually hidden node audible everywhere; an ordinary
+    // editor value remains a value only.
+    let live_projection_name = text
+        .value
+        .filter(|_| text.projected && live.is_some_and(|live| live != gpui::Live::Off));
     // The mirror image, for a role that *does* name itself from its contents.
     // Its text becomes the node's name, and the child that painted it is
     // suppressed so the name is not announced twice — which leaves the live
@@ -1260,10 +1292,12 @@ where
     // node that has one. A live `<div role="heading">` would therefore be
     // permanently silent there. Browsers announce it, so the text goes on as
     // the value as well, for a live region alone.
-    let live_contents_value =
-        name_from_contents.filter(|_| live.is_some_and(|live| live != gpui::Live::Off));
+    let live_contents_value = text
+        .name_from_contents
+        .filter(|_| live.is_some_and(|live| live != gpui::Live::Off));
     // accname order: the referenced text wins over `ariaLabel`, which wins over
-    // the name the contents would compute.
+    // the name the contents would compute, then the input placeholder and the
+    // live projection fallback.
     if let Some(label) = props
         .labelled_by
         .clone()
@@ -1272,7 +1306,8 @@ where
             props
                 .label
                 .filter(|_| props.supports("ariaLabel"))
-                .or(name_from_contents)
+                .or(text.name_from_contents)
+                .or(text.placeholder)
                 .or(live_projection_name)
                 .map(str::to_owned)
         })
@@ -1286,6 +1321,9 @@ where
         .filter(|_| props.supports("ariaDescription"))
     {
         el = el.aria_description(description);
+    }
+    if let Some(placeholder) = text.placeholder {
+        el = el.aria_placeholder(placeholder.to_owned());
     }
     if let Some(checked) = props.checked.filter(|_| props.supports("ariaChecked")) {
         let checked = if props.role.is_some_and(AccessibilityRole::is_binary_checked)
@@ -1319,7 +1357,7 @@ where
     if let Some(value) = props
         .value
         .filter(|_| props.supports("ariaValueText"))
-        .or(content_value)
+        .or(text.value)
         .or(live_contents_value)
     {
         el = el.aria_value(value.to_owned());
@@ -1587,10 +1625,9 @@ mod tests {
     }
 
     #[test]
-    fn ignores_a_descendant_label_that_no_role_carries() {
-        // `apply` sets a label only for a node whose role supports one, and the
-        // author is told the rest are dropped. A name from contents reads the
-        // same tree: the label is not there, so the painted text is the name.
+    fn includes_a_descendant_label_a_generic_carries() {
+        // accname recurses into a role-less descendant at step 2, and both
+        // Chromium and dom-accessibility-api include its label.
         let mut tree = detached_tree();
         append_element(&mut tree, None, 1, "div");
         append_element(&mut tree, Some(1), 2, "div");
@@ -1598,7 +1635,66 @@ mod tests {
         append_element(&mut tree, Some(1), 3, "text");
         append_text_node(&mut tree, 3, 4, "All");
 
-        assert_eq!(contents_name(&tree, 1).as_deref(), Some("All"));
+        assert_eq!(contents_name(&tree, 1).as_deref(), Some("Save All"));
+    }
+
+    #[test]
+    fn resolves_the_role_a_host_type_or_a_name_implies() {
+        let mut input = RetainedElement::new(1, "input".to_string(), 1);
+        assert_eq!(
+            resolved_role(&input).map(|role| role.role),
+            Some(gpui::Role::TextInput)
+        );
+
+        let textarea = RetainedElement::new(2, "textarea".to_string(), 1);
+        assert_eq!(
+            resolved_role(&textarea).map(|role| role.role),
+            Some(gpui::Role::MultilineTextInput)
+        );
+
+        input
+            .custom_props
+            .insert("role".into(), "searchbox".into());
+        assert_eq!(
+            resolved_role(&input).map(|role| role.role),
+            Some(gpui::Role::SearchInput)
+        );
+
+        let mut labelled = RetainedElement::new(3, "div".to_string(), 1);
+        labelled
+            .custom_props
+            .insert("ariaLabel".into(), "Ledger".into());
+        assert_eq!(
+            resolved_role(&labelled).map(|role| role.role),
+            Some(gpui::Role::GenericContainer)
+        );
+
+        let mut described = RetainedElement::new(4, "div".to_string(), 1);
+        described
+            .custom_props
+            .insert("ariaDescribedBy".into(), "hint".into());
+        assert_eq!(
+            resolved_role(&described).map(|role| role.role),
+            Some(gpui::Role::GenericContainer)
+        );
+
+        let mut presentational = RetainedElement::new(5, "div".to_string(), 1);
+        presentational
+            .custom_props
+            .insert("role".into(), "presentation".into());
+        presentational
+            .custom_props
+            .insert("ariaLabel".into(), "x".into());
+        assert_eq!(resolved_role(&presentational).map(|role| role.role), None);
+
+        let mut empty_label = RetainedElement::new(6, "div".to_string(), 1);
+        empty_label
+            .custom_props
+            .insert("ariaLabel".into(), "".into());
+        assert_eq!(resolved_role(&empty_label).map(|role| role.role), None);
+
+        let bare = RetainedElement::new(7, "div".to_string(), 1);
+        assert_eq!(resolved_role(&bare).map(|role| role.role), None);
     }
 
     #[test]

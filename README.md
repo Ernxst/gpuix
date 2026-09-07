@@ -2244,9 +2244,9 @@ only its own props, so an `href` appearing or disappearing is picked up by the
 ordinary prop diff instead.
 
 An authored `ariaLevel` wins over the level a heading tag implies, so
-`<h2 ariaLevel={4}>` reports level 4. The aliases with no implicit role add no
-accessibility node, which keeps them out of name computation exactly as their
-generic DOM counterparts are.
+`<h2 ariaLevel={4}>` reports level 4. An alias with no implicit role adds an
+accessibility node only when it carries a name or description, which keeps it
+out of name computation otherwise exactly as its generic DOM counterpart is.
 
 `<img>` follows HTML-AAM: it infers the `img` role and takes its accessible
 name from `alt`. `alt=""` marks the image decorative, so it infers
@@ -2269,7 +2269,7 @@ equivalents:
 
 | React prop | Native meaning |
 |---|---|
-| `ariaLabel`, `ariaDescription` | Accessible name and supplementary description; requires a supported explicit or inferred role |
+| `ariaLabel`, `ariaDescription` | Accessible name and supplementary description; on a role-less element they project a `generic` node the platform adapters prune |
 | `ariaLabelledBy`, `ariaDescribedBy` | Space-separated author `id`s whose text supplies the name or description; wins over `ariaLabel` / `ariaDescription` |
 | `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
 | `ariaExpanded`, `ariaSelected` | Boolean semantic states |
@@ -2314,6 +2314,9 @@ name through `getByRole` or assert it with `toHaveAccessibleName`.
 `semantics.role`, by contrast, does report an inferred role: it reads the same
 resolved `role` the alias mapping above produces, so an `<li>` in a list
 reports `semantics.role === "listitem"` without an authored `role`.
+
+`<input>` and `<textarea>` resolve their `textbox` role natively, so
+`semantics.role` is absent for them while `toHaveRole('textbox')` holds.
 
 The resolution reads authored `ariaLabel`s and painted text. It does not apply
 `style.textTransform`, substitute an `<img>`'s `alt`, or read an `<input>`'s
@@ -2454,7 +2457,10 @@ Role/state combinations are validated rather than silently approximated:
 | `option` | `ariaSelected` |
 | `slider`, `spinbutton` | value text/range; Increment and Decrement use `onAccessibilityAction` |
 | `switch` | boolean `ariaChecked` only; `"mixed"` is computed as `false` with a normalization diagnostic; Activate uses `onClick` |
-| `textbox` | accessible name and description |
+| `textbox` | accessible name and description; implicit on `<input>` and `<textarea>`, named by `ariaLabelledBy`, `ariaLabel`, then `placeholder` |
+
+`<input>` and `<textarea>` carry the editor's current text as the node value and
+the placeholder as its placeholder.
 
 Malformed accessibility values are rejected field by field. A well-formed
 property that its role does not support remains in the retained declaration but
@@ -4610,14 +4616,13 @@ declared and acted on but lifted onto the element as a flag rather than retained
 as a prop — assert its effect with `toHaveFocus()`.
 
 `toHaveAccessibleName` reads GPUI's computed name from the element's AccessKit
-node, which exists only where the element projects accessibility semantics: a
-declared role, a name from contents, or painted text of its own. An `ariaLabel`
-with no declared role never becomes that name. A `<div ariaLabel="Save" />`
-projects no node and so has no accessible name at all, while a
-`<text ariaLabel="Save">Hello</text>` is named `"Hello"` — the string it paints,
-not the prop it declares. Either way the matcher reports the computation rather
-than falling back to the raw prop; use `getByLabelText` or
-`TestElement.semantics.label` for the declaration.
+node. A `<div ariaLabel="Save" />` projects a `generic` node named "Save", and
+`<text ariaLabel="Save">Hello</text>` is named "Save" on its host node while
+the painted child keeps "Hello" as its value; the platform adapters prune
+generic nodes, so give the element a role when the name must be announced.
+Either way the matcher reports the computation rather than falling back to the
+raw prop; use `getByLabelText` or `TestElement.semantics.label` for the
+declaration.
 
 `toHaveAccessibleDescription` reads the same node's description, computed the
 same way a browser computes it: an `ariaDescribedBy` reference resolves to the
@@ -4632,14 +4637,11 @@ expect(screen.getByRole('button', { name: 'Coal line' })).toHaveAccessibleDescri
 )
 ```
 
-The node requirement is the accessible name's. A role — explicit or implicit —
-is what gives an element a node of its own to carry the description: an `<img>`
-or a `<button>` has one implicitly and keeps its description, while an element
-with neither projects no such node, and a description authored there is not
-observable in the tree. A plain `<div>` projects nothing at all, and a painted
-`<text>` projects only the static-text node its string becomes, which carries a
-value and no description. Either way the matcher reports the empty computation
-rather than the raw prop; see issue #353.
+The node requirement is the accessible name's. A role-less element that carries
+`ariaLabel`, `ariaLabelledBy`, `ariaDescription` or `ariaDescribedBy` projects a
+`generic` node with that name and description, as the DOM does. The platform
+adapters prune generic nodes, so a screen reader does not announce them — give
+the element a role when it must be announced.
 
 `toHaveRole(role)` reads the role that element resolves to — the one it
 declares, or the one its host type implies where it declares none — through the
@@ -4656,9 +4658,9 @@ It is the assertion for a test that already holds the element by other means.
 *authored* role: an `<img>` has the role `img` and no `role` attribute at all.
 An element that both carries a role and paints text projects two accessibility
 nodes, as `<p>Hi</p>` does in the DOM, and has both roles — the same two a role
-query would find it under. An element that projects no node has no role here:
-there is no `generic` to fall back to, and a plain `<input>` is invisible to the
-accessibility tree, so `getByRole('textbox')` does not find it either.
+query would find it under. A role-less element with no name or description
+projects no node and has no role; a plain `<input>` is a `textbox`, so
+`getByRole('textbox')` finds it.
 
 `toBeEmptyDOMElement` passes for an element with no retained children and no
 text of its own — the claim `toHaveTextContent(/^$/)` was standing in for, and a
