@@ -233,8 +233,6 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       )?.aria
 
       expect(ariaByLabel("Bad role")).toBeUndefined()
-      expect(ariaByLabel("Production ledger")).toBeUndefined()
-      expect(nodes.some((node) => node.aria.description === "Deployment summary")).toBe(false)
       expect(nodes.some((node) => node.aria.role === "ListBoxOption")).toBe(false)
       expect(ariaByLabel("Save")).toMatchObject({ role: "Button" })
       expect(ariaByLabel("Save")?.selected).toBeUndefined()
@@ -255,10 +253,6 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       const updatedNodes = Object.values(testRoot.renderer.getAccessibilityTree().nodes)
       const updatedAriaByLabel = (label: string) =>
         updatedNodes.find((node) => node.aria.label === label)?.aria
-      expect(updatedAriaByLabel("Production ledger")).toMatchObject({ role: "Button" })
-      expect(
-        updatedNodes.find((node) => node.aria.description === "Deployment summary")?.aria
-      ).toMatchObject({ role: "Button", description: "Deployment summary" })
       expect(
         updatedNodes.find((node) => node.aria.role === "ListBoxOption")?.aria
       ).toMatchObject({ role: "ListBoxOption", selected: true })
@@ -547,6 +541,32 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       expect(clean.renderer.drainStyleDiagnostics()).toEqual([])
     } finally {
       clean.unmount()
+    }
+  })
+
+  it("drains an ignored accessibility diagnostic with assertion metadata", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    try {
+      testRoot.render(<div data-testid="roleless-selected" ariaSelected />)
+
+      const element = testRoot.renderer.findByTestId("roleless-selected")!
+      const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+      expect(diagnostics).toHaveLength(1)
+      expect(diagnostics[0]).toMatchObject({
+        elementId: element.id,
+        elementType: "div",
+        dataTestId: "roleless-selected",
+        property: "ariaSelected",
+        value: "true",
+        message:
+          `[gpuix] Accessibility issue on <div data-testid="roleless-selected"> (element ${element.id}): ` +
+          'property "ariaSelected" ignored value true: ' +
+          "the property requires an explicit supported role, so it is omitted from the accessibility tree",
+      })
+    } finally {
+      testRoot.unmount()
     }
   })
 

@@ -423,8 +423,6 @@ fn flattened_text(tree: &RetainedTree, element: &RetainedElement, subject: NameS
 
 /// Whether an authored name on `node` reaches the accessibility tree at all.
 ///
-/// `apply` sets one only for a node whose declared role supports it, and
-/// `element_problems` tells the author when a role-less label was dropped. A
 /// Accname recurses into a role-less descendant at step 2, so a label it carries
 /// names the subtree it sits on. Chromium and dom-accessibility-api both include
 /// it.
@@ -1180,7 +1178,7 @@ pub(crate) fn element_problems(
                         role
                     ),
                 )),
-                None if role_value.is_none() => {
+                None if role_value.is_none() || explicit.is_some() => {
                     problems.push(ignored_problem(property, value, roleless_reason(property)));
                 }
                 _ => {}

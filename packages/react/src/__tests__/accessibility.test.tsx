@@ -132,6 +132,7 @@ describeNative("accessibility", () => {
 
     const input = testRoot.renderer.findByType("input")[0]!
     testRoot.renderer.nativeSimulateKeystrokes(input.id, "x")
+    testRoot.renderer.flush()
     const typedTree = testRoot.renderer.getAccessibilityTree()
     expect(withRole(typedTree, "TextInput")).toEqual([
       expect.objectContaining({ value: "namex" }),
