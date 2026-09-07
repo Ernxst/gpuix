@@ -1989,6 +1989,34 @@ prop parks the caret at the end of the new text when the next frame applies it.
 Every read and write above draws the committed tree first, as `getBounds()`
 does, so the caret you write is the one that survives.
 
+### Input in a search pill
+
+`<input>` has **no default inner padding** and paints text at the top of its
+box. A single-line input vertically centers its text when given extra height.
+Set `padding` on the input style or on a parent wrapper. When the input has
+`borderRadius`, text clips to the rounded shape automatically.
+
+```tsx
+<div style={{
+  display: 'flex',
+  flexDirection: 'row',
+  alignItems: 'center',
+  height: 32,
+  paddingLeft: 10,
+  paddingRight: 4,
+  borderRadius: 16,
+  backgroundColor: '#1a1a22',
+  borderWidth: 1,
+  borderColor: '#ffffff14',
+}}>
+  <input
+    value={query}
+    onChange={(e) => setQuery(e.value ?? '')}
+    style={{ flexGrow: 1, minWidth: 0, fontSize: 13, color: '#e8e8ed' }}
+  />
+</div>
+```
+
 ## Focus and keyboard navigation
 
 Focus is a **native GPUI concept**. GPUIX connects stable React element IDs to
@@ -3322,6 +3350,25 @@ CSS-like styling via the `style` prop:
 </div>
 ```
 
+> [!IMPORTANT]
+> **GPUIX styles look like CSS but are not CSS.** A few differences trip
+> everyone up on the first project:
+>
+> - **`div` is block, not flex.** Set `display: "flex"` before using
+>   `flexDirection`, `gap`, `alignItems`, or `alignSelf`. Without it those
+>   props are silently ignored.
+> - **A flex child that must shrink needs `minWidth: 0`.** Same rule as CSS,
+>   but easier to miss because there is no browser DevTools to inspect.
+> - **No shorthand values.** `padding`, `margin`, and `border` take numbers.
+>   CSS strings like `"0 16px"`, `"1px solid #fff"`, or `calc()` are ignored.
+> - **`boxShadow` is a structured object**, not a CSS string. See below.
+> - **No `<button>`.** Use `<div onClick>` with `cursor: "pointer"`.
+> - **Do not nest `<text>` in `<text>`.** Adjacent `<text>` siblings merge
+>   into one line. A `<text>` child of another `<text>` is a nested div.
+> - **`<input>` has no default inner padding.** Set `padding` on the input
+>   style, or pad the parent wrapper. The input clips to its own
+>   `borderRadius` automatically.
+
 **Layout:** `display` (`"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
 
 `gridTemplateColumns` and `gridTemplateRows` accept the existing integer shorthand
@@ -3491,7 +3538,7 @@ Limited relative-color forms can derive a new color from a base value:
 
 **Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` and `"auto"` create a native scrollable container with persistent scroll state (`"auto"` is identical to `"scroll"`: no scrollbar gutter is painted either way, so there is nothing to reserve)
 
-**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textDecoration` (`"underline"` | `"line-through"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A numeric `lineHeight` is the legacy pixel form; a unitless string such as `"1.4"` multiplies the resolved font size.
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `textDecoration` (`"underline"` | `"line-through"` | `"none"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A numeric `lineHeight` is the legacy pixel form; a unitless string such as `"1.4"` multiplies the resolved font size.
 
 `textWrap` accepts `"wrap"` and `"nowrap"`. `"balance"` and `"pretty"` are
 recognized but explicitly rejected with a strict-style diagnostic because GPUI

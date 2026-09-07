@@ -629,6 +629,7 @@ pub struct StyleDesc {
     pub text_wrap: Option<String>,
     pub text_overflow: Option<String>,
     pub line_clamp: Option<f64>,
+    pub text_decoration: Option<String>,
 
     pub overflow: Option<String>,
     pub overflow_x: Option<String>,
@@ -1643,7 +1644,7 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             value,
             "textDecoration",
             text_decoration,
-            ["underline", "line-through"]
+            ["underline", "line-through", "none"]
         );
         enum_field!(
             key,
@@ -2838,5 +2839,14 @@ mod tests {
         assert_eq!(rejected.style.border_style, None);
         assert_eq!(rejected.problems.len(), 1);
         assert_eq!(rejected.problems[0].property, "borderStyle");
+    }
+
+    #[test]
+    fn text_decoration_accepts_the_supported_set() {
+        for value in ["underline", "line-through", "none"] {
+            let parsed = parse_style_value(&json!({ "textDecoration": value }));
+            assert!(parsed.problems.is_empty(), "{value}: {:?}", parsed.problems);
+            assert_eq!(parsed.style.text_decoration.as_deref(), Some(value));
+        }
     }
 }

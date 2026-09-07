@@ -69,12 +69,26 @@ actions!(
 const INPUT_KEY_CONTEXT: &str = "GpuixInput";
 const TEXTAREA_KEY_CONTEXT: &str = "GpuixTextarea";
 const CARET_BLINK_MS: u64 = 500;
+const CARET_WIDTH: Pixels = px(2.0);
+const CARET_HEIGHT_RATIO: f32 = 0.75;
 const DRAG_SCROLL_FRAME_MS: u64 = 16;
 const UNDO_COALESCE: Duration = Duration::from_millis(700);
 const UNDO_LIMIT: usize = 200;
 
 fn caret_visible(ms_since_activity: u64) -> bool {
     (ms_since_activity / CARET_BLINK_MS) % 2 == 0
+}
+
+// Size the bar to cap height, not the line box. Default leading is phi, so a
+// full-height caret sticks out above and below the glyphs. Cap height is about
+// 0.75em; the em square itself still looks taller than the letters.
+fn caret_rect(origin: Point<Pixels>, line_height: Pixels, font_size: Pixels) -> Bounds<Pixels> {
+    let height = (font_size * CARET_HEIGHT_RATIO).min(line_height);
+    let y_offset = (line_height - height) / 2.;
+    Bounds::new(
+        point(origin.x, origin.y + y_offset),
+        size(CARET_WIDTH, height),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -403,6 +417,7 @@ impl CustomElement for TextEditorElement {
                     line_starts: vec![0],
                     last_bounds: None,
                     line_height: px(20.0),
+                    font_size: px(16.0),
                     content_height: 20.0,
                     content_width: 0.0,
                     display_is_placeholder: false,
@@ -446,8 +461,16 @@ impl CustomElement for TextEditorElement {
             editor = editor.track_focus(&focus_handle);
         }
         editor = editor.child(state);
+        // Single-line inputs center text vertically when given extra height.
+        if !self.multiline {
+            editor = editor.items_center();
+        }
         if let Some(style) = ctx.style {
             editor = crate::renderer::apply_interactive_styles(editor, style);
+            // Clip text to rounded corners, matching HTML input behavior.
+            if style.border_radius.is_some() {
+                editor = editor.overflow_hidden();
+            }
         }
         if ctx
             .style
@@ -753,6 +776,7 @@ struct TextEditorState {
     line_starts: Vec<usize>,
     last_bounds: Option<Bounds<Pixels>>,
     line_height: Pixels,
+    font_size: Pixels,
     content_height: f32,
     content_width: f32,
     display_is_placeholder: bool,
@@ -1519,6 +1543,7 @@ impl TextEditorState {
         };
         let font_size = style.font_size.to_pixels(window.rem_size());
         self.line_height = window.line_height();
+        self.font_size = font_size;
         let color = if is_placeholder {
             gpui::rgba(0x8f8f8fff).into()
         } else {
@@ -1735,12 +1760,13 @@ impl EntityInputHandler for TextEditorState {
     ) -> Option<Bounds<Pixels>> {
         let range = self.range_from_utf16(&range_utf16);
         let start = self.point_for_index(range.start)?;
-        Some(Bounds::new(
+        Some(caret_rect(
             point(
                 bounds.left() + start.x - px(self.scroll_left),
                 bounds.top() + start.y - px(self.scroll_top),
             ),
-            size(px(2.0), self.line_height),
+            self.line_height,
+            self.font_size,
         ))
     }
 
@@ -1932,9 +1958,10 @@ impl gpui::Element for EditorTextElement {
                 .point_for_index(input.cursor_offset())
                 .unwrap_or(point(px(0.0), px(0.0)));
             caret = Some(fill(
-                Bounds::new(
+                caret_rect(
                     point(origin.x + caret_point.x, origin.y + caret_point.y),
-                    size(px(2.0), input.line_height),
+                    input.line_height,
+                    input.font_size,
                 ),
                 input.caret_color,
             ));
@@ -2233,6 +2260,19 @@ mod tests {
         let mut input = TextEditorElement::new(false);
         input.set_prop("theme", serde_json::json!({ "caret": "#22c55e" }));
         assert_eq!(input.theme.caret, gpui::rgba(0x22c55eff).into());
+    }
+
+    #[test]
+    fn caret_matches_the_font_size_inside_the_line() {
+        let bounds = caret_rect(point(px(10.0), px(4.0)), px(20.0), px(16.0));
+        assert_eq!(bounds.origin, point(px(10.0), px(8.0)));
+        assert_eq!(bounds.size, size(px(2.0), px(12.0)));
+        assert_eq!(
+            caret_rect(point(px(0.0), px(0.0)), px(20.0), px(40.0))
+                .size
+                .height,
+            px(20.0)
+        );
     }
 
     #[test]

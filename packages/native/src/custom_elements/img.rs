@@ -2040,6 +2040,18 @@ impl CustomElement for ImgElement {
 
         if let Some(style) = ctx.style {
             el = crate::renderer::apply_interactive_styles(el, style);
+            // GPUI fills `aspect_ratio` from the bitmap once it loads. That
+            // overrides a definite height and jumps the box. A CSS `<img>` with
+            // both width and height keeps that box; `objectFit` paints inside it.
+            if let (
+                Some(crate::style::DimensionValue::Pixels(width)),
+                Some(crate::style::DimensionValue::Pixels(height)),
+            ) = (style.width.as_ref(), style.height.as_ref())
+            {
+                if *width > 0.0 && *height > 0.0 {
+                    el = el.aspect_ratio((*width as f32) / (*height as f32));
+                }
+            }
         }
 
         let el = apply_image_accessibility(&ctx, el);

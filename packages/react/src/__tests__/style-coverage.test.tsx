@@ -1173,4 +1173,45 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
 
     expectScreenshotsEqual(absolute, fixed)
   })
+
+  it("applies textDecoration underline", () => {
+    comparePixels(
+      "text-decoration-underline",
+      <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
+        <text style={{ fontSize: 20, color: "#ffffff" }}>underline me</text>
+      </div>,
+      <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
+        <text style={{ fontSize: 20, color: "#ffffff", textDecoration: "underline" }}>
+          underline me
+        </text>
+      </div>
+    )
+  })
+
+  it("applies textDecoration line-through", () => {
+    comparePixels(
+      "text-decoration-line-through",
+      <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
+        <text style={{ fontSize: 20, color: "#ffffff" }}>strike me</text>
+      </div>,
+      <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
+        <text style={{ fontSize: 20, color: "#ffffff", textDecoration: "line-through" }}>
+          strike me
+        </text>
+      </div>
+    )
+  })
+
+  it("applies padding on an <input>", () => {
+    // Padding on an input should inset the text from the edges.
+    comparePixels(
+      "input-padding",
+      <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
+        <input value="hello" style={{ width: 200, fontSize: 16 }} />
+      </div>,
+      <div style={{ display: "flex", backgroundColor: "#101010", height: "100%" }}>
+        <input value="hello" style={{ width: 200, fontSize: 16, paddingLeft: 40 }} />
+      </div>
+    )
+  })
 })

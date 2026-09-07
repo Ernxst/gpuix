@@ -1299,6 +1299,12 @@ work. Linux currently ignores `focus`.
 
 ### Drive the live window
 
+When the user asks to **open an example so they can look**, start
+`bun --hot <file>.tsx` and **leave that session running**. A save remounts
+React on the same window. Do not relaunch without `--hot`. Do not kill the
+session after a screenshot. `bun --hot` still drops `useState` on save; that
+is the desktop remount path, not Fast Refresh.
+
 **Do not use `usecomputer`, `screencapture`, or desktop clicks.** GPUIX has a
 Playwright-like automation API. Full docs are in the README **Automation**
 section.
