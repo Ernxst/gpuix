@@ -3350,25 +3350,6 @@ CSS-like styling via the `style` prop:
 </div>
 ```
 
-> [!IMPORTANT]
-> **GPUIX styles look like CSS but are not CSS.** A few differences trip
-> everyone up on the first project:
->
-> - **`div` is block, not flex.** Set `display: "flex"` before using
->   `flexDirection`, `gap`, `alignItems`, or `alignSelf`. Without it those
->   props are silently ignored.
-> - **A flex child that must shrink needs `minWidth: 0`.** Same rule as CSS,
->   but easier to miss because there is no browser DevTools to inspect.
-> - **No shorthand values.** `padding`, `margin`, and `border` take numbers.
->   CSS strings like `"0 16px"`, `"1px solid #fff"`, or `calc()` are ignored.
-> - **`boxShadow` is a structured object**, not a CSS string. See below.
-> - **No `<button>`.** Use `<div onClick>` with `cursor: "pointer"`.
-> - **Do not nest `<text>` in `<text>`.** Adjacent `<text>` siblings merge
->   into one line. A `<text>` child of another `<text>` is a nested div.
-> - **`<input>` has no default inner padding.** Set `padding` on the input
->   style, or pad the parent wrapper. It clips to its own box automatically,
->   as HTML inputs do.
-
 **Layout:** `display` (`"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
 
 `gridTemplateColumns` and `gridTemplateRows` accept the existing integer shorthand

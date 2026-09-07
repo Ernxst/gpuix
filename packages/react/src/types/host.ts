@@ -1026,8 +1026,9 @@ export interface TextareaProps extends InputProps {
 
 /** A variable-height list that builds only rows near its viewport. */
 export interface VirtualListProps {
-  /** No `hover` or `active`: gpui's `List` has no pressed or hovered style
-   *  state. Put those on a wrapping `<div>` instead. */
+  /** No `hover` or `active`: gpui's `List` has no interactive element identity,
+   *  so it cannot hold the pressed or hovered state those styles read. Put them
+   *  on a wrapping `<div>` instead. */
   style?: Omit<StyleDesc, "hover" | "active">
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
