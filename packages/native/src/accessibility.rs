@@ -266,7 +266,10 @@ impl AccessibilityRole {
             }
             "ariaSelected" => matches!(self.role, Role::ListBoxOption),
             "ariaValueText" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
-                matches!(self.role, Role::Slider | Role::SpinButton)
+                matches!(
+                    self.role,
+                    Role::Slider | Role::SpinButton | Role::Meter | Role::ProgressIndicator
+                )
             }
             "ariaLevel" => matches!(self.role, Role::Heading),
             "ariaRowIndex" => matches!(
@@ -1744,6 +1747,45 @@ mod tests {
         assert_eq!(props.value_now, Some(42.0));
         assert!(props.disabled);
         assert!(element_problems(&detached_tree(), &element).is_empty());
+    }
+
+    #[test]
+    fn parses_numeric_values_on_meter_and_progressbar() {
+        for role in ["meter", "progressbar"] {
+            let mut element = RetainedElement::new(7, "div".to_string(), 1);
+            element.custom_props.insert("role".into(), role.into());
+            element
+                .custom_props
+                .insert("ariaLabel".into(), "Power demand".into());
+            element
+                .custom_props
+                .insert("ariaValueText".into(), "40 percent".into());
+            element.custom_props.insert("ariaValueMin".into(), 0.into());
+            element.custom_props.insert("ariaValueMax".into(), 100.into());
+            element.custom_props.insert("ariaValueNow".into(), 40.into());
+
+            let props = AccessibilityProps::from_element(&detached_tree(), &element);
+            assert_eq!(props.value, Some("40 percent"));
+            assert_eq!(props.value_min, Some(0.0));
+            assert_eq!(props.value_max, Some(100.0));
+            assert_eq!(props.value_now, Some(40.0));
+            assert!(element_problems(&detached_tree(), &element).is_empty());
+        }
+
+        let mut progressbar = RetainedElement::new(7, "div".to_string(), 1);
+        progressbar.custom_props.insert("role".into(), "progressbar".into());
+        progressbar
+            .custom_props
+            .insert("ariaLabel".into(), "Import".into());
+        progressbar.custom_props.insert("ariaValueMin".into(), 0.into());
+        progressbar.custom_props.insert("ariaValueMax".into(), 100.into());
+
+        let props = AccessibilityProps::from_element(&detached_tree(), &progressbar);
+        assert_eq!(props.value, None);
+        assert_eq!(props.value_min, Some(0.0));
+        assert_eq!(props.value_max, Some(100.0));
+        assert_eq!(props.value_now, None);
+        assert!(element_problems(&detached_tree(), &progressbar).is_empty());
     }
 
     #[test]
