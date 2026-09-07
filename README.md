@@ -1993,8 +1993,8 @@ does, so the caret you write is the one that survives.
 
 `<input>` has **no default inner padding** and paints text at the top of its
 box. A single-line input vertically centers its text when given extra height.
-Set `padding` on the input style or on a parent wrapper. When the input has
-`borderRadius`, text clips to the rounded shape automatically.
+Set `padding` on the input style or on a parent wrapper. Every `<input>` and
+`<textarea>` clips to its own box automatically, as they do in HTML.
 
 ```tsx
 <div style={{
@@ -3366,8 +3366,8 @@ CSS-like styling via the `style` prop:
 > - **Do not nest `<text>` in `<text>`.** Adjacent `<text>` siblings merge
 >   into one line. A `<text>` child of another `<text>` is a nested div.
 > - **`<input>` has no default inner padding.** Set `padding` on the input
->   style, or pad the parent wrapper. The input clips to its own
->   `borderRadius` automatically.
+>   style, or pad the parent wrapper. It clips to its own box automatically,
+>   as HTML inputs do.
 
 **Layout:** `display` (`"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
 

@@ -2,8 +2,4 @@
 '@gpuix/native': patch
 ---
 
-Single-line `<input>` now vertically centers text when given extra height,
-and clips content to its own `borderRadius` automatically.
-
-Previously, text sat at the top of the box and could paint outside
-rounded corners. This matches how HTML inputs behave.
+Single-line `<input>` centres its text vertically when given extra height, and every `<input>` and `<textarea>` clips to its own box, as they do in HTML. Text used to sit at the top and could paint outside rounded corners.

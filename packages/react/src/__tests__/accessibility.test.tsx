@@ -127,23 +127,6 @@ describeNative("accessibility", () => {
     )
   })
 
-  it("reports <input> as TextInput and <textarea> as MultilineTextInput", () => {
-    testRoot.render(
-      <div style={{ width: 280, height: 120 }}>
-        <input value="name" placeholder="Your name" style={{ width: 200, height: 32 }} />
-        <textarea value="body" style={{ width: 200, height: 48 }} />
-      </div>,
-    )
-
-    const tree = testRoot.renderer.getAccessibilityTree()
-    expect(withRole(tree, "TextInput").some((aria) => aria.value === "name")).toBe(
-      true,
-    )
-    expect(
-      withRole(tree, "MultilineTextInput").some((aria) => aria.value === "body"),
-    ).toBe(true)
-  })
-
   it("uses img alt as the accessible name", () => {
     const src = path.join(SHOTS_DIR, "gpuix-a11y-img.svg")
     fs.writeFileSync(

@@ -2,6 +2,4 @@
 '@gpuix/native': patch
 ---
 
-Draw the `<input>` and `<textarea>` caret at about 75% of `fontSize`, not full line height.
-
-A 13px mail composer used to paint a bar as tall as the line box, so it stuck out above and below the text. The caret now matches typical cap height and sits in the middle of the line.
+Draw the `<input>` and `<textarea>` caret at the font's content area (ascent plus descent), centred in the line box, as browsers do. It was the full line height.
