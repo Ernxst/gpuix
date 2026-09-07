@@ -624,6 +624,10 @@ pub struct StyleDesc {
     pub font_variant_numeric: Option<String>,
     pub text_decoration: Option<String>,
     pub text_transform: Option<String>,
+    /// Only "none" is accepted: native lists paint no marker.
+    pub list_style: Option<String>,
+    /// Only "none" is accepted: native lists paint no marker.
+    pub list_style_type: Option<String>,
     pub text_align: Option<String>,
     pub line_height: Option<LineHeightValue>,
     pub white_space: Option<String>,
@@ -1779,6 +1783,20 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         enum_field!(
             key,
             value,
+            "listStyle",
+            list_style,
+            ["none"]
+        );
+        enum_field!(
+            key,
+            value,
+            "listStyleType",
+            list_style_type,
+            ["none"]
+        );
+        enum_field!(
+            key,
+            value,
             "textAlign",
             text_align,
             ["left", "start", "center", "right"]
@@ -2789,6 +2807,8 @@ mod tests {
             "fontVariantNumeric": "tabular-nums",
             "textDecoration": "underline",
             "textTransform": "uppercase",
+            "listStyle": "none",
+            "listStyleType": "none",
             "textAlign": "center",
             "lineHeight": 20,
             "whiteSpace": "normal",
@@ -2972,6 +2992,27 @@ mod tests {
             assert!(parsed.problems.is_empty(), "{value}: {:?}", parsed.problems);
             assert_eq!(parsed.style.text_decoration.as_deref(), Some(value));
         }
+    }
+
+    #[test]
+    fn list_style_accepts_only_none() {
+        let parsed = parse_style_value(&json!({ "listStyle": "none" }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.list_style.as_deref(), Some("none"));
+
+        let parsed = parse_style_value(&json!({ "listStyle": "disc" }));
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "listStyle");
+        assert!(parsed.style.list_style.is_none());
+
+        let parsed = parse_style_value(&json!({ "listStyleType": "none" }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.list_style_type.as_deref(), Some("none"));
+
+        let parsed = parse_style_value(&json!({ "listStyleType": "decimal" }));
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "listStyleType");
+        assert!(parsed.style.list_style_type.is_none());
     }
 
     #[test]
