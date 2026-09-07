@@ -621,6 +621,7 @@ pub struct StyleDesc {
     pub font_family: Option<String>,
     pub font_weight: Option<FontWeightValue>,
     pub letter_spacing: Option<f64>,
+    pub font_variant_numeric: Option<String>,
     pub text_decoration: Option<String>,
     pub text_transform: Option<String>,
     pub text_align: Option<String>,
@@ -723,6 +724,123 @@ fn decode_enum(
         );
         None
     }
+}
+
+fn decode_font_variant_numeric(
+    property: &str,
+    value: &serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<String> {
+    let decoded = decode::<String>(property, value, problems)?;
+    if decoded.is_empty() {
+        reject(
+            problems,
+            property,
+            value,
+            "expected normal or a space-separated set of lining-nums, oldstyle-nums, proportional-nums, tabular-nums, diagonal-fractions, stacked-fractions, ordinal, slashed-zero",
+        );
+        return None;
+    }
+
+    let tokens = decoded
+        .split_ascii_whitespace()
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    if tokens.is_empty() {
+        reject(
+            problems,
+            property,
+            value,
+            "expected normal or a space-separated set of lining-nums, oldstyle-nums, proportional-nums, tabular-nums, diagonal-fractions, stacked-fractions, ordinal, slashed-zero",
+        );
+        return None;
+    }
+
+    if tokens.len() == 1 && tokens[0] == "normal" {
+        return Some("normal".to_owned());
+    }
+    if tokens.contains(&"normal") {
+        reject(
+            problems,
+            property,
+            value,
+            "normal cannot be combined with other values",
+        );
+        return None;
+    }
+
+    let mut seen = HashSet::new();
+    let mut has_lining = false;
+    let mut has_oldstyle = false;
+    let mut has_proportional = false;
+    let mut has_tabular = false;
+    let mut has_diagonal = false;
+    let mut has_stacked = false;
+    let allowed = [
+        "lining-nums",
+        "oldstyle-nums",
+        "proportional-nums",
+        "tabular-nums",
+        "diagonal-fractions",
+        "stacked-fractions",
+        "ordinal",
+        "slashed-zero",
+    ];
+
+    for token in &tokens {
+        if !allowed.contains(token) {
+            reject(
+                problems,
+                property,
+                value,
+                "expected normal or a space-separated set of lining-nums, oldstyle-nums, proportional-nums, tabular-nums, diagonal-fractions, stacked-fractions, ordinal, slashed-zero",
+            );
+            return None;
+        }
+        if !seen.insert(*token) {
+            reject(problems, property, value, format!("\"{token}\" is repeated"));
+            return None;
+        }
+        match *token {
+            "lining-nums" => has_lining = true,
+            "oldstyle-nums" => has_oldstyle = true,
+            "proportional-nums" => has_proportional = true,
+            "tabular-nums" => has_tabular = true,
+            "diagonal-fractions" => has_diagonal = true,
+            "stacked-fractions" => has_stacked = true,
+            _ => {}
+        }
+    }
+
+    if has_lining && has_oldstyle {
+        reject(
+            problems,
+            property,
+            value,
+            "\"lining-nums\" and \"oldstyle-nums\" cannot be combined",
+        );
+        return None;
+    }
+    if has_proportional && has_tabular {
+        reject(
+            problems,
+            property,
+            value,
+            "\"proportional-nums\" and \"tabular-nums\" cannot be combined",
+        );
+        return None;
+    }
+    if has_diagonal && has_stacked {
+        reject(
+            problems,
+            property,
+            value,
+            "\"diagonal-fractions\" and \"stacked-fractions\" cannot be combined",
+        );
+        return None;
+    }
+
+    Some(tokens.join(" "))
 }
 
 fn decode_number(
@@ -1638,6 +1756,12 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             continue;
         }
         number_field!(key, value, "letterSpacing", letter_spacing);
+        if key == "fontVariantNumeric" {
+            let property = property!("fontVariantNumeric");
+            parsed.style.font_variant_numeric =
+                decode_font_variant_numeric(&property, value, &mut parsed.problems);
+            continue;
+        }
         enum_field!(
             key,
             value,
@@ -2662,6 +2786,7 @@ mod tests {
             "fontFamily": "Helvetica",
             "fontWeight": "bold",
             "letterSpacing": 1,
+            "fontVariantNumeric": "tabular-nums",
             "textDecoration": "underline",
             "textTransform": "uppercase",
             "textAlign": "center",
@@ -2846,6 +2971,35 @@ mod tests {
             let parsed = parse_style_value(&json!({ "textDecoration": value }));
             assert!(parsed.problems.is_empty(), "{value}: {:?}", parsed.problems);
             assert_eq!(parsed.style.text_decoration.as_deref(), Some(value));
+        }
+    }
+
+    #[test]
+    fn font_variant_numeric_accepts_the_supported_set() {
+        for value in [
+            "normal",
+            "tabular-nums",
+            "tabular-nums slashed-zero",
+            "oldstyle-nums tabular-nums ordinal",
+        ] {
+            let parsed = parse_style_value(&json!({ "fontVariantNumeric": value }));
+            assert!(parsed.problems.is_empty(), "{value}: {:?}", parsed.problems);
+            assert_eq!(parsed.style.font_variant_numeric.as_deref(), Some(value));
+        }
+    }
+
+    #[test]
+    fn font_variant_numeric_rejects_invalid_set() {
+        for value in [
+            "tabular-nums proportional-nums",
+            "tabular-nums tabular-nums",
+            "normal tabular-nums",
+            "tnum",
+            "",
+        ] {
+            let parsed = parse_style_value(&json!({ "fontVariantNumeric": value }));
+            assert_eq!(parsed.problems.len(), 1, "{value}: {:?}", parsed.problems);
+            assert_eq!(parsed.style.font_variant_numeric, None, "{value}: {:?}", parsed.problems);
         }
     }
 }

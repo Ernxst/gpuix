@@ -338,6 +338,76 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     )
   })
 
+  it("applies fontVariantNumeric tabular-nums to shaped digits", () => {
+    const same = createTestRoot()
+    same.render(
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+        <text
+          data-testid="ones"
+          style={{ color: "#ffffff", fontSize: 28, fontVariantNumeric: "tabular-nums" }}
+        >
+          1111
+        </text>
+        <text
+          data-testid="nines"
+          style={{ color: "#ffffff", fontSize: 28, fontVariantNumeric: "tabular-nums" }}
+        >
+          9999
+        </text>
+      </div>,
+    )
+    const sameOnes = boundsFor(same.renderer, "ones")
+    const sameNines = boundsFor(same.renderer, "nines")
+    expect(sameOnes[2]).toBeCloseTo(sameNines[2], 0)
+
+    const diff = createTestRoot()
+    diff.render(
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+        <text data-testid="ones" style={{ color: "#ffffff", fontSize: 28 }}>
+          1111
+        </text>
+        <text data-testid="nines" style={{ color: "#ffffff", fontSize: 28 }}>
+          9999
+        </text>
+      </div>,
+    )
+    const diffOnes = boundsFor(diff.renderer, "ones")
+    const diffNines = boundsFor(diff.renderer, "nines")
+    expect(Math.abs(diffOnes[2] - diffNines[2])).toBeGreaterThan(1)
+
+    comparePixels(
+      "font-variant-numeric",
+      <text style={{ color: "#ffffff", fontSize: 28 }}>1111</text>,
+      <text style={{ color: "#ffffff", fontSize: 28, fontVariantNumeric: "tabular-nums" }}>
+        1111
+      </text>,
+    )
+  })
+
+  it("inherits fontVariantNumeric from an ancestor", () => {
+    const root = createTestRoot()
+    root.render(
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "flex-start",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        <text data-testid="ones" style={{ color: "#ffffff", fontSize: 28 }}>
+          1111
+        </text>
+        <text data-testid="nines" style={{ color: "#ffffff", fontSize: 28 }}>
+          9999
+        </text>
+      </div>,
+    )
+    const inheritedOnes = boundsFor(root.renderer, "ones")
+    const inheritedNines = boundsFor(root.renderer, "nines")
+    expect(inheritedOnes[2]).toBeCloseTo(inheritedNines[2], 0)
+  })
+
   it("applies fontSize set on a div, not only on a text node", () => {
     // `fontSize` lived only in build_text, so a div that set it alongside
     // layout props had no effect on its children.
