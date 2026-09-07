@@ -461,6 +461,78 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
     }
   })
 
+  it("paints a remounted data image from the decoded cache", async () => {
+    const testRoot = createImageTestRoot()
+    const firstSource: ImageSource = {
+      kind: "data",
+      mimeType: "image/png",
+      bytes: new Uint8Array(PNG_BYTES),
+    }
+    try {
+      testRoot.render(sourceFrame(firstSource))
+      for (let frame = 0; frame < 100; frame++) {
+        testRoot.renderer.flush()
+        const image = testRoot.renderer.findByType("img")[0]!
+        if (testRoot.renderer.getImageLoadState(image.id)?.status === "loaded") break
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      const firstImage = testRoot.renderer.findByType("img")[0]!
+      expect(testRoot.renderer.getImageLoadState(firstImage.id)).toMatchObject({
+        status: "loaded",
+      })
+
+      testRoot.render(sourceFrame())
+      testRoot.renderer.flush()
+      const secondSource: ImageSource = {
+        kind: "data",
+        mimeType: "image/png",
+        bytes: new Uint8Array(PNG_BYTES),
+      }
+      testRoot.render(sourceFrame(secondSource))
+      testRoot.renderer.flush()
+
+      const remounted = testRoot.renderer.findByType("img")[0]!
+      expect(remounted.id).not.toBe(firstImage.id)
+      expect(testRoot.renderer.getImageLoadState(remounted.id)).toMatchObject({
+        status: "loaded",
+      })
+      expect(testRoot.renderer.getPaintedText().join(" ")).not.toContain("img:")
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
+  it("paints a remounted data URL image from the decoded cache", async () => {
+    const testRoot = createImageTestRoot()
+    try {
+      testRoot.render(sourceFrame(dataUrl(FIXTURES[0]!)))
+      for (let frame = 0; frame < 100; frame++) {
+        testRoot.renderer.flush()
+        const image = testRoot.renderer.findByType("img")[0]!
+        if (testRoot.renderer.getImageLoadState(image.id)?.status === "loaded") break
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      const firstImage = testRoot.renderer.findByType("img")[0]!
+      expect(testRoot.renderer.getImageLoadState(firstImage.id)).toMatchObject({
+        status: "loaded",
+      })
+
+      testRoot.render(sourceFrame())
+      testRoot.renderer.flush()
+      testRoot.render(sourceFrame(dataUrl(FIXTURES[0]!)))
+      testRoot.renderer.flush()
+
+      const remounted = testRoot.renderer.findByType("img")[0]!
+      expect(remounted.id).not.toBe(firstImage.id)
+      expect(testRoot.renderer.getImageLoadState(remounted.id)).toMatchObject({
+        status: "loaded",
+      })
+      expect(testRoot.renderer.getPaintedText().join(" ")).not.toContain("img:")
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
   it("keeps a path image on screen past the five-minute deadline", async () => {
     const testRoot = createImageTestRoot()
     try {

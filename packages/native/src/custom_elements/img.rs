@@ -1230,6 +1230,7 @@ enum ImgImageAction {
 }
 
 struct ImgImageAcquire {
+    request: ImageRequest,
     result: Arc<Mutex<Option<ImageLoadResult>>>,
     action: ImgImageAction,
 }
@@ -1248,6 +1249,34 @@ impl ImgImageStore {
         request: &ImageRequest,
         now: Instant,
     ) -> ImgImageAcquire {
+        let request = if self.entries.contains_key(request) {
+            request.clone()
+        } else {
+            match &request.source {
+                ImageSource::Data {
+                    mime_type,
+                    bytes,
+                } => self
+                    .entries
+                    .iter()
+                    .find_map(|(existing_request, _)| {
+                        let ImageSource::Data {
+                            mime_type: existing_mime_type,
+                            bytes: existing_bytes,
+                        } = &existing_request.source
+                        else {
+                            return None;
+                        };
+                        (existing_request.current_color == request.current_color
+                            && existing_mime_type == mime_type
+                            && existing_bytes.len() == bytes.len()
+                            && existing_bytes.as_ref() == bytes.as_ref())
+                            .then(|| existing_request.clone())
+                    })
+                    .unwrap_or_else(|| request.clone()),
+                _ => request.clone(),
+            }
+        };
         self.clock = self.clock.wrapping_add(1);
         let last_used = self.clock;
         let entry = self.entries.entry(request.clone()).or_default();
@@ -1275,6 +1304,7 @@ impl ImgImageStore {
         };
 
         ImgImageAcquire {
+            request,
             result: entry.result.clone(),
             action,
         }
@@ -1428,18 +1458,25 @@ impl SharedImgImageStore {
         request: ImageRequest,
         policy: ImageNetworkPolicy,
         cx: &mut gpui::Context<crate::renderer::GpuixView>,
-    ) -> Arc<Mutex<Option<ImageLoadResult>>> {
+    ) -> (ImageRequest, Arc<Mutex<Option<ImageLoadResult>>>) {
         let acquired = self.state.lock().unwrap().acquire(
             element_id,
             &request,
             cx.background_executor().now(),
         );
-        match acquired.action {
+        let ImgImageAcquire {
+            request,
+            result,
+            action,
+        } = acquired;
+        match action {
             ImgImageAction::None => {}
-            ImgImageAction::StartLoad => self.start_load(request, policy, cx),
-            ImgImageAction::ScheduleReload(delay) => self.schedule_reload(request, delay, cx),
+            ImgImageAction::StartLoad => self.start_load(request.clone(), policy, cx),
+            ImgImageAction::ScheduleReload(delay) => {
+                self.schedule_reload(request.clone(), delay, cx)
+            }
         }
-        acquired.result
+        (request, result)
     }
 
     fn start_load(
@@ -2248,12 +2285,13 @@ impl CustomElement for ImgElement {
             let fallback = super::custom_surface(fallback, &ctx, cx);
             return apply_image_accessibility(&ctx, fallback).into_any_element();
         };
-        let result_handle = store.acquire(
+        let (request, result_handle) = store.acquire(
             ctx.id,
             request.clone(),
             ctx.image_network_policy.clone(),
             cx,
         );
+        self.source = Some(request.source.clone());
         self.last_request = Some(request.clone());
 
         // One GPUI identity for the image and for the accessibility projection
@@ -2543,6 +2581,103 @@ mod tests {
             .cloned()
             .unwrap();
         assert!(Arc::ptr_eq(&loaded, &image));
+    }
+
+    #[test]
+    fn img_image_store_reuses_equivalent_data_allocations() {
+        let mut store = ImgImageStore::default();
+        let first_request = ImageRequest {
+            source: ImageSource::Data {
+                mime_type: Some("image/png".into()),
+                bytes: Arc::from(&b"image bytes"[..]),
+            },
+            current_color: Some(0x123456),
+        };
+        let second_request = ImageRequest {
+            source: ImageSource::Data {
+                mime_type: Some("image/png".into()),
+                bytes: Arc::from(&b"image bytes"[..]),
+            },
+            current_color: Some(0x123456),
+        };
+        assert_ne!(first_request, second_request);
+
+        let now = Instant::now();
+        let first = store.acquire(1, &first_request, now);
+        assert!(matches!(first.action, ImgImageAction::StartLoad));
+        let image = img_image_store_test_image(1);
+        assert_eq!(
+            store.finish_load(&first_request, Ok(image.clone()), now),
+            None
+        );
+        assert!(store.release(1, &first_request).is_empty());
+
+        let second = store.acquire(2, &second_request, now);
+        assert!(matches!(second.action, ImgImageAction::None));
+        assert_eq!(second.request, first_request);
+        let loaded = second
+            .result
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|result| result.as_ref().ok())
+            .cloned()
+            .unwrap();
+        assert!(Arc::ptr_eq(&loaded, &image));
+        assert_eq!(store.entries.len(), 1);
+        assert!(store.release(2, &second.request).is_empty());
+    }
+
+    #[test]
+    fn img_image_store_does_not_alias_data_with_different_identity_fields() {
+        let mut store = ImgImageStore::default();
+        let first_request = ImageRequest {
+            source: ImageSource::Data {
+                mime_type: Some("image/png".into()),
+                bytes: Arc::from(&b"image bytes"[..]),
+            },
+            current_color: Some(0x123456),
+        };
+        let now = Instant::now();
+        let first = store.acquire(1, &first_request, now);
+        assert!(matches!(first.action, ImgImageAction::StartLoad));
+        let image = img_image_store_test_image(1);
+        assert_eq!(
+            store.finish_load(&first_request, Ok(image), now),
+            None
+        );
+        assert!(store.release(1, &first_request).is_empty());
+
+        let different_requests = [
+            ImageRequest {
+                source: ImageSource::Data {
+                    mime_type: Some("image/png".into()),
+                    bytes: Arc::from(&b"other bytes"[..]),
+                },
+                current_color: Some(0x123456),
+            },
+            ImageRequest {
+                source: ImageSource::Data {
+                    mime_type: Some("image/jpeg".into()),
+                    bytes: Arc::from(&b"image bytes"[..]),
+                },
+                current_color: Some(0x123456),
+            },
+            ImageRequest {
+                source: ImageSource::Data {
+                    mime_type: Some("image/png".into()),
+                    bytes: Arc::from(&b"image bytes"[..]),
+                },
+                current_color: Some(0x654321),
+            },
+        ];
+
+        for (index, request) in different_requests.iter().enumerate() {
+            let acquired = store.acquire(index as u64 + 2, request, now);
+            assert!(matches!(acquired.action, ImgImageAction::StartLoad));
+            assert_ne!(acquired.request, first_request);
+            assert!(store.release(index as u64 + 2, &acquired.request).is_empty());
+        }
     }
 
     #[test]
