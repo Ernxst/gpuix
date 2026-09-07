@@ -341,7 +341,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
   it("applies fontVariantNumeric tabular-nums to shaped digits", () => {
     const same = createTestRoot()
     same.render(
-      <div style={{ display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
         <text
           data-testid="ones"
           style={{ color: "#ffffff", fontSize: 28, fontVariantNumeric: "tabular-nums" }}
@@ -362,7 +362,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
 
     const diff = createTestRoot()
     diff.render(
-      <div style={{ display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
         <text data-testid="ones" style={{ color: "#ffffff", fontSize: 28 }}>
           1111
         </text>
@@ -391,6 +391,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
         style={{
           display: "flex",
           flexDirection: "column",
+          alignItems: "flex-start",
           fontVariantNumeric: "tabular-nums",
         }}
       >
