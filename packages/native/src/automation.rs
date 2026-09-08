@@ -533,15 +533,29 @@ mod tests {
         assert!(all.platform && all.control && all.alt && all.shift && all.function);
 
         for alias in ["meta", "super", "win", "platform"] {
-            assert!(parse_modifiers(Some(alias)).expect("alias").platform, "{alias}");
+            assert!(
+                parse_modifiers(Some(alias)).expect("alias").platform,
+                "{alias}"
+            );
         }
         assert!(parse_modifiers(Some("control")).expect("control").control);
         assert!(parse_modifiers(Some("option")).expect("option").alt);
-        assert!(parse_modifiers(Some("function")).expect("function").function);
-        assert!(parse_modifiers(Some("CMD-Shift")).expect("case-insensitive").platform);
+        assert!(
+            parse_modifiers(Some("function"))
+                .expect("function")
+                .function
+        );
+        assert!(
+            parse_modifiers(Some("CMD-Shift"))
+                .expect("case-insensitive")
+                .platform
+        );
 
         assert_eq!(parse_modifiers(None).expect("none"), Modifiers::default());
-        assert_eq!(parse_modifiers(Some("")).expect("empty"), Modifiers::default());
+        assert_eq!(
+            parse_modifiers(Some("")).expect("empty"),
+            Modifiers::default()
+        );
     }
 
     /// A typo used to weaken the gesture instead of failing: `"comand-click"`
@@ -551,11 +565,17 @@ mod tests {
     fn an_unknown_modifier_name_is_an_error() {
         let error = parse_modifiers(Some("comand")).expect_err("typo must fail");
         assert!(error.contains("Unknown modifier 'comand'"), "{error}");
-        assert!(error.contains("cmd"), "the message lists what is accepted: {error}");
+        assert!(
+            error.contains("cmd"),
+            "the message lists what is accepted: {error}"
+        );
 
         // A typo alongside a real name fails too, rather than half-applying.
         let error = parse_modifiers(Some("cmd-shfit")).expect_err("typo must fail");
-        assert!(error.contains("Unknown modifier 'shfit' in 'cmd-shfit'"), "{error}");
+        assert!(
+            error.contains("Unknown modifier 'shfit' in 'cmd-shfit'"),
+            "{error}"
+        );
     }
 
     #[test]

@@ -313,19 +313,24 @@ fn resolved_role(element: &RetainedElement) -> Option<AccessibilityRole> {
         return implicit;
     }
 
-    ["ariaLabel", "ariaLabelledBy", "ariaDescription", "ariaDescribedBy"]
-        .into_iter()
-        .any(|property| {
-            element
-                .custom_props
-                .get(property)
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|value| !value.trim().is_empty())
-        })
-        .then_some(AccessibilityRole {
-            role: gpui::Role::GenericContainer,
-            name_from_contents: false,
-        })
+    [
+        "ariaLabel",
+        "ariaLabelledBy",
+        "ariaDescription",
+        "ariaDescribedBy",
+    ]
+    .into_iter()
+    .any(|property| {
+        element
+            .custom_props
+            .get(property)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    })
+    .then_some(AccessibilityRole {
+        role: gpui::Role::GenericContainer,
+        name_from_contents: false,
+    })
 }
 
 /// The live-region politeness and atomicity a role carries on its own.
@@ -427,8 +432,7 @@ fn flattened_text(tree: &RetainedTree, element: &RetainedElement, subject: NameS
 /// names the subtree it sits on. Chromium and dom-accessibility-api both include
 /// it.
 fn carries_authored_name(node: &RetainedElement) -> bool {
-    resolved_role(node)
-        .is_some_and(|role| role.supports("ariaLabel"))
+    resolved_role(node).is_some_and(|role| role.supports("ariaLabel"))
 }
 
 /// Whether `node` runs into its siblings instead of separating from them.
@@ -1613,7 +1617,10 @@ mod tests {
         append_element(&mut tree, Some(1), 3, "text");
         append_text_node(&mut tree, 3, 4, "\u{a0}left");
 
-        assert_eq!(contents_name(&tree, 1).as_deref(), Some("5\u{a0}kg \u{a0}left"));
+        assert_eq!(
+            contents_name(&tree, 1).as_deref(),
+            Some("5\u{a0}kg \u{a0}left")
+        );
     }
 
     #[test]
@@ -1661,9 +1668,7 @@ mod tests {
             Some(gpui::Role::MultilineTextInput)
         );
 
-        input
-            .custom_props
-            .insert("role".into(), "searchbox".into());
+        input.custom_props.insert("role".into(), "searchbox".into());
         assert_eq!(
             resolved_role(&input).map(|role| role.role),
             Some(gpui::Role::SearchInput)
@@ -1866,8 +1871,12 @@ mod tests {
                 .custom_props
                 .insert("ariaValueText".into(), "40 percent".into());
             element.custom_props.insert("ariaValueMin".into(), 0.into());
-            element.custom_props.insert("ariaValueMax".into(), 100.into());
-            element.custom_props.insert("ariaValueNow".into(), 40.into());
+            element
+                .custom_props
+                .insert("ariaValueMax".into(), 100.into());
+            element
+                .custom_props
+                .insert("ariaValueNow".into(), 40.into());
 
             let props = AccessibilityProps::from_element(&detached_tree(), &element);
             assert_eq!(props.value, Some("40 percent"));
@@ -1878,12 +1887,18 @@ mod tests {
         }
 
         let mut progressbar = RetainedElement::new(7, "div".to_string(), 1);
-        progressbar.custom_props.insert("role".into(), "progressbar".into());
+        progressbar
+            .custom_props
+            .insert("role".into(), "progressbar".into());
         progressbar
             .custom_props
             .insert("ariaLabel".into(), "Import".into());
-        progressbar.custom_props.insert("ariaValueMin".into(), 0.into());
-        progressbar.custom_props.insert("ariaValueMax".into(), 100.into());
+        progressbar
+            .custom_props
+            .insert("ariaValueMin".into(), 0.into());
+        progressbar
+            .custom_props
+            .insert("ariaValueMax".into(), 100.into());
 
         let props = AccessibilityProps::from_element(&detached_tree(), &progressbar);
         assert_eq!(props.value, None);
@@ -2099,9 +2114,7 @@ mod tests {
             .insert("role".into(), "heading".into());
         roled_child.children.push(27);
         assert!(!is_visually_hidden(&tree, &roled_child));
-        assert!(
-            only_reason(&tree, &roled_child).contains("accessibility semantics of their own")
-        );
+        assert!(only_reason(&tree, &roled_child).contains("accessibility semantics of their own"));
 
         // Plain text that is focusable or wired to an event is not plain: the
         // projection would destroy the handler and the tab stop along with it.
@@ -2155,7 +2168,10 @@ mod tests {
                 AccessibilityProps::from_element(&detached_tree(), &link).current,
                 Some(expected)
             );
-            assert!(element_problems(&detached_tree(), &link).is_empty(), "{token}");
+            assert!(
+                element_problems(&detached_tree(), &link).is_empty(),
+                "{token}"
+            );
         }
     }
 
@@ -2284,11 +2300,9 @@ mod tests {
         for problem in &problems {
             assert_eq!(problem.effect, AccessibilityProblemEffect::Rejected);
         }
-        assert!(
-            AccessibilityProps::from_element(&detached_tree(), &region)
-                .live
-                .is_none()
-        );
+        assert!(AccessibilityProps::from_element(&detached_tree(), &region)
+            .live
+            .is_none());
     }
 
     fn semantic_element(id: u64, element_type: &str) -> RetainedElement {
@@ -2308,12 +2322,10 @@ mod tests {
         let problems = element_problems(&detached_tree(), &element);
 
         assert_eq!(problems.len(), 1);
-        assert!(
-            problems[0]
-                .problem
-                .reason
-                .contains("does not support accessibility semantics")
-        );
+        assert!(problems[0]
+            .problem
+            .reason
+            .contains("does not support accessibility semantics"));
     }
 
     #[test]
@@ -2330,10 +2342,7 @@ mod tests {
             for id in order {
                 tree.create_element(id, "text".to_string());
                 tree.set_custom_prop(id, "id".into(), "ledger-title".into());
-                tree.set_text(
-                    id,
-                    if id == 40 { "Earliest" } else { "Later" }.to_string(),
-                );
+                tree.set_text(id, if id == 40 { "Earliest" } else { "Later" }.to_string());
             }
 
             let mut element = RetainedElement::new(1, "div".to_string(), 1);
@@ -2363,8 +2372,7 @@ mod tests {
 
             assert_eq!(problems.len(), 1, "{property}");
             assert_eq!(
-                problems[0].problem.reason,
-                "expected a string of space-separated element ids",
+                problems[0].problem.reason, "expected a string of space-separated element ids",
                 "{property}"
             );
         }
