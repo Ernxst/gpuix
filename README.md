@@ -1900,7 +1900,7 @@ grapheme-safe deletion and mouse positioning.
 />
 ```
 
-Enter and Shift+Enter insert a newline in a `<textarea>`, and Enter inserts nothing in an `<input>`; both deliver `onKeyDown` with `key: "Enter"` first, and `preventDefault()` there cancels the newline, exactly as in react-dom. A composer that submits on Enter is written the react-dom way:
+Enter and Shift+Enter insert a newline in a `<textarea>`, and Enter inserts nothing in an `<input>`; both deliver `onKeyDown` with `key: "Enter"` first, and `preventDefault()` there cancels the newline, exactly as in react-dom. Keys typed while that `onKeyDown` is still deciding are applied afterward, in the order they arrived, so a fast typist can never overtake their own Enter. A composer that submits on Enter is written the react-dom way:
 
 ```tsx
 onKeyDown={(event) => {
