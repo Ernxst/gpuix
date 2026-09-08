@@ -2314,6 +2314,8 @@ describeNative("events", () => {
         <div
           onMouseEnter={() => events.push("parent-enter")}
           onMouseLeave={() => events.push("parent-leave")}
+          // Load-bearing: a click listener in the ancestry gives the canvas a
+          // pending mouse down, during which GPUI reports it as not hovered.
           onClick={() => events.push("parent-click")}
           style={{ width: 260, height: 120, padding: 12 }}
         >
