@@ -492,6 +492,18 @@ impl CustomElement for TextEditorElement {
                 });
             });
         }
+        if ctx.events.contains("fileDrop") {
+            let callback = ctx.event_callback.clone();
+            let id = ctx.id;
+            editor = editor.on_drop(move |dropped: &gpui::ExternalPaths, window, _cx| {
+                crate::renderer::emit_file_drop(
+                    &callback,
+                    id,
+                    dropped,
+                    window.mouse_position(),
+                );
+            });
+        }
         editor = crate::accessibility::apply_a11y_click(
             editor,
             ctx.events,
@@ -531,7 +543,7 @@ impl CustomElement for TextEditorElement {
 
     fn supported_events(&self) -> &'static [&'static str] {
         &[
-            "change", "submit", "click", "keyDown", "keyUp", "focus", "blur",
+            "change", "submit", "click", "keyDown", "keyUp", "focus", "blur", "fileDrop",
         ]
     }
 

@@ -403,6 +403,9 @@ export interface Props {
   // ── Scroll events ──────────────────────────────────────────────
   onScroll?: (event: EventPayload) => void
 
+  // ── File drop (Finder / OS paths) ───────────────────────────────
+  onFileDrop?: (event: EventPayload) => void
+
   // ── Text editor events ─────────────────────────────────────────
   onChange?: (event: EventPayload) => void
   /** Enter on `<input>`, or Enter on `<textarea>` when this listener is set. */

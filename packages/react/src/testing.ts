@@ -59,6 +59,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   ): void
   simulateMouseDown(x: number, y: number, button: number, modifiers?: string): void
   simulateMouseUp(x: number, y: number, button: number, modifiers?: string): void
+  simulateFileDrop(x: number, y: number, paths: string[]): void
   getTreeJson(): string
   getA11yTree(): string
   getAutomationTree(): string
@@ -370,6 +371,14 @@ export class TestRenderer implements NativeRenderer {
   ): void {
     this.native.flush()
     this.native.simulateMouseUp(x, y, button ?? 0, modifiers)
+    this.dispatchNativeEvents()
+    this.native.flush()
+  }
+
+  /** End-to-end: Finder-style file drop through GPUI → React `onFileDrop`. */
+  nativeSimulateFileDrop(x: number, y: number, paths: string[]): void {
+    this.native.flush()
+    this.native.simulateFileDrop(x, y, paths)
     this.dispatchNativeEvents()
     this.native.flush()
   }

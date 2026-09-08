@@ -610,6 +610,30 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Simulate a Finder-style file drop at the given window coordinates.
+    /// Dispatches FileDrop Entered then Submit, matching GPUI's OS drop path.
+    #[napi]
+    pub fn simulate_file_drop(&self, x: f64, y: f64, paths: Vec<String>) -> Result<()> {
+        with_test_state(|cx, window, _view| {
+            let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+            let paths = gpui::ExternalPaths(
+                paths
+                    .into_iter()
+                    .map(std::path::PathBuf::from)
+                    .collect(),
+            );
+            cx.simulate_event(
+                window,
+                gpui::FileDropEvent::Entered {
+                    position,
+                    paths,
+                },
+            );
+            cx.simulate_event(window, gpui::FileDropEvent::Submit { position });
+            Ok(())
+        })
+    }
+
     // ── Selection API ──────────────────────────────────────────────────
 
     /// The current text selection joined in document order, or null.

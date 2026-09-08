@@ -85,6 +85,8 @@ const EVENT_PROPS = [
   ["onBlur", "blur"],
   // Scroll events
   ["onScroll", "scroll"],
+  // Finder / OS file drop
+  ["onFileDrop", "fileDrop"],
 ] as const
 
 const EVENT_PROP_NAMES = new Set<string>(EVENT_PROPS.map(([name]) => name))

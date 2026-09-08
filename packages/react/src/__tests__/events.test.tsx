@@ -880,6 +880,144 @@ describeNative("events", () => {
     })
   })
 
+  describe("file drop events", () => {
+    it("should handle onFileDrop with the dropped paths", () => {
+      const received: EventPayload[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 200 }}
+          onFileDrop={(event: EventPayload) => received.push(event)}
+        >
+          <text>drop</text>
+        </div>,
+      )
+
+      testRoot.renderer.nativeSimulateFileDrop(100, 100, [
+        "/tmp/gpuix-drop-a.txt",
+      ])
+
+      expect(received).toHaveLength(1)
+      expect(received[0]!.eventType).toBe("fileDrop")
+      expect(received[0]!.paths).toEqual(["/tmp/gpuix-drop-a.txt"])
+      expect(received[0]!.x).toBe(100)
+      expect(received[0]!.y).toBe(100)
+    })
+
+    it("should deliver every path in one drop", () => {
+      const received: string[][] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 200 }}
+          onFileDrop={(event: EventPayload) =>
+            received.push(event.paths ?? [])
+          }
+        />,
+      )
+
+      testRoot.renderer.nativeSimulateFileDrop(40, 40, [
+        "/tmp/gpuix-drop-a.txt",
+        "/tmp/gpuix-drop-b.png",
+      ])
+
+      expect(received).toEqual([
+        ["/tmp/gpuix-drop-a.txt", "/tmp/gpuix-drop-b.png"],
+      ])
+    })
+
+    it("should deliver a nested drop to the inner listener only", () => {
+      const received: string[] = []
+
+      testRoot.render(
+        <div
+          style={{
+            width: 400,
+            height: 400,
+            display: "flex",
+            flexDirection: "column",
+          }}
+          onFileDrop={() => received.push("outer")}
+        >
+          <div
+            style={{ width: 100, height: 100 }}
+            onFileDrop={() => received.push("inner")}
+          />
+        </div>,
+      )
+
+      testRoot.renderer.nativeSimulateFileDrop(50, 50, [
+        "/tmp/gpuix-drop-inner.txt",
+      ])
+      expect(received).toEqual(["inner"])
+
+      testRoot.renderer.nativeSimulateFileDrop(200, 200, [
+        "/tmp/gpuix-drop-outer.txt",
+      ])
+      expect(received).toEqual(["inner", "outer"])
+    })
+
+    it("should not fire an empty drop", () => {
+      const received: EventPayload[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 200 }}
+          onFileDrop={(event: EventPayload) => received.push(event)}
+        />,
+      )
+
+      testRoot.renderer.nativeSimulateFileDrop(40, 40, [])
+      expect(received).toEqual([])
+    })
+
+    it("should deliver a drop on a child to the ancestor listener", () => {
+      const received: string[] = []
+
+      testRoot.render(
+        <div
+          style={{
+            width: 200,
+            height: 200,
+            display: "flex",
+            flexDirection: "column",
+          }}
+          onFileDrop={() => received.push("outer")}
+        >
+          <div style={{ width: 100, height: 100 }} />
+        </div>,
+      )
+
+      testRoot.renderer.nativeSimulateFileDrop(40, 40, [
+        "/tmp/gpuix-drop-child.txt",
+      ])
+      expect(received).toEqual(["outer"])
+    })
+
+    it("should handle onFileDrop on a loaded img leaf", () => {
+      const received: string[][] = []
+      const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#5ca9ff"/></svg>'
+      const src = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`
+
+      testRoot.render(
+        <img
+          src={src}
+          style={{ width: 220, height: 120 }}
+          onFileDrop={(event: EventPayload) =>
+            received.push(event.paths ?? [])
+          }
+        />,
+      )
+
+      testRoot.renderer.nativeSimulateFileDrop(80, 40, [
+        "/tmp/gpuix-drop-img.txt",
+      ])
+
+      expect(received).toEqual([["/tmp/gpuix-drop-img.txt"]])
+    })
+  })
+
   describe("keyDown and keyUp events", () => {
     it("should handle onKeyDown via nativeSimulateKeyDown", () => {
       function KeyTracker() {

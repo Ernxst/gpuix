@@ -253,7 +253,7 @@ impl CustomElement for ImgElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &["click", "mouseEnter", "mouseLeave"]
+        &["click", "mouseEnter", "mouseLeave", "fileDrop"]
     }
 
     fn destroy(&mut self) {}
@@ -372,7 +372,7 @@ impl CustomElement for SvgElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &["click", "mouseEnter", "mouseLeave"]
+        &["click", "mouseEnter", "mouseLeave", "fileDrop"]
     }
 
     fn destroy(&mut self) {}

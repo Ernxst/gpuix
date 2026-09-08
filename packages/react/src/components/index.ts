@@ -33,6 +33,7 @@ export interface MotionDivProps extends MotionProps {
   onFocus?: Props["onFocus"]
   onBlur?: Props["onBlur"]
   onScroll?: Props["onScroll"]
+  onFileDrop?: Props["onFileDrop"]
   autoFocus?: boolean
 }
 

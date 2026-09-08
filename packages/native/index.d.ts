@@ -260,6 +260,11 @@ export declare class TestGpuixRenderer {
    * delta_x and delta_y are in pixels (negative = scroll up/left).
    */
   simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, modifiers?: string | undefined | null): void
+  /**
+   * Simulate a Finder-style file drop at the given window coordinates.
+   * Dispatches FileDrop Entered then Submit, matching GPUI's OS drop path.
+   */
+  simulateFileDrop(x: number, y: number, paths: Array<string>): void
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
   /** Drop the current selection. */
@@ -528,6 +533,11 @@ export interface EventPayload {
    * Populated for: highlight.
    */
   matchCount?: number
+  /**
+   * Absolute filesystem paths from a Finder / OS file drop.
+   * Populated for: fileDrop.
+   */
+  paths?: Array<string>
   modifiers?: EventModifiers
 }
 

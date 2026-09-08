@@ -2405,12 +2405,31 @@ text imports no longer need a runtime flag.
 | Focus | `onFocus` | — |
 | Blur | `onBlur` | — |
 | Scroll | `onScroll` | `deltaX`, `deltaY`, `precise`, `touchPhase`, `modifiers` |
+| File drop | `onFileDrop` | `paths`, `x`, `y` — Unicode filesystem paths from Finder or the OS |
 | Change | `onChange` | `value` — `<input>` and `<textarea>` only |
 | Submit | `onSubmit` | `value` — `<input>` always, `<textarea>` when `onSubmit` is set |
 | Toggle file | `onToggleFile` | `value` (file path) — `<diff>` only |
 | Show more | `onShowMore` | `value` (hidden line count) — `<diff>` only |
 | Line click | `onLineClick` | `value`, `oldLine`, `newLine` — `<diff>` only |
 | Link click | `onLinkClick` | `value` (URL) — `<markdown>` only |
+
+A Finder or OS file drop lands on the hovered element that lists
+**`onFileDrop`**. `paths` is an array of absolute Unicode filesystem paths.
+`x` and `y` are the drop point in window pixels. An empty drop, or a drop
+that contains a non-Unicode path, does not fire.
+
+Put the listener on a **`div`**, **`text`**, **`img`**, **`svg`**, **`input`**,
+**`textarea`**, **`code`**, **`markdown`**, **`diff`**, or **`anchored`**.
+`<virtual-list>` does not take this event. Wrap it:
+
+```tsx
+<div
+  onFileDrop={(event) => openFiles(event.paths ?? [])}
+  style={{ width: 400, height: 300 }}
+>
+  <virtual-list estimatedItemHeight={24}>{rows}</virtual-list>
+</div>
+```
 
 Keyboard and focus listeners create a persistent GPUI `FocusHandle`
 automatically. A listener alone does not put a `div` in the Tab order; add
