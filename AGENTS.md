@@ -28,6 +28,45 @@ Verify the target changed: TypeScript checks do not compile Rust, and native che
 - This fork releases package tarballs through GitHub release CI. It does not publish the upstream package names to npm. Do not publish locally.
 - Preserve attribution headers and `THIRD_PARTY_NOTICES.md` when changing ported code.
 
+## Pull request bodies
+
+When an agent writes the change, the PR body carries a sanitized record of what drove
+it, not the raw conversation: the repository is public, and a verbatim prompt log
+tends to carry local paths and workflow detail that don't belong there. This does not
+apply to PRs against the Zed submodule repo.
+
+Open with a three-line block naming the harness, agent, and model:
+
+- **Harness:** the product that ran the agent (`Claude Code`, `OpenCode`, `Kimaki`,
+  `Cursor`, `Codex`).
+- **Agent:** the named agent if the harness has one (`build`, `plan`, `opus`); write
+  `none` if there is no named agent.
+- **Model:** the exact model id from the session (`anthropic/claude-opus-5`,
+  `xai/grok-4.6`); do not guess a shorter marketing name.
+
+Follow it with a collapsed `<details><summary>Task statements</summary>` block
+listing, in order, what each user turn asked for in effect terms — the outcome
+requested, not the literal wording or the working directory and workflow
+instructions that got there. End each statement with "(Working-directory and
+workflow instructions omitted.)":
+
+```md
+**Harness:** Claude Code
+**Agent:** none
+**Model:** anthropic/claude-opus-5
+
+<details>
+<summary>Task statements</summary>
+
+1. Add an optional peer dependency and update its README section. (Working-directory
+   and workflow instructions omitted.)
+
+2. Fix a regression where a hovered ancestor lost its hover state. (Working-directory
+   and workflow instructions omitted.)
+
+</details>
+```
+
 ## Consumer bug fixes
 
 When fixing a consumer-reported bug, read and execute [the surface-audit procedure](.agents/skills/audit-surface/SKILL.md) before declaring the fix complete. This is part of the fixing task; do not wait for a separate user request or skill invocation. Group reports touching the same behavior and implementation into one audit. Include the audit results and any verification gaps in the handoff.
