@@ -188,6 +188,9 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     hoverPath: [],
     preventedKeyboardActivations: new Map(),
     strictStyles,
+    rootElementId: null,
+    rootElementType: null,
+    announcer: { polite: null, assertive: null },
   }
   attachRoot(renderer, gpuixContainer)
   let status: RootStatus = { status: "active" }

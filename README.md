@@ -2460,6 +2460,34 @@ supported. Live regions are verified on macOS with VoiceOver
 Linux use the same AccessKit properties but have not been checked against a
 screen reader here.
 
+**`announce()`.** For a message with no element of its own — the outcome of an
+action rather than something drawn on screen — call `announce()` instead of
+authoring a live region:
+
+```tsx
+import { announce } from "@gpuix/react"
+
+announce("Saved")
+announce("Upload failed", { politeness: "assertive" })
+```
+
+```ts
+function announce(message: string, options?: { politeness?: "polite" | "assertive" }): void
+```
+
+`politeness` defaults to `"polite"`, which speaks through a hidden
+`role="status"` region; `"assertive"` speaks through `role="alert"`. Both stay
+off-screen (the `visuallyHidden` pattern above) and carry `ariaAtomic`. Two
+regions alternate per politeness, so setting the same string twice in a row —
+otherwise silent, per the bullet above — is announced twice: each call clears
+whichever region it is not about to write to, keeping every announcement a
+changed value for AccessKit's frame diff to find. `announce()` targets the
+most recently rendered root — the one `render()` mounted, or the newest test
+root, whichever last rendered — so call it after a `render()`; called with
+none rendered, or when that root's top-level element cannot host a live
+region (a bare `<text>` or `<virtual-list>` root), it is a no-op that logs a
+single warning instead.
+
 Unroled drawn text enters AccessKit as `Label` content. `<text>` exposes its
 flattened inline string as one label, while native `<code>`, `<markdown>`, and
 `<diff>` expose one label per content string they paint. Element chrome such as

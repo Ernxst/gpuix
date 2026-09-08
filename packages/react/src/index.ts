@@ -139,6 +139,8 @@ export interface AccessibilityRoleRegistry {
 export type AccessibilityRole = keyof AccessibilityRoleRegistry & string
 
 export { createRoot, flushSync } from "./reconciler/index.js"
+export { announce } from "./announce.js"
+export type { AnnounceOptions } from "./announce.js"
 export { __applyCanvasCommands } from "./canvas/commands.js"
 export { createImageBitmap, Image } from "./canvas/image.js"
 export {
@@ -227,6 +229,7 @@ export type { MotionDivProps } from "./components/index.js"
 export type {
   AccessibilityAction,
   AccessibilityProps,
+  AnnouncePoliteness,
   CanvasProps,
   CanvasPublicInstance,
   CursorValue,

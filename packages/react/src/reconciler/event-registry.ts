@@ -20,6 +20,9 @@ const EVENT_REGISTRY_KEY = "__gpuixEventRegistry"
 
 type EventRegistrySlot = {
   containersByRenderer: WeakMap<NativeRenderer, Container>
+  /** Attached containers, oldest first, held weakly so an un-unmounted root is
+   *  not pinned in memory by this registry alone. */
+  attachOrder: WeakRef<Container>[]
 }
 
 function eventRegistrySlot(): EventRegistrySlot {
@@ -29,9 +32,15 @@ function eventRegistrySlot(): EventRegistrySlot {
   // de-duplicating module evaluation — the cross-reload event routing depends on this
   // slot surviving re-evaluation.
   const existing = Reflect.get(globalThis, EVENT_REGISTRY_KEY) as EventRegistrySlot | undefined
-  if (existing) return existing
+  if (existing) {
+    // A slot created by a module copy that predates `attachOrder` (an older
+    // reload pass, or this field's own introduction crossing a --hot reload)
+    // must not make `attachRoot` throw on a missing array.
+    existing.attachOrder ??= []
+    return existing
+  }
 
-  const created: EventRegistrySlot = { containersByRenderer: new WeakMap() }
+  const created: EventRegistrySlot = { containersByRenderer: new WeakMap(), attachOrder: [] }
   Reflect.set(globalThis, EVENT_REGISTRY_KEY, created)
   return created
 }
@@ -102,27 +111,58 @@ function restoreControlledEditor(
 }
 
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
-  const containersByRenderer = eventRegistrySlot().containersByRenderer
-  const owner = containersByRenderer.get(renderer)
+  const slot = eventRegistrySlot()
+  const owner = slot.containersByRenderer.get(renderer)
   if (owner && owner !== container) {
     throw new Error(
       "This renderer already drives a mounted GPUIX root. One renderer owns one window, one native root id, and one event map, so a second root would silently take both over. Unmount the first root first."
     )
   }
-  containersByRenderer.set(renderer, container)
+  slot.containersByRenderer.set(renderer, container)
+  // Drop dead refs and any earlier ref to this same container (re-attaching
+  // after a detach) before recording it as the newest.
+  slot.attachOrder = slot.attachOrder.filter((ref) => {
+    const target = ref.deref()
+    return target !== undefined && target !== container
+  })
+  slot.attachOrder.push(new WeakRef(container))
 }
 
 /** Only the owner may detach. Otherwise unmounting a rejected or stale root
  *  would delete the live root's event mapping and every handler would go dead. */
 export function detachRoot(renderer: NativeRenderer, container: Container): void {
-  const containersByRenderer = eventRegistrySlot().containersByRenderer
-  if (containersByRenderer.get(renderer) === container) {
-    containersByRenderer.delete(renderer)
+  const slot = eventRegistrySlot()
+  if (slot.containersByRenderer.get(renderer) === container) {
+    slot.containersByRenderer.delete(renderer)
   }
+  slot.attachOrder = slot.attachOrder.filter((ref) => {
+    const target = ref.deref()
+    return target !== undefined && target !== container
+  })
 }
 
 export function containerForRenderer(renderer: NativeRenderer): Container | undefined {
   return eventRegistrySlot().containersByRenderer.get(renderer)
+}
+
+/**
+ * The window `announce()` targets: the newest attached container that has
+ * actually rendered a root element, scanning from the most recently attached.
+ * A root that attached after this one but has not rendered yet (or has since
+ * unmounted, per `rootElementId` going back to `null`) is skipped rather than
+ * making `announce()` warn while a usable, slightly older root is available.
+ */
+export function latestAttachedContainer(): Container | undefined {
+  const slot = eventRegistrySlot()
+  for (let index = slot.attachOrder.length - 1; index >= 0; index -= 1) {
+    const container = slot.attachOrder[index]!.deref()
+    if (container === undefined) {
+      slot.attachOrder.splice(index, 1)
+      continue
+    }
+    if (container.rootElementId != null) return container
+  }
+  return undefined
 }
 
 function eventPath(container: Container, target: Instance): Instance[] {

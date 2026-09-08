@@ -3,7 +3,8 @@
 /// real TreeUpdate the platform adapters diff, because that diff — a live node,
 /// a stable id, a changed string — is the announcement itself.
 import React from "react"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { announce } from "../index.js"
 import {
   createTestRoot,
   isNativeTestRendererAvailable,
@@ -290,5 +291,128 @@ describeNative("live regions", () => {
     expect(diagnostic!.message).toContain('expected one of "off", "polite", or "assertive"')
     // The role's own politeness survives a rejected authored value.
     expect(nodeFor("region").aria.live).toBe("Polite")
+  })
+})
+
+/// `announce()` writes into hidden host regions React never rendered, so these
+/// assertions locate a node by its live-region shape rather than a testId —
+/// exactly what a screen reader itself has for an identity, since nothing
+/// authored one.
+describeNative("announce()", () => {
+  let screen: TestRoot
+
+  beforeEach(() => {
+    screen = createTestRoot()
+  })
+
+  afterEach(() => {
+    screen.unmount()
+  })
+
+  const tree = (): AccessKitTreeSnapshot => {
+    screen.renderer.flush()
+    screen.renderer.drawPendingFrame()
+    return screen.renderer.getAccessibilityTree()
+  }
+
+  const regionWithValue = (role: string, value: string): AccessKitNodeSnapshot | undefined =>
+    Object.values(tree().nodes).find(
+      (node) => node.aria.role === role && node.aria.value === value
+    )
+
+  it("speaks a polite message through a status region", () => {
+    screen.render(<div />)
+
+    announce("Saved")
+
+    const region = regionWithValue("Status", "Saved")
+    expect(region).toBeDefined()
+    expect(region!.aria).toMatchObject({ live: "Polite", live_atomic: true, value: "Saved" })
+  })
+
+  it("speaks an assertive message through an alert region", () => {
+    screen.render(<div />)
+
+    announce("Failed", { politeness: "assertive" })
+
+    const region = regionWithValue("Alert", "Failed")
+    expect(region).toBeDefined()
+    expect(region!.aria).toMatchObject({ live: "Assertive", live_atomic: true, value: "Failed" })
+  })
+
+  it("announces the same message twice by alternating regions", () => {
+    screen.render(<div />)
+
+    announce("Saved")
+    const first = regionWithValue("Status", "Saved")
+    expect(first).toBeDefined()
+
+    announce("Saved")
+    const second = regionWithValue("Status", "Saved")
+    expect(second).toBeDefined()
+    // A second identical announcement lands in the other region, not the one
+    // that already carried the string — otherwise the value never changes and
+    // AccessKit's frame diff raises no announcement at all.
+    expect(second!.accesskit_id).not.toBe(first!.accesskit_id)
+  })
+
+  it("warns once and does not throw when no root is attached", () => {
+    screen.unmount()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+    expect(() => announce("Saved")).not.toThrow()
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
+  it("recovers after the root renders null and then a new tree", () => {
+    screen.render(<div />)
+    announce("Saved")
+    const beforeUnmount = regionWithValue("Status", "Saved")
+    expect(beforeUnmount).toBeDefined()
+
+    // Rendering nothing destroys the top-level element `announce()` attached
+    // its regions under, cascading away the regions with it.
+    screen.render(null)
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    expect(() => announce("Saved")).not.toThrow()
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+
+    screen.render(<div />)
+    announce("Saved")
+    const afterRemount = regionWithValue("Status", "Saved")
+    expect(afterRemount).toBeDefined()
+    // A fresh root element gets fresh regions, not the destroyed ones.
+    expect(afterRemount!.accesskit_id).not.toBe(beforeUnmount!.accesskit_id)
+  })
+
+  it("clears the region it wrote to previously when alternating", () => {
+    screen.render(<div />)
+
+    announce("Saved 1")
+    const first = regionWithValue("Status", "Saved 1")
+    expect(first).toBeDefined()
+
+    announce("Saved 2")
+    const clearedFirst = Object.values(tree().nodes).find(
+      (node) => node.accesskit_id === first!.accesskit_id
+    )
+    expect(clearedFirst).toBeDefined()
+    expect(clearedFirst!.aria.value ?? "").toBe("")
+  })
+
+  it("keeps the polite and assertive pairs as independent nodes", () => {
+    screen.render(<div />)
+
+    announce("Saved")
+    announce("Failed", { politeness: "assertive" })
+
+    const status = regionWithValue("Status", "Saved")
+    const alert = regionWithValue("Alert", "Failed")
+    expect(status).toBeDefined()
+    expect(alert).toBeDefined()
+    expect(status!.accesskit_id).not.toBe(alert!.accesskit_id)
   })
 })
