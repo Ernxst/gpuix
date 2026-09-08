@@ -6234,6 +6234,7 @@ impl GpuixView {
         index: usize,
         expected_child_id: u64,
         inherited: Inherited,
+        virtual_list_group_id: Option<gpui::ElementId>,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> gpui::AnyElement {
@@ -6305,12 +6306,17 @@ impl GpuixView {
 
         let accessibility_host_ids = self.accessibility_host_ids.as_mut();
         let gpui_element_path = accessibility_host_ids.as_ref().map(|_| {
-            vec![
-                gpui::ElementId::View(window.current_view()),
+            let mut path = vec![gpui::ElementId::View(window.current_view())];
+            if let Some(group_id) = virtual_list_group_id {
+                path.push(group_id);
+            }
+            path.extend([
+                gpui::ElementId::Integer(list_id),
                 gpui::ElementId::Name(
                     format!("__gpuix_virtual_row_{}_{}", list_id, expected_child_id).into(),
                 ),
-            ]
+            ]);
+            path
         });
         let mut build_ctx = BuildCtx {
             tree: &tree,
@@ -8037,7 +8043,7 @@ fn retained_gpui_element_id(
 ) -> Option<gpui::ElementId> {
     let id = element.id;
     match element.element_type.as_str() {
-        "div" | "text" => Some(gpui::ElementId::Integer(id)),
+        "div" | "text" | "virtual-list" => Some(gpui::ElementId::Integer(id)),
         "img" => Some(gpui::ElementId::Name(format!("__gpuix_img_{id}").into())),
         "svg" => Some(gpui::ElementId::Name(format!("__gpuix_svg_{id}").into())),
         "input" | "textarea" => Some(gpui::ElementId::Name(format!("__gpuix_editor_{id}").into())),
@@ -9287,9 +9293,15 @@ fn build_virtual_list(
     }
 
     let list_id = element.id;
+    let virtual_list_group_id = style
+        .and_then(|style| style.hover_group.as_ref())
+        .map(|_| {
+            gpui::ElementId::Name(format!("__gpuix_virtual_list_group_{list_id}").into())
+        });
     // Cloned, not copied: gpui runs this processor once per requested row, so
     // the captured value must survive every call.
     let inherited = ctx.inherited.clone();
+    let render_item_group_id = virtual_list_group_id.clone();
     let render_item = cx.processor(move |view, index: usize, window, cx| {
         let Some(entry) = view.virtual_lists.get(&list_id) else {
             return unmounted_virtual_row(1.0);
@@ -9298,7 +9310,15 @@ fn build_virtual_list(
             // Empty measures as 0 and poisons ListState. Keep the estimate.
             return unmounted_virtual_row(entry.config.estimated_item_height.unwrap_or(1.0));
         };
-        view.build_virtual_child(list_id, index, child_id, inherited.clone(), window, cx)
+        view.build_virtual_child(
+            list_id,
+            index,
+            child_id,
+            inherited.clone(),
+            render_item_group_id.clone(),
+            window,
+            cx,
+        )
     });
     let mut list =
         gpui::list(list_state, render_item).with_sizing_behavior(gpui::ListSizingBehavior::Auto);
@@ -9310,14 +9330,33 @@ fn build_virtual_list(
             }
         }
     }
+    let list = list.id(gpui::ElementId::Integer(element.id));
+    let list = crate::accessibility::apply(
+        list,
+        ctx.tree,
+        element,
+        ctx.event_callback,
+        ctx.focus_handles.get(&element.id),
+        ctx.inherited.accessibility_hidden,
+        crate::accessibility::AccessibleText::default(),
+    );
     if let Some(group) = style.and_then(|style| style.hover_group.as_deref()) {
         // `gpui::List` is Styled but has no interactive identity. A transparent
         // stateful surface gives the retained virtual-list node the same group
         // hitbox/state contract as every other hoverGroup source while the list
         // continues to own its declared layout and scrolling styles.
         let id = element.id;
+        let group_id = virtual_list_group_id.expect("hoverGroup has a virtual-list group id");
+        if let Some(path) = ctx.gpui_element_path.as_ref() {
+            if let Some(identities) = ctx.accessibility_host_ids.as_deref_mut() {
+                let mut list_path = path[..path.len() - 1].to_vec();
+                list_path.push(group_id.clone());
+                list_path.push(gpui::ElementId::Integer(element.id));
+                record_accessibility_host_identity(element.id, &list_path, identities);
+            }
+        }
         let mut surface = gpui::div()
-            .id(gpui::ElementId::Integer(id))
+            .id(group_id)
             .relative()
             .group(gpui::SharedString::from(group.to_owned()))
             .child(list)

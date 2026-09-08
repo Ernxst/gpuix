@@ -1561,6 +1561,10 @@ function MessageList({ messages }: { messages: Message[] }) {
 }
 ```
 
+`role` and ARIA props on `<virtual-list>` project an accessibility node exactly
+as they do on a `<div>`. Use `role="list"` on the list and `role="listitem"` on
+its rows to match the react-dom equivalent of `<ul>` and `<li>`.
+
 The list needs a **bounded height** or bounded flex space. Each rendered row
 must have one stable host root, which can contain any GPUIX host or custom
 element. There is no `VirtualList` wrapper: windowing is application state.
