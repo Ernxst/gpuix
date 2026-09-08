@@ -313,9 +313,11 @@ fn grid_line_from_integer(value: i64) -> Result<GridLineValue, String> {
     if value == 0 {
         return Err(GRID_LINE_ERROR.to_string());
     }
-    i16::try_from(value)
-        .map(GridLineValue::Line)
-        .map_err(|_| GRID_LINE_ERROR.to_string())
+    // CSS Grid §8.3: a UA clamps a grid line number to its implementation
+    // limit rather than rejecting it. taffy's line numbers are i16, so clamp
+    // into that range (never landing on zero, which the grammar reserves).
+    let clamped = value.clamp(i64::from(i16::MIN) + 1, i64::from(i16::MAX));
+    Ok(GridLineValue::Line(clamped as i16))
 }
 
 fn parse_grid_line_text(value: &str) -> Result<GridLineValue, String> {
@@ -323,10 +325,12 @@ fn parse_grid_line_text(value: &str) -> Result<GridLineValue, String> {
     match parts.as_slice() {
         [keyword] if keyword.eq_ignore_ascii_case("auto") => Ok(GridLineValue::Auto),
         [keyword, span] if keyword.eq_ignore_ascii_case("span") => span
-            .parse::<u16>()
+            .parse::<i64>()
             .ok()
             .filter(|span| *span > 0)
-            .map(GridLineValue::Span)
+            // Same implementation-limit clamp as a bare line number, saturating
+            // to u16::MAX (taffy narrows this further to its own 10,000 cap).
+            .map(|span| GridLineValue::Span(span.min(i64::from(u16::MAX)) as u16))
             .ok_or_else(|| GRID_LINE_ERROR.to_string()),
         [line] => line
             .parse::<i64>()
@@ -2950,6 +2954,99 @@ mod tests {
         assert_eq!(serialized["gridRowEnd"], "3");
         assert_eq!(serialized["gridColumnStart"], "2");
         assert_eq!(serialized["gridColumnEnd"], "4");
+    }
+
+    #[test]
+    fn parses_grid_line_shorthand_spacing_and_span_pairs() {
+        let unspaced = parse_style_value(&json!({ "gridColumn": "1/2" }));
+        assert!(unspaced.problems.is_empty(), "{:?}", unspaced.problems);
+        assert_eq!(
+            unspaced.style.grid_column_start,
+            Some(GridLineValue::Line(1))
+        );
+        assert_eq!(unspaced.style.grid_column_end, Some(GridLineValue::Line(2)));
+
+        let padded = parse_style_value(&json!({ "gridRow": " 2 / span 3 " }));
+        assert!(padded.problems.is_empty(), "{:?}", padded.problems);
+        assert_eq!(padded.style.grid_row_start, Some(GridLineValue::Line(2)));
+        assert_eq!(padded.style.grid_row_end, Some(GridLineValue::Span(3)));
+
+        let both_spans = parse_style_value(&json!({ "gridColumn": "span 2 / span 3" }));
+        assert!(both_spans.problems.is_empty(), "{:?}", both_spans.problems);
+        assert_eq!(
+            both_spans.style.grid_column_start,
+            Some(GridLineValue::Span(2))
+        );
+        assert_eq!(
+            both_spans.style.grid_column_end,
+            Some(GridLineValue::Span(3))
+        );
+    }
+
+    #[test]
+    fn rejects_a_five_value_grid_area() {
+        let parsed = parse_style_value(&json!({ "gridArea": "1 / 2 / 3 / 4 / 5" }));
+        assert_eq!(parsed.style, StyleDesc::default());
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "gridArea");
+        assert_eq!(
+            parsed.problems[0].reason,
+            "expected 2 to 4 grid lines separated by \"/\"; named areas are not supported"
+        );
+    }
+
+    #[test]
+    fn serializes_auto_and_span_grid_lines() {
+        let parsed = parse_style_value(&json!({
+            "gridColumnStart": "auto",
+            "gridColumnEnd": "span 2",
+        }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.grid_column_start, Some(GridLineValue::Auto));
+        assert_eq!(
+            parsed.style.grid_column_end,
+            Some(GridLineValue::Span(2))
+        );
+
+        let serialized = serde_json::to_value(parsed.style).unwrap();
+        assert_eq!(serialized["gridColumnStart"], "auto");
+        assert_eq!(serialized["gridColumnEnd"], "span 2");
+    }
+
+    #[test]
+    fn clamps_out_of_range_grid_lines_instead_of_rejecting_them() {
+        let over = parse_style_value(&json!({ "gridColumnStart": "40000" }));
+        assert!(over.problems.is_empty(), "{:?}", over.problems);
+        assert_eq!(
+            over.style.grid_column_start,
+            Some(GridLineValue::Line(32767))
+        );
+
+        let under = parse_style_value(&json!({ "gridColumnStart": "-40000" }));
+        assert!(under.problems.is_empty(), "{:?}", under.problems);
+        assert_eq!(
+            under.style.grid_column_start,
+            Some(GridLineValue::Line(-32767))
+        );
+
+        let numeric = parse_style_value(&json!({ "gridColumnStart": 40000 }));
+        assert!(numeric.problems.is_empty(), "{:?}", numeric.problems);
+        assert_eq!(
+            numeric.style.grid_column_start,
+            Some(GridLineValue::Line(32767))
+        );
+
+        let span = parse_style_value(&json!({ "gridColumnStart": "span 70000" }));
+        assert!(span.problems.is_empty(), "{:?}", span.problems);
+        assert_eq!(
+            span.style.grid_column_start,
+            Some(GridLineValue::Span(65535))
+        );
+
+        // Zero remains a grammar rejection regardless of clamping.
+        let zero = parse_style_value(&json!({ "gridColumnStart": "0" }));
+        assert_eq!(zero.problems.len(), 1);
+        assert_eq!(zero.problems[0].reason, GRID_LINE_ERROR);
     }
 
     #[test]

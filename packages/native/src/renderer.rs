@@ -11165,28 +11165,21 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         style.grid_column_start,
         style.grid_column_end,
     ];
-    if grid_lines
-        .into_iter()
-        .flatten()
-        .any(|line| line != GridLineValue::Auto)
-    {
+    // A declared `auto` is a real value, not an absence: a hover/state
+    // refinement that sets `gridColumn: "auto"` must reset an inherited
+    // placement rather than leave it in force. So apply the location whenever
+    // any of the four slots was authored at all, filling absent slots with
+    // `Auto` (an all-`Auto` location is a no-op for taffy).
+    if grid_lines.into_iter().any(|line| line.is_some()) {
         let grid_location = el.style().grid_location_mut();
-        grid_location.row.start = to_gpui_grid_placement(
-            style
-                .grid_row_start
-                .unwrap_or(GridLineValue::Auto),
-        );
-        grid_location.row.end = to_gpui_grid_placement(style.grid_row_end.unwrap_or_default());
-        grid_location.column.start = to_gpui_grid_placement(
-            style
-                .grid_column_start
-                .unwrap_or(GridLineValue::Auto),
-        );
-        grid_location.column.end = to_gpui_grid_placement(
-            style
-                .grid_column_end
-                .unwrap_or(GridLineValue::Auto),
-        );
+        grid_location.row.start =
+            to_gpui_grid_placement(style.grid_row_start.unwrap_or(GridLineValue::Auto));
+        grid_location.row.end =
+            to_gpui_grid_placement(style.grid_row_end.unwrap_or(GridLineValue::Auto));
+        grid_location.column.start =
+            to_gpui_grid_placement(style.grid_column_start.unwrap_or(GridLineValue::Auto));
+        grid_location.column.end =
+            to_gpui_grid_placement(style.grid_column_end.unwrap_or(GridLineValue::Auto));
     }
     if style.flex_direction.as_deref() == Some("column") {
         el = el.flex_col();

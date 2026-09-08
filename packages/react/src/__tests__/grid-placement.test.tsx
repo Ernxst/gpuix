@@ -95,4 +95,22 @@ describeNative("CSS Grid item placement", () => {
       root.unmount()
     }
   })
+
+  it("lets a hover refinement's declared auto reset the base placement", () => {
+    const root = renderGrid({
+      gridColumn: "1 / -1",
+      hover: { gridColumn: "auto" },
+    })
+    try {
+      // Idle: the base placement spans all 3 columns, 600px wide.
+      expect(itemBounds(root)).toEqual([0, 0, 600, 40])
+
+      // Hovered: the declared `auto` is a real value that overrides the
+      // inherited base placement, falling back to a single auto-placed cell.
+      root.renderer.nativeSimulateMouseMove(10, 10)
+      expect(itemBounds(root)).toEqual([0, 0, 200, 40])
+    } finally {
+      root.unmount()
+    }
+  })
 })
