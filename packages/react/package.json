@@ -94,6 +94,9 @@
     "vitest": "^3.0.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
+    "scheduler": {
+      "optional": true
+    },
     "vitest": {
       "optional": true
     }
