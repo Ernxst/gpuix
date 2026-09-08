@@ -81,90 +81,108 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     const { render, renderer } = createGridRoot()
     render(
       <div style={gridStyle([{ type: "auto" }, { type: "auto" }, { type: "auto" }])}>
-        {["a", "b", "c"].map((id) => (
+        {(["a", "b", "c"] as const).map((id, index) => (
           <div data-testid={`auto-${id}`} key={id} style={{ height: 20 }}>
-            <div style={{ width: 100, height: 20 }} />
+            <div style={{ width: 50 * (index + 1), height: 20 }} />
           </div>
         ))}
       </div>,
     )
 
-    // Three 100px max-content tracks leave 300px; auto-track stretching adds
-    // 300px / 3 = 100px to each, making every track 200px wide.
-    expectBounds(renderer, "auto-a", [0, 0, 200, 20])
-    expectBounds(renderer, "auto-b", [200, 0, 200, 20])
-    expectBounds(renderer, "auto-c", [400, 0, 200, 20])
+    // 50/100/150px max-content tracks leave 300px; auto-track stretching adds
+    // 300px / 3 = 100px to each, making the tracks 150/200/250px wide.
+    expectBounds(renderer, "auto-a", [0, 0, 150, 20])
+    expectBounds(renderer, "auto-b", [150, 0, 200, 20])
+    expectBounds(renderer, "auto-c", [350, 0, 250, 20])
   })
 
   it("sizes a min-content track to the longest word", () => {
     const label = "grid layout"
     const { render, renderer } = createGridRoot()
     render(
-      <div style={gridStyle([{ type: "min-content" }])}>
-        <div data-testid="min-content-cell" style={{ height: 20 }}>
-          <text style={{ fontSize: 20 }}>{label}</text>
+      <div>
+        <div style={gridStyle([{ type: "min-content" }])}>
+          <div data-testid="min-content-cell" style={{ height: 20 }}>
+            <text style={{ fontSize: 20 }}>{label}</text>
+          </div>
         </div>
-        <text data-testid="min-content-reference" style={{ fontSize: 20 }}>
-          layout
-        </text>
+        <div style={{ display: "flex", flexDirection: "row" }}>
+          <text data-testid="min-content-reference" style={{ fontSize: 20 }}>
+            layout
+          </text>
+          <text data-testid="max-content-reference" style={{ fontSize: 20 }}>
+            {label}
+          </text>
+        </div>
       </div>,
     )
 
     const cell = boundsFor(renderer, "min-content-cell")
-    const reference = boundsFor(renderer, "min-content-reference")
-    expect(cell[2]).toBeCloseTo(reference[2], 3)
-    expect(cell[2]).toBeLessThan(600)
+    const minReference = boundsFor(renderer, "min-content-reference")
+    const maxReference = boundsFor(renderer, "max-content-reference")
+    expect(cell[2]).toBeCloseTo(minReference[2], 3)
+    expect(cell[2]).toBeLessThan(maxReference[2])
   })
 
   it("sizes a max-content track to the whole line", () => {
     const label = "grid layout"
     const { render, renderer } = createGridRoot()
     render(
-      <div style={gridStyle([{ type: "max-content" }])}>
-        <div data-testid="max-content-cell" style={{ height: 20 }}>
-          <text style={{ fontSize: 20 }}>{label}</text>
+      <div>
+        <div style={gridStyle([{ type: "max-content" }])}>
+          <div data-testid="max-content-cell" style={{ height: 20 }}>
+            <text style={{ fontSize: 20 }}>{label}</text>
+          </div>
         </div>
-        <text data-testid="max-content-reference" style={{ fontSize: 20 }}>
-          {label}
-        </text>
+        <div style={{ display: "flex", flexDirection: "row" }}>
+          <text data-testid="max-content-reference" style={{ fontSize: 20 }}>
+            {label}
+          </text>
+          <text data-testid="min-content-reference" style={{ fontSize: 20 }}>
+            layout
+          </text>
+        </div>
       </div>,
     )
 
     const cell = boundsFor(renderer, "max-content-cell")
-    const reference = boundsFor(renderer, "max-content-reference")
-    expect(cell[2]).toBeCloseTo(reference[2], 3)
-    expect(cell[2]).toBeGreaterThan(0)
+    const maxReference = boundsFor(renderer, "max-content-reference")
+    const minReference = boundsFor(renderer, "min-content-reference")
+    expect(cell[2]).toBeCloseTo(maxReference[2], 3)
+    expect(cell[2]).toBeGreaterThan(minReference[2])
   })
 
   it("clamps minmax tracks at both their minimum and maximum", () => {
-    const renderCase = (width: number, prefix: string) => {
+    const renderCase = (containerWidth: number, contentWidth: number, prefix: string) => {
       const root = createGridRoot()
       root.render(
         <div
           style={gridStyle(
             [{ type: "minmax", min: { type: "px", value: 100 }, max: { type: "px", value: 150 } }],
             {
-              width: width === 50 ? 100 : 150,
+              width: containerWidth,
               gridTemplateRows: [{ type: "px", value: 20 }, { type: "px", value: 20 }],
             },
           )}
         >
-          <div data-testid={`${prefix}-content`} style={{ width, height: 20 }} />
-          <div data-testid={`${prefix}-track`} style={{ width: "100%", minWidth: 0, height: 20 }} />
-          </div>,
+          <div data-testid={`${prefix}-content`} style={{ width: contentWidth, height: 20 }} />
+          <div data-testid={`${prefix}-track`} style={{ width: "100%", height: 20 }} />
+        </div>,
       )
       return root.renderer
     }
 
-    const minimum = renderCase(50, "minmax-minimum")
-
-    // minmax(100px, 150px) clamps 50px content up to 100px.
-    expectBounds(minimum, "minmax-minimum-track", [0, 20, 100, 20])
-
-    const maximum = renderCase(300, "minmax-maximum")
-
-    // The 300px contribution is capped at the 150px max track size.
+    // The 600px container is far larger than the 150px max, so the clamp
+    // (not the container) is what limits the track: 300px content is capped
+    // at the 150px max track size.
+    const maximum = renderCase(600, 300, "minmax-maximum")
     expectBounds(maximum, "minmax-maximum-track", [0, 20, 150, 20])
+
+    // A 60px container is smaller than the 100px min, so the clamp (not the
+    // container) is what grows the track: 50px content is raised to the
+    // 100px min track size, overflowing the container.
+    const minimum = renderCase(60, 50, "minmax-minimum")
+    expectBounds(minimum, "minmax-minimum-track", [0, 20, 100, 20])
   })
 
   it("expands repeat tracks in source order", () => {
@@ -238,6 +256,7 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
 
     // The 200px grid content is centered in 600px: (600 - 200) / 2 = 200.
     expectBounds(centered.renderer, "justify-center", [200, 0, 100, 20])
+    expectBounds(centered.renderer, "justify-center-second", [300, 0, 100, 20])
 
     const contentEnd = createGridRoot()
     contentEnd.render(

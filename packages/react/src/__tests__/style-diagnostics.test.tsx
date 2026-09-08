@@ -774,6 +774,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       property: "gridTemplateColumns[0].tracks[0].min.type",
       value: '"fr"',
     })
+    expect(diagnostics[0].message).toContain("fr is not valid as a minmax minimum")
   })
 
   it("rejects a repeat whose expanded grid has more than 64 tracks", () => {
