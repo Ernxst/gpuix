@@ -675,6 +675,34 @@ instead of leaving a mapped window without an AppKit pump. `render()` also
 guards uncaught exceptions and unhandled rejections, unmounts React, quits the
 window synchronously, runs `onTerminated`, and then exits with status 1.
 
+For an owned renderer — the one `render()` creates, not one passed in through
+the `renderer` option — that fatal path can show a runtime error overlay
+instead of quitting. Set `errorOverlay: true`, or leave it unset: it defaults
+to `process.env.NODE_ENV !== "production"`, the same check `strictStyles`
+defaults from (also off in a Bun standalone executable), so a plain
+development run gets it for free and a production build keeps the
+exit-on-error behavior above. Whatever reaches the fatal path — a React root
+that dies from an uncaught render error, a process `uncaughtException` or
+`unhandledRejection`, or an event handler that throws — unmounts the dead
+tree and mounts a full-window "Runtime error" panel in its place, with the
+message, a scrollable stack, and a **Reload** button, instead of quitting.
+Reload re-mounts the last node `render()` was given with its last options; a
+subsequent `render()` call — what `bun --hot` does once the source is fixed —
+replaces the overlay root exactly as it replaces any previous root, clearing
+it. While the overlay is showing, a further unrelated failure is logged and
+otherwise ignored rather than tearing anything else down; only a failure of
+the overlay itself falls back to the fatal path. An injected `renderer`
+ignores `errorOverlay`: the embedder owns that lifecycle and already gets the
+failed-root diagnostic to decide what to do with it.
+
+```tsx
+render(<App />, {
+  title: "My App",
+  // Explicit here; omit it and non-production runs get the same default.
+  errorOverlay: true,
+})
+```
+
 Run the human menu check on macOS:
 
 ```bash
