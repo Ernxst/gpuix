@@ -4119,14 +4119,18 @@ under the same name. Without the override the install fails outright, and at a
 version upstream also publishes it would quietly give you upstream's native
 binary under this fork's React. Point the override at the same tarball.
 
-`react`, `react-reconciler`, and `scheduler` are peer dependencies. The declared
-ranges are `react ^19.2.0`, `react-reconciler ^0.33.0`, and `scheduler ^0.27.0`
-— the versions React 19.2 ships with, and the only ones GPUIX builds and tests
-against. React 18 is not supported: `react-reconciler` 0.33 declares `react
-^19.2.0` itself, so a React 18 install could only ever be a silenced peer
-conflict. If you still use a directory link, configure Vitest to dedupe `react`,
-`react-dom`, `react-reconciler`, and `scheduler`; that is only a fallback, not a
-supported way to consume the unpublished fork under Bun.
+`react` and `react-reconciler` are required peer dependencies; `scheduler` is an
+optional peer. The declared ranges are `react ^19.2.0`, `react-reconciler
+^0.33.0`, and `scheduler ^0.27.0` — the versions React 19.2 ships with, and the
+only ones GPUIX builds and tests against. `scheduler` is optional because
+`react-reconciler` 0.33 already depends on it directly as a regular dependency,
+so it installs transitively regardless; a consumer only needs to declare it to
+dedupe the package under a single version. React 18 is not supported:
+`react-reconciler` 0.33 declares `react ^19.2.0` itself, so a React 18 install
+could only ever be a silenced peer conflict. If you still use a directory link,
+configure Vitest to dedupe `react`, `react-dom`, `react-reconciler`, and
+`scheduler`; that is only a fallback, not a supported way to consume the
+unpublished fork under Bun.
 
 The native package exports `TestGpuixRenderer` on every platform. Construction
 on Linux or a build without GPU test support throws a clear availability error;
