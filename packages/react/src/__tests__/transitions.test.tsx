@@ -27,6 +27,73 @@ const customTransitionStyle = (expanded: boolean) => ({
   },
 })
 
+const customSurfaceFixtures = [
+  {
+    name: "canvas",
+    render: (expanded: boolean) => (
+      <canvas data-testid="custom-family-target" style={customTransitionStyle(expanded)} />
+    ),
+  },
+  {
+    name: "code",
+    render: (expanded: boolean) => (
+      <code
+        code="const covered = true"
+        data-testid="custom-family-target"
+        style={customTransitionStyle(expanded)}
+      />
+    ),
+  },
+  {
+    name: "diff",
+    render: (expanded: boolean) => (
+      <diff patch="" data-testid="custom-family-target" style={customTransitionStyle(expanded)} />
+    ),
+  },
+  {
+    name: "input",
+    render: (expanded: boolean) => (
+      <input
+        value="covered"
+        data-testid="custom-family-target"
+        style={customTransitionStyle(expanded)}
+      />
+    ),
+  },
+  {
+    name: "textarea",
+    render: (expanded: boolean) => (
+      <textarea
+        value="covered"
+        data-testid="custom-family-target"
+        style={customTransitionStyle(expanded)}
+      />
+    ),
+  },
+  {
+    name: "markdown",
+    render: (expanded: boolean) => (
+      <markdown
+        source="covered"
+        data-testid="custom-family-target"
+        style={customTransitionStyle(expanded)}
+      />
+    ),
+  },
+  {
+    name: "anchored",
+    render: (expanded: boolean) => (
+      <anchored
+        position={{ x: 20, y: 20 }}
+        data-testid="custom-family-target"
+        style={customTransitionStyle(expanded)}
+      >
+        <text style={{ color: "#ffffff" }}>covered</text>
+      </anchored>
+    ),
+  },
+]
+
 describeNative("native style transitions", () => {
   it("ignores an extreme duration for spring easing through state styles", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
@@ -206,93 +273,27 @@ describeNative("native style transitions", () => {
     }
   })
 
-  it("interpolates React-driven container styles on every enabled custom surface", () => {
-    const fixtures = [
-      {
-        name: "canvas",
-        render: (expanded: boolean) => (
-          <canvas data-testid="custom-family-target" style={customTransitionStyle(expanded)} />
-        ),
-      },
-      {
-        name: "code",
-        render: (expanded: boolean) => (
-          <code
-            code="const covered = true"
-            data-testid="custom-family-target"
-            style={customTransitionStyle(expanded)}
-          />
-        ),
-      },
-      {
-        name: "diff",
-        render: (expanded: boolean) => (
-          <diff patch="" data-testid="custom-family-target" style={customTransitionStyle(expanded)} />
-        ),
-      },
-      {
-        name: "input",
-        render: (expanded: boolean) => (
-          <input
-            value="covered"
-            data-testid="custom-family-target"
-            style={customTransitionStyle(expanded)}
-          />
-        ),
-      },
-      {
-        name: "textarea",
-        render: (expanded: boolean) => (
-          <textarea
-            value="covered"
-            data-testid="custom-family-target"
-            style={customTransitionStyle(expanded)}
-          />
-        ),
-      },
-      {
-        name: "markdown",
-        render: (expanded: boolean) => (
-          <markdown
-            source="covered"
-            data-testid="custom-family-target"
-            style={customTransitionStyle(expanded)}
-          />
-        ),
-      },
-      {
-        name: "anchored",
-        render: (expanded: boolean) => (
-          <anchored
-            position={{ x: 20, y: 20 }}
-            data-testid="custom-family-target"
-            style={customTransitionStyle(expanded)}
-          >
-            <text style={{ color: "#ffffff" }}>covered</text>
-          </anchored>
-        ),
-      },
-    ]
-
-    for (const fixture of fixtures) {
+  it.each(customSurfaceFixtures)(
+    "interpolates React-driven container styles on the <$name> custom surface",
+    ({ render }) => {
       const root = createTestRoot()
       try {
         root.renderer.clockPause()
-        root.render(fixture.render(false))
+        root.render(render(false))
         const target = root.renderer.findByTestId("custom-family-target")!
 
-        root.render(fixture.render(true))
-        expect(root.renderer.getResolvedStyle(target.id), fixture.name).toMatchObject({
+        root.render(render(true))
+        expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
           width: 100,
           opacity: 0.2,
         })
         root.renderer.advanceAsyncClock(50)
-        expect(root.renderer.getResolvedStyle(target.id), fixture.name).toMatchObject({
+        expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
           width: 120,
           opacity: 0.5,
         })
         root.renderer.advanceAsyncClock(50)
-        expect(root.renderer.getResolvedStyle(target.id), fixture.name).toMatchObject({
+        expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
           width: 140,
           opacity: 0.8,
         })
@@ -300,7 +301,7 @@ describeNative("native style transitions", () => {
         root.unmount()
       }
     }
-  })
+  )
 
   it("interpolates input focus refinements through the retained custom-surface track", () => {
     const root = createTestRoot()
