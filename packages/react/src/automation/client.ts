@@ -92,22 +92,27 @@ export function normalizeScrollWheelOptions(
 
 abstract class ValidatedAutomationBackend implements AutomationBackend {
   private closed = false
+  private closeError: AutomationError = new AutomationError(
+    "Closed",
+    "Automation session is closed"
+  )
 
   async call<M extends MethodName>(
     method: M,
     params: ParamsOf<M>
   ): Promise<ResultOf<M>> {
     if (this.closed) {
-      throw new AutomationError("Closed", "Automation session is closed")
+      throw this.closeError
     }
     const parsedParams = methods[method].params.parse(params) as ParamsOf<M>
     const result = await this.request(method, parsedParams)
     return methods[method].result.parse(result) as ResultOf<M>
   }
 
-  protected closeSession(): boolean {
+  protected closeSession(error?: AutomationError): boolean {
     if (this.closed) return false
     this.closed = true
+    if (error) this.closeError = error
     return true
   }
 
@@ -439,6 +444,17 @@ export class SseBackend extends ValidatedAutomationBackend {
     }
     this.pending.clear()
     await this.onClose?.()
+  }
+
+  /** The transport is already gone (child died, stdin closed unexpectedly):
+   *  reject every waiter with the diagnosis and stop taking calls, without
+   *  invoking `onClose` a second time on a transport that no longer exists. */
+  fail(error: AutomationError): void {
+    if (!this.closeSession(error)) return
+    for (const waiter of this.pending.values()) {
+      waiter.reject(error)
+    }
+    this.pending.clear()
   }
 }
 
@@ -1260,10 +1276,13 @@ export async function connectStdio(options: {
   write: (chunk: string) => void
   feed: (listener: (chunk: string) => void) => void
   close?: () => Promise<void>
+  /** Lets the caller register a way to fail the session later (e.g. when the
+   *  transport dies), including during the `initialize` handshake below. */
+  abort?: (fail: (error: AutomationError) => void) => void
 }): Promise<App> {
-  const app = new App(
-    new SseBackend(options.write, options.feed, options.close)
-  )
+  const backend = new SseBackend(options.write, options.feed, options.close)
+  options.abort?.((error) => backend.fail(error))
+  const app = new App(backend)
   await app.call("initialize", {
     protocolVersion: PROTOCOL_VERSION,
     client: "@gpuix/react/automation",
@@ -1292,6 +1311,42 @@ export async function launch(options: {
       stdio: ["pipe", "pipe", "pipe"],
     }
   )
+  // An EPIPE after the child has died would otherwise crash the host process;
+  // the exit/error handlers below carry the diagnosis instead.
+  child.stdin.on("error", () => {})
+
+  let stderrTail = ""
+  child.stderr.on("data", (buf: Buffer) => {
+    stderrTail = (stderrTail + buf.toString("utf8")).slice(-4096)
+  })
+
+  const diagnose = (
+    message: string,
+    exitCode: number | null,
+    signal: string | null
+  ): AutomationError => {
+    const withTail = stderrTail ? `${message}\nstderr:\n${stderrTail}` : message
+    return new AutomationError("Closed", withTail, {
+      exitCode,
+      signal,
+      stderr: stderrTail,
+    })
+  }
+
+  let failChild: ((error: AutomationError) => void) | undefined
+  child.on("exit", (code, signal) => {
+    const message =
+      signal != null
+        ? `Automation child exited on signal ${signal}`
+        : `Automation child exited with code ${code}`
+    failChild?.(diagnose(message, code, signal))
+  })
+  child.on("error", (err) => {
+    failChild?.(
+      diagnose(`Automation child failed to start: ${err.message}`, null, null)
+    )
+  })
+
   const app = await connectStdio({
     write: (chunk) => {
       child.stdin.write(chunk)
@@ -1301,6 +1356,9 @@ export async function launch(options: {
     },
     close: async () => {
       child.kill()
+    },
+    abort: (fail) => {
+      failChild = fail
     },
   })
   return app

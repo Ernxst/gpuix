@@ -2,11 +2,13 @@
 
 import { describe, expect, it } from "vitest"
 import {
+  AutomationError,
   connectTest,
   connectStdio,
   encodeSse,
   handleAutomationRequest,
   InProcessBackend,
+  launch,
   PROTOCOL_VERSION,
   SseBackend,
 } from "../automation/index.js"
@@ -236,5 +238,83 @@ describe("automation stdio", () => {
     )
     expect(writes).toBe(0)
     await expect(rejected).resolves.toMatchObject({ code: "Closed" })
+  })
+
+  it("fails a live transport by rejecting pending waiters without closing again", async () => {
+    let closes = 0
+    const backend = new SseBackend(
+      () => {},
+      () => {},
+      async () => {
+        closes += 1
+      }
+    )
+    const pending = backend.call("blur", {})
+    const error = new AutomationError("Closed", "Automation child exited with code 1")
+
+    backend.fail(error)
+
+    await expect(pending).rejects.toBe(error)
+    await expect(backend.call("blur", {})).rejects.toBe(error)
+    expect(closes).toBe(0)
+    await expect(backend.close()).resolves.toBeUndefined()
+    expect(closes).toBe(0)
+  })
+
+  it("rejects the launch handshake when the child crashes before answering", async () => {
+    const script = [
+      "process.stderr.write('native abort: boom');",
+      "process.exit(3);",
+    ].join("\n")
+
+    await expect(
+      launch({ command: process.execPath, args: ["-e", script] })
+    ).rejects.toMatchObject({
+      code: "Closed",
+      message: expect.stringMatching(/exited with code 3/),
+      data: expect.objectContaining({ exitCode: 3 }),
+    })
+  })
+
+  it("rejects in-flight and later requests when the launched child dies mid-session", async () => {
+    const script = `
+      let buf = "";
+      process.stdin.on("data", (chunk) => {
+        buf += chunk.toString();
+        let idx;
+        while ((idx = buf.indexOf("\\n\\n")) >= 0) {
+          const raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const line = raw.replace(/^data: /, "");
+          const message = JSON.parse(line);
+          if (message.method === "initialize") {
+            const reply = {
+              id: message.id,
+              result: {
+                protocolVersion: message.params.protocolVersion,
+                pid: process.pid,
+                capabilities: [],
+                window: { width: 800, height: 600 },
+              },
+            };
+            process.stdout.write("data: " + JSON.stringify(reply) + "\\n\\n");
+          } else {
+            process.stderr.write("native abort: boom");
+            process.exit(2);
+          }
+        }
+      });
+    `
+
+    const app = await launch({ command: process.execPath, args: ["-e", script] })
+
+    await expect(app.call("blur", {})).rejects.toMatchObject({
+      code: "Closed",
+      message: expect.stringMatching(/exited with code 2/),
+    })
+    await expect(app.call("blur", {})).rejects.toMatchObject({
+      code: "Closed",
+      message: expect.stringMatching(/exited with code 2/),
+    })
   })
 })

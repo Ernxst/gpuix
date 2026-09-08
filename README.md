@@ -4034,6 +4034,14 @@ await app.screenshot({ path: 'live.png' })
 await app.close()
 ```
 
+If the launched child exits or fails to spawn, every in-flight request and
+every later call on `app` rejects with an `AutomationError` (`code: "Closed"`)
+whose message names the exit code or signal and includes the tail of the
+child's stderr, and whose `data` is `{ exitCode, signal, stderr }`. A crash
+during the initial handshake surfaces from `launch()` itself. This is
+different from a normal `app.close()`, whose pending calls still reject with
+`Request N cancelled`.
+
 `scrollWheel` uses the same live native input pipeline as a physical wheel. It
 accepts optional `phase` (`started`, `moved`, `ended`, or `cancelled`),
 `deltaUnit` (`pixels` or `lines`), and `modifiers` (`shift`, `ctrl`, `alt`,
