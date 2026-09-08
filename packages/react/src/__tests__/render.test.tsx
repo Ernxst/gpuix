@@ -194,6 +194,7 @@ function App() {
 render(React.createElement(App), {
   title: "GPUIX fatal lifecycle smoke",
   menus: [],
+  errorOverlay: false,
   onTerminated: () => console.log("FATAL_TERMINATED"),
 })
 
@@ -256,8 +257,212 @@ render(React.createElement("div", { accessibilityRole: "button" }), {
   title: "GPUIX owned root failure smoke",
   menus: [],
   strictStyles: true,
+  errorOverlay: false,
   onTerminated: () => console.log("OWNED_ROOT_TERMINATED"),
 })
+`
+
+function waitForOverlaySnippet(): string {
+  return `
+async function waitForOverlay(app) {
+  const deadline = Date.now() + 5_000
+  for (;;) {
+    const count = await app.getByTestId("runtime-error-overlay").count()
+    if (count === 1) return
+    if (Date.now() > deadline) throw new Error("OVERLAY_TIMEOUT")
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+`
+}
+
+const OVERLAY_APP_ROOT_FAILURE_PROGRAM = `
+import React, { useEffect } from "react"
+import { render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
+import { App, InProcessBackend, liveRendererAsTest } from ${JSON.stringify(join(srcDir, "automation/client.ts"))}
+${waitForOverlaySnippet()}
+let renderer
+
+function Boom() {
+  renderer = useGpuixRequired()
+  useEffect(() => {
+    throw new Error("INJECTED_OVERLAY_ROOT_ERROR")
+  }, [])
+  return React.createElement("text", null, "overlay app root failure smoke")
+}
+
+render(React.createElement(Boom), {
+  title: "GPUIX overlay app root failure smoke",
+  menus: [],
+  errorOverlay: true,
+  onTerminated: () => console.log("OVERLAY_ROOT_TERMINATED"),
+})
+
+setTimeout(async () => {
+  if (!renderer) throw new Error("renderer ref was not attached")
+  const app = new App(new InProcessBackend(liveRendererAsTest(renderer)))
+  await waitForOverlay(app)
+  console.log("OVERLAY_SHOWN")
+  renderer.quit()
+}, 200)
+`
+
+const OVERLAY_UNCAUGHT_EXCEPTION_PROGRAM = `
+import React from "react"
+import { render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
+import { App, InProcessBackend, liveRendererAsTest } from ${JSON.stringify(join(srcDir, "automation/client.ts"))}
+${waitForOverlaySnippet()}
+let renderer
+
+function App_() {
+  renderer = useGpuixRequired()
+  return React.createElement("text", null, "overlay uncaught exception smoke")
+}
+
+render(React.createElement(App_), {
+  title: "GPUIX overlay uncaught exception smoke",
+  menus: [],
+  errorOverlay: true,
+  onTerminated: () => console.log("OVERLAY_EXCEPTION_TERMINATED"),
+})
+
+setTimeout(() => {
+  throw new Error("INJECTED_OVERLAY_UNCAUGHT_EXCEPTION")
+}, 50)
+
+setTimeout(async () => {
+  if (!renderer) throw new Error("renderer ref was not attached")
+  const app = new App(new InProcessBackend(liveRendererAsTest(renderer)))
+  await waitForOverlay(app)
+  console.log("OVERLAY_SHOWN")
+  renderer.quit()
+}, 300)
+`
+
+const OVERLAY_FIRST_RENDER_FAILURE_PROGRAM = `
+import React from "react"
+import { render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
+import { App, InProcessBackend, liveRendererAsTest } from ${JSON.stringify(join(srcDir, "automation/client.ts"))}
+${waitForOverlaySnippet()}
+let renderer
+
+// A sibling that renders (and captures the renderer through the hook) before
+// its invalid neighbor completes and takes the whole first commit down: React
+// runs every component function in document order during the render pass,
+// well before the div's completeWork() step throws.
+function CaptureRenderer() {
+  renderer = useGpuixRequired()
+  return null
+}
+
+render(
+  React.createElement(
+    React.Fragment,
+    null,
+    React.createElement(CaptureRenderer),
+    React.createElement("div", { accessibilityRole: "button" })
+  ),
+  {
+    title: "GPUIX overlay first-render failure smoke",
+    menus: [],
+    strictStyles: true,
+    errorOverlay: true,
+    onTerminated: () => console.log("OVERLAY_FIRST_RENDER_TERMINATED"),
+  }
+)
+
+setTimeout(async () => {
+  if (!renderer) throw new Error("renderer ref was not attached")
+  const app = new App(new InProcessBackend(liveRendererAsTest(renderer)))
+  await waitForOverlay(app)
+  console.log("OVERLAY_SHOWN")
+  renderer.quit()
+}, 200)
+`
+
+const OVERLAY_RELOAD_PROGRAM = `
+import React, { useEffect } from "react"
+import { render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
+import { App, InProcessBackend, liveRendererAsTest } from ${JSON.stringify(join(srcDir, "automation/client.ts"))}
+${waitForOverlaySnippet()}
+let renderer
+let failed = false
+
+function ReloadApp() {
+  renderer = useGpuixRequired()
+  useEffect(() => {
+    if (!failed) {
+      failed = true
+      throw new Error("INJECTED_RELOAD_ERROR")
+    }
+  }, [])
+  return React.createElement("text", { "data-testid": "reload-app-content" }, "reload app content")
+}
+
+render(React.createElement(ReloadApp), {
+  title: "GPUIX overlay reload smoke",
+  menus: [],
+  errorOverlay: true,
+  onTerminated: () => console.log("OVERLAY_RELOAD_TERMINATED"),
+})
+
+setTimeout(async () => {
+  if (!renderer) throw new Error("renderer ref was not attached")
+  const app = new App(new InProcessBackend(liveRendererAsTest(renderer)))
+  await waitForOverlay(app)
+  console.log("OVERLAY_SHOWN")
+  await app.getByTestId("runtime-error-reload").click()
+  const deadline = Date.now() + 5_000
+  for (;;) {
+    const overlayCount = await app.getByTestId("runtime-error-overlay").count()
+    const contentCount = await app.getByTestId("reload-app-content").count()
+    if (overlayCount === 0 && contentCount === 1) break
+    if (Date.now() > deadline) throw new Error("RELOAD_TIMEOUT")
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  console.log("RELOAD_RESTORED_CONTENT")
+  renderer.quit()
+}, 200)
+`
+
+const OVERLAY_EVENT_HANDLER_THROW_PROGRAM = `
+import React from "react"
+import { render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
+import { App, InProcessBackend, liveRendererAsTest } from ${JSON.stringify(join(srcDir, "automation/client.ts"))}
+${waitForOverlaySnippet()}
+let renderer
+
+function App_() {
+  renderer = useGpuixRequired()
+  return React.createElement(
+    "div",
+    {
+      "data-testid": "click-boom",
+      role: "button",
+      style: { width: 100, height: 40 },
+      onClick: () => {
+        throw new Error("INJECTED_EVENT_HANDLER_ERROR")
+      },
+    },
+    React.createElement("text", null, "click me")
+  )
+}
+
+render(React.createElement(App_), {
+  title: "GPUIX overlay event handler throw smoke",
+  menus: [],
+  errorOverlay: true,
+  onTerminated: () => console.log("OVERLAY_EVENT_TERMINATED"),
+})
+
+setTimeout(async () => {
+  if (!renderer) throw new Error("renderer ref was not attached")
+  const app = new App(new InProcessBackend(liveRendererAsTest(renderer)))
+  await app.getByTestId("click-boom").click()
+  await waitForOverlay(app)
+  console.log("OVERLAY_SHOWN")
+  renderer.quit()
+}, 200)
 `
 
 const PROGRAMMATIC_QUIT_PROGRAM = `
@@ -933,6 +1138,125 @@ describeNative("render()", () => {
       )
       expect(
         result.output.match(/^OWNED_ROOT_TERMINATED$/gm),
+        result.output
+      ).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 20_000)
+
+  it("keeps an owned renderer alive behind a runtime error overlay when the app root dies", async () => {
+    const file = join(srcDir, "__tests__", "overlay-app-root-failure.tmp.tsx")
+    writeFileSync(file, OVERLAY_APP_ROOT_FAILURE_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file])
+      expect(result.code, result.output).toBe(0)
+      expect(result.signal).toBeNull()
+      expect(result.output).toContain(
+        "React root is dead after an uncaught render error"
+      )
+      expect(result.output).toContain("OVERLAY_SHOWN")
+      // Not the fatal path: quit came from the test explicitly clicking
+      // through the loop after observing the overlay, not from us tearing
+      // the window down when the app root died.
+      expect(result.output).not.toContain(
+        "fatal JavaScript error (uncaught React root error); quitting native application"
+      )
+      expect(
+        result.output.match(/^OVERLAY_ROOT_TERMINATED$/gm),
+        result.output
+      ).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 20_000)
+
+  it("keeps an owned renderer alive behind a runtime error overlay on an uncaught exception", async () => {
+    const file = join(srcDir, "__tests__", "overlay-uncaught-exception.tmp.tsx")
+    writeFileSync(file, OVERLAY_UNCAUGHT_EXCEPTION_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file])
+      expect(result.code, result.output).toBe(0)
+      expect(result.signal).toBeNull()
+      expect(result.output).toContain("INJECTED_OVERLAY_UNCAUGHT_EXCEPTION")
+      expect(result.output).toContain("OVERLAY_SHOWN")
+      expect(result.output).not.toContain(
+        "fatal JavaScript error (uncaughtException); quitting native application"
+      )
+      expect(
+        result.output.match(/^OVERLAY_EXCEPTION_TERMINATED$/gm),
+        result.output
+      ).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 20_000)
+
+  it("keeps the frame loop alive for a first-render failure so the overlay can paint and quit", async () => {
+    const file = join(srcDir, "__tests__", "overlay-first-render-failure.tmp.tsx")
+    writeFileSync(file, OVERLAY_FIRST_RENDER_FAILURE_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file])
+      expect(result.code, result.output).toBe(0)
+      expect(result.signal).toBeNull()
+      expect(result.output).toContain(
+        "React root is dead after an uncaught render error"
+      )
+      expect(result.output).toContain("OVERLAY_SHOWN")
+      // The quit assertion is what proves the frame loop was actually
+      // running: without it, quit() cannot deliver `terminated` at all.
+      expect(
+        result.output.match(/^OVERLAY_FIRST_RENDER_TERMINATED$/gm),
+        result.output
+      ).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 20_000)
+
+  it("clears the overlay and restores the app when Reload is clicked", async () => {
+    const file = join(srcDir, "__tests__", "overlay-reload.tmp.tsx")
+    writeFileSync(file, OVERLAY_RELOAD_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file])
+      expect(result.code, result.output).toBe(0)
+      expect(result.signal).toBeNull()
+      expect(result.output).toContain("OVERLAY_SHOWN")
+      expect(result.output).toContain("RELOAD_RESTORED_CONTENT")
+      expect(
+        result.output.match(/^OVERLAY_RELOAD_TERMINATED$/gm),
+        result.output
+      ).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 20_000)
+
+  it("shows the runtime error overlay when a clicked event handler throws", async () => {
+    const file = join(srcDir, "__tests__", "overlay-event-handler-throw.tmp.tsx")
+    writeFileSync(file, OVERLAY_EVENT_HANDLER_THROW_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file])
+      expect(result.code, result.output).toBe(0)
+      expect(result.signal).toBeNull()
+      expect(result.output).toContain("OVERLAY_SHOWN")
+      expect(
+        result.output.match(/^OVERLAY_EVENT_TERMINATED$/gm),
         result.output
       ).toHaveLength(1)
     } finally {
