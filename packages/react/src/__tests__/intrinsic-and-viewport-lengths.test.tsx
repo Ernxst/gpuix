@@ -175,4 +175,56 @@ describe("intrinsic and viewport lengths (issue #300)", () => {
       root.unmount()
     }
   })
+
+  it("clamps fit-content() limits using the CSS min/max-content formula", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    try {
+      root.render(
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+          <div style={{ display: "flex", flexDirection: "column", width: 300 }}>
+            <div
+              data-testid="fit-content-limit-120"
+              style={{ display: "flex", flexWrap: "wrap", width: "fit-content(120px)" }}
+            >
+              <div style={{ width: 80, height: 20 }} />
+              <div style={{ width: 80, height: 20 }} />
+            </div>
+            <div
+              data-testid="fit-content-limit-200"
+              style={{ display: "flex", flexWrap: "wrap", width: "fit-content(200px)" }}
+            >
+              <div style={{ width: 80, height: 20 }} />
+              <div style={{ width: 80, height: 20 }} />
+            </div>
+            <div
+              data-testid="fit-content-limit-40"
+              style={{ display: "flex", flexWrap: "wrap", width: "fit-content(40px)" }}
+            >
+              <div style={{ width: 80, height: 20 }} />
+              <div style={{ width: 80, height: 20 }} />
+            </div>
+          </div>
+        </div>,
+      )
+
+      const minContent = 80
+      const maxContent = 160
+      const fitContent = (limit: number) => Math.min(maxContent, Math.max(minContent, limit))
+
+      expect(boundsFor(root.renderer, "fit-content-limit-120").width).toBeCloseTo(
+        fitContent(120),
+        4,
+      )
+      expect(boundsFor(root.renderer, "fit-content-limit-200").width).toBeCloseTo(
+        fitContent(200),
+        4,
+      )
+      expect(boundsFor(root.renderer, "fit-content-limit-40").width).toBeCloseTo(
+        fitContent(40),
+        4,
+      )
+    } finally {
+      root.unmount()
+    }
+  })
 })
