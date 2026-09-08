@@ -5878,6 +5878,10 @@ pub(crate) struct GpuixView {
     /// it once per mouse event; the React bridge expands its ancestry into DOM
     /// mouseenter/mouseleave transitions.
     hover_target: Option<u64>,
+    /// Retained elements whose GPUI hitboxes are currently hovered. GPUI only
+    /// reports hover edges, so this preserves hovered ancestors when a more
+    /// specific descendant reports that it is no longer hovered.
+    hovered_targets: HashSet<u64>,
     reported_hover_target: Option<u64>,
     hover_target_dispatch_pending: bool,
     /// CSS-like style transition tracks keyed by retained element ID.
@@ -6109,6 +6113,7 @@ impl GpuixView {
             motion_states: HashMap::new(),
             interactive_style_states: HashMap::new(),
             hover_target: None,
+            hovered_targets: HashSet::new(),
             reported_hover_target: None,
             hover_target_dispatch_pending: false,
             transition_states: HashMap::new(),
@@ -6134,16 +6139,22 @@ impl GpuixView {
         window: &gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        let tree = self.tree.lock().unwrap();
         if is_hovered {
-            let keep_more_specific_target = self.hover_target.is_some_and(|target| {
-                is_hover_target_descendant(&self.tree.lock().unwrap(), target, id)
-            });
+            self.hovered_targets.insert(id);
+            let keep_more_specific_target = self
+                .hover_target
+                .is_some_and(|target| is_hover_target_descendant(&tree, target, id));
             if !keep_more_specific_target {
                 self.hover_target = Some(id);
             }
-        } else if self.hover_target == Some(id) {
-            self.hover_target = None;
+        } else {
+            self.hovered_targets.remove(&id);
+            if self.hover_target == Some(id) {
+                self.hover_target = nearest_hovered_ancestor(&tree, &self.hovered_targets, id);
+            }
         }
+        drop(tree);
 
         if self.hover_target_dispatch_pending {
             return;
@@ -6151,7 +6162,7 @@ impl GpuixView {
         self.hover_target_dispatch_pending = true;
         cx.defer_in(window, |view, _window, _cx| {
             view.hover_target_dispatch_pending = false;
-            view.dispatch_hover_target_change();
+            view.dispatch_hover_target_change(true);
         });
     }
 
@@ -6163,10 +6174,21 @@ impl GpuixView {
     /// target and becomes a no-op.
     pub(crate) fn update_hover_target_before_mouse_move(&mut self, id: u64) {
         self.hover_target = Some(id);
-        self.dispatch_hover_target_change();
+        self.dispatch_hover_target_change(false);
     }
 
-    fn dispatch_hover_target_change(&mut self) {
+    fn dispatch_hover_target_change(&mut self, revalidate: bool) {
+        if revalidate {
+            let tree = self.tree.lock().unwrap();
+            if self.hover_target.is_some_and(|target| {
+                !self.hovered_targets.contains(&target) || !tree.elements.contains_key(&target)
+            }) {
+                self.hover_target = self.hover_target.and_then(|target| {
+                    nearest_hovered_ancestor(&tree, &self.hovered_targets, target)
+                });
+            }
+        }
+
         if self.hover_target == self.reported_hover_target {
             return;
         }
@@ -6340,6 +6362,7 @@ impl GpuixView {
             virtual_lists: &mut self.virtual_lists,
             motion_states: &mut self.motion_states,
             transition_states: &mut self.transition_states,
+            hovered_targets: &mut self.hovered_targets,
             interactive_style_states: &self.interactive_style_states,
             now,
             animation_active: &mut animation_active,
@@ -6514,6 +6537,7 @@ pub(crate) struct BuildCtx<'a> {
     virtual_lists: &'a mut HashMap<u64, VirtualListEntry>,
     pub motion_states: &'a mut HashMap<u64, crate::motion::MotionState>,
     pub transition_states: &'a mut HashMap<u64, crate::motion::StyleTransitionState>,
+    pub hovered_targets: &'a mut HashSet<u64>,
     pub interactive_style_states: &'a HashMap<u64, InteractiveStyleState>,
     pub now: web_time::Instant,
     pub animation_active: &'a mut bool,
@@ -7848,6 +7872,8 @@ impl gpui::Render for GpuixView {
             .retain(|id, _| tree.elements.contains_key(id));
         self.interactive_style_states
             .retain(|id, _| tree.elements.contains_key(id));
+        self.hovered_targets
+            .retain(|id| tree.elements.contains_key(id));
         self.transition_states.retain(|id, _| tree.is_attached(*id));
 
         // Build the element tree. custom_registry, focus_handles, and scroll_handles
@@ -7889,6 +7915,7 @@ impl gpui::Render for GpuixView {
                     virtual_lists: &mut self.virtual_lists,
                     motion_states: &mut self.motion_states,
                     transition_states: &mut self.transition_states,
+                    hovered_targets: &mut self.hovered_targets,
                     interactive_style_states: &self.interactive_style_states,
                     now,
                     animation_active: &mut animation_active,
@@ -8212,6 +8239,7 @@ fn build_element_with_parent_layout(
         == Some("none")
     {
         remove_subtree_motion_and_transition_state(ctx, id);
+        remove_subtree_hover_state(ctx, id);
         ctx.scroll_handles.remove(&id);
         let built = build_display_none_element(element);
         if tracks_accessibility_host_identity {
@@ -8227,6 +8255,7 @@ fn build_element_with_parent_layout(
         ctx.custom_registry.destroy(id);
         ctx.motion_states.remove(&id);
         ctx.transition_states.remove(&id);
+        remove_subtree_hover_state(ctx, id);
         ctx.scroll_handles.remove(&id);
         let built = build_visually_hidden_element(element, ctx);
         if tracks_accessibility_host_identity {
@@ -8580,6 +8609,16 @@ fn remove_subtree_motion_and_transition_state(ctx: &mut BuildCtx<'_>, root_id: u
     for id in ids {
         ctx.motion_states.remove(&id);
         ctx.transition_states.remove(&id);
+    }
+}
+
+fn remove_subtree_hover_state(ctx: &mut BuildCtx<'_>, root_id: u64) {
+    let mut pending = vec![root_id];
+    while let Some(id) = pending.pop() {
+        ctx.hovered_targets.remove(&id);
+        if let Some(element) = ctx.tree.elements.get(&id) {
+            pending.extend(element.children.iter().copied());
+        }
     }
 }
 
@@ -9941,6 +9980,24 @@ fn is_hover_target_descendant(tree: &RetainedTree, descendant: u64, ancestor: u6
         current = tree.elements.get(&id).and_then(|element| element.parent);
     }
     false
+}
+
+fn nearest_hovered_ancestor(
+    tree: &RetainedTree,
+    hovered_targets: &HashSet<u64>,
+    id: u64,
+) -> Option<u64> {
+    let mut current = tree.elements.get(&id).and_then(|element| element.parent);
+    while let Some(current_id) = current {
+        if hovered_targets.contains(&current_id) {
+            return Some(current_id);
+        }
+        current = tree
+            .elements
+            .get(&current_id)
+            .and_then(|element| element.parent);
+    }
+    None
 }
 
 fn scroll_position_tracker(

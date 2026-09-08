@@ -1860,6 +1860,348 @@ describeNative("events", () => {
       expect(grandchildLeave).toHaveBeenCalledOnce()
     })
 
+    it.each([false, true])(
+      "keeps the ancestor hovered across child boundaries (resize=%s)",
+      (resize) => {
+        const icon = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"><path d="M2 2h14v14H2z" fill="white"/></svg>')}`
+
+        function HoverTile({ events, resize }: { events: string[]; resize: boolean }) {
+          const [hovered, setHovered] = useState(false)
+          const size = resize && hovered ? 22 : 18
+
+          return (
+            <div style={{ width: 400, height: 200, padding: 40 }}>
+              <a
+                href="#tile"
+                data-testid="tile"
+                onMouseEnter={() => {
+                  events.push("enter")
+                  setHovered(true)
+                }}
+                onMouseLeave={() => {
+                  events.push("leave")
+                  setHovered(false)
+                }}
+                style={{ display: "flex", width: 120, height: 36 }}
+              >
+                <span
+                  style={{
+                    display: "flex",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 7,
+                    paddingLeft: 10,
+                    paddingRight: 10,
+                    height: 36,
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 22,
+                      height: 22,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <img
+                      data-testid="icon"
+                      alt=""
+                      src={icon}
+                      style={{ width: size, height: size, flexShrink: 0 }}
+                    />
+                  </span>
+                  <span style={{ fontSize: 11 }}>3</span>
+                  <span style={{ fontSize: 12 }}>Map</span>
+                </span>
+              </a>
+            </div>
+          )
+        }
+
+        const root = createTestRoot()
+        const events: string[] = []
+        try {
+          root.render(<HoverTile events={events} resize={resize} />)
+          root.renderer.nativeSimulateMouseMove(1, 1)
+          events.length = 0
+          const tile = root.renderer.findByTestId("tile")
+          if (!tile) throw new Error("Missing tile")
+          const bounds = root.renderer.getElementBounds(tile.id)
+          if (!bounds) throw new Error("Missing tile bounds")
+          const [left, top] = bounds
+
+          for (const offset of [18, 25, 32, 38, 44, 38, 32, 25, 18]) {
+            root.renderer.nativeSimulateMouseMove(left + offset, top + 18)
+            expect(events, `pointer at tile x=${offset}`).toEqual(["enter"])
+          }
+
+          root.renderer.nativeSimulateMouseMove(1, 1)
+          expect(events).toEqual(["enter", "leave"])
+
+          root.renderer.nativeSimulateMouseMove(left + 44, top + 18)
+          expect(events).toEqual(["enter", "leave", "enter"])
+          root.renderer.nativeSimulateMouseMove(1, 1)
+          expect(events).toEqual(["enter", "leave", "enter", "leave"])
+        } finally {
+          root.unmount()
+        }
+      }
+    )
+
+    it("leaves one link and enters its sibling without losing either edge", () => {
+      const events: string[] = []
+
+      testRoot.render(
+        <div style={{ display: "flex", gap: 12 }}>
+          <a
+            data-testid="first-link"
+            href="#first"
+            onMouseEnter={() => events.push("first-enter")}
+            onMouseLeave={() => events.push("first-leave")}
+            style={{ width: 100, height: 36, padding: 8 }}
+          >
+            First
+          </a>
+          <a
+            data-testid="second-link"
+            href="#second"
+            onMouseEnter={() => events.push("second-enter")}
+            onMouseLeave={() => events.push("second-leave")}
+            style={{ width: 100, height: 36, padding: 8 }}
+          >
+            Second
+          </a>
+        </div>
+      )
+
+      const moveTo = (testId: string) => {
+        const element = testRoot.renderer.findByTestId(testId)!
+        const [x, y, width, height] = testRoot.renderer.getElementBounds(element.id)!
+        testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      }
+
+      moveTo("first-link")
+      moveTo("second-link")
+      expect(events).toEqual(["first-enter", "first-leave", "second-enter"])
+
+      testRoot.renderer.nativeSimulateMouseMove(700, 700)
+      expect(events).toEqual([
+        "first-enter",
+        "first-leave",
+        "second-enter",
+        "second-leave",
+      ])
+    })
+
+    it.each(["canvas", "code"] as const)(
+      "keeps the ancestor hovered around a %s surface",
+      (surfaceType) => {
+        const events: string[] = []
+        const surface =
+          surfaceType === "canvas" ? (
+            <canvas
+              data-testid="hover-surface"
+              width={44}
+              height={24}
+              onMouseEnter={() => events.push("surface-enter")}
+              onMouseLeave={() => events.push("surface-leave")}
+              style={{ width: 44, height: 24 }}
+            />
+          ) : (
+            <code
+              data-testid="hover-surface"
+              code="const hovered = true"
+              onMouseEnter={() => events.push("surface-enter")}
+              onMouseLeave={() => events.push("surface-leave")}
+              style={{ width: 44, height: 24 }}
+            />
+          )
+
+        testRoot.render(
+          <a
+            data-testid="surface-parent"
+            href="#surface"
+            onMouseEnter={() => events.push("parent-enter")}
+            onMouseLeave={() => events.push("parent-leave")}
+            style={{ display: "flex", alignItems: "center", gap: 18, width: 180, height: 40 }}
+          >
+            {surface}
+            <span data-testid="surface-label">Map</span>
+          </a>
+        )
+
+        const bounds = (testId: string) => {
+          const element = testRoot.renderer.findByTestId(testId)!
+          return testRoot.renderer.getElementBounds(element.id)!
+        }
+        const surfaceBounds = bounds("hover-surface")
+        const labelBounds = bounds("surface-label")
+        const surfacePoint = [
+          surfaceBounds[0] + surfaceBounds[2] / 2,
+          surfaceBounds[1] + surfaceBounds[3] / 2,
+        ] as const
+        const labelPoint = [
+          labelBounds[0] + labelBounds[2] / 2,
+          labelBounds[1] + labelBounds[3] / 2,
+        ] as const
+        const gapPoint = [
+          (surfaceBounds[0] + surfaceBounds[2] + labelBounds[0]) / 2,
+          surfacePoint[1],
+        ] as const
+
+        testRoot.renderer.nativeSimulateMouseMove(...surfacePoint)
+        expect(events).toEqual(["parent-enter", "surface-enter"])
+        testRoot.renderer.nativeSimulateMouseMove(...gapPoint)
+        expect(events).toEqual(["parent-enter", "surface-enter", "surface-leave"])
+        testRoot.renderer.nativeSimulateMouseMove(...labelPoint)
+        expect(events).toEqual(["parent-enter", "surface-enter", "surface-leave"])
+        testRoot.renderer.nativeSimulateMouseMove(...gapPoint)
+        testRoot.renderer.nativeSimulateMouseMove(...surfacePoint)
+        expect(events).toEqual([
+          "parent-enter",
+          "surface-enter",
+          "surface-leave",
+          "surface-enter",
+        ])
+        testRoot.renderer.nativeSimulateMouseMove(700, 700)
+        expect(events).toEqual([
+          "parent-enter",
+          "surface-enter",
+          "surface-leave",
+          "surface-enter",
+          "surface-leave",
+          "parent-leave",
+        ])
+      }
+    )
+
+    it("keeps an ancestor hovered when its hovered descendant unmounts", () => {
+      const events: string[] = []
+
+      function UnmountingChild() {
+        const [mounted, setMounted] = useState(true)
+        return (
+          <div
+            data-testid="unmount-parent"
+            onMouseEnter={() => events.push("parent-enter")}
+            onMouseLeave={() => events.push("parent-leave")}
+            style={{ display: "flex", gap: 12, width: 180, height: 40 }}
+          >
+            {mounted ? (
+              <span
+                data-testid="unmount-child"
+                onMouseEnter={() => {
+                  events.push("child-enter")
+                  setMounted(false)
+                }}
+                onMouseLeave={() => events.push("child-leave")}
+                style={{ width: 44, height: 24, backgroundColor: "#1f272d" }}
+              />
+            ) : (
+              <span data-testid="unmount-replacement" style={{ width: 44, height: 24 }} />
+            )}
+            <span style={{ width: 60, height: 24 }}>Map</span>
+          </div>
+        )
+      }
+
+      testRoot.render(<UnmountingChild />)
+      const child = testRoot.renderer.findByTestId("unmount-child")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      expect(events).toEqual(["parent-enter", "child-enter"])
+
+      const replacement = testRoot.renderer.findByTestId("unmount-replacement")!
+      const [replacementX, replacementY, replacementWidth, replacementHeight] =
+        testRoot.renderer.getElementBounds(replacement.id)!
+      testRoot.renderer.nativeSimulateMouseMove(
+        replacementX + replacementWidth / 2,
+        replacementY + replacementHeight / 2
+      )
+      expect(events).toEqual(["parent-enter", "child-enter"])
+
+      testRoot.renderer.nativeSimulateMouseMove(700, 700)
+      expect(events).toEqual(["parent-enter", "child-enter", "parent-leave"])
+    })
+
+    it("keeps a link hovered around a nested handler in the image gap", () => {
+      const icon = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"><path d="M2 2h14v14H2z" fill="white"/></svg>')}`
+      const events: string[] = []
+
+      testRoot.render(
+        <a
+          data-testid="nested-gap-parent"
+          href="#nested-gap"
+          onMouseEnter={() => events.push("parent-enter")}
+          onMouseLeave={() => events.push("parent-leave")}
+          style={{ display: "flex", alignItems: "center", width: 180, height: 36, gap: 8 }}
+        >
+          <img
+            data-testid="nested-gap-image"
+            alt=""
+            src={icon}
+            onMouseEnter={() => events.push("image-enter")}
+            onMouseLeave={() => events.push("image-leave")}
+            style={{ width: 18, height: 18 }}
+          />
+          <span style={{ width: 18, height: 18 }}>
+            <span
+              data-testid="nested-gap-handler"
+              onMouseEnter={() => events.push("gap-enter")}
+              onMouseLeave={() => events.push("gap-leave")}
+              style={{ display: "flex", width: 8, height: 18 }}
+            />
+          </span>
+          <span data-testid="nested-gap-label">Map</span>
+        </a>
+      )
+
+      const center = (testId: string) => {
+        const element = testRoot.renderer.findByTestId(testId)!
+        const [x, y, width, height] = testRoot.renderer.getElementBounds(element.id)!
+        return [x + width / 2, y + height / 2] as const
+      }
+
+      testRoot.renderer.nativeSimulateMouseMove(...center("nested-gap-image"))
+      testRoot.renderer.nativeSimulateMouseMove(...center("nested-gap-handler"))
+      testRoot.renderer.nativeSimulateMouseMove(...center("nested-gap-label"))
+      expect(events).toEqual([
+        "parent-enter",
+        "image-enter",
+        "image-leave",
+        "gap-enter",
+        "gap-leave",
+      ])
+
+      testRoot.renderer.nativeSimulateMouseMove(...center("nested-gap-handler"))
+      testRoot.renderer.nativeSimulateMouseMove(...center("nested-gap-image"))
+      expect(events).toEqual([
+        "parent-enter",
+        "image-enter",
+        "image-leave",
+        "gap-enter",
+        "gap-leave",
+        "gap-enter",
+        "gap-leave",
+        "image-enter",
+      ])
+      testRoot.renderer.nativeSimulateMouseMove(700, 700)
+      expect(events).toEqual([
+        "parent-enter",
+        "image-enter",
+        "image-leave",
+        "gap-enter",
+        "gap-leave",
+        "gap-enter",
+        "gap-leave",
+        "image-enter",
+        "image-leave",
+        "parent-leave",
+      ])
+    })
+
     it("delivers one ancestor hover edge around a transitioning custom surface", () => {
       const events: string[] = []
 
