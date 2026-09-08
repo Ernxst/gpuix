@@ -2342,6 +2342,14 @@ impl TestGpuixRenderer {
 
     fn collect_text(id: u64, tree: &RetainedTree, texts: &mut Vec<String>) {
         if let Some(element) = tree.elements.get(&id) {
+            if element
+                .style
+                .as_deref()
+                .and_then(|style| style.display.as_deref())
+                == Some("none")
+            {
+                return;
+            }
             if let Some(ref content) = element.content {
                 texts.push(content.clone());
             }

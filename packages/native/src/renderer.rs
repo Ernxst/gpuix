@@ -4807,6 +4807,14 @@ mod initialization_tests {
 
 fn collect_text(id: u64, tree: &RetainedTree, texts: &mut Vec<String>) {
     if let Some(element) = tree.elements.get(&id) {
+        if element
+            .style
+            .as_deref()
+            .and_then(|style| style.display.as_deref())
+            == Some("none")
+        {
+            return;
+        }
         if let Some(ref content) = element.content {
             texts.push(content.clone());
         }
@@ -8197,6 +8205,25 @@ fn build_element_with_parent_layout(
             || retained_gpui_element_id(element),
         );
 
+    if element
+        .style
+        .as_deref()
+        .and_then(|style| style.display.as_deref())
+        == Some("none")
+    {
+        ctx.motion_states.remove(&id);
+        ctx.transition_states.remove(&id);
+        ctx.scroll_handles.remove(&id);
+        let built = build_display_none_element(element);
+        if tracks_accessibility_host_identity {
+            ctx.gpui_element_path
+                .as_mut()
+                .expect("tracked accessibility identity has a path")
+                .pop();
+        }
+        return built;
+    }
+
     if crate::accessibility::is_visually_hidden(ctx.tree, element) {
         ctx.custom_registry.destroy(id);
         ctx.motion_states.remove(&id);
@@ -10499,6 +10526,20 @@ fn build_visually_hidden_element(
     .into_any_element()
 }
 
+fn build_display_none_element(element: &crate::retained_tree::RetainedElement) -> gpui::AnyElement {
+    use gpui::prelude::*;
+
+    let id = element.id;
+    match retained_gpui_element_id(element) {
+        Some(element_id) => {
+            crate::automation::track_own_bounds(gpui::div().id(element_id).hidden(), id, None, None)
+                .into_any_element()
+        }
+        None => crate::automation::track_own_bounds(gpui::div().hidden(), id, None, None)
+            .into_any_element(),
+    }
+}
+
 /// A selectable text run owned by `element`. Runs are left to gpui so the
 /// text keeps inheriting colour, weight and family from ancestor styles.
 ///
@@ -11018,6 +11059,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         _ => {}
     }
     match style.display.as_deref() {
+        Some("none") => el = el.hidden(),
         Some("flex") => el = el.flex(),
         Some("grid") => el = el.grid(),
         _ => {}
