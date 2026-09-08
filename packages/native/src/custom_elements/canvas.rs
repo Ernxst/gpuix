@@ -1226,21 +1226,64 @@ impl CanvasElement {
         // flags keep a canvas that declares both from attaching two.
         let mut click_attached = false;
         let mut mouse_down_attached = false;
+        let tracks_click = crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "click")
+            || crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "doubleClick");
+        let tracks_aux_click =
+            crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "auxClick");
+        let tracks_mouse_down =
+            crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "mouseDown");
+        let tracks_context_menu =
+            crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "contextMenu");
+        let tracks_mouse_up =
+            crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "mouseUp");
+        let tracks_mouse_move =
+            crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "mouseMove");
         // A canvas that declares only `onContextMenu` takes the right button
         // alone, so a left press neither costs an IPC round trip nor stops
         // propagation on behalf of a listener that would ignore it.
         let mouse_down_buttons =
-            crate::renderer::mouse_down_button_set(ctx.events.contains("mouseDown"));
-        for event_type in ctx.events {
+            crate::renderer::mouse_down_button_set(tracks_mouse_down);
+        let mut event_types = ctx.events.iter().map(String::as_str).collect::<Vec<_>>();
+        if tracks_click && !ctx.events.contains("click") && !ctx.events.contains("doubleClick") {
+            event_types.push("click");
+        }
+        if tracks_aux_click && !ctx.events.contains("auxClick") {
+            event_types.push("auxClick");
+        }
+        if (tracks_mouse_down || tracks_context_menu)
+            && !ctx.events.contains("mouseDown")
+            && !ctx.events.contains("contextMenu")
+        {
+            event_types.push("mouseDown");
+        }
+        if tracks_mouse_up && !ctx.events.contains("mouseUp") {
+            event_types.push("mouseUp");
+        }
+        if tracks_mouse_move && !ctx.events.contains("mouseMove") {
+            event_types.push("mouseMove");
+        }
+        for event_type in event_types {
             let callback = ctx.event_callback.clone();
             let geometry = self.geometry.clone();
-            match event_type.as_str() {
+            match event_type {
                 "click" | "doubleClick" => {
                     if click_attached {
                         continue;
                     }
                     click_attached = true;
                     element = element.on_click(move |event, _window, cx| {
+                        let mut mouse_up_event = event.clone();
+                        if let gpui::ClickEvent::Mouse(mouse_event) = &mut mouse_up_event {
+                            let (x, y) = local_point(&geometry, mouse_event.up.position);
+                            mouse_event.up.position =
+                                gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+                        }
+                        crate::renderer::emit_click_mouse_up(
+                            &callback,
+                            id,
+                            &mouse_up_event,
+                            tracks_mouse_up,
+                        );
                         let (x, y) = local_point(&geometry, event.position());
                         crate::renderer::emit_event_full(&callback, id, "click", |payload| {
                             payload.x = Some(x);
@@ -1267,7 +1310,19 @@ impl CanvasElement {
                     });
                 }
                 "auxClick" => {
-                    element = element.on_aux_click(move |event, _window, _cx| {
+                    element = element.on_aux_click(move |event, _window, cx| {
+                        let mut mouse_up_event = event.clone();
+                        if let gpui::ClickEvent::Mouse(mouse_event) = &mut mouse_up_event {
+                            let (x, y) = local_point(&geometry, mouse_event.up.position);
+                            mouse_event.up.position =
+                                gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+                        }
+                        crate::renderer::emit_click_mouse_up(
+                            &callback,
+                            id,
+                            &mouse_up_event,
+                            tracks_mouse_up,
+                        );
                         let (x, y) = local_point(&geometry, event.position());
                         crate::renderer::emit_event_full(&callback, id, "auxClick", |payload| {
                             payload.x = Some(x);
@@ -1277,6 +1332,7 @@ impl CanvasElement {
                             payload.is_right_click = Some(event.is_right_click());
                             payload.button = Some(if event.is_right_click() { 2 } else { 1 });
                         });
+                        cx.stop_propagation();
                     });
                 }
                 "mouseDown" | "contextMenu" => {
@@ -1318,7 +1374,7 @@ impl CanvasElement {
                     ] {
                         let callback = callback.clone();
                         let geometry = geometry.clone();
-                        element = element.on_mouse_up(button, move |event, _window, _cx| {
+                        element = element.on_mouse_up(button, move |event, _window, cx| {
                             let (x, y) = local_point(&geometry, event.position);
                             crate::renderer::emit_event_full(&callback, id, "mouseUp", |payload| {
                                 payload.x = Some(x);
@@ -1328,6 +1384,7 @@ impl CanvasElement {
                                 payload.click_count = Some(event.click_count as u32);
                                 payload.modifiers = Some(event.modifiers.into());
                             });
+                            cx.stop_propagation();
                         });
                     }
                 }

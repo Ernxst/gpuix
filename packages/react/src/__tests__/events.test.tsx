@@ -1412,6 +1412,51 @@ describeNative("events", () => {
       ])
     })
 
+    it("delivers a descendant mouseUp once before an ancestor click", () => {
+      const order: string[] = []
+      let mouseUpTarget: PublicInstance | null = null
+
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 100 }}
+          onClick={() => order.push("click")}
+        >
+          <div
+            data-testid="mouse-up-child"
+            style={{ width: 80, height: 40 }}
+            onMouseUp={(event) => {
+              order.push("mouseUp")
+              mouseUpTarget = event.target
+            }}
+          />
+        </div>
+      )
+
+      const child = testRoot.renderer.findByTestId("mouse-up-child")!
+      const bounds = testRoot.renderer.getElementBounds(child.id)!
+      testRoot.renderer.nativeSimulateMouseDown(bounds[0]! + 10, bounds[1]! + 10)
+      testRoot.renderer.nativeSimulateMouseUp(bounds[0]! + 10, bounds[1]! + 10)
+
+      expect(order).toEqual(["mouseUp", "click"])
+      expect(mouseUpTarget?.id).toBe(child.id)
+    })
+
+    it("delivers one mouseUp when the press starts outside and release lands inside", () => {
+      const received: string[] = []
+      testRoot.render(
+        <div
+          style={{ width: 80, height: 40 }}
+          onMouseUp={() => received.push("mouseUp")}
+          onClick={() => received.push("click")}
+        />
+      )
+
+      testRoot.renderer.nativeSimulateMouseDown(200, 20)
+      testRoot.renderer.nativeSimulateMouseUp(20, 20)
+
+      expect(received).toEqual(["mouseUp"])
+    })
+
     it("dispatches primary clicks from motion elements", () => {
       let clicks = 0
       testRoot.render(

@@ -9763,7 +9763,7 @@ fn tracks_mouse_hover_events(
     false
 }
 
-fn tracks_pointer_event(
+pub(crate) fn tracks_pointer_event(
     element: &crate::retained_tree::RetainedElement,
     tree: &RetainedTree,
     event_type: &str,
@@ -9843,13 +9843,7 @@ where
             return;
         }
         let stop_native_propagation = !matches!(click_event, gpui::ClickEvent::Keyboard(_));
-        if tracks_mouse_up {
-            if let gpui::ClickEvent::Mouse(event) = &click_event {
-                emit_event_full(&callback, id, "mouseUp", |payload| {
-                    populate_mouse_up_payload(payload, &event.up);
-                });
-            }
-        }
+        emit_click_mouse_up(&callback, id, &click_event, tracks_mouse_up);
         emit_event_full(&callback, id, "click", |payload| {
             let (x, y) = point_to_xy(click_event.position());
             payload.x = Some(x);
@@ -10217,13 +10211,7 @@ pub(crate) fn build_host_container(
         let callback = ctx.event_callback.clone();
         let id = element.id;
         el = el.on_aux_click(move |click_event, _window, cx| {
-            if tracks_mouse_up {
-                if let gpui::ClickEvent::Mouse(event) = &click_event {
-                    emit_event_full(&callback, id, "mouseUp", |payload| {
-                        populate_mouse_up_payload(payload, &event.up);
-                    });
-                }
-            }
+            emit_click_mouse_up(&callback, id, &click_event, tracks_mouse_up);
             emit_event_full(&callback, id, "auxClick", |p| {
                 let (x, y) = point_to_xy(click_event.position());
                 p.x = Some(x);
@@ -11408,6 +11396,23 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
 /// Helper to convert a GPUI Point<Pixels> to (f64, f64).
 pub(crate) fn point_to_xy(p: gpui::Point<gpui::Pixels>) -> (f64, f64) {
     (f64::from(f32::from(p.x)), f64::from(f32::from(p.y)))
+}
+
+pub(crate) fn emit_click_mouse_up(
+    callback: &Option<EventCallback>,
+    element_id: u64,
+    click_event: &gpui::ClickEvent,
+    tracks_mouse_up: bool,
+) {
+    if !tracks_mouse_up {
+        return;
+    }
+    let gpui::ClickEvent::Mouse(event) = click_event else {
+        return;
+    };
+    emit_event_full(callback, element_id, "mouseUp", |payload| {
+        populate_mouse_up_payload(payload, &event.up);
+    });
 }
 
 fn populate_mouse_up_payload(payload: &mut EventPayload, event: &gpui::MouseUpEvent) {
