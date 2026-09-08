@@ -25,7 +25,7 @@ Verify the target changed: TypeScript checks do not compile Rust, and native che
 
 - `packages/native/index.js`, `index.d.ts` and `*.node` are generated. Change Rust declarations and rebuild instead of editing generated output by hand.
 - Update the relevant README API section for user-facing fixes or features.
-- This fork releases package tarballs through GitHub release CI. It does not publish the upstream package names to npm. Do not publish locally.
+- This fork ships package tarballs attached to GitHub releases, stamped and packed by hand. It does not publish the upstream package names to npm. Do not publish locally.
 - Preserve attribution headers and `THIRD_PARTY_NOTICES.md` when changing ported code.
 
 ## Pull request bodies
