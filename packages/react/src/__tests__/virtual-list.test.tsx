@@ -3,7 +3,9 @@
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
 import { flushSync } from "../reconciler/reconciler.js"
-import { createTestRoot } from "../testing.js"
+import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
+
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 function Rows({ count }: { count: number }) {
   return Array.from({ length: count }, (_, index) => (
@@ -73,6 +75,69 @@ function DynamicFocusableRows({ enabled }: { enabled: boolean }) {
 }
 
 describe("<virtual-list>", () => {
+  describeNative("accessibility", () => {
+    it("projects its declared role and label into the accessibility tree", () => {
+      const screen = createTestRoot()
+
+      try {
+        screen.render(
+          <virtual-list
+            role="list"
+            ariaLabel="Messages"
+            style={{ width: 400, height: 160 }}
+          >
+            {["one", "two", "three"].map((message) => (
+              <div key={message} role="listitem" style={{ height: 40 }}>
+                <text>{message}</text>
+              </div>
+            ))}
+          </virtual-list>,
+        )
+
+        screen.renderer.flush()
+        screen.renderer.drawPendingFrame()
+        const list = screen.renderer.findByType("virtual-list")[0]
+        const node = Object.values(screen.renderer.getAccessibilityTree().nodes).find(
+          (candidate) => candidate.host_id === list?.id,
+        )
+
+        expect(node).toMatchObject({
+          host_id: list?.id,
+          aria: { role: "List", label: "Messages" },
+        })
+        expect(screen.getByRole("list", { name: "Messages" })).toBe(list)
+        expect(screen.getAllByRole("listitem")).toHaveLength(3)
+      } finally {
+        screen.unmount()
+      }
+    })
+
+    it("keeps accessibility queries working through a hover-group wrapper", () => {
+      const screen = createTestRoot()
+
+      try {
+        screen.render(
+          <virtual-list
+            role="list"
+            ariaLabel="Messages"
+            style={{ width: 400, height: 160, hoverGroup: "rows" }}
+          >
+            {["one", "two", "three"].map((message) => (
+              <div key={message} role="listitem" style={{ height: 40 }}>
+                <text>{message}</text>
+              </div>
+            ))}
+          </virtual-list>,
+        )
+
+        expect(screen.getByRole("list", { name: "Messages" })).toBeDefined()
+        expect(screen.getAllByRole("listitem")).toHaveLength(3)
+      } finally {
+        screen.unmount()
+      }
+    })
+  })
+
   it("materializes host elements when the browser has no process global", () => {
     const { render, renderer } = createTestRoot()
     const reportError = vi.spyOn(console, "error").mockImplementation(() => {})

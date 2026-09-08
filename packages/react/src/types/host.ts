@@ -822,24 +822,7 @@ export type AccessibilityAction = "increment" | "decrement" | "focus"
 /** Keep a semantic node in the accessibility tree while omitting its visual box. */
 export type VisuallyHidden = true
 
-// Props passed to elements.
-// Element IDs are auto-generated numeric IDs (not user-settable).
-// Use React refs to get an element's ID: ref.current.id
-export interface Props {
-  // `key` must live here, not in `JSX.IntrinsicAttributes`. TypeScript 5 ignores
-  // that member for intrinsic elements, and React's DOM types work only because
-  // `DetailedHTMLProps` already carries `key`. Without this field every
-  // `<div key={...} />` inside a `.map()` fails to typecheck.
-  key?: React.Key | null
-  style?: StyleDesc
-  children?: React.ReactNode
-  ref?: React.Ref<PublicInstance>
-
-  /** Author-defined identity preserved for shared DOM/native JSX and native diagnostics. */
-  id?: string
-  /** Inert author metadata preserved for automation and event host handles. */
-  [key: `data-${string}`]: string | number | boolean | undefined
-
+export interface AccessibilityProps {
   // ── Accessibility ───────────────────────────────────────────────
   /** Explicit native accessibility role. `<button>` and `<a>` infer `button` and `link` when omitted. */
   role?: AccessibilityRole
@@ -941,6 +924,25 @@ export interface Props {
   visuallyHidden?: VisuallyHidden
   /** Value or focus action requested by assistive technology. Activate uses onClick. */
   onAccessibilityAction?: (event: GpuixSyntheticEvent) => void
+}
+
+// Props passed to elements.
+// Element IDs are auto-generated numeric IDs (not user-settable).
+// Use React refs to get an element's ID: ref.current.id
+export interface Props extends AccessibilityProps {
+  // `key` must live here, not in `JSX.IntrinsicAttributes`. TypeScript 5 ignores
+  // that member for intrinsic elements, and React's DOM types work only because
+  // `DetailedHTMLProps` already carries `key`. Without this field every
+  // `<div key={...} />` inside a `.map()` fails to typecheck.
+  key?: React.Key | null
+  style?: StyleDesc
+  children?: React.ReactNode
+  ref?: React.Ref<PublicInstance>
+
+  /** Author-defined identity preserved for shared DOM/native JSX and native diagnostics. */
+  id?: string
+  /** Inert author metadata preserved for automation and event host handles. */
+  [key: `data-${string}`]: string | number | boolean | undefined
 
   // ── Mouse events ───────────────────────────────────────────────
   /** Primary button only, like the DOM. Use `onAuxClick` for the others. */
@@ -1036,7 +1038,8 @@ export interface TextareaProps extends InputProps {
 }
 
 /** A variable-height list that builds only rows near its viewport. */
-export interface VirtualListProps {
+export interface VirtualListProps
+  extends AccessibilityProps, Pick<Props, "key" | "id"> {
   /** No `hover` or `active`: gpui's `List` has no interactive element identity,
    *  so it cannot hold the pressed or hovered state those styles read. Put them
    *  on a wrapping `<div>` instead. */

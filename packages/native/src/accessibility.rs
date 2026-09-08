@@ -887,7 +887,7 @@ fn projects_accessibility(element_type: &str) -> bool {
     supports_accessibility_host(element_type)
         || matches!(
             element_type,
-            "svg" | "canvas" | "code" | "diff" | "markdown" | "anchored"
+            "svg" | "canvas" | "code" | "diff" | "markdown" | "anchored" | "virtual-list"
         )
 }
 
@@ -2292,10 +2292,10 @@ mod tests {
     }
 
     #[test]
-    fn reports_unsupported_hosts_instead_of_dropping_semantics() {
-        // `<virtual-list>` is the one host left that never projects what it is
-        // given, so it is the one that still has to say so.
-        let element = semantic_element(1, "virtual-list");
+    fn reports_unknown_hosts_instead_of_dropping_semantics() {
+        // No shipped element type reaches this branch; keep an unknown host
+        // here as the guard for unregistered renderer element types.
+        let element = semantic_element(1, "unknown-host");
         let problems = element_problems(&detached_tree(), &element);
 
         assert_eq!(problems.len(), 1);
