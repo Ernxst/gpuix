@@ -1479,7 +1479,7 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             }
             continue;
         }
-        enum_field!(key, value, "display", display, ["flex", "grid"]);
+        enum_field!(key, value, "display", display, ["none", "flex", "grid"]);
         enum_field!(key, value, "visibility", visibility, ["visible", "hidden"]);
         enum_field!(
             key,
@@ -2895,6 +2895,18 @@ mod tests {
                 5.0,
             ))
         );
+    }
+
+    #[test]
+    fn display_accepts_none_and_rejects_block() {
+        let hidden = parse_style_value(&json!({ "display": "none" }));
+        assert!(hidden.problems.is_empty(), "{:?}", hidden.problems);
+        assert_eq!(hidden.style.display.as_deref(), Some("none"));
+
+        let block = parse_style_value(&json!({ "display": "block" }));
+        assert_eq!(block.style.display, None);
+        assert_eq!(block.problems.len(), 1);
+        assert_eq!(block.problems[0].property, "display");
     }
 
     #[test]

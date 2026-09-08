@@ -118,6 +118,42 @@ describeNative("native style transitions", () => {
     }
   })
 
+  it("clears a descendant transition when its ancestor is hidden", () => {
+    const root = createTestRoot()
+    const view = (hidden: boolean, expanded: boolean) => (
+      <div
+        data-testid="transition-parent"
+        style={{ display: hidden ? "none" : "flex", width: 300, height: 80 }}
+      >
+        <div
+          data-testid="transition-child"
+          style={{
+            width: expanded ? 200 : 100,
+            height: 20,
+            transition: { properties: ["width"], durationMs: 100, easing: "linear" },
+          }}
+        />
+      </div>
+    )
+
+    try {
+      root.renderer.clockPause()
+      root.render(view(false, false))
+      const child = root.renderer.findByTestId("transition-child")!
+
+      root.render(view(false, true))
+      root.renderer.advanceAsyncClock(50)
+      expect(root.renderer.getResolvedStyle(child.id)).toMatchObject({ width: 150 })
+
+      root.render(view(true, true))
+      root.render(view(false, true))
+      expect(root.renderer.getResolvedStyle(child.id)).toMatchObject({ width: 200 })
+      expect(root.renderer.getElementBounds(child.id)).toEqual([0, 0, 200, 20])
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("interpolates img width and opacity on the paused frame clock", () => {
     const root = createTestRoot()
     const image = (expanded: boolean) => (

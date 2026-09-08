@@ -100,6 +100,9 @@ pub(crate) struct InlineText {
     pub(crate) runs: Vec<StyledTextRun>,
     /// Nested React host ids whose glyph ranges should be exposed to automation.
     pub(crate) tracked_ranges: Vec<(Range<usize>, u64)>,
+    /// Nested React text hosts skipped by `display: none`, which still need a
+    /// zero native bounds record for DOM-shaped measurement.
+    pub(crate) zero_bounds: Vec<u64>,
     /// React host ids that installed an `onClick` handler.
     pub(crate) clickable_ranges: Vec<(Range<usize>, u64)>,
 }
@@ -171,6 +174,15 @@ fn collect_node(
     let Some(element) = tree.elements.get(&id) else {
         return Ok(());
     };
+    if element
+        .style
+        .as_deref()
+        .and_then(|style| style.display.as_deref())
+        == Some("none")
+    {
+        collect_zero_bounds(tree, id, &mut output.zero_bounds);
+        return Ok(());
+    }
     if element.element_type != "text" {
         return Err(InlineTextError {
             parent_id: element.parent.unwrap_or(id),
@@ -221,6 +233,15 @@ fn collect_node(
         }
     }
     Ok(())
+}
+
+fn collect_zero_bounds(tree: &RetainedTree, id: u64, output: &mut Vec<u64>) {
+    output.push(id);
+    if let Some(element) = tree.elements.get(&id) {
+        for child_id in &element.children {
+            collect_zero_bounds(tree, *child_id, output);
+        }
+    }
 }
 
 /// Flatten an outer `<text>` and all of its text-only descendants.
@@ -321,7 +342,9 @@ pub(crate) fn unsupported_inline_style_problems(style: &StyleDesc) -> Vec<StyleP
     object
         .iter()
         .filter(|(property, value)| {
-            !value.is_null() && !INLINE_STYLE_PROPERTIES.contains(&property.as_str())
+            !value.is_null()
+                && !(*property == "display" && value.as_str() == Some("none"))
+                && !INLINE_STYLE_PROPERTIES.contains(&property.as_str())
         })
         .map(|(property, value)| StyleProblem {
             property: property.clone(),

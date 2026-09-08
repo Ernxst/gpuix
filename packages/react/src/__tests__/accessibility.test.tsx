@@ -90,6 +90,32 @@ describeNative("accessibility", () => {
     ])
   })
 
+  it("omits display-none contents from names but keeps a directly referenced label", () => {
+    testRoot.render(
+      <div>
+        <div data-testid="contents-button" role="button">
+          <text>Visible contents</text>
+          <text style={{ display: "none" }}>Hidden contents</text>
+        </div>
+        <text id="hidden-label" style={{ display: "none" }}>
+          Referenced hidden label
+        </text>
+        <div
+          data-testid="referenced-button"
+          role="button"
+          ariaLabelledBy="hidden-label"
+        />
+      </div>,
+    )
+
+    expect(testRoot.getByRole("button", { name: "Visible contents" })).toBe(
+      testRoot.getByTestId("contents-button"),
+    )
+    expect(testRoot.getByRole("button", { name: "Referenced hidden label" })).toBe(
+      testRoot.getByTestId("referenced-button"),
+    )
+  })
+
   it("gives a plain input and textarea their implicit textbox roles", () => {
     testRoot.render(
       <div style={{ width: 300, height: 120 }}>

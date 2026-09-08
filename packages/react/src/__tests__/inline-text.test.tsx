@@ -224,6 +224,47 @@ describeNative("inline text runs", () => {
     expect(targetCurrentTarget).toBe(target)
   })
 
+  it('omits a nested display: "none" run from paint, bounds, clicks, and diagnostics', () => {
+    const root = createTestRoot({ strictStyles: true, width: 400, height: 100 })
+    const hiddenClick = vi.fn()
+
+    try {
+      root.render(
+        <text data-testid="inline-parent" style={{ width: 300, fontSize: 20 }}>
+          visible run
+          <text
+            data-testid="hidden-inline"
+            onClick={hiddenClick}
+            style={{ display: "none", color: "red" }}
+          >
+            hidden run
+          </text>
+        </text>,
+      )
+
+      const hidden = root.renderer.findByTestId("hidden-inline")!
+      expect(root.renderer.getPaintedText()).toEqual(["visible run"])
+      expect(root.renderer.getAllText()).toEqual(["visible run"])
+      expect(root.renderer.getElementBounds(hidden.id)).toEqual([0, 0, 0, 0])
+      expect(hidden.getBoundingClientRect()).toEqual({
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+      })
+
+      root.renderer.nativeSimulateClick(150, 10)
+      expect(hiddenClick).not.toHaveBeenCalled()
+      expect(root.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("resolves an inner data-testid and preserves its event identity", async () => {
     const observedTargets: Array<[PublicInstance, PublicInstance]> = []
     const targetClick = vi.fn((event: GpuixSyntheticEvent) => {

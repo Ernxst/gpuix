@@ -234,7 +234,7 @@ export type FontWeight =
   | "extra-bold"
   | "black"
 
-export type Display = "flex" | "grid"
+export type Display = "none" | "flex" | "grid"
 export type Visibility = "visible" | "hidden"
 export type FlexDirection = "row" | "column"
 export type FlexWrap = "nowrap" | "wrap" | "wrap-reverse"

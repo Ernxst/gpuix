@@ -464,12 +464,21 @@ fn collect_flattened_text(
         flat.push(' ');
     }
     let is_reference_target = is_root && matches!(subject, NameSubject::Reference { .. });
-    if is_reference_target || !is_hidden(node) {
+    if is_reference_target || !is_hidden_from_contents(node) {
         contribute_flattened_text(tree, node, subject, is_root, flat);
     }
     if separates {
         flat.push(' ');
     }
+}
+
+fn is_hidden_from_contents(node: &RetainedElement) -> bool {
+    is_hidden(node)
+        || node
+            .style
+            .as_deref()
+            .and_then(|style| style.display.as_deref())
+            == Some("none")
 }
 
 fn contribute_flattened_text(
