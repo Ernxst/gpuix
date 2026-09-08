@@ -5851,6 +5851,8 @@ pub(crate) struct GpuixView {
     /// Created lazily for elements with keyboard or focus/blur listeners.
     /// Handles persist across renders so GPUI maintains focus state.
     pub(crate) focus_handles: HashMap<u64, gpui::FocusHandle>,
+    /// Autofocus targets whose reveal waits for their first layout pass.
+    pending_autofocus_reveals: Vec<u64>,
     /// Tab defaults wait for the matching React keydown dispatch. Serializing
     /// them keeps each queued keypress targeted at the focus left by the one
     /// before it, just like a browser event loop.
@@ -6109,6 +6111,7 @@ impl GpuixView {
             root_focus_handle: cx.focus_handle().tab_stop(false),
             focus_lost_subscription: None,
             focus_handles: HashMap::new(),
+            pending_autofocus_reveals: Vec::new(),
             pending_tab_key_down: None,
             queued_tab_key_downs: VecDeque::new(),
             focus_subscriptions: HashMap::new(),
@@ -7566,14 +7569,9 @@ impl GpuixView {
         // missed during the initial render.
         for (id, handle) in pending_auto_focus {
             handle.focus(window, cx);
-            let view = cx.weak_entity();
-            window.on_next_frame(move |window, app| {
-                view.update(app, |view, cx| {
-                    if handle.is_focused(window) {
-                        view.scroll_focused_element_into_view(id, cx);
-                    }
-                })
-                .ok();
+            self.pending_autofocus_reveals.push(id);
+            cx.defer_in(window, |_view, _window, cx| {
+                cx.notify();
             });
         }
     }
@@ -7831,6 +7829,16 @@ impl gpui::Render for GpuixView {
                         cx.notify();
                     }
                 }));
+        }
+
+        for id in std::mem::take(&mut self.pending_autofocus_reveals) {
+            let focused = self
+                .focus_handles
+                .get(&id)
+                .is_some_and(|handle| handle.is_focused(window));
+            if focused {
+                self.scroll_focused_element_into_view(id, cx);
+            }
         }
 
         // Clone Arc so we don't borrow self.tree — frees self for focus_handles access.
