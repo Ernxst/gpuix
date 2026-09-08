@@ -1084,7 +1084,8 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
         expect(sample).toBeLessThan(content)
       }
       // Halfway through a linear 120ms run.
-      expect(samples[1]).toBeCloseTo(content / 2, 0)
+      // Edges snap to whole pixels, so a half-pixel midpoint lands one pixel either side.
+      expect(Math.abs(samples[1]! - content / 2)).toBeLessThanOrEqual(0.5)
 
       root.renderer.advanceAsyncClock(30)
       expect(widths(root).lane).toBeCloseTo(content, 1)
@@ -1116,7 +1117,8 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       const middle = widths(root).lane
       expect(middle).toBeLessThan(content)
       expect(middle).toBeGreaterThan(0)
-      expect(middle).toBeCloseTo(content / 2, 0)
+      // Edges snap to whole pixels, so a half-pixel midpoint lands one pixel either side.
+      expect(Math.abs(middle - content / 2)).toBeLessThanOrEqual(0.5)
 
       root.renderer.advanceAsyncClock(60)
       expect(widths(root).lane).toBeCloseTo(0, 1)
