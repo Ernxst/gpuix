@@ -977,7 +977,16 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.dispatchNativeEvents()
     this.native.simulateKeystrokes(keystrokes)
+    const maxDrainIterations = 1000
+    let iterations = 0
     for (;;) {
+      if (++iterations > maxDrainIterations) {
+        throw new Error(
+          `nativeSimulateKeystrokeBatch: still draining events after ${maxDrainIterations} ` +
+            "iterations. A deferred keydown is likely never resolving (its JS handler never " +
+            "settling, or a native/JS resolution mismatch), so the queue behind it never drains."
+        )
+      }
       this.native.flush()
       const delivered = this.dispatchNativeEvents()
       this.native.flush()
