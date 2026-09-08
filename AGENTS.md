@@ -27,3 +27,7 @@ Verify the target changed: TypeScript checks do not compile Rust, and native che
 - Update the relevant README API section for user-facing fixes or features.
 - This fork releases package tarballs through GitHub release CI. It does not publish the upstream package names to npm. Do not publish locally.
 - Preserve attribution headers and `THIRD_PARTY_NOTICES.md` when changing ported code.
+
+## Consumer bug fixes
+
+When fixing a consumer-reported bug, read and execute [the surface-audit procedure](.agents/skills/audit-surface/SKILL.md) before declaring the fix complete. This is part of the fixing task; do not wait for a separate user request or skill invocation. Group reports touching the same behavior and implementation into one audit. Include the audit results and any verification gaps in the handoff.
