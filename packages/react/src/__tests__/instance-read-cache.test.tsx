@@ -7,6 +7,11 @@ import type { PublicInstance } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
+const WEBP_BYTES = Buffer.from(
+  "UklGRpYAAABXRUJQVlA4TIkAAAAvH8AFADegJpIUNvmBMvU4QBFqGkmBs+U5+IASB+hASRtJkH9hi1fDGvgOH5j/+MXAS889Jc+ezBjYRLatJiQABXDqVNHBqfn61/A+g4CI/itw20bxMcMzAi9DtZ2tVPoBKGUWkDOU+BgkknFwBtHIm0Qz7xRdPKgzdbd6mfrd6n9R/pv6X30JAQA=",
+  "base64",
+)
+
 describeNative("instance reads reuse a clean rendered frame", () => {
   it("does not draw repeated bounds and client-rect reads", () => {
     const root = createTestRoot()
@@ -58,6 +63,35 @@ describeNative("instance reads reuse a clean rendered frame", () => {
       const framesAfterChangedRead = root.renderer.getDebugFrameOverlayStats().frames
       expect(root.renderer.getDebugFrameOverlayStats().frames).toBe(framesAfterChangedRead)
       expect(framesAfterChangedRead - framesBeforeChangedRead).toBe(1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("reads settled geometry when a child gains an intrinsic size in the same batch", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    const tree = (withChild: boolean) => (
+      <div style={{ display: "flex", flexDirection: "row" }}>
+        <div data-testid="pill" style={{ display: "flex", flexDirection: "row", padding: 4 }}>
+          <div style={{ width: 20, height: 20 }} />
+          {withChild ? (
+            <img
+              src={{ kind: "data", mimeType: "image/webp", bytes: WEBP_BYTES }}
+            />
+          ) : null}
+        </div>
+      </div>
+    )
+    try {
+      root.render(tree(false))
+      flushSync(() => root.root.render(tree(true)))
+      const pill = root.renderer.findByTestId("pill")!
+      const framesBefore = root.renderer.getDebugFrameOverlayStats().frames
+      expect(root.renderer.getElementBounds(pill.id)).toEqual([0, 0, 60, 32])
+      const framesAfterFirstRead = root.renderer.getDebugFrameOverlayStats().frames
+      expect(root.renderer.getElementBounds(pill.id)).toEqual([0, 0, 60, 32])
+      expect(root.renderer.getDebugFrameOverlayStats().frames).toBe(framesAfterFirstRead)
+      expect(framesAfterFirstRead - framesBefore).toBe(2)
     } finally {
       root.unmount()
     }
@@ -129,6 +163,40 @@ describeNative("instance reads reuse a clean rendered frame", () => {
       root.renderer.advanceAsyncClock(50)
 
       expect(root.renderer.getResolvedStyle(target.id)?.width).toBe(150)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("does not redraw repeated reads while a transition is running", () => {
+    const root = createTestRoot()
+    try {
+      root.renderer.clockPause()
+      const card = (expanded: boolean) => (
+        <div
+          data-testid="target"
+          style={{
+            width: expanded ? 200 : 100,
+            height: 40,
+            transition: { properties: ["width"], durationMs: 100, easing: "linear" },
+          }}
+        />
+      )
+
+      root.render(card(false))
+      const target = root.renderer.findByTestId("target")!
+      root.renderer.getResolvedStyle(target.id)
+      root.render(card(true))
+      root.renderer.advanceAsyncClock(50)
+      root.renderer.resetDebugFrameOverlayStats()
+
+      expect(root.renderer.getResolvedStyle(target.id)?.width).toBe(150)
+      const framesAfterFirstRead = root.renderer.getDebugFrameOverlayStats().frames
+      for (let read = 0; read < 5; read += 1) {
+        expect(root.renderer.getResolvedStyle(target.id)?.width).toBe(150)
+      }
+      expect(root.renderer.getDebugFrameOverlayStats().frames).toBe(framesAfterFirstRead)
+      expect(framesAfterFirstRead).toBeGreaterThan(0)
     } finally {
       root.unmount()
     }

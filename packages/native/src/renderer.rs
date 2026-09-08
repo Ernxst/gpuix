@@ -57,6 +57,12 @@ use crate::style::{
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection, TextTransform};
 use crate::theme::Theme;
 
+/// Synchronous reads may need multiple draws because a draw can schedule work
+/// that dirties layout again, such as an intrinsic image size changing its
+/// parent's layout. Check `is_dirty()` rather than `needs_frame()`: a pending
+/// next-frame callback requests future work but is not consumed by a draw.
+pub(crate) const MAX_SETTLE_PASSES: usize = 3;
+
 #[cfg(not(target_family = "wasm"))]
 pub(crate) fn default_http_client() -> Arc<dyn gpui::http_client::HttpClient> {
     Arc::new(
@@ -1095,10 +1101,11 @@ fn update_window_without_view<R>(
 #[cfg(target_os = "macos")]
 fn draw_window_for_automation_read() -> Result<()> {
     update_window_without_view(|window, cx| {
-        // A read draws when the window has pending changes or frame demand, so
-        // it is as fresh as the frame loop would make it, including when the
-        // platform never services an occluded window's frame request.
-        if window.needs_frame() {
+        // Settle layout dirtied by the previous draw without consuming callbacks.
+        for _ in 0..MAX_SETTLE_PASSES {
+            if !window.is_dirty() {
+                break;
+            }
             window.draw(cx).clear(cx);
         }
     })
@@ -1386,7 +1393,11 @@ fn draw_ui_window_for_read(
     cx: &mut gpui::AsyncApp,
 ) -> anyhow::Result<()> {
     gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| {
-        if window.needs_frame() {
+        // Settle layout dirtied by the previous draw without consuming callbacks.
+        for _ in 0..MAX_SETTLE_PASSES {
+            if !window.is_dirty() {
+                break;
+            }
             window.draw(cx).clear(cx);
         }
     })
@@ -4952,7 +4963,11 @@ fn update_web_window<R>(
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 fn draw_web_window_for_read() -> Result<(), wasm_bindgen::JsValue> {
     update_web_window(|window, cx| {
-        if window.needs_frame() {
+        // Settle layout dirtied by the previous draw without consuming callbacks.
+        for _ in 0..MAX_SETTLE_PASSES {
+            if !window.is_dirty() {
+                break;
+            }
             window.draw(cx).clear(cx);
         }
     })

@@ -34,7 +34,7 @@ use crate::renderer::{
     take_style_diagnostics_for_reporting, to_element_id, validate_canvas_target,
     AnimationFrameCallback, CanvasImageLoadState, DebugFrameOverlayStats, EventCallback,
     FocusDirection, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView, MenuSpec,
-    PendingStyleDiagnostics, WindowSize,
+    PendingStyleDiagnostics, WindowSize, MAX_SETTLE_PASSES,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -780,18 +780,27 @@ impl TestGpuixRenderer {
         })
     }
 
-    /// Draw the pending frame, if the window needs one, without
+    /// Settle pending layout without consuming next-frame callbacks or
     /// notifying the view. Pure reads use this to observe the latest frame
     /// while leaving an unchanged window alone.
     fn draw_if_frame_needed(&self) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.update_window(window, |_, window, app| {
-                if window.needs_frame() {
-                    window.draw(app).clear(app);
+            for _ in 0..MAX_SETTLE_PASSES {
+                let drew = cx
+                    .update_window(window, |_, window, app| {
+                        if !window.is_dirty() {
+                            return false;
+                        }
+                        window.draw(app).clear(app);
+                        true
+                    })
+                    .map_err(|error| Error::from_reason(error.to_string()))?;
+                if !drew {
+                    break;
                 }
-            })
-            .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+                // Let async work spawned by the draw invalidate the next pass.
+                cx.run_until_parked();
+            }
             Ok(())
         })?;
         self.surface_canvas_preparation_diagnostics()
