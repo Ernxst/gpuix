@@ -1552,12 +1552,10 @@ than at the top of the viewport.
 Reading any of the six properties forces layout in the native renderer only
 when the frame is stale—when the window has pending changes or frame demand—as
 reading `Element.scrollHeight` does on the web; the browser-mirror renderer
-samples the last frame instead. A native read redraws only when the window has
-pending changes or frame demand, so repeated reads against unchanged layout are
-cheap. Hoist
-the reads you need out of a hot scroll handler rather than repeating them as a
-matter of good practice. On an element that is **not** a scroll container the
-metrics call returns nothing and the fallback measures the element's bounds,
+samples the last frame instead. Repeated reads against unchanged layout are
+therefore cheap, but hoist the reads you need out of a hot scroll handler
+rather than repeating them. On an element that is **not** a scroll container
+the metrics call returns nothing and the fallback measures the element's bounds,
 so the three-property "am I at the bottom?" idiom still performs both
 measurements there.
 

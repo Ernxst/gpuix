@@ -8,7 +8,7 @@ React/TypeScript renderers backed by GPUI, with native and browser targets. Matc
 - `packages/native/src/`: Rust renderer and napi bridge.
 - `zed/`: GPUI submodule; consult the relevant implementation when changing GPUI integration.
 - `README.md`: public API reference. Read the sections relevant to the task.
-- `examples/`: runnable usage examples. `scripts/` and `.github/workflows/`: build and release entry points.
+- `examples/`: runnable usage examples. `scripts/`: build and release entry points.
 
 ## Build and verification
 
