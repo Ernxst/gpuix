@@ -1,10 +1,74 @@
 import { Suspense } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { handleGpuixEvent } from "../reconciler/event-registry.js"
+import { hostConfig } from "../reconciler/host-config.js"
 import { createRoot, flushSync } from "../reconciler/reconciler.js"
 import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing.js"
+import type {
+  Container,
+  HostContext,
+  MutationRenderer,
+  Props,
+} from "../types/host.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
+
+function recordingRenderer(): MutationRenderer & { styles: object[] } {
+  const styles: object[] = []
+  return {
+    styles,
+    createElement() {},
+    destroyElement: () => [],
+    appendChild() {},
+    insertBefore() {},
+    setStyle(_id, style) {
+      styles.push(style)
+    },
+    setText() {},
+    setEventListener() {},
+    setRoot() {},
+    setCustomProp() {},
+    flushMutations() {},
+  }
+}
+
+describe("host config hideInstance", () => {
+  it("keeps the element style when React hides the element", () => {
+    const renderer = recordingRenderer()
+    const container: Container = {
+      renderer,
+      ids: { nextElementId: 0 },
+      eventHandlers: new Map(),
+      windowKeyEventHandlers: {},
+      windowKeyEventId: 0,
+    }
+    const props: Props = {
+      style: {
+        width: 80,
+        height: 40,
+        backgroundColor: "#f38ba8",
+        hover: { backgroundColor: "#a6e3a1" },
+      },
+    }
+    const instance = hostConfig.createInstance(
+      "div",
+      props,
+      container,
+      null as unknown as HostContext
+    )
+
+    hostConfig.hideInstance(instance)
+    expect(renderer.styles.at(-1)).toEqual({
+      width: 80,
+      height: 40,
+      backgroundColor: "#f38ba8",
+      visibility: "hidden",
+    })
+
+    hostConfig.unhideInstance(instance, props)
+    expect(renderer.styles.at(-1)).toEqual(props.style)
+  })
+})
 
 describeNative("mutation lifecycle", () => {
   it("does not paint host nodes from an abandoned Suspense render", () => {

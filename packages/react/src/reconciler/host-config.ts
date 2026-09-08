@@ -418,11 +418,19 @@ export const hostConfig = {
   },
 
   hideInstance(instance: Instance): void {
-    rendererFor(instance).setStyle(instance.id, { visibility: "hidden" })
+    // Keep the element's own style. `visibility: hidden` skips the paint and
+    // keeps the layout box, so replacing the whole style here would collapse
+    // the box and lose every other style on the element.
+    //
+    // Hover and active go, because a hidden element must stay hidden. A hover
+    // style that sets `visibility` would otherwise paint an element React
+    // asked to hide.
+    const { hover: _hover, active: _active, ...base } = instance.props.style ?? {}
+    rendererFor(instance).setStyle(instance.id, { ...base, visibility: "hidden" })
   },
 
-  unhideInstance(instance: Instance, _props: Props): void {
-    rendererFor(instance).setStyle(instance.id, instance.props.style ?? {})
+  unhideInstance(instance: Instance, props: Props): void {
+    rendererFor(instance).setStyle(instance.id, props.style ?? {})
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},
