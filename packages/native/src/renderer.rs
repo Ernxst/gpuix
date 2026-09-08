@@ -1095,9 +1095,10 @@ fn update_window_without_view<R>(
 #[cfg(target_os = "macos")]
 fn draw_window_for_automation_read() -> Result<()> {
     update_window_without_view(|window, cx| {
-        // Automation reads must be fresh even when the window is occluded and
-        // the platform never services its pending frame request.
-        if window.is_dirty() {
+        // A read draws when the window has pending changes or frame demand, so
+        // it is as fresh as the frame loop would make it, including when the
+        // platform never services an occluded window's frame request.
+        if window.needs_frame() {
             window.draw(cx).clear(cx);
         }
     })
@@ -1385,7 +1386,7 @@ fn draw_ui_window_for_read(
     cx: &mut gpui::AsyncApp,
 ) -> anyhow::Result<()> {
     gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| {
-        if window.is_dirty() {
+        if window.needs_frame() {
             window.draw(cx).clear(cx);
         }
     })
@@ -4955,7 +4956,7 @@ fn update_web_window<R>(
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 fn draw_web_window_for_read() -> Result<(), wasm_bindgen::JsValue> {
     update_web_window(|window, cx| {
-        if window.is_dirty() {
+        if window.needs_frame() {
             window.draw(cx).clear(cx);
         }
     })

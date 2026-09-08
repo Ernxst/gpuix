@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import { flushSync } from "../reconciler/reconciler.js"
+import type { PublicInstance } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -47,16 +48,46 @@ describeNative("instance reads reuse a clean rendered frame", () => {
       const target = root.renderer.findByTestId("target")!
       expect(root.renderer.getElementBounds(target.id)?.[2]).toBe(100)
       root.renderer.resetDebugFrameOverlayStats()
+      expect(root.renderer.getElementBounds(target.id)?.[2]).toBe(100)
+      const framesBeforeChangedRead = root.renderer.getDebugFrameOverlayStats().frames
 
       flushSync(() => {
         root.root.render(<div data-testid="target" style={{ width: 240, height: 40 }} />)
       })
-      const framesBeforeChangedRead = root.renderer.getDebugFrameOverlayStats().frames
-      expect(target.getBoundingClientRect().width).toBe(240)
-      const framesAfterChangedRead = root.renderer.getDebugFrameOverlayStats().frames
       expect(root.renderer.getElementBounds(target.id)?.[2]).toBe(240)
+      const framesAfterChangedRead = root.renderer.getDebugFrameOverlayStats().frames
       expect(root.renderer.getDebugFrameOverlayStats().frames).toBe(framesAfterChangedRead)
       expect(framesAfterChangedRead - framesBeforeChangedRead).toBe(1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("measures a sibling committed in the same layout-effect batch", () => {
+    const root = createTestRoot()
+    let measuredWidth: number | undefined
+
+    function Fixture({ wide }: { wide: boolean }) {
+      const sibling = React.useRef<PublicInstance>(null)
+
+      React.useLayoutEffect(() => {
+        if (wide) {
+          measuredWidth = sibling.current?.getBoundingClientRect().width
+        }
+      }, [wide])
+
+      return (
+        <div>
+          <div ref={sibling} style={{ width: wide ? 220 : 100, height: 40 }} />
+          <div style={{ width: 20, height: 20 }} />
+        </div>
+      )
+    }
+
+    try {
+      root.render(<Fixture wide={false} />)
+      flushSync(() => root.root.render(<Fixture wide />))
+      expect(measuredWidth).toBe(220)
     } finally {
       root.unmount()
     }
