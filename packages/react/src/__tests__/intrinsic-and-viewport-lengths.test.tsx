@@ -130,6 +130,28 @@ describe("intrinsic and viewport lengths (issue #300)", () => {
     }
   })
 
+  it("sizes a text-bearing div's min-content width to its longest word", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    try {
+      root.render(
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+          <div data-testid="min-content-text" style={{ width: "min-content" }}>
+            <text style={{ fontSize: 20 }}>grid layout</text>
+          </div>
+          <text data-testid="min-content-reference" style={{ fontSize: 20 }}>
+            layout
+          </text>
+        </div>,
+      )
+
+      const text = boundsFor(root.renderer, "min-content-text")
+      const reference = boundsFor(root.renderer, "min-content-reference")
+      expect(text.width).toBeCloseTo(reference.width, 3)
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("clamps fit-content between min-content, the available space, and max-content, and composes vw inside calc()", () => {
     // fit-content resolves to its CSS definition, clamp(min-content, stretch,
     // max-content), which rides GPUI's calc engine. The default test window

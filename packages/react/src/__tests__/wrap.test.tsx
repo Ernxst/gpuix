@@ -155,6 +155,31 @@ describeNative("text wrapping", () => {
     expect(prose.height).toBeGreaterThan(20)
   })
 
+  it("wraps a text flex item at its min-content width", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div
+        data-testid="row"
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          width: 160,
+          backgroundColor: "#111",
+        }}
+      >
+        <div style={{ width: 48, flexShrink: 0, backgroundColor: "#333" }} />
+        <text data-testid="prose" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
+          A label with enough separate words to wrap
+        </text>
+      </div>,
+    )
+
+    const row = rect(renderer, "row")
+    const prose = rect(renderer, "prose")
+    expectInside(prose, row)
+    expect(prose.height).toBeGreaterThan(20)
+  })
+
   it("keeps a markdown list item inside a flex column", () => {
     const { render, renderer } = createTestRoot()
     render(
