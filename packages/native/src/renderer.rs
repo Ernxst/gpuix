@@ -57,6 +57,34 @@ use crate::style::{
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection, TextTransform};
 use crate::theme::Theme;
 
+/// Synchronous reads may need multiple draws because a draw can schedule work
+/// that dirties layout again, such as an intrinsic image size changing its
+/// parent's layout. Check `is_dirty()` rather than `needs_frame()`: a pending
+/// next-frame callback requests future work but is not consumed by a draw.
+pub(crate) const MAX_SETTLE_PASSES: usize = 3;
+
+/// Settle layout dirtied by a previous draw before a synchronous read, without
+/// consuming pending animation-frame callbacks: a read should see the last
+/// drawn frame, not force one that only a running animation is waiting on.
+///
+/// Loops because a draw can itself schedule work that dirties layout again
+/// (an intrinsic image size changing its parent's layout, for example), so
+/// one draw is not always enough to reach a stable tree. Checks `is_dirty()`
+/// rather than `needs_frame()` for the same reason the constant above does:
+/// a pending next-frame callback is future work, not evidence that the last
+/// draw left something unsettled.
+pub(crate) fn settle_for_read(window: &mut gpui::Window, cx: &mut gpui::App) {
+    for _ in 0..MAX_SETTLE_PASSES {
+        if !window.is_dirty() {
+            return;
+        }
+        window.draw(cx).clear(cx);
+    }
+    if window.is_dirty() {
+        log::debug!("settle_for_read: window still dirty after {MAX_SETTLE_PASSES} passes");
+    }
+}
+
 #[cfg(not(target_family = "wasm"))]
 pub(crate) fn default_http_client() -> Arc<dyn gpui::http_client::HttpClient> {
     Arc::new(
@@ -1094,14 +1122,7 @@ fn update_window_without_view<R>(
 
 #[cfg(target_os = "macos")]
 fn draw_window_for_automation_read() -> Result<()> {
-    update_window_without_view(|window, cx| {
-        // A read draws when the window has pending changes or frame demand, so
-        // it is as fresh as the frame loop would make it, including when the
-        // platform never services an occluded window's frame request.
-        if window.needs_frame() {
-            window.draw(cx).clear(cx);
-        }
-    })
+    update_window_without_view(|window, cx| settle_for_read(window, cx))
 }
 
 /// Queue a real AppKit mouse click. This is deliberately distinct from the
@@ -1385,11 +1406,7 @@ fn draw_ui_window_for_read(
     window: gpui::WindowHandle<GpuixView>,
     cx: &mut gpui::AsyncApp,
 ) -> anyhow::Result<()> {
-    gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| {
-        if window.needs_frame() {
-            window.draw(cx).clear(cx);
-        }
-    })
+    gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| settle_for_read(window, cx))
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -4951,11 +4968,7 @@ fn update_web_window<R>(
 /// overwritten by it.
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 fn draw_web_window_for_read() -> Result<(), wasm_bindgen::JsValue> {
-    update_web_window(|window, cx| {
-        if window.needs_frame() {
-            window.draw(cx).clear(cx);
-        }
-    })
+    update_web_window(|window, cx| settle_for_read(window, cx))
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
