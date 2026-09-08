@@ -2701,6 +2701,14 @@ The trigger participates in normal tab navigation. Opening the Select focuses
 its content. `Up`, `Down`, `Ctrl+P`, `Ctrl+N`, `Enter`, and `Escape` control the
 menu. Closing it restores focus to the trigger. Disabled items are skipped.
 
+`Select` discovers items by registration at mount time rather than by walking
+its element tree, so wrapping `Item` in your own component (for a shared label
+layout, for example) still works. Content stays mounted while the Select is
+closed - kept in a clipped, zero-size box rather than removed - so a value can
+resolve its label before the Select has ever opened. Item order is document
+order at mount; an item added later than its siblings is appended rather than
+inserted where it appears in JSX.
+
 ### Style Combobox and Tooltip the same way
 
 Start their local files from namespace imports too:
