@@ -633,15 +633,14 @@ describeNative("events", () => {
       testRoot.renderer.nativeSimulateClick(40, 40)
       testRoot.renderer.nativeSimulateClick(40, 40, 2)
 
-      // macOS fires contextmenu on the press, between mousedown and auxclick.
-      // The right-button mouseup is missing: GPUI's aux-click listener stops
-      // propagation before the mouse-up listener runs. That divergence
-      // predates this event and is not what this test locks in.
+      // macOS fires contextmenu on the press; the DOM order is mousedown,
+      // contextmenu, mouseup, auxclick.
       expect(order).toEqual([
         "mouseDown",
         "mouseUp",
         "mouseDown",
         "contextMenu",
+        "mouseUp",
         "auxClick",
       ])
       expect(calls).toEqual([
@@ -1401,18 +1400,14 @@ describeNative("events", () => {
 
       testRoot.renderer.nativeSimulateMouseDown(10, 10, 0)
       testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
-      // Only the primary button loses its `mouseUp`: GPUI resolves the click
-      // gesture inside the primary mouse-up dispatch and stops propagation, so
-      // this element's own `mouseUp` listener never runs. The middle and right
-      // buttons above have no click to resolve and keep theirs. The DOM order
-      // is mousedown, mouseup, click; update this assertion when #329 is
-      // fixed.
+      // The DOM order is mousedown, mouseup, click.
       expect(received).toEqual([
         "down:1",
         "up:1",
         "down:2",
         "up:2",
         "down:0",
+        "up:0",
         "click:0:false",
       ])
     })
