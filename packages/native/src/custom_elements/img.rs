@@ -1253,10 +1253,7 @@ impl ImgImageStore {
             request.clone()
         } else {
             match &request.source {
-                ImageSource::Data {
-                    mime_type,
-                    bytes,
-                } => self
+                ImageSource::Data { mime_type, bytes } => self
                     .entries
                     .iter()
                     .find_map(|(existing_request, _)| {
@@ -1271,7 +1268,7 @@ impl ImgImageStore {
                             && existing_mime_type == mime_type
                             && existing_bytes.len() == bytes.len()
                             && existing_bytes.as_ref() == bytes.as_ref())
-                            .then(|| existing_request.clone())
+                        .then(|| existing_request.clone())
                     })
                     .unwrap_or_else(|| request.clone()),
                 _ => request.clone(),
@@ -1499,11 +1496,11 @@ impl SharedImgImageStore {
             let Some(state) = state.upgrade() else {
                 return;
             };
-            let reload_after = state.lock().unwrap().finish_load(
-                &request_for_task,
-                result,
-                completed_at,
-            );
+            let reload_after =
+                state
+                    .lock()
+                    .unwrap()
+                    .finish_load(&request_for_task, result, completed_at);
             let store_for_update = SharedImgImageStore { state };
             let _ = view.update(cx, move |_view, cx| {
                 if let Some(delay) = reload_after {
@@ -1528,11 +1525,7 @@ impl SharedImgImageStore {
             let Some(state) = state.upgrade() else {
                 return;
             };
-            if state
-                .lock()
-                .unwrap()
-                .finish_reload_wake(&request_for_task)
-            {
+            if state.lock().unwrap().finish_reload_wake(&request_for_task) {
                 let _ = view.update(cx, |_view, cx| cx.notify());
             }
         });
@@ -2641,10 +2634,7 @@ mod tests {
         let first = store.acquire(1, &first_request, now);
         assert!(matches!(first.action, ImgImageAction::StartLoad));
         let image = img_image_store_test_image(1);
-        assert_eq!(
-            store.finish_load(&first_request, Ok(image), now),
-            None
-        );
+        assert_eq!(store.finish_load(&first_request, Ok(image), now), None);
         assert!(store.release(1, &first_request).is_empty());
 
         let different_requests = [
@@ -2675,7 +2665,9 @@ mod tests {
             let acquired = store.acquire(index as u64 + 2, request, now);
             assert!(matches!(acquired.action, ImgImageAction::StartLoad));
             assert_ne!(acquired.request, first_request);
-            assert!(store.release(index as u64 + 2, &acquired.request).is_empty());
+            assert!(store
+                .release(index as u64 + 2, &acquired.request)
+                .is_empty());
         }
     }
 
@@ -2767,12 +2759,7 @@ mod tests {
             store.finish_load(&request, Err(failure), now),
             Some(URL_FAILURE_RETRY_MIN)
         );
-        let retained = store
-            .entries
-            .get(&request)
-            .unwrap()
-            .loaded_image()
-            .unwrap();
+        let retained = store.entries.get(&request).unwrap().loaded_image().unwrap();
         assert!(Arc::ptr_eq(&retained, &original));
         assert!(store.pending_dropped.is_empty());
 
@@ -2781,12 +2768,7 @@ mod tests {
             store.finish_load(&request, Ok(replacement.clone()), now),
             Some(URL_SUCCESS_TTL)
         );
-        let loaded = store
-            .entries
-            .get(&request)
-            .unwrap()
-            .loaded_image()
-            .unwrap();
+        let loaded = store.entries.get(&request).unwrap().loaded_image().unwrap();
         assert!(Arc::ptr_eq(&loaded, &replacement));
         assert_eq!(store.pending_dropped.len(), 1);
         assert!(Arc::ptr_eq(&store.pending_dropped[0], &original));

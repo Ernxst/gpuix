@@ -959,7 +959,12 @@ fn decode_font_variant_numeric(
             return None;
         }
         if !seen.insert(*token) {
-            reject(problems, property, value, format!("\"{token}\" is repeated"));
+            reject(
+                problems,
+                property,
+                value,
+                format!("\"{token}\" is repeated"),
+            );
             return None;
         }
         match *token {
@@ -1724,12 +1729,8 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         number_field!(key, value, "columnGap", column_gap);
         if key == "gridColumn" || key == "gridRow" {
             let property = property!(key);
-            match parse_grid_line_list(
-                value,
-                1,
-                2,
-                "expected 1 or 2 grid lines separated by \"/\"",
-            ) {
+            match parse_grid_line_list(value, 1, 2, "expected 1 or 2 grid lines separated by \"/\"")
+            {
                 Ok(lines) => {
                     let (start, end) = (lines[0], lines.get(1).copied().unwrap_or_default());
                     let offset = if key == "gridRow" { 0 } else { 2 };
@@ -1973,11 +1974,21 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         // describes what is drawn. Validated and then dropped: there is
         // no field because no renderer path would read it.
         if key == "listStyle" {
-            let _ = decode_enum(&property!("listStyle"), value, &["none"], &mut parsed.problems);
+            let _ = decode_enum(
+                &property!("listStyle"),
+                value,
+                &["none"],
+                &mut parsed.problems,
+            );
             continue;
         }
         if key == "listStyleType" {
-            let _ = decode_enum(&property!("listStyleType"), value, &["none"], &mut parsed.problems);
+            let _ = decode_enum(
+                &property!("listStyleType"),
+                value,
+                &["none"],
+                &mut parsed.problems,
+            );
             continue;
         }
         enum_field!(
@@ -2419,11 +2430,7 @@ fn parse_repeating_linear_gradient(body: &str) -> Result<gpui::Background, Strin
 
     let width = width as f32;
     let period = period as f32;
-    if !width.is_finite()
-        || !period.is_finite()
-        || width <= 0.0
-        || period <= 0.0
-        || width >= period
+    if !width.is_finite() || !period.is_finite() || width <= 0.0 || period <= 0.0 || width >= period
     {
         return Err(REPEATING_GRADIENT_REJECTION.into());
     }
@@ -3003,10 +3010,7 @@ mod tests {
         }));
         assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
         assert_eq!(parsed.style.grid_column_start, Some(GridLineValue::Auto));
-        assert_eq!(
-            parsed.style.grid_column_end,
-            Some(GridLineValue::Span(2))
-        );
+        assert_eq!(parsed.style.grid_column_end, Some(GridLineValue::Span(2)));
 
         let serialized = serde_json::to_value(parsed.style).unwrap();
         assert_eq!(serialized["gridColumnStart"], "auto");
@@ -3265,7 +3269,11 @@ mod tests {
 
     #[test]
     fn parses_functional_colors_in_repeating_linear_gradient() {
-        for color in ["rgb(136, 136, 136)", "rgb(136 136 136 / 100%)", "oklch(0 0 0)"] {
+        for color in [
+            "rgb(136, 136, 136)",
+            "rgb(136 136 136 / 100%)",
+            "oklch(0 0 0)",
+        ] {
             let value =
                 format!("repeating-linear-gradient(135deg, {color} 0 2px, transparent 2px 5px)");
             assert_eq!(
@@ -3629,7 +3637,11 @@ mod tests {
         ] {
             let parsed = parse_style_value(&json!({ "fontVariantNumeric": value }));
             assert_eq!(parsed.problems.len(), 1, "{value}: {:?}", parsed.problems);
-            assert_eq!(parsed.style.font_variant_numeric, None, "{value}: {:?}", parsed.problems);
+            assert_eq!(
+                parsed.style.font_variant_numeric, None,
+                "{value}: {:?}",
+                parsed.problems
+            );
         }
     }
 }

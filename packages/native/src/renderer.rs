@@ -1591,8 +1591,8 @@ async fn run_ui_commands(
             }
             // Force layout before sampling, the way GetElementBounds does: a
             // read from a mount effect must not report an unscrollable element.
-            UiCommand::GetScrollMetrics { id, response } => {
-                draw_ui_window_for_read(window, cx).and_then(|()| {
+            UiCommand::GetScrollMetrics { id, response } => draw_ui_window_for_read(window, cx)
+                .and_then(|()| {
                     let metrics = VIRTUAL_LIST_STATES
                         .with(|cell| cell.borrow().get(&id).map(virtual_list_metrics))
                         .or_else(|| {
@@ -1601,32 +1601,27 @@ async fn run_ui_commands(
                         });
                     response.send(metrics).ok();
                     Ok(())
-                })
-            }
+                }),
             UiCommand::ScrollElementIntoView { id, align_to_top } => {
                 window.update(cx, move |view, window, cx| {
                     view.scroll_element_into_view(id, align_to_top, cx);
                     window.refresh();
                 })
             }
-            UiCommand::GetAutomationBounds { response } => {
-                draw_ui_window_for_read(window, cx).and_then(|()| {
+            UiCommand::GetAutomationBounds { response } => draw_ui_window_for_read(window, cx)
+                .and_then(|()| {
                     response.send(crate::automation::all_bounds()).ok();
                     Ok(())
-                })
-            }
-            UiCommand::GetElementBounds { id, response } => {
-                draw_ui_window_for_read(window, cx).and_then(|()| {
+                }),
+            UiCommand::GetElementBounds { id, response } => draw_ui_window_for_read(window, cx)
+                .and_then(|()| {
                     response.send(crate::automation::get_bounds(id)).ok();
                     Ok(())
-                })
-            }
-            UiCommand::FocusElement { id, reveal } => {
-                window.update(cx, move |view, window, cx| {
-                    view.focus_element(id, reveal, window, cx);
-                    window.refresh();
-                })
-            }
+                }),
+            UiCommand::FocusElement { id, reveal } => window.update(cx, move |view, window, cx| {
+                view.focus_element(id, reveal, window, cx);
+                window.refresh();
+            }),
             UiCommand::FocusNext => window.update(cx, |view, window, cx| {
                 view.move_focus(FocusDirection::Next, window, cx)
             }),
@@ -1672,15 +1667,14 @@ async fn run_ui_commands(
             // do. The frame is what syncs a changed `value` prop into the
             // editor, and that sync parks the caret at the end of the new text:
             // a caret written before it would be overwritten moments later.
-            UiCommand::GetTextEditingState { id, response } => {
-                draw_ui_window_for_read(window, cx).and_then(|()| {
+            UiCommand::GetTextEditingState { id, response } => draw_ui_window_for_read(window, cx)
+                .and_then(|()| {
                     window.update(cx, move |view, _window, cx| {
                         response
                             .send(view.custom_registry.text_editing_state(id, cx))
                             .ok();
                     })
-                })
-            }
+                }),
             UiCommand::SetTextSelection {
                 id,
                 start,
@@ -3567,11 +3561,7 @@ impl GpuixRenderer {
     /// Complete the DOM default of an editor's Enter keydown after React capture and
     /// bubble handlers have had a chance to call preventDefault().
     #[napi]
-    pub fn resolve_editor_key_down(
-        &self,
-        element_id: f64,
-        default_prevented: bool,
-    ) -> Result<()> {
+    pub fn resolve_editor_key_down(&self, element_id: f64, default_prevented: bool) -> Result<()> {
         let id = to_element_id(element_id)?;
 
         #[cfg(target_os = "macos")]
@@ -4356,7 +4346,15 @@ impl GpuixRenderer {
 
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
-            crate::automation::dispatch_mouse_down(window, cx, x, y, button, modifiers, click_count);
+            crate::automation::dispatch_mouse_down(
+                window,
+                cx,
+                x,
+                y,
+                button,
+                modifiers,
+                click_count,
+            );
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -4911,9 +4909,7 @@ fn update_web_view<R>(
 /// The same modifier parse as every other surface, surfaced to JS as a thrown
 /// error rather than a silently weakened gesture.
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-fn parse_web_modifiers(
-    modifiers: Option<&str>,
-) -> Result<gpui::Modifiers, wasm_bindgen::JsValue> {
+fn parse_web_modifiers(modifiers: Option<&str>) -> Result<gpui::Modifiers, wasm_bindgen::JsValue> {
     crate::automation::parse_modifiers(modifiers)
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error))
 }
@@ -7951,14 +7947,16 @@ impl gpui::Render for GpuixView {
                 .track_focus(&self.root_focus_handle)
                 .on_action(cx.listener(Self::focus_next_action))
                 .on_action(cx.listener(Self::focus_previous_action))
-                .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, _cx| {
-                    view.dispatch_unfocused_key_event(
-                        "keyDown",
-                        &event.keystroke,
-                        Some(event.is_held),
-                        window,
-                    );
-                }))
+                .on_key_down(
+                    cx.listener(|view, event: &gpui::KeyDownEvent, window, _cx| {
+                        view.dispatch_unfocused_key_event(
+                            "keyDown",
+                            &event.keystroke,
+                            Some(event.is_held),
+                            window,
+                        );
+                    }),
+                )
                 .on_key_up(cx.listener(|view, event: &gpui::KeyUpEvent, window, _cx| {
                     view.dispatch_unfocused_key_event("keyUp", &event.keystroke, None, window);
                 }));
@@ -8327,7 +8325,10 @@ fn build_element_with_parent_layout(
         // the frame that is already rendering it, and a custom renderer is not
         // required to be idempotent under that.
         let measurable = matches!(element.element_type.as_str(), "div" | "text")
-            && interpolate_size_keywords(declared_style, parent_inherited.interpolate_size_keywords);
+            && interpolate_size_keywords(
+                declared_style,
+                parent_inherited.interpolate_size_keywords,
+            );
         // Both questions are about the style the transition is aiming at, not
         // the base declaration: `hover: { width: "auto" }` or an inset
         // refinement changes the answer. Layout-mode properties (`alignSelf`,
@@ -8758,9 +8759,11 @@ fn content_sized_intrinsic_axes(
 mod content_sized_intrinsic_axes_tests {
     use super::*;
 
-    fn element(element_type: &str, style: serde_json::Value) -> crate::retained_tree::RetainedElement {
-        let mut element =
-            crate::retained_tree::RetainedElement::new(1, element_type.to_owned(), 0);
+    fn element(
+        element_type: &str,
+        style: serde_json::Value,
+    ) -> crate::retained_tree::RetainedElement {
+        let mut element = crate::retained_tree::RetainedElement::new(1, element_type.to_owned(), 0);
         let parsed = crate::style::parse_style_value(&style);
         assert_eq!(parsed.problems, [], "{style}");
         element.style = Some(Arc::new(parsed.style));
@@ -9017,12 +9020,7 @@ fn resolve_intrinsic_keywords(
     fn is_keyword(dim: Option<&Dim>) -> bool {
         matches!(
             dim,
-            Some(
-                Dim::MinContent
-                    | Dim::MaxContent
-                    | Dim::FitContent
-                    | Dim::FitContentLimit { .. },
-            )
+            Some(Dim::MinContent | Dim::MaxContent | Dim::FitContent | Dim::FitContentLimit { .. },)
         )
     }
 
@@ -9039,22 +9037,18 @@ fn resolve_intrinsic_keywords(
             style.min_height.as_ref(),
             style.max_height.as_ref(),
         ];
-        let mut min_w = widths
-            .iter()
-            .any(|dim| {
-                matches!(
-                    dim,
-                    Some(Dim::MinContent | Dim::FitContent | Dim::FitContentLimit { .. })
-                )
-            });
-        let mut max_w = widths
-            .iter()
-            .any(|dim| {
-                matches!(
-                    dim,
-                    Some(Dim::MaxContent | Dim::FitContent | Dim::FitContentLimit { .. })
-                )
-            });
+        let mut min_w = widths.iter().any(|dim| {
+            matches!(
+                dim,
+                Some(Dim::MinContent | Dim::FitContent | Dim::FitContentLimit { .. })
+            )
+        });
+        let mut max_w = widths.iter().any(|dim| {
+            matches!(
+                dim,
+                Some(Dim::MaxContent | Dim::FitContent | Dim::FitContentLimit { .. })
+            )
+        });
         let mut height = heights.iter().any(|dim| is_keyword(*dim));
         for refinement in [
             style.hover.as_deref(),
@@ -9398,9 +9392,7 @@ fn build_virtual_list(
     let list_id = element.id;
     let virtual_list_group_id = style
         .and_then(|style| style.hover_group.as_ref())
-        .map(|_| {
-            gpui::ElementId::Name(format!("__gpuix_virtual_list_group_{list_id}").into())
-        });
+        .map(|_| gpui::ElementId::Name(format!("__gpuix_virtual_list_group_{list_id}").into()));
     // Cloned, not copied: gpui runs this processor once per requested row, so
     // the captured value must survive every call.
     let inherited = ctx.inherited.clone();
@@ -10827,9 +10819,7 @@ fn dimension_to_length(value: &crate::style::DimensionValue) -> gpui::Length {
         DimensionValue::MinContent
         | DimensionValue::MaxContent
         | DimensionValue::FitContent
-        | DimensionValue::FitContentLimit { .. } => {
-            gpui::Length::Auto
-        }
+        | DimensionValue::FitContentLimit { .. } => gpui::Length::Auto,
     }
 }
 
@@ -12043,8 +12033,8 @@ fn resolve_styles(
         if let BatchOp::SetStyle { style, .. } = op {
             // Keeping the raw bytes here is what makes the content hash work.
             let raw = style.get().trim().as_bytes();
-            let value: serde_json::Value = serde_json::from_slice(raw)
-                .expect("a RawValue payload is always valid JSON");
+            let value: serde_json::Value =
+                serde_json::from_slice(raw).expect("a RawValue payload is always valid JSON");
             let parsed = crate::style::parse_style_value(&value);
             let shared = styles.intern_parsed(raw, parsed.style);
             let problems = if collect_diagnostics {

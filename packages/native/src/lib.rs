@@ -60,10 +60,10 @@ const TEST_GPUIX_RENDERER_UNAVAILABLE: &str =
         )
     } else {
         concat!(
-            "TestGpuixRenderer is macOS and Windows only. ",
-            "Linux builds have no test-support because wgpu cannot read a rendered image back yet. ",
-            "GpuixRenderer still works on Linux."
-        )
+        "TestGpuixRenderer is macOS and Windows only. ",
+        "Linux builds have no test-support because wgpu cannot read a rendered image back yet. ",
+        "GpuixRenderer still works on Linux."
+    )
     };
 
 /// True only when this binary compiled the real GPU test renderer.

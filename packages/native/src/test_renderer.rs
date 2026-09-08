@@ -32,9 +32,9 @@ use crate::renderer::{
     has_application_menus, init_application_menu_support, install_application_menus,
     parse_canvas_image_source, parse_debug_frame_overlay_mode, set_application_menus,
     take_style_diagnostics_for_reporting, to_element_id, validate_canvas_target,
-    AnimationFrameCallback, CanvasImageLoadState,
-    DebugFrameOverlayStats, EventCallback, FocusDirection, FrameTimestampOrigin,
-    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostics, WindowSize,
+    AnimationFrameCallback, CanvasImageLoadState, DebugFrameOverlayStats, EventCallback,
+    FocusDirection, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView, MenuSpec,
+    PendingStyleDiagnostics, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -1317,11 +1317,7 @@ impl TestGpuixRenderer {
     }
 
     #[napi]
-    pub fn resolve_editor_key_down(
-        &self,
-        element_id: f64,
-        default_prevented: bool,
-    ) -> Result<()> {
+    pub fn resolve_editor_key_down(&self, element_id: f64, default_prevented: bool) -> Result<()> {
         let id = to_element_id(element_id)?;
         with_test_state(self.state_id, |cx, window, view| {
             let view = view.clone();

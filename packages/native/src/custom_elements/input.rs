@@ -327,7 +327,9 @@ impl TextEditorElement {
     /// False before the first frame builds the editor: there is no state to
     /// write to, and the caller asked for something that did not happen.
     fn set_selection(&self, start: usize, end: usize, backward: bool, cx: &mut App) -> bool {
-        let Some(state) = &self.state else { return false };
+        let Some(state) = &self.state else {
+            return false;
+        };
         state.update(cx, |state, cx| {
             state.set_selection_utf16(start, end, backward, cx)
         });
@@ -346,7 +348,9 @@ impl TextEditorElement {
     /// False before the first frame builds the editor, as in
     /// {@link set_selection}.
     fn set_value(&self, value: String, cx: &mut App) -> bool {
-        let Some(state) = &self.state else { return false };
+        let Some(state) = &self.state else {
+            return false;
+        };
         state.update(cx, |state, cx| state.set_external_text(value, cx));
         true
     }
@@ -501,8 +505,7 @@ impl CustomElement for TextEditorElement {
             ctx.accessibility_hidden,
             crate::accessibility::AccessibleText {
                 value: Some(content.as_str()),
-                placeholder: (!self.placeholder.is_empty())
-                    .then_some(self.placeholder.as_str()),
+                placeholder: (!self.placeholder.is_empty()).then_some(self.placeholder.as_str()),
                 ..Default::default()
             },
         );
@@ -557,9 +560,7 @@ impl CustomElement for TextEditorElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &[
-            "change", "click", "keyDown", "keyUp", "focus", "blur",
-        ]
+        &["change", "click", "keyDown", "keyUp", "focus", "blur"]
     }
 
     fn text_editing_state(&self, cx: &App) -> Option<TextEditingState> {
@@ -580,8 +581,12 @@ impl CustomElement for TextEditorElement {
         window: &mut Window,
         cx: &mut App,
     ) -> bool {
-        let Some(state) = &self.state else { return false };
-        state.update(cx, |state, cx| state.resolve_key_down_default(default_prevented, window, cx))
+        let Some(state) = &self.state else {
+            return false;
+        };
+        state.update(cx, |state, cx| {
+            state.resolve_key_down_default(default_prevented, window, cx)
+        })
     }
 
     fn destroy(&mut self) {
@@ -1129,7 +1134,8 @@ impl TextEditorState {
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::Backspace));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::Backspace));
             return;
         }
         if self.read_only {
@@ -1147,7 +1153,8 @@ impl TextEditorState {
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::Delete));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::Delete));
             return;
         }
         if self.read_only {
@@ -1165,7 +1172,8 @@ impl TextEditorState {
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::Left));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::Left));
             return;
         }
         let offset = if self.selected_range.is_empty() {
@@ -1178,7 +1186,8 @@ impl TextEditorState {
 
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::Right));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::Right));
             return;
         }
         let offset = if self.selected_range.is_empty() {
@@ -1201,7 +1210,8 @@ impl TextEditorState {
 
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::Down));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::Down));
             return;
         }
         if let Some(offset) = self.vertical_target(1.0) {
@@ -1211,7 +1221,8 @@ impl TextEditorState {
 
     fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::SelectLeft));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::SelectLeft));
             return;
         }
         self.select_to(self.previous_boundary(self.cursor_offset()), cx);
@@ -1219,7 +1230,8 @@ impl TextEditorState {
 
     fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::SelectRight));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::SelectRight));
             return;
         }
         self.select_to(self.next_boundary(self.cursor_offset()), cx);
@@ -1227,7 +1239,8 @@ impl TextEditorState {
 
     fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::SelectUp));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::SelectUp));
             return;
         }
         if let Some(offset) = self.vertical_target(-1.0) {
@@ -1237,7 +1250,8 @@ impl TextEditorState {
 
     fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::SelectDown));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::SelectDown));
             return;
         }
         if let Some(offset) = self.vertical_target(1.0) {
@@ -1247,7 +1261,8 @@ impl TextEditorState {
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::SelectAll));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::SelectAll));
             return;
         }
         self.selected_range = 0..self.content.len();
@@ -1258,7 +1273,8 @@ impl TextEditorState {
 
     fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::Home));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::Home));
             return;
         }
         self.move_to(self.visual_line_boundary(false), cx);
@@ -1274,7 +1290,8 @@ impl TextEditorState {
 
     fn doc_start(&mut self, _: &DocStart, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::DocStart));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::DocStart));
             return;
         }
         self.move_to(0, cx);
@@ -1282,7 +1299,8 @@ impl TextEditorState {
 
     fn doc_end(&mut self, _: &DocEnd, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::DocEnd));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::DocEnd));
             return;
         }
         self.move_to(self.content.len(), cx);
@@ -1290,7 +1308,8 @@ impl TextEditorState {
 
     fn select_home(&mut self, _: &SelectHome, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::SelectHome));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::SelectHome));
             return;
         }
         self.select_to(self.visual_line_boundary(false), cx);
@@ -1298,7 +1317,8 @@ impl TextEditorState {
 
     fn select_end(&mut self, _: &SelectEnd, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::SelectEnd));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::SelectEnd));
             return;
         }
         self.select_to(self.visual_line_boundary(true), cx);
@@ -1306,7 +1326,8 @@ impl TextEditorState {
 
     fn select_doc_start(&mut self, _: &SelectDocStart, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::SelectDocStart));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::SelectDocStart));
             return;
         }
         self.select_to(0, cx);
@@ -1314,7 +1335,8 @@ impl TextEditorState {
 
     fn select_doc_end(&mut self, _: &SelectDocEnd, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::SelectDocEnd));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::SelectDocEnd));
             return;
         }
         self.select_to(self.content.len(), cx);
@@ -1322,7 +1344,8 @@ impl TextEditorState {
 
     fn word_left(&mut self, _: &WordLeft, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::WordLeft));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::WordLeft));
             return;
         }
         self.move_to(self.previous_word_boundary(self.cursor_offset()), cx);
@@ -1330,7 +1353,8 @@ impl TextEditorState {
 
     fn word_right(&mut self, _: &WordRight, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::WordRight));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::WordRight));
             return;
         }
         self.move_to(self.next_word_boundary(self.cursor_offset()), cx);
@@ -1338,7 +1362,8 @@ impl TextEditorState {
 
     fn select_word_left(&mut self, _: &SelectWordLeft, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::SelectWordLeft));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::SelectWordLeft));
             return;
         }
         self.select_to(self.previous_word_boundary(self.cursor_offset()), cx);
@@ -1346,7 +1371,8 @@ impl TextEditorState {
 
     fn select_word_right(&mut self, _: &SelectWordRight, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::SelectWordRight));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::SelectWordRight));
             return;
         }
         self.select_to(self.next_word_boundary(self.cursor_offset()), cx);
@@ -1359,7 +1385,8 @@ impl TextEditorState {
         cx: &mut Context<Self>,
     ) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::DeleteWordLeft));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::DeleteWordLeft));
             return;
         }
         if self.read_only {
@@ -1378,7 +1405,8 @@ impl TextEditorState {
         cx: &mut Context<Self>,
     ) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::DeleteWordRight));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::DeleteWordRight));
             return;
         }
         if self.read_only {
@@ -1397,7 +1425,8 @@ impl TextEditorState {
         cx: &mut Context<Self>,
     ) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::DeleteToLineStart));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::DeleteToLineStart));
             return;
         }
         if self.read_only {
@@ -1420,7 +1449,8 @@ impl TextEditorState {
         cx: &mut Context<Self>,
     ) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::DeleteToLineEnd));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::DeleteToLineEnd));
             return;
         }
         if self.read_only {
@@ -1438,7 +1468,8 @@ impl TextEditorState {
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::Copy));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::Copy));
             return;
         }
         if !self.selected_range.is_empty() {
@@ -1462,7 +1493,8 @@ impl TextEditorState {
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::Paste));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::Paste));
             return;
         }
         if self.read_only {
@@ -1475,7 +1507,8 @@ impl TextEditorState {
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::Undo));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::Undo));
             return;
         }
         if self.read_only {
@@ -1489,7 +1522,8 @@ impl TextEditorState {
 
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
         if self.enter_wait_armed() {
-            self.queue.push_back(QueuedInput::Action(EditorAction::Redo));
+            self.queue
+                .push_back(QueuedInput::Action(EditorAction::Redo));
             return;
         }
         if self.read_only {
