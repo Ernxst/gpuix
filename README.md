@@ -3434,15 +3434,14 @@ CSS-like styling via the `style` prop:
 </div>
 ```
 
-**Layout:** `display` (`"none"` | `"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
+**Layout:** `display` (`"none"` | `"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`
 
 `display: "none"` removes the element and its subtree from layout, painting, hit
 testing, accessibility, and text collection. It is not transitioned.
 
-`gridTemplateColumns` and `gridTemplateRows` accept the existing integer shorthand
-(`2` means `repeat(2, 1fr)`) or a typed CSS Grid track list. Each entry is an
-object with a `type`: `px`, `fr`, `auto`, `min-content`, `max-content`,
-`minmax`, or `repeat`.
+`gridTemplateColumns` and `gridTemplateRows` accept a typed CSS Grid track list.
+Each entry is an object with a `type`: `px`, `fr`, `auto`, `min-content`,
+`max-content`, `minmax`, or `repeat`.
 
 ```tsx
 <div style={{

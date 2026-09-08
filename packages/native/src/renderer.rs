@@ -51,7 +51,7 @@ use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::retained_tree::{RetainedTree, StyleTable};
 use crate::style::{
-    parse_font_weight, GridTemplateValue, GridTrackMaxValue, GridTrackMinValue, GridTrackValue,
+    parse_font_weight, GridTrackMaxValue, GridTrackMinValue, GridTrackValue,
     StyleDesc, StyleProblem,
 };
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection, TextTransform};
@@ -11119,43 +11119,17 @@ fn to_gpui_grid_track(track: &GridTrackValue) -> gpui::GridTrack {
     }
 }
 
-fn legacy_grid_track(minimum: Option<&str>) -> gpui::GridTrack {
-    match minimum {
-        Some("min-content") => gpui::GridTrack::MinMax {
-            min: gpui::GridTrackMin::MinContent,
-            max: gpui::GridTrackMax::Fr(1.),
-        },
-        Some("max-content") => gpui::GridTrack::MinMax {
-            min: gpui::GridTrackMin::Px(gpui::px(0.)),
-            max: gpui::GridTrackMax::MaxContent,
-        },
-        _ => gpui::GridTrack::MinMax {
-            min: gpui::GridTrackMin::Px(gpui::px(0.)),
-            max: gpui::GridTrackMax::Fr(1.),
-        },
-    }
-}
-
-fn to_gpui_grid_template(
-    template: &GridTemplateValue,
-    legacy_minimum: Option<&str>,
-) -> gpui::GridTemplate {
-    let tracks = match template {
-        GridTemplateValue::LegacyCount(count) => vec![gpui::GridTemplateComponent::Repeat {
-            count: *count as u16,
-            tracks: vec![legacy_grid_track(legacy_minimum)],
-        }],
-        GridTemplateValue::Tracks(tracks) => tracks
-            .iter()
-            .map(|track| match track {
-                GridTrackValue::Repeat { count, tracks } => gpui::GridTemplateComponent::Repeat {
-                    count: *count,
-                    tracks: tracks.iter().map(to_gpui_grid_track).collect(),
-                },
-                track => gpui::GridTemplateComponent::Track(to_gpui_grid_track(track)),
-            })
-            .collect(),
-    };
+fn to_gpui_grid_template(tracks: &[GridTrackValue]) -> gpui::GridTemplate {
+    let tracks = tracks
+        .iter()
+        .map(|track| match track {
+            GridTrackValue::Repeat { count, tracks } => gpui::GridTemplateComponent::Repeat {
+                count: *count,
+                tracks: tracks.iter().map(to_gpui_grid_track).collect(),
+            },
+            track => gpui::GridTemplateComponent::Track(to_gpui_grid_track(track)),
+        })
+        .collect();
     gpui::GridTemplate { tracks }
 }
 
@@ -11172,13 +11146,10 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         _ => {}
     }
     if let Some(cols) = &style.grid_template_columns {
-        el = el.grid_template_columns(to_gpui_grid_template(
-            cols,
-            style.grid_column_min.as_deref(),
-        ));
+        el = el.grid_template_columns(to_gpui_grid_template(cols));
     }
     if let Some(rows) = &style.grid_template_rows {
-        el = el.grid_template_rows(to_gpui_grid_template(rows, style.grid_row_min.as_deref()));
+        el = el.grid_template_rows(to_gpui_grid_template(rows));
     }
     if style.flex_direction.as_deref() == Some("column") {
         el = el.flex_col();
