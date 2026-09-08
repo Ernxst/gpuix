@@ -8972,7 +8972,8 @@ fn measure_intrinsic_size(
 }
 
 /// Substitute the CSS intrinsic sizing keywords (`min-content`, `max-content`,
-/// `fit-content`) on this element's dimension props with measured pixel
+/// `fit-content` and `fit-content(<length-percentage>)`) on this element's
+/// dimension props with measured pixel
 /// values before the style reaches GPUI.
 ///
 /// Neither GPUI's `Length` nor taffy's flex/block algorithms carry an
@@ -9016,7 +9017,12 @@ fn resolve_intrinsic_keywords(
     fn is_keyword(dim: Option<&Dim>) -> bool {
         matches!(
             dim,
-            Some(Dim::MinContent | Dim::MaxContent | Dim::FitContent)
+            Some(
+                Dim::MinContent
+                    | Dim::MaxContent
+                    | Dim::FitContent
+                    | Dim::FitContentLimit { .. },
+            )
         )
     }
 
@@ -9035,10 +9041,20 @@ fn resolve_intrinsic_keywords(
         ];
         let mut min_w = widths
             .iter()
-            .any(|dim| matches!(dim, Some(Dim::MinContent | Dim::FitContent)));
+            .any(|dim| {
+                matches!(
+                    dim,
+                    Some(Dim::MinContent | Dim::FitContent | Dim::FitContentLimit { .. })
+                )
+            });
         let mut max_w = widths
             .iter()
-            .any(|dim| matches!(dim, Some(Dim::MaxContent | Dim::FitContent)));
+            .any(|dim| {
+                matches!(
+                    dim,
+                    Some(Dim::MaxContent | Dim::FitContent | Dim::FitContentLimit { .. })
+                )
+            });
         let mut height = heights.iter().any(|dim| is_keyword(*dim));
         for refinement in [
             style.hover.as_deref(),
@@ -9137,6 +9153,14 @@ fn resolve_intrinsic_keywords(
                 preferred: Box::new(Dim::Percentage(1.0)),
                 max: Box::new(Dim::Pixels(max)),
             }),
+            Some(Dim::FitContentLimit { source, limit }) => {
+                min_width.zip(max_width).map(|(min, max)| Dim::Clamp {
+                    source: source.clone(),
+                    min: Box::new(Dim::Pixels(min)),
+                    preferred: limit.clone(),
+                    max: Box::new(Dim::Pixels(max)),
+                })
+            }
             _ => return,
         };
         *dim = replaced;
@@ -10772,7 +10796,10 @@ fn dimension_to_calc(value: &crate::style::DimensionValue) -> gpui::CalcLength {
             dimension_to_calc(max),
         ),
         DimensionValue::Auto => unreachable!("auto cannot be part of a calc expression"),
-        DimensionValue::MinContent | DimensionValue::MaxContent | DimensionValue::FitContent => {
+        DimensionValue::MinContent
+        | DimensionValue::MaxContent
+        | DimensionValue::FitContent
+        | DimensionValue::FitContentLimit { .. } => {
             unreachable!("intrinsic sizing keywords cannot be part of a calc expression")
         }
     }
@@ -10797,7 +10824,10 @@ fn dimension_to_length(value: &crate::style::DimensionValue) -> gpui::Length {
         // `resolve_intrinsic_keywords` on the host containers that can be
         // probed. A surface that cannot be measured falls back to `auto`, the
         // closest layout GPUI can produce without a content measurement.
-        DimensionValue::MinContent | DimensionValue::MaxContent | DimensionValue::FitContent => {
+        DimensionValue::MinContent
+        | DimensionValue::MaxContent
+        | DimensionValue::FitContent
+        | DimensionValue::FitContentLimit { .. } => {
             gpui::Length::Auto
         }
     }
@@ -10882,6 +10912,12 @@ fn resolve_dimension(
         crate::style::DimensionValue::MinContent
         | crate::style::DimensionValue::MaxContent
         | crate::style::DimensionValue::FitContent => Some(value.clone()),
+        crate::style::DimensionValue::FitContentLimit { source, limit } => {
+            Some(crate::style::DimensionValue::FitContentLimit {
+                source: source.clone(),
+                limit: Box::new(resolve_dimension(Some(limit), units)?),
+            })
+        }
         crate::style::DimensionValue::Ch(value) => {
             Some(crate::style::DimensionValue::Pixels(value * units.ch))
         }

@@ -97,6 +97,12 @@ pub enum DimensionValue {
     MaxContent,
     /// CSS `fit-content`: `clamp(min-content, stretch, max-content)`.
     FitContent,
+    /// CSS `fit-content(<length-percentage>)`, retaining the source for
+    /// serialization and the parsed limit for layout.
+    FitContentLimit {
+        source: String,
+        limit: Box<DimensionValue>,
+    },
     Calc {
         source: String,
         left: Box<DimensionValue>,
@@ -374,6 +380,7 @@ impl Serialize for DimensionValue {
             Self::MinContent => serializer.serialize_str("min-content"),
             Self::MaxContent => serializer.serialize_str("max-content"),
             Self::FitContent => serializer.serialize_str("fit-content"),
+            Self::FitContentLimit { source, .. } => serializer.serialize_str(source),
             Self::Calc { source, .. } | Self::Clamp { source, .. } => {
                 serializer.serialize_str(source)
             }
@@ -455,6 +462,17 @@ fn parse_dimension(value: &str) -> Result<DimensionValue, String> {
         "max-content" => return Ok(DimensionValue::MaxContent),
         "fit-content" => return Ok(DimensionValue::FitContent),
         _ => {}
+    }
+    if let Some(inner) = value
+        .strip_prefix("fit-content(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        let limit = parse_length_atom(inner.trim())
+            .map_err(|error| format!("invalid fit-content() at byte 12: {error}"))?;
+        return Ok(DimensionValue::FitContentLimit {
+            source: value.to_owned(),
+            limit: Box::new(limit),
+        });
     }
     if let Some(inner) = value
         .strip_prefix("calc(")
@@ -2417,17 +2435,52 @@ mod tests {
     }
 
     #[test]
+    fn parses_fit_content_limits_and_rejects_invalid_limits() {
+        let parsed = parse_style_value(&json!({
+            "width": "fit-content(240px)",
+            "maxWidth": "fit-content(50%)",
+        }));
+
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(
+            parsed.style.width,
+            Some(DimensionValue::FitContentLimit {
+                source: "fit-content(240px)".into(),
+                limit: Box::new(DimensionValue::Pixels(240.0)),
+            })
+        );
+        assert_eq!(
+            parsed.style.max_width,
+            Some(DimensionValue::FitContentLimit {
+                source: "fit-content(50%)".into(),
+                limit: Box::new(DimensionValue::Percentage(0.5)),
+            })
+        );
+
+        let serialized = serde_json::to_value(parsed.style).unwrap();
+        assert_eq!(serialized["width"], "fit-content(240px)");
+        assert_eq!(serialized["maxWidth"], "fit-content(50%)");
+
+        for (property, value) in [
+            ("width", "fit-content()"),
+            ("maxWidth", "fit-content(auto)"),
+            ("height", "fit-content(max-content)"),
+        ] {
+            let parsed = parse_style_value(&json!({ property: value }));
+            assert_eq!(parsed.problems.len(), 1, "{value}");
+            assert_eq!(parsed.problems[0].property, property, "{value}");
+        }
+    }
+
+    #[test]
     fn rejects_intrinsic_keywords_inside_expressions() {
         // A browser rejects `calc(max-content + 4px)` and
         // `clamp(min-content, 50%, max-content)` too: the keywords are not
-        // <length-percentage> terms. `fit-content(240px)` is different — it
-        // is valid CSS on width — but the functional form is a deliberate
-        // scope cut here (README documents it); this pins the rejection so
-        // adding it later is a conscious change.
+        // <length-percentage> terms. The fit-content() functional form is
+        // parsed separately and accepts only a length atom as its limit.
         for (property, value) in [
             ("width", "calc(max-content + 4px)"),
             ("width", "clamp(min-content, 50%, 240px)"),
-            ("width", "fit-content(240px)"),
         ] {
             let parsed = parse_style_value(&json!({ property: value }));
             assert_eq!(parsed.problems.len(), 1, "{value}");

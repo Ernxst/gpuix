@@ -27,8 +27,8 @@ the keywords exist for. `fit-content` substitutes its CSS definition,
 to the content's laid-out height, which is what a browser computes for them
 there. Keywords are measured on `<div>` and `<text>`; a custom element
 cannot be re-entered to measure, so a keyword there behaves as `auto`. The
-functional form `fit-content(240px)`, valid CSS on width, is a deliberate
-scope cut and still rejects.
+functional form `fit-content(<length-percentage>)` is accepted as well; see
+the `accept-fit-content-limit` changeset.
 
 Fixing `fit-content` also surfaced a gpui bug: `CalcLength::resolve` left
 absolute atoms in logical pixels while taffy supplies a scale-multiplied

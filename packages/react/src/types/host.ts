@@ -21,6 +21,7 @@ export type DimensionValue =
   | "max-content"
   | "fit-content"
   | LengthAtom
+  | `fit-content(${LengthAtom})`
   | `calc(${CalcExpression})`
   | `clamp(${LengthAtom}, ${LengthAtom}, ${LengthAtom})`
 
