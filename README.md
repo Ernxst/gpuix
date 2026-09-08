@@ -1551,12 +1551,13 @@ than at the top of the viewport.
 
 Reading any of the six properties forces layout in the native renderer, as
 reading `Element.scrollHeight` does on the web; the browser-mirror renderer
-samples the last frame instead. Hoist the reads you need out of a hot scroll
-handler rather than repeating them: each read costs a forced draw, and on an
-element that is **not** a scroll container it costs two, because the metrics
-call returns nothing and the fallback measures the element's bounds — the
-three-property "am I at the bottom?" idiom above is six draws there. A
-per-frame metrics cache would collapse that; it is not implemented yet.
+samples the last frame instead. A native read redraws only when the window has
+pending changes, so repeated reads against unchanged layout are cheap. Hoist
+the reads you need out of a hot scroll handler rather than repeating them as a
+matter of good practice. On an element that is **not** a scroll container the
+metrics call returns nothing and the fallback measures the element's bounds,
+so the three-property "am I at the bottom?" idiom still performs both
+measurements there.
 
 ## Virtual lists
 

@@ -313,10 +313,7 @@ export declare class TestGpuixRenderer {
   setAllowPrivateNetworkImages(enabled: boolean): void
   drainStyleDiagnostics(): Array<GpuixStyleDiagnostic>
   takeStyleDiagnosticsForReporting(): Array<GpuixStyleDiagnostic>
-  /**
-   * Signal that a batch of mutations is complete.
-   * In tests, this is a no-op — flush() handles the actual re-render.
-   */
+  /** Signal that a batch of mutations is complete and schedule its frame. */
   commitMutations(): void
   /**
    * Replace one canvas element's retained display list and notify the
