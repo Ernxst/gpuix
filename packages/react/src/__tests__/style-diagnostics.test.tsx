@@ -736,6 +736,86 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(diagnostics[0].message).toContain('<div data-testid="ledger-grid">')
   })
 
+  it("reports a malformed minmax track nested inside repeat", () => {
+    const renderer = new TestRenderer()
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 84, "div"],
+        ["setCustomPropValue", 84, "data-testid", "repeated-grid"],
+        [
+          "setStyle",
+          84,
+          {
+            display: "grid",
+            gridTemplateColumns: [
+              {
+                type: "repeat",
+                count: 2,
+                tracks: [
+                  {
+                    type: "minmax",
+                    min: { type: "fr", value: 1 },
+                    max: { type: "fr", value: 1 },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      ]),
+    )
+
+    const diagnostics = renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementId: 84,
+      elementType: "div",
+      dataTestId: "repeated-grid",
+      property: "gridTemplateColumns[0].tracks[0].min.type",
+      value: '"fr"',
+    })
+    expect(diagnostics[0].message).toContain("fr is not valid as a minmax minimum")
+  })
+
+  it("rejects a repeat whose expanded grid has more than 64 tracks", () => {
+    const renderer = new TestRenderer()
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 85, "div"],
+        ["setCustomPropValue", 85, "data-testid", "oversized-grid"],
+        [
+          "setStyle",
+          85,
+          {
+            display: "grid",
+            gridTemplateColumns: [
+              {
+                type: "repeat",
+                count: 64,
+                tracks: [
+                  { type: "fr", value: 1 },
+                  { type: "fr", value: 1 },
+                ],
+              },
+            ],
+          },
+        ],
+      ]),
+    )
+
+    const diagnostics = renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementId: 85,
+      elementType: "div",
+      dataTestId: "oversized-grid",
+      property: "gridTemplateColumns",
+    })
+    expect(diagnostics[0].message).toContain(
+      "expected no more than 64 expanded grid tracks",
+    )
+  })
+
   it("rejects a malformed transition as one descriptor with precise paths", () => {
     const renderer = new TestRenderer()
     renderer.applyBatch(
