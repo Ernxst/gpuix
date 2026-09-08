@@ -155,7 +155,7 @@ describeNative("text wrapping", () => {
     expect(prose.height).toBeGreaterThan(20)
   })
 
-  it("wraps a text flex item at its min-content width", () => {
+  it("wraps a text flex item instead of overflowing its row", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div
@@ -178,6 +178,10 @@ describeNative("text wrapping", () => {
     const prose = rect(renderer, "prose")
     expectInside(prose, row)
     expect(prose.height).toBeGreaterThan(20)
+    // The item takes the row's remaining width, not its own min-content: row
+    // 160 minus the 48px fixed sibling.
+    expect(prose.x).toBeCloseTo(48, 3)
+    expect(prose.width).toBeCloseTo(112, 3)
   })
 
   it("keeps a markdown list item inside a flex column", () => {

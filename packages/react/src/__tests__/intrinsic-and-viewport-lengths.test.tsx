@@ -152,6 +152,32 @@ describe("intrinsic and viewport lengths (issue #300)", () => {
     }
   })
 
+  it("sizes a two-line text-bearing div's min-content width to the widest word on its second hard line", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    try {
+      root.render(
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+          <div data-testid="min-content-multiline-text" style={{ width: "min-content" }}>
+            <text style={{ fontSize: 20 }}>{"grid\nwide layout"}</text>
+          </div>
+          {/* "layout" is the last word of its hard-wrapped line, so its
+              wrap-candidate span ends at the line's own width rather than
+              extending into a following space. That makes the reference a
+              bare word instead of a word-plus-space span. */}
+          <text data-testid="min-content-multiline-reference" style={{ fontSize: 20 }}>
+            layout
+          </text>
+        </div>,
+      )
+
+      const text = boundsFor(root.renderer, "min-content-multiline-text")
+      const reference = boundsFor(root.renderer, "min-content-multiline-reference")
+      expect(text.width).toBeCloseTo(reference.width, 3)
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("clamps fit-content between min-content, the available space, and max-content, and composes vw inside calc()", () => {
     // fit-content resolves to its CSS definition, clamp(min-content, stretch,
     // max-content), which rides GPUI's calc engine. The default test window
