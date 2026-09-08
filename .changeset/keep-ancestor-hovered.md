@@ -1,8 +1,5 @@
 ---
 '@gpuix/native': patch
-'@gpuix/react': patch
 ---
 
-Keep ancestor hover state while the pointer crosses between descendant hitboxes.
-
-Fixes #389
+Keep canvas hover targets and their ancestors stable during press-and-drag moves inside clickable containers.

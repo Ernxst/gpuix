@@ -2307,6 +2307,83 @@ describeNative("events", () => {
       expect(events).toEqual(["parent-enter", "child-enter", "child-move"])
     })
 
+    it("keeps a canvas and its clickable ancestor hovered during a drag", () => {
+      const events: string[] = []
+
+      testRoot.render(
+        <div
+          onMouseEnter={() => events.push("parent-enter")}
+          onMouseLeave={() => events.push("parent-leave")}
+          onClick={() => events.push("parent-click")}
+          style={{ width: 260, height: 120, padding: 12 }}
+        >
+          <canvas
+            width={220}
+            height={80}
+            data-testid="drag-hover-canvas"
+            onMouseDown={() => events.push("surface-down")}
+            onMouseMove={() => events.push("surface-move")}
+            onMouseEnter={() => events.push("surface-enter")}
+            onMouseLeave={() => events.push("surface-leave")}
+            style={{ width: 220, height: 80 }}
+          />
+        </div>
+      )
+
+      const canvas = testRoot.renderer.findByTestId("drag-hover-canvas")!
+      const [x, y, width, height] = testRoot.renderer.getElementBounds(canvas.id)!
+      const point = (offset: number) => [x + offset, y + height / 2] as const
+
+      testRoot.renderer.nativeSimulateMouseMove(...point(width / 2))
+      expect(events).toEqual(["parent-enter", "surface-enter", "surface-move"])
+
+      testRoot.renderer.nativeSimulateMouseDown(...point(width / 2), 0)
+      expect(events).toEqual(["parent-enter", "surface-enter", "surface-move", "surface-down"])
+
+      testRoot.renderer.nativeSimulateMouseMove(...point(width / 2 - 10), 0)
+      expect(events).toEqual([
+        "parent-enter",
+        "surface-enter",
+        "surface-move",
+        "surface-down",
+        "surface-move",
+      ])
+
+      testRoot.renderer.nativeSimulateMouseMove(...point(width / 2 + 10), 0)
+      expect(events).toEqual([
+        "parent-enter",
+        "surface-enter",
+        "surface-move",
+        "surface-down",
+        "surface-move",
+        "surface-move",
+      ])
+
+      testRoot.renderer.nativeSimulateMouseUp(...point(width / 2 + 10), 0)
+      expect(events).toEqual([
+        "parent-enter",
+        "surface-enter",
+        "surface-move",
+        "surface-down",
+        "surface-move",
+        "surface-move",
+        "parent-click",
+      ])
+
+      testRoot.renderer.nativeSimulateMouseMove(700, 700)
+      expect(events).toEqual([
+        "parent-enter",
+        "surface-enter",
+        "surface-move",
+        "surface-down",
+        "surface-move",
+        "surface-move",
+        "parent-click",
+        "surface-leave",
+        "parent-leave",
+      ])
+    })
+
     it("keeps common ancestors hovered while moving between painted siblings", () => {
       const events: string[] = []
 

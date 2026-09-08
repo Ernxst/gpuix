@@ -6173,6 +6173,7 @@ impl GpuixView {
     /// safe to use here; the later GPUI hover callback reconciles to the same
     /// target and becomes a no-op.
     pub(crate) fn update_hover_target_before_mouse_move(&mut self, id: u64) {
+        self.hovered_targets.insert(id);
         self.hover_target = Some(id);
         self.dispatch_hover_target_change(false);
     }
