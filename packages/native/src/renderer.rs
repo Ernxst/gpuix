@@ -9795,7 +9795,7 @@ fn accessibility_hidden_in_ancestry(tree: &RetainedTree, element_id: u64) -> boo
     false
 }
 
-fn action_disabled_in_ancestry(tree: &RetainedTree, element_id: u64) -> bool {
+pub(crate) fn action_disabled_in_ancestry(tree: &RetainedTree, element_id: u64) -> bool {
     let mut current = Some(element_id);
     while let Some(id) = current {
         let Some(element) = tree.elements.get(&id) else {

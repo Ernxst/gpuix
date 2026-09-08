@@ -1294,6 +1294,80 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     }
   })
 
+  it("does not bubble canvas mouseMove twice to an ancestor", () => {
+    const testRoot = createTestRoot({ width: 240, height: 140 })
+    const moves: string[] = []
+    try {
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 100 }}
+          onMouseMove={() => moves.push("move")}
+        >
+          <canvas
+            width={80}
+            height={60}
+            style={{ width: 80, height: 60 }}
+          />
+        </div>
+      )
+      testRoot.renderer.nativeSimulateMouseMove(10, 10)
+
+      expect(moves).toEqual(["move"])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("delivers an ancestor mouseUp once before its click for an unstyled canvas", () => {
+    const testRoot = createTestRoot({ width: 240, height: 140 })
+    const order: string[] = []
+    const canvasMouseUp = vi.fn()
+    try {
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 100 }}
+          onClick={() => order.push("click")}
+          onMouseUp={() => order.push("mouseUp")}
+        >
+          <canvas
+            width={80}
+            height={60}
+            onMouseUp={canvasMouseUp}
+          />
+        </div>
+      )
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 0)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
+
+      expect(canvasMouseUp).toHaveBeenCalledOnce()
+      expect(order).toEqual(["mouseUp", "click"])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("does not click a canvas under an aria-disabled ancestor", () => {
+    const testRoot = createTestRoot({ width: 240, height: 140 })
+    const click = vi.fn()
+    try {
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 100 }}
+          onClick={click}
+          ariaDisabled
+        >
+          <canvas width={80} height={60} />
+        </div>
+      )
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 0)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
+
+      expect(click).not.toHaveBeenCalled()
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
   it("delivers canvas mouseUp before auxClick", () => {
     const testRoot = createTestRoot({ width: 160, height: 120 })
     const order: string[] = []

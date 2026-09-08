@@ -1226,23 +1226,19 @@ impl CanvasElement {
         // flags keep a canvas that declares both from attaching two.
         let mut click_attached = false;
         let mut mouse_down_attached = false;
-        let tracks_click = crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "click")
-            || crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "doubleClick");
-        let tracks_aux_click =
-            crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "auxClick");
-        let tracks_mouse_down =
-            crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "mouseDown");
-        let tracks_context_menu =
-            crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "contextMenu");
-        let tracks_mouse_up =
-            crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "mouseUp");
-        let tracks_mouse_move =
-            crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "mouseMove");
+        let tracks = |event: &str| {
+            crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, event)
+        };
+        let tracks_click = (tracks("click") || tracks("doubleClick"))
+            && !crate::renderer::action_disabled_in_ancestry(ctx.tree, ctx.id);
+        let tracks_aux_click = tracks("auxClick");
+        let tracks_mouse_down = tracks("mouseDown");
+        let tracks_context_menu = tracks("contextMenu");
+        let tracks_mouse_up = tracks("mouseUp");
+        let tracks_mouse_move = tracks("mouseMove");
         // A canvas that declares only `onContextMenu` takes the right button
-        // alone, so a left press neither costs an IPC round trip nor stops
-        // propagation on behalf of a listener that would ignore it.
-        let mouse_down_buttons =
-            crate::renderer::mouse_down_button_set(tracks_mouse_down);
+        // alone, unless an ancestor tracks `onMouseDown` too.
+        let mouse_down_buttons = crate::renderer::mouse_down_button_set(tracks_mouse_down);
         let mut event_types = ctx.events.iter().map(String::as_str).collect::<Vec<_>>();
         if tracks_click && !ctx.events.contains("click") && !ctx.events.contains("doubleClick") {
             event_types.push("click");
@@ -1390,7 +1386,7 @@ impl CanvasElement {
                 }
                 "mouseMove" => {
                     element = element.on_mouse_move(cx.listener(
-                        move |view, event: &gpui::MouseMoveEvent, _window, _cx| {
+                        move |view, event: &gpui::MouseMoveEvent, _window, cx| {
                             view.update_hover_target_before_mouse_move(id);
                             let (x, y) = local_point(&geometry, event.position);
                             crate::renderer::emit_event_full(
@@ -1406,6 +1402,7 @@ impl CanvasElement {
                                         .map(crate::renderer::mouse_button_to_u32);
                                 },
                             );
+                            cx.stop_propagation();
                         },
                     ));
                 }
