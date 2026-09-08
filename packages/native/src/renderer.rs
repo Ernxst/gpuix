@@ -8211,8 +8211,7 @@ fn build_element_with_parent_layout(
         .and_then(|style| style.display.as_deref())
         == Some("none")
     {
-        ctx.motion_states.remove(&id);
-        ctx.transition_states.remove(&id);
+        remove_subtree_motion_and_transition_state(ctx, id);
         ctx.scroll_handles.remove(&id);
         let built = build_display_none_element(element);
         if tracks_accessibility_host_identity {
@@ -8566,6 +8565,22 @@ fn build_element_with_parent_layout(
     }
     ctx.inherited = parent_inherited;
     built
+}
+
+fn remove_subtree_motion_and_transition_state(ctx: &mut BuildCtx<'_>, root_id: u64) {
+    let mut pending = vec![root_id];
+    let mut ids = Vec::new();
+    while let Some(id) = pending.pop() {
+        ids.push(id);
+        if let Some(element) = ctx.tree.elements.get(&id) {
+            pending.extend(element.children.iter().copied());
+        }
+    }
+
+    for id in ids {
+        ctx.motion_states.remove(&id);
+        ctx.transition_states.remove(&id);
+    }
 }
 
 /// The pixel size of this element's intrinsic (`auto`) transition endpoint, or
@@ -10620,6 +10635,7 @@ fn flattened_text_content(
     );
     content.run_styles = Some(inline.runs);
     content.tracked_ranges = inline.tracked_ranges;
+    content.zero_bounds = inline.zero_bounds;
     content.clickable_ranges = inline.clickable_ranges;
     content.selectable = ctx.inherited.selectable;
     content.group = crate::text::search::group_id(ctx.tree, element.id);

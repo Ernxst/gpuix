@@ -232,6 +232,9 @@ pub struct SelectableText {
     pub on_link: Option<Arc<dyn Fn(&str)>>,
     /// Nested React text hosts whose glyph ranges should have automation bounds.
     pub tracked_ranges: Vec<(Range<usize>, u64)>,
+    /// Nested React text hosts skipped by `display: none`, which still need a
+    /// zero native bounds record for DOM-shaped measurement.
+    pub zero_bounds: Vec<u64>,
     /// Nested React text hosts with an `onClick` handler.
     pub clickable_ranges: Vec<(Range<usize>, u64)>,
     /// Called with the most specific clickable host under a mouse-up.
@@ -268,6 +271,7 @@ impl SelectableText {
             links: Vec::new(),
             on_link: None,
             tracked_ranges: Vec::new(),
+            zero_bounds: Vec::new(),
             clickable_ranges: Vec::new(),
             on_inline_click: None,
             selectable: true,
@@ -453,6 +457,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         links,
         on_link,
         tracked_ranges,
+        zero_bounds,
         clickable_ranges,
         on_inline_click,
         selectable,
@@ -542,6 +547,9 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                 {
                     crate::automation::record_bounds(*element_id, bounds);
                 }
+            }
+            for element_id in &zero_bounds {
+                crate::automation::record_bounds(*element_id, Bounds::default());
             }
             if let Some(on_link) = &on_link {
                 register_link_listener(window, &layout, &links, on_link, &selection);
