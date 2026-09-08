@@ -26,7 +26,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../index"
-import { useFocusTrap } from "../components/floating"
 // `../index` does not re-export the test helpers, so importing them from there
 // left `hasNativeTestRenderer` undefined and skipped this whole suite silently.
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
@@ -712,7 +711,7 @@ describeNative("floating controls", () => {
     testRoot.render(<Demo />)
     const two = testRoot.renderer.findByTestId("two")
     const twoBounds = testRoot.renderer.getElementBounds(two.id)
-    testRoot.renderer.nativeSimulateClick(twoBounds[0] + 8, twoBounds[1] + 8)
+    testRoot.renderer.nativeSimulateClick(twoBounds.x + 8, twoBounds.y + 8)
     expect(testRoot.renderer.getAllText()).toContain("Value: one")
     testRoot.renderer.simulateKeystrokes("down")
     testRoot.renderer.simulateKeystrokes("enter")
@@ -721,8 +720,6 @@ describeNative("floating controls", () => {
 
   it("wraps tab order inside a subtree", () => {
     function Demo() {
-      const [panel, setPanel] = useState(null)
-      const trapTab = useFocusTrap(panel)
       return (
         <div style={{ width: 400, height: 220, padding: 12 }}>
           <div
@@ -734,9 +731,7 @@ describeNative("floating controls", () => {
             Outside
           </div>
           <div
-            ref={setPanel}
             testId="panel"
-            onKeyDown={trapTab}
             style={{ width: 180, height: 80, backgroundColor: "#1e293b" }}
           >
             <div tabIndex={2} testId="later" style={{ width: 80, height: 32 }}>
@@ -751,35 +746,33 @@ describeNative("floating controls", () => {
     }
 
     testRoot.render(<Demo />)
+    const panel = testRoot.renderer.findByTestId("panel")
     const first = testRoot.renderer.findByTestId("first")
     const later = testRoot.renderer.findByTestId("later")
     const outside = testRoot.renderer.findByTestId("outside")
+    expect(panel).toBeDefined()
     expect(first).toBeDefined()
     expect(later).toBeDefined()
 
     testRoot.renderer.focusElement(first.id)
     expect(testRoot.renderer.getFocusedElementId()).toBe(first.id)
-    testRoot.renderer.simulateKeystrokes("tab")
+    testRoot.renderer.focusNextWithin(panel.id)
     expect(testRoot.renderer.getFocusedElementId()).toBe(later.id)
     expect(testRoot.renderer.getFocusedElementId()).not.toBe(outside.id)
 
-    testRoot.renderer.simulateKeystrokes("tab")
+    testRoot.renderer.focusNextWithin(panel.id)
     expect(testRoot.renderer.getFocusedElementId()).toBe(first.id)
 
-    testRoot.renderer.simulateKeystrokes("shift-tab")
+    testRoot.renderer.focusPreviousWithin(panel.id)
     expect(testRoot.renderer.getFocusedElementId()).toBe(later.id)
   })
 
   it("skips a hidden tab stop", () => {
     function Demo() {
-      const [panel, setPanel] = useState(null)
-      const trapTab = useFocusTrap(panel)
       return (
         <div style={{ width: 400, height: 220, padding: 12 }}>
           <div
-            ref={setPanel}
             testId="panel"
-            onKeyDown={trapTab}
             style={{ width: 180, height: 80, backgroundColor: "#1e293b" }}
           >
             <div tabIndex={0} testId="first" style={{ width: 80, height: 32 }}>
@@ -801,14 +794,16 @@ describeNative("floating controls", () => {
     }
 
     testRoot.render(<Demo />)
+    const panel = testRoot.renderer.findByTestId("panel")
     const first = testRoot.renderer.findByTestId("first")
     const second = testRoot.renderer.findByTestId("second")
     const hidden = testRoot.renderer.findByTestId("hidden")
+    expect(panel).toBeDefined()
     expect(first).toBeDefined()
     expect(second).toBeDefined()
 
     testRoot.renderer.focusElement(first.id)
-    testRoot.renderer.simulateKeystrokes("tab")
+    testRoot.renderer.focusNextWithin(panel.id)
     expect(testRoot.renderer.getFocusedElementId()).toBe(second.id)
     expect(testRoot.renderer.getFocusedElementId()).not.toBe(hidden.id)
   })

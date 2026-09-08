@@ -10,7 +10,6 @@ import React, {
 import type { ReactElement, ReactNode, Ref } from "react"
 import type { EventPayload } from "@gpuix/native"
 import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
-import { useGpuix } from "../hooks/use-gpuix.js"
 
 export type FloatingSide = "top" | "right" | "bottom" | "left"
 export type FloatingAlign = "start" | "center" | "end"
@@ -70,21 +69,6 @@ export function useControllableState<Value>({
     [controlled, currentValue, onChange]
   )
   return [currentValue, setValue]
-}
-
-export function useFocusTrap(
-  element: PublicInstance | null | undefined
-): (event: EventPayload) => void {
-  const { renderer } = useGpuix()
-  const id = element?.id
-  return useCallback(
-    (event: EventPayload) => {
-      if (event.key !== "tab" || id === undefined || !renderer) return
-      if (event.modifiers?.shift) renderer.focusPreviousWithin?.(id)
-      else renderer.focusNextWithin?.(id)
-    },
-    [id, renderer]
-  )
 }
 
 export function setRefs<T>(value: T, ...refs: Array<Ref<T> | undefined>): void {
