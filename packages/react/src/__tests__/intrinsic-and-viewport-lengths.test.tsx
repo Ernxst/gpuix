@@ -203,6 +203,13 @@ describe("intrinsic and viewport lengths (issue #300)", () => {
               <div style={{ width: 80, height: 20 }} />
               <div style={{ width: 80, height: 20 }} />
             </div>
+            <div
+              data-testid="fit-content-limit-10vw"
+              style={{ display: "flex", flexWrap: "wrap", width: "fit-content(10vw)" }}
+            >
+              <div style={{ width: 80, height: 20 }} />
+              <div style={{ width: 80, height: 20 }} />
+            </div>
           </div>
         </div>,
       )
@@ -220,6 +227,10 @@ describe("intrinsic and viewport lengths (issue #300)", () => {
         4,
       )
       expect(boundsFor(root.renderer, "fit-content-limit-40").width).toBeCloseTo(
+        fitContent(40),
+        4,
+      )
+      expect(boundsFor(root.renderer, "fit-content-limit-10vw").width).toBeCloseTo(
         fitContent(40),
         4,
       )

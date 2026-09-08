@@ -47,6 +47,9 @@ const intrinsicAndViewportLengths = {
   height: "100vh",
   minHeight: "calc(50vh - 10px)",
   maxHeight: "12.5vw",
+  hover: {
+    width: "fit-content(240px)",
+  },
 } satisfies StyleDesc
 
 void intrinsicAndViewportLengths
