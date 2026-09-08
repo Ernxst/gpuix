@@ -52,10 +52,11 @@ export const hatchCases: readonly HatchCase[] = [
   },
   {
     name: "transparent-border",
-    left: 13.25,
-    top: 17.75,
-    width: 113.5,
-    height: 79.25,
+    // Fractional box geometry stays with the `fractional` case because GPUI snaps a fractional box size while Chromium snaps its edges, so the two engines disagree on the padding box by one device pixel there.
+    left: 13,
+    top: 17,
+    width: 113,
+    height: 79,
     viewportWidth: 160,
     viewportHeight: 120,
     background: "repeating-linear-gradient(135deg, #ff0000 0 4px, transparent 4px 12px)",
