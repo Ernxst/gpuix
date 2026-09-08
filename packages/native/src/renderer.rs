@@ -1095,9 +1095,12 @@ fn update_window_without_view<R>(
 #[cfg(target_os = "macos")]
 fn draw_window_for_automation_read() -> Result<()> {
     update_window_without_view(|window, cx| {
-        // Automation reads must be fresh even when the window is occluded and
-        // the platform never services its pending frame request.
-        window.draw(cx).clear(cx);
+        // A read draws when the window has pending changes or frame demand, so
+        // it is as fresh as the frame loop would make it, including when the
+        // platform never services an occluded window's frame request.
+        if window.needs_frame() {
+            window.draw(cx).clear(cx);
+        }
     })
 }
 
@@ -1383,7 +1386,9 @@ fn draw_ui_window_for_read(
     cx: &mut gpui::AsyncApp,
 ) -> anyhow::Result<()> {
     gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| {
-        window.draw(cx).clear(cx);
+        if window.needs_frame() {
+            window.draw(cx).clear(cx);
+        }
     })
 }
 
@@ -1587,18 +1592,15 @@ async fn run_ui_commands(
             // Force layout before sampling, the way GetElementBounds does: a
             // read from a mount effect must not report an unscrollable element.
             UiCommand::GetScrollMetrics { id, response } => {
-                window.update(cx, move |_view, window, cx| {
-                    cx.notify();
-                    window.refresh();
-                    window.on_next_frame(move |_window, _cx| {
-                        let metrics = VIRTUAL_LIST_STATES
-                            .with(|cell| cell.borrow().get(&id).map(virtual_list_metrics))
-                            .or_else(|| {
-                                SCROLL_HANDLES
-                                    .with(|cell| cell.borrow().get(&id).map(scroll_handle_metrics))
-                            });
-                        response.send(metrics).ok();
-                    });
+                draw_ui_window_for_read(window, cx).and_then(|()| {
+                    let metrics = VIRTUAL_LIST_STATES
+                        .with(|cell| cell.borrow().get(&id).map(virtual_list_metrics))
+                        .or_else(|| {
+                            SCROLL_HANDLES
+                                .with(|cell| cell.borrow().get(&id).map(scroll_handle_metrics))
+                        });
+                    response.send(metrics).ok();
+                    Ok(())
                 })
             }
             UiCommand::ScrollElementIntoView { id, align_to_top } => {
@@ -1608,21 +1610,15 @@ async fn run_ui_commands(
                 })
             }
             UiCommand::GetAutomationBounds { response } => {
-                window.update(cx, move |_view, window, cx| {
-                    cx.notify();
-                    window.refresh();
-                    window.on_next_frame(move |_window, _cx| {
-                        response.send(crate::automation::all_bounds()).ok();
-                    });
+                draw_ui_window_for_read(window, cx).and_then(|()| {
+                    response.send(crate::automation::all_bounds()).ok();
+                    Ok(())
                 })
             }
             UiCommand::GetElementBounds { id, response } => {
-                window.update(cx, move |_view, window, cx| {
-                    cx.notify();
-                    window.refresh();
-                    window.on_next_frame(move |_window, _cx| {
-                        response.send(crate::automation::get_bounds(id)).ok();
-                    });
+                draw_ui_window_for_read(window, cx).and_then(|()| {
+                    response.send(crate::automation::get_bounds(id)).ok();
+                    Ok(())
                 })
             }
             UiCommand::FocusElement { id, reveal } => {
@@ -4159,7 +4155,6 @@ impl GpuixRenderer {
 
     #[napi]
     pub fn get_automation_tree(&self) -> Result<String> {
-        self.request_invalidate()?;
         #[cfg(target_os = "macos")]
         draw_window_for_automation_read()?;
         let bounds = self.automation_bounds()?;
@@ -4961,7 +4956,9 @@ fn update_web_window<R>(
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 fn draw_web_window_for_read() -> Result<(), wasm_bindgen::JsValue> {
     update_web_window(|window, cx| {
-        window.draw(cx).clear(cx);
+        if window.needs_frame() {
+            window.draw(cx).clear(cx);
+        }
     })
 }
 
