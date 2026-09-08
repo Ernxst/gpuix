@@ -1432,6 +1432,25 @@ export interface ElementIdAllocator {
   nextElementId: number
 }
 
+/** The politeness `announce()` accepts, mirroring `aria-live`'s two audible values. */
+export type AnnouncePoliteness = "polite" | "assertive"
+
+/**
+ * One politeness's alternating pair of hidden live regions for `announce()`.
+ *
+ * Each call writes to `next` and clears the other index, so AccessKit always
+ * sees a changed value even when the same string is announced twice in a row.
+ */
+export interface AnnouncerRegionPair {
+  regionIds: readonly [number, number]
+  textIds: readonly [number, number]
+  next: 0 | 1
+  /** The root element these regions are attached under; stale once the root remounts. */
+  attachedToRootId: number
+}
+
+export type AnnouncerState = Record<AnnouncePoliteness, AnnouncerRegionPair | null>
+
 // One React root. Event handlers stay on this object so two live roots
 // can both use id 1. Ids come from an allocator that lives with the
 // NativeRenderer, so a remount on the same renderer cannot reuse them.
@@ -1445,6 +1464,12 @@ export interface Container {
   hoverPath: Instance[]
   preventedKeyboardActivations: Map<number, string>
   strictStyles: boolean
+  /** The id last passed to `setRoot`. `announce()` attaches its regions beneath it. */
+  rootElementId: number | null
+  /** The native type `rootElementId` materialized as. Only `"div"` can host `announce()`'s regions. */
+  rootElementType: ElementType | null
+  /** `announce()`'s lazily created regions, one alternating pair per politeness. */
+  announcer: AnnouncerState
 }
 
 /** Bounds in logical window coordinates, relative to the window's content origin. */

@@ -1361,6 +1361,13 @@ export const hostConfig = {
 
   removeChildFromContainer(parent: Container, child: Instance): void {
     disposeRecordingContext2D(child)
+    // A fragment root can have several top-level children, so only the one
+    // `announce()` is actually attached under invalidates the id — an
+    // unrelated sibling leaving must not orphan `announce()`'s regions.
+    if (parent.rootElementId === child.id) {
+      parent.rootElementId = null
+      parent.rootElementType = null
+    }
     const destroyed = parent.renderer.destroyElement(child.id)
     for (const id of destroyed) {
       unregisterEventHandlers(parent.eventHandlers, id)
@@ -1493,6 +1500,12 @@ export const hostConfig = {
     stateFor(child).parent = null
     materialize(child)
     container.renderer.setRoot(child.id)
+    // `announce()`'s regions hang off whichever element last became the root, so
+    // a remounted top-level instance invalidates them (see `announce.ts`). The
+    // *native* type — a `DIV_ALIASES` entry materializes as "div" — is what
+    // decides whether that element can host an appended child at all.
+    container.rootElementId = child.id
+    container.rootElementType = DIV_ALIASES.has(child.type) ? "div" : child.type
   },
 
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {
