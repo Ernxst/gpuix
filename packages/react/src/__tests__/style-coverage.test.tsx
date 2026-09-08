@@ -724,8 +724,19 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: 2,
-            gridColumnMin: "max-content",
+            gridTemplateColumns: [
+              {
+                type: "repeat",
+                count: 2,
+                tracks: [
+                  {
+                    type: "minmax",
+                    min: { type: "px", value: 0 },
+                    max: { type: "max-content" },
+                  },
+                ],
+              },
+            ],
           }}
         >
           {cell("a", 80)}

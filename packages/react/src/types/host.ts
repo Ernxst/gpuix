@@ -426,12 +426,12 @@ export type GridTrackMinmax = {
 
 export type GridTrackNonRepeat = GridTrackSizing | GridTrackMinmax
 
-/** A serializable CSS Grid track function. Integer templates remain supported as `repeat(n, 1fr)`. */
+/** A serializable CSS Grid track function. */
 export type GridTrack =
   | GridTrackNonRepeat
   | { type: "repeat"; count: number; tracks: GridTrackNonRepeat[] }
 
-export type GridTemplate = number | GridTrack[]
+export type GridTemplate = GridTrack[]
 
 /** Keys that apply a native interaction state rather than a base style declaration. */
 export type NativeStateStyleKey =
@@ -475,8 +475,6 @@ export interface StyleDesc {
   columnGap?: number
   gridTemplateColumns?: GridTemplate
   gridTemplateRows?: GridTemplate
-  gridColumnMin?: "zero" | "min-content" | "max-content"
-  gridRowMin?: "zero" | "min-content" | "max-content"
 
   width?: DimensionValue
   height?: DimensionValue

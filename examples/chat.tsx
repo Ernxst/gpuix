@@ -1686,8 +1686,15 @@ const SAFE_MDX_COMPONENTS = {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: cols,
-            gridColumnMin: 'max-content',
+            gridTemplateColumns: [{
+              type: 'repeat',
+              count: cols,
+              tracks: [{
+                type: 'minmax',
+                min: { type: 'px', value: 0 },
+                max: { type: 'max-content' },
+              }],
+            }],
             flexShrink: 0,
             backgroundColor: C.border,
             rowGap: 1,

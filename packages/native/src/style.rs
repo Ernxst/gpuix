@@ -298,14 +298,6 @@ pub enum GridTrackMaxValue {
     MaxContent,
 }
 
-/// Integer grid counts remain a compatibility shorthand for `repeat(count, 1fr)`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum GridTemplateValue {
-    LegacyCount(f64),
-    Tracks(Vec<GridTrackValue>),
-}
-
 impl Default for DimensionValue {
     fn default() -> Self {
         DimensionValue::Auto
@@ -579,10 +571,8 @@ pub struct StyleDesc {
     pub gap: Option<f64>,
     pub row_gap: Option<f64>,
     pub column_gap: Option<f64>,
-    pub grid_template_columns: Option<GridTemplateValue>,
-    pub grid_template_rows: Option<GridTemplateValue>,
-    pub grid_column_min: Option<String>,
-    pub grid_row_min: Option<String>,
+    pub grid_template_columns: Option<Vec<GridTrackValue>>,
+    pub grid_template_rows: Option<Vec<GridTrackValue>>,
 
     pub width: Option<DimensionValue>,
     pub height: Option<DimensionValue>,
@@ -1136,27 +1126,13 @@ fn parse_grid_template(
     property: &str,
     value: &serde_json::Value,
     problems: &mut Vec<StyleProblem>,
-) -> Option<GridTemplateValue> {
-    if value.is_number() {
-        let count = decode_number(property, value, problems)?;
-        if count < 1.0 || count > 64.0 || count.fract() != 0.0 {
-            reject(
-                problems,
-                property,
-                value,
-                "expected an integer from 1 through 64 or a grid track list",
-            );
-            return None;
-        }
-        return Some(GridTemplateValue::LegacyCount(count));
-    }
-
+) -> Option<Vec<GridTrackValue>> {
     let Some(tracks) = value.as_array() else {
         reject(
             problems,
             property,
             value,
-            "expected an integer shorthand or a non-empty grid track list",
+            "expected a non-empty grid track list",
         );
         return None;
     };
@@ -1190,7 +1166,7 @@ fn parse_grid_template(
         );
         return None;
     }
-    Some(GridTemplateValue::Tracks(parsed_tracks))
+    Some(parsed_tracks)
 }
 
 fn parse_nested_style(
@@ -1602,21 +1578,6 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                 parse_grid_template(&property!("gridTemplateRows"), value, &mut parsed.problems);
             continue;
         }
-        enum_field!(
-            key,
-            value,
-            "gridColumnMin",
-            grid_column_min,
-            ["zero", "min-content", "max-content"]
-        );
-        enum_field!(
-            key,
-            value,
-            "gridRowMin",
-            grid_row_min,
-            ["zero", "min-content", "max-content"]
-        );
-
         dimension_field!(key, value, "width", width);
         dimension_field!(key, value, "height", height);
         dimension_field!(key, value, "minWidth", min_width);
@@ -2670,7 +2631,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_mixed_grid_track_lists_and_preserves_integer_shorthand() {
+    fn parses_mixed_grid_track_lists_and_rejects_integer_shorthand() {
         let parsed = parse_style_value(&json!({
             "gridTemplateColumns": [
                 { "type": "max-content" },
@@ -2695,17 +2656,20 @@ mod tests {
         assert!(parsed.problems.is_empty());
         assert!(matches!(
             parsed.style.grid_template_columns,
-            Some(GridTemplateValue::Tracks(ref tracks)) if tracks.len() == 4
+            Some(ref tracks) if tracks.len() == 4
         ));
         assert!(matches!(
             parsed.style.grid_template_rows,
-            Some(GridTemplateValue::Tracks(ref tracks)) if tracks.len() == 2
+            Some(ref tracks) if tracks.len() == 2
         ));
 
         let shorthand = parse_style_value(&json!({ "gridTemplateRows": 2 }));
+        assert_eq!(shorthand.style.grid_template_rows, None);
+        assert_eq!(shorthand.problems.len(), 1);
+        assert_eq!(shorthand.problems[0].property, "gridTemplateRows");
         assert_eq!(
-            shorthand.style.grid_template_rows,
-            Some(GridTemplateValue::LegacyCount(2.0))
+            shorthand.problems[0].reason,
+            "expected a non-empty grid track list"
         );
     }
 
@@ -2980,10 +2944,24 @@ mod tests {
             "gap": 1,
             "rowGap": 2,
             "columnGap": 3,
-            "gridTemplateColumns": 2,
-            "gridTemplateRows": 2,
-            "gridColumnMin": "min-content",
-            "gridRowMin": "max-content",
+            "gridTemplateColumns": [{
+                "type": "repeat",
+                "count": 2,
+                "tracks": [{
+                    "type": "minmax",
+                    "min": { "type": "min-content" },
+                    "max": { "type": "fr", "value": 1 }
+                }]
+            }],
+            "gridTemplateRows": [{
+                "type": "repeat",
+                "count": 2,
+                "tracks": [{
+                    "type": "minmax",
+                    "min": { "type": "px", "value": 0 },
+                    "max": { "type": "max-content" }
+                }]
+            }],
             "width": 100,
             "height": "100%",
             "minWidth": "auto",
