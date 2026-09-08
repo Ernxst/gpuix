@@ -92,17 +92,17 @@ export function normalizeScrollWheelOptions(
 
 abstract class ValidatedAutomationBackend implements AutomationBackend {
   private closed = false
-  private closeError: AutomationError = new AutomationError(
-    "Closed",
-    "Automation session is closed"
-  )
+  private closeError?: AutomationError
 
   async call<M extends MethodName>(
     method: M,
     params: ParamsOf<M>
   ): Promise<ResultOf<M>> {
     if (this.closed) {
-      throw this.closeError
+      throw (
+        this.closeError ??
+        new AutomationError("Closed", "Automation session is closed")
+      )
     }
     const parsedParams = methods[method].params.parse(params) as ParamsOf<M>
     const result = await this.request(method, parsedParams)
@@ -1311,13 +1311,20 @@ export async function launch(options: {
       stdio: ["pipe", "pipe", "pipe"],
     }
   )
-  // An EPIPE after the child has died would otherwise crash the host process;
-  // the exit/error handlers below carry the diagnosis instead.
+  // A write or read after the child has died would otherwise crash the host
+  // process with an unhandled stream error; the close/error handlers below
+  // carry the diagnosis instead.
   child.stdin.on("error", () => {})
+  child.stdout.on("error", () => {})
+  child.stderr.on("error", () => {})
 
+  const { StringDecoder } = await importNodeModule<
+    typeof import("node:string_decoder")
+  >("node:string_decoder")
+  const stderrDecoder = new StringDecoder("utf8")
   let stderrTail = ""
   child.stderr.on("data", (buf: Buffer) => {
-    stderrTail = (stderrTail + buf.toString("utf8")).slice(-4096)
+    stderrTail = (stderrTail + stderrDecoder.write(buf)).slice(-4096)
   })
 
   const diagnose = (
@@ -1334,7 +1341,9 @@ export async function launch(options: {
   }
 
   let failChild: ((error: AutomationError) => void) | undefined
-  child.on("exit", (code, signal) => {
+  // `close` (not `exit`) fires once stdio has drained, so a response written
+  // just before the child exits is still decoded before this diagnosis runs.
+  child.on("close", (code, signal) => {
     const message =
       signal != null
         ? `Automation child exited on signal ${signal}`

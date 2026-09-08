@@ -267,13 +267,17 @@ describe("automation stdio", () => {
       "process.exit(3);",
     ].join("\n")
 
-    await expect(
-      launch({ command: process.execPath, args: ["-e", script] })
-    ).rejects.toMatchObject({
+    const rejection = launch({ command: process.execPath, args: ["-e", script] })
+    await expect(rejection).rejects.toMatchObject({
       code: "Closed",
       message: expect.stringMatching(/exited with code 3/),
-      data: expect.objectContaining({ exitCode: 3 }),
+      data: expect.objectContaining({
+        exitCode: 3,
+        signal: null,
+        stderr: expect.stringContaining("native abort: boom"),
+      }),
     })
+    await expect(rejection).rejects.toThrow(/boom/)
   })
 
   it("rejects in-flight and later requests when the launched child dies mid-session", async () => {
@@ -315,6 +319,49 @@ describe("automation stdio", () => {
     await expect(app.call("blur", {})).rejects.toMatchObject({
       code: "Closed",
       message: expect.stringMatching(/exited with code 2/),
+    })
+  })
+
+  it("keeps the cancellation message when app.close() races the child's own exit", async () => {
+    const script = `
+      let buf = "";
+      process.stdin.on("data", (chunk) => {
+        buf += chunk.toString();
+        let idx;
+        while ((idx = buf.indexOf("\\n\\n")) >= 0) {
+          const raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const line = raw.replace(/^data: /, "");
+          const message = JSON.parse(line);
+          if (message.method === "initialize") {
+            const reply = {
+              id: message.id,
+              result: {
+                protocolVersion: message.params.protocolVersion,
+                pid: process.pid,
+                capabilities: [],
+                window: { width: 800, height: 600 },
+              },
+            };
+            process.stdout.write("data: " + JSON.stringify(reply) + "\\n\\n");
+          }
+          // Everything else is left pending; app.close() kills this child.
+        }
+      });
+    `
+
+    const app = await launch({ command: process.execPath, args: ["-e", script] })
+    const pending = app.call("blur", {})
+
+    await app.close()
+
+    await expect(pending).rejects.toMatchObject({
+      code: "Closed",
+      message: expect.stringMatching(/^Request \d+ cancelled$/),
+    })
+    await expect(app.call("focus", {})).rejects.toMatchObject({
+      code: "Closed",
+      message: "Automation session is closed",
     })
   })
 })
