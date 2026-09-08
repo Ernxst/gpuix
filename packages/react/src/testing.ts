@@ -175,6 +175,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   focusNext(): void
   focusPrevious(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
+  resolveEditorKeyDown(elementId: number, defaultPrevented: boolean): void
   setPointerCapture(elementId: number): void
   releasePointerCapture(elementId: number): void
   simulateWindowActivation(active: boolean): void
@@ -885,12 +886,20 @@ export class TestRenderer implements NativeRenderer {
    *  Each event is delivered in its own `act` scope, so a handler's state
    *  update, the effects that update schedules, and the re-renders those
    *  effects schedule have all landed before the next event is delivered —
-   *  a browser's one-event-at-a-time ordering, not a batch. */
-  dispatchNativeEvents(): void {
+   *  a browser's one-event-at-a-time ordering, not a batch.
+   *
+   *  Returns whether it delivered anything, so a caller that needs every
+   *  cascading effect settled (a resolved Enter re-arming and emitting a
+   *  replayed keydown, for instance) can call this — and `flush()`, which may
+   *  surface a further frame's worth of events — in a loop until nothing is
+   *  left. */
+  dispatchNativeEvents(): boolean {
     const report = (error: unknown): void => reportUncaughtErrorToRenderer(this, error)
+    let delivered = false
     for (;;) {
       const events = this.native.drainEvents()
       if (events.length === 0) break
+      delivered = true
       for (const event of events) {
         if (event.eventType === "windowResize" || event.eventType === "windowActivation") {
           actSync(report, () => {
@@ -907,6 +916,7 @@ export class TestRenderer implements NativeRenderer {
         })
       }
     }
+    return delivered
   }
 
   /** End-to-end: focus element → simulate keystrokes through GPUI →
@@ -948,8 +958,40 @@ export class TestRenderer implements NativeRenderer {
   nativeSimulateKeystrokes(elementId: number, keystrokes: string): void {
     this.native.flush()
     this.native.focusElement(elementId)
-    this.native.simulateKeystrokes(keystrokes)
+    this.simulateKeystrokes(keystrokes)
+  }
+
+  /** Like {@link nativeSimulateKeystrokes}, but sends every keystroke to the
+   *  native layer in a single call instead of draining React after each one.
+   *
+   *  `simulateKeystrokes` drains between keys, so it can never observe a
+   *  later key overtaking an earlier one still waiting on a JS answer — the
+   *  one failure mode this exists to reproduce: a textarea's Enter is
+   *  answered asynchronously, and without ordering the next native keystroke
+   *  in the same batch could otherwise land before that answer does. Proves
+   *  the editor itself queues out-of-order input rather than the test
+   *  harness serializing it for it. */
+  nativeSimulateKeystrokeBatch(elementId: number, keystrokes: string): void {
+    this.native.flush()
+    this.native.focusElement(elementId)
+    this.native.flush()
     this.dispatchNativeEvents()
+    this.native.simulateKeystrokes(keystrokes)
+    const maxDrainIterations = 1000
+    let iterations = 0
+    for (;;) {
+      if (++iterations > maxDrainIterations) {
+        throw new Error(
+          `nativeSimulateKeystrokeBatch: still draining events after ${maxDrainIterations} ` +
+            "iterations. A deferred keydown is likely never resolving (its JS handler never " +
+            "settling, or a native/JS resolution mismatch), so the queue behind it never drains."
+        )
+      }
+      this.native.flush()
+      const delivered = this.dispatchNativeEvents()
+      this.native.flush()
+      if (!delivered) break
+    }
   }
 
   /** End-to-end: focus element → simulate a single key down through GPUI →
@@ -1383,6 +1425,11 @@ export class TestRenderer implements NativeRenderer {
     this.native.resolveTabKeyDown(defaultPrevented)
     // Production reports the resulting focus transition on a later frame.
     // Draw it now so the enclosing drain loop observes blur/focus in order.
+    this.native.flush()
+  }
+
+  resolveEditorKeyDown(elementId: number, defaultPrevented: boolean): void {
+    this.native.resolveEditorKeyDown(elementId, defaultPrevented)
     this.native.flush()
   }
 

@@ -148,7 +148,6 @@ export function renderSlot({
     onScroll: composeHandlers(childProps.onScroll, props.onScroll),
     onWheel: composeHandlers(childProps.onWheel, props.onWheel),
     onChange: composeHandlers(childProps.onChange, props.onChange),
-    onSubmit: composeHandlers(childProps.onSubmit, props.onSubmit),
   }
   if (props.tabIndex === undefined) merged.tabIndex = childProps.tabIndex
   const childRef = getElementRef(child)

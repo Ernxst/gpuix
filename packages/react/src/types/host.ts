@@ -987,8 +987,6 @@ export interface Props {
   // ── Text editor events ─────────────────────────────────────────
   onChange?: (event: GpuixSyntheticEvent) => void
   onChangeCapture?: (event: GpuixSyntheticEvent) => void
-  onSubmit?: (event: GpuixSyntheticEvent) => void
-  onSubmitCapture?: (event: GpuixSyntheticEvent) => void
 
   // ── Native component events ─────────────────────────────────────
   onToggleFile?: (event: GpuixSyntheticEvent) => void
@@ -1237,6 +1235,8 @@ export interface NativeRenderer {
   focusPrevious?(): void
   /** @internal Complete Tab's default focus traversal after synthetic dispatch. */
   resolveTabKeyDown?(defaultPrevented: boolean): void
+  /** @internal Complete an editor's Enter default after synthetic dispatch. */
+  resolveEditorKeyDown?(elementId: number, defaultPrevented: boolean): void
   /** The focused host element id, analogous to `document.activeElement`, or null. */
   getActiveElement?(): number | null
   blur?(): void

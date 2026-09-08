@@ -182,8 +182,6 @@ const EVENT_PROPS = [
   ["onAccessibilityAction", "accessibilityAction", "bubble"],
   ["onChangeCapture", "change", "capture"],
   ["onChange", "change", "bubble"],
-  ["onSubmitCapture", "submit", "capture"],
-  ["onSubmit", "submit", "bubble"],
   // Mouse events
   ["onClickCapture", "click", "capture"],
   ["onClick", "click", "bubble"],

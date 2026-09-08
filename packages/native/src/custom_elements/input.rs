@@ -61,8 +61,6 @@ actions!(
         Paste,
         Undo,
         Redo,
-        Newline,
-        Submit,
     ]
 );
 
@@ -177,8 +175,6 @@ fn text_editor_bindings(
 ) -> Vec<KeyBinding> {
     let context = Some(context);
     let mut bindings = vec![
-        KeyBinding::new("enter", Submit, context),
-        KeyBinding::new("shift-enter", Newline, context),
         KeyBinding::new("backspace", Backspace, context),
         KeyBinding::new("delete", Delete, context),
         KeyBinding::new("left", Left, context),
@@ -371,7 +367,6 @@ impl CustomElement for TextEditorElement {
             .cloned()
             .unwrap_or_else(|| cx.focus_handle());
         let emits_change = ctx.events.contains("change");
-        let emits_submit = ctx.events.contains("submit");
         let emits_key_down = ctx.events.contains("keyDown");
         let emits_key_up = ctx.events.contains("keyUp");
         let callback = ctx.event_callback.clone();
@@ -395,7 +390,6 @@ impl CustomElement for TextEditorElement {
                     element_id: id,
                     callback,
                     emits_change,
-                    emits_submit,
                     emits_key_down,
                     emits_key_up,
                     focus_handle: state_focus_handle,
@@ -430,6 +424,8 @@ impl CustomElement for TextEditorElement {
                     blink_anchor: cx.background_executor().now(),
                     blink_task: None,
                     pending_values: VecDeque::new(),
+                    enter_resolutions: VecDeque::new(),
+                    queue: VecDeque::new(),
                     undo_stack: VecDeque::new(),
                     redo_stack: Vec::new(),
                     last_edit: None,
@@ -441,7 +437,6 @@ impl CustomElement for TextEditorElement {
         state.update(cx, |state, cx| {
             state.callback = callback;
             state.emits_change = emits_change;
-            state.emits_submit = emits_submit;
             state.emits_key_down = emits_key_down;
             state.emits_key_up = emits_key_up;
             state.placeholder = self.placeholder.clone().into();
@@ -563,7 +558,7 @@ impl CustomElement for TextEditorElement {
 
     fn supported_events(&self) -> &'static [&'static str] {
         &[
-            "change", "submit", "click", "keyDown", "keyUp", "focus", "blur",
+            "change", "click", "keyDown", "keyUp", "focus", "blur",
         ]
     }
 
@@ -577,6 +572,16 @@ impl CustomElement for TextEditorElement {
 
     fn set_text_value(&self, value: String, cx: &mut App) -> bool {
         TextEditorElement::set_value(self, value, cx)
+    }
+
+    fn resolve_key_down_default(
+        &self,
+        default_prevented: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        let Some(state) = &self.state else { return false };
+        state.update(cx, |state, cx| state.resolve_key_down_default(default_prevented, window, cx))
     }
 
     fn destroy(&mut self) {
@@ -754,11 +759,90 @@ fn invalidate_pending_echoes(pending: &mut VecDeque<String>) {
     pending.clear();
 }
 
+/// Mirrors the `actions!` list above so a queued action can be replayed by
+/// calling the editor's own handler directly on this entity — never through
+/// `window.dispatch_action`, which would fire on whatever holds focus at
+/// replay time rather than this editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorAction {
+    Backspace,
+    Delete,
+    Left,
+    Right,
+    Up,
+    Down,
+    SelectLeft,
+    SelectRight,
+    SelectUp,
+    SelectDown,
+    SelectAll,
+    Home,
+    End,
+    DocStart,
+    DocEnd,
+    SelectHome,
+    SelectEnd,
+    SelectDocStart,
+    SelectDocEnd,
+    WordLeft,
+    WordRight,
+    SelectWordLeft,
+    SelectWordRight,
+    DeleteWordLeft,
+    DeleteWordRight,
+    DeleteToLineStart,
+    DeleteToLineEnd,
+    Copy,
+    Cut,
+    Paste,
+    Undo,
+    Redo,
+}
+
+/// One input this editor received while a deferrable Enter keydown was still
+/// waiting on JS (`enter_resolutions` holds a `true` entry). Everything that
+/// would otherwise land on the editor during that window is captured here
+/// instead, in the order it arrived, and replayed once that Enter resolves —
+/// so native batching can never overtake the DOM order a browser would
+/// deliver.
+///
+/// Mouse handlers are not gated and never appear here: a press or drag is not
+/// part of the DOM's Enter-then-effects ordering, and holding one up behind an
+/// async keydown would make dragging a selection stutter for no browser-
+/// observable reason.
+enum QueuedInput {
+    /// A key that reached `on_key_down`. Replayed by feeding it back through
+    /// `on_key_down`, so a replayed deferrable Enter re-arms the wait and JS
+    /// is told about the key only at replay time — after the newline it
+    /// followed actually exists, as in the DOM.
+    KeyDown(gpui::KeyDownEvent),
+    /// A key that reached `on_key_up`. Replayed by feeding it back through
+    /// `on_key_up`, so JS never sees a keyup before the keydown it pairs
+    /// with, even though the keydown was itself deferred.
+    KeyUp(gpui::KeyUpEvent),
+    /// An action bound to a key (backspace, arrows, undo, …).
+    Action(EditorAction),
+    /// `EntityInputHandler::replace_text_in_range`.
+    ReplaceText {
+        range_utf16: Option<Range<usize>>,
+        new_text: String,
+    },
+    /// `EntityInputHandler::replace_and_mark_text_in_range`.
+    ReplaceAndMarkText {
+        range_utf16: Option<Range<usize>>,
+        new_text: String,
+        new_selected_range_utf16: Option<Range<usize>>,
+    },
+    /// `EntityInputHandler::unmark_text`.
+    UnmarkText,
+    /// `EntityInputHandler::set_selected_text_range`.
+    SetSelectedTextRange(Range<usize>),
+}
+
 struct TextEditorState {
     element_id: u64,
     callback: Option<EventCallback>,
     emits_change: bool,
-    emits_submit: bool,
     emits_key_down: bool,
     emits_key_up: bool,
     focus_handle: FocusHandle,
@@ -793,6 +877,21 @@ struct TextEditorState {
     blink_anchor: Instant,
     blink_task: Option<Task<()>>,
     pending_values: VecDeque<String>,
+    /// One entry per Enter keydown emitted to JS that has not yet resolved,
+    /// oldest first: `true` if that Enter is deferrable (multiline, not
+    /// read-only, no ctrl/alt/platform/function) and so armed the wait,
+    /// `false` if it was only sent to JS to observe. `resolve_key_down_default`
+    /// pops the front on each resolution — never just clears a flag — so a
+    /// non-deferrable Enter's answer (say, a plain Enter that raced ahead of
+    /// an outstanding ctrl-Enter) can never be mistaken for the deferrable
+    /// one's. Every other entry point queues its input instead of applying it
+    /// while any entry here is `true`; because input behind a deferrable
+    /// Enter is queued rather than dispatched, at most one `true` entry is
+    /// ever outstanding at a time.
+    enter_resolutions: VecDeque<bool>,
+    /// Inputs received while a deferrable Enter was outstanding, in dispatch
+    /// order. Drained by `resolve_key_down_default` once that Enter resolves.
+    queue: VecDeque<QueuedInput>,
     undo_stack: VecDeque<EditSnapshot>,
     redo_stack: Vec<EditSnapshot>,
     last_edit: Option<LastEdit>,
@@ -904,14 +1003,6 @@ impl TextEditorState {
         if self.emits_change {
             record_pending_echo(&mut self.pending_values, self.content.clone());
             emit_event_full(&self.callback, self.element_id, "change", |payload| {
-                payload.value = Some(self.content.clone());
-            });
-        }
-    }
-
-    fn emit_submit(&self) {
-        if self.emits_submit {
-            emit_event_full(&self.callback, self.element_id, "submit", |payload| {
                 payload.value = Some(self.content.clone());
             });
         }
@@ -1037,6 +1128,10 @@ impl TextEditorState {
     }
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::Backspace));
+            return;
+        }
         if self.read_only {
             return;
         }
@@ -1051,6 +1146,10 @@ impl TextEditorState {
     }
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::Delete));
+            return;
+        }
         if self.read_only {
             return;
         }
@@ -1065,6 +1164,10 @@ impl TextEditorState {
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::Left));
+            return;
+        }
         let offset = if self.selected_range.is_empty() {
             self.previous_boundary(self.cursor_offset())
         } else {
@@ -1074,6 +1177,10 @@ impl TextEditorState {
     }
 
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::Right));
+            return;
+        }
         let offset = if self.selected_range.is_empty() {
             self.next_boundary(self.cursor_offset())
         } else {
@@ -1083,38 +1190,66 @@ impl TextEditorState {
     }
 
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::Up));
+            return;
+        }
         if let Some(offset) = self.vertical_target(-1.0) {
             self.move_to(offset, cx);
         }
     }
 
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::Down));
+            return;
+        }
         if let Some(offset) = self.vertical_target(1.0) {
             self.move_to(offset, cx);
         }
     }
 
     fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::SelectLeft));
+            return;
+        }
         self.select_to(self.previous_boundary(self.cursor_offset()), cx);
     }
 
     fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::SelectRight));
+            return;
+        }
         self.select_to(self.next_boundary(self.cursor_offset()), cx);
     }
 
     fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::SelectUp));
+            return;
+        }
         if let Some(offset) = self.vertical_target(-1.0) {
             self.select_to(offset, cx);
         }
     }
 
     fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::SelectDown));
+            return;
+        }
         if let Some(offset) = self.vertical_target(1.0) {
             self.select_to(offset, cx);
         }
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::SelectAll));
+            return;
+        }
         self.selected_range = 0..self.content.len();
         self.selection_reversed = false;
         self.reset_blink(cx);
@@ -1122,50 +1257,98 @@ impl TextEditorState {
     }
 
     fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::Home));
+            return;
+        }
         self.move_to(self.visual_line_boundary(false), cx);
     }
 
     fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::End));
+            return;
+        }
         self.move_to(self.visual_line_boundary(true), cx);
     }
 
     fn doc_start(&mut self, _: &DocStart, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::DocStart));
+            return;
+        }
         self.move_to(0, cx);
     }
 
     fn doc_end(&mut self, _: &DocEnd, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::DocEnd));
+            return;
+        }
         self.move_to(self.content.len(), cx);
     }
 
     fn select_home(&mut self, _: &SelectHome, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::SelectHome));
+            return;
+        }
         self.select_to(self.visual_line_boundary(false), cx);
     }
 
     fn select_end(&mut self, _: &SelectEnd, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::SelectEnd));
+            return;
+        }
         self.select_to(self.visual_line_boundary(true), cx);
     }
 
     fn select_doc_start(&mut self, _: &SelectDocStart, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::SelectDocStart));
+            return;
+        }
         self.select_to(0, cx);
     }
 
     fn select_doc_end(&mut self, _: &SelectDocEnd, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::SelectDocEnd));
+            return;
+        }
         self.select_to(self.content.len(), cx);
     }
 
     fn word_left(&mut self, _: &WordLeft, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::WordLeft));
+            return;
+        }
         self.move_to(self.previous_word_boundary(self.cursor_offset()), cx);
     }
 
     fn word_right(&mut self, _: &WordRight, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::WordRight));
+            return;
+        }
         self.move_to(self.next_word_boundary(self.cursor_offset()), cx);
     }
 
     fn select_word_left(&mut self, _: &SelectWordLeft, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::SelectWordLeft));
+            return;
+        }
         self.select_to(self.previous_word_boundary(self.cursor_offset()), cx);
     }
 
     fn select_word_right(&mut self, _: &SelectWordRight, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::SelectWordRight));
+            return;
+        }
         self.select_to(self.next_word_boundary(self.cursor_offset()), cx);
     }
 
@@ -1175,6 +1358,10 @@ impl TextEditorState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::DeleteWordLeft));
+            return;
+        }
         if self.read_only {
             return;
         }
@@ -1190,6 +1377,10 @@ impl TextEditorState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::DeleteWordRight));
+            return;
+        }
         if self.read_only {
             return;
         }
@@ -1205,6 +1396,10 @@ impl TextEditorState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::DeleteToLineStart));
+            return;
+        }
         if self.read_only {
             return;
         }
@@ -1224,6 +1419,10 @@ impl TextEditorState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::DeleteToLineEnd));
+            return;
+        }
         if self.read_only {
             return;
         }
@@ -1238,6 +1437,10 @@ impl TextEditorState {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::Copy));
+            return;
+        }
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
@@ -1246,6 +1449,10 @@ impl TextEditorState {
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::Cut));
+            return;
+        }
         if self.read_only || self.selected_range.is_empty() {
             return;
         }
@@ -1254,6 +1461,10 @@ impl TextEditorState {
     }
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::Paste));
+            return;
+        }
         if self.read_only {
             return;
         }
@@ -1263,6 +1474,10 @@ impl TextEditorState {
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::Undo));
+            return;
+        }
         if self.read_only {
             return;
         }
@@ -1273,6 +1488,10 @@ impl TextEditorState {
     }
 
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::Action(EditorAction::Redo));
+            return;
+        }
         if self.read_only {
             return;
         }
@@ -1283,17 +1502,199 @@ impl TextEditorState {
         }
     }
 
-    fn newline(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
+    fn insert_newline(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.multiline && !self.read_only {
             self.replace_text_in_range(None, "\n", window, cx);
         }
     }
 
-    fn submit(&mut self, _: &Submit, _: &mut Window, _: &mut Context<Self>) {
-        if self.action_disabled {
+    /// True while some Enter keydown this editor emitted to JS is both
+    /// unresolved and deferrable — the only condition under which any other
+    /// entry point queues its input instead of applying it.
+    fn enter_wait_armed(&self) -> bool {
+        self.enter_resolutions.iter().any(|&deferrable| deferrable)
+    }
+
+    /// DOM order is keydown then default. Stopping propagation keeps gpui's
+    /// key-char path and the platform from inserting their own newline —
+    /// needed at both the live site below (this Enter) and the enqueue site
+    /// above (a later Enter arriving while an earlier one is still
+    /// outstanding), since either one reaching the platform unstopped would
+    /// insert a newline gpui, not this queue, controls the timing of.
+    ///
+    /// While `enter_wait_armed()` is true, an unrelated key arriving here
+    /// (native batching can deliver several before JS answers the
+    /// outstanding Enter) is queued rather than acted on: emitting its
+    /// keydown now, and letting it take effect now, would let it overtake
+    /// the Enter's own effect — something that cannot happen one key at a
+    /// time in a browser.
+    fn on_key_down(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.enter_wait_armed() {
+            if event.keystroke.key == "enter" {
+                cx.stop_propagation();
+            }
+            self.queue.push_back(QueuedInput::KeyDown(event.clone()));
             return;
         }
-        self.emit_submit();
+
+        let is_enter = event.keystroke.key == "enter";
+        // Non-Enter keys keep the emits_key_down gate: only emit if this
+        // editor itself listens. Enter always reaches JS when a callback
+        // exists, even with no listener here, so an ancestor-only onKeyDown
+        // (or capture handler) can still preventDefault() and cancel it.
+        if self.emits_key_down || (is_enter && self.callback.is_some()) {
+            emit_event_full(&self.callback, self.element_id, "keyDown", |payload| {
+                payload.key = Some(event.keystroke.key.clone());
+                payload.key_char = event.keystroke.key_char.clone();
+                payload.is_held = Some(event.is_held);
+                payload.modifiers = Some(event.keystroke.modifiers.into());
+            });
+        }
+
+        if !is_enter {
+            return;
+        }
+        cx.stop_propagation();
+        let modifiers = event.keystroke.modifiers;
+        let deferrable = self.multiline
+            && !self.read_only
+            && !modifiers.control
+            && !modifiers.alt
+            && !modifiers.platform
+            && !modifiers.function;
+        if self.callback.is_some() {
+            // Every Enter sent to JS — deferrable or not — gets exactly one
+            // resolution back. Recording it here, in arrival order, is what
+            // lets `resolve_key_down_default` match each answer to the Enter
+            // it actually answers instead of whichever Enter merely happens
+            // to be outstanding.
+            self.enter_resolutions.push_back(deferrable);
+        } else if deferrable {
+            self.insert_newline(window, cx);
+        }
+    }
+
+    /// Replay a queued key-up by feeding it back through `on_key_up`, the
+    /// same as a queued keydown replays through `on_key_down`: JS must never
+    /// observe a keyup before the keydown it pairs with, even when that
+    /// keydown itself only reaches JS at replay time.
+    fn on_key_up(&mut self, event: &gpui::KeyUpEvent, _: &mut Window, _: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::KeyUp(event.clone()));
+            return;
+        }
+        if self.emits_key_up {
+            emit_event_full(&self.callback, self.element_id, "keyUp", |payload| {
+                payload.key = Some(event.keystroke.key.clone());
+                payload.key_char = event.keystroke.key_char.clone();
+                payload.modifiers = Some(event.keystroke.modifiers.into());
+            });
+        }
+    }
+
+    pub(crate) fn resolve_key_down_default(
+        &mut self,
+        default_prevented: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match self.enter_resolutions.pop_front() {
+            None | Some(false) => false,
+            Some(true) => {
+                if !default_prevented {
+                    self.insert_newline(window, cx);
+                }
+                self.drain_queue(window, cx);
+                true
+            }
+        }
+    }
+
+    /// Replay a queued action by calling the editor's own handler directly
+    /// on this entity, bypassing `window.dispatch_action` entirely so replay
+    /// cannot land on whatever happens to be focused when it runs.
+    fn apply_action(&mut self, action: EditorAction, window: &mut Window, cx: &mut Context<Self>) {
+        match action {
+            EditorAction::Backspace => self.backspace(&Backspace, window, cx),
+            EditorAction::Delete => self.delete(&Delete, window, cx),
+            EditorAction::Left => self.left(&Left, window, cx),
+            EditorAction::Right => self.right(&Right, window, cx),
+            EditorAction::Up => self.up(&Up, window, cx),
+            EditorAction::Down => self.down(&Down, window, cx),
+            EditorAction::SelectLeft => self.select_left(&SelectLeft, window, cx),
+            EditorAction::SelectRight => self.select_right(&SelectRight, window, cx),
+            EditorAction::SelectUp => self.select_up(&SelectUp, window, cx),
+            EditorAction::SelectDown => self.select_down(&SelectDown, window, cx),
+            EditorAction::SelectAll => self.select_all(&SelectAll, window, cx),
+            EditorAction::Home => self.home(&Home, window, cx),
+            EditorAction::End => self.end(&End, window, cx),
+            EditorAction::DocStart => self.doc_start(&DocStart, window, cx),
+            EditorAction::DocEnd => self.doc_end(&DocEnd, window, cx),
+            EditorAction::SelectHome => self.select_home(&SelectHome, window, cx),
+            EditorAction::SelectEnd => self.select_end(&SelectEnd, window, cx),
+            EditorAction::SelectDocStart => self.select_doc_start(&SelectDocStart, window, cx),
+            EditorAction::SelectDocEnd => self.select_doc_end(&SelectDocEnd, window, cx),
+            EditorAction::WordLeft => self.word_left(&WordLeft, window, cx),
+            EditorAction::WordRight => self.word_right(&WordRight, window, cx),
+            EditorAction::SelectWordLeft => self.select_word_left(&SelectWordLeft, window, cx),
+            EditorAction::SelectWordRight => self.select_word_right(&SelectWordRight, window, cx),
+            EditorAction::DeleteWordLeft => self.delete_word_left(&DeleteWordLeft, window, cx),
+            EditorAction::DeleteWordRight => self.delete_word_right(&DeleteWordRight, window, cx),
+            EditorAction::DeleteToLineStart => {
+                self.delete_to_line_start(&DeleteToLineStart, window, cx)
+            }
+            EditorAction::DeleteToLineEnd => self.delete_to_line_end(&DeleteToLineEnd, window, cx),
+            EditorAction::Copy => self.copy(&Copy, window, cx),
+            EditorAction::Cut => self.cut(&Cut, window, cx),
+            EditorAction::Paste => self.paste(&Paste, window, cx),
+            EditorAction::Undo => self.undo(&Undo, window, cx),
+            EditorAction::Redo => self.redo(&Redo, window, cx),
+        }
+    }
+
+    /// Replay one queued input through the same handler that received it.
+    fn apply_queued(&mut self, item: QueuedInput, window: &mut Window, cx: &mut Context<Self>) {
+        match item {
+            QueuedInput::KeyDown(event) => self.on_key_down(&event, window, cx),
+            QueuedInput::KeyUp(event) => self.on_key_up(&event, window, cx),
+            QueuedInput::Action(action) => self.apply_action(action, window, cx),
+            QueuedInput::ReplaceText {
+                range_utf16,
+                new_text,
+            } => self.replace_text_in_range(range_utf16, &new_text, window, cx),
+            QueuedInput::ReplaceAndMarkText {
+                range_utf16,
+                new_text,
+                new_selected_range_utf16,
+            } => self.replace_and_mark_text_in_range(
+                range_utf16,
+                &new_text,
+                new_selected_range_utf16,
+                window,
+                cx,
+            ),
+            QueuedInput::UnmarkText => self.unmark_text(window, cx),
+            QueuedInput::SetSelectedTextRange(range_utf16) => {
+                self.set_selected_text_range(range_utf16, window, cx)
+            }
+        }
+    }
+
+    /// Drain queued inputs in order. A replayed Enter can re-arm the wait
+    /// (`on_key_down` records it exactly as it would live), which stops the
+    /// drain with the rest still queued until that Enter resolves in turn.
+    fn drain_queue(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        while !self.enter_wait_armed() {
+            let Some(item) = self.queue.pop_front() else {
+                break;
+            };
+            self.apply_queued(item, window, cx);
+        }
     }
 
     fn vertical_target(&self, direction: f32) -> Option<usize> {
@@ -1679,6 +2080,10 @@ impl EntityInputHandler for TextEditorState {
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::UnmarkText);
+            return;
+        }
         self.marked_range = None;
         cx.notify();
     }
@@ -1690,6 +2095,13 @@ impl EntityInputHandler for TextEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::ReplaceText {
+                range_utf16,
+                new_text: new_text.to_string(),
+            });
+            return;
+        }
         if self.read_only {
             return;
         }
@@ -1726,6 +2138,14 @@ impl EntityInputHandler for TextEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.enter_wait_armed() {
+            self.queue.push_back(QueuedInput::ReplaceAndMarkText {
+                range_utf16,
+                new_text: new_text.to_string(),
+                new_selected_range_utf16,
+            });
+            return;
+        }
         if self.read_only {
             return;
         }
@@ -1797,6 +2217,11 @@ impl EntityInputHandler for TextEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.enter_wait_armed() {
+            self.queue
+                .push_back(QueuedInput::SetSelectedTextRange(range_utf16));
+            return;
+        }
         self.selected_range = self.range_from_utf16(&range_utf16);
         self.selection_reversed = false;
         self.follow_cursor = true;
@@ -1815,9 +2240,6 @@ impl EntityInputHandler for TextEditorState {
 
 impl gpui::Render for TextEditorState {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let key_down_callback = self.callback.clone();
-        let key_up_callback = self.callback.clone();
-        let element_id = self.element_id;
         div()
             .key_context(if self.multiline {
                 TEXTAREA_KEY_CONTEXT
@@ -1858,31 +2280,12 @@ impl gpui::Render for TextEditorState {
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
-            .on_action(cx.listener(Self::newline))
-            .on_action(cx.listener(Self::submit))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
-            .when(self.emits_key_down, move |editor| {
-                editor.on_key_down(move |event, _window, _cx| {
-                    emit_event_full(&key_down_callback, element_id, "keyDown", |payload| {
-                        payload.key = Some(event.keystroke.key.clone());
-                        payload.key_char = event.keystroke.key_char.clone();
-                        payload.is_held = Some(event.is_held);
-                        payload.modifiers = Some(event.keystroke.modifiers.into());
-                    });
-                })
-            })
-            .when(self.emits_key_up, move |editor| {
-                editor.on_key_up(move |event, _window, _cx| {
-                    emit_event_full(&key_up_callback, element_id, "keyUp", |payload| {
-                        payload.key = Some(event.keystroke.key.clone());
-                        payload.key_char = event.keystroke.key_char.clone();
-                        payload.modifiers = Some(event.keystroke.modifiers.into());
-                    });
-                })
-            })
+            .on_key_down(cx.listener(Self::on_key_down))
+            .on_key_up(cx.listener(Self::on_key_up))
             .w_full()
             .min_w_0()
             .child(EditorTextElement {
@@ -2162,6 +2565,25 @@ mod tests {
         assert_eq!(pending.len(), MAX_PENDING_ECHOES);
         // The oldest edits were dropped, not the newest.
         assert_eq!(pending.back().map(String::as_str), Some("39"));
+    }
+
+    #[test]
+    fn enter_is_not_a_key_binding() {
+        for bindings in [
+            text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true),
+            text_editor_bindings(TEXTAREA_KEY_CONTEXT, true, true, true),
+        ] {
+            assert!(bindings.iter().all(|binding| {
+                binding.match_keystrokes(std::slice::from_ref(
+                    &gpui::Keystroke::parse("enter").unwrap(),
+                )) != Some(false)
+            }));
+            assert!(bindings.iter().all(|binding| {
+                binding.match_keystrokes(std::slice::from_ref(
+                    &gpui::Keystroke::parse("shift-enter").unwrap(),
+                )) != Some(false)
+            }));
+        }
     }
 
     #[test]

@@ -43,10 +43,9 @@ describeNative("native text editors", () => {
     expect(testRoot.renderer.getPaintedText()).toContain("hi")
   })
 
-  it("supports multiline textarea editing and submission", () => {
+  it("inserts a newline on Enter and Shift+Enter in a textarea", () => {
     function Textarea() {
       const [text, setText] = useState("")
-      const [submits, setSubmits] = useState(0)
       return (
         <div style={{ width: 400, height: 160 }}>
           <textarea
@@ -56,10 +55,8 @@ describeNative("native text editors", () => {
             maxRows={4}
             style={{ width: 300 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
-            onSubmit={() => setSubmits((count) => count + 1)}
           />
           <text>{`Value: ${JSON.stringify(text)}`}</text>
-          <text>{`Submits: ${submits}`}</text>
         </div>
       )
     }
@@ -71,12 +68,314 @@ describeNative("native text editors", () => {
     expect(testRoot.renderer.getAllText()).toMatchInlineSnapshot(`
       [
         "Value: \"hi\\nthere\"",
-        "Submits: 0",
       ]
     `)
 
     testRoot.renderer.nativeSimulateKeystrokes(textarea.id, "enter")
+    expect(testRoot.renderer.getAllText()).toContain('Value: "hi\\nthere\\n"')
+  })
+
+  it("lets a composer submit on Enter and insert a newline on Shift+Enter", () => {
+    function Composer() {
+      const [text, setText] = useState("")
+      const [submits, setSubmits] = useState(0)
+      return (
+        <div style={{ width: 400, height: 160 }}>
+          <textarea
+            value={text}
+            minRows={1}
+            maxRows={4}
+            style={{ width: 300 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+            onKeyDown={(event: EventPayload) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault()
+                setSubmits((count) => count + 1)
+              }
+            }}
+          />
+          <text>{`Value: ${JSON.stringify(text)}`}</text>
+          <text>{`Submits: ${submits}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Composer />)
+    const textarea = testRoot.renderer.findByType("textarea")[0]
+
+    testRoot.renderer.nativeSimulateKeystrokes(textarea.id, "h i enter")
+    expect(testRoot.renderer.getAllText()).toContain('Value: "hi"')
     expect(testRoot.renderer.getAllText()).toContain("Submits: 1")
+
+    testRoot.renderer.nativeSimulateKeystrokes(textarea.id, "shift-enter x")
+    expect(testRoot.renderer.getAllText()).toContain('Value: "hi\\nx"')
+    expect(testRoot.renderer.getAllText()).toContain("Submits: 1")
+  })
+
+  it("delivers Enter on an input through onKeyDown and inserts nothing", () => {
+    const keys: string[] = []
+    function TextInput() {
+      const [text, setText] = useState("")
+      return (
+        <div style={{ width: 400, height: 100 }}>
+          <input
+            value={text}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+            onKeyDown={(event: EventPayload) => keys.push(event.key)}
+          />
+          <text>{`Value: ${text}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<TextInput />)
+    const input = testRoot.renderer.findByType("input")[0]
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "a enter b")
+
+    expect(testRoot.renderer.getAllText()).toContain("Value: ab")
+    expect(keys).toContain("Enter")
+  })
+
+  it("cancels the newline from a capture handler", () => {
+    function Textarea() {
+      const [text, setText] = useState("")
+      return (
+        <div style={{ width: 400, height: 160 }}>
+          <textarea
+            value={text}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+            onKeyDownCapture={(event: EventPayload) => {
+              if (event.key === "Enter") event.preventDefault()
+            }}
+          />
+          <text>{`Value: ${JSON.stringify(text)}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Textarea />)
+    const textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokes(textarea.id, "enter")
+
+    expect(testRoot.renderer.getAllText()).toContain('Value: ""')
+  })
+
+  it("serializes a batch of native keys behind a deferred Enter, in dispatch order", () => {
+    function Textarea() {
+      const [text, setText] = useState("")
+      return (
+        <div style={{ width: 400, height: 160 }}>
+          <textarea
+            value={text}
+            style={{ width: 300 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+          />
+          <text>{`Value: ${JSON.stringify(text)}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Textarea />)
+    const textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokeBatch(textarea.id, "h i shift-enter x")
+
+    expect(testRoot.renderer.getAllText()).toContain('Value: "hi\\nx"')
+  })
+
+  it("applies a batched key that moves the caret only after the Enter ahead of it resolves", () => {
+    function Textarea() {
+      const [text, setText] = useState("")
+      return (
+        <div style={{ width: 400, height: 160 }}>
+          <textarea
+            value={text}
+            style={{ width: 300 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+          />
+        </div>
+      )
+    }
+
+    testRoot.render(<Textarea />)
+    const textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokeBatch(textarea.id, "h i shift-enter left")
+
+    expect(testRoot.renderer.getInputValue(textarea.id)).toBe("hi\n")
+    expect(testRoot.renderer.getInputSelection(textarea.id)).toEqual([2, 2, 0])
+  })
+
+  it("resolves two consecutive Enters from the same native batch one at a time", () => {
+    function Textarea() {
+      const [text, setText] = useState("")
+      return (
+        <div style={{ width: 400, height: 160 }}>
+          <textarea
+            value={text}
+            style={{ width: 300 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+          />
+          <text>{`Value: ${JSON.stringify(text)}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Textarea />)
+    const textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokeBatch(textarea.id, "a enter enter b")
+
+    expect(testRoot.renderer.getAllText()).toContain('Value: "a\\n\\nb"')
+  })
+
+  it("still applies a batched key that followed a cancelled Enter, without the newline", () => {
+    function Textarea() {
+      const [text, setText] = useState("")
+      return (
+        <div style={{ width: 400, height: 160 }}>
+          <textarea
+            value={text}
+            style={{ width: 300 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+            onKeyDown={(event: EventPayload) => {
+              if (event.key === "Enter") event.preventDefault()
+            }}
+          />
+          <text>{`Value: ${JSON.stringify(text)}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Textarea />)
+    const textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokeBatch(textarea.id, "a enter b")
+
+    expect(testRoot.renderer.getAllText()).toContain('Value: "ab"')
+  })
+
+  it("lets an ancestor-only onKeyDown cancel a batched Enter's newline", () => {
+    function Textarea() {
+      const [text, setText] = useState("")
+      return (
+        <div
+          style={{ width: 400, height: 160 }}
+          onKeyDown={(event: EventPayload) => {
+            if (event.key === "Enter") event.preventDefault()
+          }}
+        >
+          <textarea
+            value={text}
+            style={{ width: 300 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+          />
+          <text>{`Value: ${JSON.stringify(text)}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Textarea />)
+    const textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokeBatch(textarea.id, "a enter b")
+
+    expect(testRoot.renderer.getAllText()).toContain('Value: "ab"')
+  })
+
+  it("still inserts the newline when an ancestor onKeyDown sees Enter but does not cancel it", () => {
+    const seen: string[] = []
+    function Textarea() {
+      const [text, setText] = useState("")
+      return (
+        <div style={{ width: 400, height: 160 }} onKeyDown={(event: EventPayload) => seen.push(event.key)}>
+          <textarea
+            value={text}
+            style={{ width: 300 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+          />
+          <text>{`Value: ${JSON.stringify(text)}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Textarea />)
+    const textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokeBatch(textarea.id, "a enter b")
+
+    expect(testRoot.renderer.getAllText()).toContain('Value: "a\\nb"')
+    expect(seen).toContain("Enter")
+  })
+
+  it("resolves a plain Enter with its own answer, not an outstanding non-deferrable ctrl-Enter's", () => {
+    function Textarea() {
+      const [text, setText] = useState("")
+      return (
+        <div style={{ width: 400, height: 160 }}>
+          <textarea
+            value={text}
+            style={{ width: 300 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+            onKeyDown={(event: EventPayload) => {
+              if (event.key === "Enter" && event.ctrlKey) event.preventDefault()
+            }}
+          />
+          <text>{`Value: ${JSON.stringify(text)}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Textarea />)
+    const textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokeBatch(textarea.id, "a ctrl-enter enter b")
+
+    expect(testRoot.renderer.getAllText()).toContain('Value: "a\\nb"')
+  })
+
+  it("never delivers a keyup before the keydown it pairs with, even when the keydown was deferred", () => {
+    const seen: string[] = []
+    function Textarea() {
+      const [text, setText] = useState("")
+      return (
+        <textarea
+          value={text}
+          style={{ width: 300 }}
+          onChange={(event: EventPayload) => setText(event.value ?? "")}
+          onKeyDown={(event: EventPayload) => seen.push(`keydown:${event.key}`)}
+          onKeyUp={(event: EventPayload) => seen.push(`keyup:${event.key}`)}
+        />
+      )
+    }
+
+    testRoot.render(<Textarea />)
+    const textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokeBatch(textarea.id, "a enter b")
+
+    expect(seen).toEqual([
+      "keydown:a",
+      "keyup:a",
+      "keydown:Enter",
+      "keyup:Enter",
+      "keydown:b",
+      "keyup:b",
+    ])
+  })
+
+  it("reaches JS and inserts the newline for a batched Enter with no onKeyDown anywhere", () => {
+    function Textarea() {
+      const [text, setText] = useState("")
+      return (
+        <div style={{ width: 400, height: 160 }}>
+          <textarea
+            value={text}
+            style={{ width: 300 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+          />
+          <text>{`Value: ${JSON.stringify(text)}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Textarea />)
+    const textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokeBatch(textarea.id, "a enter b")
+
+    expect(testRoot.renderer.getAllText()).toContain('Value: "a\\nb"')
   })
 
   it("deletes to the start of the line with cmd-backspace", () => {
@@ -340,7 +639,9 @@ describeNative("native text editors", () => {
             placeholder="Empty"
             style={{ width: 300, height: 40 }}
             onChange={(event: EventPayload) => setText(event.value ?? "")}
-            onSubmit={() => setText("")}
+            onKeyDown={(event: EventPayload) => {
+              if (event.key === "Enter") setText("")
+            }}
           />
           <text>{`Value: ${text}`}</text>
         </div>

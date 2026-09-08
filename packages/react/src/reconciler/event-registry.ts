@@ -260,6 +260,9 @@ function finishKeyboardDispatch(
     const defaultPrevented = container.preventedKeyboardActivations.delete(payload.elementId)
     container.native.resolveTabKeyDown?.(defaultPrevented)
   }
+  if (payload.eventType === "keyDown" && payload.key?.toLowerCase() === "enter") {
+    container.native.resolveEditorKeyDown?.(payload.elementId, result.defaultPrevented)
+  }
   return result
 }
 
@@ -321,6 +324,9 @@ function dispatchGpuixEvent(
   if (!container) {
     if (payload.eventType === "keyDown" && activationKey(payload) === "tab") {
       renderer.resolveTabKeyDown?.(false)
+    }
+    if (payload.eventType === "keyDown" && payload.key?.toLowerCase() === "enter") {
+      renderer.resolveEditorKeyDown?.(payload.elementId, false)
     }
     return { defaultPrevented: false, propagationStopped: false }
   }
@@ -393,7 +399,7 @@ function dispatchGpuixEvent(
     if (
       !keyboardDispatchFinished &&
       payload.eventType === "keyDown" &&
-      activationKey(payload) === "tab"
+      (activationKey(payload) === "tab" || payload.key?.toLowerCase() === "enter")
     ) {
       finishDispatch({
         defaultPrevented: event.defaultPrevented,

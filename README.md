@@ -1897,12 +1897,19 @@ grapheme-safe deletion and mouse positioning.
   minRows={1}
   maxRows={8}
   onChange={(event) => setDraft(event.value ?? '')}
-  onSubmit={send}
 />
 ```
 
-`Enter` emits `onSubmit`. In a `<textarea>`, `Shift+Enter` inserts a newline.
-The editor updates natively first, then reports the complete value to React.
+Enter and Shift+Enter insert a newline in a `<textarea>`, and Enter inserts nothing in an `<input>`; both deliver `onKeyDown` with `key: "Enter"` first, and `preventDefault()` there cancels the newline, exactly as in react-dom. Keys typed while that `onKeyDown` is still deciding are applied afterward, in the order they arrived, so a fast typist can never overtake their own Enter — mouse input is never held behind it. A composer that submits on Enter is written the react-dom way:
+
+```tsx
+onKeyDown={(event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    send(draft)
+  }
+}}
+```
 
 **A controlled editor is as controlled as a browser's.** An `<input>` or
 `<textarea>` with a `value` prop shows that prop and nothing else: after each
@@ -3269,7 +3276,6 @@ text imports no longer need a runtime flag.
 | Wheel | `onWheel` | `x`, `y`, `deltaX`, `deltaY`, `deltaZ`, `deltaMode`, `precise`, `touchPhase`, `modifiers` |
 | Scroll | `onScroll` | — read `scrollLeft` / `scrollTop` from `currentTarget` |
 | Change | `onChange` | `value` — `<input>` and `<textarea>` only |
-| Submit | `onSubmit` | `value` — `<input>` and `<textarea>` only |
 | Toggle file | `onToggleFile` | `value` (file path) — `<diff>` only |
 | Show more | `onShowMore` | `value` (hidden line count) — `<diff>` only |
 | Line click | `onLineClick` | `value`, `oldLine`, `newLine` — `<diff>` only |
