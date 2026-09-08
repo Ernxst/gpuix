@@ -154,6 +154,21 @@ describeNative("host instance scroll properties", () => {
     expect(scroller.scrollTop).toBe(160)
   })
 
+  // Audit probe for #406: scrollIntoView schedules the scroll during a draw,
+  // so a reader that skips the settle loop could still see the pre-scroll
+  // offset. No explicit flush() here, unlike every test around it.
+  it("keeps scroll reads settled without an explicit flush after scrollIntoView", () => {
+    const { scroller, target } = renderRowScroller()
+
+    target.scrollIntoView()
+
+    // Read the raw renderer method first: unlike `scroller.scrollTop`, which
+    // goes through `getScrollMetrics`, this is the reader under audit and
+    // must not see a pre-scroll value just because it ran first.
+    expect(testRoot.renderer.getScrollOffset(scroller.id)).toEqual([0, -160])
+    expect(scroller.scrollTop).toBe(160)
+  })
+
   it("honors block: \"nearest\" in scrollIntoView", () => {
     const { scroller, target } = renderRowScroller()
 

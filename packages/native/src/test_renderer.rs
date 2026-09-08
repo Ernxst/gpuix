@@ -783,8 +783,16 @@ impl TestGpuixRenderer {
     /// Settle pending layout without consuming next-frame callbacks or
     /// notifying the view. Pure reads use this to observe the latest frame
     /// while leaving an unchanged window alone.
-    fn draw_if_frame_needed(&self) -> Result<()> {
+    ///
+    /// Draws up to `MAX_SETTLE_PASSES` times, parking between passes so async
+    /// work the draw spawned (an intrinsic image load, for example) can dirty
+    /// layout again before the next pass checks it. A read of an already
+    /// clean window still parks once afterwards, matching the unconditional
+    /// park this replaced, so pending async work advances even when nothing
+    /// needed drawing.
+    fn settle_for_read(&self) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
+            let mut drew_any = false;
             for _ in 0..MAX_SETTLE_PASSES {
                 let drew = cx
                     .update_window(window, |_, window, app| {
@@ -798,7 +806,11 @@ impl TestGpuixRenderer {
                 if !drew {
                     break;
                 }
+                drew_any = true;
                 // Let async work spawned by the draw invalidate the next pass.
+                cx.run_until_parked();
+            }
+            if !drew_any {
                 cx.run_until_parked();
             }
             Ok(())
@@ -1007,7 +1019,7 @@ impl TestGpuixRenderer {
     /// offscreen renderer so lifecycle tests can prove unmounted tracks leave.
     #[napi]
     pub fn get_style_transition_count(&self) -> Result<u32> {
-        self.draw_if_frame_needed()?;
+        self.settle_for_read()?;
         with_test_state(self.state_id, |cx, window, view| {
             let view = view.clone();
             cx.update_window(window, |_, _window, app| {
@@ -1590,7 +1602,7 @@ impl TestGpuixRenderer {
         &self,
         id: u64,
     ) -> Result<Option<crate::custom_elements::input::TextEditingState>> {
-        self.draw_if_frame_needed()?;
+        self.settle_for_read()?;
         with_test_state(self.state_id, |cx, window, view| {
             let view = view.clone();
             cx.update_window(window, |_, _window, app| {
@@ -1622,7 +1634,7 @@ impl TestGpuixRenderer {
     /// this is the only way to assert on what they actually rendered.
     #[napi]
     pub fn get_painted_text(&self) -> Result<Vec<String>> {
-        self.draw_if_frame_needed()?;
+        self.settle_for_read()?;
         Ok(crate::text::painted_text())
     }
 
@@ -1633,7 +1645,7 @@ impl TestGpuixRenderer {
     /// so a soft-wrapped match is provably two boxes.
     #[napi]
     pub fn get_painted_highlights(&self) -> Result<Vec<crate::element_tree::HighlightMatch>> {
-        self.draw_if_frame_needed()?;
+        self.settle_for_read()?;
         Ok(crate::text::painted_highlights()
             .into_iter()
             .map(Into::into)
@@ -1830,7 +1842,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_scroll_metrics(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
         let id = to_element_id(element_id)?;
-        self.draw_if_frame_needed()?;
+        self.settle_for_read()?;
         with_test_state(self.state_id, |cx, window, view| {
             let view = view.clone();
             let result = cx
@@ -2065,7 +2077,7 @@ impl TestGpuixRenderer {
             )
         };
 
-        self.draw_if_frame_needed()?;
+        self.settle_for_read()?;
         let element_bounds = crate::automation::get_bounds(id);
         let hover_group_bounds = hover_groups
             .iter()
@@ -2189,7 +2201,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_image_load_state(&self, id: f64) -> Result<Option<String>> {
         let id = to_element_id(id)?;
-        self.draw_if_frame_needed()?;
+        self.settle_for_read()?;
         let state = with_test_state(self.state_id, |cx, window, view| {
             let view = view.clone();
             cx.update_window(window, |_, _window, app| {
@@ -2209,7 +2221,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_canvas_state(&self, id: f64) -> Result<Option<String>> {
         let id = to_element_id(id)?;
-        self.draw_if_frame_needed()?;
+        self.settle_for_read()?;
         self.canvas_state_json(id)
     }
 
@@ -2254,7 +2266,7 @@ impl TestGpuixRenderer {
     /// Tree JSON with last-paint bounds. Used by the automation locators.
     #[napi]
     pub fn get_automation_tree(&self) -> Result<String> {
-        self.draw_if_frame_needed()?;
+        self.settle_for_read()?;
         let tree = self.tree.lock().unwrap();
         let json = tree.to_automation_json(&crate::automation::all_bounds());
         serde_json::to_string(&json)
@@ -2265,7 +2277,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_element_bounds(&self, id: f64) -> Result<Option<Vec<f64>>> {
         let id = to_element_id(id)?;
-        self.draw_if_frame_needed()?;
+        self.settle_for_read()?;
         Ok(crate::automation::get_bounds(id)
             .map(|bounds| vec![bounds.x, bounds.y, bounds.width, bounds.height]))
     }
