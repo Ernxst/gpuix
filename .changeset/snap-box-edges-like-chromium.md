@@ -1,8 +1,8 @@
 ---
-'@gpuix/native': patch
-'@gpuix/react': patch
+'@gpuix/native': minor
+'@gpuix/react': minor
 ---
 
-Snap authored box edges independently in absolute device coordinates, matching Chromium's fractional sizes and half-pixel ties.
+The rendered geometry of every fractionally positioned or sized box can move by one device pixel, now matching Chromium at integer scale factors.
 
 Fixes #375
