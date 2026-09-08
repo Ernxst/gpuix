@@ -120,7 +120,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: .
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Check all Rust targets without default features
         if: contains(matrix.settings.target, 'linux')
@@ -203,7 +203,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Download macOS arm64 artifact
         uses: actions/download-artifact@v4
@@ -262,7 +262,7 @@ jobs:
           node-version: 24
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Download Windows x64 artifact
         uses: actions/download-artifact@v4
