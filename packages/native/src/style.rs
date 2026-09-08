@@ -298,6 +298,154 @@ pub enum GridTrackMaxValue {
     MaxContent,
 }
 
+/// A CSS Grid line value retained in the form GPUI's grid layout accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GridLineValue {
+    #[default]
+    Auto,
+    Line(i16),
+    Span(u16),
+}
+
+const GRID_LINE_ERROR: &str = "expected auto, an integer, or span <integer>";
+
+fn grid_line_from_integer(value: i64) -> Result<GridLineValue, String> {
+    if value == 0 {
+        return Err(GRID_LINE_ERROR.to_string());
+    }
+    // CSS Grid §8.3: a UA clamps a grid line number to its implementation
+    // limit rather than rejecting it. taffy's line numbers are i16, so clamp
+    // into that range (never landing on zero, which the grammar reserves).
+    let clamped = value.clamp(i64::from(i16::MIN) + 1, i64::from(i16::MAX));
+    Ok(GridLineValue::Line(clamped as i16))
+}
+
+fn parse_grid_line_text(value: &str) -> Result<GridLineValue, String> {
+    let parts = value.split_ascii_whitespace().collect::<Vec<_>>();
+    match parts.as_slice() {
+        [keyword] if keyword.eq_ignore_ascii_case("auto") => Ok(GridLineValue::Auto),
+        [keyword, span] if keyword.eq_ignore_ascii_case("span") => span
+            .parse::<i64>()
+            .ok()
+            .filter(|span| *span > 0)
+            // Same implementation-limit clamp as a bare line number, saturating
+            // to u16::MAX (taffy narrows this further to its own 10,000 cap).
+            .map(|span| GridLineValue::Span(span.min(i64::from(u16::MAX)) as u16))
+            .ok_or_else(|| GRID_LINE_ERROR.to_string()),
+        [line] => line
+            .parse::<i64>()
+            .ok()
+            .and_then(|value| grid_line_from_integer(value).ok())
+            .ok_or_else(|| GRID_LINE_ERROR.to_string()),
+        _ => Err(GRID_LINE_ERROR.to_string()),
+    }
+}
+
+fn parse_grid_line_value(value: &serde_json::Value) -> Result<GridLineValue, String> {
+    match value {
+        serde_json::Value::Number(number) => number
+            .as_i64()
+            .or_else(|| {
+                number.as_f64().and_then(|value| {
+                    (value.is_finite() && value.fract() == 0.0).then_some(value as i64)
+                })
+            })
+            .ok_or_else(|| GRID_LINE_ERROR.to_string())
+            .and_then(grid_line_from_integer),
+        serde_json::Value::String(value) => parse_grid_line_text(value),
+        _ => Err(GRID_LINE_ERROR.to_string()),
+    }
+}
+
+impl<'de> Deserialize<'de> for GridLineValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+
+        struct GridLineVisitor;
+
+        impl<'de> Visitor<'de> for GridLineVisitor {
+            type Value = GridLineValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str(GRID_LINE_ERROR)
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                grid_line_from_integer(value).map_err(E::custom)
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                i64::try_from(value)
+                    .map_err(|_| E::custom(GRID_LINE_ERROR))
+                    .and_then(|value| grid_line_from_integer(value).map_err(E::custom))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if value.is_finite() && value.fract() == 0.0 {
+                    grid_line_from_integer(value as i64).map_err(E::custom)
+                } else {
+                    Err(E::custom(GRID_LINE_ERROR))
+                }
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                parse_grid_line_text(value).map_err(E::custom)
+            }
+        }
+
+        deserializer.deserialize_any(GridLineVisitor)
+    }
+}
+
+impl Serialize for GridLineValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let value = match self {
+            Self::Auto => "auto".to_string(),
+            Self::Line(line) => line.to_string(),
+            Self::Span(span) => format!("span {span}"),
+        };
+        serializer.serialize_str(&value)
+    }
+}
+
+fn parse_grid_line_list(
+    value: &serde_json::Value,
+    min: usize,
+    max: usize,
+    count_error: &str,
+) -> Result<Vec<GridLineValue>, String> {
+    let parts = match value {
+        serde_json::Value::String(value) => value.split('/').map(str::trim).collect::<Vec<_>>(),
+        _ if min == 1 && max == 2 => return Ok(vec![parse_grid_line_value(value)?]),
+        _ => return Err(count_error.to_string()),
+    };
+    if !(min..=max).contains(&parts.len()) {
+        return Err(count_error.to_string());
+    }
+    parts
+        .into_iter()
+        .map(parse_grid_line_text)
+        .collect::<Result<Vec<_>, _>>()
+}
+
 impl Default for DimensionValue {
     fn default() -> Self {
         DimensionValue::Auto
@@ -573,6 +721,10 @@ pub struct StyleDesc {
     pub column_gap: Option<f64>,
     pub grid_template_columns: Option<Vec<GridTrackValue>>,
     pub grid_template_rows: Option<Vec<GridTrackValue>>,
+    pub grid_row_start: Option<GridLineValue>,
+    pub grid_row_end: Option<GridLineValue>,
+    pub grid_column_start: Option<GridLineValue>,
+    pub grid_column_end: Option<GridLineValue>,
 
     pub width: Option<DimensionValue>,
     pub height: Option<DimensionValue>,
@@ -1394,7 +1546,7 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
     };
 
     macro_rules! property {
-        ($name:literal) => {
+        ($name:expr) => {
             if prefix.is_empty() {
                 $name.to_string()
             } else {
@@ -1444,6 +1596,11 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             }
         };
     }
+
+    // Shorthands are collected separately so explicit longhands win regardless
+    // of the property order in the JavaScript object.
+    let mut derived_grid_lines: [Option<GridLineValue>; 4] = [None; 4];
+    let mut explicit_grid_lines: [Option<GridLineValue>; 4] = [None; 4];
 
     'fields: for (key, value) in object {
         if key == "transition" {
@@ -1565,6 +1722,62 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         number_field!(key, value, "gap", gap);
         number_field!(key, value, "rowGap", row_gap);
         number_field!(key, value, "columnGap", column_gap);
+        if key == "gridColumn" || key == "gridRow" {
+            let property = property!(key);
+            match parse_grid_line_list(
+                value,
+                1,
+                2,
+                "expected 1 or 2 grid lines separated by \"/\"",
+            ) {
+                Ok(lines) => {
+                    let (start, end) = (lines[0], lines.get(1).copied().unwrap_or_default());
+                    let offset = if key == "gridRow" { 0 } else { 2 };
+                    derived_grid_lines[offset] = Some(start);
+                    derived_grid_lines[offset + 1] = Some(end);
+                }
+                Err(reason) => reject(&mut parsed.problems, property, value, reason),
+            }
+            continue;
+        }
+        if key == "gridArea" {
+            let property = property!("gridArea");
+            match parse_grid_line_list(
+                value,
+                2,
+                4,
+                "expected 2 to 4 grid lines separated by \"/\"; named areas are not supported",
+            ) {
+                Ok(lines) => {
+                    for (index, line) in lines
+                        .into_iter()
+                        .chain(std::iter::repeat(GridLineValue::Auto))
+                        .take(4)
+                        .enumerate()
+                    {
+                        let slot = [0, 2, 1, 3][index];
+                        derived_grid_lines[slot] = Some(line);
+                    }
+                }
+                Err(reason) => reject(&mut parsed.problems, property, value, reason),
+            }
+            continue;
+        }
+        let explicit_slot = match key.as_str() {
+            "gridRowStart" => Some(0),
+            "gridRowEnd" => Some(1),
+            "gridColumnStart" => Some(2),
+            "gridColumnEnd" => Some(3),
+            _ => None,
+        };
+        if let Some(slot) = explicit_slot {
+            let property = property!(key);
+            match parse_grid_line_value(value) {
+                Ok(line) => explicit_grid_lines[slot] = Some(line),
+                Err(reason) => reject(&mut parsed.problems, property, value, reason),
+            }
+            continue;
+        }
         if key == "gridTemplateColumns" {
             parsed.style.grid_template_columns = parse_grid_template(
                 &property!("gridTemplateColumns"),
@@ -1927,6 +2140,21 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             value,
             "unsupported style property",
         );
+    }
+
+    for (slot, (derived, explicit)) in derived_grid_lines
+        .into_iter()
+        .zip(explicit_grid_lines)
+        .enumerate()
+    {
+        let value = explicit.or(derived);
+        match slot {
+            0 => parsed.style.grid_row_start = value,
+            1 => parsed.style.grid_row_end = value,
+            2 => parsed.style.grid_column_start = value,
+            3 => parsed.style.grid_column_end = value,
+            _ => unreachable!(),
+        }
     }
 
     validate_ranges(&mut parsed, prefix);
@@ -2696,6 +2924,157 @@ mod tests {
     }
 
     #[test]
+    fn parses_grid_lines_shorthands_longhands_and_areas() {
+        let parsed = parse_style_value(&json!({
+            "gridColumn": "1 / -1",
+            "gridRow": "2 / span 3",
+            "gridArea": "1 / 2 / 3 / 4",
+            "gridColumnStart": 2,
+        }));
+
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.grid_row_start, Some(GridLineValue::Line(1)));
+        assert_eq!(parsed.style.grid_row_end, Some(GridLineValue::Line(3)));
+        // The explicit longhand wins over gridColumn's derived start line.
+        assert_eq!(parsed.style.grid_column_start, Some(GridLineValue::Line(2)));
+        assert_eq!(parsed.style.grid_column_end, Some(GridLineValue::Line(4)));
+
+        let span = parse_style_value(&json!({ "gridColumn": "span 2" }));
+        assert_eq!(span.style.grid_column_start, Some(GridLineValue::Span(2)));
+        assert_eq!(span.style.grid_column_end, Some(GridLineValue::Auto));
+
+        let area = parse_style_value(&json!({ "gridArea": "1 / 2" }));
+        assert_eq!(area.style.grid_row_start, Some(GridLineValue::Line(1)));
+        assert_eq!(area.style.grid_column_start, Some(GridLineValue::Line(2)));
+        assert_eq!(area.style.grid_row_end, Some(GridLineValue::Auto));
+        assert_eq!(area.style.grid_column_end, Some(GridLineValue::Auto));
+
+        let serialized = serde_json::to_value(parsed.style).unwrap();
+        assert_eq!(serialized["gridRowStart"], "1");
+        assert_eq!(serialized["gridRowEnd"], "3");
+        assert_eq!(serialized["gridColumnStart"], "2");
+        assert_eq!(serialized["gridColumnEnd"], "4");
+    }
+
+    #[test]
+    fn parses_grid_line_shorthand_spacing_and_span_pairs() {
+        let unspaced = parse_style_value(&json!({ "gridColumn": "1/2" }));
+        assert!(unspaced.problems.is_empty(), "{:?}", unspaced.problems);
+        assert_eq!(
+            unspaced.style.grid_column_start,
+            Some(GridLineValue::Line(1))
+        );
+        assert_eq!(unspaced.style.grid_column_end, Some(GridLineValue::Line(2)));
+
+        let padded = parse_style_value(&json!({ "gridRow": " 2 / span 3 " }));
+        assert!(padded.problems.is_empty(), "{:?}", padded.problems);
+        assert_eq!(padded.style.grid_row_start, Some(GridLineValue::Line(2)));
+        assert_eq!(padded.style.grid_row_end, Some(GridLineValue::Span(3)));
+
+        let both_spans = parse_style_value(&json!({ "gridColumn": "span 2 / span 3" }));
+        assert!(both_spans.problems.is_empty(), "{:?}", both_spans.problems);
+        assert_eq!(
+            both_spans.style.grid_column_start,
+            Some(GridLineValue::Span(2))
+        );
+        assert_eq!(
+            both_spans.style.grid_column_end,
+            Some(GridLineValue::Span(3))
+        );
+    }
+
+    #[test]
+    fn rejects_a_five_value_grid_area() {
+        let parsed = parse_style_value(&json!({ "gridArea": "1 / 2 / 3 / 4 / 5" }));
+        assert_eq!(parsed.style, StyleDesc::default());
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "gridArea");
+        assert_eq!(
+            parsed.problems[0].reason,
+            "expected 2 to 4 grid lines separated by \"/\"; named areas are not supported"
+        );
+    }
+
+    #[test]
+    fn serializes_auto_and_span_grid_lines() {
+        let parsed = parse_style_value(&json!({
+            "gridColumnStart": "auto",
+            "gridColumnEnd": "span 2",
+        }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.grid_column_start, Some(GridLineValue::Auto));
+        assert_eq!(
+            parsed.style.grid_column_end,
+            Some(GridLineValue::Span(2))
+        );
+
+        let serialized = serde_json::to_value(parsed.style).unwrap();
+        assert_eq!(serialized["gridColumnStart"], "auto");
+        assert_eq!(serialized["gridColumnEnd"], "span 2");
+    }
+
+    #[test]
+    fn clamps_out_of_range_grid_lines_instead_of_rejecting_them() {
+        let over = parse_style_value(&json!({ "gridColumnStart": "40000" }));
+        assert!(over.problems.is_empty(), "{:?}", over.problems);
+        assert_eq!(
+            over.style.grid_column_start,
+            Some(GridLineValue::Line(32767))
+        );
+
+        let under = parse_style_value(&json!({ "gridColumnStart": "-40000" }));
+        assert!(under.problems.is_empty(), "{:?}", under.problems);
+        assert_eq!(
+            under.style.grid_column_start,
+            Some(GridLineValue::Line(-32767))
+        );
+
+        let numeric = parse_style_value(&json!({ "gridColumnStart": 40000 }));
+        assert!(numeric.problems.is_empty(), "{:?}", numeric.problems);
+        assert_eq!(
+            numeric.style.grid_column_start,
+            Some(GridLineValue::Line(32767))
+        );
+
+        let span = parse_style_value(&json!({ "gridColumnStart": "span 70000" }));
+        assert!(span.problems.is_empty(), "{:?}", span.problems);
+        assert_eq!(
+            span.style.grid_column_start,
+            Some(GridLineValue::Span(65535))
+        );
+
+        // Zero remains a grammar rejection regardless of clamping.
+        let zero = parse_style_value(&json!({ "gridColumnStart": "0" }));
+        assert_eq!(zero.problems.len(), 1);
+        assert_eq!(zero.problems[0].reason, GRID_LINE_ERROR);
+    }
+
+    #[test]
+    fn rejects_invalid_grid_lines_and_area_shapes() {
+        for (property, value) in [
+            ("gridColumn", json!("0")),
+            ("gridColumn", json!("span 0")),
+            ("gridColumn", json!("span")),
+            ("gridColumn", json!("header")),
+            ("gridArea", json!("header")),
+            ("gridColumn", json!("1 / 2 / 3")),
+        ] {
+            let parsed = parse_style_value(&json!({ property: value }));
+            assert_eq!(parsed.style, StyleDesc::default(), "{property}: {value}");
+            assert_eq!(parsed.problems.len(), 1, "{property}: {value}");
+            assert_eq!(parsed.problems[0].property, property);
+        }
+        assert_eq!(
+            parse_style_value(&json!({ "gridArea": "header" })).problems[0].reason,
+            "expected 2 to 4 grid lines separated by \"/\"; named areas are not supported"
+        );
+        assert_eq!(
+            parse_style_value(&json!({ "gridColumnStart": "header" })).problems[0].reason,
+            GRID_LINE_ERROR
+        );
+    }
+
+    #[test]
     fn named_colors_are_valid_paints() {
         let parsed = parse_style_value(&json!({ "backgroundColor": "red" }));
         assert!(parsed.problems.is_empty());
@@ -2962,6 +3341,10 @@ mod tests {
                     "max": { "type": "max-content" }
                 }]
             }],
+            "gridRowStart": "1",
+            "gridRowEnd": "2",
+            "gridColumnStart": "1",
+            "gridColumnEnd": "2",
             "width": 100,
             "height": "100%",
             "minWidth": "auto",

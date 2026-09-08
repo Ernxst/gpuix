@@ -51,7 +51,7 @@ use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::retained_tree::{RetainedTree, StyleTable};
 use crate::style::{
-    parse_font_weight, GridTrackMaxValue, GridTrackMinValue, GridTrackValue,
+    parse_font_weight, GridLineValue, GridTrackMaxValue, GridTrackMinValue, GridTrackValue,
     StyleDesc, StyleProblem,
 };
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection, TextTransform};
@@ -11133,6 +11133,14 @@ fn to_gpui_grid_template(tracks: &[GridTrackValue]) -> gpui::GridTemplate {
     gpui::GridTemplate { tracks }
 }
 
+fn to_gpui_grid_placement(value: GridLineValue) -> gpui::GridPlacement {
+    match value {
+        GridLineValue::Auto => gpui::GridPlacement::Auto,
+        GridLineValue::Line(line) => gpui::GridPlacement::Line(line),
+        GridLineValue::Span(span) => gpui::GridPlacement::Span(span),
+    }
+}
+
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.visibility.as_deref() {
         Some("hidden") => el = el.invisible(),
@@ -11150,6 +11158,28 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     }
     if let Some(rows) = &style.grid_template_rows {
         el = el.grid_template_rows(to_gpui_grid_template(rows));
+    }
+    let grid_lines = [
+        style.grid_row_start,
+        style.grid_row_end,
+        style.grid_column_start,
+        style.grid_column_end,
+    ];
+    // A declared `auto` is a real value, not an absence: a hover/state
+    // refinement that sets `gridColumn: "auto"` must reset an inherited
+    // placement rather than leave it in force. So apply the location whenever
+    // any of the four slots was authored at all, filling absent slots with
+    // `Auto` (an all-`Auto` location is a no-op for taffy).
+    if grid_lines.into_iter().any(|line| line.is_some()) {
+        let grid_location = el.style().grid_location_mut();
+        grid_location.row.start =
+            to_gpui_grid_placement(style.grid_row_start.unwrap_or(GridLineValue::Auto));
+        grid_location.row.end =
+            to_gpui_grid_placement(style.grid_row_end.unwrap_or(GridLineValue::Auto));
+        grid_location.column.start =
+            to_gpui_grid_placement(style.grid_column_start.unwrap_or(GridLineValue::Auto));
+        grid_location.column.end =
+            to_gpui_grid_placement(style.grid_column_end.unwrap_or(GridLineValue::Auto));
     }
     if style.flex_direction.as_deref() == Some("column") {
         el = el.flex_col();

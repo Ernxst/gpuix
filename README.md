@@ -3434,7 +3434,7 @@ CSS-like styling via the `style` prop:
 </div>
 ```
 
-**Layout:** `display` (`"none"` | `"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`
+**Layout:** `display` (`"none"` | `"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumn`, `gridRow`, `gridColumnStart`, `gridColumnEnd`, `gridRowStart`, `gridRowEnd`, `gridArea`
 
 `display: "none"` removes the element and its subtree from layout, painting, hit
 testing, accessibility, and text collection. It is not transitioned.
@@ -3442,6 +3442,17 @@ testing, accessibility, and text collection. It is not transitioned.
 `gridTemplateColumns` and `gridTemplateRows` accept a typed CSS Grid track list.
 Each entry is an object with a `type`: `px`, `fr`, `auto`, `min-content`,
 `max-content`, `minmax`, or `repeat`.
+
+`gridColumn` and `gridRow` accept `<grid-line> [ / <grid-line> ]?`; the
+`gridColumnStart`, `gridColumnEnd`, `gridRowStart`, and `gridRowEnd` longhands
+accept one `<grid-line>`. `gridArea` accepts 2 to 4 grid lines separated by `/`
+in row-start / column-start / row-end / column-end order. A grid line is `auto`,
+an integer (including a negative line number counted from the end), or `span N`
+for a positive integer `N`; the span form must use that order. Missing `gridArea`
+values are `auto`. Bare JavaScript
+numbers are accepted for integer grid-line values. Named lines and named areas
+are not supported. When a shorthand and longhand are both present, the
+longhand wins for its slot.
 
 ```tsx
 <div style={{

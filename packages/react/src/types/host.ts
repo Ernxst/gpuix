@@ -475,6 +475,13 @@ export interface StyleDesc {
   columnGap?: number
   gridTemplateColumns?: GridTemplate
   gridTemplateRows?: GridTemplate
+  gridColumn?: string | number
+  gridRow?: string | number
+  gridColumnStart?: string | number
+  gridColumnEnd?: string | number
+  gridRowStart?: string | number
+  gridRowEnd?: string | number
+  gridArea?: string
 
   width?: DimensionValue
   height?: DimensionValue
