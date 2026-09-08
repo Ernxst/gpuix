@@ -194,6 +194,7 @@ function App() {
 render(React.createElement(App), {
   title: "GPUIX fatal lifecycle smoke",
   menus: [],
+  focus: false,
   errorOverlay: false,
   onTerminated: () => console.log("FATAL_TERMINATED"),
 })
@@ -256,6 +257,7 @@ import { render } from ${JSON.stringify(join(srcDir, "reconciler/renderer.ts"))}
 render(React.createElement("div", { accessibilityRole: "button" }), {
   title: "GPUIX owned root failure smoke",
   menus: [],
+  focus: false,
   strictStyles: true,
   errorOverlay: false,
   onTerminated: () => console.log("OWNED_ROOT_TERMINATED"),
@@ -294,6 +296,7 @@ function Boom() {
 render(React.createElement(Boom), {
   title: "GPUIX overlay app root failure smoke",
   menus: [],
+  focus: false,
   errorOverlay: true,
   onTerminated: () => console.log("OVERLAY_ROOT_TERMINATED"),
 })
@@ -322,6 +325,7 @@ function App_() {
 render(React.createElement(App_), {
   title: "GPUIX overlay uncaught exception smoke",
   menus: [],
+  focus: false,
   errorOverlay: true,
   onTerminated: () => console.log("OVERLAY_EXCEPTION_TERMINATED"),
 })
@@ -365,6 +369,7 @@ render(
   {
     title: "GPUIX overlay first-render failure smoke",
     menus: [],
+    focus: false,
     strictStyles: true,
     errorOverlay: true,
     onTerminated: () => console.log("OVERLAY_FIRST_RENDER_TERMINATED"),
@@ -402,6 +407,7 @@ function ReloadApp() {
 render(React.createElement(ReloadApp), {
   title: "GPUIX overlay reload smoke",
   menus: [],
+  focus: false,
   errorOverlay: true,
   onTerminated: () => console.log("OVERLAY_RELOAD_TERMINATED"),
 })
@@ -451,6 +457,7 @@ function App_() {
 render(React.createElement(App_), {
   title: "GPUIX overlay event handler throw smoke",
   menus: [],
+  focus: false,
   errorOverlay: true,
   onTerminated: () => console.log("OVERLAY_EVENT_TERMINATED"),
 })
@@ -480,6 +487,7 @@ function App() {
 render(React.createElement(App), {
   title: "GPUIX programmatic quit smoke",
   menus: [],
+  focus: false,
   onTerminated: () => console.log("QUIT_TERMINATED"),
 })
 
@@ -564,6 +572,7 @@ function App() {
 render(React.createElement(App), {
   title: "GPUIX failing unmount quit smoke",
   menus: [],
+  focus: false,
   onTerminated: () => console.log("QUIT_FAILURE_CLEANUP_FINISHED"),
 })
 
@@ -582,7 +591,7 @@ import { GpuixRenderer } from "@gpuix/native"
 import { render, resetRender } from ${JSON.stringify(join(srcDir, "reconciler/renderer.ts"))}
 
 const renderer = new GpuixRenderer(() => {})
-renderer.init({ title: "GPUIX injected menu smoke", menus: [] })
+renderer.init({ title: "GPUIX injected menu smoke", menus: [], focus: false })
 
 const timeout = setTimeout(() => {
   renderer.quit()
