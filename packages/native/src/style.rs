@@ -2,6 +2,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
 
 const MAX_LINEAR_GRADIENT_STOPS: usize = 8;
+const REPEATING_GRADIENT_REJECTION: &str = "repeating-linear-gradient() is painted only as a 135deg two-stop pixel hatch: `135deg, <color> 0 <w>px, transparent <w>px <p>px`";
 
 /// Font weight value — accepts both CSS strings ("bold", "700") and numbers (700).
 /// JS style objects commonly use both `fontWeight: "bold"` and `fontWeight: 700`.
@@ -2102,6 +2103,12 @@ fn parse_background_string(value: &str) -> Result<gpui::Background, String> {
     if trimmed.starts_with("radial-gradient(") {
         return Err("radial gradients are not supported by GPUI".into());
     }
+    if let Some(rest) = trimmed.strip_prefix("repeating-linear-gradient(") {
+        return match rest.strip_suffix(')') {
+            Some(body) => parse_repeating_linear_gradient(body),
+            None => Err(REPEATING_GRADIENT_REJECTION.into()),
+        };
+    }
     if !trimmed.starts_with("linear-gradient(") {
         return crate::color::parse_color_rgba(trimmed)
             .map(Into::into)
@@ -2147,6 +2154,74 @@ fn parse_background_string(value: &str) -> Result<gpui::Background, String> {
     }
 
     native_linear_gradient(angle, &stops, color_space.as_deref())
+}
+
+fn parse_repeating_linear_gradient(body: &str) -> Result<gpui::Background, String> {
+    fn px_length(token: &str) -> Option<f64> {
+        let value = token.strip_suffix("px")?.parse::<f64>().ok()?;
+        value.is_finite().then_some(value)
+    }
+
+    // Peel the last two whitespace-separated positions off the right of a
+    // stop, leaving the color expression intact. CSS functional colors
+    // (`rgb(136 136 136 / 100%)`, `oklch(0 0 0)`, ...) contain their own
+    // internal whitespace, so the color can't be found by splitting on the
+    // first whitespace run; `parse_color_rgba` owns validating whatever is
+    // left over.
+    fn split_stop(stop: &str) -> Option<(&str, &str, &str)> {
+        let stop = stop.trim();
+        let (rest, width) = stop.rsplit_once(char::is_whitespace)?;
+        let (color, start) = rest.trim_end().rsplit_once(char::is_whitespace)?;
+        Some((color.trim_end(), start, width))
+    }
+
+    let parts = split_top_level(body, ',');
+    if parts.len() != 3 || parts[0].trim() != "135deg" {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    }
+
+    let Some((color, start, width)) = split_stop(parts[1]) else {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    };
+    if !matches!(start, "0" | "0px") {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    }
+    let Some(width) = px_length(width) else {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    };
+
+    let Some((keyword, second_start, period)) = split_stop(parts[2]) else {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    };
+    if !keyword.eq_ignore_ascii_case("transparent") {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    }
+    let Some(second_start) = px_length(second_start) else {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    };
+    let Some(period) = px_length(period) else {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    };
+    if second_start != width || !(0.0 < width && width < period) {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    }
+
+    let Some(color) = crate::color::parse_color_rgba(color) else {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    };
+
+    let width = width as f32;
+    let period = period as f32;
+    if !width.is_finite()
+        || !period.is_finite()
+        || width <= 0.0
+        || period <= 0.0
+        || width >= period
+    {
+        return Err(REPEATING_GRADIENT_REJECTION.into());
+    }
+
+    Ok(gpui::repeating_hatch_135(color, width, period))
 }
 
 fn parse_gradient_direction(value: &str) -> Option<(f64, Option<String>)> {
@@ -2722,6 +2797,104 @@ mod tests {
         assert_eq!(malformed.problems.len(), 1);
         assert_eq!(malformed.problems[0].property, "background");
         assert!(malformed.problems[0].value.contains("colourSpace"));
+    }
+
+    #[test]
+    fn parses_the_pixel_hatch_form_of_repeating_linear_gradient() {
+        for value in [
+            "repeating-linear-gradient(135deg, #888 0 2px, transparent 2px 5px)",
+            "repeating-linear-gradient(135deg, #888 0px 2px, transparent 2px 5px)",
+            "repeating-linear-gradient( 135deg , #888 0 2px , transparent 2px 5px )",
+        ] {
+            assert_eq!(
+                parse_background(&BackgroundValue::String(value.into())),
+                Ok(gpui::repeating_hatch_135(
+                    crate::color::parse_color_rgba("#888").unwrap(),
+                    2.0,
+                    5.0,
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_wide_repeating_linear_gradient_hatch() {
+        // Regression: the old `pattern_slash` translation packed width/interval
+        // into a single u32, which overflowed well below these logical-pixel
+        // values. `repeating_hatch_135` carries width/period as plain f32s.
+        let value = "repeating-linear-gradient(135deg, #888 0 200px, transparent 200px 500px)";
+        assert_eq!(
+            parse_background(&BackgroundValue::String(value.into())),
+            Ok(gpui::repeating_hatch_135(
+                crate::color::parse_color_rgba("#888").unwrap(),
+                200.0,
+                500.0,
+            ))
+        );
+    }
+
+    #[test]
+    fn rejects_repeating_linear_gradient_hatch_with_width_unrepresentable_in_f32() {
+        // Finite as f64 but overflows to infinity once narrowed to f32.
+        let value = "repeating-linear-gradient(135deg, #888 0 5e38px, transparent 5e38px 6e38px)";
+        assert_eq!(
+            parse_background(&BackgroundValue::String(value.into())),
+            Err(REPEATING_GRADIENT_REJECTION.to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_every_other_repeating_linear_gradient() {
+        for value in [
+            "repeating-linear-gradient(45deg, #888 0 2px, transparent 2px 5px)",
+            "repeating-linear-gradient(135deg, #888 0 20%, transparent 20% 50%)",
+            "repeating-linear-gradient(135deg, #888 0 2px, transparent 2px 5px, #888 5px 6px)",
+            "repeating-linear-gradient(135deg, #888 0 2px, #000 2px 5px)",
+            "repeating-linear-gradient(135deg, #888 0 5px, transparent 5px 5px)",
+            "repeating-linear-gradient(135deg, #888 0 2px, transparent 3px 5px)",
+            // Nonzero unitless positions, rejected individually.
+            "repeating-linear-gradient(135deg, #888 0 2, transparent 2px 5px)",
+            "repeating-linear-gradient(135deg, #888 0 2px, transparent 2 5px)",
+            "repeating-linear-gradient(135deg, #888 0 2px, transparent 2px 5)",
+            // Missing closing parenthesis and trailing junk after it.
+            "repeating-linear-gradient(135deg, #888 0 2px, transparent 2px 5px",
+            "repeating-linear-gradient(135deg, #888 0 2px, transparent 2px 5px) no-repeat",
+        ] {
+            assert_eq!(
+                parse_background(&BackgroundValue::String(value.into())),
+                Err(REPEATING_GRADIENT_REJECTION.to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn parses_functional_colors_in_repeating_linear_gradient() {
+        for color in ["rgb(136, 136, 136)", "rgb(136 136 136 / 100%)", "oklch(0 0 0)"] {
+            let value =
+                format!("repeating-linear-gradient(135deg, {color} 0 2px, transparent 2px 5px)");
+            assert_eq!(
+                parse_background(&BackgroundValue::String(value)),
+                Ok(gpui::repeating_hatch_135(
+                    crate::color::parse_color_rgba(color).unwrap(),
+                    2.0,
+                    5.0,
+                ))
+            );
+        }
+
+        // Extra internal whitespace around the color and positions must not
+        // split the functional color expression apart.
+        let color = "rgb(136 136 136 / 100%)";
+        let value =
+            format!("repeating-linear-gradient(135deg,  {color}   0   2px , transparent 2px 5px)");
+        assert_eq!(
+            parse_background(&BackgroundValue::String(value)),
+            Ok(gpui::repeating_hatch_135(
+                crate::color::parse_color_rgba(color).unwrap(),
+                2.0,
+                5.0,
+            ))
+        );
     }
 
     #[test]

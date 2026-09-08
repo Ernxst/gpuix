@@ -200,4 +200,28 @@ describeNative("native color functions", { timeout: 12_000 }, () => {
     })
     expectScreenshotsDiffer(twoStop, multiStop)
   })
+
+  it("rejects the 45deg hatch with a strict-style diagnostic", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+    try {
+      testRoot.render(
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            background:
+              "repeating-linear-gradient(45deg, #ff0000 0 4px, transparent 4px 12px)",
+          }}
+        />
+      )
+      const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+      expect(diagnostics).toHaveLength(1)
+      expect(diagnostics[0]).toMatchObject({ property: "background" })
+      expect(diagnostics[0]?.message).toContain(
+        "repeating-linear-gradient() is painted only as a 135deg two-stop pixel hatch"
+      )
+    } finally {
+      testRoot.unmount()
+    }
+  })
 })
