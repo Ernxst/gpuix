@@ -1264,4 +1264,134 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       testRoot.unmount()
     }
   })
+
+  it("delivers canvas primary mouse events in DOM order", () => {
+    const testRoot = createTestRoot({ width: 160, height: 120 })
+    const order: string[] = []
+    try {
+      testRoot.render(
+        <canvas
+          data-testid="primary-order-canvas"
+          width={80}
+          height={60}
+          style={{ width: 80, height: 60 }}
+          onMouseDown={() => order.push("mouseDown")}
+          onMouseUp={() => order.push("mouseUp")}
+          onClick={() => order.push("click")}
+        />
+      )
+      const canvas = testRoot.renderer.findByTestId("primary-order-canvas")!
+      const bounds = testRoot.renderer.getElementBounds(canvas.id)!
+      const x = bounds[0]! + 10
+      const y = bounds[1]! + 10
+
+      testRoot.renderer.nativeSimulateMouseDown(x, y, 0)
+      testRoot.renderer.nativeSimulateMouseUp(x, y, 0)
+
+      expect(order).toEqual(["mouseDown", "mouseUp", "click"])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("does not bubble canvas mouseMove twice to an ancestor", () => {
+    const testRoot = createTestRoot({ width: 240, height: 140 })
+    const moves: string[] = []
+    try {
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 100 }}
+          onMouseMove={() => moves.push("move")}
+        >
+          <canvas
+            width={80}
+            height={60}
+            style={{ width: 80, height: 60 }}
+          />
+        </div>
+      )
+      testRoot.renderer.nativeSimulateMouseMove(10, 10)
+
+      expect(moves).toEqual(["move"])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("delivers an ancestor mouseUp once before its click for an unstyled canvas", () => {
+    const testRoot = createTestRoot({ width: 240, height: 140 })
+    const order: string[] = []
+    const canvasMouseUp = vi.fn()
+    try {
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 100 }}
+          onClick={() => order.push("click")}
+          onMouseUp={() => order.push("mouseUp")}
+        >
+          <canvas
+            width={80}
+            height={60}
+            onMouseUp={canvasMouseUp}
+          />
+        </div>
+      )
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 0)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
+
+      expect(canvasMouseUp).toHaveBeenCalledOnce()
+      expect(order).toEqual(["mouseUp", "click"])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("does not click a canvas under an aria-disabled ancestor", () => {
+    const testRoot = createTestRoot({ width: 240, height: 140 })
+    const click = vi.fn()
+    try {
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 100 }}
+          onClick={click}
+          ariaDisabled
+        >
+          <canvas width={80} height={60} />
+        </div>
+      )
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 0)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
+
+      expect(click).not.toHaveBeenCalled()
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("delivers canvas mouseUp before auxClick", () => {
+    const testRoot = createTestRoot({ width: 160, height: 120 })
+    const order: string[] = []
+    try {
+      testRoot.render(
+        <canvas
+          data-testid="aux-order-canvas"
+          width={80}
+          height={60}
+          style={{ width: 80, height: 60 }}
+          onMouseUp={() => order.push("mouseUp")}
+          onAuxClick={() => order.push("auxClick")}
+        />
+      )
+      const canvas = testRoot.renderer.findByTestId("aux-order-canvas")!
+      const bounds = testRoot.renderer.getElementBounds(canvas.id)!
+      const x = bounds[0]! + 10
+      const y = bounds[1]! + 10
+
+      testRoot.renderer.nativeSimulateClick(x, y, 2)
+
+      expect(order).toEqual(["mouseUp", "auxClick"])
+    } finally {
+      testRoot.unmount()
+    }
+  })
 })

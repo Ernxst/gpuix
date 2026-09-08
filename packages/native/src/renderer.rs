@@ -9763,7 +9763,7 @@ fn tracks_mouse_hover_events(
     false
 }
 
-fn tracks_pointer_event(
+pub(crate) fn tracks_pointer_event(
     element: &crate::retained_tree::RetainedElement,
     tree: &RetainedTree,
     event_type: &str,
@@ -9795,7 +9795,7 @@ fn accessibility_hidden_in_ancestry(tree: &RetainedTree, element_id: u64) -> boo
     false
 }
 
-fn action_disabled_in_ancestry(tree: &RetainedTree, element_id: u64) -> bool {
+pub(crate) fn action_disabled_in_ancestry(tree: &RetainedTree, element_id: u64) -> bool {
     let mut current = Some(element_id);
     while let Some(id) = current {
         let Some(element) = tree.elements.get(&id) else {
@@ -9829,6 +9829,7 @@ where
         .get("activationKind")
         .and_then(serde_json::Value::as_str)
         != Some("anchor");
+    let tracks_mouse_up = tracks_pointer_event(element, ctx.tree, "mouseUp");
     let callback = ctx.event_callback.clone();
     let id = element.id;
     el = el.on_click(move |click_event, _window, cx| {
@@ -9842,6 +9843,7 @@ where
             return;
         }
         let stop_native_propagation = !matches!(click_event, gpui::ClickEvent::Keyboard(_));
+        emit_click_mouse_up(&callback, id, &click_event, tracks_mouse_up);
         emit_event_full(&callback, id, "click", |payload| {
             let (x, y) = point_to_xy(click_event.position());
             payload.x = Some(x);
@@ -10205,9 +10207,11 @@ pub(crate) fn build_host_container(
     el = apply_click_handler(el, element, ctx);
 
     if tracks_pointer_event(element, ctx.tree, "auxClick") {
+        let tracks_mouse_up = tracks_pointer_event(element, ctx.tree, "mouseUp");
         let callback = ctx.event_callback.clone();
         let id = element.id;
         el = el.on_aux_click(move |click_event, _window, cx| {
+            emit_click_mouse_up(&callback, id, &click_event, tracks_mouse_up);
             emit_event_full(&callback, id, "auxClick", |p| {
                 let (x, y) = point_to_xy(click_event.position());
                 p.x = Some(x);
@@ -10265,12 +10269,7 @@ pub(crate) fn build_host_container(
             let id = element.id;
             el = el.on_mouse_up(button, move |mouse_event, _window, cx| {
                 emit_event_full(&callback, id, "mouseUp", |p| {
-                    let (x, y) = point_to_xy(mouse_event.position);
-                    p.x = Some(x);
-                    p.y = Some(y);
-                    p.button = Some(mouse_button_to_u32(mouse_event.button));
-                    p.click_count = Some(mouse_event.click_count as u32);
-                    p.modifiers = Some(mouse_event.modifiers.into());
+                    populate_mouse_up_payload(p, mouse_event);
                 });
                 cx.stop_propagation();
             });
@@ -11397,6 +11396,32 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
 /// Helper to convert a GPUI Point<Pixels> to (f64, f64).
 pub(crate) fn point_to_xy(p: gpui::Point<gpui::Pixels>) -> (f64, f64) {
     (f64::from(f32::from(p.x)), f64::from(f32::from(p.y)))
+}
+
+pub(crate) fn emit_click_mouse_up(
+    callback: &Option<EventCallback>,
+    element_id: u64,
+    click_event: &gpui::ClickEvent,
+    tracks_mouse_up: bool,
+) {
+    if !tracks_mouse_up {
+        return;
+    }
+    let gpui::ClickEvent::Mouse(event) = click_event else {
+        return;
+    };
+    emit_event_full(callback, element_id, "mouseUp", |payload| {
+        populate_mouse_up_payload(payload, &event.up);
+    });
+}
+
+fn populate_mouse_up_payload(payload: &mut EventPayload, event: &gpui::MouseUpEvent) {
+    let (x, y) = point_to_xy(event.position);
+    payload.x = Some(x);
+    payload.y = Some(y);
+    payload.button = Some(mouse_button_to_u32(event.button));
+    payload.click_count = Some(event.click_count as u32);
+    payload.modifiers = Some(event.modifiers.into());
 }
 
 /// Fill the DOM `WheelEvent` fields of a payload from a GPUI wheel event.
