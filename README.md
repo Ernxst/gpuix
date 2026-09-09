@@ -3482,7 +3482,7 @@ CSS-like styling via the `style` prop:
 </div>
 ```
 
-**Layout:** `display` (`"none"` | `"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumn`, `gridRow`, `gridColumnStart`, `gridColumnEnd`, `gridRowStart`, `gridRowEnd`, `gridArea`
+**Layout:** `display` (`"none"` | `"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridAutoFlow`, `gridAutoRows`, `gridAutoColumns`, `justifyItems`, `justifySelf`, `gridColumn`, `gridRow`, `gridColumnStart`, `gridColumnEnd`, `gridRowStart`, `gridRowEnd`, `gridArea`
 
 `display: "none"` removes the element and its subtree from layout, painting, hit
 testing, accessibility, and text collection. It is not transitioned.
@@ -3493,6 +3493,14 @@ Each entry is an object with a `type`: `px`, `percent`, `fr`, `auto`,
 track uses a CSS number (`50` means `50%`). A `fit-content` track has the shape
 `{ type: "fit-content", limit: { type: "px", value: number } | { type: "percent", value: number } }`;
 `fit-content` is valid only as a whole track, not as a `minmax` bound.
+`gridAutoFlow` accepts `"row"`, `"column"`, `"dense"` (short for `"row dense"`),
+`"row dense"`, or `"column dense"`, controlling how items are auto-placed into
+implicit tracks. `gridAutoRows` and `gridAutoColumns` size those implicit
+tracks using the same track objects as `gridTemplateColumns` / `-Rows`, except
+`repeat` is not valid there, matching CSS's `<track-size>+` grammar for
+`grid-auto-rows` / `grid-auto-columns`. `justifyItems` (container) and
+`justifySelf` (item) align grid items on the inline axis; like in CSS, they
+apply only to grid containers and items and are ignored by flex.
 
 `gridColumn` and `gridRow` accept `<grid-line> [ / <grid-line> ]?`; the
 `gridColumnStart`, `gridColumnEnd`, `gridRowStart`, and `gridRowEnd` longhands
