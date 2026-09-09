@@ -1456,6 +1456,17 @@ export class TestRenderer implements NativeRenderer {
     this.dispatchNativeEvents()
   }
 
+  /** Like {@link focusElement}, but does not draw: GPUI records the new
+   *  focus target immediately, while it only finalizes the old target's
+   *  focus-path change (and so its `blur`) on the next drawn frame. Lets a
+   *  test land a focus change and a structural update (e.g. hiding the old
+   *  target) in the same draw, to exercise that interleaving. Also skips the
+   *  pre-flush `focusElement` does before calling into native, so pending
+   *  React work is not committed before focus moves. */
+  focusElementWithoutDrawing(elementId: number, preventScroll?: boolean): void {
+    this.native.focusElement(elementId, preventScroll)
+  }
+
   getActiveElement(): number | null {
     return this.native.getActiveElement()
   }

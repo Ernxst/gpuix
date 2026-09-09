@@ -5874,6 +5874,11 @@ pub(crate) struct GpuixView {
     pub(crate) focus_handles: HashMap<u64, gpui::FocusHandle>,
     /// Autofocus targets whose reveal waits for their first layout pass.
     pending_autofocus_reveals: Vec<u64>,
+    /// Autofocus targets created under `display: none`. Browser autofocus is
+    /// deferred until the element is actually rendered: each id here is
+    /// focused once, on the first `sync_focus_handles` pass where it is no
+    /// longer hidden, then removed.
+    pending_auto_focus_when_visible: HashSet<u64>,
     /// Tab defaults wait for the matching React keydown dispatch. Serializing
     /// them keeps each queued keypress targeted at the focus left by the one
     /// before it, just like a browser event loop.
@@ -6137,6 +6142,7 @@ impl GpuixView {
             focus_lost_subscription: None,
             focus_handles: HashMap::new(),
             pending_autofocus_reveals: Vec::new(),
+            pending_auto_focus_when_visible: HashSet::new(),
             pending_tab_key_down: None,
             queued_tab_key_downs: VecDeque::new(),
             focus_subscriptions: HashMap::new(),
@@ -6555,9 +6561,18 @@ impl GpuixView {
         cx: &mut gpui::Context<Self>,
     ) {
         if let Some(handle) = self.focus_handles.get(&id) {
-            handle.focus(window, cx);
-            if reveal {
-                self.scroll_focused_element_into_view(id, cx);
+            let hidden = {
+                let tree = self.tree.lock().unwrap();
+                display_none_in_ancestry(&tree, id)
+            };
+            // A target under `display: none` refuses focus outright: no focus
+            // change, so no `focus`/`blur` event and `getActiveElement()` is
+            // untouched.
+            if !hidden {
+                handle.focus(window, cx);
+                if reveal {
+                    self.scroll_focused_element_into_view(id, cx);
+                }
             }
         }
         cx.notify();
@@ -7682,6 +7697,21 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        // A focused element that just went under `display: none` (its own
+        // style or an ancestor's) loses focus outright, the same as removing
+        // it from the DOM: gpui's own focus-path finalization then fires the
+        // ordinary `on_blur` listener below, and the root fallback a few
+        // lines down claims focus back for the window.
+        if let Some(focused_id) = self
+            .focus_handles
+            .iter()
+            .find_map(|(&id, handle)| handle.is_focused(window).then_some(id))
+        {
+            if display_none_in_ancestry(tree, focused_id) {
+                window.blur();
+            }
+        }
+
         let tab_index = |element: &crate::retained_tree::RetainedElement| {
             if crate::accessibility::is_native_disabled(element)
                 || accessibility_hidden_in_ancestry(tree, element.id)
@@ -7720,7 +7750,15 @@ impl GpuixView {
                 // Focus once, at creation. Re-focusing every frame would
                 // steal focus back from whatever the user clicked next.
                 if element.auto_focus && !native_disabled {
-                    pending_auto_focus.push((id, handle.clone()));
+                    // Browser autofocus on a subtree hidden by `display:
+                    // none` is deferred until the element is actually
+                    // rendered, so it takes effect on the first sync where
+                    // it is visible instead of firing now.
+                    if display_none_in_ancestry(tree, id) {
+                        self.pending_auto_focus_when_visible.insert(id);
+                    } else {
+                        pending_auto_focus.push((id, handle.clone()));
+                    }
                 }
                 self.focus_handles.insert(id, handle);
             } else if let (Some(handle), Some(index)) =
@@ -7732,6 +7770,21 @@ impl GpuixView {
                 self.focus_handles.insert(id, handle.tab_stop(false));
             }
         }
+
+        // Resolve autofocus deferred while its element was hidden: fire once,
+        // on the first pass where it is no longer under `display: none`.
+        self.pending_auto_focus_when_visible.retain(|&id| {
+            if !tree.elements.contains_key(&id) {
+                return false;
+            }
+            if display_none_in_ancestry(tree, id) {
+                return true;
+            }
+            if let Some(handle) = self.focus_handles.get(&id).cloned() {
+                pending_auto_focus.push((id, handle));
+            }
+            false
+        });
 
         // Clean up handles for elements that no longer exist before deriving
         // scroll anchors and subscriptions from the live focus set.
@@ -10727,6 +10780,29 @@ fn accessibility_hidden_in_ancestry(tree: &RetainedTree, element_id: u64) -> boo
             return false;
         };
         if crate::accessibility::is_hidden(element) {
+            return true;
+        }
+        current = element.parent;
+    }
+    false
+}
+
+/// Whether `element_id` or any ancestor (including itself) is styled
+/// `display: none`. Focus handle lifetime is unaffected by this: it is a
+/// focusability predicate, checked only at the points where focus would
+/// actually move (see issue #426).
+fn display_none_in_ancestry(tree: &RetainedTree, element_id: u64) -> bool {
+    let mut current = Some(element_id);
+    while let Some(id) = current {
+        let Some(element) = tree.elements.get(&id) else {
+            return false;
+        };
+        if element
+            .style
+            .as_deref()
+            .and_then(|style| style.display.as_deref())
+            == Some("none")
+        {
             return true;
         }
         current = element.parent;
