@@ -1552,6 +1552,556 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
     }
   })
 
+  /** `lanes`, parametrized by the declared width instead of just open/closed,
+   *  for the keyword endpoints. */
+  const laneAt = (
+    width: number | string,
+    options: {
+      interpolateSize?: "numeric-only" | "allow-keywords"
+      laneInterpolateSize?: "numeric-only" | "allow-keywords"
+      content?: string
+    } = {}
+  ) => (
+    <div
+      style={{
+        display: "flex",
+        width: 600,
+        height: 120,
+        interpolateSize: options.interpolateSize,
+      }}
+    >
+      <div
+        data-testid="lane"
+        style={{
+          ...laneBase,
+          width,
+          interpolateSize: options.laneInterpolateSize,
+          transition: laneTransition,
+        }}
+      >
+        {/* No `whiteSpace: "nowrap"` here: the lane's min-content and
+            max-content need to differ, so its own content must be free to
+            wrap at the query that asks for the narrower one. */}
+        <text>{options.content ?? LANE_TEXT}</text>
+      </div>
+      <div data-testid="max-content-reference" style={{ ...laneBase, flexShrink: 0, width: "auto" }}>
+        <text style={{ whiteSpace: "nowrap" }}>{options.content ?? LANE_TEXT}</text>
+      </div>
+      {/* min-content is the longest word in `LANE_TEXT` ("Lane contents"):
+          measuring just that word, unwrapped, gives the same number
+          `grid-layout.test.tsx` uses for a min-content grid track. */}
+      <div data-testid="min-content-reference" style={{ ...laneBase, flexShrink: 0, width: "auto" }}>
+        <text style={{ whiteSpace: "nowrap" }}>contents</text>
+      </div>
+    </div>
+  )
+
+  const laneWidth = (root: ReturnType<typeof createTestRoot>) =>
+    root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)![2]
+
+  it("opens a width transition to max-content and settles as the keyword", () => {
+    const root = createTestRoot({ strictStyles: true })
+    try {
+      root.renderer.clockPause()
+      root.render(laneAt(0, { interpolateSize: "allow-keywords" }))
+      const content = root.renderer.getElementBounds(
+        root.renderer.findByTestId("max-content-reference")!.id
+      )![2]
+
+      root.render(laneAt("max-content", { interpolateSize: "allow-keywords" }))
+      expect(laneWidth(root)).toBeCloseTo(0, 1)
+      root.renderer.advanceAsyncClock(60)
+      const middle = laneWidth(root)
+      expect(middle).toBeGreaterThan(0)
+      expect(middle).toBeLessThan(content)
+      root.renderer.advanceAsyncClock(60)
+      expect(laneWidth(root)).toBeCloseTo(content, 1)
+
+      // Settled means the declared keyword again: a later content growth
+      // resizes the lane with no second run.
+      root.render(
+        laneAt("max-content", {
+          interpolateSize: "allow-keywords",
+          content: `${LANE_TEXT} widened`,
+        })
+      )
+      const grown = root.renderer.getElementBounds(
+        root.renderer.findByTestId("max-content-reference")!.id
+      )![2]
+      expect(grown).toBeGreaterThan(content)
+      expect(laneWidth(root)).toBeCloseTo(grown, 1)
+      expect(root.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("closes a width transition to max-content from the measured width", () => {
+    const root = createTestRoot()
+    try {
+      root.renderer.clockPause()
+      root.render(laneAt("max-content", { interpolateSize: "allow-keywords" }))
+      const content = root.renderer.getElementBounds(
+        root.renderer.findByTestId("max-content-reference")!.id
+      )![2]
+      expect(laneWidth(root)).toBeCloseTo(content, 1)
+
+      root.render(laneAt(0, { interpolateSize: "allow-keywords" }))
+      root.renderer.advanceAsyncClock(60)
+      const middle = laneWidth(root)
+      expect(middle).toBeGreaterThan(0)
+      expect(middle).toBeLessThan(content)
+      root.renderer.advanceAsyncClock(60)
+      expect(laneWidth(root)).toBeCloseTo(0, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("opens a width transition to min-content in a fixture where min and max differ", () => {
+    const root = createTestRoot()
+    try {
+      root.renderer.clockPause()
+      root.render(laneAt(0, { interpolateSize: "allow-keywords" }))
+      const minContent = root.renderer.getElementBounds(
+        root.renderer.findByTestId("min-content-reference")!.id
+      )![2]
+      const maxContent = root.renderer.getElementBounds(
+        root.renderer.findByTestId("max-content-reference")!.id
+      )![2]
+      expect(minContent).toBeLessThan(maxContent)
+
+      root.render(laneAt("min-content", { interpolateSize: "allow-keywords" }))
+      root.renderer.advanceAsyncClock(60)
+      const middle = laneWidth(root)
+      expect(middle).toBeGreaterThan(0)
+      expect(middle).toBeLessThan(minContent)
+      root.renderer.advanceAsyncClock(60)
+      expect(laneWidth(root)).toBeCloseTo(minContent, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("interpolates a width transition from min-content to max-content", () => {
+    const root = createTestRoot()
+    try {
+      root.renderer.clockPause()
+      root.render(laneAt("min-content", { interpolateSize: "allow-keywords" }))
+      const minContent = laneWidth(root)
+      const maxContent = root.renderer.getElementBounds(
+        root.renderer.findByTestId("max-content-reference")!.id
+      )![2]
+      expect(minContent).toBeLessThan(maxContent)
+
+      root.render(laneAt("max-content", { interpolateSize: "allow-keywords" }))
+      expect(laneWidth(root)).toBeCloseTo(minContent, 1)
+      root.renderer.advanceAsyncClock(60)
+      const middle = laneWidth(root)
+      expect(middle).toBeGreaterThan(minContent)
+      expect(middle).toBeLessThan(maxContent)
+      root.renderer.advanceAsyncClock(60)
+      expect(laneWidth(root)).toBeCloseTo(maxContent, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("clamps a fit-content endpoint to the parent basis and a fit-content() limit", () => {
+    // A basis and a limit strictly between this content's min-content and
+    // max-content, so the clamp lands on them rather than floor/ceiling to a
+    // bound.
+    const measuring = createTestRoot()
+    measuring.renderer.clockPause()
+    measuring.render(laneAt(0, { interpolateSize: "allow-keywords" }))
+    const minContent = measuring.renderer.getElementBounds(
+      measuring.renderer.findByTestId("min-content-reference")!.id
+    )![2]
+    const maxContent = measuring.renderer.getElementBounds(
+      measuring.renderer.findByTestId("max-content-reference")!.id
+    )![2]
+    measuring.unmount()
+    // A whole pixel: layout edges snap to whole pixels, and a half-pixel
+    // basis would land the clamp one pixel either side of it.
+    const between = Math.round((minContent + maxContent) / 2)
+
+    const root = createTestRoot()
+    const view = (width: number | string, parentWidth: number) => (
+      <div
+        style={{
+          display: "flex",
+          width: parentWidth,
+          height: 120,
+          interpolateSize: "allow-keywords",
+        }}
+      >
+        <div data-testid="lane" style={{ ...laneBase, width, transition: laneTransition }}>
+          {/* No `whiteSpace: "nowrap"`: it would make min-content and
+              max-content equal, and this fixture needs them to differ. */}
+          <text>{LANE_TEXT}</text>
+        </div>
+      </div>
+    )
+
+    try {
+      root.renderer.clockPause()
+      // A parent narrower than the content's max-content clamps the bare
+      // keyword to the containing block's content-box width.
+      root.render(view(0, between))
+      root.render(view("fit-content", between))
+      root.renderer.advanceAsyncClock(120)
+      expect(laneWidth(root)).toBeCloseTo(between, 1)
+
+      // `fit-content(<limit>)` clamps to the limit instead.
+      root.render(view(0, 600))
+      root.renderer.advanceAsyncClock(120)
+      root.render(view(`fit-content(${between}px)`, 600))
+      root.renderer.advanceAsyncClock(120)
+      expect(laneWidth(root)).toBeCloseTo(between, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("interpolates a height transition to max-content", () => {
+    const root = createTestRoot()
+    const view = (height: number | string) => (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          width: 220,
+          height: 400,
+          interpolateSize: "allow-keywords",
+        }}
+      >
+        <text
+          data-testid="lane"
+          style={{
+            overflow: "hidden",
+            height,
+            transition: { properties: ["height"], durationMs: 120, easing: "linear" },
+          }}
+        >
+          {LANE_TEXT}
+        </text>
+        <text data-testid="reference" style={{ flexShrink: 0, height: "auto" }}>
+          {LANE_TEXT}
+        </text>
+      </div>
+    )
+    const height = () =>
+      root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)![3]
+
+    try {
+      root.renderer.clockPause()
+      root.render(view(0))
+      const content = root.renderer.getElementBounds(
+        root.renderer.findByTestId("reference")!.id
+      )![3]
+
+      root.render(view("max-content"))
+      root.renderer.advanceAsyncClock(60)
+      const middle = height()
+      expect(middle).toBeGreaterThan(0)
+      expect(middle).toBeLessThan(content)
+      root.renderer.advanceAsyncClock(60)
+      expect(height()).toBeCloseTo(content, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("ends at the unwrapped height when both width and height travel to auto together", () => {
+    const root = createTestRoot()
+    const paragraph =
+      "A paragraph long enough to wrap over several lines if it were measured at a narrow width."
+    // A flex row with `alignItems: "flex-start"` content-sizes both the main
+    // axis (width) and the cross axis (height) of an unstretched item. The
+    // lane's own text can wrap; the reference's cannot, so its height is the
+    // single-line number both axes traveling to `auto` at once must land on
+    // too — the folded probe offers both axes unbounded space, the way one
+    // `(MaxContent, MaxContent)` layout always has.
+    const view = (open: boolean) => (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          width: 900,
+          height: 400,
+          interpolateSize: "allow-keywords",
+        }}
+      >
+        <div
+          data-testid="lane"
+          style={{
+            flexShrink: 0,
+            overflow: "hidden",
+            minWidth: 0,
+            minHeight: 0,
+            width: open ? "auto" : 0,
+            height: open ? "auto" : 0,
+            transition: {
+              properties: ["width", "height"],
+              durationMs: 120,
+              easing: "linear",
+            },
+          }}
+        >
+          <text>{paragraph}</text>
+        </div>
+        <div
+          data-testid="reference"
+          style={{ flexShrink: 0, width: "auto", height: "auto" }}
+        >
+          <text style={{ whiteSpace: "nowrap" }}>{paragraph}</text>
+        </div>
+      </div>
+    )
+
+    try {
+      root.renderer.clockPause()
+      root.render(view(false))
+      const unwrapped = root.renderer.getElementBounds(
+        root.renderer.findByTestId("reference")!.id
+      )![3]
+
+      root.render(view(true))
+      root.renderer.advanceAsyncClock(120)
+      const bounds = root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)!
+      expect(bounds[3]).toBeCloseTo(unwrapped, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("clamps fit-content to the parent's content-box width, not its border box", () => {
+    const measuring = createTestRoot()
+    measuring.renderer.clockPause()
+    measuring.render(laneAt(0, { interpolateSize: "allow-keywords" }))
+    const minContent = measuring.renderer.getElementBounds(
+      measuring.renderer.findByTestId("min-content-reference")!.id
+    )![2]
+    const maxContent = measuring.renderer.getElementBounds(
+      measuring.renderer.findByTestId("max-content-reference")!.id
+    )![2]
+    measuring.unmount()
+    const between = Math.round((minContent + maxContent) / 2)
+
+    const root = createTestRoot()
+    // The parent's border box is 34px wider than its content box (16px
+    // padding and 1px border on each side). A basis that ignored the
+    // shorthands would clamp to the border-box width and overshoot `between`.
+    const parentWidth = between + 2 * 16 + 2 * 1
+    const view = (width: number | string) => (
+      <div
+        style={{
+          display: "flex",
+          width: parentWidth,
+          height: 120,
+          padding: 16,
+          borderWidth: 1,
+          interpolateSize: "allow-keywords",
+        }}
+      >
+        <div data-testid="lane" style={{ ...laneBase, width, transition: laneTransition }}>
+          <text>{LANE_TEXT}</text>
+        </div>
+      </div>
+    )
+
+    try {
+      root.renderer.clockPause()
+      root.render(view(0))
+      root.render(view("fit-content"))
+      root.renderer.advanceAsyncClock(120)
+      expect(laneWidth(root)).toBeCloseTo(between, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("steps a keyword endpoint under numeric-only and snaps it with reduced motion", () => {
+    const root = createTestRoot({ strictStyles: true })
+    try {
+      root.renderer.clockPause()
+      root.render(laneAt(0, { interpolateSize: "allow-keywords" }))
+      const content = root.renderer.getElementBounds(
+        root.renderer.findByTestId("max-content-reference")!.id
+      )![2]
+
+      // `"numeric-only"` on the lane itself turns the inherited opt-in back
+      // off, so the keyword steps rather than interpolating.
+      root.render(
+        laneAt(0, { interpolateSize: "allow-keywords", laneInterpolateSize: "numeric-only" })
+      )
+      root.render(
+        laneAt("max-content", {
+          interpolateSize: "allow-keywords",
+          laneInterpolateSize: "numeric-only",
+        })
+      )
+      expect(laneWidth(root)).toBeCloseTo(content, 1)
+      root.renderer.advanceAsyncClock(60)
+      expect(laneWidth(root)).toBeCloseTo(content, 1)
+
+      // Reduced motion snaps a keyword endpoint the same way it snaps `auto`.
+      root.renderer.setReducedMotion(true)
+      root.render(laneAt(0, { interpolateSize: "allow-keywords" }))
+      const requests = root.renderer.getStyleTransitionFrameRequestCount()
+      root.render(laneAt("max-content", { interpolateSize: "allow-keywords" }))
+      expect(laneWidth(root)).toBeCloseTo(content, 1)
+      expect(root.renderer.getStyleTransitionFrameRequestCount()).toBe(requests)
+      root.renderer.setReducedMotion(false)
+      expect(root.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("interpolates a hover refinement that targets max-content", () => {
+    const root = createTestRoot()
+    try {
+      root.renderer.clockPause()
+      root.render(
+        <div style={{ display: "flex", width: 600, height: 120, interpolateSize: "allow-keywords" }}>
+          <div
+            data-testid="hover-lane"
+            style={{
+              ...laneBase,
+              width: 40,
+              hover: { width: "max-content" },
+              transition: laneTransition,
+            }}
+          >
+            <text style={{ whiteSpace: "nowrap" }}>{LANE_TEXT}</text>
+          </div>
+          <div data-testid="reference" style={{ ...laneBase, flexShrink: 0, width: "auto" }}>
+            <text style={{ whiteSpace: "nowrap" }}>{LANE_TEXT}</text>
+          </div>
+        </div>
+      )
+      const lane = root.renderer.findByTestId("hover-lane")!
+      const content = root.renderer.getElementBounds(
+        root.renderer.findByTestId("reference")!.id
+      )![2]
+      const [x, y, width, height] = root.renderer.getElementBounds(lane.id)!
+      expect(width).toBeCloseTo(40, 1)
+
+      root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      root.renderer.advanceAsyncClock(60)
+      const middle = root.renderer.getElementBounds(lane.id)![2]
+      expect(middle).toBeGreaterThan(40)
+      expect(middle).toBeLessThan(content)
+
+      root.renderer.advanceAsyncClock(60)
+      expect(root.renderer.getElementBounds(lane.id)![2]).toBeCloseTo(content, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("animates an explicit keyword endpoint on an axis the parent stretches", () => {
+    const root = createTestRoot()
+    const column = (width: number | string) => (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          width: 400,
+          height: 200,
+          interpolateSize: "allow-keywords",
+        }}
+      >
+        <div data-testid="lane" style={{ ...laneBase, width, transition: laneTransition }}>
+          <text style={{ whiteSpace: "nowrap" }}>{LANE_TEXT}</text>
+        </div>
+      </div>
+    )
+
+    try {
+      root.renderer.clockPause()
+      // `auto` on the cross axis, default `stretch`, still steps straight to
+      // the parent's width.
+      root.render(column(0))
+      root.render(column("auto"))
+      expect(laneWidth(root)).toBeCloseTo(400, 1)
+      root.renderer.advanceAsyncClock(60)
+      expect(laneWidth(root)).toBeCloseTo(400, 1)
+
+      // `max-content` on the same stretched axis is not gated by the parent
+      // layout: it resolves to its own definition and animates, rather than
+      // stepping straight to the measured number the way `auto` did above.
+      root.render(column(0))
+      root.renderer.advanceAsyncClock(120)
+      expect(laneWidth(root)).toBeCloseTo(0, 1)
+      root.render(column("max-content"))
+      root.renderer.advanceAsyncClock(120)
+      const settled = laneWidth(root)
+      expect(settled).toBeGreaterThan(0)
+      expect(settled).toBeLessThan(400)
+
+      root.render(column(0))
+      root.renderer.advanceAsyncClock(120)
+      expect(laneWidth(root)).toBeCloseTo(0, 1)
+      root.render(column("max-content"))
+      root.renderer.advanceAsyncClock(60)
+      const middle = laneWidth(root)
+      expect(middle).toBeGreaterThan(0)
+      expect(middle).toBeLessThan(settled)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("keeps a settled keyword width while another property animates", () => {
+    const root = createTestRoot()
+    const view = (content: string, opacity: number) => (
+      <div style={{ display: "flex", width: 600, height: 120, interpolateSize: "allow-keywords" }}>
+        <div
+          data-testid="lane"
+          style={{
+            ...laneBase,
+            width: "max-content",
+            opacity,
+            transition: {
+              properties: ["width", "opacity"],
+              durationMs: 120,
+              easing: "linear",
+            },
+          }}
+        >
+          <text style={{ whiteSpace: "nowrap" }}>{content}</text>
+        </div>
+        <div data-testid="reference" style={{ ...laneBase, flexShrink: 0, width: "auto" }}>
+          <text style={{ whiteSpace: "nowrap" }}>{content}</text>
+        </div>
+      </div>
+    )
+
+    try {
+      root.renderer.clockPause()
+      root.render(view(LANE_TEXT, 1))
+      root.renderer.advanceAsyncClock(200)
+      const initial = widths(root)
+      expect(initial.lane).toBeCloseTo(initial.reference, 1)
+
+      const grown = `${LANE_TEXT} and then some more`
+      root.render(view(grown, 1))
+      const wide = widths(root)
+      expect(wide.reference).toBeGreaterThan(initial.reference)
+      expect(wide.lane).toBeCloseTo(wide.reference, 1)
+
+      root.render(view(grown, 0.2))
+      for (let frame = 0; frame < 4; frame += 1) {
+        root.renderer.advanceAsyncClock(30)
+        expect(widths(root).lane).toBeCloseTo(wide.reference, 1)
+      }
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("rejects an unknown interpolateSize value through the strict style channel", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const root = createTestRoot({ strictStyles: true })

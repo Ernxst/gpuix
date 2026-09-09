@@ -16,15 +16,21 @@ enum TransitionValue {
     Color([f32; 4]),
 }
 
-/// The pixel size GPUI laid an intrinsic (`auto`) endpoint out at this frame.
+/// The three numbers an intrinsic-keyword endpoint can resolve from: the
+/// content's min-content width, its max-content width, and its content
+/// height under the width it will paint at. `auto`, `min-content`,
+/// `max-content` and `fit-content` on the width axis each need one or two of
+/// the first two fields; every keyword on the height axis needs only the
+/// third.
 ///
-/// `None` on an axis means the endpoint keeps CSS's default behaviour and steps,
-/// either because `interpolateSize` is `"numeric-only"` or because nothing on
-/// this element needs the number.
+/// `None` on a field means nothing needs the number, either because
+/// `interpolateSize` is `"numeric-only"` or because no declared endpoint asks
+/// for it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct IntrinsicSize {
-    pub width: Option<f64>,
-    pub height: Option<f64>,
+    pub min_width: Option<f64>,
+    pub max_width: Option<f64>,
+    pub content_height: Option<f64>,
 }
 
 /// A pair of per-axis flags, for the two axes an intrinsic size can travel on.
@@ -40,21 +46,64 @@ pub(crate) struct IntrinsicAxes {
 pub(crate) struct IntrinsicInput {
     /// Axes whose `auto` resolves from the element's own content. An axis
     /// outside this set is stretched by its parent, so no content measurement
-    /// describes it and the endpoint keeps CSS's step.
+    /// describes it and an `auto` endpoint keeps CSS's step. An explicit
+    /// keyword (`min-content`, `max-content`, `fit-content`) is not gated by
+    /// this: it resolves to its own definition regardless of how the parent
+    /// lays the element out.
     pub content_sized: IntrinsicAxes,
-    /// This frame's fresh measurement, per axis. Absent on every frame the
+    /// This frame's fresh measurement, per field. Absent on every frame the
     /// renderer did not probe, which is every frame except an endpoint edge.
     pub measured: IntrinsicSize,
+    /// The containing block's content-box width: the parent's last painted
+    /// bounds minus its padding and border. This is the clamp basis for a
+    /// bare `fit-content` endpoint and the resolution basis for a percentage
+    /// `fit-content(<limit>)`. `None` before the parent has painted, which
+    /// steps the endpoint.
+    pub basis: Option<f64>,
 }
 
 /// The style whose layout supplies the numbers in [`IntrinsicSize`], plus the
-/// axes that need measuring. The renderer builds this style, lays it out with
-/// GPUI, and hands the result back to [`StyleTransitionState::sync`].
+/// fields that need measuring. The renderer builds this style, lays it out
+/// with GPUI, and hands the result back to [`StyleTransitionState::sync`].
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct IntrinsicProbe {
     pub style: StyleDesc,
-    pub width: bool,
+    pub min_width: bool,
+    pub max_width: bool,
     pub height: bool,
+}
+
+/// Which of CSS's intrinsic sizing keywords a dimension declares, `auto`
+/// included. `None` means the dimension is a plain length or percentage,
+/// which never interpolates from a measurement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IntrinsicKeyword {
+    Auto,
+    MinContent,
+    MaxContent,
+    FitContent,
+    FitContentLimit,
+}
+
+pub(crate) fn intrinsic_keyword(dimension: &Option<DimensionValue>) -> Option<IntrinsicKeyword> {
+    match dimension {
+        Some(DimensionValue::Auto) => Some(IntrinsicKeyword::Auto),
+        Some(DimensionValue::MinContent) => Some(IntrinsicKeyword::MinContent),
+        Some(DimensionValue::MaxContent) => Some(IntrinsicKeyword::MaxContent),
+        Some(DimensionValue::FitContent) => Some(IntrinsicKeyword::FitContent),
+        Some(DimensionValue::FitContentLimit { .. }) => Some(IntrinsicKeyword::FitContentLimit),
+        _ => None,
+    }
+}
+
+/// Which fields of [`IntrinsicSize`] a width-axis keyword needs.
+fn width_needs(keyword: Option<IntrinsicKeyword>) -> (bool, bool) {
+    match keyword {
+        Some(IntrinsicKeyword::Auto | IntrinsicKeyword::MaxContent) => (false, true),
+        Some(IntrinsicKeyword::MinContent) => (true, false),
+        Some(IntrinsicKeyword::FitContent | IntrinsicKeyword::FitContentLimit) => (true, true),
+        None => (false, false),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -103,21 +152,33 @@ impl TransitionValue {
 
     /// Give an intrinsic endpoint the number GPUI laid it out at.
     ///
-    /// CSS interpolates `auto` only under `interpolate-size: allow-keywords`,
-    /// so an axis without a measurement keeps `Auto` here and falls through
-    /// `interpolate` to the step it takes today. Only `width` and `height`
-    /// carry a measurement: `min-*` and `max-*` keywords keep stepping.
-    fn with_intrinsic(self, property: TransitionProperty, intrinsic: IntrinsicSize) -> Self {
-        let measured = match property {
-            TransitionProperty::Width => intrinsic.width,
-            TransitionProperty::Height => intrinsic.height,
+    /// CSS interpolates an intrinsic keyword only under `interpolate-size:
+    /// allow-keywords`, so a keyword the renderer could not resolve a number
+    /// for keeps its keyword here and falls through `interpolate` to the step
+    /// it takes today. Only `width` and `height` carry a measurement: `min-*`
+    /// and `max-*` keywords keep stepping.
+    fn with_intrinsic(
+        self,
+        property: TransitionProperty,
+        intrinsic: IntrinsicSize,
+        basis: Option<f64>,
+    ) -> Self {
+        let Self::Dimension(dimension) = &self else {
+            return self;
+        };
+        let Some(keyword) = intrinsic_keyword(&Some(dimension.clone())) else {
+            return self;
+        };
+        let resolved = match property {
+            TransitionProperty::Width => {
+                resolve_width_keyword(keyword, dimension, intrinsic, basis)
+            }
+            TransitionProperty::Height => intrinsic.content_height,
             _ => None,
         };
-        match (self, measured) {
-            (Self::Dimension(DimensionValue::Auto), Some(measured)) => {
-                Self::Dimension(DimensionValue::Pixels(measured))
-            }
-            (value, _) => value,
+        match resolved {
+            Some(pixels) => Self::Dimension(DimensionValue::Pixels(pixels)),
+            None => self,
         }
     }
 
@@ -337,6 +398,40 @@ impl TransitionValue {
     }
 }
 
+/// Resolve a width-axis intrinsic keyword to a pixel number, per the table in
+/// README's `interpolateSize` section. `fit-content` and `fit-content(<limit>)`
+/// need the clamp basis: the containing block's content-box width, for the
+/// bare keyword and for a percentage limit. A `ch`/`vw`/`vh` limit, or a
+/// basis this element does not have yet, leaves the endpoint unresolved and
+/// it steps.
+fn resolve_width_keyword(
+    keyword: IntrinsicKeyword,
+    dimension: &DimensionValue,
+    intrinsic: IntrinsicSize,
+    basis: Option<f64>,
+) -> Option<f64> {
+    match keyword {
+        IntrinsicKeyword::Auto | IntrinsicKeyword::MaxContent => intrinsic.max_width,
+        IntrinsicKeyword::MinContent => intrinsic.min_width,
+        IntrinsicKeyword::FitContent => {
+            let (min, max) = (intrinsic.min_width?, intrinsic.max_width?);
+            Some(basis?.max(min).min(max))
+        }
+        IntrinsicKeyword::FitContentLimit => {
+            let DimensionValue::FitContentLimit { limit, .. } = dimension else {
+                unreachable!("`intrinsic_keyword` matched a `FitContentLimit` dimension");
+            };
+            let (min, max) = (intrinsic.min_width?, intrinsic.max_width?);
+            let limit = match limit.as_ref() {
+                DimensionValue::Pixels(limit) => Some(*limit),
+                DimensionValue::Percentage(fraction) => basis.map(|basis| basis * fraction),
+                _ => None,
+            }?;
+            Some(limit.max(min).min(max))
+        }
+    }
+}
+
 fn premultiply(color: [f32; 4]) -> [f64; 4] {
     let alpha = f64::from(color[3]);
     [
@@ -372,6 +467,7 @@ impl TransitionValues {
         style: &StyleDesc,
         transition: &StyleTransition,
         intrinsic: IntrinsicSize,
+        basis: Option<f64>,
     ) -> Self {
         let properties = canonical_transition_properties(transition);
         let canonical_style = properties
@@ -389,7 +485,7 @@ impl TransitionValues {
                 .copied()
                 .map(|property| {
                     let value = TransitionValue::from_style(style, property)
-                        .map(|value| value.with_intrinsic(property, intrinsic));
+                        .map(|value| value.with_intrinsic(property, intrinsic, basis));
                     (property, value)
                 })
                 .collect(),
@@ -550,13 +646,16 @@ pub(crate) struct StyleTransitionState {
     started: Instant,
     hovered: bool,
     active: bool,
-    /// The measurement of this element's `auto` state, latched when the
+    /// The measurement of this element's intrinsic endpoints, latched when the
     /// endpoint last changed. It is not re-taken while a run is in flight:
     /// `sync` restarts the clock whenever the target moves, so a target that
     /// followed the content — a nested transition, streaming text — would push
     /// the finish line away on every frame and the declared duration would
     /// never elapse.
     intrinsic: IntrinsicSize,
+    /// The `fit-content` clamp basis, latched alongside `intrinsic` for the
+    /// same reason.
+    intrinsic_basis: Option<f64>,
 }
 
 impl StyleTransitionState {
@@ -574,8 +673,12 @@ impl StyleTransitionState {
         // No measurement on the frame an element mounts: the renderer calls
         // `sync` before the first `frame`, and a state whose `from` equals its
         // `target` paints the target style either way.
-        let target =
-            TransitionValues::from_style(&target_style, &transition, IntrinsicSize::default());
+        let target = TransitionValues::from_style(
+            &target_style,
+            &transition,
+            IntrinsicSize::default(),
+            None,
+        );
         Self {
             from: target.clone(),
             target,
@@ -586,6 +689,7 @@ impl StyleTransitionState {
             hovered: false,
             active: false,
             intrinsic: IntrinsicSize::default(),
+            intrinsic_basis: None,
         }
     }
 
@@ -607,24 +711,47 @@ impl StyleTransitionState {
         // A stretched axis has no content number, latched or fresh. A
         // content-sized one keeps the number it latched at the last edge until
         // a fresh probe replaces it.
-        self.intrinsic.width = intrinsic
+        self.intrinsic.min_width = intrinsic
             .content_sized
             .width
-            .then(|| intrinsic.measured.width.or(self.intrinsic.width))
+            .then(|| intrinsic.measured.min_width.or(self.intrinsic.min_width))
             .flatten();
-        self.intrinsic.height = intrinsic
+        self.intrinsic.max_width = intrinsic
+            .content_sized
+            .width
+            .then(|| intrinsic.measured.max_width.or(self.intrinsic.max_width))
+            .flatten();
+        self.intrinsic.content_height = intrinsic
             .content_sized
             .height
-            .then(|| intrinsic.measured.height.or(self.intrinsic.height))
+            .then(|| {
+                intrinsic
+                    .measured
+                    .content_height
+                    .or(self.intrinsic.content_height)
+            })
             .flatten();
+        // The basis latches with the triple, off the same signal: a fresh
+        // probe this frame. Gating on `content_sized.width` alone would
+        // re-adopt whatever basis a caller passed on every frame, even one
+        // where nothing was actually measured — retargeting every frame a
+        // containing block resizes mid-run, never letting a run finish.
+        let probed_width =
+            intrinsic.measured.min_width.is_some() || intrinsic.measured.max_width.is_some();
+        self.intrinsic_basis = if probed_width {
+            intrinsic.basis.or(self.intrinsic_basis)
+        } else {
+            self.intrinsic_basis
+        };
         let intrinsic = self.intrinsic;
+        let basis = self.intrinsic_basis;
         let target_style =
             resolve_transition_target(style, state, hover_within, self.hovered, self.active);
         let transition = style
             .transition
             .clone()
             .expect("a transition state is retained only for a declared transition");
-        let target = TransitionValues::from_style(&target_style, &transition, intrinsic);
+        let target = TransitionValues::from_style(&target_style, &transition, intrinsic, basis);
 
         if target != self.target || transition != self.transition {
             // Resolve the whole painted style before adopting the new property
@@ -642,7 +769,8 @@ impl StyleTransitionState {
                 self.active,
                 &transition,
             );
-            let visible = TransitionValues::from_style(&visible_style, &transition, intrinsic);
+            let visible =
+                TransitionValues::from_style(&visible_style, &transition, intrinsic, basis);
             self.from = visible.interpolate(&target, 0.0);
             self.velocities = match &transition.easing {
                 TransitionEasing::Spring(spring) => self.from.spring_velocities(
@@ -789,9 +917,17 @@ impl StyleTransitionState {
     /// says the element was content-sized a frame ago.
     fn settles_intrinsic(&self) -> (bool, bool) {
         (
-            self.target_style.width == Some(DimensionValue::Auto),
-            self.target_style.height == Some(DimensionValue::Auto),
+            intrinsic_keyword(&self.target_style.width).is_some(),
+            intrinsic_keyword(&self.target_style.height).is_some(),
         )
+    }
+
+    /// The style this element's transition is currently aiming at. The
+    /// renderer reads this to decide whether an explicit keyword endpoint —
+    /// unlike `auto` — needs measuring on an axis its parent would otherwise
+    /// stretch.
+    pub(crate) fn target_style(&self) -> &StyleDesc {
+        &self.target_style
     }
 
     pub(crate) fn set_hovered(&mut self, hovered: bool) -> bool {
@@ -906,54 +1042,78 @@ pub(crate) fn intrinsic_probe(
     let (settled_width, settled_height) =
         retained.map_or((false, false), StyleTransitionState::settles_intrinsic);
     let latched = retained.map_or(IntrinsicSize::default(), |state| state.intrinsic);
+    let previous_width = retained.and_then(|state| intrinsic_keyword(&state.target_style.width));
+    let previous_height = retained.and_then(|state| intrinsic_keyword(&state.target_style.height));
 
-    // An axis is at an edge when it is becoming intrinsic or ceasing to be, or
-    // when nothing is latched for it yet. In between — every frame of a run,
-    // and every frame of a settled `auto` element — the latch stands and no
+    // An axis is at an edge when it is becoming intrinsic or ceasing to be,
+    // when the keyword it needs a number for changed mid-run (a retarget from
+    // `min-content` to `max-content` while still opening), or when a field the
+    // active keyword needs is not yet latched. In between — every other frame
+    // of a run, and every frame of a settled element — the latch stands and no
     // layout is paid for.
-    let edge = |property: TransitionProperty,
-                axis_content_sized: bool,
-                axis_target: &Option<DimensionValue>,
-                settled: bool,
-                latched: Option<f64>| {
+    let axis_edge = |property: TransitionProperty,
+                     axis_content_sized: bool,
+                     axis_target: &Option<DimensionValue>,
+                     settled: bool,
+                     previous: Option<IntrinsicKeyword>,
+                     field_latched: &dyn Fn(IntrinsicKeyword) -> bool| {
         if !axis_content_sized || !properties.contains(&property) {
-            return false;
+            return None;
         }
-        let intrinsic_now = *axis_target == Some(DimensionValue::Auto);
+        let now = intrinsic_keyword(axis_target);
+        let intrinsic_now = now.is_some();
         if !intrinsic_now && !settled {
-            return false;
+            return None;
         }
-        latched.is_none() || intrinsic_now != settled
+        let active = now.or(previous);
+        let Some(active) = active else {
+            return None;
+        };
+        let is_edge = intrinsic_now != settled
+            || (intrinsic_now && settled && now != previous)
+            || !field_latched(active);
+        is_edge.then_some(active)
     };
-    let width = edge(
+
+    let width_active = axis_edge(
         TransitionProperty::Width,
         content_sized.width,
         &target.width,
         settled_width,
-        latched.width,
+        previous_width,
+        &|keyword| {
+            let (needs_min, needs_max) = width_needs(Some(keyword));
+            (!needs_min || latched.min_width.is_some())
+                && (!needs_max || latched.max_width.is_some())
+        },
     );
-    let height = edge(
+    let height_active = axis_edge(
         TransitionProperty::Height,
         content_sized.height,
         &target.height,
         settled_height,
-        latched.height,
+        previous_height,
+        &|_keyword| latched.content_height.is_some(),
     );
-    if !width && !height {
+
+    let (needs_min_width, needs_max_width) = width_needs(width_active);
+    let needs_height = height_active.is_some();
+    if !needs_min_width && !needs_max_width && !needs_height {
         return None;
     }
 
     let mut probe = target.clone();
-    if width {
+    if needs_min_width || needs_max_width {
         probe.width = Some(DimensionValue::Auto);
     }
-    if height {
+    if needs_height {
         probe.height = Some(DimensionValue::Auto);
     }
     Some(IntrinsicProbe {
         style: probe,
-        width,
-        height,
+        min_width: needs_min_width,
+        max_width: needs_max_width,
+        height: needs_height,
     })
 }
 
@@ -2515,6 +2675,28 @@ mod tests {
         state.frame(at, false).style.width
     }
 
+    fn max_content(width: f64) -> IntrinsicSize {
+        IntrinsicSize {
+            max_width: Some(width),
+            ..IntrinsicSize::default()
+        }
+    }
+
+    fn min_content(width: f64) -> IntrinsicSize {
+        IntrinsicSize {
+            min_width: Some(width),
+            ..IntrinsicSize::default()
+        }
+    }
+
+    fn min_max_content(min_width: f64, max_width: f64) -> IntrinsicSize {
+        IntrinsicSize {
+            min_width: Some(min_width),
+            max_width: Some(max_width),
+            ..IntrinsicSize::default()
+        }
+    }
+
     const CONTENT_WIDTH: IntrinsicAxes = IntrinsicAxes {
         width: true,
         height: false,
@@ -2545,7 +2727,33 @@ mod tests {
         now: Instant,
         measure: impl FnOnce() -> IntrinsicSize,
     ) -> bool {
-        let probe = probe_of(style, CONTENT_WIDTH, Some(state));
+        drive_with_basis(state, style, now, None, measure)
+    }
+
+    /// `drive`, with the `fit-content` clamp basis a parent would supply.
+    fn drive_with_basis(
+        state: &mut StyleTransitionState,
+        style: &StyleDesc,
+        now: Instant,
+        basis: Option<f64>,
+        measure: impl FnOnce() -> IntrinsicSize,
+    ) -> bool {
+        drive_axes(state, style, CONTENT_WIDTH, now, basis, measure)
+    }
+
+    /// `drive`, generalized to any set of content-sized axes: the renderer
+    /// bundles whichever fields a probe needs — a `max-content` width and a
+    /// content height alike — into the *one* probe an edge frame takes, so
+    /// this drives them through the same single measurement call.
+    fn drive_axes(
+        state: &mut StyleTransitionState,
+        style: &StyleDesc,
+        content_sized: IntrinsicAxes,
+        now: Instant,
+        basis: Option<f64>,
+        measure: impl FnOnce() -> IntrinsicSize,
+    ) -> bool {
+        let probe = probe_of(style, content_sized, Some(state));
         let measured = probe.is_some().then(measure).unwrap_or_default();
         state.sync(
             style,
@@ -2554,8 +2762,9 @@ mod tests {
             now,
             false,
             IntrinsicInput {
-                content_sized: CONTENT_WIDTH,
+                content_sized,
                 measured,
+                basis,
             },
         );
         probe.is_some()
@@ -2566,10 +2775,7 @@ mod tests {
         let started = Instant::now();
         let closed = width_transition(serde_json::json!(0));
         let opened = width_transition(serde_json::json!("auto"));
-        let measure = || IntrinsicSize {
-            width: Some(120.0),
-            height: None,
-        };
+        let measure = || max_content(120.0);
 
         let mut state = StyleTransitionState::new(&closed, StyleState::default(), false, started);
         drive(&mut state, &closed, started, measure);
@@ -2624,10 +2830,7 @@ mod tests {
         let started = Instant::now();
         let closed = width_transition(serde_json::json!(0));
         let opened = width_transition(serde_json::json!("auto"));
-        let measure = || IntrinsicSize {
-            width: Some(120.0),
-            height: None,
-        };
+        let measure = || max_content(120.0);
 
         let mut state = StyleTransitionState::new(&opened, StyleState::default(), false, started);
         assert!(drive(&mut state, &opened, started, measure));
@@ -2649,10 +2852,7 @@ mod tests {
         let started = Instant::now();
         let closed = width_transition(serde_json::json!(0));
         let opened = width_transition(serde_json::json!("auto"));
-        let measure = || IntrinsicSize {
-            width: Some(120.0),
-            height: None,
-        };
+        let measure = || max_content(120.0);
 
         let mut state = StyleTransitionState::new(&closed, StyleState::default(), false, started);
         // Mounted closed: nothing is intrinsic, so nothing is measured.
@@ -2672,6 +2872,134 @@ mod tests {
         let closing_at = started + Duration::from_millis(4_000);
         assert!(drive(&mut state, &closed, closing_at, measure));
         assert!(!drive(&mut state, &closed, closing_at, measure));
+
+        // A retarget between two different keywords while still settled at an
+        // intrinsic value is also an edge, even though the axis never stops
+        // being intrinsic: the new keyword needs a field the old one did not.
+        let min = width_transition(serde_json::json!("min-content"));
+        let max = width_transition(serde_json::json!("max-content"));
+        let mut keyword_state =
+            StyleTransitionState::new(&min, StyleState::default(), false, started);
+        assert!(drive(&mut keyword_state, &min, started, || min_content(
+            80.0
+        )));
+        assert!(
+            !drive(&mut keyword_state, &min, started, || min_content(80.0)),
+            "the same keyword must reuse its latch"
+        );
+        assert!(
+            drive(&mut keyword_state, &max, started, || max_content(200.0)),
+            "min-content -> max-content must re-measure the newly needed field"
+        );
+    }
+
+    #[test]
+    fn both_axes_to_auto_share_one_probe_and_measure_the_unwrapped_height() {
+        let started = Instant::now();
+        let closed = style(serde_json::json!({
+            "width": 0,
+            "height": 0,
+            "overflow": "hidden",
+            "minWidth": 0,
+            "minHeight": 0,
+            "transition": {
+                "properties": ["width", "height"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        let opened = style(serde_json::json!({
+            "width": "auto",
+            "height": "auto",
+            "overflow": "hidden",
+            "minWidth": 0,
+            "minHeight": 0,
+            "transition": {
+                "properties": ["width", "height"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        const BOTH_AXES: IntrinsicAxes = IntrinsicAxes {
+            width: true,
+            height: true,
+        };
+        let probes = std::cell::Cell::new(0);
+        let measure = || {
+            probes.set(probes.get() + 1);
+            IntrinsicSize {
+                max_width: Some(120.0),
+                content_height: Some(40.0),
+                ..IntrinsicSize::default()
+            }
+        };
+
+        let mut state = StyleTransitionState::new(&closed, StyleState::default(), false, started);
+        drive_axes(&mut state, &closed, BOTH_AXES, started, None, measure);
+        // Both axes become intrinsic on the same edge frame: the renderer's
+        // `measure_intrinsic_triple` answers the max-content width and the
+        // content height from the *same* probe subtree, so the whole edge
+        // costs one build and one `layout_as_root`, not two.
+        assert!(drive_axes(
+            &mut state, &opened, BOTH_AXES, started, None, measure
+        ));
+        assert_eq!(probes.get(), 1, "one edge must take exactly one probe");
+
+        let settled = state.frame(started + Duration::from_millis(100), false);
+        assert_eq!(settled.style.width, Some(DimensionValue::Auto));
+        assert_eq!(settled.style.height, Some(DimensionValue::Auto));
+    }
+
+    #[test]
+    fn fit_content_basis_is_latched_not_refetched_every_frame() {
+        let started = Instant::now();
+        let closed = width_transition(serde_json::json!(0));
+        let opened = width_transition(serde_json::json!("fit-content"));
+
+        let mut state = StyleTransitionState::new(&closed, StyleState::default(), false, started);
+        drive_with_basis(&mut state, &closed, started, Some(150.0), || {
+            min_max_content(40.0, 300.0)
+        });
+        assert!(drive_with_basis(
+            &mut state,
+            &opened,
+            started,
+            Some(150.0),
+            || min_max_content(40.0, 300.0)
+        ));
+
+        // Mid-run, as if the containing block resized: a caller that passed a
+        // *different* basis on a frame with no fresh measurement must not
+        // retarget the run — `started` stays put, and the clamp the run is
+        // travelling to stays the one latched at the edge.
+        let mid_run = started + Duration::from_millis(50);
+        state.sync(
+            &opened,
+            StyleState::default(),
+            false,
+            mid_run,
+            false,
+            IntrinsicInput {
+                content_sized: CONTENT_WIDTH,
+                measured: IntrinsicSize::default(),
+                basis: Some(999.0),
+            },
+        );
+        assert_eq!(
+            sampled_width(&state, mid_run),
+            Some(DimensionValue::Pixels(75.0)),
+            "an un-probed frame's basis must not retarget the run"
+        );
+        // If the fake basis had retargeted the run, `started` would have
+        // moved to `mid_run` and the clamp would have become 300 (`999`
+        // clamped to `[40, 300]`), giving a different number here. The
+        // original trajectory toward 150, on the original clock, must hold.
+        assert_eq!(
+            sampled_width(&state, started + Duration::from_millis(90)),
+            Some(DimensionValue::Pixels(135.0))
+        );
+        let settled = state.frame(started + Duration::from_millis(100), false);
+        assert_eq!(settled.style.width, Some(DimensionValue::FitContent));
     }
 
     #[test]
@@ -2681,11 +3009,8 @@ mod tests {
         let opened = width_transition(serde_json::json!("auto"));
 
         let mut state = StyleTransitionState::new(&closed, StyleState::default(), false, started);
-        drive(&mut state, &closed, started, || IntrinsicSize::default());
-        drive(&mut state, &opened, started, || IntrinsicSize {
-            width: Some(120.0),
-            height: None,
-        });
+        drive(&mut state, &closed, started, IntrinsicSize::default);
+        drive(&mut state, &opened, started, || max_content(120.0));
 
         // Content grows on every frame, the way streaming text does. The run
         // keeps the endpoint it latched, so the clock is never pushed out.
@@ -2694,10 +3019,7 @@ mod tests {
             let now = started + Duration::from_millis(frame * 16);
             growing += 40.0;
             let measured = growing;
-            assert!(!drive(&mut state, &opened, now, || IntrinsicSize {
-                width: Some(measured),
-                height: None,
-            }));
+            assert!(!drive(&mut state, &opened, now, || max_content(measured)));
         }
         let end = started + Duration::from_millis(100);
         let settled = state.frame(end, false);
@@ -2729,23 +3051,60 @@ mod tests {
 
         let mut state =
             StyleTransitionState::new(&lane(1.0), StyleState::default(), false, started);
-        assert!(drive(&mut state, &lane(1.0), started, || IntrinsicSize {
-            width: Some(120.0),
-            height: None,
-        }));
+        assert!(drive(&mut state, &lane(1.0), started, || max_content(
+            120.0
+        )));
         assert_eq!(sampled_width(&state, started), Some(DimensionValue::Auto));
 
         // An opacity-only change retargets the run. Width has nowhere to
         // travel, and its latched pixel is already stale, so the frame must
         // keep the declared `auto` rather than pin the element to it.
-        assert!(!drive(&mut state, &lane(0.0), started, || IntrinsicSize {
-            width: Some(400.0),
-            height: None,
-        }));
+        assert!(!drive(&mut state, &lane(0.0), started, || max_content(
+            400.0
+        )));
         let middle = state.frame(started + Duration::from_millis(50), false);
         assert!(middle.active);
         assert_eq!(middle.style.opacity, Some(0.5));
         assert_eq!(middle.style.width, Some(DimensionValue::Auto));
+    }
+
+    /// The same property/opacity lane, with the width endpoint a `max-content`
+    /// keyword instead of `auto`. An explicit keyword settles and keeps not
+    /// pinning the axis exactly the way `auto` does.
+    #[test]
+    fn another_property_does_not_pin_a_settled_keyword_axis() {
+        let started = Instant::now();
+        let lane = |opacity: f64| {
+            style(serde_json::json!({
+                "width": "max-content",
+                "opacity": opacity,
+                "overflow": "hidden",
+                "minWidth": 0,
+                "transition": {
+                    "properties": ["width", "opacity"],
+                    "durationMs": 100,
+                    "easing": "linear"
+                }
+            }))
+        };
+
+        let mut state =
+            StyleTransitionState::new(&lane(1.0), StyleState::default(), false, started);
+        assert!(drive(&mut state, &lane(1.0), started, || max_content(
+            120.0
+        )));
+        assert_eq!(
+            sampled_width(&state, started),
+            Some(DimensionValue::MaxContent)
+        );
+
+        assert!(!drive(&mut state, &lane(0.0), started, || max_content(
+            400.0
+        )));
+        let middle = state.frame(started + Duration::from_millis(50), false);
+        assert!(middle.active);
+        assert_eq!(middle.style.opacity, Some(0.5));
+        assert_eq!(middle.style.width, Some(DimensionValue::MaxContent));
     }
 
     #[test]
@@ -2759,7 +3118,7 @@ mod tests {
 
         // Opening: the declared target is already intrinsic.
         let probe = probe_for(&opened, None).expect("an auto target needs a measurement");
-        assert!(probe.width && !probe.height);
+        assert!(probe.max_width && !probe.min_width && !probe.height);
         assert_eq!(probe.style.width, Some(DimensionValue::Auto));
 
         // Nothing intrinsic on either side, and no retained intrinsic state.
@@ -2771,13 +3130,10 @@ mod tests {
         // Closing: React has already swapped `auto` for a number, so only the
         // retained target still says the element was content-sized.
         let mut state = StyleTransitionState::new(&opened, StyleState::default(), false, now);
-        drive(&mut state, &opened, now, || IntrinsicSize {
-            width: Some(120.0),
-            height: None,
-        });
+        drive(&mut state, &opened, now, || max_content(120.0));
         let probe =
             probe_for(&closed, Some(&state)).expect("a retained auto endpoint needs a measurement");
-        assert!(probe.width);
+        assert!(probe.max_width);
         assert_eq!(probe.style.width, Some(DimensionValue::Auto));
 
         // A state refinement goes through the same resolution.
@@ -2792,7 +3148,27 @@ mod tests {
         assert!(hover_state.set_hovered(true));
         let probe = probe_for(&hovered, Some(&hover_state))
             .expect("a hovered auto refinement needs a measurement");
-        assert!(probe.width);
+        assert!(probe.max_width);
+        assert_eq!(probe.style.width, Some(DimensionValue::Auto));
+    }
+
+    /// `hover: { width: "max-content" }` mirrors the `auto` refinement case
+    /// above.
+    #[test]
+    fn intrinsic_probe_measures_a_hovered_keyword_refinement() {
+        let now = Instant::now();
+        let hovered = style(serde_json::json!({
+            "width": 0,
+            "hover": { "width": "max-content" },
+            "transition": { "properties": ["width"], "durationMs": 100 }
+        }));
+        let mut hover_state =
+            StyleTransitionState::new(&hovered, StyleState::default(), false, now);
+        assert!(probe_of(&hovered, CONTENT_WIDTH, Some(&hover_state)).is_none());
+        assert!(hover_state.set_hovered(true));
+        let probe = probe_of(&hovered, CONTENT_WIDTH, Some(&hover_state))
+            .expect("a hovered keyword refinement needs a measurement");
+        assert!(probe.max_width);
         assert_eq!(probe.style.width, Some(DimensionValue::Auto));
     }
 
@@ -2803,10 +3179,8 @@ mod tests {
         let opened = width_transition(serde_json::json!("auto"));
         let stretched = IntrinsicInput {
             content_sized: IntrinsicAxes::default(),
-            measured: IntrinsicSize {
-                width: Some(120.0),
-                height: None,
-            },
+            measured: max_content(120.0),
+            basis: None,
         };
 
         let mut state = StyleTransitionState::new(&closed, StyleState::default(), false, started);
@@ -2853,9 +3227,11 @@ mod tests {
                 height: true,
             },
             measured: IntrinsicSize {
-                width: Some(120.0),
-                height: Some(40.0),
+                max_width: Some(120.0),
+                content_height: Some(40.0),
+                ..IntrinsicSize::default()
             },
+            basis: None,
         };
 
         // `minWidth` is not an intrinsic-size axis, so no measurement is asked
@@ -2886,5 +3262,219 @@ mod tests {
                 .min_width,
             Some(DimensionValue::Auto)
         );
+    }
+
+    #[test]
+    fn min_content_endpoint_opens_from_zero() {
+        let started = Instant::now();
+        let closed = width_transition(serde_json::json!(0));
+        let opened = width_transition(serde_json::json!("min-content"));
+        let measure = || min_content(80.0);
+
+        let mut state = StyleTransitionState::new(&closed, StyleState::default(), false, started);
+        drive(&mut state, &closed, started, measure);
+        assert!(drive(&mut state, &opened, started, measure));
+
+        assert_eq!(
+            sampled_width(&state, started),
+            Some(DimensionValue::Pixels(0.0))
+        );
+        assert_eq!(
+            sampled_width(&state, started + Duration::from_millis(50)),
+            Some(DimensionValue::Pixels(40.0))
+        );
+        let settled = state.frame(started + Duration::from_millis(100), false);
+        assert_eq!(settled.style.width, Some(DimensionValue::MinContent));
+        assert!(!settled.active);
+    }
+
+    #[test]
+    fn min_content_endpoint_interpolates_to_max_content() {
+        let started = Instant::now();
+        let min = width_transition(serde_json::json!("min-content"));
+        let max = width_transition(serde_json::json!("max-content"));
+
+        let mut state = StyleTransitionState::new(&min, StyleState::default(), false, started);
+        assert!(drive(&mut state, &min, started, || min_content(80.0)));
+        assert_eq!(
+            sampled_width(&state, started),
+            Some(DimensionValue::MinContent)
+        );
+
+        // The retarget needs only the field the new keyword adds: `max_width`.
+        // `min_width` stays latched from the previous edge.
+        assert!(drive(&mut state, &max, started, || max_content(200.0)));
+        assert_eq!(
+            sampled_width(&state, started),
+            Some(DimensionValue::Pixels(80.0))
+        );
+        assert_eq!(
+            sampled_width(&state, started + Duration::from_millis(50)),
+            Some(DimensionValue::Pixels(140.0))
+        );
+        let settled = state.frame(started + Duration::from_millis(100), false);
+        assert_eq!(settled.style.width, Some(DimensionValue::MaxContent));
+    }
+
+    #[test]
+    fn fit_content_endpoint_clamps_to_the_parent_basis() {
+        let started = Instant::now();
+        let closed = width_transition(serde_json::json!(0));
+        let opened = width_transition(serde_json::json!("fit-content"));
+
+        // The parent is narrower than max-content, so the clamp lands on the
+        // basis rather than either bound.
+        let mut state = StyleTransitionState::new(&closed, StyleState::default(), false, started);
+        drive_with_basis(&mut state, &closed, started, Some(150.0), || {
+            min_max_content(40.0, 300.0)
+        });
+        assert!(drive_with_basis(
+            &mut state,
+            &opened,
+            started,
+            Some(150.0),
+            || min_max_content(40.0, 300.0)
+        ));
+        let settled = state.frame(started + Duration::from_millis(100), false);
+        assert_eq!(settled.style.width, Some(DimensionValue::FitContent));
+        assert_eq!(
+            sampled_width(&state, started + Duration::from_millis(50)),
+            Some(DimensionValue::Pixels(75.0))
+        );
+
+        // Without a painted parent there is no basis, so the endpoint steps.
+        let mut unbased = StyleTransitionState::new(&closed, StyleState::default(), false, started);
+        drive(&mut unbased, &closed, started, || {
+            min_max_content(40.0, 300.0)
+        });
+        drive(&mut unbased, &opened, started, || {
+            min_max_content(40.0, 300.0)
+        });
+        assert_eq!(
+            sampled_width(&unbased, started + Duration::from_millis(50)),
+            Some(DimensionValue::FitContent)
+        );
+    }
+
+    #[test]
+    fn fit_content_limit_clamps_to_a_pixel_or_percentage_limit() {
+        let started = Instant::now();
+        let closed = width_transition(serde_json::json!(0));
+        let pixel_limit = width_transition(serde_json::json!("fit-content(80px)"));
+
+        let mut state = StyleTransitionState::new(&closed, StyleState::default(), false, started);
+        drive(&mut state, &closed, started, || {
+            min_max_content(40.0, 300.0)
+        });
+        assert!(drive(&mut state, &pixel_limit, started, || {
+            min_max_content(40.0, 300.0)
+        }));
+        let settled = state.frame(started + Duration::from_millis(100), false);
+        assert_eq!(
+            settled.style.width,
+            Some(DimensionValue::FitContentLimit {
+                source: "fit-content(80px)".to_owned(),
+                limit: Box::new(DimensionValue::Pixels(80.0)),
+            })
+        );
+        assert_eq!(
+            sampled_width(&state, started + Duration::from_millis(50)),
+            Some(DimensionValue::Pixels(40.0))
+        );
+
+        // A percentage limit resolves against the parent basis.
+        let percent_limit = width_transition(serde_json::json!("fit-content(50%)"));
+        let mut percent_state =
+            StyleTransitionState::new(&closed, StyleState::default(), false, started);
+        drive_with_basis(&mut percent_state, &closed, started, Some(200.0), || {
+            min_max_content(40.0, 300.0)
+        });
+        assert!(drive_with_basis(
+            &mut percent_state,
+            &percent_limit,
+            started,
+            Some(200.0),
+            || min_max_content(40.0, 300.0)
+        ));
+        assert_eq!(
+            sampled_width(&percent_state, started + Duration::from_millis(50)),
+            Some(DimensionValue::Pixels(50.0))
+        );
+    }
+
+    #[test]
+    fn height_max_content_endpoint_interpolates() {
+        let started = Instant::now();
+        let closed = style(serde_json::json!({
+            "height": 0,
+            "overflow": "hidden",
+            "minHeight": 0,
+            "transition": {
+                "properties": ["height"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        let opened = style(serde_json::json!({
+            "height": "max-content",
+            "overflow": "hidden",
+            "minHeight": 0,
+            "transition": {
+                "properties": ["height"],
+                "durationMs": 100,
+                "easing": "linear"
+            }
+        }));
+        const CONTENT_HEIGHT: IntrinsicAxes = IntrinsicAxes {
+            width: false,
+            height: true,
+        };
+        let drive_height = |state: &mut StyleTransitionState,
+                            style: &StyleDesc,
+                            now: Instant,
+                            content_height: f64| {
+            let target = transition_target_style(style, StyleState::default(), false, Some(state));
+            let probe = intrinsic_probe(
+                &target,
+                style.transition.as_ref().expect("a declared transition"),
+                CONTENT_HEIGHT,
+                Some(state),
+            );
+            let measured = probe.is_some().then(|| IntrinsicSize {
+                content_height: Some(content_height),
+                ..IntrinsicSize::default()
+            });
+            state.sync(
+                style,
+                StyleState::default(),
+                false,
+                now,
+                false,
+                IntrinsicInput {
+                    content_sized: CONTENT_HEIGHT,
+                    measured: measured.unwrap_or_default(),
+                    basis: None,
+                },
+            );
+            probe.is_some()
+        };
+
+        let mut state = StyleTransitionState::new(&closed, StyleState::default(), false, started);
+        drive_height(&mut state, &closed, started, 80.0);
+        assert!(drive_height(&mut state, &opened, started, 80.0));
+
+        assert_eq!(
+            state.frame(started, false).style.height,
+            Some(DimensionValue::Pixels(0.0))
+        );
+        assert_eq!(
+            state
+                .frame(started + Duration::from_millis(50), false)
+                .style
+                .height,
+            Some(DimensionValue::Pixels(40.0))
+        );
+        let settled = state.frame(started + Duration::from_millis(100), false);
+        assert_eq!(settled.style.height, Some(DimensionValue::MaxContent));
     }
 }
