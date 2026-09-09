@@ -23,7 +23,8 @@
 /// this queue.
 
 import type { MutationRenderer, NativeRenderer } from "../types/host.js"
-import { containerForRenderer, unregisterEventHandlers } from "./event-registry.js"
+import { containerForRenderer } from "./event-registry.js"
+import { unregisterEventHandlers } from "./event-handlers.js"
 import { reportStyleDiagnostics } from "./renderer-diagnostics.js"
 
 export type MutationTuple = (number | string | boolean | object | null)[]

@@ -2,14 +2,7 @@
 
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-// From "../dom-position.js", not "../reconciler/host-config.js": host-config.ts
-// still sits on its own module cycle (host-config -> event-registry ->
-// reconciler -> host-config) whenever something imports it directly as the
-// first module to touch that cycle, crashing reconciler.ts's top-level
-// `ReactReconciler(hostConfig)` call with "Cannot access 'hostConfig' before
-// initialization" - confirmed by actually importing host-config.js first
-// here. dom-position.ts has no imports of its own, so which of these two
-// import statements comes first genuinely does not matter.
+// dom-position.ts is the zero-dependency home of these constants.
 import {
   DOCUMENT_POSITION_CONTAINED_BY,
   DOCUMENT_POSITION_CONTAINS,
