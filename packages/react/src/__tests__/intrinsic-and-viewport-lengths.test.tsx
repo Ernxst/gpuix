@@ -299,6 +299,7 @@ describe("intrinsic keywords in state refinements (issue #313)", () => {
             style={{
               display: "flex",
               width: "max-content",
+              paddingLeft: 4,
               hover: { width: "max-content", padding: 20 },
             }}
           >
@@ -308,14 +309,14 @@ describe("intrinsic keywords in state refinements (issue #313)", () => {
       )
 
       const target = root.renderer.findByTestId("hover-target")!
-      expect(boundsFor(root.renderer, "hover-target").width).toBeCloseTo(100, 4)
+      expect(boundsFor(root.renderer, "hover-target").width).toBeCloseTo(104, 4)
 
       const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       expect(boundsFor(root.renderer, "hover-target").width).toBeCloseTo(140, 4)
 
       root.renderer.nativeSimulateMouseMove(-1, -1)
-      expect(boundsFor(root.renderer, "hover-target").width).toBeCloseTo(100, 4)
+      expect(boundsFor(root.renderer, "hover-target").width).toBeCloseTo(104, 4)
     } finally {
       root.unmount()
     }

@@ -9381,26 +9381,158 @@ fn measure_intrinsic_triple(
 }
 
 /// Merge authored state fields in the same order as GPUI's interaction style
-/// composition. Null fields mean "not authored" in the decoded style, so they
-/// leave the base field intact. Nested refinements are cleared after the merge:
-/// the probe is a fresh root and must represent one effective style, not a
-/// second interaction cascade.
+/// composition. A state refinement is applied as a second style pass, so an
+/// authored shorthand first clears the base longhands that its pass would
+/// overwrite. Nested refinements are cleared after the merge: the probe is a
+/// fresh root and must represent one effective style, not a second interaction
+/// cascade.
 fn merge_intrinsic_state_style(base: &StyleDesc, overlay: &StyleDesc) -> StyleDesc {
-    let mut merged = serde_json::to_value(base).expect("StyleDesc is serializable");
-    let overlay = serde_json::to_value(overlay).expect("StyleDesc is serializable");
-    let merged_fields = merged
-        .as_object_mut()
-        .expect("StyleDesc serializes as an object");
-    for (field, value) in overlay
-        .as_object()
-        .expect("StyleDesc serializes as an object")
-    {
-        if !value.is_null() {
-            merged_fields.insert(field.clone(), value.clone());
-        }
+    let mut merged = base.clone();
+
+    if overlay.padding.is_some() {
+        merged.padding_top = None;
+        merged.padding_right = None;
+        merged.padding_bottom = None;
+        merged.padding_left = None;
     }
-    let mut merged: StyleDesc =
-        serde_json::from_value(merged).expect("merged StyleDesc remains valid");
+    if overlay.gap.is_some() {
+        merged.row_gap = None;
+        merged.column_gap = None;
+    }
+    if overlay.border_width.is_some() {
+        merged.border_top_width = None;
+        merged.border_right_width = None;
+        merged.border_bottom_width = None;
+        merged.border_left_width = None;
+    }
+    if overlay.border_radius.is_some() {
+        merged.border_top_left_radius = None;
+        merged.border_top_right_radius = None;
+        merged.border_bottom_left_radius = None;
+        merged.border_bottom_right_radius = None;
+    }
+    if overlay.overflow.is_some() {
+        merged.overflow_x = None;
+        merged.overflow_y = None;
+    }
+    if overlay.white_space.is_some() {
+        merged.text_wrap = None;
+    }
+    // `apply_styles` fills every missing grid line with `auto` whenever a
+    // placement field is present, so a refinement of any placement slot is a
+    // second pass over the whole four-slot grid location.
+    if overlay.grid_row_start.is_some()
+        || overlay.grid_row_end.is_some()
+        || overlay.grid_column_start.is_some()
+        || overlay.grid_column_end.is_some()
+    {
+        merged.grid_row_start = None;
+        merged.grid_row_end = None;
+        merged.grid_column_start = None;
+        merged.grid_column_end = None;
+    }
+
+    macro_rules! overlay_fields {
+        ($($field:ident),+ $(,)?) => {
+            $(
+                if overlay.$field.is_some() {
+                    merged.$field = overlay.$field.clone();
+                }
+            )+
+        };
+    }
+    overlay_fields!(
+        display,
+        visibility,
+        flex_direction,
+        flex_wrap,
+        flex_grow,
+        flex_shrink,
+        flex_basis,
+        align_items,
+        align_self,
+        align_content,
+        justify_content,
+        gap,
+        row_gap,
+        column_gap,
+        grid_template_columns,
+        grid_template_rows,
+        grid_row_start,
+        grid_row_end,
+        grid_column_start,
+        grid_column_end,
+        grid_auto_flow,
+        grid_auto_rows,
+        grid_auto_columns,
+        justify_items,
+        justify_self,
+        width,
+        height,
+        min_width,
+        min_height,
+        max_width,
+        max_height,
+        padding,
+        padding_top,
+        padding_right,
+        padding_bottom,
+        padding_left,
+        margin,
+        margin_top,
+        margin_right,
+        margin_bottom,
+        margin_left,
+        position,
+        top,
+        right,
+        bottom,
+        left,
+        background,
+        background_color,
+        color,
+        opacity,
+        border_width,
+        border_top_width,
+        border_right_width,
+        border_bottom_width,
+        border_left_width,
+        border_color,
+        border_style,
+        border_radius,
+        border_top_left_radius,
+        border_top_right_radius,
+        border_bottom_left_radius,
+        border_bottom_right_radius,
+        box_shadow,
+        outline_color,
+        outline_width,
+        outline_offset,
+        font_size,
+        font_family,
+        font_weight,
+        letter_spacing,
+        font_variant_numeric,
+        text_decoration,
+        text_transform,
+        text_align,
+        line_height,
+        white_space,
+        text_wrap,
+        text_overflow,
+        line_clamp,
+        overflow,
+        overflow_x,
+        overflow_y,
+        cursor,
+        pointer_events,
+        user_select,
+        selection_color,
+        interpolate_size,
+        transition,
+        hover_group,
+    );
+
     merged.hover = None;
     merged.hover_within = None;
     merged.active = None;
@@ -9470,6 +9602,76 @@ mod intrinsic_state_style_tests {
         assert_eq!(merged.font_size, Some(18.0));
         assert!(merged.hover.is_none());
         assert!(merged.focus.is_none());
+    }
+
+    #[test]
+    fn an_overlay_shorthand_clears_base_longhands() {
+        let base = StyleDesc {
+            padding_left: Some(4.0),
+            gap: Some(3.0),
+            border_top_width: Some(2.0),
+            ..Default::default()
+        };
+        let overlay = StyleDesc {
+            padding: Some(20.0),
+            gap: Some(12.0),
+            border_width: Some(5.0),
+            ..Default::default()
+        };
+
+        let merged = merge_intrinsic_state_style(&base, &overlay);
+        assert_eq!(merged.padding, Some(20.0));
+        assert_eq!(merged.padding_left, None);
+        assert_eq!(merged.gap, Some(12.0));
+        assert_eq!(merged.row_gap, None);
+        assert_eq!(merged.column_gap, None);
+        assert_eq!(merged.border_width, Some(5.0));
+        assert_eq!(merged.border_top_width, None);
+    }
+
+    #[test]
+    fn an_overlay_longhand_keeps_the_base_shorthand_for_other_sides() {
+        let base = StyleDesc {
+            padding: Some(10.0),
+            ..Default::default()
+        };
+        let overlay = StyleDesc {
+            padding_left: Some(4.0),
+            ..Default::default()
+        };
+
+        let merged = merge_intrinsic_state_style(&base, &overlay);
+        assert_eq!(merged.padding, Some(10.0));
+        assert_eq!(merged.padding_left, Some(4.0));
+    }
+
+    #[test]
+    fn later_active_state_wins_after_hover() {
+        let style = StyleDesc {
+            width: Some(crate::style::DimensionValue::Pixels(100.0)),
+            hover: Some(Box::new(StyleDesc {
+                width: Some(crate::style::DimensionValue::Pixels(110.0)),
+                ..Default::default()
+            })),
+            active: Some(Box::new(StyleDesc {
+                width: Some(crate::style::DimensionValue::Pixels(120.0)),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+
+        let effective = effective_intrinsic_state_style(
+            &style,
+            InteractionProbeState {
+                hovered: true,
+                active: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            effective.width,
+            Some(crate::style::DimensionValue::Pixels(120.0))
+        );
     }
 }
 
