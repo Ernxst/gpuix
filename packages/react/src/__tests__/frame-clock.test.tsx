@@ -244,6 +244,22 @@ describe("requestAnimationFrame", () => {
     expect(callbacks).toEqual(["kept"])
   })
 
+  it("honours cancelAnimationFrame of a sibling issued during delivery", () => {
+    root = createTestRoot()
+    root.render(<text>cancel sibling</text>)
+    const callbacks: string[] = []
+
+    let second = 0
+    requestAnimationFrame(() => {
+      callbacks.push("first")
+      cancelAnimationFrame(second)
+    })
+    second = requestAnimationFrame(() => callbacks.push("second"))
+
+    root.renderer.advanceAsyncClock(FRAME_MS)
+    expect(callbacks).toEqual(["first"])
+  })
+
   it("waits until the next advance for a callback registered during delivery", () => {
     root = createTestRoot()
     root.render(<text>continuous loop</text>)
