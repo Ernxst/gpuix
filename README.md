@@ -2750,8 +2750,9 @@ menu. Closing it restores focus to the trigger. Disabled items are skipped.
 `Select` discovers items by registration at mount time rather than by walking
 its element tree, so wrapping `Item` in your own component (for a shared label
 layout, for example) still works. Content stays mounted while the Select is
-closed - kept in a clipped, zero-size box rather than removed - so a value can
-resolve its label before the Select has ever opened. Item order follows
+closed - a `display: none` floating panel that builds nothing beneath it - so a
+value can resolve its label before the Select has ever opened, while items keep
+their host elements across open and close. Item order follows
 document position, re-derived after each commit rather than fixed at
 registration time, so an item mounted later than its siblings - or moved by
 React's own reconciliation - still navigates where it currently sits in JSX.
