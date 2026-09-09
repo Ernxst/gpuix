@@ -1140,14 +1140,32 @@ steps) and `"allow-keywords"`. It is **inherited**, like the CSS property, so
 one declaration opts a whole subtree in and a nested `"numeric-only"` turns it
 back off for that subtree. No measurement in JavaScript is involved: GPUI lays
 the intrinsic state out during the same frame, and that size becomes the
-transition's numeric endpoint. It works in both directions — `0` to `auto`
-opens, `auto` to `0` closes — and through state refinements such as
-`hover: { width: 'auto' }`.
+transition's numeric endpoint. It works in both directions — `0` to a keyword
+opens, a keyword to `0` closes — keyword to keyword interpolates between the
+two, and it works through state refinements such as `hover: { width: 'auto' }`.
 
-The **settled** element is `auto` again, not a pinned pixel width, so later
-content changes resize it on the next frame with no second transition — and
-that holds while another transitioned property is animating, so an `opacity`
-run does not pin the size.
+`auto` is not the only endpoint this lifts: `min-content`, `max-content`,
+`fit-content`, and `fit-content(<length-percentage>)` all resolve to a number
+and interpolate the same way, per axis:
+
+| endpoint | inline axis (`width`) | block axis (`height`) |
+| --- | --- | --- |
+| `auto` | max-content width (unchanged) | content height (unchanged) |
+| `max-content` | max-content width | content height |
+| `min-content` | min-content width | content height |
+| `fit-content` | `clamp(min-content, basis, max-content)` | content height |
+| `fit-content(<limit>)` | `clamp(min-content, limit, max-content)` | content height |
+
+`basis` for the bare `fit-content` keyword is the containing block's
+content-box width — the parent's last painted bounds minus its own padding and
+border, the same "last painted" convention the non-travelling axis (below)
+uses. A percentage `limit` resolves against that same basis. Without a painted
+parent yet, or with a `ch`/`vw`/`vh` limit, the endpoint steps.
+
+The **settled** element is the declared keyword again, not a pinned pixel
+width, so later content changes resize it on the next frame with no second
+transition — and that holds while another transitioned property is
+animating, so an `opacity` run does not pin the size.
 
 The endpoint is measured once, when the run starts, and held for the run:
 content that changes while it is in flight — streaming text, a nested
@@ -1162,9 +1180,9 @@ number is one the element never paints at all.
 
 Bounds:
 
-- `width` and `height` only. `auto` is the only intrinsic keyword GPUIX's
-  dimension grammar has, and `minWidth`, `minHeight`, `maxWidth`, and
-  `maxHeight` keywords keep stepping.
+- `width` and `height` only, per the table above. `minWidth`, `minHeight`,
+  `maxWidth`, and `maxHeight` are not intrinsic-size axes, so their keywords
+  keep stepping even under `"allow-keywords"`.
 - `<div>` and `<text>` only. Measuring a custom surface's outer container means
   re-entering that element's own render inside the frame already rendering it,
   so `<img>`, `<canvas>`, `<code>`, `<diff>`, `<input>`, `<textarea>`,
@@ -1188,17 +1206,23 @@ Bounds:
   but layout-mode properties (`alignSelf`, `position`, `flexGrow`, `flexBasis`)
   are read from the base declaration. The parent is read from its base
   declaration too, so a state refinement on the *parent's* `display`,
-  `flexDirection`, or `alignItems` is not consulted.
-- The measured endpoint is the element's **max-content** size on the animated
-  axis. A lane that settles narrower than its content — a `flexShrink` sibling
-  squeezes it, or the parent is narrower — travels at the max-content rate and
-  therefore arrives early: it reaches its real width partway through the
-  declared duration and sits there until the run ends. Give such a lane
-  `flexShrink: 0`, or transition it between two numbers instead.
-- The axis that is *not* travelling to `auto` is offered the width the element
-  last painted at, so a `height` endpoint wraps its text the way the settled
-  element does. When both axes travel to `auto` at once, both are offered
-  unbounded space, so the height is the one the content takes unwrapped.
+  `flexDirection`, or `alignItems` is not consulted. This restriction is for
+  `auto` only: an explicit keyword — `min-content`, `max-content`,
+  `fit-content`, `fit-content(<limit>)` — resolves to its own definition
+  regardless of how the parent lays the element out, so a stretched flex cross
+  axis or a block child's width still animates when the endpoint names one.
+- `auto` measures the element's **max-content** size on the animated axis, the
+  same as an explicit `max-content` endpoint. A lane that settles narrower than
+  its content — a `flexShrink` sibling squeezes it, or the parent is narrower —
+  travels at the max-content rate and therefore arrives early: it reaches its
+  real width partway through the declared duration and sits there until the
+  run ends. Give such a lane `flexShrink: 0`, or transition it between two
+  numbers instead.
+- The axis that is *not* travelling to an intrinsic keyword is offered the
+  width the element last painted at, so a `height` endpoint wraps its text the
+  way the settled element does. When both axes travel to an intrinsic keyword
+  at once, both are offered unbounded space, so the height is the one the
+  content takes unwrapped.
 - A percentage length inside the lane cannot resolve on the measured axis,
   because that axis is offered unbounded space and so has no containing block
   size to be a percentage of. It contributes nothing, the way it does in any

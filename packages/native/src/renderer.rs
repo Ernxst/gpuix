@@ -8393,29 +8393,36 @@ fn build_element_with_parent_layout(
                 ctx.transition_states.get(&id),
             )
         });
-        let content_sized = intrinsic_target.as_ref().map_or_else(
-            crate::motion::IntrinsicAxes::default,
-            |target| {
-                let parent = element
-                    .parent
-                    .and_then(|parent_id| ctx.tree.elements.get(&parent_id));
-                content_sized_intrinsic_axes(parent, Some(target))
-            },
-        );
+        let parent = element
+            .parent
+            .and_then(|parent_id| ctx.tree.elements.get(&parent_id));
+        let retained_target = ctx
+            .transition_states
+            .get(&id)
+            .map(crate::motion::StyleTransitionState::target_style);
+        let content_sized = intrinsic_target
+            .as_ref()
+            .map_or_else(crate::motion::IntrinsicAxes::default, |target| {
+                content_sized_axes_for_transition(parent, target, retained_target)
+            });
+        let (measured, basis) = match intrinsic_target.as_ref() {
+            Some(target) => intrinsic_transition_size(
+                id,
+                target,
+                style.transition.as_ref().expect("a declared transition"),
+                content_sized,
+                parent,
+                element.parent,
+                ctx,
+                window,
+                cx,
+            ),
+            None => (crate::motion::IntrinsicSize::default(), None),
+        };
         let intrinsic = crate::motion::IntrinsicInput {
             content_sized,
-            measured: match intrinsic_target.as_ref() {
-                Some(target) => intrinsic_transition_size(
-                    id,
-                    target,
-                    style.transition.as_ref().expect("a declared transition"),
-                    content_sized,
-                    ctx,
-                    window,
-                    cx,
-                ),
-                None => crate::motion::IntrinsicSize::default(),
-            },
+            measured,
+            basis,
         };
         let state = ctx.transition_states.entry(id).or_insert_with(|| {
             crate::motion::StyleTransitionState::new(style, focus_state, hover_within, ctx.now)
@@ -8671,10 +8678,42 @@ fn remove_subtree_hover_state(ctx: &mut BuildCtx<'_>, root_id: u64) {
     }
 }
 
-/// The pixel size of this element's intrinsic (`auto`) transition endpoint, or
-/// nothing when no axis needs one.
+/// The containing block's content-box width: the parent's last painted
+/// border-box bounds minus its own padding and border. This is the clamp
+/// basis for a bare `fit-content` transition endpoint and the resolution
+/// basis for a percentage `fit-content(<limit>)`, the same "last painted"
+/// convention `measure_intrinsic_triple` uses for the non-travelling axis.
+/// `None` before the parent has painted, which steps the endpoint.
+fn containing_block_basis(
+    parent: Option<&crate::retained_tree::RetainedElement>,
+    parent_id: Option<u64>,
+) -> Option<f64> {
+    let bounds = crate::automation::get_bounds(parent_id?)?;
+    let style = parent.and_then(|parent| parent.style.as_deref());
+    // Each side falls back through its own shorthand, the way the box model
+    // resolves `padding-left` against `padding` and `border-left-width`
+    // against `border-width`.
+    let side = |longhand: fn(&StyleDesc) -> Option<f64>,
+                shorthand: fn(&StyleDesc) -> Option<f64>| {
+        style
+            .and_then(|style| longhand(style).or_else(|| shorthand(style)))
+            .unwrap_or(0.0)
+    };
+    let padding = side(|style| style.padding_left, |style| style.padding)
+        + side(|style| style.padding_right, |style| style.padding);
+    let border = side(|style| style.border_left_width, |style| style.border_width)
+        + side(|style| style.border_right_width, |style| style.border_width);
+    Some((bounds.width - padding - border).max(0.0))
+}
+
+/// The pixel numbers this element's intrinsic transition endpoint needs, or
+/// nothing when no axis needs one, alongside the `fit-content` clamp basis —
+/// present only on this same frame, never latched here, so a containing block
+/// that changes mid-run does not retarget every frame: `StyleTransitionState`
+/// latches the basis exactly the way it latches the triple, off this same
+/// signal.
 ///
-/// GPUI owns layout, so the number comes from GPUI rather than from a JS
+/// GPUI owns layout, so the numbers come from GPUI rather than from a JS
 /// measurement: the element is built once more at its intrinsic style and
 /// handed to `gpui::AnyElement::layout_as_root`, which runs taffy on it as its
 /// own root through `gpui::Window::compute_layout`. `build_element` runs inside
@@ -8685,27 +8724,76 @@ fn intrinsic_transition_size(
     target: &StyleDesc,
     transition: &crate::style::StyleTransition,
     content_sized: crate::motion::IntrinsicAxes,
+    parent: Option<&crate::retained_tree::RetainedElement>,
+    parent_id: Option<u64>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
-) -> crate::motion::IntrinsicSize {
+) -> (crate::motion::IntrinsicSize, Option<f64>) {
     // Reduced motion snaps to the target style, so the measurement would be
     // paid for and thrown away.
     if ctx.reduce_motion || ctx.measuring {
-        return crate::motion::IntrinsicSize::default();
+        return (crate::motion::IntrinsicSize::default(), None);
     }
-    // `intrinsic_probe` answers `None` unless an endpoint is changing to or
-    // from `auto` this frame, so a settled element and every frame of a run
-    // cost nothing.
+    // `intrinsic_probe` answers `None` unless an endpoint needs a fresh
+    // number this frame, so a settled element and every steady-state frame of
+    // a run cost nothing.
     let Some(probe) = crate::motion::intrinsic_probe(
         target,
         transition,
         content_sized,
         ctx.transition_states.get(&id),
     ) else {
-        return crate::motion::IntrinsicSize::default();
+        return (crate::motion::IntrinsicSize::default(), None);
     };
-    measure_intrinsic_size(id, probe, ctx, window, cx)
+    let measured = measure_intrinsic_triple(
+        id,
+        probe.style,
+        (probe.min_width, probe.max_width, probe.height),
+        ctx,
+        window,
+        cx,
+    );
+    (measured, containing_block_basis(parent, parent_id))
+}
+
+/// [`content_sized_intrinsic_axes`], widened for an explicit keyword.
+///
+/// An explicit keyword (`min-content`, `max-content`, `fit-content`) resolves
+/// to its own definition regardless of how the parent lays the element out,
+/// unlike `auto`, which only travels on an axis the element's own content
+/// sizes. Both the freshly resolved target and the endpoint this element
+/// already settled at (`retained_target`, for the closing direction) can
+/// declare one — but the retained keyword only stands in for the *closing*
+/// direction, where this frame's target is a plain number and says nothing
+/// about how the axis should be gated. A retarget between two keywords —
+/// `max-content` to `auto` — is judged on the new keyword's own rule: `auto`
+/// stays gated on a stretched axis exactly as #304 requires, even though the
+/// element was previously an explicit, ungated keyword.
+fn content_sized_axes_for_transition(
+    parent: Option<&crate::retained_tree::RetainedElement>,
+    target: &StyleDesc,
+    retained_target: Option<&StyleDesc>,
+) -> crate::motion::IntrinsicAxes {
+    let mut content_sized = content_sized_intrinsic_axes(parent, Some(target));
+
+    let is_explicit_keyword = |dimension: &Option<crate::style::DimensionValue>| {
+        !matches!(
+            crate::motion::intrinsic_keyword(dimension),
+            None | Some(crate::motion::IntrinsicKeyword::Auto)
+        )
+    };
+    let closing_to_a_number = |dimension: &Option<crate::style::DimensionValue>| {
+        crate::motion::intrinsic_keyword(dimension).is_none()
+    };
+
+    content_sized.width |= is_explicit_keyword(&target.width)
+        || (closing_to_a_number(&target.width)
+            && retained_target.is_some_and(|style| is_explicit_keyword(&style.width)));
+    content_sized.height |= is_explicit_keyword(&target.height)
+        || (closing_to_a_number(&target.height)
+            && retained_target.is_some_and(|style| is_explicit_keyword(&style.height)));
+    content_sized
 }
 
 /// Which axes take their `auto` from this element's own content.
@@ -8958,9 +9046,57 @@ mod content_sized_intrinsic_axes_tests {
             }
         );
     }
+
+    /// A stretched flex-column cross axis: `auto` steps here (the case
+    /// [`answers_each_parent_layout`] covers), an explicit keyword animates,
+    /// and a retarget from one to the other is judged on the *new* endpoint,
+    /// not on which one happened to be settled a moment ago.
+    #[test]
+    fn explicit_keyword_animates_on_a_stretched_axis_but_a_retarget_to_auto_steps() {
+        let stretched_column = element(
+            "div",
+            serde_json::json!({
+                "display": "flex",
+                "flexDirection": "column",
+            }),
+        );
+
+        // Opening straight to an explicit keyword: content-sized regardless
+        // of the stretched parent.
+        let max_content = own(serde_json::json!({ "width": "max-content" }));
+        assert!(
+            content_sized_axes_for_transition(Some(&stretched_column), &max_content, None).width
+        );
+
+        // Closing an explicit keyword to a plain number: still content-sized,
+        // via the retained target, so the closing edge is measured too.
+        let closed = own(serde_json::json!({ "width": 0 }));
+        assert!(content_sized_axes_for_transition(
+            Some(&stretched_column),
+            &closed,
+            Some(&max_content),
+        )
+        .width);
+
+        // Retargeting from a settled `max-content` to `auto`: the new
+        // endpoint is judged on its own rule, and `auto` stays gated on the
+        // stretched axis exactly as #304 requires.
+        let auto = own(serde_json::json!({ "width": "auto" }));
+        assert!(
+            !content_sized_axes_for_transition(Some(&stretched_column), &auto, Some(&max_content),)
+                .width,
+            "a max-content -> auto retarget must not inherit the old keyword's gate"
+        );
+    }
 }
 
-/// Lay the probe subtree out and read its size.
+/// Lay the probe subtree out and read up to three intrinsic-size numbers: the
+/// axis's min-content width, its max-content width, and its content height
+/// under the width it will paint at. Each field this call needs (`needed`)
+/// builds and lays the probe subtree out once more; a field left out costs
+/// nothing. Shared by an intrinsic transition endpoint
+/// (`intrinsic_transition_size`) and the static keyword substitution
+/// (`resolve_intrinsic_keywords`).
 ///
 /// What is guaranteed: the probe is never prepainted and never painted, so
 /// hitboxes, the dispatch tree, accessibility nodes, painted text, the
@@ -8979,48 +9115,108 @@ mod content_sized_intrinsic_axes_tests {
 /// the same element-id path as the painted element, so the probe borrows and
 /// returns them rather than allocating a parallel set, and any state it
 /// creates for an element the painted build does not reach is dropped with the
-/// frame. This is why the probe is limited to endpoint edges rather than run
-/// on every frame.
-fn measure_intrinsic_size(
+/// frame. This is why an intrinsic transition endpoint's probe is limited to
+/// endpoint edges rather than run on every frame.
+fn measure_intrinsic_triple(
     id: u64,
-    probe: crate::motion::IntrinsicProbe,
+    probe_style: StyleDesc,
+    needed: (bool, bool, bool),
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
 ) -> crate::motion::IntrinsicSize {
     use gpui::AvailableSpace;
 
-    let crate::motion::IntrinsicProbe {
-        style,
-        width: measure_width,
-        height: measure_height,
-    } = probe;
-    let measuring = std::mem::replace(&mut ctx.measuring, true);
-    let outer_probe = ctx.intrinsic_probe.replace((id, style));
-    let mut element = build_element(id, ctx, window, cx);
-    ctx.measuring = measuring;
-    ctx.intrinsic_probe = outer_probe;
+    fn measure(
+        id: u64,
+        probe_style: StyleDesc,
+        available: gpui::Size<AvailableSpace>,
+        ctx: &mut BuildCtx,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<GpuixView>,
+    ) -> gpui::Size<gpui::Pixels> {
+        let measuring = std::mem::replace(&mut ctx.measuring, true);
+        let outer_probe = ctx.intrinsic_probe.replace((id, probe_style));
+        let mut element = build_element(id, ctx, window, cx);
+        ctx.measuring = measuring;
+        ctx.intrinsic_probe = outer_probe;
+        element.layout_as_root(available, window, cx)
+    }
 
-    // A measured axis must be offered unbounded space, or taffy answers with
-    // the constraint rather than the content. The other axis keeps the width
-    // the element last painted at, so a `height` endpoint wraps its text the
-    // way the settled element does; before the first paint there is no such
-    // width and max-content stands in.
-    let available_width = if measure_width {
-        AvailableSpace::MaxContent
+    let (needs_min_width, needs_max_width, needs_height) = needed;
+
+    let min_width = needs_min_width.then(|| {
+        let size = measure(
+            id,
+            probe_style.clone(),
+            gpui::size(AvailableSpace::MinContent, AvailableSpace::MaxContent),
+            ctx,
+            window,
+            cx,
+        );
+        f64::from(f32::from(size.width))
+    });
+
+    // When both the max-content width and the content height are needed in
+    // the same frame — both axes travelling to an intrinsic keyword at once —
+    // one layout answers both: each is offered unbounded space, so the height
+    // is the one the content takes unwrapped, at its own max-content width.
+    // Reading them from a single build avoids paying for the subtree twice.
+    let (max_width, content_height) = if needs_max_width && needs_height {
+        let size = measure(
+            id,
+            probe_style,
+            gpui::size(AvailableSpace::MaxContent, AvailableSpace::MaxContent),
+            ctx,
+            window,
+            cx,
+        );
+        (
+            Some(f64::from(f32::from(size.width))),
+            Some(f64::from(f32::from(size.height))),
+        )
     } else {
-        crate::automation::get_bounds(id)
-            .map(|bounds| AvailableSpace::Definite(gpui::px(bounds.width as f32)))
-            .unwrap_or(AvailableSpace::MaxContent)
+        let max_width = needs_max_width.then(|| {
+            let size = measure(
+                id,
+                probe_style.clone(),
+                gpui::size(AvailableSpace::MaxContent, AvailableSpace::MaxContent),
+                ctx,
+                window,
+                cx,
+            );
+            f64::from(f32::from(size.width))
+        });
+        let content_height = needs_height.then(|| {
+            // The content wraps at the width this frame resolves to: the
+            // probe style's own definite width when it has one, otherwise the
+            // width this element last painted at; before the first paint,
+            // max-content stands in.
+            let available_width = match probe_style.width {
+                Some(crate::style::DimensionValue::Pixels(width)) => {
+                    AvailableSpace::Definite(gpui::px(width as f32))
+                }
+                _ => crate::automation::get_bounds(id)
+                    .map(|bounds| AvailableSpace::Definite(gpui::px(bounds.width as f32)))
+                    .unwrap_or(AvailableSpace::MaxContent),
+            };
+            let size = measure(
+                id,
+                probe_style,
+                gpui::size(available_width, AvailableSpace::MaxContent),
+                ctx,
+                window,
+                cx,
+            );
+            f64::from(f32::from(size.height))
+        });
+        (max_width, content_height)
     };
-    let size = element.layout_as_root(
-        gpui::size(available_width, AvailableSpace::MaxContent),
-        window,
-        cx,
-    );
+
     crate::motion::IntrinsicSize {
-        width: measure_width.then(|| f64::from(f32::from(size.width))),
-        height: measure_height.then(|| f64::from(f32::from(size.height))),
+        min_width,
+        max_width,
+        content_height,
     }
 }
 
@@ -9065,7 +9261,6 @@ fn resolve_intrinsic_keywords(
     cx: &mut gpui::Context<GpuixView>,
 ) {
     use crate::style::DimensionValue as Dim;
-    use gpui::AvailableSpace;
 
     fn is_keyword(dim: Option<&Dim>) -> bool {
         matches!(
@@ -9146,46 +9341,20 @@ fn resolve_intrinsic_keywords(
         }
     }
 
-    fn measure(
-        id: u64,
-        probe_style: StyleDesc,
-        available: gpui::Size<AvailableSpace>,
-        ctx: &mut BuildCtx,
-        window: &mut gpui::Window,
-        cx: &mut gpui::Context<GpuixView>,
-    ) -> gpui::Size<gpui::Pixels> {
-        let measuring = std::mem::replace(&mut ctx.measuring, true);
-        let outer_probe = ctx.intrinsic_probe.replace((id, probe_style));
-        let mut element = build_element(id, ctx, window, cx);
-        ctx.measuring = measuring;
-        ctx.intrinsic_probe = outer_probe;
-        element.layout_as_root(available, window, cx)
-    }
-
     let mut width_probe = style.clone();
     neutralize_keywords(&mut width_probe);
-    let min_width = needs_min_width.then(|| {
-        let size = measure(
-            id,
-            width_probe.clone(),
-            gpui::size(AvailableSpace::MinContent, AvailableSpace::MaxContent),
-            ctx,
-            window,
-            cx,
-        );
-        f64::from(f32::from(size.width))
-    });
-    let max_width = needs_max_width.then(|| {
-        let size = measure(
-            id,
-            width_probe.clone(),
-            gpui::size(AvailableSpace::MaxContent, AvailableSpace::MaxContent),
-            ctx,
-            window,
-            cx,
-        );
-        f64::from(f32::from(size.width))
-    });
+    let crate::motion::IntrinsicSize {
+        min_width,
+        max_width,
+        ..
+    } = measure_intrinsic_triple(
+        id,
+        width_probe,
+        (needs_min_width, needs_max_width, false),
+        ctx,
+        window,
+        cx,
+    );
 
     fn substitute_width(dim: &mut Option<Dim>, min_width: Option<f64>, max_width: Option<f64>) {
         let replaced = match dim {
@@ -9236,25 +9405,13 @@ fn resolve_intrinsic_keywords(
     // probe is offered the width this frame resolves to: the element's own
     // definite width when it has one (the width props above are already
     // substituted), otherwise the width it last painted at, the same
-    // convention `measure_intrinsic_size` uses. Before the first paint,
+    // convention `measure_intrinsic_triple` uses. Before the first paint,
     // max-content stands in.
     let mut height_probe = style.clone();
     neutralize_keywords(&mut height_probe);
-    let available_width = match style.width {
-        Some(Dim::Pixels(width)) => AvailableSpace::Definite(gpui::px(width as f32)),
-        _ => crate::automation::get_bounds(id)
-            .map(|bounds| AvailableSpace::Definite(gpui::px(bounds.width as f32)))
-            .unwrap_or(AvailableSpace::MaxContent),
-    };
-    let size = measure(
-        id,
-        height_probe,
-        gpui::size(available_width, AvailableSpace::MaxContent),
-        ctx,
-        window,
-        cx,
-    );
-    let content_height = f64::from(f32::from(size.height));
+    let crate::motion::IntrinsicSize { content_height, .. } =
+        measure_intrinsic_triple(id, height_probe, (false, false, true), ctx, window, cx);
+    let content_height = content_height.expect("height was requested");
 
     fn substitute_heights(style: &mut StyleDesc, content_height: f64) {
         for dim in [
