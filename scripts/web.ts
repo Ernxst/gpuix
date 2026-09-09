@@ -23,7 +23,7 @@
  *   bun scripts/web.ts --production
  */
 
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -33,8 +33,24 @@ import infinitePage from "../examples/web-infinite-chat.html"
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const NATIVE = path.join(ROOT, "packages", "native")
 const PACKAGE_OUTPUT = path.join(NATIVE, "wasm")
-const WASM = path.join(NATIVE, "target", "wasm32-unknown-unknown", "release", "gpuix_native.wasm")
 const PRODUCTION_OUTPUT = path.join(ROOT, "website", "public", "chat-example")
+
+/**
+ * Cargo decides where artefacts go: `packages/native/target` by default, or
+ * whatever `build.target-dir` a `.cargo/config.toml` up the tree sets. Ask it
+ * rather than guessing.
+ */
+function wasmArtifactPath(): string {
+  const result = spawnSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
+    cwd: NATIVE,
+    encoding: "utf8",
+  })
+  if (result.status !== 0) {
+    throw new Error(`cargo metadata exited with code ${result.status ?? 1}\n${result.stderr}`)
+  }
+  const { target_directory: targetDirectory } = JSON.parse(result.stdout) as { target_directory: string }
+  return path.join(targetDirectory, "wasm32-unknown-unknown", "release", "gpuix_native.wasm")
+}
 
 /**
  * `packages/native/.cargo/config.toml` links the Wasm with `--shared-memory`,
@@ -81,7 +97,7 @@ async function buildWasm(): Promise<void> {
   console.log("web: generating the @gpuix/native browser loader")
   await run({
     command: "wasm-bindgen",
-    args: [WASM, "--target", "web", "--out-dir", PACKAGE_OUTPUT, "--out-name", "gpuix-web"],
+    args: [wasmArtifactPath(), "--target", "web", "--out-dir", PACKAGE_OUTPUT, "--out-name", "gpuix-web"],
     cwd: NATIVE,
   })
 }
