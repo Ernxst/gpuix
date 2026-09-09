@@ -324,13 +324,13 @@ describeNative("host instance scroll properties", () => {
 
     expect(testRoot.renderer.getActiveElement()).toBe(targetRef.current!.id)
 
-    // Sampled before the scrollTop read below, which is the synchronous read
-    // that settles the deferred autofocus reveal. That makes this the
-    // reveal's own frame cost rather than the frames spent since some later
-    // point in the read chain, so it can assert the reveal costs exactly one
-    // settle pass instead of merely "not too many".
-    const framesBeforeBounds = testRoot.renderer.getDebugFrameOverlayStats().frames
+    // Sampled either side of the scrollTop read, which is the synchronous
+    // read that settles the deferred autofocus reveal, so the delta is the
+    // reveal's own frame cost: exactly one settle pass.
+    const framesBeforeReveal = testRoot.renderer.getDebugFrameOverlayStats().frames
     expect(scrollerRef.current!.scrollTop).toBeGreaterThan(0)
+    const framesAfterReveal = testRoot.renderer.getDebugFrameOverlayStats().frames
+    expect(framesAfterReveal - framesBeforeReveal).toBe(1)
 
     const scrollerBounds = testRoot.renderer.getElementBounds(scrollerRef.current!.id)!
     const targetBounds = testRoot.renderer.getElementBounds(targetRef.current!.id)!
@@ -338,8 +338,6 @@ describeNative("host instance scroll properties", () => {
     expect(targetBounds[1] + targetBounds[3]).toBeLessThanOrEqual(
       scrollerBounds[1] + scrollerBounds[3],
     )
-    const framesAfterBounds = testRoot.renderer.getDebugFrameOverlayStats().frames
-    expect(framesAfterBounds - framesBeforeBounds).toBe(1)
   })
 
   it("reveals an autofocused element through nested scrollers", () => {

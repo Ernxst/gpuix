@@ -789,9 +789,11 @@ impl TestGpuixRenderer {
     /// is in production — a deferred effect only flushes when that update
     /// finishes — followed by a park so async work the draw spawned (an
     /// intrinsic image load, for example) can dirty layout again before the
-    /// next pass checks it. A read of an already clean window still parks
-    /// once, matching the unconditional park this replaced, so pending async
-    /// work advances even when nothing needed drawing.
+    /// next pass checks it. Every pass parks, including the final one that
+    /// finds the window clean, so pending async work advances even when
+    /// nothing needed drawing; that matches the unconditional park this
+    /// replaced, and like it, work that dirties the window during that last
+    /// park waits for the next read.
     fn settle_for_read(&self) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
             crate::renderer::settle_for_read(|pass| {

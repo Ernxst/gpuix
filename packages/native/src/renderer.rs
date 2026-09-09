@@ -78,8 +78,9 @@ pub(crate) const MAX_SETTLE_PASSES: usize = 3;
 /// fresh `update_window`-style call per invocation, never one pass looping
 /// inside another's update — because effects deferred with `cx.defer`/
 /// `cx.defer_in` (the autofocus scroll reveal, for example) only flush once
-/// the outermost update finishes. Passes sharing one update would draw the
-/// reveal's target frame but never see the deferred scroll it scheduled.
+/// the outermost update finishes. The reveal re-dirties the window through a
+/// deferred notify; passes sharing one update would never see that notify,
+/// so the pass that performs the reveal would never draw.
 pub(crate) fn settle_for_read<E>(
     mut run_pass: impl FnMut(
         &mut dyn FnMut(&mut gpui::Window, &mut gpui::App) -> bool,
@@ -97,12 +98,9 @@ pub(crate) fn settle_for_read<E>(
             return Ok(());
         }
     }
-    // The loop above only knows a pass drew, not whether the window is still
-    // dirty afterwards; probe once more, without drawing, to decide the log.
-    let still_dirty = run_pass(&mut |window, _cx| window.is_dirty())?;
-    if still_dirty {
-        log::debug!("settle_for_read: window still dirty after {MAX_SETTLE_PASSES} passes");
-    }
+    // Every pass in the budget drew, so the tree did not reach rest; a read
+    // taken now may be one pass stale.
+    log::debug!("settle_for_read: still drawing after {MAX_SETTLE_PASSES} passes");
     Ok(())
 }
 
