@@ -5900,7 +5900,7 @@ pub(crate) struct GpuixView {
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
     intrinsic_probe_cache: HashMap<u64, IntrinsicProbeCacheEntry>,
     pub(crate) intrinsic_probe_layouts: u32,
-    interaction_revision: u64,
+    pub(crate) interaction_revision: u64,
     last_focus_state: Option<(Option<u64>, bool)>,
     /// Hit-test state reported by GPUI's interactive-element callbacks.
     ///
@@ -5995,7 +5995,7 @@ impl InteractiveStyleState {
         true
     }
 
-    fn set_active(&mut self, active: bool) -> bool {
+    pub(crate) fn set_active(&mut self, active: bool) -> bool {
         if self.active == active {
             return false;
         }
@@ -6285,7 +6285,11 @@ impl GpuixView {
             .transition_states
             .values_mut()
             .fold(false, |changed, state| state.set_active(false) || changed);
-        interactive_changed || transition_changed
+        let changed = interactive_changed || transition_changed;
+        if changed {
+            self.interaction_revision = self.interaction_revision.saturating_add(1);
+        }
+        changed
     }
 
     fn observe_window_resize(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) {
@@ -6679,6 +6683,13 @@ struct InteractionProbeState {
     active: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum HeightWrappingSource {
+    Definite,
+    Substituted,
+    LastPainted(Option<f64>),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct IntrinsicProbeCacheKey {
     subtree_revision: u64,
@@ -6691,9 +6702,43 @@ struct IntrinsicProbeCacheKey {
     rem_size: f32,
     inherited_font: InheritedFont,
     text_transform: u8,
-    wrapping_width: Option<f64>,
+    wrapping_width: Option<HeightWrappingSource>,
     interaction_revision: u64,
     image_revision: u64,
+}
+
+struct IntrinsicProbeCacheKeyView<'a> {
+    subtree_revision: u64,
+    state: InteractionProbeState,
+    probe_style: &'a StyleDesc,
+    needed: (bool, bool, bool),
+    viewport_width: f64,
+    viewport_height: f64,
+    scale_factor: f32,
+    rem_size: f32,
+    inherited_font: &'a InheritedFont,
+    text_transform: u8,
+    wrapping_width: Option<HeightWrappingSource>,
+    interaction_revision: u64,
+    image_revision: u64,
+}
+
+impl IntrinsicProbeCacheKey {
+    fn matches(&self, candidate: &IntrinsicProbeCacheKeyView<'_>) -> bool {
+        self.subtree_revision == candidate.subtree_revision
+            && self.state == candidate.state
+            && self.probe_style == *candidate.probe_style
+            && self.needed == candidate.needed
+            && self.viewport_width == candidate.viewport_width
+            && self.viewport_height == candidate.viewport_height
+            && self.scale_factor == candidate.scale_factor
+            && self.rem_size == candidate.rem_size
+            && self.inherited_font == *candidate.inherited_font
+            && self.text_transform == candidate.text_transform
+            && self.wrapping_width == candidate.wrapping_width
+            && self.interaction_revision == candidate.interaction_revision
+            && self.image_revision == candidate.image_revision
+    }
 }
 
 struct IntrinsicProbeCacheEntry {
@@ -6750,7 +6795,23 @@ mod intrinsic_probe_cache_key_tests {
         assert_ne!(changed, key());
 
         let mut changed = key();
+        changed.probe_style.width = Some(crate::style::DimensionValue::Pixels(12.0));
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.probe_style.font_weight = Some(crate::style::FontWeightValue::Num(700.0));
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.needed.0 = !changed.needed.0;
+        assert_ne!(changed, key());
+
+        let mut changed = key();
         changed.viewport_width += 1.0;
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.viewport_height += 1.0;
         assert_ne!(changed, key());
 
         let mut changed = key();
@@ -6766,7 +6827,15 @@ mod intrinsic_probe_cache_key_tests {
         assert_ne!(changed, key());
 
         let mut changed = key();
-        changed.wrapping_width = Some(100.0);
+        changed.inherited_font.font = gpui::font("Times New Roman");
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.text_transform = 1;
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.wrapping_width = Some(HeightWrappingSource::LastPainted(Some(100.0)));
         assert_ne!(changed, key());
 
         let mut changed = key();
@@ -8679,6 +8748,15 @@ fn build_element_with_parent_layout(
     // and `vh` are reduced here, using the inherited font chain above.
     let mut resolved_style =
         layered_style.map(|style| resolve_length_expressions(style, window, &font));
+    if ctx.measuring {
+        // An orphan intrinsic probe has no live pointer state for GPUI to use
+        // while laying out its descendants. Resolve each descendant's current
+        // interaction state into the measured declaration so an ancestor's
+        // max-content size follows a hovered custom or host child as painted.
+        if let Some(style) = resolved_style.as_mut() {
+            *style = effective_intrinsic_state_style(style, probe_state);
+        }
+    }
     if let Some(style) = resolved_style.as_mut() {
         resolve_intrinsic_keywords(
             id,
@@ -9571,10 +9649,18 @@ fn effective_intrinsic_state_style(style: &StyleDesc, state: InteractionProbeSta
     effective
 }
 
-fn intrinsic_wrapping_width(id: u64, style: &StyleDesc) -> Option<f64> {
+fn intrinsic_wrapping_source(id: u64, style: &StyleDesc) -> HeightWrappingSource {
     match style.width {
-        Some(crate::style::DimensionValue::Pixels(width)) => Some(width),
-        _ => crate::automation::get_bounds(id).map(|bounds| bounds.width as f64),
+        Some(crate::style::DimensionValue::Pixels(_)) => HeightWrappingSource::Definite,
+        Some(
+            crate::style::DimensionValue::MinContent
+            | crate::style::DimensionValue::MaxContent
+            | crate::style::DimensionValue::FitContent
+            | crate::style::DimensionValue::FitContentLimit { .. },
+        ) => HeightWrappingSource::Substituted,
+        _ => HeightWrappingSource::LastPainted(
+            crate::automation::get_bounds(id).map(|bounds| bounds.width as f64),
+        ),
     }
 }
 
@@ -9791,34 +9877,34 @@ fn resolve_intrinsic_keywords(
         }
     }
 
-    let mut width_probe = effective_style.clone();
+    let wrapping_width = needs_height.then(|| intrinsic_wrapping_source(id, &effective_style));
+    let mut width_probe = effective_style;
     neutralize_keywords(&mut width_probe);
     let viewport_size = window.viewport_size();
-    let candidate_key = IntrinsicProbeCacheKey {
-        subtree_revision: ctx
-            .tree
-            .elements
-            .get(&id)
-            .map_or(0, |element| element.subtree_revision),
+    let subtree_revision = ctx
+        .tree
+        .elements
+        .get(&id)
+        .map_or(0, |element| element.subtree_revision);
+    let candidate_key = IntrinsicProbeCacheKeyView {
+        subtree_revision,
         state,
-        probe_style: width_probe.clone(),
+        probe_style: &width_probe,
         needed: (needs_min_width, needs_max_width, needs_height),
         viewport_width: f64::from(f32::from(viewport_size.width)),
         viewport_height: f64::from(f32::from(viewport_size.height)),
         scale_factor: window.scale_factor(),
         rem_size: f32::from(window.rem_size()),
-        inherited_font: inherited_font.clone(),
+        inherited_font: &inherited_font,
         text_transform: text_transform_key(text_transform),
-        wrapping_width: needs_height
-            .then(|| intrinsic_wrapping_width(id, &effective_style))
-            .flatten(),
+        wrapping_width,
         interaction_revision: ctx.interaction_revision,
         image_revision: ctx.img_image_store.revision(),
     };
     if ctx
         .intrinsic_probe_cache
         .get(&id)
-        .is_some_and(|entry| entry.key == candidate_key)
+        .is_some_and(|entry| entry.key.matches(&candidate_key))
     {
         let measured = ctx
             .intrinsic_probe_cache
@@ -9828,6 +9914,22 @@ fn resolve_intrinsic_keywords(
         substitute_intrinsic_sizes(style, measured);
         return;
     }
+
+    let cache_key = IntrinsicProbeCacheKey {
+        subtree_revision,
+        state,
+        probe_style: width_probe.clone(),
+        needed: candidate_key.needed,
+        viewport_width: candidate_key.viewport_width,
+        viewport_height: candidate_key.viewport_height,
+        scale_factor: candidate_key.scale_factor,
+        rem_size: candidate_key.rem_size,
+        inherited_font: inherited_font.clone(),
+        text_transform: candidate_key.text_transform,
+        wrapping_width,
+        interaction_revision: candidate_key.interaction_revision,
+        image_revision: candidate_key.image_revision,
+    };
 
     let measured_widths = measure_intrinsic_triple(
         id,
@@ -9857,16 +9959,10 @@ fn resolve_intrinsic_keywords(
         },
     );
 
-    let final_wrapping_width = needs_height
-        .then(|| intrinsic_wrapping_width(id, &effective_intrinsic_state_style(style, state)))
-        .flatten();
     ctx.intrinsic_probe_cache.insert(
         id,
         IntrinsicProbeCacheEntry {
-            key: IntrinsicProbeCacheKey {
-                wrapping_width: final_wrapping_width,
-                ..candidate_key
-            },
+            key: cache_key,
             value: crate::motion::IntrinsicSize {
                 min_width: measured_widths.min_width,
                 max_width: measured_widths.max_width,

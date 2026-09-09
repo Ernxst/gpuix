@@ -389,4 +389,88 @@ describe("intrinsic keyword probe cache (issue #310)", () => {
       root.unmount()
     }
   })
+
+  it("invalidates a max-content ancestor when a host descendant changes width on hover", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    try {
+      root.render(
+        <div style={{ display: "flex", alignItems: "flex-start" }}>
+          <div data-testid="ancestor" style={{ display: "flex", width: "max-content" }}>
+            <div
+              data-testid="host-descendant"
+              style={{ display: "flex", width: 40, height: 20, hover: { width: 80 } }}
+            />
+          </div>
+        </div>,
+      )
+
+      expect(boundsFor(root.renderer, "ancestor").width).toBeCloseTo(40, 4)
+      const initialProbes = root.renderer.getIntrinsicProbeLayoutCount()
+      const target = root.renderer.findByTestId("host-descendant")!
+      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({ width: 80 })
+      expect(boundsFor(root.renderer, "host-descendant").width).toBeCloseTo(80, 4)
+      expect(root.renderer.getIntrinsicProbeLayoutCount()).toBeGreaterThan(initialProbes)
+      // The ancestor's own state and subtree are unchanged; without the
+      // interaction revision, its cached probe would therefore keep 40px
+      // even though the descendant's painted width is now 80px.
+      expect(boundsFor(root.renderer, "ancestor").width).toBeCloseTo(80, 4)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("invalidates a max-content ancestor for an img descendant hover width", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    try {
+      root.render(
+        <div style={{ display: "flex", alignItems: "flex-start" }}>
+          <div data-testid="img-ancestor" style={{ display: "flex", width: "max-content" }}>
+            <img
+              data-testid="img-descendant"
+              style={{ display: "flex", width: 40, height: 20, hover: { width: 80 } }}
+            />
+          </div>
+        </div>,
+      )
+
+      expect(boundsFor(root.renderer, "img-ancestor").width).toBeCloseTo(40, 4)
+      const initialProbes = root.renderer.getIntrinsicProbeLayoutCount()
+      const target = root.renderer.findByTestId("img-descendant")!
+      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({ width: 80 })
+      expect(boundsFor(root.renderer, "img-descendant").width).toBeCloseTo(80, 4)
+      expect(root.renderer.getIntrinsicProbeLayoutCount()).toBeGreaterThan(initialProbes)
+      // <img> is a custom root: the ancestor can only learn about its
+      // interaction change through the shared revision in the cache key.
+      expect(boundsFor(root.renderer, "img-ancestor").width).toBeCloseTo(80, 4)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("reuses a flex-shrunk intrinsic width and height probe while idle", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    try {
+      root.render(
+        <div style={{ display: "flex", width: 100, alignItems: "flex-start" }}>
+          <div
+            data-testid="flex-shrunk-intrinsic"
+            style={{ display: "flex", flexShrink: 1, width: "max-content", height: "max-content" }}
+          >
+            <div style={{ width: 200, height: 40 }} />
+          </div>
+        </div>,
+      )
+
+      const firstPaint = root.renderer.getIntrinsicProbeLayoutCount()
+      root.renderer.flush()
+      root.renderer.flush()
+      expect(root.renderer.getIntrinsicProbeLayoutCount()).toBe(firstPaint)
+    } finally {
+      root.unmount()
+    }
+  })
 })
