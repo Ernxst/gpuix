@@ -25,7 +25,7 @@ import {
   registerEventHandler,
   unregisterEventHandler,
   unregisterEventHandlers,
-} from "./event-registry.js"
+} from "./event-handlers.js"
 import { TEXT_EDITING_TYPES } from "./text-editing.js"
 import {
   ARIA_PROP_ALIASES,
