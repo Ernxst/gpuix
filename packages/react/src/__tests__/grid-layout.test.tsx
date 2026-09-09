@@ -77,6 +77,95 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     expectBounds(renderer, "fr-c", [400, 0, 200, 20])
   })
 
+  it("sizes percentage tracks from the grid container", () => {
+    const { render, renderer } = createGridRoot()
+    render(
+      <div
+        style={gridStyle([
+          { type: "percent", value: 25 },
+          { type: "px", value: 100 },
+        ])}
+      >
+        <div data-testid="percent-track" style={{ width: "100%", height: 20 }} />
+        <div data-testid="percent-px-track" style={{ width: "100%", height: 20 }} />
+      </div>,
+    )
+
+    expectBounds(renderer, "percent-track", [0, 0, 150, 20])
+    expectBounds(renderer, "percent-px-track", [150, 0, 100, 20])
+  })
+
+  it("clamps fit-content tracks between content contributions and their limit", () => {
+    const label = "a long single-line grid label"
+    const { render, renderer } = createGridRoot()
+    render(
+      <div>
+        <div style={gridStyle([{ type: "fit-content", limit: { type: "px", value: 200 } }])}>
+          <text data-testid="fit-content-long" style={{ fontSize: 20 }}>
+            {label}
+          </text>
+        </div>
+        <div style={{ display: "flex", flexDirection: "row" }}>
+          <text data-testid="fit-content-long-reference" style={{ fontSize: 20 }}>
+            {label}
+          </text>
+        </div>
+        <div style={gridStyle([{ type: "fit-content", limit: { type: "px", value: 200 } }])}>
+          <text data-testid="fit-content-short" style={{ fontSize: 20 }}>
+            short
+          </text>
+        </div>
+        <div style={{ display: "flex", flexDirection: "row" }}>
+          <text data-testid="fit-content-short-reference" style={{ fontSize: 20 }}>
+            short
+          </text>
+        </div>
+      </div>,
+    )
+
+    const long = boundsFor(renderer, "fit-content-long")
+    const longReference = boundsFor(renderer, "fit-content-long-reference")
+    const short = boundsFor(renderer, "fit-content-short")
+    const shortReference = boundsFor(renderer, "fit-content-short-reference")
+    expect(long[2]).toBeCloseTo(200, 3)
+    expect(long[2]).toBeLessThan(longReference[2])
+    expect(short[2]).toBeCloseTo(shortReference[2], 3)
+  })
+
+  it("uses percentage minmax bounds when distributing flexible tracks", () => {
+    const low = createGridRoot()
+    low.render(
+      <div
+        style={gridStyle([
+          { type: "minmax", min: { type: "percent", value: 10 }, max: { type: "fr", value: 1 } },
+          { type: "fr", value: 1 },
+        ])}
+      >
+        <div data-testid="minmax-percent-low" style={{ width: "100%", minWidth: 0, height: 20 }} />
+        <div data-testid="minmax-percent-low-second" style={{ width: "100%", minWidth: 0, height: 20 }} />
+      </div>,
+    )
+
+    expectBounds(low.renderer, "minmax-percent-low", [0, 0, 300, 20])
+    expectBounds(low.renderer, "minmax-percent-low-second", [300, 0, 300, 20])
+
+    const high = createGridRoot()
+    high.render(
+      <div
+        style={gridStyle([
+          { type: "minmax", min: { type: "percent", value: 60 }, max: { type: "fr", value: 1 } },
+          { type: "fr", value: 1 },
+        ])}
+      >
+        <div data-testid="minmax-percent-high" style={{ width: "100%", minWidth: 0, height: 20 }} />
+        <div data-testid="minmax-percent-high-second" style={{ width: "100%", minWidth: 0, height: 20 }} />
+      </div>,
+    )
+
+    expectBounds(high.renderer, "minmax-percent-high", [0, 0, 360, 20])
+    expectBounds(high.renderer, "minmax-percent-high-second", [360, 0, 240, 20])
+  })
+
   it("stretches auto tracks after sizing them from content", () => {
     const { render, renderer } = createGridRoot()
     render(
@@ -313,5 +402,29 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     expectBounds(renderer, "auto-row-tall", [0, 0, 300, 30])
     expectBounds(renderer, "auto-row-short", [300, 0, 300, 20])
     expectBounds(renderer, "fixed-row", [0, 30, 300, 20])
+  })
+
+  it("keeps absolute track lengths in logical pixels at a device scale factor", () => {
+    const label = "a long single-line grid label"
+    const { render, renderer } = createTestRoot({ scaleFactor: 2 })
+    render(
+      <div
+        style={gridStyle([
+          { type: "px", value: 100 },
+          { type: "px", value: 200 },
+          { type: "fit-content", limit: { type: "px", value: 150 } },
+        ])}
+      >
+        <div data-testid="scale-px-a" style={{ width: "100%", height: 20 }} />
+        <div data-testid="scale-px-b" style={{ width: "100%", height: 20 }} />
+        <text data-testid="scale-fit-content" style={{ fontSize: 20 }}>
+          {label}
+        </text>
+      </div>,
+    )
+
+    expectBounds(renderer, "scale-px-a", [0, 0, 100, 20])
+    expectBounds(renderer, "scale-px-b", [100, 0, 200, 20])
+    expect(boundsFor(renderer, "scale-fit-content")[2]).toBeCloseTo(150, 3)
   })
 })

@@ -410,13 +410,18 @@ export type BackgroundValue =
 
 export type GridTrackSizing =
   | { type: "px"; value: number }
+  | { type: "percent"; value: number }
   | { type: "fr"; value: number }
   | { type: "auto" }
   | { type: "min-content" }
   | { type: "max-content" }
+  | {
+      type: "fit-content"
+      limit: { type: "px"; value: number } | { type: "percent"; value: number }
+    }
 
-export type GridTrackMin = Exclude<GridTrackSizing, { type: "fr" }>
-export type GridTrackMax = GridTrackSizing
+export type GridTrackMin = Exclude<GridTrackSizing, { type: "fr" } | { type: "fit-content" }>
+export type GridTrackMax = Exclude<GridTrackSizing, { type: "fit-content" }>
 
 export type GridTrackMinmax = {
   type: "minmax"

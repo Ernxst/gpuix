@@ -261,12 +261,18 @@ pub enum GridTrackValue {
     Px {
         value: f64,
     },
+    Percent {
+        value: f64,
+    },
     Fr {
         value: f64,
     },
     Auto,
     MinContent,
     MaxContent,
+    FitContent {
+        limit: GridTrackFitContentLimit,
+    },
     Minmax {
         min: GridTrackMinValue,
         max: GridTrackMaxValue,
@@ -277,11 +283,20 @@ pub enum GridTrackValue {
     },
 }
 
+/// A length-percentage limit for a `fit-content()` grid track.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum GridTrackFitContentLimit {
+    Px { value: f64 },
+    Percent { value: f64 },
+}
+
 /// Valid lower-bound functions for a `minmax()` grid track.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GridTrackMinValue {
     Px { value: f64 },
+    Percent { value: f64 },
     Auto,
     MinContent,
     MaxContent,
@@ -292,6 +307,7 @@ pub enum GridTrackMinValue {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GridTrackMaxValue {
     Px { value: f64 },
+    Percent { value: f64 },
     Fr { value: f64 },
     Auto,
     MinContent,
@@ -1101,6 +1117,65 @@ fn grid_track_number(
     Some(number)
 }
 
+fn parse_grid_fit_content_limit(
+    path: &str,
+    value: Option<&serde_json::Value>,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<GridTrackFitContentLimit> {
+    let limit_path = format!("{path}.limit");
+    let Some(value) = value else {
+        reject(
+            problems,
+            limit_path,
+            &serde_json::Value::Null,
+            "expected a px or percent limit",
+        );
+        return None;
+    };
+    let Some(object) = value.as_object() else {
+        reject(
+            problems,
+            limit_path,
+            value,
+            "expected a px or percent limit",
+        );
+        return None;
+    };
+    let Some(limit_type) = object.get("type").and_then(serde_json::Value::as_str) else {
+        reject(
+            problems,
+            limit_path,
+            value,
+            "expected a px or percent limit",
+        );
+        return None;
+    };
+    if limit_type != "px" && limit_type != "percent" {
+        reject(
+            problems,
+            limit_path,
+            value,
+            "expected a px or percent limit",
+        );
+        return None;
+    }
+    let fields_ok = reject_unexpected_grid_fields(
+        &format!("{path}.limit"),
+        object,
+        &["type", "value"],
+        problems,
+    );
+    let number = grid_track_number(&format!("{path}.limit"), object, "value", problems, false)?;
+    if !fields_ok {
+        return None;
+    }
+    Some(match limit_type {
+        "px" => GridTrackFitContentLimit::Px { value: number },
+        "percent" => GridTrackFitContentLimit::Percent { value: number },
+        _ => unreachable!("limit_type validated above"),
+    })
+}
+
 fn parse_grid_track_sizing(
     path: &str,
     value: &serde_json::Value,
@@ -1114,6 +1189,12 @@ fn parse_grid_track_sizing(
                 reject_unexpected_grid_fields(path, object, &["type", "value"], problems);
             let value = grid_track_number(path, object, "value", problems, false)?;
             fields_ok.then_some(GridTrackValue::Px { value })
+        }
+        "percent" => {
+            let fields_ok =
+                reject_unexpected_grid_fields(path, object, &["type", "value"], problems);
+            let value = grid_track_number(path, object, "value", problems, false)?;
+            fields_ok.then_some(GridTrackValue::Percent { value })
         }
         "fr" if allow_fr => {
             let fields_ok =
@@ -1136,6 +1217,15 @@ fn parse_grid_track_sizing(
             );
             None
         }
+        "fit-content" => {
+            reject(
+                problems,
+                format!("{path}.type"),
+                object.get("type").expect("track type is present"),
+                "fit-content is not valid as a minmax bound",
+            );
+            None
+        }
         "minmax" | "repeat" => {
             reject(
                 problems,
@@ -1150,7 +1240,7 @@ fn parse_grid_track_sizing(
                 problems,
                 format!("{path}.type"),
                 object.get("type").expect("track type is present"),
-                "expected px, fr, auto, min-content, or max-content",
+                "expected px, percent, fr, fit-content, auto, min-content, or max-content",
             );
             None
         }
@@ -1164,10 +1254,12 @@ fn parse_grid_track_min(
 ) -> Option<GridTrackMinValue> {
     match parse_grid_track_sizing(path, value, false, problems)? {
         GridTrackValue::Px { value } => Some(GridTrackMinValue::Px { value }),
+        GridTrackValue::Percent { value } => Some(GridTrackMinValue::Percent { value }),
         GridTrackValue::Auto => Some(GridTrackMinValue::Auto),
         GridTrackValue::MinContent => Some(GridTrackMinValue::MinContent),
         GridTrackValue::MaxContent => Some(GridTrackMinValue::MaxContent),
         GridTrackValue::Fr { .. }
+        | GridTrackValue::FitContent { .. }
         | GridTrackValue::Minmax { .. }
         | GridTrackValue::Repeat { .. } => {
             unreachable!("grid track sizing grammar excludes these values")
@@ -1182,11 +1274,14 @@ fn parse_grid_track_max(
 ) -> Option<GridTrackMaxValue> {
     match parse_grid_track_sizing(path, value, true, problems)? {
         GridTrackValue::Px { value } => Some(GridTrackMaxValue::Px { value }),
+        GridTrackValue::Percent { value } => Some(GridTrackMaxValue::Percent { value }),
         GridTrackValue::Fr { value } => Some(GridTrackMaxValue::Fr { value }),
         GridTrackValue::Auto => Some(GridTrackMaxValue::Auto),
         GridTrackValue::MinContent => Some(GridTrackMaxValue::MinContent),
         GridTrackValue::MaxContent => Some(GridTrackMaxValue::MaxContent),
-        GridTrackValue::Minmax { .. } | GridTrackValue::Repeat { .. } => {
+        GridTrackValue::FitContent { .. }
+        | GridTrackValue::Minmax { .. }
+        | GridTrackValue::Repeat { .. } => {
             unreachable!("grid track sizing grammar excludes these values")
         }
     }
@@ -1200,6 +1295,12 @@ fn parse_grid_track(
 ) -> Option<GridTrackValue> {
     let (track_type, object) = grid_track_object(path, value, problems)?;
     match track_type {
+        "fit-content" => {
+            let fields_ok =
+                reject_unexpected_grid_fields(path, object, &["type", "limit"], problems);
+            let limit = parse_grid_fit_content_limit(path, object.get("limit"), problems)?;
+            fields_ok.then_some(GridTrackValue::FitContent { limit })
+        }
         "minmax" => {
             let fields_ok =
                 reject_unexpected_grid_fields(path, object, &["type", "min", "max"], problems);
@@ -3269,6 +3370,79 @@ mod tests {
             shorthand.problems[0].reason,
             "expected a non-empty grid track list"
         );
+    }
+
+    #[test]
+    fn parses_percentage_and_fit_content_grid_tracks() {
+        let parsed = parse_style_value(&json!({
+            "gridTemplateColumns": [
+                { "type": "percent", "value": 25 },
+                {
+                    "type": "minmax",
+                    "min": { "type": "percent", "value": 10 },
+                    "max": { "type": "percent", "value": 125 }
+                },
+                { "type": "fit-content", "limit": { "type": "px", "value": 200 } },
+                {
+                    "type": "repeat",
+                    "count": 2,
+                    "tracks": [
+                        { "type": "percent", "value": 50 },
+                        { "type": "fit-content", "limit": { "type": "percent", "value": 75 } }
+                    ]
+                }
+            ]
+        }));
+
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert!(matches!(
+            parsed.style.grid_template_columns,
+            Some(ref tracks)
+                if matches!(tracks[0], GridTrackValue::Percent { value } if value == 25.0)
+                    && matches!(tracks[1], GridTrackValue::Minmax {
+                        min: GridTrackMinValue::Percent { value: 10.0 },
+                        max: GridTrackMaxValue::Percent { value: 125.0 },
+                    })
+                    && matches!(tracks[2], GridTrackValue::FitContent {
+                        limit: GridTrackFitContentLimit::Px { value: 200.0 },
+                    })
+                    && matches!(tracks[3], GridTrackValue::Repeat { ref tracks, .. }
+                        if matches!(tracks[0], GridTrackValue::Percent { value } if value == 50.0)
+                            && matches!(tracks[1], GridTrackValue::FitContent {
+                                limit: GridTrackFitContentLimit::Percent { value: 75.0 },
+                            }))
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_percentage_and_fit_content_grid_tracks() {
+        for (value, property, reason) in [
+            (
+                json!({ "type": "percent", "value": -1 }),
+                "gridTemplateColumns[0].value",
+                "expected a non-negative number",
+            ),
+            (
+                json!({
+                    "type": "minmax",
+                    "min": { "type": "fit-content", "limit": { "type": "px", "value": 20 } },
+                    "max": { "type": "fr", "value": 1 }
+                }),
+                "gridTemplateColumns[0].min.type",
+                "fit-content is not valid as a minmax bound",
+            ),
+            (
+                json!({ "type": "fit-content", "limit": { "type": "fr", "value": 1 } }),
+                "gridTemplateColumns[0].limit",
+                "expected a px or percent limit",
+            ),
+        ] {
+            let parsed = parse_style_value(&json!({ "gridTemplateColumns": [value] }));
+            assert_eq!(parsed.style.grid_template_columns, None);
+            assert_eq!(parsed.problems.len(), 1, "{property}");
+            assert_eq!(parsed.problems[0].property, property);
+            assert_eq!(parsed.problems[0].reason, reason);
+        }
     }
 
     #[test]
