@@ -73,16 +73,35 @@ pub(crate) const MAX_SETTLE_PASSES: usize = 3;
 /// rather than `needs_frame()` for the same reason the constant above does:
 /// a pending next-frame callback is future work, not evidence that the last
 /// draw left something unsettled.
-pub(crate) fn settle_for_read(window: &mut gpui::Window, cx: &mut gpui::App) {
+///
+/// `run_pass` must perform its own top-level window update per call — a
+/// fresh `update_window`-style call per invocation, never one pass looping
+/// inside another's update — because effects deferred with `cx.defer`/
+/// `cx.defer_in` (the autofocus scroll reveal, for example) only flush once
+/// the outermost update finishes. The reveal re-dirties the window through a
+/// deferred notify; passes sharing one update would never see that notify,
+/// so the pass that performs the reveal would never draw.
+pub(crate) fn settle_for_read<E>(
+    mut run_pass: impl FnMut(
+        &mut dyn FnMut(&mut gpui::Window, &mut gpui::App) -> bool,
+    ) -> std::result::Result<bool, E>,
+) -> std::result::Result<(), E> {
     for _ in 0..MAX_SETTLE_PASSES {
-        if !window.is_dirty() {
-            return;
+        let drew = run_pass(&mut |window, cx| {
+            if !window.is_dirty() {
+                return false;
+            }
+            window.draw(cx).clear(cx);
+            true
+        })?;
+        if !drew {
+            return Ok(());
         }
-        window.draw(cx).clear(cx);
     }
-    if window.is_dirty() {
-        log::debug!("settle_for_read: window still dirty after {MAX_SETTLE_PASSES} passes");
-    }
+    // Every pass in the budget drew, so the tree did not reach rest; a read
+    // taken now may be one pass stale.
+    log::debug!("settle_for_read: still drawing after {MAX_SETTLE_PASSES} passes");
+    Ok(())
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -1122,7 +1141,7 @@ fn update_window_without_view<R>(
 
 #[cfg(target_os = "macos")]
 fn draw_window_for_automation_read() -> Result<()> {
-    update_window_without_view(|window, cx| settle_for_read(window, cx))
+    settle_for_read(|pass| update_window_without_view(move |window, cx| pass(window, cx)))
 }
 
 /// Queue a real AppKit mouse click. This is deliberately distinct from the
@@ -1406,7 +1425,9 @@ fn draw_ui_window_for_read(
     window: gpui::WindowHandle<GpuixView>,
     cx: &mut gpui::AsyncApp,
 ) -> anyhow::Result<()> {
-    gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| settle_for_read(window, cx))
+    settle_for_read(|pass| {
+        gpui::AnyWindowHandle::from(window).update(cx, move |_view, window, cx| pass(window, cx))
+    })
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -4968,7 +4989,7 @@ fn update_web_window<R>(
 /// overwritten by it.
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 fn draw_web_window_for_read() -> Result<(), wasm_bindgen::JsValue> {
-    update_web_window(|window, cx| settle_for_read(window, cx))
+    settle_for_read(|pass| update_web_window(move |window, cx| pass(window, cx)))
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -5851,6 +5872,8 @@ pub(crate) struct GpuixView {
     /// Created lazily for elements with keyboard or focus/blur listeners.
     /// Handles persist across renders so GPUI maintains focus state.
     pub(crate) focus_handles: HashMap<u64, gpui::FocusHandle>,
+    /// Autofocus targets whose reveal waits for their first layout pass.
+    pending_autofocus_reveals: Vec<u64>,
     /// Tab defaults wait for the matching React keydown dispatch. Serializing
     /// them keeps each queued keypress targeted at the focus left by the one
     /// before it, just like a browser event loop.
@@ -6109,6 +6132,7 @@ impl GpuixView {
             root_focus_handle: cx.focus_handle().tab_stop(false),
             focus_lost_subscription: None,
             focus_handles: HashMap::new(),
+            pending_autofocus_reveals: Vec::new(),
             pending_tab_key_down: None,
             queued_tab_key_downs: VecDeque::new(),
             focus_subscriptions: HashMap::new(),
@@ -7566,14 +7590,13 @@ impl GpuixView {
         // missed during the initial render.
         for (id, handle) in pending_auto_focus {
             handle.focus(window, cx);
-            let view = cx.weak_entity();
-            window.on_next_frame(move |window, app| {
-                view.update(app, |view, cx| {
-                    if handle.is_focused(window) {
-                        view.scroll_focused_element_into_view(id, cx);
-                    }
-                })
-                .ok();
+            self.pending_autofocus_reveals.push(id);
+            // A plain `cx.notify()` here would be dropped: this runs during
+            // `Window::draw`, which clears dirty state up front and ignores
+            // invalidation until the draw finishes. Defer past the draw so
+            // the next pass picks up `pending_autofocus_reveals`.
+            cx.defer_in(window, |_view, _window, cx| {
+                cx.notify();
             });
         }
     }
@@ -7831,6 +7854,20 @@ impl gpui::Render for GpuixView {
                         cx.notify();
                     }
                 }));
+        }
+
+        // Drained here, one draw after the mount that queued it, so the
+        // anchor element already has `last_bounds` to scroll against. Also
+        // ahead of the tree lock below: `reveal_element` takes that same
+        // mutex, so draining after it would deadlock.
+        for id in std::mem::take(&mut self.pending_autofocus_reveals) {
+            let focused = self
+                .focus_handles
+                .get(&id)
+                .is_some_and(|handle| handle.is_focused(window));
+            if focused {
+                self.scroll_focused_element_into_view(id, cx);
+            }
         }
 
         // Clone Arc so we don't borrow self.tree — frees self for focus_handles access.

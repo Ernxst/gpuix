@@ -302,6 +302,78 @@ describeNative("host instance scroll properties", () => {
     expect(outerRef.current!.scrollTop).toBeGreaterThan(0)
   })
 
+  it("reveals an autofocused element without a frame callback", () => {
+    const scrollerRef = React.createRef<PublicInstance>()
+    const targetRef = React.createRef<PublicInstance>()
+
+    testRoot.render(
+      <div ref={scrollerRef} style={{ width: 200, height: 100, overflow: "scroll" }}>
+        {Array.from({ length: 10 }, (_, index) => (
+          <div key={index} style={{ height: 40, flexShrink: 0 }}>
+            {index === 6 ? (
+              <div ref={targetRef} tabIndex={0} autoFocus ariaLabel="autofocus target">
+                <text>autofocus target</text>
+              </div>
+            ) : (
+              <text>{`row-${index}`}</text>
+            )}
+          </div>
+        ))}
+      </div>,
+    )
+
+    expect(testRoot.renderer.getActiveElement()).toBe(targetRef.current!.id)
+
+    // Sampled either side of the scrollTop read, which is the synchronous
+    // read that settles the deferred autofocus reveal, so the delta is the
+    // reveal's own frame cost: exactly one settle pass.
+    const framesBeforeReveal = testRoot.renderer.getDebugFrameOverlayStats().frames
+    expect(scrollerRef.current!.scrollTop).toBeGreaterThan(0)
+    const framesAfterReveal = testRoot.renderer.getDebugFrameOverlayStats().frames
+    expect(framesAfterReveal - framesBeforeReveal).toBe(1)
+
+    const scrollerBounds = testRoot.renderer.getElementBounds(scrollerRef.current!.id)!
+    const targetBounds = testRoot.renderer.getElementBounds(targetRef.current!.id)!
+    expect(targetBounds[1]).toBeGreaterThanOrEqual(scrollerBounds[1])
+    expect(targetBounds[1] + targetBounds[3]).toBeLessThanOrEqual(
+      scrollerBounds[1] + scrollerBounds[3],
+    )
+  })
+
+  it("reveals an autofocused element through nested scrollers", () => {
+    const outerRef = React.createRef<PublicInstance>()
+    const innerRef = React.createRef<PublicInstance>()
+    const targetRef = React.createRef<PublicInstance>()
+
+    testRoot.render(
+      <div ref={outerRef} style={{ width: 200, height: 100, overflow: "scroll" }}>
+        <div style={{ height: 120, flexShrink: 0 }}>
+          <text>outer-row-0</text>
+        </div>
+        <div
+          ref={innerRef}
+          style={{ width: 200, height: 100, flexShrink: 0, overflow: "scroll" }}
+        >
+          {Array.from({ length: 8 }, (_, index) => (
+            <div key={index} style={{ height: 40, flexShrink: 0 }}>
+              {index === 4 ? (
+                <div ref={targetRef} tabIndex={0} autoFocus ariaLabel="nested autofocus target">
+                  <text>nested autofocus target</text>
+                </div>
+              ) : (
+                <text>{`inner-row-${index}`}</text>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>,
+    )
+
+    expect(testRoot.renderer.getActiveElement()).toBe(targetRef.current!.id)
+    expect(innerRef.current!.scrollTop).toBeGreaterThan(0)
+    expect(outerRef.current!.scrollTop).toBeGreaterThan(0)
+  })
+
   it("reports virtual list scroll geometry in DOM coordinates", () => {
     const ref = React.createRef<PublicInstance>()
 
