@@ -713,4 +713,22 @@ describeNative("native text editors", () => {
     testRoot.renderer.nativeSimulateMouseUp(150, 20, 2)
     expect(testRoot.renderer.getAllText()).toContain("Events: 1/1")
   })
+
+  it("sizes a row from the element's fontSize and lineHeight", () => {
+    const { render, renderer } = createTestRoot({ scaleFactor: 1 })
+    render(
+      <div style={{ display: "flex", flexDirection: "column", width: 400 }}>
+        <textarea data-testid="scaled" minRows={1} maxRows={1} style={{ width: 300, fontSize: 28 }} />
+        <textarea data-testid="exact" minRows={1} maxRows={1} style={{ width: 300, lineHeight: 40 }} />
+        <textarea data-testid="rows" minRows={3} maxRows={3} style={{ width: 300, lineHeight: 20 }} />
+        <input data-testid="input" style={{ width: 300, fontSize: 28 }} />
+      </div>,
+    )
+    const heightOf = (id: string) => renderer.getElementBounds(renderer.findByTestId(id)!.id)![3]
+    // gpui's default leading is 1.618: round(28 * 1.618) = 45. Before the fix every row was 26.
+    expect(heightOf("scaled")).toBe(45)
+    expect(heightOf("exact")).toBe(40)
+    expect(heightOf("rows")).toBe(60)
+    expect(heightOf("input")).toBe(45)
+  })
 })

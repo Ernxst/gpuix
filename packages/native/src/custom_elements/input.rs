@@ -1986,7 +1986,7 @@ impl TextEditorState {
             (SharedString::from(self.content.clone()), false)
         };
         let font_size = style.font_size.to_pixels(window.rem_size());
-        self.line_height = window.line_height();
+        self.line_height = style.line_height_in_pixels(window.rem_size());
         let font_id = window.text_system().resolve_font(&style.font());
         self.caret_ascent = window.text_system().ascent(font_id, font_size);
         self.caret_descent = window.text_system().descent(font_id, font_size).abs();
