@@ -513,7 +513,35 @@ export interface StyleDesc {
   color?: GpuixColor
   opacity?: number
 
-  borderWidth?: number
+  /**
+   * CSS `border` shorthand: up to three whitespace-separated components, in
+   * any order, each optional — a width (`<n>px` or `0`), a `borderStyle`
+   * value, and a color. Sets `borderWidth`. GPUI paints one border color and
+   * one border style for all four sides, so when this and a sibling shorthand
+   * (`border` / `borderTop` / `borderRight` / `borderBottom` / `borderLeft`)
+   * disagree on color or style, one of them is rejected with a diagnostic
+   * naming both (per-side color and style is not yet supported).
+   */
+  border?: string
+  /** `border` shorthand grammar, restricted to the top edge. Sets `borderTopWidth`. */
+  borderTop?: string
+  /** `border` shorthand grammar, restricted to the right edge. Sets `borderRightWidth`. */
+  borderRight?: string
+  /** `border` shorthand grammar, restricted to the bottom edge. Sets `borderBottomWidth`. */
+  borderBottom?: string
+  /** `border` shorthand grammar, restricted to the left edge. Sets `borderLeftWidth`. */
+  borderLeft?: string
+  /**
+   * A single width, or a CSS-style string of 1 to 4 widths (`"<n>px" | "0"`,
+   * whitespace-separated) applied like the `border-width` shorthand: one
+   * value sets all sides; two set top/bottom then left/right; three set top,
+   * left/right, bottom; four set top, right, bottom, left. A multi-value
+   * string only fills in a side left unset by an explicit `borderTopWidth` /
+   * `borderRightWidth` / `borderBottomWidth` / `borderLeftWidth` or an
+   * explicit `borderTop` / `borderRight` / `borderBottom` / `borderLeft`
+   * elsewhere on the same style — the explicit per-side width always wins.
+   */
+  borderWidth?: number | string
   borderTopWidth?: number
   borderRightWidth?: number
   borderBottomWidth?: number

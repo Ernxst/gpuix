@@ -1532,6 +1532,228 @@ fn valid_transition_milliseconds(value: f64) -> bool {
         && std::time::Duration::try_from_secs_f64(value / 1000.0).is_ok()
 }
 
+const BORDER_STYLE_VALUES: [&str; 10] = [
+    "none", "hidden", "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset",
+];
+
+/// Splits a border shorthand string on whitespace, except inside parentheses, so a
+/// color function such as `rgb(1, 2, 3)` or `oklch(from #bad455 calc(l - 0.15) c h)`
+/// survives tokenising as a single token.
+fn tokenize_border_value(value: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut depth: i32 = 0;
+    for ch in value.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ch if ch.is_whitespace() && depth == 0 => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            ch => current.push(ch),
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// A border width token: `0` (unitless zero) or `<n>px` with a finite, non-negative
+/// `n`. A leading `-` is rejected outright, ahead of the numeric check, so `-0px`
+/// is rejected exactly like `-4px` rather than surviving as negative-zero.
+fn parse_border_width_token(token: &str) -> Option<f64> {
+    if token == "0" {
+        return Some(0.0);
+    }
+    if token.starts_with('-') {
+        return None;
+    }
+    let magnitude = token.strip_suffix("px")?;
+    if magnitude.is_empty() {
+        return None;
+    }
+    let magnitude: f64 = magnitude.parse().ok()?;
+    (magnitude.is_finite() && magnitude >= 0.0).then_some(magnitude)
+}
+
+enum BorderToken {
+    Width(f64),
+    Style(String),
+    /// The authored color text, alongside its parsed value — conflicts across
+    /// shorthands compare the parsed color, not the authored text, so `#333`
+    /// and `#333333` agree.
+    Color(String, gpui::Rgba),
+}
+
+fn classify_border_token(token: &str) -> Option<BorderToken> {
+    if let Some(width) = parse_border_width_token(token) {
+        return Some(BorderToken::Width(width));
+    }
+    if BORDER_STYLE_VALUES.contains(&token) {
+        return Some(BorderToken::Style(token.to_string()));
+    }
+    if let Some(parsed) = crate::color::parse_color_rgba(token) {
+        return Some(BorderToken::Color(token.to_string(), parsed));
+    }
+    None
+}
+
+/// The three optional components of a `border` / `borderTop` / `borderRight` /
+/// `borderBottom` / `borderLeft` shorthand string.
+#[derive(Debug, Default, Clone)]
+struct BorderShorthand {
+    width: Option<f64>,
+    style: Option<String>,
+    color: Option<(String, gpui::Rgba)>,
+}
+
+fn parse_border_shorthand(
+    property: &str,
+    raw: &str,
+    value: &serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<BorderShorthand> {
+    if raw.trim().is_empty() {
+        reject(
+            problems,
+            property,
+            value,
+            format!("{property} is an empty string; expected a width, a style, or a color"),
+        );
+        return None;
+    }
+
+    let mut shorthand = BorderShorthand::default();
+    for token in tokenize_border_value(raw) {
+        match classify_border_token(&token) {
+            Some(BorderToken::Width(width)) => {
+                if shorthand.width.is_some() {
+                    reject(
+                        problems,
+                        property,
+                        value,
+                        format!("{property} declares more than one width (\"{token}\")"),
+                    );
+                    return None;
+                }
+                shorthand.width = Some(width);
+            }
+            Some(BorderToken::Style(style)) => {
+                if shorthand.style.is_some() {
+                    reject(
+                        problems,
+                        property,
+                        value,
+                        format!("{property} declares more than one style (\"{token}\")"),
+                    );
+                    return None;
+                }
+                shorthand.style = Some(style);
+            }
+            Some(BorderToken::Color(text, parsed)) => {
+                if shorthand.color.is_some() {
+                    reject(
+                        problems,
+                        property,
+                        value,
+                        format!("{property} declares more than one color (\"{token}\")"),
+                    );
+                    return None;
+                }
+                shorthand.color = Some((text, parsed));
+            }
+            None => {
+                reject(
+                    problems,
+                    property,
+                    value,
+                    format!("{property} token \"{token}\" is not a border width, style, or color"),
+                );
+                return None;
+            }
+        }
+    }
+    Some(shorthand)
+}
+
+/// The result of parsing a `borderWidth` string: a single value behaves like the
+/// number form (`border_width` alone), while 2 to 4 values expand CSS-style into
+/// the four per-side fields, which then are the whole answer for `borderWidth`.
+enum BorderWidthList {
+    Single(f64),
+    PerSide([f64; 4]),
+}
+
+/// The CSS-style expansion of a multi-value `borderWidth` list: 1 value sets all
+/// sides, 2 sets top/bottom then left/right, 3 sets top, left/right, bottom, and 4
+/// sets top, right, bottom, left.
+fn parse_border_width_list(
+    property: &str,
+    raw: &str,
+    value: &serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<BorderWidthList> {
+    let tokens = tokenize_border_value(raw);
+    if tokens.is_empty() {
+        reject(
+            problems,
+            property,
+            value,
+            format!("{property} is an empty string; expected 1 to 4 widths"),
+        );
+        return None;
+    }
+    if tokens.len() > 4 {
+        reject(
+            problems,
+            property,
+            value,
+            format!(
+                "{property} declares {} widths; expected 1 to 4",
+                tokens.len()
+            ),
+        );
+        return None;
+    }
+
+    let mut widths = Vec::with_capacity(tokens.len());
+    for token in &tokens {
+        match parse_border_width_token(token) {
+            Some(width) => widths.push(width),
+            None => {
+                reject(
+                    problems,
+                    property,
+                    value,
+                    format!("{property} token \"{token}\" is not a valid width"),
+                );
+                return None;
+            }
+        }
+    }
+
+    Some(match widths[..] {
+        [top] => BorderWidthList::Single(top),
+        [top_bottom, left_right] => {
+            BorderWidthList::PerSide([top_bottom, left_right, top_bottom, left_right])
+        }
+        [top, left_right, bottom] => {
+            BorderWidthList::PerSide([top, left_right, bottom, left_right])
+        }
+        [top, right, bottom, left] => BorderWidthList::PerSide([top, right, bottom, left]),
+        _ => unreachable!("length was validated above"),
+    })
+}
+
 /// Parse one style object field-by-field. A malformed field is omitted while valid
 /// siblings survive, so one bad value can never abort a React commit.
 pub fn parse_style_value(value: &serde_json::Value) -> ParsedStyle {
@@ -1606,6 +1828,20 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
     // of the property order in the JavaScript object.
     let mut derived_grid_lines: [Option<GridLineValue>; 4] = [None; 4];
     let mut explicit_grid_lines: [Option<GridLineValue>; 4] = [None; 4];
+
+    // GPUI paints one border color and one border style for all four sides, so the
+    // first of `border` / `borderTop` / `borderRight` / `borderBottom` / `borderLeft`
+    // to declare a color or a style wins; a later one that disagrees is rejected.
+    // Colors compare by parsed value (`#333` and `#333333` agree), not text.
+    // Longhand `borderColor` / `borderStyle` keep last-wins and never populate this.
+    let mut border_color_source: Option<(String, String, gpui::Rgba)> = None;
+    let mut border_style_source: Option<(String, String)> = None;
+
+    // A multi-value `borderWidth` string only fills in sides an explicit per-side
+    // longhand or per-side shorthand left untouched, so — like the grid lines
+    // above — its 2-to-4-value expansion is buffered here and applied after the
+    // loop, once every per-side field's final explicit state is known.
+    let mut border_width_expansion: Option<[f64; 4]> = None;
 
     'fields: for (key, value) in object {
         if key == "transition" {
@@ -1859,6 +2095,125 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         }
         number_field!(key, value, "opacity", opacity);
 
+        if key == "border"
+            || key == "borderTop"
+            || key == "borderRight"
+            || key == "borderBottom"
+            || key == "borderLeft"
+        {
+            let property = property!(key.as_str());
+            if let Some(raw) = decode::<String>(&property, value, &mut parsed.problems) {
+                if let Some(shorthand) =
+                    parse_border_shorthand(&property, &raw, value, &mut parsed.problems)
+                {
+                    let mut conflict: Option<(&'static str, String, String, String)> = None;
+                    if let Some((new_text, new_parsed)) = shorthand.color.clone() {
+                        if let Some((earlier_key, earlier_text, earlier_parsed)) =
+                            &border_color_source
+                        {
+                            if *earlier_parsed != new_parsed {
+                                conflict = Some((
+                                    "color",
+                                    earlier_key.clone(),
+                                    earlier_text.clone(),
+                                    new_text,
+                                ));
+                            }
+                        }
+                    }
+                    if conflict.is_none() {
+                        if let Some(new_style) = shorthand.style.clone() {
+                            if let Some((earlier_key, earlier_style)) = &border_style_source {
+                                if *earlier_style != new_style {
+                                    conflict = Some((
+                                        "style",
+                                        earlier_key.clone(),
+                                        earlier_style.clone(),
+                                        new_style,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some((component, earlier_key, earlier_value, new_value)) = conflict {
+                        reject(
+                            &mut parsed.problems,
+                            property,
+                            value,
+                            format!(
+                                "{key} {component} {new_value} conflicts with {earlier_key} \
+                                 {component} {earlier_value}; GPUI paints one border color and \
+                                 style for all four sides"
+                            ),
+                        );
+                    } else {
+                        match key.as_str() {
+                            "border" => {
+                                if let Some(width) = shorthand.width {
+                                    parsed.style.border_width = Some(width);
+                                }
+                            }
+                            "borderTop" => {
+                                if let Some(width) = shorthand.width {
+                                    parsed.style.border_top_width = Some(width);
+                                }
+                            }
+                            "borderRight" => {
+                                if let Some(width) = shorthand.width {
+                                    parsed.style.border_right_width = Some(width);
+                                }
+                            }
+                            "borderBottom" => {
+                                if let Some(width) = shorthand.width {
+                                    parsed.style.border_bottom_width = Some(width);
+                                }
+                            }
+                            "borderLeft" => {
+                                if let Some(width) = shorthand.width {
+                                    parsed.style.border_left_width = Some(width);
+                                }
+                            }
+                            _ => unreachable!("matched above"),
+                        }
+                        if let Some((text, parsed_color)) = shorthand.color {
+                            parsed.style.border_color = Some(text.clone());
+                            border_color_source
+                                .get_or_insert_with(|| (key.clone(), text, parsed_color));
+                        }
+                        if let Some(style) = shorthand.style {
+                            parsed.style.border_style = Some(style.clone());
+                            border_style_source.get_or_insert_with(|| (key.clone(), style));
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+
+        if key == "borderWidth" {
+            if let Some(text) = value.as_str() {
+                let property = property!("borderWidth");
+                if let Some(widths) =
+                    parse_border_width_list(&property, text, value, &mut parsed.problems)
+                {
+                    match widths {
+                        // A single value behaves like the number form: it never
+                        // touches the per-side fields, so it applies immediately.
+                        BorderWidthList::Single(width) => {
+                            parsed.style.border_width = Some(width);
+                        }
+                        // 2 to 4 values only fill in sides an explicit per-side
+                        // longhand or shorthand leaves untouched, so the expansion
+                        // is buffered and applied after the loop.
+                        BorderWidthList::PerSide(sides) => {
+                            border_width_expansion = Some(sides);
+                        }
+                    }
+                }
+                continue;
+            }
+        }
         number_field!(key, value, "borderWidth", border_width);
         number_field!(key, value, "borderTopWidth", border_top_width);
         number_field!(key, value, "borderRightWidth", border_right_width);
@@ -2166,6 +2521,14 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             3 => parsed.style.grid_column_end = value,
             _ => unreachable!(),
         }
+    }
+
+    if let Some([top, right, bottom, left]) = border_width_expansion {
+        parsed.style.border_width = None;
+        parsed.style.border_top_width.get_or_insert(top);
+        parsed.style.border_right_width.get_or_insert(right);
+        parsed.style.border_bottom_width.get_or_insert(bottom);
+        parsed.style.border_left_width.get_or_insert(left);
     }
 
     validate_ranges(&mut parsed, prefix);
@@ -3643,5 +4006,243 @@ mod tests {
                 parsed.problems
             );
         }
+    }
+
+    // Issue #403: `border` / `borderTop` / `borderRight` / `borderBottom` /
+    // `borderLeft` accept a CSS-shorthand string of a width, a style and a
+    // color, in any order, each optional, folding into the existing longhand
+    // fields so resolved styles read back as longhands.
+    #[test]
+    fn border_shorthand_accepts_any_order() {
+        for value in [
+            "4px solid #333333",
+            "solid 4px #333333",
+            "solid #333333 4px",
+            "#333333 solid 4px",
+            "#333333 4px solid",
+            "4px #333333 solid",
+        ] {
+            let parsed = parse_style_value(&json!({ "border": value }));
+            assert!(parsed.problems.is_empty(), "{value}: {:?}", parsed.problems);
+            assert_eq!(parsed.style.border_width, Some(4.0), "{value}");
+            assert_eq!(
+                parsed.style.border_style.as_deref(),
+                Some("solid"),
+                "{value}"
+            );
+            assert_eq!(
+                parsed.style.border_color.as_deref(),
+                Some("#333333"),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn border_shorthand_accepts_every_subset_of_components() {
+        for (value, width, style, color) in [
+            ("4px", Some(4.0), None, None),
+            ("solid", None, Some("solid"), None),
+            ("#333333", None, None, Some("#333333")),
+            ("4px solid", Some(4.0), Some("solid"), None),
+            ("4px #333333", Some(4.0), None, Some("#333333")),
+            ("solid #333333", None, Some("solid"), Some("#333333")),
+            ("0", Some(0.0), None, None),
+            ("none", None, Some("none"), None),
+        ] {
+            let parsed = parse_style_value(&json!({ "border": value }));
+            assert!(parsed.problems.is_empty(), "{value}: {:?}", parsed.problems);
+            assert_eq!(parsed.style.border_width, width, "{value}");
+            assert_eq!(parsed.style.border_style.as_deref(), style, "{value}");
+            assert_eq!(parsed.style.border_color.as_deref(), color, "{value}");
+        }
+    }
+
+    #[test]
+    fn border_shorthand_tokenises_spaced_color_functions_as_one_token() {
+        for color in ["rgb(1, 2, 3)", "oklch(from #bad455 calc(l - 0.15) c h)"] {
+            let parsed = parse_style_value(&json!({ "border": format!("4px solid {color}") }));
+            assert!(parsed.problems.is_empty(), "{color}: {:?}", parsed.problems);
+            assert_eq!(parsed.style.border_color.as_deref(), Some(color), "{color}");
+        }
+    }
+
+    #[test]
+    fn border_side_shorthands_set_only_their_own_width_field() {
+        let cases: [(&str, fn(&StyleDesc) -> Option<f64>); 4] = [
+            ("borderTop", |s| s.border_top_width),
+            ("borderRight", |s| s.border_right_width),
+            ("borderBottom", |s| s.border_bottom_width),
+            ("borderLeft", |s| s.border_left_width),
+        ];
+        for (key, width_of) in cases {
+            let parsed = parse_style_value(&json!({ key: "4px solid #333333" }));
+            assert!(parsed.problems.is_empty(), "{key}: {:?}", parsed.problems);
+            assert_eq!(width_of(&parsed.style), Some(4.0), "{key}");
+            assert_eq!(parsed.style.border_style.as_deref(), Some("solid"), "{key}");
+            assert_eq!(
+                parsed.style.border_color.as_deref(),
+                Some("#333333"),
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn border_width_string_expands_css_style_by_count() {
+        let one = parse_style_value(&json!({ "borderWidth": "4px" }));
+        assert!(one.problems.is_empty(), "{:?}", one.problems);
+        assert_eq!(one.style.border_width, Some(4.0));
+        assert_eq!(one.style.border_top_width, None);
+
+        let two = parse_style_value(&json!({ "borderWidth": "4px 8px" }));
+        assert!(two.problems.is_empty(), "{:?}", two.problems);
+        assert_eq!(two.style.border_width, None);
+        assert_eq!(two.style.border_top_width, Some(4.0));
+        assert_eq!(two.style.border_bottom_width, Some(4.0));
+        assert_eq!(two.style.border_left_width, Some(8.0));
+        assert_eq!(two.style.border_right_width, Some(8.0));
+
+        let three = parse_style_value(&json!({ "borderWidth": "4px 8px 12px" }));
+        assert!(three.problems.is_empty(), "{:?}", three.problems);
+        assert_eq!(three.style.border_width, None);
+        assert_eq!(three.style.border_top_width, Some(4.0));
+        assert_eq!(three.style.border_left_width, Some(8.0));
+        assert_eq!(three.style.border_right_width, Some(8.0));
+        assert_eq!(three.style.border_bottom_width, Some(12.0));
+
+        let four = parse_style_value(&json!({ "borderWidth": "4px 8px 12px 16px" }));
+        assert!(four.problems.is_empty(), "{:?}", four.problems);
+        assert_eq!(four.style.border_width, None);
+        assert_eq!(four.style.border_top_width, Some(4.0));
+        assert_eq!(four.style.border_right_width, Some(8.0));
+        assert_eq!(four.style.border_bottom_width, Some(12.0));
+        assert_eq!(four.style.border_left_width, Some(16.0));
+    }
+
+    #[test]
+    fn border_width_number_form_keeps_working() {
+        let parsed = parse_style_value(&json!({ "borderWidth": 4 }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.border_width, Some(4.0));
+    }
+
+    // A multi-value `borderWidth` string only fills in sides an explicit
+    // per-side longhand or per-side shorthand left untouched; it never
+    // overrides one, regardless of where each key falls in the (alphabetical,
+    // not source) iteration order.
+    #[test]
+    fn border_width_list_does_not_override_an_explicit_per_side_longhand() {
+        let parsed = parse_style_value(&json!({
+            "borderTopWidth": 2,
+            "borderWidth": "4px 8px",
+        }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.border_width, None);
+        assert_eq!(parsed.style.border_top_width, Some(2.0));
+        assert_eq!(parsed.style.border_right_width, Some(8.0));
+        assert_eq!(parsed.style.border_bottom_width, Some(4.0));
+        assert_eq!(parsed.style.border_left_width, Some(8.0));
+    }
+
+    #[test]
+    fn border_width_list_does_not_override_an_explicit_per_side_shorthand() {
+        let parsed = parse_style_value(&json!({
+            "borderLeft": "4px solid red",
+            "borderWidth": "1px 2px",
+        }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.border_left_width, Some(4.0));
+    }
+
+    #[test]
+    fn border_shorthand_rejects_an_unrecognized_token() {
+        let parsed = parse_style_value(&json!({ "border": "4px chunky #333333" }));
+        assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+        assert_eq!(parsed.problems[0].property, "border");
+        assert!(parsed.problems[0].reason.contains("chunky"));
+        assert!(parsed.problems[0].reason.contains("border"));
+    }
+
+    #[test]
+    fn border_shorthand_rejects_a_duplicated_component() {
+        let parsed = parse_style_value(&json!({ "border": "4px 8px solid" }));
+        assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+        assert_eq!(parsed.problems[0].property, "border");
+        assert!(parsed.problems[0].reason.contains("8px"));
+        assert!(parsed.problems[0].reason.contains("border"));
+    }
+
+    #[test]
+    fn border_shorthand_rejects_a_negative_width() {
+        let parsed = parse_style_value(&json!({ "border": "-4px solid #333333" }));
+        assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+        assert_eq!(parsed.problems[0].property, "border");
+        assert!(parsed.problems[0].reason.contains("-4px"));
+    }
+
+    // `-0px` is negative zero textually, not a magnitude below zero, so it must
+    // be rejected by its leading `-` rather than surviving a `>= 0.0` check.
+    #[test]
+    fn border_shorthand_rejects_a_leading_minus_zero_width() {
+        let parsed = parse_style_value(&json!({ "border": "-0px solid #333333" }));
+        assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+        assert_eq!(parsed.problems[0].property, "border");
+        assert!(parsed.problems[0].reason.contains("-0px"));
+    }
+
+    // Border shorthand color conflicts compare the parsed color, not the
+    // authored text, so `#333` and `#333333` — the same color spelled two
+    // ways — do not conflict.
+    #[test]
+    fn border_shorthands_do_not_conflict_on_the_same_color_spelled_differently() {
+        let parsed = parse_style_value(&json!({
+            "border": "1px solid #333",
+            "borderTop": "1px solid #333333",
+        }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.border_color.as_deref(), Some("#333333"));
+        assert_eq!(parsed.style.border_top_width, Some(1.0));
+    }
+
+    // `serde_json::Map` here is a `BTreeMap` (no `preserve_order` feature), so
+    // the style object iterates in alphabetical key order, not JS source
+    // order — "border" sorts before "borderTop" because it is a prefix of it.
+    // This test pins that deterministic map order deliberately, on the one
+    // declaration that survives, rather than claiming a source-order contract
+    // for authors: the only promise is that exactly one of a disagreeing pair
+    // is rejected with a diagnostic naming both.
+    #[test]
+    fn border_shorthands_reject_a_conflicting_color() {
+        let parsed = parse_style_value(&json!({
+            "border": "4px solid #333333",
+            "borderTop": "4px solid #ff0000",
+        }));
+        assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+        assert_eq!(parsed.problems[0].property, "borderTop");
+        let reason = &parsed.problems[0].reason;
+        assert!(reason.contains("borderTop"), "{reason}");
+        assert!(reason.contains("border "), "{reason}");
+        assert!(reason.contains("color"), "{reason}");
+        // The surviving declaration stands; none of the rejected one's components land.
+        assert_eq!(parsed.style.border_color.as_deref(), Some("#333333"));
+        assert_eq!(parsed.style.border_top_width, None);
+    }
+
+    // See the map-order note on `border_shorthands_reject_a_conflicting_color`.
+    #[test]
+    fn border_shorthands_reject_a_conflicting_style() {
+        let parsed = parse_style_value(&json!({
+            "border": "4px solid #333333",
+            "borderTop": "4px dashed #333333",
+        }));
+        assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+        assert_eq!(parsed.problems[0].property, "borderTop");
+        let reason = &parsed.problems[0].reason;
+        assert!(reason.contains("borderTop"), "{reason}");
+        assert!(reason.contains("border "), "{reason}");
+        assert!(reason.contains("style"), "{reason}");
+        assert_eq!(parsed.style.border_style.as_deref(), Some("solid"));
+        assert_eq!(parsed.style.border_top_width, None);
     }
 }

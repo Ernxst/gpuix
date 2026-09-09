@@ -544,6 +544,44 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     }
   })
 
+  // Issue #403: GPUI paints one border color and one border style for all four
+  // sides, so a later border shorthand that disagrees with an earlier one is
+  // rejected, and the warning names both sides.
+  it("rejects a border shorthand that conflicts with an earlier one, naming both sides", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    try {
+      testRoot.render(
+        <div
+          data-testid="conflicting-border"
+          style={{
+            border: "4px solid #333333",
+            borderTop: "4px dashed #333333",
+          }}
+        />
+      )
+
+      const element = testRoot.renderer.findByTestId("conflicting-border")!
+      const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+      expect(diagnostics).toHaveLength(1)
+      expect(diagnostics[0]).toMatchObject({
+        elementId: element.id,
+        elementType: "div",
+        dataTestId: "conflicting-border",
+        property: "borderTop",
+      })
+      expect(diagnostics[0]!.message).toContain("borderTop")
+      expect(diagnostics[0]!.message).toContain("border ")
+      expect(diagnostics[0]!.message).toContain(
+        "GPUI paints one border color and style for all four sides"
+      )
+    } finally {
+      testRoot.unmount()
+      warn.mockRestore()
+    }
+  })
+
   it("drains an ignored accessibility diagnostic with assertion metadata", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })
