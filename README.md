@@ -3486,9 +3486,10 @@ CSS-like styling via the `style` prop:
 **Layout:** `display` (`"none"` | `"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridAutoFlow`, `gridAutoRows`, `gridAutoColumns`, `justifyItems`, `justifySelf`, `gridColumn`, `gridRow`, `gridColumnStart`, `gridColumnEnd`, `gridRowStart`, `gridRowEnd`, `gridArea`
 
 `display: "none"` removes the element and its subtree from layout, painting, hit
-testing, accessibility, and text collection. It is not transitioned. Descendants
-of a hidden element are not focusable, are skipped by Tab, and a focused element
-that becomes hidden blurs.
+testing, accessibility, and text collection. It is not transitioned. A hidden
+element and its descendants are not focusable, are skipped by Tab, and a
+focused element that becomes hidden blurs; `autoFocus` on a hidden element
+does not fire, as in the browser.
 
 `gridTemplateColumns` and `gridTemplateRows` accept a typed CSS Grid track list.
 Each entry is an object with a `type`: `px`, `percent`, `fr`, `auto`,

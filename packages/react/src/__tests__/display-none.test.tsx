@@ -253,6 +253,11 @@ describeNative('display: "none" and focus (issue #426)', () => {
     flushSync(() => show!())
     testRoot.renderer.flush()
 
+    // The revealed input is reachable by Tab again, not just by
+    // programmatic focus — closing the issue's stated done-means.
+    testRoot.renderer.focusNext()
+    expect(testRoot.renderer.getActiveElement()).toBe(target.id)
+
     testRoot.renderer.focusElement(target.id)
     expect(onFocus).toHaveBeenCalledTimes(1)
     expect(testRoot.renderer.getActiveElement()).toBe(target.id)
@@ -261,20 +266,21 @@ describeNative('display: "none" and focus (issue #426)', () => {
     expect(testRoot.renderer.getInputValue(target.id)).toBe("x")
   })
 
-  it("defers autoFocus while hidden and fires it once, on the first show", () => {
-    let hide: (() => void) | undefined
+  it("never autofocuses an input inserted under display: none, even after it is later shown", () => {
+    // Browsers run autofocus once, at insertion, and drop a candidate that
+    // isn't rendered rather than deferring it: an input mounted inside a
+    // hidden subtree never autofocuses, whether or not it is later shown.
     let show: (() => void) | undefined
 
     function Toggle() {
       const [hidden, setHidden] = useState(true)
-      hide = () => setHidden(true)
       show = () => setHidden(false)
       return (
         <div>
           <div style={{ display: hidden ? "none" : "flex" }}>
             <input data-testid="target" autoFocus />
           </div>
-          <input data-testid="other" />
+          <input data-testid="other" autoFocus />
         </div>
       )
     }
@@ -288,22 +294,19 @@ describeNative('display: "none" and focus (issue #426)', () => {
     testRoot.renderer.flush()
     testRoot.renderer.dispatchNativeEvents()
 
+    // Showing the subtree later does not retroactively autofocus it: focus
+    // stays wherever it already was (here, `other`'s own autoFocus, which
+    // fired at insertion because it was visible then).
+    expect(testRoot.renderer.getActiveElement()).toBe(other.id)
+    expect(testRoot.renderer.getActiveElement()).not.toBe(target.id)
+  })
+
+  it("still autofocuses a visible input on mount", () => {
+    // Existing coverage for the ordinary case lives in style-coverage.test
+    // and elsewhere; this keeps one assertion of it alongside the
+    // hidden-subtree case above for contrast.
+    testRoot.render(<input data-testid="target" autoFocus />)
+    const target = testRoot.renderer.findByTestId("target")!
     expect(testRoot.renderer.getActiveElement()).toBe(target.id)
-
-    // Browser autofocus fires only once per insertion. Move focus away, then
-    // hide and show again: if autoFocus refired it would steal focus back
-    // from `other`, which is the only way this is observable — the target
-    // ends up focused either way on the *first* show, so the assertion has
-    // to be about a *second* one not stealing focus back.
-    testRoot.renderer.focusElement(other.id)
-    expect(testRoot.renderer.getActiveElement()).toBe(other.id)
-
-    flushSync(() => hide!())
-    testRoot.renderer.flush()
-    flushSync(() => show!())
-    testRoot.renderer.flush()
-    testRoot.renderer.dispatchNativeEvents()
-
-    expect(testRoot.renderer.getActiveElement()).toBe(other.id)
   })
 })
