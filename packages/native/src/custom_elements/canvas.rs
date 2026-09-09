@@ -1444,22 +1444,26 @@ impl CanvasElement {
         let transition_hover = ctx
             .style
             .is_some_and(|style| style.transition.is_some() && style.hover.is_some());
+        let tracks_hover = ctx.style.is_some_and(|style| style.hover.is_some());
         let tracks_hover_group = ctx.style.is_some_and(|style| style.hover_group.is_some());
         let tracks_mouse_hover = ctx.tracks_mouse_hover;
-        if tracks_mouse_hover || transition_hover || tracks_hover_group {
+        if tracks_mouse_hover || transition_hover || tracks_hover || tracks_hover_group {
             element = element.on_hover(cx.listener(move |view, hovered: &bool, window, cx| {
                 let transition_changed = transition_hover
                     && view
                         .transition_states
                         .get_mut(&id)
                         .is_some_and(|state| state.set_hovered(*hovered));
-                let hover_group_changed = tracks_hover_group
+                let interactive_changed = (tracks_hover || tracks_hover_group)
                     && view
                         .interactive_style_states
                         .entry(id)
                         .or_default()
                         .set_hovered(*hovered);
-                if transition_changed || hover_group_changed {
+                if interactive_changed {
+                    view.interaction_revision = view.interaction_revision.saturating_add(1);
+                }
+                if transition_changed || interactive_changed {
                     cx.notify();
                 }
                 if tracks_mouse_hover {
@@ -1471,16 +1475,27 @@ impl CanvasElement {
         let transition_active = ctx
             .style
             .is_some_and(|style| style.transition.is_some() && style.active.is_some());
-        if transition_active {
+        let tracks_active = ctx.style.is_some_and(|style| style.active.is_some());
+        if transition_active || tracks_active {
             element = element
                 .on_mouse_down(
                     gpui::MouseButton::Left,
                     cx.listener(move |view, _event: &gpui::MouseDownEvent, _window, cx| {
-                        if view
-                            .transition_states
-                            .get_mut(&id)
-                            .is_some_and(|state| state.set_active(true))
-                        {
+                        let transition_changed = transition_active
+                            && view
+                                .transition_states
+                                .get_mut(&id)
+                                .is_some_and(|state| state.set_active(true));
+                        let interactive_changed = tracks_active
+                            && view
+                                .interactive_style_states
+                                .entry(id)
+                                .or_default()
+                                .set_active(true);
+                        if interactive_changed {
+                            view.interaction_revision = view.interaction_revision.saturating_add(1);
+                        }
+                        if transition_changed || interactive_changed {
                             cx.notify();
                         }
                     }),
@@ -1488,11 +1503,21 @@ impl CanvasElement {
                 .on_mouse_up(
                     gpui::MouseButton::Left,
                     cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
-                        if view
-                            .transition_states
-                            .get_mut(&id)
-                            .is_some_and(|state| state.set_active(false))
-                        {
+                        let transition_changed = transition_active
+                            && view
+                                .transition_states
+                                .get_mut(&id)
+                                .is_some_and(|state| state.set_active(false));
+                        let interactive_changed = tracks_active
+                            && view
+                                .interactive_style_states
+                                .entry(id)
+                                .or_default()
+                                .set_active(false);
+                        if interactive_changed {
+                            view.interaction_revision = view.interaction_revision.saturating_add(1);
+                        }
+                        if transition_changed || interactive_changed {
                             cx.notify();
                         }
                     }),
@@ -1500,11 +1525,21 @@ impl CanvasElement {
                 .on_mouse_up_out(
                     gpui::MouseButton::Left,
                     cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
-                        if view
-                            .transition_states
-                            .get_mut(&id)
-                            .is_some_and(|state| state.set_active(false))
-                        {
+                        let transition_changed = transition_active
+                            && view
+                                .transition_states
+                                .get_mut(&id)
+                                .is_some_and(|state| state.set_active(false));
+                        let interactive_changed = tracks_active
+                            && view
+                                .interactive_style_states
+                                .entry(id)
+                                .or_default()
+                                .set_active(false);
+                        if interactive_changed {
+                            view.interaction_revision = view.interaction_revision.saturating_add(1);
+                        }
+                        if transition_changed || interactive_changed {
                             cx.notify();
                         }
                     }),

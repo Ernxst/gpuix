@@ -371,6 +371,8 @@ export declare class TestGpuixRenderer {
    * offscreen renderer so lifecycle tests can prove unmounted tracks leave.
    */
   getStyleTransitionCount(): number
+  /** Number of intrinsic probe layouts performed by the offscreen renderer. */
+  getIntrinsicProbeLayoutCount(): number
   /**
    * Number of GPUI frame requests emitted by active style transitions since
    * this offscreen renderer was created. Imperative motion is not counted.
