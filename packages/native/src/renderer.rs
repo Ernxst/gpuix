@@ -9430,12 +9430,16 @@ fn measure_intrinsic_triple(
             // probe style's own definite width when it has one, otherwise the
             // width this element last painted at; before the first paint,
             // max-content stands in.
-            let available_width = match probe_style.width {
-                Some(crate::style::DimensionValue::Pixels(width)) => {
-                    AvailableSpace::Definite(gpui::px(width as f32))
-                }
-                _ => crate::automation::get_bounds(id)
-                    .map(|bounds| AvailableSpace::Definite(gpui::px(bounds.width as f32)))
+            let available_width = match intrinsic_wrapping_source(id, &probe_style) {
+                HeightWrappingSource::Definite => match probe_style.width {
+                    Some(crate::style::DimensionValue::Pixels(width)) => {
+                        AvailableSpace::Definite(gpui::px(width as f32))
+                    }
+                    _ => AvailableSpace::MaxContent,
+                },
+                HeightWrappingSource::Substituted => AvailableSpace::MaxContent,
+                HeightWrappingSource::LastPainted(width) => width
+                    .map(|width| AvailableSpace::Definite(gpui::px(width as f32)))
                     .unwrap_or(AvailableSpace::MaxContent),
             };
             let size = measure(
@@ -9464,14 +9468,18 @@ fn measure_intrinsic_triple(
 /// overwrite. Nested refinements are cleared after the merge: the probe is a
 /// fresh root and must represent one effective style, not a second interaction
 /// cascade.
-fn merge_intrinsic_state_style(base: &StyleDesc, overlay: &StyleDesc) -> StyleDesc {
-    let mut merged = base.clone();
-
+fn merge_intrinsic_state_style(merged: &mut StyleDesc, overlay: &StyleDesc) {
     if overlay.padding.is_some() {
         merged.padding_top = None;
         merged.padding_right = None;
         merged.padding_bottom = None;
         merged.padding_left = None;
+    }
+    if overlay.margin.is_some() {
+        merged.margin_top = None;
+        merged.margin_right = None;
+        merged.margin_bottom = None;
+        merged.margin_left = None;
     }
     if overlay.gap.is_some() {
         merged.row_gap = None;
@@ -9616,34 +9624,33 @@ fn merge_intrinsic_state_style(base: &StyleDesc, overlay: &StyleDesc) -> StyleDe
     merged.active = None;
     merged.focus = None;
     merged.focus_visible = None;
-    merged
 }
 
 fn effective_intrinsic_state_style(style: &StyleDesc, state: InteractionProbeState) -> StyleDesc {
     let mut effective = style.clone();
     if state.focused {
         if let Some(focus) = style.focus.as_deref() {
-            effective = merge_intrinsic_state_style(&effective, focus);
+            merge_intrinsic_state_style(&mut effective, focus);
         }
     }
     if state.focus_visible {
         if let Some(focus_visible) = style.focus_visible.as_deref() {
-            effective = merge_intrinsic_state_style(&effective, focus_visible);
+            merge_intrinsic_state_style(&mut effective, focus_visible);
         }
     }
     if state.hover_within {
         if let Some(hover_within) = style.hover_within.as_deref() {
-            effective = merge_intrinsic_state_style(&effective, hover_within);
+            merge_intrinsic_state_style(&mut effective, hover_within);
         }
     }
     if state.hovered {
         if let Some(hover) = style.hover.as_deref() {
-            effective = merge_intrinsic_state_style(&effective, hover);
+            merge_intrinsic_state_style(&mut effective, hover);
         }
     }
     if state.active {
         if let Some(active) = style.active.as_deref() {
-            effective = merge_intrinsic_state_style(&effective, active);
+            merge_intrinsic_state_style(&mut effective, active);
         }
     }
     effective
@@ -9653,11 +9660,16 @@ fn intrinsic_wrapping_source(id: u64, style: &StyleDesc) -> HeightWrappingSource
     match style.width {
         Some(crate::style::DimensionValue::Pixels(_)) => HeightWrappingSource::Definite,
         Some(
-            crate::style::DimensionValue::MinContent
-            | crate::style::DimensionValue::MaxContent
-            | crate::style::DimensionValue::FitContent
-            | crate::style::DimensionValue::FitContentLimit { .. },
+            crate::style::DimensionValue::MinContent | crate::style::DimensionValue::MaxContent,
         ) => HeightWrappingSource::Substituted,
+        Some(
+            crate::style::DimensionValue::FitContent
+            | crate::style::DimensionValue::FitContentLimit { .. }
+            | crate::style::DimensionValue::Clamp { .. },
+        )
+        | None => HeightWrappingSource::LastPainted(
+            crate::automation::get_bounds(id).map(|bounds| bounds.width as f64),
+        ),
         _ => HeightWrappingSource::LastPainted(
             crate::automation::get_bounds(id).map(|bounds| bounds.width as f64),
         ),
@@ -9682,7 +9694,8 @@ mod intrinsic_state_style_tests {
             ..Default::default()
         };
 
-        let merged = merge_intrinsic_state_style(&base, &overlay);
+        let mut merged = base.clone();
+        merge_intrinsic_state_style(&mut merged, &overlay);
         assert_eq!(merged.width, base.width);
         assert_eq!(merged.padding, Some(20.0));
         assert_eq!(merged.font_size, Some(18.0));
@@ -9694,20 +9707,25 @@ mod intrinsic_state_style_tests {
     fn an_overlay_shorthand_clears_base_longhands() {
         let base = StyleDesc {
             padding_left: Some(4.0),
+            margin_left: Some(4.0),
             gap: Some(3.0),
             border_top_width: Some(2.0),
             ..Default::default()
         };
         let overlay = StyleDesc {
             padding: Some(20.0),
+            margin: Some(20.0),
             gap: Some(12.0),
             border_width: Some(5.0),
             ..Default::default()
         };
 
-        let merged = merge_intrinsic_state_style(&base, &overlay);
+        let mut merged = base.clone();
+        merge_intrinsic_state_style(&mut merged, &overlay);
         assert_eq!(merged.padding, Some(20.0));
         assert_eq!(merged.padding_left, None);
+        assert_eq!(merged.margin, Some(20.0));
+        assert_eq!(merged.margin_left, None);
         assert_eq!(merged.gap, Some(12.0));
         assert_eq!(merged.row_gap, None);
         assert_eq!(merged.column_gap, None);
@@ -9726,7 +9744,8 @@ mod intrinsic_state_style_tests {
             ..Default::default()
         };
 
-        let merged = merge_intrinsic_state_style(&base, &overlay);
+        let mut merged = base.clone();
+        merge_intrinsic_state_style(&mut merged, &overlay);
         assert_eq!(merged.padding, Some(10.0));
         assert_eq!(merged.padding_left, Some(4.0));
     }

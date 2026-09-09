@@ -320,13 +320,7 @@ fn wire_hover_and_style_transition_events<E: gpui::StatefulInteractiveElement>(
                     .transition_states
                     .get_mut(&id)
                     .is_some_and(|state| state.set_hovered(*is_hovered));
-            let hover_group_changed = tracks_hover_group
-                && view
-                    .interactive_style_states
-                    .entry(id)
-                    .or_default()
-                    .set_hovered(*is_hovered);
-            let interactive_changed = tracks_hover
+            let interactive_changed = (tracks_hover || tracks_hover_group)
                 && view
                     .interactive_style_states
                     .entry(id)
@@ -335,7 +329,7 @@ fn wire_hover_and_style_transition_events<E: gpui::StatefulInteractiveElement>(
             if interactive_changed {
                 view.interaction_revision = view.interaction_revision.saturating_add(1);
             }
-            if transition_changed || hover_group_changed || interactive_changed {
+            if transition_changed || interactive_changed {
                 cx.notify();
             }
             if tracks_mouse_hover {

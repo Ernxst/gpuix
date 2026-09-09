@@ -451,6 +451,55 @@ describe("intrinsic keyword probe cache (issue #310)", () => {
     }
   })
 
+  it("invalidates a max-content ancestor for a custom hover group", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    try {
+      root.render(
+        <div style={{ display: "flex", alignItems: "flex-start" }}>
+          <div data-testid="custom-group-ancestor" style={{ display: "flex", width: "max-content" }}>
+            <img
+              data-testid="custom-group"
+              style={{ width: 40, height: 20, hoverGroup: "custom-group" }}
+            />
+          </div>
+        </div>,
+      )
+
+      const initialProbes = root.renderer.getIntrinsicProbeLayoutCount()
+      const target = root.renderer.findByTestId("custom-group")!
+      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      expect(root.renderer.getIntrinsicProbeLayoutCount()).toBeGreaterThan(initialProbes)
+      expect(boundsFor(root.renderer, "custom-group-ancestor").width).toBeCloseTo(40, 4)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("re-measures fit-content wrapping when its containing block changes width", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    const paragraph = "A paragraph long enough to wrap over several lines inside a narrow column."
+    const view = (width: number) => (
+      <div style={{ display: "flex", flexDirection: "column", width, alignItems: "flex-start" }}>
+        <div
+          data-testid="fit-content-wrap"
+          style={{ display: "flex", width: "fit-content", height: "max-content" }}
+        >
+          <text style={{ fontSize: 14, lineHeight: 20 }}>{paragraph}</text>
+        </div>
+      </div>
+    )
+    try {
+      root.render(view(360))
+      const wideHeight = boundsFor(root.renderer, "fit-content-wrap").height
+      root.render(view(120))
+      const narrowHeight = boundsFor(root.renderer, "fit-content-wrap").height
+      expect(narrowHeight).toBeGreaterThan(wideHeight)
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("reuses a flex-shrunk intrinsic width and height probe while idle", () => {
     const root = createTestRoot({ width: 400, height: 300 })
     try {
