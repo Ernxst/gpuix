@@ -27,13 +27,12 @@ use crate::renderer::{
     animation_frame_origin, animation_frame_timestamp_ms, apply_batch_to_tree_with_diagnostics,
     canvas_image_load_state_js, canvas_size, catch_gpui_initialization,
     debug_frame_overlay_mode_name, debug_frame_overlay_stats_js, default_http_client,
-    dispatch_animation_frame_callback, dispatch_application_menu_action, drain_style_diagnostics,
-    first_canvas_diagnostic_message, forget_canvas_diagnostics, fresh_canvas_diagnostics,
-    has_application_menus, init_application_menu_support, install_application_menus,
-    parse_canvas_image_source, parse_debug_frame_overlay_mode, set_application_menus,
-    take_style_diagnostics_for_reporting, to_element_id, validate_canvas_target,
-    AnimationFrameCallback, CanvasImageLoadState, DebugFrameOverlayStats, EventCallback,
-    FocusDirection, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView, MenuSpec,
+    dispatch_application_menu_action, drain_style_diagnostics, first_canvas_diagnostic_message,
+    forget_canvas_diagnostics, fresh_canvas_diagnostics, has_application_menus,
+    init_application_menu_support, install_application_menus, parse_canvas_image_source,
+    parse_debug_frame_overlay_mode, set_application_menus, take_style_diagnostics_for_reporting,
+    to_element_id, validate_canvas_target, CanvasImageLoadState, DebugFrameOverlayStats,
+    EventCallback, FocusDirection, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView, MenuSpec,
     PendingStyleDiagnostics, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
@@ -423,6 +422,7 @@ pub struct TestGpuixRenderer {
     tree: Arc<Mutex<RetainedTree>>,
     canvas_display_lists: crate::canvas::SharedDisplayLists,
     events: Arc<Mutex<Vec<EventPayload>>>,
+    frame_timestamps: Arc<Mutex<Vec<f64>>>,
     /// Same handle GpuixView paints against, so tests can assert on the live
     /// selection after simulating a drag.
     selection: crate::text::SharedSelection,
@@ -455,6 +455,7 @@ impl TestGpuixRenderer {
         let tree = Arc::new(Mutex::new(RetainedTree::new()));
         let canvas_display_lists = crate::canvas::SharedDisplayLists::default();
         let events: Arc<Mutex<Vec<EventPayload>>> = Arc::new(Mutex::new(Vec::new()));
+        let frame_timestamps: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
 
         // Event callback: push to Vec instead of ThreadsafeFunction.
         let events_clone = events.clone();
@@ -543,6 +544,7 @@ impl TestGpuixRenderer {
             tree,
             canvas_display_lists,
             events,
+            frame_timestamps,
             selection,
             image_network_policy,
             strict_styles: AtomicBool::new(true),
@@ -938,20 +940,21 @@ impl TestGpuixRenderer {
     /// Queue one callback for the next manually advanced GPUI frame without
     /// dirtying or synchronously drawing the offscreen window.
     #[napi]
-    pub fn request_frame(
-        &self,
-        #[napi(ts_arg_type = "(timestamp: number) => void")] callback: AnimationFrameCallback,
-    ) -> Result<()> {
+    pub fn request_frame(&self) -> Result<()> {
         let timestamp_origin = self.animation_frame_timestamp_origin.clone();
+        let frame_timestamps = self.frame_timestamps.clone();
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, move |_, window, app| {
                 let origin =
                     animation_frame_origin(&timestamp_origin, app.background_executor().now());
                 window.on_next_frame(move |_window, app| {
-                    dispatch_animation_frame_callback(
-                        callback,
-                        animation_frame_timestamp_ms(origin, app.background_executor().now()),
-                    );
+                    frame_timestamps
+                        .lock()
+                        .unwrap()
+                        .push(animation_frame_timestamp_ms(
+                            origin,
+                            app.background_executor().now(),
+                        ));
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
@@ -1964,6 +1967,14 @@ impl TestGpuixRenderer {
     pub fn drain_events(&self) -> Vec<EventPayload> {
         let mut events = self.events.lock().unwrap();
         events.drain(..).collect()
+    }
+
+    /// Return and clear native frame timestamps since the last drain.
+    /// Timestamps are collected synchronously — no event loop queuing.
+    #[napi]
+    pub fn drain_frame_timestamps(&self) -> Vec<f64> {
+        let mut frame_timestamps = self.frame_timestamps.lock().unwrap();
+        frame_timestamps.drain(..).collect()
     }
 
     // ── Tree inspection ──────────────────────────────────────────────
