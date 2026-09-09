@@ -325,17 +325,16 @@ export const SelectContent = forwardRef<PublicInstance, SelectContentProps>(
   ) {
     const context = useSelectContext("SelectContent")
     // Children stay mounted while closed - like Radix's detached collection -
-    // so SelectItem registers at mount time regardless of open state. The
-    // clipped, zero-size, out-of-flow box keeps a user wrapper's own host
-    // element (one we don't control the hiding of) from taking layout space
-    // or painting; the floating panel itself is gated on open separately, so
-    // closed content contributes no text to the render tree either way.
+    // so SelectItem registers at mount time regardless of open state. Both
+    // states render the same FloatingLayer element type on the path to
+    // children, so React preserves every item's fiber and host element
+    // across open/close instead of remounting the subtree. Closed, the panel
+    // carries none of the user's props, handlers, tabIndex, or autoFocus -
+    // display:none builds no children in the native renderer, so nothing
+    // below paints, lays out, is hit-tested, or reaches the accessibility
+    // tree, and no focus handle exists for it to reacquire on reopen.
     if (!context.open) {
-      return (
-        <div style={{ position: "absolute", width: 0, height: 0, overflow: "hidden" }}>
-          {children}
-        </div>
-      )
+      return <FloatingLayer style={{ display: "none" }}>{children}</FloatingLayer>
     }
     return (
       <FloatingLayer
@@ -457,8 +456,10 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
 export const SelectGroup = forwardRef<PublicInstance, Props>(function SelectGroup(props, ref) {
   const context = useSelectContext("SelectGroup")
   // A group can contain items, so its children stay mounted while closed for
-  // their own registration - only the group's own host element disappears.
-  if (!context.open) return <>{props.children}</>
+  // their own registration. The group renders a div in both states - like
+  // SelectItem's own marker - so its host element and the items beneath it
+  // keep their identity across open/close instead of remounting.
+  if (!context.open) return <div style={{ display: "none" }}>{props.children}</div>
   return <div {...props} ref={ref} />
 })
 

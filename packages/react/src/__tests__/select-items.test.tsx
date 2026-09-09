@@ -4,6 +4,7 @@ import React, { useState } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
 import * as SelectPrimitive from "../components/select"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing"
+import type { PublicInstance } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -175,14 +176,14 @@ describeNative("Select item registration", () => {
     testRoot.render(<Demo />)
 
     // The wrapper's own style still asks for 120x40 - Select doesn't own that
-    // element - but its clipping parent (the closed content's zero-size box)
-    // is what keeps it from taking layout space or painting.
-    const wrapper = testRoot.getByTestId("styled-wrapper")
-    const clippingParent = wrapper.parentElement
-    expect(clippingParent).not.toBeNull()
-    const closedRect = clippingParent!.getBoundingClientRect()
-    expect(closedRect.width).toBe(0)
-    expect(closedRect.height).toBe(0)
+    // element - but the closed content panel is `display: none`, which builds
+    // no children beneath it in the native renderer (see
+    // display-none.test.tsx): the wrapper's host node exists, but nothing
+    // under the hidden panel is laid out or painted, so it reports no bounds
+    // rather than being clipped to a zero-size box.
+    const wrapper = testRoot.renderer.findByTestId("styled-wrapper")
+    expect(wrapper).toBeDefined()
+    expect(testRoot.renderer.getElementBounds(wrapper!.id)).toBeNull()
 
     testRoot.renderer.nativeSimulateClick(30, 25)
     testRoot.renderer.simulateKeystrokes("down")
@@ -287,5 +288,65 @@ describeNative("Select item order (issue #387)", () => {
     testRoot.renderer.simulateKeystrokes("enter")
 
     expect(testRoot.renderer.getAllText()).toContain("Value: beta")
+  })
+})
+
+describeNative("Select item identity (issue #420)", () => {
+  let testRoot: ReturnType<typeof createTestRoot>
+
+  beforeEach(() => {
+    testRoot = createTestRoot()
+  })
+
+  it("keeps a plain item's and a grouped item's host element identity across open, close, and reopen", () => {
+    const plainRef = React.createRef<PublicInstance>()
+    const groupedRef = React.createRef<PublicInstance>()
+
+    function Demo() {
+      const [value, setValue] = useState<string | undefined>(undefined)
+      return (
+        <div style={{ width: 400, height: 300, padding: 12 }}>
+          <SelectPrimitive.Root value={value} onValueChange={setValue}>
+            <SelectPrimitive.Trigger data-testid="trigger" style={triggerStyle}>
+              <SelectPrimitive.Value placeholder="Choose" />
+            </SelectPrimitive.Trigger>
+            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+              <SelectPrimitive.Item value="alpha" ref={plainRef} style={itemStyle}>
+                Alpha
+              </SelectPrimitive.Item>
+              <SelectPrimitive.Group>
+                <SelectPrimitive.Item value="beta" ref={groupedRef} style={itemStyle}>
+                  Beta
+                </SelectPrimitive.Item>
+              </SelectPrimitive.Group>
+            </SelectPrimitive.Content>
+          </SelectPrimitive.Root>
+          <text>{`Value: ${value ?? "none"}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+
+    // Open, so both items mount their real host element and registration
+    // can capture the ids that must survive close and reopen unchanged.
+    testRoot.renderer.nativeSimulateClick(30, 25)
+    const plainIdBeforeClose = plainRef.current?.id
+    const groupedIdBeforeClose = groupedRef.current?.id
+    expect(plainIdBeforeClose).toBeDefined()
+    expect(groupedIdBeforeClose).toBeDefined()
+
+    testRoot.renderer.simulateKeystrokes("escape")
+    testRoot.renderer.nativeSimulateClick(30, 25)
+
+    expect(plainRef.current?.id).toBe(plainIdBeforeClose)
+    expect(groupedRef.current?.id).toBe(groupedIdBeforeClose)
+
+    // Keyboard navigation still works on this second open - the content
+    // panel reacquires a focus handle and autoFocus fires again on reopen.
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+
+    expect(testRoot.renderer.getAllText()).toContain("Value: alpha")
   })
 })
