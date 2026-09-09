@@ -164,6 +164,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   requestFrame(): void
   setReducedMotion(enabled: boolean): void
   getStyleTransitionCount(): number
+  getIntrinsicProbeLayoutCount(): number
   getStyleTransitionFrameRequestCount(): number
   drainEvents(): EventPayload[]
   drainFrameTimestamps(): number[]
@@ -913,6 +914,11 @@ export class TestRenderer implements NativeRenderer {
   /** Number of transition tracks retained by the offscreen native view. */
   getStyleTransitionCount(): number {
     return this.native.getStyleTransitionCount()
+  }
+
+  /** Number of layout passes spent measuring intrinsic keyword sizes. */
+  getIntrinsicProbeLayoutCount(): number {
+    return this.native.getIntrinsicProbeLayoutCount()
   }
 
   /** Number of GPUI frames requested by retained style transitions. */

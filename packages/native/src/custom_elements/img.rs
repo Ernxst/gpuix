@@ -1239,6 +1239,7 @@ struct ImgImageAcquire {
 struct ImgImageStore {
     entries: HashMap<ImageRequest, ImgImageEntry>,
     clock: u64,
+    revision: u64,
     pending_dropped: Vec<Arc<gpui::RenderImage>>,
 }
 
@@ -1366,6 +1367,8 @@ impl ImgImageStore {
             }
         }
 
+        self.revision = self.revision.saturating_add(1);
+
         (!entry.users.is_empty())
             .then_some(entry.reload_after)
             .flatten()
@@ -1449,6 +1452,10 @@ pub(crate) struct SharedImgImageStore {
 }
 
 impl SharedImgImageStore {
+    pub(crate) fn revision(&self) -> u64 {
+        self.state.lock().unwrap().revision
+    }
+
     fn acquire(
         &self,
         element_id: u64,

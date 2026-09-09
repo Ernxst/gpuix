@@ -1021,6 +1021,19 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Number of intrinsic probe layouts performed by the offscreen renderer.
+    #[napi]
+    pub fn get_intrinsic_probe_layout_count(&self) -> Result<u32> {
+        self.settle_for_read()?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_view, _window, app| {
+                view.read(app).intrinsic_probe_layouts
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
     /// Number of GPUI frame requests emitted by active style transitions since
     /// this offscreen renderer was created. Imperative motion is not counted.
     #[napi]
