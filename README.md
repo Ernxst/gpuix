@@ -529,6 +529,10 @@ callback creates frame demand without dirtying the window; drawing still happens
 only through the normal GPUI frame path. A hot remount drops callbacks owned by
 the previous tree.
 
+In the test renderer, one `advanceAsyncClock()` delivers every frame callback
+queued before it synchronously, before it returns. `advanceTime()` and
+`clockFastForward()` advance clocks only and deliver no frame callbacks.
+
 ### Canvas bitmap and layout dimensions
 
 On desktop, `<canvas width>` and `<canvas height>` define the logical coordinate

@@ -63,6 +63,7 @@ import { Image } from "./canvas/image.js"
 import {
   attachAnimationFrameSource,
   detachAnimationFrameSource,
+  flushFrameRequests,
 } from "./frame-clock.js"
 import {
   CANVAS_GOLDEN_DPR,
@@ -160,11 +161,12 @@ interface NativeTestRendererApi extends NativeRenderer {
   flush(): void
   drawPendingFrame(): void
   advanceAsyncClock(deltaMs: number): void
-  requestFrame(callback: (timestamp: number) => void): void
+  requestFrame(): void
   setReducedMotion(enabled: boolean): void
   getStyleTransitionCount(): number
   getStyleTransitionFrameRequestCount(): number
   drainEvents(): EventPayload[]
+  drainFrameTimestamps(): number[]
   setMenus(menus: MenuSpec[]): void
   simulateMenuAction(id: string): void
   hasMainMenu(): boolean
@@ -715,6 +717,7 @@ export class TestRenderer implements NativeRenderer {
   private applicationEventHandler: ((event: EventPayload) => void) | null = null
   private windowEventHandler: ((event: EventPayload) => void) | null = null
   private animationFrameRequestCount = 0
+  private animationFrameCallbacks: Array<(timestamp: number) => void> = []
   private elementMap: Map<number, TestElement> | null = null
 
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
@@ -834,18 +837,67 @@ export class TestRenderer implements NativeRenderer {
     this.native.drawPendingFrame()
   }
 
-  /** Advance GPUI timers and, when paused, the native animation frame clock. */
+  /** Advance GPUI timers and synchronously deliver pending native frame callbacks.
+   *
+   *  A callback that throws does not stop the remaining callbacks from running,
+   *  and `dispatchNativeEvents()` still runs after delivery either way — the
+   *  first error seen is rethrown only once both have happened. */
   advanceAsyncClock(deltaMs: number): void {
     if (!Number.isFinite(deltaMs) || deltaMs < 0) {
       throw new Error("advanceAsyncClock delta must be a finite non-negative number")
     }
+    flushFrameRequests(this)
     this.native.advanceAsyncClock(deltaMs)
+
+    const report = (error: unknown): void => reportUncaughtErrorToRenderer(this, error)
+    let firstError: unknown
+    let hasError = false
+    const recordFirstError = (error: unknown): void => {
+      if (!hasError) {
+        hasError = true
+        firstError = error
+      }
+    }
+
+    // `test_renderer.rs`'s `advance_async_clock` calls `simulate_next_frame` once
+    // per advance, sampling one `now()` for every `on_next_frame` closure it
+    // fires — every timestamp drained here belongs to that single sampling, so
+    // they must all agree.
+    const drained = this.native.drainFrameTimestamps()
+    if (drained.length > 0) {
+      const [timestamp] = drained
+      if (drained.some((candidate) => candidate !== timestamp)) {
+        throw new Error(
+          "advanceAsyncClock drained frame timestamps that disagree within one advance"
+        )
+      }
+      const callbacks = this.animationFrameCallbacks
+      this.animationFrameCallbacks = []
+      for (const callback of callbacks) {
+        try {
+          actSync(report, () => callback(timestamp!))
+        } catch (error) {
+          recordFirstError(error)
+        }
+      }
+    }
+
+    try {
+      this.dispatchNativeEvents()
+    } catch (error) {
+      recordFirstError(error)
+    }
+
+    if (hasError) throw firstError
   }
 
-  /** Queue one native next-frame callback without dirtying the offscreen window. */
+  /** Queue one native next-frame callback without dirtying the offscreen window.
+   *  The JS callback is only tracked once the native registration succeeds, so
+   *  a native failure leaves no orphan callback behind. */
   requestFrame(callback: (timestamp: number) => void): void {
+    this.native.requestFrame()
     this.animationFrameRequestCount += 1
-    this.native.requestFrame(callback)
+    this.animationFrameCallbacks.push(callback)
   }
 
   /** Number of one-shot frame requests made through this test renderer. */
@@ -1371,6 +1423,7 @@ export class TestRenderer implements NativeRenderer {
     return this.native.clockSet(nowMs)
   }
 
+  /** Advance the motion clock only; this does not simulate a frame. */
   clockFastForward(deltaMs: number): number {
     return this.native.clockFastForward(deltaMs)
   }
@@ -1379,7 +1432,7 @@ export class TestRenderer implements NativeRenderer {
     return this.native.clockResume()
   }
 
-  /** Advance GPUI's test dispatcher and run due timers.
+  /** Advance GPUI's timer clock only; this does not simulate a frame.
    *  This is not `clockFastForward`. That moves the motion clock only.
    *  Use this for caret blink, input drag autoscroll, and list edge scroll. */
   advanceTime(milliseconds: number): void {

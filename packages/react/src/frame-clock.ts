@@ -16,6 +16,7 @@ type FrameCallbackEntry = {
 
 type FrameClockSlot = {
   callbacks: Map<number, FrameCallbackEntry>
+  deferredRequest?: () => void
   generation: number
   nextId: number
   requestGeneration: number
@@ -73,7 +74,7 @@ function requestNativeFrame(slot: FrameClockSlot): void {
   slot.requestPending = true
   const generation = slot.generation
   const requestGeneration = (slot.requestGeneration += 1)
-  queueMicrotask(() => {
+  const deferredRequest = (): void => {
     const queued = frameClockSlot()
     if (
       !queued.requestPending ||
@@ -115,7 +116,33 @@ function requestNativeFrame(slot: FrameClockSlot): void {
       }
       console.error("[gpuix] animation frame request failed", error)
     }
+  }
+  slot.deferredRequest = deferredRequest
+  queueMicrotask(() => {
+    const queued = frameClockSlot()
+    if (queued.deferredRequest !== deferredRequest) return
+    queued.deferredRequest = undefined
+    deferredRequest()
   })
+}
+
+/**
+ * Flush the deferred native frame request, if one is queued for `owner`.
+ *
+ * The clock slot is a process-wide singleton shared by every test renderer,
+ * but at most one renderer's `FrameSource` is attached at a time —
+ * `attachAnimationFrameSource` replaces it on each new root. A caller whose
+ * renderer is not the currently attached source did not create the pending
+ * request, so it must not be the one to flush it: that would let one root's
+ * `advanceAsyncClock()` issue a *different* root's native frame token.
+ */
+export function flushFrameRequests(owner: object): void {
+  const slot = frameClockSlot()
+  if (slot.source?.owner !== owner) return
+  const deferredRequest = slot.deferredRequest
+  if (!deferredRequest) return
+  slot.deferredRequest = undefined
+  deferredRequest()
 }
 
 /**

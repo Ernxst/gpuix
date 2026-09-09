@@ -356,7 +356,7 @@ export declare class TestGpuixRenderer {
    * Queue one callback for the next manually advanced GPUI frame without
    * dirtying or synchronously drawing the offscreen window.
    */
-  requestFrame(callback: (timestamp: number) => void): void
+  requestFrame(): void
   /**
    * Advance GPUI's async executor clock so tests can deterministically fire
    * timers such as bounded image retry/revalidation deadlines. When the
@@ -577,6 +577,11 @@ export declare class TestGpuixRenderer {
    * Events are collected synchronously — no event loop queuing.
    */
   drainEvents(): Array<EventPayload>
+  /**
+   * Return and clear native frame timestamps since the last drain.
+   * Timestamps are collected synchronously — no event loop queuing.
+   */
+  drainFrameTimestamps(): Array<number>
   /** Get all text content in the tree (depth-first order). */
   getAllText(): Array<string>
   /** Find element IDs matching the given type (e.g. "div", "text"). */
