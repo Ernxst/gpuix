@@ -3477,7 +3477,7 @@ The intrinsic keywords are measured per frame on `<div>` and `<text>` (a custom 
 
 **Position:** `position` (`"relative"` | `"absolute"` | `"fixed"`), `top`, `right`, `bottom`, `left` — `"fixed"` lays out like `"absolute"`, because GPUI has no scrolling document to be fixed against
 
-**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `borderStyle`, `boxShadow`, `outlineColor`, `outlineWidth`, `outlineOffset`
+**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `border`, `borderTop`, `borderRight`, `borderBottom`, `borderLeft`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `borderStyle`, `boxShadow`, `outlineColor`, `outlineWidth`, `outlineOffset`
 
 Boxes are sized **border-box** — the near-universal stylesheet convention
 (`box-sizing: border-box`; the DOM's own default is `content-box`):
@@ -3496,7 +3496,25 @@ declaring-a-width-requests-a-border convention: an overlay authoring only
 `borderWidth` over a `borderStyle: "none"` base paints a solid border, where
 CSS would keep it hidden. A border still paints when only `borderWidth` and
 `borderColor` are declared; GPUIX does not require an explicit `borderStyle`
-the way a stylesheet does.
+the way a stylesheet does. `border`, `borderTop`, `borderRight`,
+`borderBottom`, and `borderLeft` accept the CSS border shorthand grammar: a
+string of up to three whitespace-separated components — a width (`<n>px` or
+`0`), a `borderStyle` value, and a color — in any order, each optional.
+`border` sets `borderWidth`; the four per-side shorthands each set their own
+per-side width field. `borderWidth` itself additionally accepts a
+whitespace-separated string of 1 to 4 widths, expanded CSS-style (1 value for
+all sides; 2 for top/bottom then left/right; 3 for top, left/right, bottom; 4
+for top, right, bottom, left) into the four per-side width fields; a
+single-value string behaves like the plain number form. A 2-to-4-value
+`borderWidth` string only fills in a side an explicit `borderTopWidth` /
+`borderRightWidth` / `borderBottomWidth` / `borderLeftWidth` or an explicit
+`borderTop` / `borderRight` / `borderBottom` / `borderLeft` shorthand left
+unset elsewhere in the same style object; the explicit per-side width always
+wins. GPUI paints one
+border color and one border style for all four sides, so a style or color
+declared by one of the five shorthands is shared by every side: when two of
+them disagree on color or style, one is rejected with a diagnostic naming
+both (per-side color and style is not yet supported).
 
 `background` accepts a solid color, a CSS `linear-gradient()` with two through
 eight stops, or a structured native gradient:

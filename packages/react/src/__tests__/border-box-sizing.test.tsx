@@ -255,3 +255,51 @@ describe("borderStyle (issue #301)", () => {
     }
   })
 })
+
+describe("border shorthands (issue #403)", () => {
+  it('borderBottom: "4px solid #333" takes width from the bottom edge only', () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div
+          data-testid="divider"
+          style={{ width: 200, height: 100, borderBottom: "4px solid #333" }}
+        >
+          <div data-testid="child" style={{ width: "100%", height: "100%" }} />
+        </div>,
+      )
+
+      const child = boundsFor(root.renderer, "child")
+      expect([child.x, child.y, child.width, child.height]).toEqual([0, 0, 200, 96])
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("resolves to the equivalent longhands", () => {
+    const root = createTestRoot()
+
+    try {
+      root.render(
+        <div
+          data-testid="divider"
+          style={{ width: 200, height: 100, borderBottom: "4px solid #333" }}
+        >
+          <div style={{ width: "100%", height: "100%" }} />
+        </div>,
+      )
+
+      const divider = root.renderer.findByTestId("divider")!
+      const resolved = root.renderer.getResolvedStyle(divider.id)
+      expect(resolved).toMatchObject({
+        borderBottomWidth: 4,
+        borderStyle: "solid",
+      })
+      expect(resolved).not.toHaveProperty("borderTopWidth")
+      expect((resolved as StyleDesc).borderColor).toBeDefined()
+    } finally {
+      root.unmount()
+    }
+  })
+})

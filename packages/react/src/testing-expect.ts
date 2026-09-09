@@ -304,7 +304,9 @@ function borderInset(style: StyleDesc | undefined): Edges {
   if (style.borderColor.toLowerCase() === "transparent") return NO_EDGES
   if (style.borderStyle === "none" || style.borderStyle === "hidden") return NO_EDGES
 
-  const all = style.borderWidth ?? 0
+  // A resolved style's `borderWidth` is always a plain number (or absent):
+  // the native fold has already normalized any authored shorthand string.
+  const all = typeof style.borderWidth === "number" ? style.borderWidth : 0
   return {
     left: style.borderLeftWidth ?? all,
     top: style.borderTopWidth ?? all,
