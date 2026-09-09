@@ -153,7 +153,7 @@ describeNative("Select item registration", () => {
     expect(testRoot.renderer.getAllText()).toContain("Value: alpha")
   })
 
-  it("clips a wrapper's own host element to zero size while closed, and keeps its item navigable once open", () => {
+  it("builds nothing beneath a closed panel, and keeps its item navigable once open", () => {
     function Demo() {
       const [value, setValue] = useState<string | undefined>(undefined)
       return (
@@ -175,15 +175,9 @@ describeNative("Select item registration", () => {
 
     testRoot.render(<Demo />)
 
-    // The wrapper's own style still asks for 120x40 - Select doesn't own that
-    // element - but the closed content panel is `display: none`, which builds
-    // no children beneath it in the native renderer (see
-    // display-none.test.tsx): the wrapper's host node exists, but nothing
-    // under the hidden panel is laid out or painted, so it reports no bounds
-    // rather than being clipped to a zero-size box.
-    const wrapper = testRoot.renderer.findByTestId("styled-wrapper")
-    expect(wrapper).toBeDefined()
-    expect(testRoot.renderer.getElementBounds(wrapper!.id)).toBeNull()
+    // The closed content panel is `display: none`, which builds no children
+    // beneath it in the native renderer (see display-none.test.tsx).
+    expect(testRoot.renderer.findByTestId("styled-wrapper")).toBeUndefined()
 
     testRoot.renderer.nativeSimulateClick(30, 25)
     testRoot.renderer.simulateKeystrokes("down")
@@ -301,6 +295,7 @@ describeNative("Select item identity (issue #420)", () => {
   it("keeps a plain item's and a grouped item's host element identity across open, close, and reopen", () => {
     const plainRef = React.createRef<PublicInstance>()
     const groupedRef = React.createRef<PublicInstance>()
+    const contentRef = React.createRef<PublicInstance>()
 
     function Demo() {
       const [value, setValue] = useState<string | undefined>(undefined)
@@ -310,7 +305,12 @@ describeNative("Select item identity (issue #420)", () => {
             <SelectPrimitive.Trigger data-testid="trigger" style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Content
+              ref={contentRef}
+              side="bottom"
+              sideOffset={4}
+              style={contentStyle}
+            >
               <SelectPrimitive.Item value="alpha" ref={plainRef} style={itemStyle}>
                 Alpha
               </SelectPrimitive.Item>
@@ -337,10 +337,12 @@ describeNative("Select item identity (issue #420)", () => {
     expect(groupedIdBeforeClose).toBeDefined()
 
     testRoot.renderer.simulateKeystrokes("escape")
+    expect(contentRef.current).toBeNull()
     testRoot.renderer.nativeSimulateClick(30, 25)
 
     expect(plainRef.current?.id).toBe(plainIdBeforeClose)
     expect(groupedRef.current?.id).toBe(groupedIdBeforeClose)
+    expect(testRoot.renderer.getActiveElement()).toBe(contentRef.current?.id)
 
     // Keyboard navigation still works on this second open - the content
     // panel reacquires a focus handle and autoFocus fires again on reopen.

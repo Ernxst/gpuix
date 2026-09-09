@@ -274,6 +274,36 @@ describeNative("floating controls", () => {
     expect(testRoot.renderer.getAllText()).toContain("Two")
   })
 
+  it("does not occlude controls behind a closed SelectContent", () => {
+    function Demo() {
+      const [clicks, setClicks] = useState(0)
+      const [value, setValue] = useState("one")
+      return (
+        <div style={{ width: 400, height: 260, position: "relative", padding: 12 }}>
+          <div
+            style={{ position: "absolute", top: 52, left: 12, width: 180, height: 90 }}
+            onClick={() => setClicks((count) => count + 1)}
+          >
+            <text>Behind</text>
+          </div>
+          <Select value={value} onValueChange={setValue}>
+            <SelectTrigger style={triggerStyle}><SelectValue /></SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              <SelectItem value="one" style={itemStyle}>One</SelectItem>
+              <SelectItem value="two" style={itemStyle}>Two</SelectItem>
+            </SelectContent>
+          </Select>
+          <text>{`Behind clicks: ${clicks}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    testRoot.renderer.nativeSimulateClick(30, 104)
+
+    expect(testRoot.renderer.getAllText()).toContain("Behind clicks: 1")
+  })
+
   it("filters and selects through the shadcn Combobox shape", () => {
     const frameworks = ["Astro", "SvelteKit", "Next.js"]
 

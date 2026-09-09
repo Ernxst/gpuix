@@ -327,46 +327,44 @@ export const SelectContent = forwardRef<PublicInstance, SelectContentProps>(
     // Children stay mounted while closed - like Radix's detached collection -
     // so SelectItem registers at mount time regardless of open state. Both
     // states render the same FloatingLayer element type on the path to
-    // children, so React preserves every item's fiber and host element
-    // across open/close instead of remounting the subtree. Closed, the panel
-    // carries none of the user's props, handlers, tabIndex, or autoFocus -
-    // display:none builds no children in the native renderer, so nothing
-    // below paints, lays out, is hit-tested, or reaches the accessibility
-    // tree, and no focus handle exists for it to reacquire on reopen.
-    if (!context.open) {
-      return <FloatingLayer style={{ display: "none" }}>{children}</FloatingLayer>
-    }
-    return (
-      <FloatingLayer
-        {...props}
-        ref={forwardedRef}
-        tabIndex={tabIndex}
-        autoFocus
-        onMouseDownOutside={(event) => {
-          onMouseDownOutside?.(event)
-          context.dismissedByOutsidePress.current = true
-          queueMicrotask(() => {
-            context.dismissedByOutsidePress.current = false
-          })
-          context.setOpen(false)
-        }}
-        onKeyDown={(event) => {
-          onKeyDown?.(event)
-          if (event.key === "Escape") {
-            onEscapeKeyDown?.(event)
+    // children, so React preserves every item's fiber and host element across
+    // open/close. Item content and SelectLabel still remount on open - the
+    // closed item marker has no children. Closed, the panel carries none of
+    // the user's props, handlers, tabIndex, or autoFocus - display:none builds
+    // no children in the native renderer, so nothing below paints, lays out,
+    // is hit-tested, or reaches the accessibility tree, and no focus handle
+    // exists for it to reacquire on reopen.
+    const floatingProps = context.open
+      ? {
+          ...props,
+          ref: forwardedRef,
+          tabIndex,
+          autoFocus: true,
+          onMouseDownOutside: (event: GpuixSyntheticEvent) => {
+            onMouseDownOutside?.(event)
+            context.dismissedByOutsidePress.current = true
+            queueMicrotask(() => {
+              context.dismissedByOutsidePress.current = false
+            })
             context.setOpen(false)
-          } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
-            context.moveActive(1)
-          } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
-            context.moveActive(-1)
-          } else if ((event.key === "Enter" || event.key === " ") && context.activeValue) {
-            context.selectValue(context.activeValue)
-          }
-        }}
-      >
-        {children}
-      </FloatingLayer>
-    )
+          },
+          onKeyDown: (event: GpuixSyntheticEvent) => {
+            onKeyDown?.(event)
+            if (event.key === "Escape") {
+              onEscapeKeyDown?.(event)
+              context.setOpen(false)
+            } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
+              context.moveActive(1)
+            } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
+              context.moveActive(-1)
+            } else if ((event.key === "Enter" || event.key === " ") && context.activeValue) {
+              context.selectValue(context.activeValue)
+            }
+          },
+        }
+      : { style: { display: "none" as const } }
+
+    return <FloatingLayer {...floatingProps}>{children}</FloatingLayer>
   }
 )
 
