@@ -51,8 +51,8 @@ use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::retained_tree::{RetainedTree, StyleTable};
 use crate::style::{
-    parse_font_weight, GridLineValue, GridTrackMaxValue, GridTrackMinValue, GridTrackValue,
-    StyleDesc, StyleProblem,
+    parse_font_weight, GridLineValue, GridTrackFitContentLimit, GridTrackMaxValue,
+    GridTrackMinValue, GridTrackValue, StyleDesc, StyleProblem,
 };
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection, TextTransform};
 use crate::theme::Theme;
@@ -11134,19 +11134,34 @@ where
 fn to_gpui_grid_track(track: &GridTrackValue) -> gpui::GridTrack {
     match track {
         GridTrackValue::Px { value } => gpui::GridTrack::Px(gpui::px(*value as f32)),
+        GridTrackValue::Percent { value } => gpui::GridTrack::Percent(*value as f32 / 100.0),
         GridTrackValue::Fr { value } => gpui::GridTrack::Fr(*value as f32),
         GridTrackValue::Auto => gpui::GridTrack::Auto,
         GridTrackValue::MinContent => gpui::GridTrack::MinContent,
         GridTrackValue::MaxContent => gpui::GridTrack::MaxContent,
+        GridTrackValue::FitContent { limit } => gpui::GridTrack::FitContent(match limit {
+            GridTrackFitContentLimit::Px { value } => {
+                gpui::DefiniteLength::Absolute(gpui::px(*value as f32).into())
+            }
+            GridTrackFitContentLimit::Percent { value } => {
+                gpui::DefiniteLength::Fraction(*value as f32 / 100.0)
+            }
+        }),
         GridTrackValue::Minmax { min, max } => gpui::GridTrack::MinMax {
             min: match min {
                 GridTrackMinValue::Px { value } => gpui::GridTrackMin::Px(gpui::px(*value as f32)),
+                GridTrackMinValue::Percent { value } => {
+                    gpui::GridTrackMin::Percent(*value as f32 / 100.0)
+                }
                 GridTrackMinValue::Auto => gpui::GridTrackMin::Auto,
                 GridTrackMinValue::MinContent => gpui::GridTrackMin::MinContent,
                 GridTrackMinValue::MaxContent => gpui::GridTrackMin::MaxContent,
             },
             max: match max {
                 GridTrackMaxValue::Px { value } => gpui::GridTrackMax::Px(gpui::px(*value as f32)),
+                GridTrackMaxValue::Percent { value } => {
+                    gpui::GridTrackMax::Percent(*value as f32 / 100.0)
+                }
                 GridTrackMaxValue::Fr { value } => gpui::GridTrackMax::Fr(*value as f32),
                 GridTrackMaxValue::Auto => gpui::GridTrackMax::Auto,
                 GridTrackMaxValue::MinContent => gpui::GridTrackMax::MinContent,

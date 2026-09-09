@@ -3460,8 +3460,11 @@ CSS-like styling via the `style` prop:
 testing, accessibility, and text collection. It is not transitioned.
 
 `gridTemplateColumns` and `gridTemplateRows` accept a typed CSS Grid track list.
-Each entry is an object with a `type`: `px`, `fr`, `auto`, `min-content`,
-`max-content`, `minmax`, or `repeat`.
+Each entry is an object with a `type`: `px`, `percent`, `fr`, `auto`,
+`min-content`, `max-content`, `fit-content`, `minmax`, or `repeat`. A percentage
+track uses a CSS number (`50` means `50%`). A `fit-content` track has the shape
+`{ type: "fit-content", limit: { type: "px", value: number } | { type: "percent", value: number } }`;
+`fit-content` is valid only as a whole track, not as a `minmax` bound.
 
 `gridColumn` and `gridRow` accept `<grid-line> [ / <grid-line> ]?`; the
 `gridColumnStart`, `gridColumnEnd`, `gridRowStart`, and `gridRowEnd` longhands

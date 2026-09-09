@@ -184,6 +184,34 @@ const invalidGrid: StyleDesc = {
   ],
 }
 
+const invalidGridFitContentMin: StyleDesc = {
+  gridTemplateColumns: [
+    {
+      type: "minmax",
+      min: {
+        // @ts-expect-error fit-content is not a valid minmax lower bound.
+        type: "fit-content",
+        limit: { type: "px", value: 100 },
+      },
+      max: { type: "fr", value: 1 },
+    },
+  ],
+}
+
+const invalidGridFitContentMax: StyleDesc = {
+  gridTemplateColumns: [
+    {
+      type: "minmax",
+      min: { type: "px", value: 0 },
+      max: {
+        // @ts-expect-error fit-content is not a valid minmax upper bound.
+        type: "fit-content",
+        limit: { type: "px", value: 100 },
+      },
+    },
+  ],
+}
+
 const invalidImage: ImgProps = {
   src: {
     kind: "data",
@@ -213,4 +241,6 @@ void nestedTransition
 void nestedHoverGroup
 void removedElementHoverGroup
 void invalidGrid
+void invalidGridFitContentMin
+void invalidGridFitContentMax
 void invalidImage
