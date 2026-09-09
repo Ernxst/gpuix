@@ -191,3 +191,101 @@ describeNative("Select item registration", () => {
     expect(testRoot.renderer.getAllText()).toContain("Value: alpha")
   })
 })
+
+describeNative("Select item order (issue #387)", () => {
+  let testRoot: ReturnType<typeof createTestRoot>
+
+  beforeEach(() => {
+    testRoot = createTestRoot()
+  })
+
+  /** `beta` mounts only once `show` is true, after its siblings register. */
+  function Demo({ show }: { show: boolean }) {
+    const [value, setValue] = useState<string | undefined>(undefined)
+    return (
+      <div style={{ width: 400, height: 300, padding: 12 }}>
+        <SelectPrimitive.Root value={value} onValueChange={setValue}>
+          <SelectPrimitive.Trigger data-testid="trigger" style={triggerStyle}>
+            <SelectPrimitive.Value placeholder="Choose" />
+          </SelectPrimitive.Trigger>
+          <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Item value="alpha" style={itemStyle}>Alpha</SelectPrimitive.Item>
+            {show ? (
+              <SelectPrimitive.Item value="beta" style={itemStyle}>Beta</SelectPrimitive.Item>
+            ) : null}
+            <SelectPrimitive.Item value="gamma" style={itemStyle}>Gamma</SelectPrimitive.Item>
+          </SelectPrimitive.Content>
+        </SelectPrimitive.Root>
+        <text>{`Value: ${value ?? "none"}`}</text>
+      </div>
+    )
+  }
+
+  it("orders a middle item mounted after its siblings while open, by document position", () => {
+    testRoot.render(<Demo show={false} />)
+    testRoot.renderer.nativeSimulateClick(30, 25)
+    expect(testRoot.renderer.getAllText()).not.toContain("Beta")
+
+    testRoot.render(<Demo show />)
+    expect(testRoot.renderer.getAllText()).toContain("Beta")
+
+    // Alpha, then Beta, then Gamma - JSX order, not registration order.
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+
+    expect(testRoot.renderer.getAllText()).toContain("Value: beta")
+  })
+
+  it("orders a middle item mounted while closed, once keyboard navigation opens the Select", () => {
+    testRoot.render(<Demo show={false} />)
+    testRoot.render(<Demo show />)
+    expect(testRoot.renderer.getAllText()).not.toContain("Beta")
+
+    const trigger = testRoot.renderer.findByTestId("trigger")!
+    testRoot.renderer.focusElement(trigger.id)
+    // ArrowUp with nothing active wraps to the last item - Gamma only if
+    // Beta was placed between Alpha and Gamma while the Select was closed.
+    testRoot.renderer.simulateKeystrokes("up")
+    testRoot.renderer.simulateKeystrokes("enter")
+
+    expect(testRoot.renderer.getAllText()).toContain("Value: gamma")
+  })
+
+  it("re-orders keyed items React moves in place, not just ones newly mounted", () => {
+    function Reorderable({ order }: { order: string[] }) {
+      const [value, setValue] = useState<string | undefined>(undefined)
+      return (
+        <div style={{ width: 400, height: 300, padding: 12 }}>
+          <SelectPrimitive.Root value={value} onValueChange={setValue}>
+            <SelectPrimitive.Trigger data-testid="trigger" style={triggerStyle}>
+              <SelectPrimitive.Value placeholder="Choose" />
+            </SelectPrimitive.Trigger>
+            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+              {order.map((itemValue) => (
+                <SelectPrimitive.Item key={itemValue} value={itemValue} style={itemStyle}>
+                  {itemValue === "alpha" ? "Alpha" : "Beta"}
+                </SelectPrimitive.Item>
+              ))}
+            </SelectPrimitive.Content>
+          </SelectPrimitive.Root>
+          <text>{`Value: ${value ?? "none"}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Reorderable order={["alpha", "beta"]} />)
+    // Same two elements, same props, moved by key - not a mount/unmount, so
+    // neither item's own registration effect necessarily re-fires. Select's
+    // own re-sort still has to pick up the swap because it reads current
+    // document position on every commit rather than relying on that effect.
+    testRoot.render(<Reorderable order={["beta", "alpha"]} />)
+
+    const trigger = testRoot.renderer.findByTestId("trigger")!
+    testRoot.renderer.focusElement(trigger.id)
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+
+    expect(testRoot.renderer.getAllText()).toContain("Value: beta")
+  })
+})

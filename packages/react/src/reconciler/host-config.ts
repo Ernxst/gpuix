@@ -42,6 +42,14 @@ import {
   getOrCreateRecordingContext2D,
 } from "../canvas/context-2d.js"
 import { reportStyleDiagnostics } from "./renderer-diagnostics.js"
+import {
+  DOCUMENT_POSITION_CONTAINED_BY,
+  DOCUMENT_POSITION_CONTAINS,
+  DOCUMENT_POSITION_DISCONNECTED,
+  DOCUMENT_POSITION_FOLLOWING,
+  DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC,
+  DOCUMENT_POSITION_PRECEDING,
+} from "../dom-position.js"
 
 let currentUpdatePriority = NoEventPriority
 
@@ -150,6 +158,102 @@ function appendTrackedChild(parent: Instance, state: HostNodeState, child: HostN
   state.children.push(child)
   child.parentId = parent.id
   stateFor(child).parent = parent
+}
+
+/** This node and every ancestor up to (and including) its root, root first. */
+function ancestorChain(node: HostNode): HostNode[] {
+  const chain: HostNode[] = []
+  let current: HostNode | null = node
+  while (current !== null) {
+    chain.unshift(current)
+    current = stateFor(current).parent
+  }
+  return chain
+}
+
+// Disconnected roots need a stable pick between them. Element ids are not it:
+// each renderer gets its own id allocator (`idAllocatorFor`), starting back
+// at 1, so two different roots routinely share ids. First-seen order across
+// roots is unique by construction and never collides.
+let nextDisconnectedRootOrder = 0
+const disconnectedRootOrder = new WeakMap<HostNode, number>()
+
+function orderForDisconnectedRoot(root: HostNode): number {
+  let order = disconnectedRootOrder.get(root)
+  if (order === undefined) {
+    order = nextDisconnectedRootOrder++
+    disconnectedRootOrder.set(root, order)
+  }
+  return order
+}
+
+function describeInvalidCompareDocumentPositionArgument(value: unknown): string {
+  if (value === null) return "null"
+  if (typeof value !== "object") return `a ${typeof value}`
+  return "an object this renderer never created"
+}
+
+/**
+ * `Node.compareDocumentPosition()` over the JS-side tree position tracked in
+ * {@link hostNodeStates}, since these instances have no real DOM node to ask.
+ *
+ * Two nodes with different roots are disconnected; the ordering picked for
+ * them is arbitrary but stable within a process, matching the DOM's guarantee
+ * that disconnected nodes still compare consistently. This also makes two
+ * top-level siblings under the *same* container disconnected from each
+ * other: {@link Container} tracks only its single current `rootElementId`,
+ * not an ordered list of top-level children, so there is no ancestor to walk
+ * up to for a common one. A single root under each container sidesteps this
+ * — the only case the current call sites need — but two real top-level
+ * siblings (e.g. two roots of one React Fragment mounted directly into a
+ * container) will read as disconnected even though they share a container.
+ */
+function compareDocumentPosition(self: HostNode, other: HostNode): number {
+  if (!hostNodeStates.has(other)) {
+    throw new TypeError(
+      `compareDocumentPosition expects a GPUIX PublicInstance obtained from a ref or ` +
+        `the render tree, received ${describeInvalidCompareDocumentPositionArgument(other)}.`
+    )
+  }
+  if (self === other) return 0
+
+  const selfChain = ancestorChain(self)
+  const otherChain = ancestorChain(other)
+  if (selfChain[0] !== otherChain[0]) {
+    const otherPrecedes =
+      orderForDisconnectedRoot(otherChain[0]!) < orderForDisconnectedRoot(selfChain[0]!)
+    return (
+      DOCUMENT_POSITION_DISCONNECTED |
+      DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC |
+      (otherPrecedes ? DOCUMENT_POSITION_PRECEDING : DOCUMENT_POSITION_FOLLOWING)
+    )
+  }
+
+  let depth = 0
+  while (
+    depth < selfChain.length &&
+    depth < otherChain.length &&
+    selfChain[depth] === otherChain[depth]
+  ) {
+    depth++
+  }
+  // selfChain fully consumed as a common prefix of otherChain means self is
+  // one of other's ancestors, so `other` (the argument) is self's descendant.
+  if (depth === selfChain.length) {
+    return DOCUMENT_POSITION_CONTAINED_BY | DOCUMENT_POSITION_FOLLOWING
+  }
+  // Symmetrically, `other` is self's ancestor.
+  if (depth === otherChain.length) return DOCUMENT_POSITION_CONTAINS | DOCUMENT_POSITION_PRECEDING
+
+  const commonAncestor = selfChain[depth - 1]!
+  const siblings = stateFor(commonAncestor).children
+  const selfBranchIndex = siblings.indexOf(selfChain[depth]!)
+  const otherBranchIndex = siblings.indexOf(otherChain[depth]!)
+  // self's branch coming first in the common ancestor's children means self
+  // precedes other, so other follows self.
+  return selfBranchIndex < otherBranchIndex
+    ? DOCUMENT_POSITION_FOLLOWING
+    : DOCUMENT_POSITION_PRECEDING
 }
 
 function insertTrackedChild(
@@ -1267,6 +1371,9 @@ export const hostConfig = {
         reportStyleDiagnostics(rootContainerInstance.native)
       },
       parentId: null,
+      compareDocumentPosition(other: PublicInstance): number {
+        return compareDocumentPosition(instance, other as unknown as HostNode)
+      },
       getAttribute(name): string | null {
         const value = (instance.props as Props & Record<string, unknown>)[name]
         if (value == null || typeof value === "function") return null

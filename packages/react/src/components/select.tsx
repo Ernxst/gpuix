@@ -5,6 +5,7 @@ import React, {
   createContext,
   forwardRef,
   isValidElement,
+  useCallback,
   useContext,
   useLayoutEffect,
   useMemo,
@@ -12,6 +13,10 @@ import React, {
   useState,
 } from "react"
 import type { ReactElement, ReactNode } from "react"
+import {
+  DOCUMENT_POSITION_FOLLOWING,
+  DOCUMENT_POSITION_PRECEDING,
+} from "../dom-position.js"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
@@ -30,6 +35,8 @@ interface SelectItemRecord {
   label: ReactNode
   textValue: string
   disabled: boolean
+  /** Null only until the item's ref attaches, which happens in the same commit. */
+  instance: PublicInstance | null
 }
 
 interface SelectContextValue {
@@ -61,6 +68,29 @@ function textContent(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node)
   if (!isValidElement<{ children?: ReactNode }>(node)) return ""
   return Children.toArray(node.props.children).map(textContent).join("")
+}
+
+/**
+ * Orders two item records by document position once both have registered an
+ * instance. Before that (the item's ref has not attached yet this commit),
+ * falls back to `registrationIndex` for *both* records rather than treating
+ * the pair as equal: a bare `return 0` there would make the comparator
+ * inconsistent between calls - the same pair could sort either way depending
+ * on what else `Array#sort` happens to compare it against - while indexing
+ * off one shared, stable key keeps every such pair on one consistent order.
+ */
+function compareItemRecords(
+  a: SelectItemRecord,
+  b: SelectItemRecord,
+  registrationIndex: (value: string) => number
+): number {
+  if (a.instance && b.instance) {
+    const position = a.instance.compareDocumentPosition(b.instance)
+    if (position & DOCUMENT_POSITION_FOLLOWING) return -1
+    if (position & DOCUMENT_POSITION_PRECEDING) return 1
+    return 0
+  }
+  return registrationIndex(a.value) - registrationIndex(b.value)
 }
 
 export interface SelectProps extends Omit<Props, "children" | "onChange"> {
@@ -109,33 +139,45 @@ export function Select({
   // SelectContent keeps its children mounted even while closed - like Radix's
   // detached collection - painting nothing until open, so an item registers
   // at mount time regardless of open state and Value can resolve a label
-  // before the Select has ever opened. Order reflects mount order: React
-  // commits children in document order on the initial render, but an item
-  // mounted later (e.g. after a conditional render) is appended rather than
-  // inserted in place.
+  // before the Select has ever opened. SelectItem always carries a host node
+  // (an inert marker while closed), so every record's instance has a document
+  // position once its own layout effect below has run.
   const itemRegistry = useRef<Map<string, SelectItemRecord>>(new Map())
   const itemOrder = useRef<string[]>([])
   const [items, setItems] = useState<SelectItemRecord[]>([])
 
-  const syncItems = () => {
-    setItems(
-      itemOrder.current
-        .map((itemValue) => itemRegistry.current.get(itemValue))
-        .filter((item): item is SelectItemRecord => item !== undefined)
-    )
-  }
-
   const registerItem = (item: SelectItemRecord) => {
     if (!itemRegistry.current.has(item.value)) itemOrder.current.push(item.value)
     itemRegistry.current.set(item.value, item)
-    syncItems()
   }
 
   const unregisterItem = (value: string) => {
     itemRegistry.current.delete(value)
     itemOrder.current = itemOrder.current.filter((candidate) => candidate !== value)
-    syncItems()
   }
+
+  // Re-derive item order once per commit, rather than once per registration:
+  // React runs child layout effects before the parent's, so by the time this
+  // one runs every SelectItem below has already registered or unregistered
+  // for the commit just made, and this reads that settled registry instead
+  // of resorting after each individual item. The functional `setItems`
+  // update bails when nothing actually changed - same length, same records
+  // at the same indices - so a commit that touched something else in Select
+  // (`open`, `activeValue`, ...) re-renders once here, not once per item.
+  useLayoutEffect(() => {
+    const registrationIndex = (value: string): number => itemOrder.current.indexOf(value)
+    const sorted = itemOrder.current
+      .map((itemValue) => itemRegistry.current.get(itemValue))
+      .filter((item): item is SelectItemRecord => item !== undefined)
+      .sort((a, b) => compareItemRecords(a, b, registrationIndex))
+
+    setItems((current) => {
+      const unchanged =
+        current.length === sorted.length &&
+        current.every((item, index) => item === sorted[index])
+      return unchanged ? current : sorted
+    })
+  })
 
   const setOpen = (nextOpen: boolean) => {
     setOpenState(nextOpen)
@@ -349,6 +391,7 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
     ref
   ) {
     const context = useSelectContext("SelectItem")
+    const instanceRef = useRef<PublicInstance | null>(null)
     const state = {
       selected: context.value === value,
       highlighted: context.activeValue === value,
@@ -358,17 +401,43 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
     const resolvedTextValue =
       textValue ?? (typeof children === "function" ? "" : textContent(children))
 
+    // Ref callbacks attach before layout effects run in the same commit, so
+    // this is set before registerItem below reads it. Stable via useCallback
+    // (keyed only on `ref`, since `setRefs` is pure over its arguments): an
+    // inline arrow here would give React a new function every render, which
+    // detaches and reattaches the ref - and re-fires this callback - on every
+    // commit instead of only when the forwarded ref itself changes.
+    const setInstanceRef = useCallback(
+      (instance: PublicInstance | null) => {
+        instanceRef.current = instance
+        setRefs(instance, ref)
+      },
+      [ref]
+    )
+
     useLayoutEffect(() => {
-      context.registerItem({ value, label, textValue: resolvedTextValue, disabled })
+      context.registerItem({
+        value,
+        label,
+        textValue: resolvedTextValue,
+        disabled,
+        instance: instanceRef.current,
+      })
       return () => context.unregisterItem(value)
     }, [value, label, resolvedTextValue, disabled])
 
-    if (!context.open) return null
+    // Closed content stays mounted (see registerItem's comment above), so
+    // this marker keeps the item's document position current even while
+    // Select is closed - unlike returning null, which would leave the item
+    // with no tree position for compareDocumentPosition to read. Inert:
+    // `display: "none"` takes no layout space, is absent from the
+    // accessibility tree, and is never hit-tested (see display-none.test.tsx).
+    if (!context.open) return <div style={{ display: "none" }} ref={setInstanceRef} />
 
     return (
       <div
         {...props}
-        ref={ref}
+        ref={setInstanceRef}
         style={resolveStyle(style, state)}
         onMouseEnter={(event: GpuixSyntheticEvent) => {
           onMouseEnter?.(event)

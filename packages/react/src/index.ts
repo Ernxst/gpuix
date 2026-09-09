@@ -139,6 +139,14 @@ export interface AccessibilityRoleRegistry {
 export type AccessibilityRole = keyof AccessibilityRoleRegistry & string
 
 export { createRoot, flushSync } from "./reconciler/index.js"
+export {
+  DOCUMENT_POSITION_CONTAINED_BY,
+  DOCUMENT_POSITION_CONTAINS,
+  DOCUMENT_POSITION_DISCONNECTED,
+  DOCUMENT_POSITION_FOLLOWING,
+  DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC,
+  DOCUMENT_POSITION_PRECEDING,
+} from "./dom-position.js"
 export { announce } from "./announce.js"
 export type { AnnounceOptions } from "./announce.js"
 export { __applyCanvasCommands } from "./canvas/commands.js"
