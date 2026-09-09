@@ -1935,6 +1935,8 @@ grapheme-safe deletion and mouse positioning.
 />
 ```
 
+A row is the element's `lineHeight`; without one, `fontSize` alone scales the row by the same ratio `<code>` uses, so `minRows` and `maxRows` follow the text style.
+
 Enter and Shift+Enter insert a newline in a `<textarea>`, and Enter inserts nothing in an `<input>`; both deliver `onKeyDown` with `key: "Enter"` first, and `preventDefault()` there cancels the newline, exactly as in react-dom. Keys typed while that `onKeyDown` is still deciding are applied afterward, in the order they arrived, so a fast typist can never overtake their own Enter — mouse input is never held behind it. A composer that submits on Enter is written the react-dom way:
 
 ```tsx
