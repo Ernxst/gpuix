@@ -427,4 +427,191 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     expectBounds(renderer, "scale-px-b", [100, 0, 200, 20])
     expect(boundsFor(renderer, "scale-fit-content")[2]).toBeCloseTo(150, 3)
   })
+
+  it("auto-places items column-major when gridAutoFlow is column", () => {
+    const { render, renderer } = createGridRoot()
+    render(
+      <div
+        style={gridStyle(
+          [{ type: "px", value: 100 }, { type: "px", value: 100 }],
+          {
+            gridAutoFlow: "column",
+            gridTemplateRows: [
+              { type: "px", value: 40 },
+              { type: "px", value: 40 },
+              { type: "px", value: 40 },
+            ],
+          },
+        )}
+      >
+        {[0, 1, 2, 3, 4].map((index) => (
+          <div
+            data-testid={`auto-flow-item-${index}`}
+            key={index}
+            style={{ width: "100%", height: "100%" }}
+          />
+        ))}
+      </div>,
+    )
+
+    // Column-major placement fills column 0's three rows before moving to
+    // column 1: the third item (index 2) lands at column 0, row 2, and the
+    // fourth item (index 3) starts the second column at row 0.
+    expectBounds(renderer, "auto-flow-item-2", [0, 80, 100, 40])
+    expectBounds(renderer, "auto-flow-item-3", [100, 0, 100, 40])
+  })
+
+  it("sizes implicit rows from gridAutoRows when no row template is declared", () => {
+    const { render, renderer } = createGridRoot()
+    render(
+      <div
+        style={gridStyle([{ type: "px", value: 100 }, { type: "px", value: 100 }], {
+          gridAutoRows: [{ type: "px", value: 40 }],
+        })}
+      >
+        {[0, 1, 2, 3].map((index) => (
+          <div
+            data-testid={`auto-row-item-${index}`}
+            key={index}
+            style={{ width: "100%", height: "100%" }}
+          />
+        ))}
+      </div>,
+    )
+
+    // Row-major auto-placement fills the two columns before wrapping: the
+    // third item (index 2) starts the implicit second row at y = 40.
+    expectBounds(renderer, "auto-row-item-0", [0, 0, 100, 40])
+    expectBounds(renderer, "auto-row-item-1", [100, 0, 100, 40])
+    expectBounds(renderer, "auto-row-item-2", [0, 40, 100, 40])
+  })
+
+  it("sizes implicit columns from gridAutoColumns when flowing column-major", () => {
+    const { render, renderer } = createGridRoot()
+    render(
+      <div
+        style={{
+          display: "grid" as const,
+          width: 600,
+          height: 200,
+          gridAutoFlow: "column",
+          gridAutoColumns: [{ type: "px", value: 150 }],
+          gridTemplateRows: [{ type: "px", value: 40 }],
+        }}
+      >
+        {[0, 1, 2].map((index) => (
+          <div
+            data-testid={`auto-col-item-${index}`}
+            key={index}
+            style={{ width: "100%", height: "100%" }}
+          />
+        ))}
+      </div>,
+    )
+
+    // With a single explicit row and no explicit columns, column-major
+    // auto-placement gives every item its own implicit column at the
+    // declared 150px width.
+    expectBounds(renderer, "auto-col-item-0", [0, 0, 150, 40])
+    expectBounds(renderer, "auto-col-item-1", [150, 0, 150, 40])
+    expectBounds(renderer, "auto-col-item-2", [300, 0, 150, 40])
+  })
+
+  it("centers items on the inline axis with justifyItems, overridden by justifySelf", () => {
+    const { render, renderer } = createGridRoot()
+    render(
+      <div
+        style={gridStyle([{ type: "px", value: 200 }], {
+          gridTemplateRows: [
+            { type: "px", value: 40 },
+            { type: "px", value: 40 },
+          ],
+          justifyItems: "center",
+        })}
+      >
+        <div data-testid="justify-items-center" style={{ width: 50, height: 40 }} />
+        <div
+          data-testid="justify-self-end"
+          style={{ width: 50, height: 40, justifySelf: "end" }}
+        />
+      </div>,
+    )
+
+    // A 50px item centered in a 200px column sits at (200 - 50) / 2 = 75.
+    expectBounds(renderer, "justify-items-center", [75, 0, 50, 40])
+    // justifySelf: "end" overrides the inherited justifyItems, pushing the
+    // item flush with the column's end edge: 200 - 50 = 150.
+    expectBounds(renderer, "justify-self-end", [150, 40, 50, 40])
+  })
+
+  it("packs an auto-placed item into an earlier hole with gridAutoFlow: column dense", () => {
+    const runFlow = (flow: "column" | "column dense") => {
+      const testId = `hole-fill-${flow.replace(" ", "-")}`
+      const root = createGridRoot()
+      root.render(
+        <div
+          style={{
+            display: "grid" as const,
+            width: 600,
+            height: 200,
+            gridAutoFlow: flow,
+            gridAutoColumns: [{ type: "px", value: 100 }],
+            gridTemplateRows: [
+              { type: "px", value: 40 },
+              { type: "px", value: 40 },
+            ],
+          }}
+        >
+          {/* Column 1 is fully reserved by a two-row span. Column 2's second
+              row is explicitly taken, but its first row is too small a gap
+              for the auto-placed two-row span below, so sparse placement
+              skips over it (leaving a hole) and lands that span in column 3.
+              The final auto-placed cell, with no explicit position, is what
+              distinguishes the two flows. */}
+          <div style={{ gridColumn: "1", gridRow: "span 2" }} />
+          <div style={{ gridColumn: "2", gridRow: "2" }} />
+          <div style={{ gridRow: "span 2" }} />
+          <div data-testid={testId} style={{ width: "100%", height: "100%" }} />
+        </div>,
+      )
+      return { renderer: root.renderer, testId }
+    }
+
+    // Sparse "column" placement never revisits column 2's first-row hole
+    // once its cursor has advanced past it, so the final item continues on
+    // to a new, fourth column.
+    const sparse = runFlow("column")
+    expectBounds(sparse.renderer, sparse.testId, [300, 0, 100, 40])
+
+    // "column dense" rescans from the start for every item and finds that
+    // same hole still open, packing the final item into column 2 instead.
+    const dense = runFlow("column dense")
+    expectBounds(dense.renderer, dense.testId, [100, 0, 100, 40])
+  })
+
+  it("aligns an item to the start or stretches it across the column with justifySelf", () => {
+    const { render, renderer } = createGridRoot()
+    render(
+      <div
+        style={gridStyle([{ type: "px", value: 200 }], {
+          gridTemplateRows: [
+            { type: "px", value: 40 },
+            { type: "px", value: 40 },
+          ],
+        })}
+      >
+        <div
+          data-testid="justify-self-start"
+          style={{ width: 50, height: 40, justifySelf: "start" }}
+        />
+        <div data-testid="justify-self-stretch" style={{ height: 40, justifySelf: "stretch" }} />
+      </div>,
+    )
+
+    // justifySelf: "start" leaves a 50px item flush with the column's start.
+    expectBounds(renderer, "justify-self-start", [0, 0, 50, 40])
+    // justifySelf: "stretch" fills the full 200px column, but only because
+    // this item declares no explicit width of its own.
+    expectBounds(renderer, "justify-self-stretch", [0, 40, 200, 40])
+  })
 })

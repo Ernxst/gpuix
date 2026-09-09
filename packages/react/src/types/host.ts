@@ -438,6 +438,9 @@ export type GridTrack =
 
 export type GridTemplate = GridTrack[]
 
+/** The `grid-auto-flow` placement direction and packing algorithm. */
+export type GridAutoFlow = "row" | "column" | "dense" | "row dense" | "column dense"
+
 /** Keys that apply a native interaction state rather than a base style declaration. */
 export type NativeStateStyleKey =
   | "hover"
@@ -487,6 +490,11 @@ export interface StyleDesc {
   gridRowStart?: string | number
   gridRowEnd?: string | number
   gridArea?: string
+  gridAutoFlow?: GridAutoFlow
+  gridAutoRows?: GridTrackNonRepeat[]
+  gridAutoColumns?: GridTrackNonRepeat[]
+  justifyItems?: AlignItems
+  justifySelf?: AlignItems
 
   width?: DimensionValue
   height?: DimensionValue

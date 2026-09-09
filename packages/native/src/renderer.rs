@@ -11353,6 +11353,20 @@ fn to_gpui_grid_placement(value: GridLineValue) -> gpui::GridPlacement {
     }
 }
 
+/// Decodes an `AlignItems`-shaped keyword shared by `alignSelf`, `justifyItems`,
+/// and `justifySelf`. `alignItems` itself keeps its own fluent-helper match
+/// above, since GPUI exposes no keyword-to-builder-method table for it.
+fn align_items_keyword(value: Option<&str>) -> Option<gpui::AlignItems> {
+    match value {
+        Some("center") => Some(gpui::AlignItems::Center),
+        Some("start") | Some("flex-start") => Some(gpui::AlignItems::FlexStart),
+        Some("end") | Some("flex-end") => Some(gpui::AlignItems::FlexEnd),
+        Some("stretch") => Some(gpui::AlignItems::Stretch),
+        Some("baseline") => Some(gpui::AlignItems::Baseline),
+        _ => None,
+    }
+}
+
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.visibility.as_deref() {
         Some("hidden") => el = el.invisible(),
@@ -11370,6 +11384,23 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     }
     if let Some(rows) = &style.grid_template_rows {
         el = el.grid_template_rows(to_gpui_grid_template(rows));
+    }
+    if let Some(rows) = &style.grid_auto_rows {
+        el.style().grid_auto_rows = Some(rows.iter().map(to_gpui_grid_track).collect());
+    }
+    if let Some(cols) = &style.grid_auto_columns {
+        el.style().grid_auto_columns = Some(cols.iter().map(to_gpui_grid_track).collect());
+    }
+    match style.grid_auto_flow.as_deref() {
+        Some("row") => el.style().grid_auto_flow = Some(gpui::GridAutoFlow::Row),
+        Some("column") => el.style().grid_auto_flow = Some(gpui::GridAutoFlow::Column),
+        Some("dense") | Some("row dense") => {
+            el.style().grid_auto_flow = Some(gpui::GridAutoFlow::RowDense);
+        }
+        Some("column dense") => {
+            el.style().grid_auto_flow = Some(gpui::GridAutoFlow::ColumnDense);
+        }
+        _ => {}
     }
     let grid_lines = [
         style.grid_row_start,
@@ -11452,23 +11483,14 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("evenly") | Some("space-evenly") => el = el.justify_evenly(),
         _ => {}
     }
-    match style.align_self.as_deref() {
-        Some("center") => {
-            el.style().align_self = Some(gpui::AlignItems::Center);
-        }
-        Some("start") | Some("flex-start") => {
-            el.style().align_self = Some(gpui::AlignItems::FlexStart);
-        }
-        Some("end") | Some("flex-end") => {
-            el.style().align_self = Some(gpui::AlignItems::FlexEnd);
-        }
-        Some("stretch") => {
-            el.style().align_self = Some(gpui::AlignItems::Stretch);
-        }
-        Some("baseline") => {
-            el.style().align_self = Some(gpui::AlignItems::Baseline);
-        }
-        _ => {}
+    if let Some(align_self) = align_items_keyword(style.align_self.as_deref()) {
+        el.style().align_self = Some(align_self);
+    }
+    if let Some(justify_items) = align_items_keyword(style.justify_items.as_deref()) {
+        el.style().justify_items = Some(justify_items);
+    }
+    if let Some(justify_self) = align_items_keyword(style.justify_self.as_deref()) {
+        el.style().justify_self = Some(justify_self);
     }
     if let Some(gap) = style.gap {
         el = el.gap(gpui::px(gap as f32));

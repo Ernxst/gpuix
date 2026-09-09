@@ -741,6 +741,11 @@ pub struct StyleDesc {
     pub grid_row_end: Option<GridLineValue>,
     pub grid_column_start: Option<GridLineValue>,
     pub grid_column_end: Option<GridLineValue>,
+    pub grid_auto_flow: Option<String>,
+    pub grid_auto_rows: Option<Vec<GridTrackValue>>,
+    pub grid_auto_columns: Option<Vec<GridTrackValue>>,
+    pub justify_items: Option<String>,
+    pub justify_self: Option<String>,
 
     pub width: Option<DimensionValue>,
     pub height: Option<DimensionValue>,
@@ -1380,10 +1385,40 @@ fn grid_track_count(track: &GridTrackValue) -> usize {
     }
 }
 
+/// Parses a single track of a `grid-auto-rows` / `grid-auto-columns` list.
+/// CSS's `<track-size>+` grammar for these properties excludes `repeat()`
+/// (unlike `grid-template-columns`/`-rows`, which allow it), so `repeat` is
+/// rejected here with a property-specific reason rather than falling through
+/// to `parse_grid_track`'s "cannot be nested" message.
+fn parse_grid_auto_track(
+    path: &str,
+    value: &serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<GridTrackValue> {
+    let (track_type, _) = grid_track_object(path, value, problems)?;
+    if track_type == "repeat" {
+        reject(
+            problems,
+            format!("{path}.type"),
+            value,
+            "repeat is not valid in gridAutoRows/gridAutoColumns",
+        );
+        return None;
+    }
+    parse_grid_track(path, value, problems, false)
+}
+
+/// Parses a `grid-template-columns` / `-rows` or `grid-auto-rows` /
+/// `-columns` track list — the array/empty/64-track-cap grammar the two
+/// property groups share. Only `grid-template-*` allows `repeat()`, per
+/// CSS's `<track-size>+` grammar for the auto properties; `allow_repeat`
+/// selects the per-track parser (and, through it, the diagnostic a stray
+/// `repeat` gets) accordingly.
 fn parse_grid_template(
     property: &str,
     value: &serde_json::Value,
     problems: &mut Vec<StyleProblem>,
+    allow_repeat: bool,
 ) -> Option<Vec<GridTrackValue>> {
     let Some(tracks) = value.as_array() else {
         reject(
@@ -1407,7 +1442,13 @@ fn parse_grid_template(
     let mut parsed_tracks = Vec::with_capacity(tracks.len());
     let mut valid = true;
     for (index, track) in tracks.iter().enumerate() {
-        match parse_grid_track(&format!("{property}[{index}]"), track, problems, true) {
+        let path = format!("{property}[{index}]");
+        let parsed = if allow_repeat {
+            parse_grid_track(&path, track, problems, true)
+        } else {
+            parse_grid_auto_track(&path, track, problems)
+        };
+        match parsed {
             Some(track) => parsed_tracks.push(track),
             None => valid = false,
         }
@@ -2024,6 +2065,43 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         enum_field!(
             key,
             value,
+            "justifyItems",
+            justify_items,
+            [
+                "start",
+                "flex-start",
+                "center",
+                "end",
+                "flex-end",
+                "baseline",
+                "stretch"
+            ]
+        );
+        enum_field!(
+            key,
+            value,
+            "justifySelf",
+            justify_self,
+            [
+                "start",
+                "flex-start",
+                "center",
+                "end",
+                "flex-end",
+                "baseline",
+                "stretch"
+            ]
+        );
+        enum_field!(
+            key,
+            value,
+            "gridAutoFlow",
+            grid_auto_flow,
+            ["row", "column", "dense", "row dense", "column dense"]
+        );
+        enum_field!(
+            key,
+            value,
             "alignContent",
             align_content,
             [
@@ -2121,12 +2199,35 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                 &property!("gridTemplateColumns"),
                 value,
                 &mut parsed.problems,
+                true,
             );
             continue;
         }
         if key == "gridTemplateRows" {
-            parsed.style.grid_template_rows =
-                parse_grid_template(&property!("gridTemplateRows"), value, &mut parsed.problems);
+            parsed.style.grid_template_rows = parse_grid_template(
+                &property!("gridTemplateRows"),
+                value,
+                &mut parsed.problems,
+                true,
+            );
+            continue;
+        }
+        if key == "gridAutoRows" {
+            parsed.style.grid_auto_rows = parse_grid_template(
+                &property!("gridAutoRows"),
+                value,
+                &mut parsed.problems,
+                false,
+            );
+            continue;
+        }
+        if key == "gridAutoColumns" {
+            parsed.style.grid_auto_columns = parse_grid_template(
+                &property!("gridAutoColumns"),
+                value,
+                &mut parsed.problems,
+                false,
+            );
             continue;
         }
         dimension_field!(key, value, "width", width);
@@ -3465,6 +3566,91 @@ mod tests {
             "gridTemplateColumns[1].min.type"
         );
         assert_eq!(parsed.problems[0].value, "\"fr\"");
+    }
+
+    #[test]
+    fn parses_grid_auto_tracks_and_rejects_repeat() {
+        let parsed = parse_style_value(&json!({
+            "gridAutoRows": [
+                { "type": "px", "value": 40 },
+                { "type": "percent", "value": 25 },
+                { "type": "fit-content", "limit": { "type": "px", "value": 200 } },
+                {
+                    "type": "minmax",
+                    "min": { "type": "px", "value": 0 },
+                    "max": { "type": "fr", "value": 1 }
+                }
+            ],
+            "gridAutoColumns": [{ "type": "auto" }]
+        }));
+
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert!(matches!(
+            parsed.style.grid_auto_rows,
+            Some(ref tracks) if tracks.len() == 4
+        ));
+        assert!(matches!(
+            parsed.style.grid_auto_columns,
+            Some(ref tracks) if tracks.len() == 1 && matches!(tracks[0], GridTrackValue::Auto)
+        ));
+
+        let repeat_in_rows = parse_style_value(&json!({
+            "gridAutoRows": [{
+                "type": "repeat",
+                "count": 2,
+                "tracks": [{ "type": "px", "value": 24 }]
+            }]
+        }));
+        assert_eq!(repeat_in_rows.style.grid_auto_rows, None);
+        assert_eq!(repeat_in_rows.problems.len(), 1);
+        assert_eq!(repeat_in_rows.problems[0].property, "gridAutoRows[0].type");
+        assert_eq!(
+            repeat_in_rows.problems[0].reason,
+            "repeat is not valid in gridAutoRows/gridAutoColumns"
+        );
+
+        let repeat_in_columns = parse_style_value(&json!({
+            "gridAutoColumns": [{
+                "type": "repeat",
+                "count": 2,
+                "tracks": [{ "type": "px", "value": 24 }]
+            }]
+        }));
+        assert_eq!(repeat_in_columns.style.grid_auto_columns, None);
+        assert_eq!(repeat_in_columns.problems.len(), 1);
+        assert_eq!(
+            repeat_in_columns.problems[0].property,
+            "gridAutoColumns[0].type"
+        );
+        assert_eq!(
+            repeat_in_columns.problems[0].reason,
+            "repeat is not valid in gridAutoRows/gridAutoColumns"
+        );
+    }
+
+    #[test]
+    fn parses_grid_auto_flow_and_inline_axis_justification() {
+        for value in ["row", "column", "dense", "row dense", "column dense"] {
+            let parsed = parse_style_value(&json!({ "gridAutoFlow": value }));
+            assert!(parsed.problems.is_empty(), "{value}");
+            assert_eq!(parsed.style.grid_auto_flow.as_deref(), Some(value));
+        }
+
+        let rejected = parse_style_value(&json!({ "gridAutoFlow": "diagonal" }));
+        assert_eq!(rejected.style.grid_auto_flow, None);
+        assert_eq!(rejected.problems.len(), 1);
+        assert_eq!(rejected.problems[0].property, "gridAutoFlow");
+
+        for property in ["justifyItems", "justifySelf"] {
+            let parsed = parse_style_value(&json!({ property: "center" }));
+            assert!(parsed.problems.is_empty(), "{property}");
+        }
+        let parsed = parse_style_value(&json!({
+            "justifyItems": "center",
+            "justifySelf": "end"
+        }));
+        assert_eq!(parsed.style.justify_items.as_deref(), Some("center"));
+        assert_eq!(parsed.style.justify_self.as_deref(), Some("end"));
     }
 
     #[test]

@@ -815,6 +815,34 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(diagnostics[0].message).toContain("fr is not valid as a minmax minimum")
   })
 
+  it("rejects an unknown gridAutoFlow keyword", () => {
+    const renderer = new TestRenderer()
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 85, "div"],
+        ["setCustomPropValue", 85, "data-testid", "auto-flow-grid"],
+        [
+          "setStyle",
+          85,
+          {
+            display: "grid",
+            gridAutoFlow: "diagonal",
+          },
+        ],
+      ]),
+    )
+
+    const diagnostics = renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementId: 85,
+      elementType: "div",
+      dataTestId: "auto-flow-grid",
+      property: "gridAutoFlow",
+      value: '"diagonal"',
+    })
+  })
+
   it("rejects a repeat whose expanded grid has more than 64 tracks", () => {
     const renderer = new TestRenderer()
     renderer.applyBatch(
