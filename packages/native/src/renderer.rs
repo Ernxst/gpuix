@@ -5898,6 +5898,10 @@ pub(crate) struct GpuixView {
     focus_scroll_anchors: HashMap<u64, FocusScrollAnchor>,
     /// Native animation clocks keyed by retained element ID.
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
+    intrinsic_probe_cache: HashMap<u64, IntrinsicProbeCacheEntry>,
+    pub(crate) intrinsic_probe_layouts: u32,
+    interaction_revision: u64,
+    last_focus_state: Option<(Option<u64>, bool)>,
     /// Hit-test state reported by GPUI's interactive-element callbacks.
     ///
     /// Test-only resolved-style reads use this instead of reconstructing hover
@@ -6141,6 +6145,10 @@ impl GpuixView {
             scroll_event_offsets: Arc::new(Mutex::new(HashMap::new())),
             focus_scroll_anchors: HashMap::new(),
             motion_states: HashMap::new(),
+            intrinsic_probe_cache: HashMap::new(),
+            intrinsic_probe_layouts: 0,
+            interaction_revision: 0,
+            last_focus_state: None,
             interactive_style_states: HashMap::new(),
             hover_target: None,
             hovered_targets: HashSet::new(),
@@ -6392,6 +6400,9 @@ impl GpuixView {
             custom_registry: &mut self.custom_registry,
             virtual_lists: &mut self.virtual_lists,
             motion_states: &mut self.motion_states,
+            intrinsic_probe_cache: &mut self.intrinsic_probe_cache,
+            intrinsic_probe_layouts: &mut self.intrinsic_probe_layouts,
+            interaction_revision: self.interaction_revision,
             transition_states: &mut self.transition_states,
             hovered_targets: &mut self.hovered_targets,
             interactive_style_states: &self.interactive_style_states,
@@ -6567,6 +6578,9 @@ pub(crate) struct BuildCtx<'a> {
     pub custom_registry: &'a mut CustomElementRegistry,
     virtual_lists: &'a mut HashMap<u64, VirtualListEntry>,
     pub motion_states: &'a mut HashMap<u64, crate::motion::MotionState>,
+    intrinsic_probe_cache: &'a mut HashMap<u64, IntrinsicProbeCacheEntry>,
+    intrinsic_probe_layouts: &'a mut u32,
+    interaction_revision: u64,
     pub transition_states: &'a mut HashMap<u64, crate::motion::StyleTransitionState>,
     pub hovered_targets: &'a mut HashSet<u64>,
     pub interactive_style_states: &'a HashMap<u64, InteractiveStyleState>,
@@ -6650,10 +6664,119 @@ struct InheritedHoverGroup {
     id: u64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 struct InheritedFont {
     font: gpui::Font,
     size: gpui::Pixels,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct InteractionProbeState {
+    focused: bool,
+    focus_visible: bool,
+    hover_within: bool,
+    hovered: bool,
+    active: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct IntrinsicProbeCacheKey {
+    subtree_revision: u64,
+    state: InteractionProbeState,
+    probe_style: StyleDesc,
+    needed: (bool, bool, bool),
+    viewport_width: f64,
+    viewport_height: f64,
+    scale_factor: f32,
+    rem_size: f32,
+    inherited_font: InheritedFont,
+    text_transform: u8,
+    wrapping_width: Option<f64>,
+    interaction_revision: u64,
+    image_revision: u64,
+}
+
+struct IntrinsicProbeCacheEntry {
+    key: IntrinsicProbeCacheKey,
+    value: crate::motion::IntrinsicSize,
+}
+
+fn text_transform_key(transform: TextTransform) -> u8 {
+    match transform {
+        TextTransform::None => 0,
+        TextTransform::Uppercase => 1,
+        TextTransform::Lowercase => 2,
+    }
+}
+
+#[cfg(test)]
+mod intrinsic_probe_cache_key_tests {
+    use super::*;
+
+    fn key() -> IntrinsicProbeCacheKey {
+        IntrinsicProbeCacheKey {
+            subtree_revision: 1,
+            state: InteractionProbeState::default(),
+            probe_style: StyleDesc::default(),
+            needed: (false, true, false),
+            viewport_width: 400.0,
+            viewport_height: 300.0,
+            scale_factor: 2.0,
+            rem_size: 16.0,
+            inherited_font: InheritedFont {
+                font: gpui::font(".SystemUIFont"),
+                size: gpui::px(16.0),
+            },
+            text_transform: 0,
+            wrapping_width: None,
+            interaction_revision: 1,
+            image_revision: 1,
+        }
+    }
+
+    #[test]
+    fn identical_keys_are_equal() {
+        assert_eq!(key(), key());
+    }
+
+    #[test]
+    fn every_layout_input_changes_the_key() {
+        let mut changed = key();
+        changed.subtree_revision += 1;
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.state.hovered = true;
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.viewport_width += 1.0;
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.scale_factor += 1.0;
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.rem_size += 1.0;
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.inherited_font.size = gpui::px(18.0);
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.wrapping_width = Some(100.0);
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.interaction_revision += 1;
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.image_revision += 1;
+        assert_ne!(changed, key());
+    }
 }
 
 impl Inherited {
@@ -7845,6 +7968,20 @@ impl gpui::Render for GpuixView {
         window.set_window_title(&self.window_title);
         self.observe_window_resize(window, cx);
 
+        let focus_state = (
+            self.focus_handles
+                .iter()
+                .find_map(|(id, handle)| handle.is_focused(window).then_some(*id)),
+            window.last_input_was_keyboard(),
+        );
+        if self
+            .last_focus_state
+            .is_some_and(|previous| previous != focus_state)
+        {
+            self.interaction_revision = self.interaction_revision.saturating_add(1);
+        }
+        self.last_focus_state = Some(focus_state);
+
         if self.window_activation_subscription.is_none() {
             self.window_activation_subscription =
                 Some(cx.observe_window_activation(window, |view, window, cx| {
@@ -7914,6 +8051,8 @@ impl gpui::Render for GpuixView {
             .retain(|id, _| tree.elements.contains_key(id));
         self.motion_states
             .retain(|id, _| tree.elements.contains_key(id));
+        self.intrinsic_probe_cache
+            .retain(|id, _| tree.elements.contains_key(id));
         self.interactive_style_states
             .retain(|id, _| tree.elements.contains_key(id));
         self.hovered_targets
@@ -7958,6 +8097,9 @@ impl gpui::Render for GpuixView {
                     custom_registry: &mut self.custom_registry,
                     virtual_lists: &mut self.virtual_lists,
                     motion_states: &mut self.motion_states,
+                    intrinsic_probe_cache: &mut self.intrinsic_probe_cache,
+                    intrinsic_probe_layouts: &mut self.intrinsic_probe_layouts,
+                    interaction_revision: self.interaction_revision,
                     transition_states: &mut self.transition_states,
                     hovered_targets: &mut self.hovered_targets,
                     interactive_style_states: &self.interactive_style_states,
@@ -8516,13 +8658,39 @@ fn build_element_with_parent_layout(
     // Inheritable style resolves once here so both built-ins and custom
     // elements see the same cascade.
     let font = parent_inherited.font_for(layered_style, window);
+    let focused = ctx
+        .focus_handles
+        .get(&id)
+        .is_some_and(|handle| handle.is_focused(window));
+    let interaction = ctx
+        .interactive_style_states
+        .get(&id)
+        .copied()
+        .unwrap_or_default();
+    let probe_state = InteractionProbeState {
+        focused,
+        focus_visible: focused && window.last_input_was_keyboard(),
+        hover_within,
+        hovered: interaction.hovered,
+        active: interaction.active,
+    };
     // Percentage terms stay deferred through GPUI/Taffy, where the layout
     // algorithm supplies the containing block's content size. Only `ch`, `vw`,
     // and `vh` are reduced here, using the inherited font chain above.
     let mut resolved_style =
         layered_style.map(|style| resolve_length_expressions(style, window, &font));
     if let Some(style) = resolved_style.as_mut() {
-        resolve_intrinsic_keywords(id, style, &element.element_type, ctx, window, cx);
+        resolve_intrinsic_keywords(
+            id,
+            style,
+            &element.element_type,
+            probe_state,
+            font.clone(),
+            parent_inherited.text_transform,
+            ctx,
+            window,
+            cx,
+        );
     }
     if default_flex_none {
         default_flex_none_for_parent_layout(resolved_style.get_or_insert_default());
@@ -8539,15 +8707,6 @@ fn build_element_with_parent_layout(
     }
     let style = resolved_style.as_ref();
     let hover_group = style.and_then(|style| style.hover_group.as_deref());
-    let focused = ctx
-        .focus_handles
-        .get(&id)
-        .is_some_and(|handle| handle.is_focused(window));
-    let interaction = ctx
-        .interactive_style_states
-        .get(&id)
-        .copied()
-        .unwrap_or_default();
     let current_color = resolved_current_color(
         style,
         focused,
@@ -9135,6 +9294,7 @@ fn measure_intrinsic_triple(
         window: &mut gpui::Window,
         cx: &mut gpui::Context<GpuixView>,
     ) -> gpui::Size<gpui::Pixels> {
+        *ctx.intrinsic_probe_layouts = ctx.intrinsic_probe_layouts.saturating_add(1);
         let measuring = std::mem::replace(&mut ctx.measuring, true);
         let outer_probe = ctx.intrinsic_probe.replace((id, probe_style));
         let mut element = build_element(id, ctx, window, cx);
@@ -9220,6 +9380,99 @@ fn measure_intrinsic_triple(
     }
 }
 
+/// Merge authored state fields in the same order as GPUI's interaction style
+/// composition. Null fields mean "not authored" in the decoded style, so they
+/// leave the base field intact. Nested refinements are cleared after the merge:
+/// the probe is a fresh root and must represent one effective style, not a
+/// second interaction cascade.
+fn merge_intrinsic_state_style(base: &StyleDesc, overlay: &StyleDesc) -> StyleDesc {
+    let mut merged = serde_json::to_value(base).expect("StyleDesc is serializable");
+    let overlay = serde_json::to_value(overlay).expect("StyleDesc is serializable");
+    let merged_fields = merged
+        .as_object_mut()
+        .expect("StyleDesc serializes as an object");
+    for (field, value) in overlay
+        .as_object()
+        .expect("StyleDesc serializes as an object")
+    {
+        if !value.is_null() {
+            merged_fields.insert(field.clone(), value.clone());
+        }
+    }
+    let mut merged: StyleDesc =
+        serde_json::from_value(merged).expect("merged StyleDesc remains valid");
+    merged.hover = None;
+    merged.hover_within = None;
+    merged.active = None;
+    merged.focus = None;
+    merged.focus_visible = None;
+    merged
+}
+
+fn effective_intrinsic_state_style(style: &StyleDesc, state: InteractionProbeState) -> StyleDesc {
+    let mut effective = style.clone();
+    if state.focused {
+        if let Some(focus) = style.focus.as_deref() {
+            effective = merge_intrinsic_state_style(&effective, focus);
+        }
+    }
+    if state.focus_visible {
+        if let Some(focus_visible) = style.focus_visible.as_deref() {
+            effective = merge_intrinsic_state_style(&effective, focus_visible);
+        }
+    }
+    if state.hover_within {
+        if let Some(hover_within) = style.hover_within.as_deref() {
+            effective = merge_intrinsic_state_style(&effective, hover_within);
+        }
+    }
+    if state.hovered {
+        if let Some(hover) = style.hover.as_deref() {
+            effective = merge_intrinsic_state_style(&effective, hover);
+        }
+    }
+    if state.active {
+        if let Some(active) = style.active.as_deref() {
+            effective = merge_intrinsic_state_style(&effective, active);
+        }
+    }
+    effective
+}
+
+fn intrinsic_wrapping_width(id: u64, style: &StyleDesc) -> Option<f64> {
+    match style.width {
+        Some(crate::style::DimensionValue::Pixels(width)) => Some(width),
+        _ => crate::automation::get_bounds(id).map(|bounds| bounds.width as f64),
+    }
+}
+
+#[cfg(test)]
+mod intrinsic_state_style_tests {
+    use super::*;
+
+    #[test]
+    fn overlays_authored_fields_and_preserves_the_base() {
+        let base = StyleDesc {
+            width: Some(crate::style::DimensionValue::Pixels(100.0)),
+            padding: Some(4.0),
+            font_size: Some(12.0),
+            ..Default::default()
+        };
+        let overlay = StyleDesc {
+            padding: Some(20.0),
+            font_size: Some(18.0),
+            ..Default::default()
+        };
+
+        let merged = merge_intrinsic_state_style(&base, &overlay);
+        assert_eq!(merged.width, base.width);
+        assert_eq!(merged.padding, Some(20.0));
+        assert_eq!(merged.font_size, Some(18.0));
+        assert!(merged.hover.is_none());
+        assert!(merged.focus.is_none());
+    }
+}
+
 /// Substitute the CSS intrinsic sizing keywords (`min-content`, `max-content`,
 /// `fit-content` and `fit-content(<length-percentage>)`) on this element's
 /// dimension props with measured pixel
@@ -9233,10 +9486,11 @@ fn measure_intrinsic_triple(
 /// `gpui::AnyElement::layout_as_root` under the available space that defines
 /// the keyword (`AvailableSpace::MinContent` / `MaxContent`). The same
 /// measured numbers substitute the keyword everywhere it appears on this
-/// element, state refinements included. The element is probed once, at its
-/// base style, so a refinement keyword receives the base content's
-/// measurement; a refinement that also changes a content-affecting property
-/// (its padding, a font) is sized as if it had not.
+/// element, state refinements included. The element is probed at the style
+/// that is effective for this frame. State refinements are merged in GPUI's
+/// composition order before the probe, so a refinement that changes a
+/// content-affecting property (its padding or font) is measured with that
+/// property in force.
 ///
 /// `fit-content` becomes its CSS definition, `clamp(min-content, stretch,
 /// max-content)`, with the stretch term expressed as `100%` of the containing
@@ -9256,6 +9510,9 @@ fn resolve_intrinsic_keywords(
     id: u64,
     style: &mut StyleDesc,
     element_type: &str,
+    state: InteractionProbeState,
+    inherited_font: InheritedFont,
+    text_transform: TextTransform,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -9269,7 +9526,7 @@ fn resolve_intrinsic_keywords(
         )
     }
 
-    /// Which measurements this style (base and refinements) asks for:
+    /// Which measurements this effective style asks for:
     /// `(min-content width, max-content width, content height)`.
     fn measurement_needs(style: &StyleDesc) -> (bool, bool, bool) {
         let widths = [
@@ -9282,42 +9539,33 @@ fn resolve_intrinsic_keywords(
             style.min_height.as_ref(),
             style.max_height.as_ref(),
         ];
-        let mut min_w = widths.iter().any(|dim| {
+        let min_w = widths.iter().any(|dim| {
             matches!(
                 dim,
                 Some(Dim::MinContent | Dim::FitContent | Dim::FitContentLimit { .. })
             )
         });
-        let mut max_w = widths.iter().any(|dim| {
+        let max_w = widths.iter().any(|dim| {
             matches!(
                 dim,
                 Some(Dim::MaxContent | Dim::FitContent | Dim::FitContentLimit { .. })
             )
         });
-        let mut height = heights.iter().any(|dim| is_keyword(*dim));
-        for refinement in [
-            style.hover.as_deref(),
-            style.hover_within.as_deref(),
-            style.active.as_deref(),
-            style.focus.as_deref(),
-            style.focus_visible.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            let (nested_min_w, nested_max_w, nested_height) = measurement_needs(refinement);
-            min_w |= nested_min_w;
-            max_w |= nested_max_w;
-            height |= nested_height;
-        }
+        let height = heights.iter().any(|dim| is_keyword(*dim));
         (min_w, max_w, height)
     }
 
-    let (needs_min_width, needs_max_width, needs_height) = measurement_needs(style);
-    if !(needs_min_width || needs_max_width || needs_height) {
+    if ctx.measuring {
         return;
     }
-    if ctx.measuring || !matches!(element_type, "div" | "text") {
+    let effective_style = effective_intrinsic_state_style(style, state);
+    let (needs_min_width, needs_max_width, needs_height) = measurement_needs(&effective_style);
+    if !(needs_min_width || needs_max_width || needs_height) {
+        ctx.intrinsic_probe_cache.remove(&id);
+        return;
+    }
+    if !matches!(element_type, "div" | "text") {
+        ctx.intrinsic_probe_cache.remove(&id);
         return;
     }
 
@@ -9341,13 +9589,45 @@ fn resolve_intrinsic_keywords(
         }
     }
 
-    let mut width_probe = style.clone();
+    let mut width_probe = effective_style.clone();
     neutralize_keywords(&mut width_probe);
-    let crate::motion::IntrinsicSize {
-        min_width,
-        max_width,
-        ..
-    } = measure_intrinsic_triple(
+    let viewport_size = window.viewport_size();
+    let candidate_key = IntrinsicProbeCacheKey {
+        subtree_revision: ctx
+            .tree
+            .elements
+            .get(&id)
+            .map_or(0, |element| element.subtree_revision),
+        state,
+        probe_style: width_probe.clone(),
+        needed: (needs_min_width, needs_max_width, needs_height),
+        viewport_width: f64::from(f32::from(viewport_size.width)),
+        viewport_height: f64::from(f32::from(viewport_size.height)),
+        scale_factor: window.scale_factor(),
+        rem_size: f32::from(window.rem_size()),
+        inherited_font: inherited_font.clone(),
+        text_transform: text_transform_key(text_transform),
+        wrapping_width: needs_height
+            .then(|| intrinsic_wrapping_width(id, &effective_style))
+            .flatten(),
+        interaction_revision: ctx.interaction_revision,
+        image_revision: ctx.img_image_store.revision(),
+    };
+    if ctx
+        .intrinsic_probe_cache
+        .get(&id)
+        .is_some_and(|entry| entry.key == candidate_key)
+    {
+        let measured = ctx
+            .intrinsic_probe_cache
+            .get(&id)
+            .expect("cache entry was just found")
+            .value;
+        substitute_intrinsic_sizes(style, measured);
+        return;
+    }
+
+    let measured_widths = measure_intrinsic_triple(
         id,
         width_probe,
         (needs_min_width, needs_max_width, false),
@@ -9355,9 +9635,50 @@ fn resolve_intrinsic_keywords(
         window,
         cx,
     );
+    substitute_intrinsic_sizes(style, measured_widths);
+
+    let content_height = if needs_height {
+        // The content height depends on the width this frame resolves to.
+        let mut height_probe = effective_intrinsic_state_style(style, state);
+        neutralize_keywords(&mut height_probe);
+        measure_intrinsic_triple(id, height_probe, (false, false, true), ctx, window, cx)
+            .content_height
+    } else {
+        None
+    };
+    substitute_intrinsic_sizes(
+        style,
+        crate::motion::IntrinsicSize {
+            min_width: None,
+            max_width: None,
+            content_height,
+        },
+    );
+
+    let final_wrapping_width = needs_height
+        .then(|| intrinsic_wrapping_width(id, &effective_intrinsic_state_style(style, state)))
+        .flatten();
+    ctx.intrinsic_probe_cache.insert(
+        id,
+        IntrinsicProbeCacheEntry {
+            key: IntrinsicProbeCacheKey {
+                wrapping_width: final_wrapping_width,
+                ..candidate_key
+            },
+            value: crate::motion::IntrinsicSize {
+                min_width: measured_widths.min_width,
+                max_width: measured_widths.max_width,
+                content_height,
+            },
+        },
+    );
+}
+
+fn substitute_intrinsic_sizes(style: &mut StyleDesc, measured: crate::motion::IntrinsicSize) {
+    use crate::style::DimensionValue as Dim;
 
     fn substitute_width(dim: &mut Option<Dim>, min_width: Option<f64>, max_width: Option<f64>) {
-        let replaced = match dim {
+        let replacement = match dim {
             Some(Dim::MinContent) => min_width.map(Dim::Pixels),
             Some(Dim::MaxContent) => max_width.map(Dim::Pixels),
             Some(Dim::FitContent) => min_width.zip(max_width).map(|(min, max)| Dim::Clamp {
@@ -9374,9 +9695,11 @@ fn resolve_intrinsic_keywords(
                     max: Box::new(Dim::Pixels(max)),
                 })
             }
-            _ => return,
+            _ => None,
         };
-        *dim = replaced;
+        if let Some(replacement) = replacement {
+            *dim = Some(replacement);
+        }
     }
 
     fn substitute_widths(style: &mut StyleDesc, min_width: Option<f64>, max_width: Option<f64>) {
@@ -9396,30 +9719,25 @@ fn resolve_intrinsic_keywords(
             substitute_widths(refinement, min_width, max_width);
         }
     }
-    substitute_widths(style, min_width, max_width);
 
-    if !needs_height {
-        return;
-    }
-    // The content height depends on the width the content wraps at, so the
-    // probe is offered the width this frame resolves to: the element's own
-    // definite width when it has one (the width props above are already
-    // substituted), otherwise the width it last painted at, the same
-    // convention `measure_intrinsic_triple` uses. Before the first paint,
-    // max-content stands in.
-    let mut height_probe = style.clone();
-    neutralize_keywords(&mut height_probe);
-    let crate::motion::IntrinsicSize { content_height, .. } =
-        measure_intrinsic_triple(id, height_probe, (false, false, true), ctx, window, cx);
-    let content_height = content_height.expect("height was requested");
-
-    fn substitute_heights(style: &mut StyleDesc, content_height: f64) {
+    fn substitute_heights(style: &mut StyleDesc, content_height: Option<f64>) {
+        let Some(content_height) = content_height else {
+            return;
+        };
         for dim in [
             &mut style.height,
             &mut style.min_height,
             &mut style.max_height,
         ] {
-            if is_keyword(dim.as_ref()) {
+            if matches!(
+                dim,
+                Some(
+                    Dim::MinContent
+                        | Dim::MaxContent
+                        | Dim::FitContent
+                        | Dim::FitContentLimit { .. }
+                )
+            ) {
                 *dim = Some(Dim::Pixels(content_height));
             }
         }
@@ -9433,10 +9751,12 @@ fn resolve_intrinsic_keywords(
         .into_iter()
         .flatten()
         {
-            substitute_heights(refinement, content_height);
+            substitute_heights(refinement, Some(content_height));
         }
     }
-    substitute_heights(style, content_height);
+
+    substitute_widths(style, measured.min_width, measured.max_width);
+    substitute_heights(style, measured.content_height);
 }
 
 fn default_flex_none_for_parent_layout(style: &mut StyleDesc) {
@@ -10629,6 +10949,9 @@ pub(crate) fn build_host_container(
                     .entry(id)
                     .or_default()
                     .set_hovered(*is_hovered);
+            if interactive_changed {
+                view.interaction_revision = view.interaction_revision.saturating_add(1);
+            }
             if transition_changed || interactive_changed {
                 cx.notify();
             }
@@ -10655,6 +10978,9 @@ pub(crate) fn build_host_container(
                             .entry(id)
                             .or_default()
                             .set_active(true);
+                    if interactive_changed {
+                        view.interaction_revision = view.interaction_revision.saturating_add(1);
+                    }
                     if transition_changed || interactive_changed {
                         cx.notify();
                     }
@@ -10674,6 +11000,9 @@ pub(crate) fn build_host_container(
                             .entry(id)
                             .or_default()
                             .set_active(false);
+                    if interactive_changed {
+                        view.interaction_revision = view.interaction_revision.saturating_add(1);
+                    }
                     if transition_changed || interactive_changed {
                         cx.notify();
                     }
@@ -10693,6 +11022,9 @@ pub(crate) fn build_host_container(
                             .entry(id)
                             .or_default()
                             .set_active(false);
+                    if interactive_changed {
+                        view.interaction_revision = view.interaction_revision.saturating_add(1);
+                    }
                     if transition_changed || interactive_changed {
                         cx.notify();
                     }

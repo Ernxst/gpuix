@@ -287,3 +287,105 @@ describe("intrinsic and viewport lengths (issue #300)", () => {
     }
   })
 })
+
+describe("intrinsic keywords in state refinements (issue #313)", () => {
+  it("measures a hovered refinement at its effective padding", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    try {
+      root.render(
+        <div style={{ display: "flex", alignItems: "flex-start" }}>
+          <div
+            data-testid="hover-target"
+            style={{
+              display: "flex",
+              width: "max-content",
+              hover: { width: "max-content", padding: 20 },
+            }}
+          >
+            <div style={{ width: 100, height: 20 }} />
+          </div>
+        </div>,
+      )
+
+      const target = root.renderer.findByTestId("hover-target")!
+      expect(boundsFor(root.renderer, "hover-target").width).toBeCloseTo(100, 4)
+
+      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      expect(boundsFor(root.renderer, "hover-target").width).toBeCloseTo(140, 4)
+
+      root.renderer.nativeSimulateMouseMove(-1, -1)
+      expect(boundsFor(root.renderer, "hover-target").width).toBeCloseTo(100, 4)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("measures a focused refinement at its effective padding", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    try {
+      root.render(
+        <div style={{ display: "flex", alignItems: "flex-start" }}>
+          <div
+            data-testid="focus-target"
+            tabIndex={0}
+            style={{
+              display: "flex",
+              width: "max-content",
+              focus: { width: "max-content", padding: 12 },
+            }}
+          >
+            <div style={{ width: 100, height: 20 }} />
+          </div>
+        </div>,
+      )
+
+      const target = root.renderer.findByTestId("focus-target")!
+      root.renderer.focusElement(target.id)
+      expect(boundsFor(root.renderer, "focus-target").width).toBeCloseTo(124, 4)
+    } finally {
+      root.unmount()
+    }
+  })
+})
+
+describe("intrinsic keyword probe cache (issue #310)", () => {
+  it("reuses unchanged probes and invalidates on content and interaction changes", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    try {
+      const render = (label: string) => {
+        root.render(
+          <div style={{ display: "flex", alignItems: "flex-start" }}>
+            <div
+              data-testid="cache-target"
+              style={{ display: "flex", width: "max-content", hover: { width: "max-content" } }}
+            >
+              <text>{label}</text>
+            </div>
+          </div>,
+        )
+      }
+
+      render("a")
+      const initial = root.renderer.getIntrinsicProbeLayoutCount()
+      root.renderer.flush()
+      root.renderer.flush()
+      expect(root.renderer.getIntrinsicProbeLayoutCount()).toBe(initial)
+
+      render("a much longer child text")
+      const afterText = root.renderer.getIntrinsicProbeLayoutCount()
+      expect(afterText).toBeGreaterThan(initial)
+
+      const target = root.renderer.findByTestId("cache-target")!
+      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      const afterHover = root.renderer.getIntrinsicProbeLayoutCount()
+      expect(afterHover).toBeGreaterThan(afterText)
+
+      root.renderer.nativeSimulateMouseMove(-1, -1)
+      expect(root.renderer.getIntrinsicProbeLayoutCount()).toBeGreaterThan(afterHover)
+    } finally {
+      root.unmount()
+    }
+  })
+})
