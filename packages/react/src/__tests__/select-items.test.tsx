@@ -175,9 +175,14 @@ describeNative("Select item registration", () => {
 
     testRoot.render(<Demo />)
 
-    // The closed content panel is `display: none`, which builds no children
-    // beneath it in the native renderer (see display-none.test.tsx).
-    expect(testRoot.renderer.findByTestId("styled-wrapper")).toBeUndefined()
+    // The wrapper's own style still asks for 120x40 - Select doesn't own that
+    // element - but the closed content panel is `display: none`, which builds
+    // no children beneath it in the native renderer (see
+    // display-none.test.tsx): the wrapper's host node exists in the tree, but
+    // nothing under the hidden panel is laid out or painted, so it has no bounds.
+    const wrapper = testRoot.renderer.findByTestId("styled-wrapper")
+    expect(wrapper).toBeDefined()
+    expect(testRoot.renderer.getElementBounds(wrapper!.id)).toBeNull()
 
     testRoot.renderer.nativeSimulateClick(30, 25)
     testRoot.renderer.simulateKeystrokes("down")
