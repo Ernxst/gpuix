@@ -99,10 +99,14 @@ function requestNativeFrame(slot: FrameClockSlot): void {
         }
 
         current.requestPending = false
-        const callbacks = [...current.callbacks.values()]
-        current.callbacks.clear()
 
-        for (const entry of callbacks) {
+        // Snapshot the queue so a callback registered during delivery waits
+        // for the next frame, but consult the live map per entry: a
+        // cancelAnimationFrame issued by an earlier callback in this frame
+        // removes its sibling, as the HTML animation-frame steps do.
+        for (const [id, entry] of [...current.callbacks]) {
+          if (current.callbacks.get(id) !== entry) continue
+          current.callbacks.delete(id)
           try {
             entry.callback(timestamp)
           } catch (error) {
