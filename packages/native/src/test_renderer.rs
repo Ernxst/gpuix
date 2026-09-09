@@ -34,7 +34,7 @@ use crate::renderer::{
     take_style_diagnostics_for_reporting, to_element_id, validate_canvas_target,
     AnimationFrameCallback, CanvasImageLoadState, DebugFrameOverlayStats, EventCallback,
     FocusDirection, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView, MenuSpec,
-    PendingStyleDiagnostics, WindowSize, MAX_SETTLE_PASSES,
+    PendingStyleDiagnostics, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -784,36 +784,23 @@ impl TestGpuixRenderer {
     /// notifying the view. Pure reads use this to observe the latest frame
     /// while leaving an unchanged window alone.
     ///
-    /// Draws up to `MAX_SETTLE_PASSES` times, parking between passes so async
-    /// work the draw spawned (an intrinsic image load, for example) can dirty
-    /// layout again before the next pass checks it. A read of an already
-    /// clean window still parks once afterwards, matching the unconditional
-    /// park this replaced, so pending async work advances even when nothing
-    /// needed drawing.
+    /// Shares `renderer::settle_for_read`'s pass budget and dirtiness check;
+    /// each pass here is its own `update_window` call for the same reason it
+    /// is in production — a deferred effect only flushes when that update
+    /// finishes — followed by a park so async work the draw spawned (an
+    /// intrinsic image load, for example) can dirty layout again before the
+    /// next pass checks it. A read of an already clean window still parks
+    /// once, matching the unconditional park this replaced, so pending async
+    /// work advances even when nothing needed drawing.
     fn settle_for_read(&self) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
-            let mut drew_any = false;
-            for _ in 0..MAX_SETTLE_PASSES {
+            crate::renderer::settle_for_read(|pass| {
                 let drew = cx
-                    .update_window(window, |_, window, app| {
-                        if !window.is_dirty() {
-                            return false;
-                        }
-                        window.draw(app).clear(app);
-                        true
-                    })
+                    .update_window(window, |_, window, app| pass(window, app))
                     .map_err(|error| Error::from_reason(error.to_string()))?;
-                if !drew {
-                    break;
-                }
-                drew_any = true;
-                // Let async work spawned by the draw invalidate the next pass.
                 cx.run_until_parked();
-            }
-            if !drew_any {
-                cx.run_until_parked();
-            }
-            Ok(())
+                Ok(drew)
+            })
         })?;
         self.surface_canvas_preparation_diagnostics()
     }

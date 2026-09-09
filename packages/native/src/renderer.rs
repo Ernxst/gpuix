@@ -73,16 +73,37 @@ pub(crate) const MAX_SETTLE_PASSES: usize = 3;
 /// rather than `needs_frame()` for the same reason the constant above does:
 /// a pending next-frame callback is future work, not evidence that the last
 /// draw left something unsettled.
-pub(crate) fn settle_for_read(window: &mut gpui::Window, cx: &mut gpui::App) {
+///
+/// `run_pass` must perform its own top-level window update per call — a
+/// fresh `update_window`-style call per invocation, never one pass looping
+/// inside another's update — because effects deferred with `cx.defer`/
+/// `cx.defer_in` (the autofocus scroll reveal, for example) only flush once
+/// the outermost update finishes. Passes sharing one update would draw the
+/// reveal's target frame but never see the deferred scroll it scheduled.
+pub(crate) fn settle_for_read<E>(
+    mut run_pass: impl FnMut(
+        &mut dyn FnMut(&mut gpui::Window, &mut gpui::App) -> bool,
+    ) -> std::result::Result<bool, E>,
+) -> std::result::Result<(), E> {
     for _ in 0..MAX_SETTLE_PASSES {
-        if !window.is_dirty() {
-            return;
+        let drew = run_pass(&mut |window, cx| {
+            if !window.is_dirty() {
+                return false;
+            }
+            window.draw(cx).clear(cx);
+            true
+        })?;
+        if !drew {
+            return Ok(());
         }
-        window.draw(cx).clear(cx);
     }
-    if window.is_dirty() {
+    // The loop above only knows a pass drew, not whether the window is still
+    // dirty afterwards; probe once more, without drawing, to decide the log.
+    let still_dirty = run_pass(&mut |window, _cx| window.is_dirty())?;
+    if still_dirty {
         log::debug!("settle_for_read: window still dirty after {MAX_SETTLE_PASSES} passes");
     }
+    Ok(())
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -1122,7 +1143,7 @@ fn update_window_without_view<R>(
 
 #[cfg(target_os = "macos")]
 fn draw_window_for_automation_read() -> Result<()> {
-    update_window_without_view(|window, cx| settle_for_read(window, cx))
+    settle_for_read(|pass| update_window_without_view(move |window, cx| pass(window, cx)))
 }
 
 /// Queue a real AppKit mouse click. This is deliberately distinct from the
@@ -1406,7 +1427,9 @@ fn draw_ui_window_for_read(
     window: gpui::WindowHandle<GpuixView>,
     cx: &mut gpui::AsyncApp,
 ) -> anyhow::Result<()> {
-    gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| settle_for_read(window, cx))
+    settle_for_read(|pass| {
+        gpui::AnyWindowHandle::from(window).update(cx, move |_view, window, cx| pass(window, cx))
+    })
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -4968,7 +4991,7 @@ fn update_web_window<R>(
 /// overwritten by it.
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 fn draw_web_window_for_read() -> Result<(), wasm_bindgen::JsValue> {
-    update_web_window(|window, cx| settle_for_read(window, cx))
+    settle_for_read(|pass| update_web_window(move |window, cx| pass(window, cx)))
 }
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -7570,6 +7593,10 @@ impl GpuixView {
         for (id, handle) in pending_auto_focus {
             handle.focus(window, cx);
             self.pending_autofocus_reveals.push(id);
+            // A plain `cx.notify()` here would be dropped: this runs during
+            // `Window::draw`, which clears dirty state up front and ignores
+            // invalidation until the draw finishes. Defer past the draw so
+            // the next pass picks up `pending_autofocus_reveals`.
             cx.defer_in(window, |_view, _window, cx| {
                 cx.notify();
             });
@@ -7831,6 +7858,10 @@ impl gpui::Render for GpuixView {
                 }));
         }
 
+        // Drained here, one draw after the mount that queued it, so the
+        // anchor element already has `last_bounds` to scroll against. Also
+        // ahead of the tree lock below: `reveal_element` takes that same
+        // mutex, so draining after it would deadlock.
         for id in std::mem::take(&mut self.pending_autofocus_reveals) {
             let focused = self
                 .focus_handles
