@@ -1601,6 +1601,25 @@ export interface PublicInstance {
   parentId: number | null
   getAttribute(name: string): string | null
   /**
+   * Where `other` sits relative to this node, matching
+   * `Node.compareDocumentPosition()`'s bitmask: `DOCUMENT_POSITION_PRECEDING`,
+   * `_FOLLOWING`, `_CONTAINS`, `_CONTAINED_BY`, `_DISCONNECTED`, and
+   * `_IMPLEMENTATION_SPECIFIC`, exported from `@gpuix/react`. Same node
+   * returns 0. There is no `Node` global on either GPUIX target — the browser
+   * mirror runs this same implementation on gpuix instances too, not real DOM
+   * nodes — so this method, not `instanceof Node`, is how a ref's tree
+   * position is compared here.
+   *
+   * Two top-level siblings mounted directly into the same root are the one
+   * pair this cannot place relative to each other: it reports them as
+   * disconnected, since nothing here tracks an ordered list of a root's own
+   * top-level children.
+   *
+   * Throws `TypeError` when `other` was not obtained from a ref or the render
+   * tree.
+   */
+  compareDocumentPosition(other: PublicInstance): number
+  /**
    * Returns the current layout bounds in logical window coordinates, relative
    * to the window's content origin. This forces the committed tree through a
    * rendered-state read before returning; it is not a cached React layout.

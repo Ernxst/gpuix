@@ -2,12 +2,166 @@
 
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+// From "../dom-position.js", not "../reconciler/host-config.js": host-config.ts
+// still sits on its own module cycle (host-config -> event-registry ->
+// reconciler -> host-config) whenever something imports it directly as the
+// first module to touch that cycle, crashing reconciler.ts's top-level
+// `ReactReconciler(hostConfig)` call with "Cannot access 'hostConfig' before
+// initialization" - confirmed by actually importing host-config.js first
+// here. dom-position.ts has no imports of its own, so which of these two
+// import statements comes first genuinely does not matter.
+import {
+  DOCUMENT_POSITION_CONTAINED_BY,
+  DOCUMENT_POSITION_CONTAINS,
+  DOCUMENT_POSITION_DISCONNECTED,
+  DOCUMENT_POSITION_FOLLOWING,
+  DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC,
+  DOCUMENT_POSITION_PRECEDING,
+} from "../dom-position.js"
 import { createRoot, flushSync } from "../reconciler/reconciler.js"
 import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { NativeRenderer, PublicInstance } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+
+/** A minimal mock renderer, needing no native binary, for tree-shape-only assertions. */
+function createMockRenderer(): NativeRenderer {
+  return {
+    applyBatch: vi.fn(() => []),
+    setStrictStyles: vi.fn(),
+  }
+}
+
+describe("compareDocumentPosition", () => {
+  it("returns 0 for the same node", () => {
+    const ref = React.createRef<PublicInstance>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+
+    try {
+      flushSync(() => root.render(<div ref={ref} />))
+      expect(ref.current!.compareDocumentPosition(ref.current!)).toBe(0)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("orders siblings by PRECEDING/FOLLOWING", () => {
+    const first = React.createRef<PublicInstance>()
+    const second = React.createRef<PublicInstance>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+
+    try {
+      flushSync(() =>
+        root.render(
+          <div>
+            <div ref={first} />
+            <div ref={second} />
+          </div>
+        )
+      )
+
+      expect(first.current!.compareDocumentPosition(second.current!)).toBe(
+        DOCUMENT_POSITION_FOLLOWING
+      )
+      expect(second.current!.compareDocumentPosition(first.current!)).toBe(
+        DOCUMENT_POSITION_PRECEDING
+      )
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("marks an ancestor as CONTAINS|PRECEDING and a descendant as CONTAINED_BY|FOLLOWING", () => {
+    const parent = React.createRef<PublicInstance>()
+    const child = React.createRef<PublicInstance>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+
+    try {
+      flushSync(() =>
+        root.render(
+          <div ref={parent}>
+            <div ref={child} />
+          </div>
+        )
+      )
+
+      expect(child.current!.compareDocumentPosition(parent.current!)).toBe(
+        DOCUMENT_POSITION_CONTAINS | DOCUMENT_POSITION_PRECEDING
+      )
+      expect(child.current!.compareDocumentPosition(parent.current!)).toBe(10)
+      expect(parent.current!.compareDocumentPosition(child.current!)).toBe(
+        DOCUMENT_POSITION_CONTAINED_BY | DOCUMENT_POSITION_FOLLOWING
+      )
+      expect(parent.current!.compareDocumentPosition(child.current!)).toBe(20)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("orders nested descendants by their branch under the common ancestor", () => {
+    const leftBranch = React.createRef<PublicInstance>()
+    const rightBranch = React.createRef<PublicInstance>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+
+    try {
+      flushSync(() =>
+        root.render(
+          <div>
+            <div>
+              <div ref={leftBranch} />
+            </div>
+            <div>
+              <div ref={rightBranch} />
+            </div>
+          </div>
+        )
+      )
+
+      expect(leftBranch.current!.compareDocumentPosition(rightBranch.current!)).toBe(
+        DOCUMENT_POSITION_FOLLOWING
+      )
+      expect(rightBranch.current!.compareDocumentPosition(leftBranch.current!)).toBe(
+        DOCUMENT_POSITION_PRECEDING
+      )
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("marks unrelated roots as DISCONNECTED with a stable, reciprocal order", () => {
+    const firstRef = React.createRef<PublicInstance>()
+    const secondRef = React.createRef<PublicInstance>()
+    const firstRoot = createRoot(createMockRenderer(), { strictStyles: false })
+    const secondRoot = createRoot(createMockRenderer(), { strictStyles: false })
+
+    try {
+      flushSync(() => firstRoot.render(<div ref={firstRef} />))
+      flushSync(() => secondRoot.render(<div ref={secondRef} />))
+
+      const forward = firstRef.current!.compareDocumentPosition(secondRef.current!)
+      const backward = secondRef.current!.compareDocumentPosition(firstRef.current!)
+
+      expect(forward & DOCUMENT_POSITION_DISCONNECTED).toBe(DOCUMENT_POSITION_DISCONNECTED)
+      expect(forward & DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC).toBe(
+        DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC
+      )
+      // Exactly one direction bit each, and the two calls disagree on it -
+      // a consistent order within this process, as the DOM guarantees for
+      // disconnected nodes.
+      expect(forward & (DOCUMENT_POSITION_PRECEDING | DOCUMENT_POSITION_FOLLOWING)).not.toBe(0)
+      expect(forward & (DOCUMENT_POSITION_PRECEDING | DOCUMENT_POSITION_FOLLOWING)).not.toBe(
+        backward & (DOCUMENT_POSITION_PRECEDING | DOCUMENT_POSITION_FOLLOWING)
+      )
+
+      // Calling it again gives the same answer within this process.
+      expect(firstRef.current!.compareDocumentPosition(secondRef.current!)).toBe(forward)
+    } finally {
+      firstRoot.unmount()
+      secondRoot.unmount()
+    }
+  })
+})
 
 describe("getBoundingClientRect without a painted box", () => {
   it("reports an all-zero rect rather than nothing", () => {

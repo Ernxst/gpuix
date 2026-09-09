@@ -1535,6 +1535,19 @@ element with no painted box reports an all-zero rect, as the DOM does. Use
 `getBounds()` when the distinction between "no box" and "a zero box" matters;
 it returns `null` for the former.
 
+`ref.current.compareDocumentPosition(other)` matches
+`Node.compareDocumentPosition()`: it returns the same bitmask a browser does —
+`DOCUMENT_POSITION_PRECEDING`, `_FOLLOWING`, `_CONTAINS`, `_CONTAINED_BY`,
+`_DISCONNECTED`, and `_IMPLEMENTATION_SPECIFIC` — exported as constants from
+`@gpuix/react`. The same node returns `0`; an ancestor/descendant pair sets
+`_CONTAINS`/`_CONTAINED_BY` alongside `_PRECEDING`/`_FOLLOWING`; unrelated
+trees set `_DISCONNECTED` plus `_IMPLEMENTATION_SPECIFIC` and a pick between
+them that stays consistent for the life of the process, as the DOM guarantees.
+There is no `Node` global on either GPUIX target — the browser mirror runs
+this same implementation on gpuix instances too, not real DOM nodes — so this
+method, not `instanceof Node`, is how code shared with the web compares two
+refs' tree positions.
+
 Only `overflow: "scroll"` / `"auto"` elements and `<virtual-list>` are scroll
 containers here. Everything else — **including `overflow: "hidden"`, which the web does
 treat as a programmatically scrollable container** — reports its viewport for
@@ -2710,9 +2723,12 @@ menu. Closing it restores focus to the trigger. Disabled items are skipped.
 its element tree, so wrapping `Item` in your own component (for a shared label
 layout, for example) still works. Content stays mounted while the Select is
 closed - kept in a clipped, zero-size box rather than removed - so a value can
-resolve its label before the Select has ever opened. Item order is document
-order at mount; an item added later than its siblings is appended rather than
-inserted where it appears in JSX.
+resolve its label before the Select has ever opened. Item order follows
+document position, re-derived after each commit rather than fixed at
+registration time, so an item mounted later than its siblings - or moved by
+React's own reconciliation - still navigates where it currently sits in JSX.
+A closed Select keeps each item's `display: "none"` placeholder in the tree so
+that position stays current even while nothing paints.
 
 ### Style Combobox and Tooltip the same way
 
