@@ -5075,7 +5075,7 @@ either wiring registers.
 | `toHaveAccessibleDescription(matcher?)` | Its computed accessible description |
 | `toHaveRole(role)` | Its computed role, authored or implicit |
 | `toHaveAttribute(name, value?)` | The attribute it was given, by its DOM name |
-| `await toMatchScreenshot(name?, options?)` | The window, or the element's box, against a stored golden |
+| `await toMatchScreenshot(name?, options?)` | The window, or the element's box, against a stored golden; native transitions and animations are settled by default |
 
 Every matcher re-resolves the element against its renderer first, so an element
 captured before a rerender reports current state — the same contract
@@ -5355,10 +5355,21 @@ files should rename them or pass `resolveScreenshotPath`):
 ${root}/${testFileDirectory}/__screenshots__/${testFileName}/${arg}${ext}
 ```
 
-Both knobs are options:
+`toMatchScreenshot` finishes native style transitions and `motion` animations
+before capturing, so an assertion compares the settled picture rather than a
+wall-clock sample from the middle of a tween. Pass `animations: 'allow'` to
+capture the current frame instead. Settling pauses the renderer's animation
+clock, flushes each frame, and advances it in 16ms steps until no active track
+remains or a 10,000ms clock budget is exhausted. On exhaustion the matcher
+warns once with the target and remaining count, then captures anyway. If the
+clock was running before the assertion it resumes afterward; advanced time is
+not rewound.
+
+Both animation handling and comparator knobs are options:
 
 ```ts
 await expect(screen).toMatchScreenshot('panel', {
+  animations: 'disabled', // finish native animations first (default)
   comparatorOptions: {
     tolerance: 2,            // per-channel delta a pixel may differ by (default 0)
     differingPixelBudget: 0.01, // fraction of pixels allowed past it (default 0)
@@ -5371,16 +5382,17 @@ await expect(screen).toMatchScreenshot('panel', {
 
 A suite that aligns every golden with a browser project's layout does not
 repeat that lambda per call: `configureScreenshots` (exported beside
-`gpuixMatchers` from `@gpuix/react/testing/matchers`) sets a suite-wide
-default from a vitest setup file, with vitest's precedence — a per-call
-`resolveScreenshotPath` wins over the configured default, which wins over the
-built-in path:
+`gpuixMatchers` from `@gpuix/react/testing/matchers`) sets suite-wide defaults
+from a vitest setup file. Its `animations` default follows the same
+per-call-over-suite precedence, while a per-call `resolveScreenshotPath` wins
+over the configured resolver, which wins over the built-in path:
 
 ```ts
 // vitest setup file
 import { configureScreenshots } from '@gpuix/react/testing/matchers'
 
 configureScreenshots({
+  animations: 'disabled',
   resolveScreenshotPath: ({ root, testFileDirectory, testFileName, arg, ext, platform }) =>
     path.join(root, testFileDirectory, '__goldens__', testFileName, `${arg}-${platform}${ext}`),
 })
@@ -5420,11 +5432,12 @@ failure message names the golden, the capture, and the diff in vitest's layout.
 Gitignore `__diff_output__/` — it sits inside the committed screenshots tree,
 where vitest's attachments directory is ignored by default.
 
-**There is no capture-stability loop.** vitest re-screenshots a live page until
-two frames agree, because a browser can still be animating. `captureScreenshot`
-draws the committed tree synchronously and reproduces itself exactly, so a
-capture is taken once; the "Could not capture a stable screenshot" outcome does
-not exist here.
+**Capture settling is native, not a repeated-image heuristic.** The matcher
+asks the renderer whether style-transition and `motion` tracks are still
+active, advances its animation clock, and captures once the tracks settle.
+`captureScreenshot()` remains a raw current-frame capture for tests that need
+to inspect an in-flight transition. An infinite animation can exhaust the
+10,000ms budget; the matcher warns and captures the frame at that budget.
 
 **One comparator, and it is the native one.** `comparatorName`, custom
 comparators, `screenshotOptions` (masking, `fullPage`, caret handling), and

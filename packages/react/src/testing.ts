@@ -165,6 +165,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   requestFrame(): void
   setReducedMotion(enabled: boolean): void
   getStyleTransitionCount(): number
+  getActiveAnimationCount(): number
   getIntrinsicProbeLayoutCount(): number
   getStyleTransitionFrameRequestCount(): number
   drainEvents(): EventPayload[]
@@ -236,6 +237,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getRetainedElementCount(): number
   getElementBounds(elementId: number): ElementBounds | null
   clockPause(): number
+  isClockPaused(): boolean
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
   clockResume(): number
@@ -978,6 +980,11 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getStyleTransitionCount()
   }
 
+  /** Number of style-transition and motion tracks still animating now. */
+  getActiveAnimationCount(): number {
+    return this.native.getActiveAnimationCount()
+  }
+
   /** Number of layout passes spent measuring intrinsic keyword sizes. */
   getIntrinsicProbeLayoutCount(): number {
     return this.native.getIntrinsicProbeLayoutCount()
@@ -1493,6 +1500,10 @@ export class TestRenderer implements NativeRenderer {
 
   clockPause(): number {
     return this.native.clockPause()
+  }
+
+  isClockPaused(): boolean {
+    return this.native.isClockPaused()
   }
 
   clockSet(nowMs: number): number {

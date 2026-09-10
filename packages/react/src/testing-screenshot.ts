@@ -31,6 +31,7 @@ import {
 } from "./testing-png.js"
 import {
   TestRenderer,
+  describeElement,
   rendererOf,
   type ImageComparisonResult,
   type TestElement,
@@ -72,6 +73,12 @@ export interface ScreenshotPathContext {
 export type ResolveScreenshotPath = (context: ScreenshotPathContext) => string
 
 export interface ToMatchScreenshotOptions {
+  /**
+   * Whether to finish native transitions and animations before capturing.
+   *
+   * @default "disabled"
+   */
+  animations?: "disabled" | "allow"
   comparatorOptions?: ScreenshotComparatorOptions
   /**
    * Overrides the golden's path, for this one assertion. Wins over a
@@ -84,6 +91,8 @@ export interface ToMatchScreenshotOptions {
 
 /** The suite-wide defaults `configureScreenshots` accepts. */
 export interface ConfigureScreenshotsOptions {
+  /** Default animation handling for every `toMatchScreenshot` call. */
+  animations?: "disabled" | "allow"
   /**
    * Default `resolveScreenshotPath` for every `toMatchScreenshot` call that
    * does not pass its own.
@@ -448,6 +457,53 @@ function capture(target: CaptureTarget, directory: string): { bytes: Buffer; fil
   return { bytes, file }
 }
 
+const ANIMATION_SETTLE_STEP_MS = 16
+const ANIMATION_SETTLE_BUDGET_MS = 10_000
+
+/**
+ * Capture after native transitions and motion have reached a settled frame.
+ * The clock is deliberately not rewound: finishing a transition is part of
+ * the assertion's contract, and a running clock resumes from that advanced
+ * time after the capture.
+ */
+function captureWithAnimationSettled(
+  target: CaptureTarget,
+  directory: string,
+  animations: "disabled" | "allow"
+): { bytes: Buffer; file: string } {
+  if (animations === "allow") return capture(target, directory)
+
+  const wasPaused = target.renderer.isClockPaused()
+  target.renderer.clockPause()
+  let elapsed = 0
+
+  try {
+    while (true) {
+      target.renderer.flush()
+      const active = target.renderer.getActiveAnimationCount()
+      if (active === 0) break
+
+      if (elapsed >= ANIMATION_SETTLE_BUDGET_MS) {
+        const subject =
+          target.element === null ? "window" : describeElement(target.renderer, target.element)
+        console.warn(
+          `[gpuix] toMatchScreenshot could not settle animations for ${subject}; ` +
+            `${active} active animation(s) remain after ${ANIMATION_SETTLE_BUDGET_MS}ms ` +
+            "of clock time"
+        )
+        break
+      }
+
+      target.renderer.advanceAsyncClock(ANIMATION_SETTLE_STEP_MS)
+      elapsed += ANIMATION_SETTLE_STEP_MS
+    }
+
+    return capture(target, directory)
+  } finally {
+    if (!wasPaused) target.renderer.clockResume()
+  }
+}
+
 function write(file: string, bytes: Buffer): void {
   mkdirSync(path.dirname(file), { recursive: true })
   writeFileSync(file, bytes)
@@ -558,6 +614,7 @@ export async function toMatchScreenshot(
 
   const options: ToMatchScreenshotOptions =
     (typeof nameOrOptions === "object" ? nameOrOptions : maybeOptions) ?? {}
+  const animations = options.animations ?? screenshotDefaults.animations ?? "disabled"
   const comparator = resolveComparatorOptions(options.comparatorOptions)
   // vitest bumps the per-test counter on every call, named or not, so an
   // unnamed call after two named ones is "<test> 3" there — mirrored here by
@@ -579,7 +636,11 @@ export async function toMatchScreenshot(
   const diffPaths = screenshotDiffPaths(referencePath)
 
   try {
-    const { bytes: actualBytes, file: actualFile } = capture(target, scratch)
+    const { bytes: actualBytes, file: actualFile } = captureWithAnimationSettled(
+      target,
+      scratch,
+      animations
+    )
     const actualSize = readPngSize(actualBytes, "screenshot")
     const referenceBytes = existsSync(referencePath) ? readFileSync(referencePath) : null
     const referenceSize = referenceBytes === null ? null : readPngSize(referenceBytes, referencePath)

@@ -211,6 +211,10 @@ impl AutomationClock {
         now.saturating_duration_since(inner.origin).as_secs_f64() * 1000.0
     }
 
+    pub fn is_paused(&self) -> bool {
+        matches!(self.inner.lock().unwrap().mode, ClockMode::Frozen { .. })
+    }
+
     pub fn set_ms(&self, now_ms: f64) -> f64 {
         let mut inner = self.inner.lock().unwrap();
         let now = inner.origin + duration_ms(now_ms);

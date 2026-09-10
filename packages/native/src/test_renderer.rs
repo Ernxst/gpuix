@@ -1014,6 +1014,35 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Number of style-transition and motion tracks that are still active at
+    /// the renderer's current animation-clock time.
+    #[napi]
+    pub fn get_active_animation_count(&self) -> Result<u32> {
+        self.settle_for_read()?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                let view = view.read(app);
+                let now = view.clock.now();
+                let reduce_motion = app.reduce_motion();
+                let transitions = view
+                    .transition_states
+                    .values()
+                    .filter(|state| state.frame(now, reduce_motion).active)
+                    .count();
+                let motions = view
+                    .motion_states
+                    .values()
+                    .filter(|state| {
+                        state.is_valid() && state.frame(now, reduce_motion).active
+                    })
+                    .count();
+                u32::try_from(transitions.saturating_add(motions)).unwrap_or(u32::MAX)
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
     /// Number of intrinsic probe layouts performed by the offscreen renderer.
     #[napi]
     pub fn get_intrinsic_probe_layout_count(&self) -> Result<u32> {
@@ -2327,6 +2356,15 @@ impl TestGpuixRenderer {
                 .map_err(|e| Error::from_reason(e.to_string()))?;
             cx.run_until_parked();
             Ok(now_ms)
+        })
+    }
+
+    #[napi]
+    pub fn is_clock_paused(&self) -> Result<bool> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| view.read(app).clock.is_paused())
+                .map_err(|e| Error::from_reason(e.to_string()))
         })
     }
 
