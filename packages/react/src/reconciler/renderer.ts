@@ -444,11 +444,40 @@ function formatRuntimeError(
 /** The overlay's element tree, built directly against gpuix host elements
  *  rather than through a component module — it has to render with nothing
  *  else (including the app's own tree) still standing. */
+function thrownToError(thrown: unknown): Error | string {
+  if (thrown instanceof Error) return thrown
+  if (typeof thrown === "string") return thrown
+  try {
+    return String(thrown)
+  } catch {
+    return "Unknown error"
+  }
+}
+
+const OVERLAY_MONO =
+  process.platform === "win32"
+    ? "Consolas"
+    : process.platform === "darwin"
+      ? "Menlo"
+      : "DejaVu Sans Mono"
+
+function overlayStackLines(error: { message: string; stack: string }): string[] {
+  const lines = error.stack.length === 0 ? [error.message] : error.stack.split("\n")
+  const frames = lines.flatMap((line) => {
+    const trimmed = line.trim()
+    if (trimmed.length === 0) return []
+    if (trimmed === error.message) return []
+    if (trimmed === `Error: ${error.message}`) return []
+    if (/^at\s/.test(line)) return [`    ${line}`]
+    return [line]
+  })
+  return frames.length > 0 ? frames : [error.message]
+}
 function runtimeErrorOverlay(
   error: { message: string; stack: string },
   onReload: () => void
 ): ReactNode {
-  const lines = error.stack.length === 0 ? [error.message] : error.stack.split("\n")
+  const lines = overlayStackLines(error)
   return React.createElement(
     "div",
     {
@@ -459,14 +488,23 @@ function runtimeErrorOverlay(
         width: "100%",
         height: "100%",
         padding: 32,
-        gap: 16,
-        backgroundColor: "#1c0b0b",
+        paddingBottom: 40,
+        gap: 20,
+        backgroundColor: "#000000e6",
+        pointerEvents: "auto",
       },
     },
     React.createElement(
       "text",
-      { style: { fontSize: 22, fontWeight: 700, color: "#f87171" } },
-      "Runtime error"
+      {
+        style: {
+          fontSize: 32,
+          fontWeight: 700,
+          color: "#e83b46",
+          flexShrink: 0,
+        },
+      },
+      "Uncaught runtime errors:",
     ),
     React.createElement(
       "div",
@@ -475,19 +513,45 @@ function runtimeErrorOverlay(
         style: {
           display: "flex",
           flexDirection: "column",
-          flexGrow: 1,
+          flexGrow: 0,
+          flexShrink: 1,
           minHeight: 0,
           overflowY: "scroll",
-          gap: 2,
+          padding: 16,
+          paddingBottom: 24,
+          backgroundColor: "#ce11261a",
+          borderRadius: 4,
+          gap: 4,
         },
       },
+      React.createElement(
+        "text",
+        {
+          style: {
+            fontSize: 20,
+            fontWeight: 700,
+            color: "#e83b46",
+            marginBottom: 12,
+            flexShrink: 0,
+          },
+        },
+        error.message,
+      ),
       ...lines.map((line) =>
         React.createElement(
           "text",
-          { style: { fontSize: 13, color: "#fecaca" } },
-          line === "" ? " " : line
-        )
-      )
+          {
+            style: {
+              fontSize: 13,
+              lineHeight: 20,
+              color: "#fccfcf",
+              fontFamily: OVERLAY_MONO,
+              whiteSpace: "nowrap",
+            },
+          },
+          line,
+        ),
+      ),
     ),
     React.createElement(
       "div",
@@ -500,17 +564,17 @@ function runtimeErrorOverlay(
           padding: 10,
           paddingLeft: 16,
           paddingRight: 16,
-          borderRadius: 8,
-          backgroundColor: "#7f1d1d",
-          hover: { backgroundColor: "#991b1b" },
+          borderRadius: 4,
+          backgroundColor: "#e83b46",
+          hover: { backgroundColor: "#c92a34" },
         },
       },
       React.createElement(
         "text",
-        { style: { fontSize: 14, fontWeight: 600, color: "#fee2e2" } },
-        "Reload"
-      )
-    )
+        { style: { fontSize: 14, fontWeight: 700, color: "#ffffff" } },
+        "Reload",
+      ),
+    ),
   )
 }
 

@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 anyhow = "1"
+base64 = "0.22"
 csscolorparser = "0.8.3"
 log = "0.4"
 env_logger = "0.11"
@@ -49,6 +50,13 @@ gpui_platform = { path = "../../zed/crates/gpui_platform", default-features = fa
 reqwest_client = { path = "../../zed/crates/reqwest_client" }
 reqwest = { git = "https://github.com/zed-industries/reqwest.git", rev = "c15662463bda39148ba154100dd44d3fba5873a4", default-features = false, features = ["charset", "http2", "macos-system-configuration", "multipart", "rustls-tls-native-roots", "socks", "stream"], package = "zed-reqwest", version = "0.12.15-zed" }
 tokio = { version = "1", features = ["net"] }
+http_client = { path = "../../zed/crates/http_client" }
+semver = "1"
+minisign-verify = "0.2"
+tempfile = "3"
+percent-encoding = "2"
+time = { version = "0.3", features = ["parsing", "formatting"] }
+url = { version = "2", features = ["serde"] }
 
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
 napi = { version = "3", features = ["napi8", "serde-json"] }
@@ -79,6 +87,8 @@ objc = "0.2"
 # Same semver line GPUI depends on (zed/Cargo.toml); the workspace lockfile
 # unifies both to one resolved version.
 raw-window-handle = "0.6"
+tar = "0.4"
+flate2 = "1"
 # Production uses the embedded AppKit loop; tests use the native Metal renderer.
 gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, features = ["font-kit"] }
 
@@ -117,3 +127,21 @@ path = "examples/bench_serde.rs"
 
 [profile.release]
 lto = true
+
+# capture_screenshot encodes a png on every visual test. The encoder is
+# too slow at opt-level 0 and vitest kills the worker, so build the
+# image crates with opt-level 3 in debug builds too.
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.fdeflate]
+opt-level = 3
+
+[profile.dev.package.flate2]
+opt-level = 3
+
+[profile.dev.package.miniz_oxide]
+opt-level = 3

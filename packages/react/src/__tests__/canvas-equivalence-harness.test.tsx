@@ -142,7 +142,10 @@ describeLocalMac("canvas browser-equivalence harness", { timeout: 12_000 }, () =
       scaleFactor: 2,
     })
     expect(oneX.bounds).toEqual(twoX.bounds)
-    expect(oneX.bounds?.slice(2)).toEqual([CANVAS_GOLDEN_WIDTH, CANVAS_GOLDEN_HEIGHT])
+    expect(oneX.bounds && { width: oneX.bounds.width, height: oneX.bounds.height }).toEqual({
+      width: CANVAS_GOLDEN_WIDTH,
+      height: CANVAS_GOLDEN_HEIGHT,
+    })
   })
 
   test("reports zero diff for a golden compared with itself", () => {

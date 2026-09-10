@@ -46,7 +46,7 @@ describe('reduced-motion example', () => {
         const width = (id: number): number => {
           const bounds = renderer.getElementBounds(id)
           if (!bounds) throw new Error('Reduced-motion target did not paint')
-          return bounds[2]
+          return bounds.width
         }
         const expectWidths = async (expected: number): Promise<void> => {
           await vi.waitFor(

@@ -334,9 +334,9 @@ describeNative("host instance scroll properties", () => {
 
     const scrollerBounds = testRoot.renderer.getElementBounds(scrollerRef.current!.id)!
     const targetBounds = testRoot.renderer.getElementBounds(targetRef.current!.id)!
-    expect(targetBounds[1]).toBeGreaterThanOrEqual(scrollerBounds[1])
-    expect(targetBounds[1] + targetBounds[3]).toBeLessThanOrEqual(
-      scrollerBounds[1] + scrollerBounds[3],
+    expect(targetBounds.y).toBeGreaterThanOrEqual(scrollerBounds.y)
+    expect(targetBounds.y + targetBounds.height).toBeLessThanOrEqual(
+      scrollerBounds.y + scrollerBounds.height,
     )
   })
 

@@ -53,7 +53,7 @@ const TARGET_ONLY_EVENTS = new Set([
   "visibleRange",
 ])
 
-const NON_BUBBLING_EVENTS = new Set(["focus", "blur", "scroll"])
+const NON_BUBBLING_EVENTS = new Set(["focus", "blur", "scroll", "fileDrop"])
 
 /**
  * The editor a change event came from, when there is one whose state React
@@ -447,4 +447,3 @@ function dispatchGpuixEvent(
     }
   }
 }
-

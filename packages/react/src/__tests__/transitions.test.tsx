@@ -120,7 +120,7 @@ describeNative("native style transitions", () => {
       )
 
       const target = root.renderer.findByTestId("spring-hover-target")!
-      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(target.id)!
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
 
       root.renderer.advanceAsyncClock(100)
@@ -215,7 +215,7 @@ describeNative("native style transitions", () => {
       root.render(view(true, true))
       root.render(view(false, true))
       expect(root.renderer.getResolvedStyle(child.id)).toMatchObject({ width: 200 })
-      expect(root.renderer.getElementBounds(child.id)).toEqual([0, 0, 200, 20])
+      expect(root.renderer.getElementBounds(child.id)).toEqual({ x: 0, y: 0, width: 200, height: 20 })
     } finally {
       root.unmount()
     }
@@ -464,7 +464,7 @@ describeNative("native style transitions", () => {
 
       const group = root.renderer.findByTestId("transition-group")!
       const target = root.renderer.findByTestId("hover-within-target")!
-      const [x, y, width, height] = root.renderer.getElementBounds(group.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(group.id)!
 
       root.renderer.captureScreenshot(beforePath)
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
@@ -524,7 +524,7 @@ describeNative("native style transitions", () => {
       )
       const group = root.renderer.findByTestId("custom-hover-within-group")!
       const target = root.renderer.findByTestId("custom-hover-within-target")!
-      const [x, y, width, height] = root.renderer.getElementBounds(group.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(group.id)!
 
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       expect(root.renderer.getResolvedStyle(target.id)?.opacity).toBe(0.2)
@@ -609,7 +609,7 @@ describeNative("native style transitions", () => {
         />
       )
       const target = root.renderer.findByTestId("custom-hover-target")!
-      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(target.id)!
 
       root.renderer.captureScreenshot(beforePath)
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
@@ -653,7 +653,7 @@ describeNative("native style transitions", () => {
         />
       )
       const target = root.renderer.findByTestId("hovering-image")!
-      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(target.id)!
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({ width: 100, opacity: 0.2 })
       root.renderer.advanceAsyncClock(50)
@@ -717,7 +717,7 @@ describeNative("native style transitions", () => {
       )
 
       const target = root.renderer.findByTestId("transition-target")!
-      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(target.id)!
       const centerX = x + width / 2
       const centerY = y + height / 2
 
@@ -785,7 +785,7 @@ describeNative("native style transitions", () => {
       )
 
       const target = root.renderer.findByTestId("reduced-target")!
-      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(target.id)!
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
 
       expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
@@ -821,7 +821,7 @@ describeNative("native style transitions", () => {
       )
       const group = root.renderer.findByTestId("reduced-group")!
       const target = root.renderer.findByTestId("reduced-hover-within-target")!
-      const [x, y, width, height] = root.renderer.getElementBounds(group.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(group.id)!
       const requests = root.renderer.getStyleTransitionFrameRequestCount()
 
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
@@ -1094,8 +1094,8 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
     const lane = root.renderer.findByTestId("lane")!
     const reference = root.renderer.findByTestId("reference")!
     return {
-      lane: root.renderer.getElementBounds(lane.id)![2],
-      reference: root.renderer.getElementBounds(reference.id)![2],
+      lane: root.renderer.getElementBounds(lane.id)!.width,
+      reference: root.renderer.getElementBounds(reference.id)!.width,
     }
   }
 
@@ -1217,7 +1217,7 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       </div>
     )
     const width = (testId: string) =>
-      root.renderer.getElementBounds(root.renderer.findByTestId(testId)!.id)![2]
+      root.renderer.getElementBounds(root.renderer.findByTestId(testId)!.id)!.width
 
     try {
       root.renderer.clockPause()
@@ -1314,7 +1314,7 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       </div>
     )
     const laneWidth = () =>
-      root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)![2]
+      root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)!.width
 
     try {
       root.renderer.clockPause()
@@ -1337,7 +1337,7 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       // child's width is content-sized and interpolates.
       xOnly.render(view(false, "scroll-x"))
       const width = () =>
-        xOnly.renderer.getElementBounds(xOnly.renderer.findByTestId("lane")!.id)![2]
+        xOnly.renderer.getElementBounds(xOnly.renderer.findByTestId("lane")!.id)!.width
       expect(width()).toBeCloseTo(0, 1)
       xOnly.render(view(true, "scroll-x"))
       xOnly.renderer.advanceAsyncClock(60)
@@ -1374,7 +1374,7 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       </div>
     )
     const laneWidth = () =>
-      root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)![2]
+      root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)!.width
 
     try {
       root.renderer.clockPause()
@@ -1440,7 +1440,7 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       </div>
     )
     const height = (testId: string) =>
-      root.renderer.getElementBounds(root.renderer.findByTestId(testId)!.id)![3]
+      root.renderer.getElementBounds(root.renderer.findByTestId(testId)!.id)!.height
 
     try {
       root.renderer.clockPause()
@@ -1535,18 +1535,18 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       const lane = root.renderer.findByTestId("hover-lane")!
       const content = root.renderer.getElementBounds(
         root.renderer.findByTestId("reference")!.id
-      )![2]
-      const [x, y, width, height] = root.renderer.getElementBounds(lane.id)!
+      )!.width
+      const { x, y, width, height } = root.renderer.getElementBounds(lane.id)!
       expect(width).toBeCloseTo(40, 1)
 
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       root.renderer.advanceAsyncClock(60)
-      const middle = root.renderer.getElementBounds(lane.id)![2]
+      const middle = root.renderer.getElementBounds(lane.id)!.width
       expect(middle).toBeGreaterThan(40)
       expect(middle).toBeLessThan(content)
 
       root.renderer.advanceAsyncClock(60)
-      expect(root.renderer.getElementBounds(lane.id)![2]).toBeCloseTo(content, 1)
+      expect(root.renderer.getElementBounds(lane.id)!.width).toBeCloseTo(content, 1)
     } finally {
       root.unmount()
     }
@@ -1597,7 +1597,7 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
   )
 
   const laneWidth = (root: ReturnType<typeof createTestRoot>) =>
-    root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)![2]
+    root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)!.width
 
   it("opens a width transition to max-content and settles as the keyword", () => {
     const root = createTestRoot({ strictStyles: true })
@@ -1606,7 +1606,7 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       root.render(laneAt(0, { interpolateSize: "allow-keywords" }))
       const content = root.renderer.getElementBounds(
         root.renderer.findByTestId("max-content-reference")!.id
-      )![2]
+      )!.width
 
       root.render(laneAt("max-content", { interpolateSize: "allow-keywords" }))
       expect(laneWidth(root)).toBeCloseTo(0, 1)
@@ -1627,7 +1627,7 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       )
       const grown = root.renderer.getElementBounds(
         root.renderer.findByTestId("max-content-reference")!.id
-      )![2]
+      )!.width
       expect(grown).toBeGreaterThan(content)
       expect(laneWidth(root)).toBeCloseTo(grown, 1)
       expect(root.renderer.drainStyleDiagnostics()).toEqual([])
@@ -1643,7 +1643,7 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       root.render(laneAt("max-content", { interpolateSize: "allow-keywords" }))
       const content = root.renderer.getElementBounds(
         root.renderer.findByTestId("max-content-reference")!.id
-      )![2]
+      )!.width
       expect(laneWidth(root)).toBeCloseTo(content, 1)
 
       root.render(laneAt(0, { interpolateSize: "allow-keywords" }))
@@ -1665,10 +1665,10 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       root.render(laneAt(0, { interpolateSize: "allow-keywords" }))
       const minContent = root.renderer.getElementBounds(
         root.renderer.findByTestId("min-content-reference")!.id
-      )![2]
+      )!.width
       const maxContent = root.renderer.getElementBounds(
         root.renderer.findByTestId("max-content-reference")!.id
-      )![2]
+      )!.width
       expect(minContent).toBeLessThan(maxContent)
 
       root.render(laneAt("min-content", { interpolateSize: "allow-keywords" }))
@@ -1691,7 +1691,7 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       const minContent = laneWidth(root)
       const maxContent = root.renderer.getElementBounds(
         root.renderer.findByTestId("max-content-reference")!.id
-      )![2]
+      )!.width
       expect(minContent).toBeLessThan(maxContent)
 
       root.render(laneAt("max-content", { interpolateSize: "allow-keywords" }))
@@ -1716,10 +1716,10 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
     measuring.render(laneAt(0, { interpolateSize: "allow-keywords" }))
     const minContent = measuring.renderer.getElementBounds(
       measuring.renderer.findByTestId("min-content-reference")!.id
-    )![2]
+    )!.width
     const maxContent = measuring.renderer.getElementBounds(
       measuring.renderer.findByTestId("max-content-reference")!.id
-    )![2]
+    )!.width
     measuring.unmount()
     // A whole pixel: layout edges snap to whole pixels, and a half-pixel
     // basis would land the clamp one pixel either side of it.
@@ -1791,14 +1791,14 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       </div>
     )
     const height = () =>
-      root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)![3]
+      root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)!.height
 
     try {
       root.renderer.clockPause()
       root.render(view(0))
       const content = root.renderer.getElementBounds(
         root.renderer.findByTestId("reference")!.id
-      )![3]
+      )!.height
 
       root.render(view("max-content"))
       root.renderer.advanceAsyncClock(60)
@@ -1864,12 +1864,12 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       root.render(view(false))
       const unwrapped = root.renderer.getElementBounds(
         root.renderer.findByTestId("reference")!.id
-      )![3]
+      )!.height
 
       root.render(view(true))
       root.renderer.advanceAsyncClock(120)
       const bounds = root.renderer.getElementBounds(root.renderer.findByTestId("lane")!.id)!
-      expect(bounds[3]).toBeCloseTo(unwrapped, 1)
+      expect(bounds.height).toBeCloseTo(unwrapped, 1)
     } finally {
       root.unmount()
     }
@@ -1881,10 +1881,10 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
     measuring.render(laneAt(0, { interpolateSize: "allow-keywords" }))
     const minContent = measuring.renderer.getElementBounds(
       measuring.renderer.findByTestId("min-content-reference")!.id
-    )![2]
+    )!.width
     const maxContent = measuring.renderer.getElementBounds(
       measuring.renderer.findByTestId("max-content-reference")!.id
-    )![2]
+    )!.width
     measuring.unmount()
     const between = Math.round((minContent + maxContent) / 2)
 
@@ -1928,7 +1928,7 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       root.render(laneAt(0, { interpolateSize: "allow-keywords" }))
       const content = root.renderer.getElementBounds(
         root.renderer.findByTestId("max-content-reference")!.id
-      )![2]
+      )!.width
 
       // `"numeric-only"` on the lane itself turns the inherited opt-in back
       // off, so the keyword steps rather than interpolating.
@@ -1984,18 +1984,18 @@ describeNative("intrinsic size transitions", { timeout: 20_000 }, () => {
       const lane = root.renderer.findByTestId("hover-lane")!
       const content = root.renderer.getElementBounds(
         root.renderer.findByTestId("reference")!.id
-      )![2]
-      const [x, y, width, height] = root.renderer.getElementBounds(lane.id)!
+      )!.width
+      const { x, y, width, height } = root.renderer.getElementBounds(lane.id)!
       expect(width).toBeCloseTo(40, 1)
 
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       root.renderer.advanceAsyncClock(60)
-      const middle = root.renderer.getElementBounds(lane.id)![2]
+      const middle = root.renderer.getElementBounds(lane.id)!.width
       expect(middle).toBeGreaterThan(40)
       expect(middle).toBeLessThan(content)
 
       root.renderer.advanceAsyncClock(60)
-      expect(root.renderer.getElementBounds(lane.id)![2]).toBeCloseTo(content, 1)
+      expect(root.renderer.getElementBounds(lane.id)!.width).toBeCloseTo(content, 1)
     } finally {
       root.unmount()
     }

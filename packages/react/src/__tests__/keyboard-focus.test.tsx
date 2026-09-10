@@ -284,8 +284,8 @@ describeNative("keyboard focus", () => {
 
     const bounds = testRoot.renderer.getElementBounds(first.id)!
     testRoot.renderer.nativeSimulateClick(
-      bounds[0]! + bounds[2]! / 2,
-      bounds[1]! + bounds[3]! / 2
+      bounds.x! + bounds.width! / 2,
+      bounds.y! + bounds.height! / 2
     )
     expect(events).toEqual([
       "focus:parent-capture:1:false:false",

@@ -137,6 +137,9 @@ pub struct EventPayload {
         napi(ts_type = "\"increment\" | \"decrement\" | \"focus\"")
     )]
     pub accessibility_action: Option<String>,
+    /// Absolute filesystem paths from a Finder / OS file drop.
+    /// Populated for: fileDrop.
+    pub paths: Option<Vec<String>>,
 
     // ── Modifiers ────────────────────────────────────────────────────
     pub modifiers: Option<EventModifiers>,
@@ -175,6 +178,7 @@ impl Default for EventPayload {
             end_index: None,
             match_count: None,
             accessibility_action: None,
+            paths: None,
             modifiers: None,
         }
     }

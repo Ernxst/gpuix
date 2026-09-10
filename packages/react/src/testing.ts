@@ -37,6 +37,7 @@ import type {
   DebugFrameOverlayStats,
   CanvasPublicInstance,
   CanvasImageLoadState,
+  ElementBounds,
   HighlightMatch,
   NativeRenderer,
   PublicInstance,
@@ -220,6 +221,7 @@ interface NativeTestRendererApi extends NativeRenderer {
     modifiers?: string,
     clickCount?: number
   ): void
+  simulateFileDrop(x: number, y: number, paths: string[]): void
   getTreeJson(): string
   getResolvedStyle(elementId: number): string | null
   getImageLoadState(elementId: number): string | null
@@ -232,7 +234,7 @@ interface NativeTestRendererApi extends NativeRenderer {
     action: "activate" | "increment" | "decrement" | "focus"
   ): void
   getRetainedElementCount(): number
-  getElementBounds(elementId: number): number[] | null
+  getElementBounds(elementId: number): ElementBounds | null
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -1251,6 +1253,14 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
+  /** End-to-end: Finder-style file drop through GPUI → React `onFileDrop`. */
+  nativeSimulateFileDrop(x: number, y: number, paths: string[]): void {
+    this.native.flush()
+    this.native.simulateFileDrop(x, y, paths)
+    this.dispatchNativeEvents()
+    this.native.flush()
+  }
+
   // ── Tree inspection (queries Rust RetainedTree via napi) ────────
 
   /** Build a flat map of TestElements from the native tree JSON.
@@ -1417,7 +1427,7 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getRetainedElementCount()
   }
 
-  getElementBounds(elementId: number): number[] | null {
+  getElementBounds(elementId: number): ElementBounds | null {
     return this.native.getElementBounds(elementId)
   }
 
@@ -1726,7 +1736,7 @@ function boundingClientRectOf(renderer: TestRenderer, element: TestElement): Tes
   const bounds = renderer.getElementBounds(current.id)
   if (bounds === null) throw noPaintedBoundsError(renderer, current)
 
-  const [x, y, width, height] = bounds
+  const { x, y, width, height } = bounds
   return {
     x,
     y,
@@ -2552,7 +2562,7 @@ function resolveElementBounds(renderer: TestRenderer, element: TestElement): Tes
   if (bounds === null) {
     throw new Error(`${describeElement(renderer, current)} has no painted bounds`)
   }
-  const [x, y, width, height] = bounds
+  const { x, y, width, height } = bounds
   return { element: current, x, y, width, height }
 }
 

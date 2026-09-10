@@ -315,20 +315,20 @@ describe("requestAnimationFrame", () => {
 
   it("lets a committed effect read the rendered tree inside its frame callback", () => {
     root = createTestRoot()
-    const seen: number[][] = []
+    const seen: Array<{ x: number; y: number; width: number; height: number }> = []
     root.render(
       <BoundsAfterFrame
         onFrame={() => {
           const target = root!.renderer.findByTestId("frame-target")
           expect(target).toBeDefined()
-          seen.push(root!.renderer.getElementBounds(target!.id) ?? [])
+          seen.push(root!.renderer.getElementBounds(target!.id) ?? { x: 0, y: 0, width: 0, height: 0 })
         }}
       />
     )
 
     root.renderer.advanceAsyncClock(16)
 
-    expect(seen).toEqual([[0, 0, 80, 20]])
+    expect(seen).toEqual([{ x: 0, y: 0, width: 80, height: 20 }])
   })
 
   it("does not request or draw frames while idle", async () => {

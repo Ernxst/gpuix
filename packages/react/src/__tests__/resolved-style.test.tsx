@@ -82,7 +82,7 @@ describe("resolved test-renderer styles", () => {
       )
 
       const target = root.renderer.findByTestId("state-target")!
-      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(target.id)!
       const centerX = x + width / 2
       const centerY = y + height / 2
 
@@ -133,7 +133,7 @@ describe("resolved test-renderer styles", () => {
       )
 
       const target = root.renderer.findByTestId("shadow-target")!
-      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(target.id)!
       const centerX = x + width / 2
       const centerY = y + height / 2
 

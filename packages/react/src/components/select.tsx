@@ -30,6 +30,12 @@ import {
 } from "./floating.js"
 import type { FloatingContentProps, StateStyle } from "./floating.js"
 
+export interface SelectItemData {
+  value: string
+  label?: ReactNode
+  textValue?: string
+}
+
 interface SelectItemRecord {
   value: string
   label: ReactNode
@@ -43,7 +49,7 @@ interface SelectContextValue {
   open: boolean
   value: string | undefined
   disabled: boolean
-  items: SelectItemRecord[]
+  labels: Map<string, ReactNode>
   activeValue: string | null
   triggerPressedWhileOpen: React.MutableRefObject<boolean>
   dismissedByOutsidePress: React.MutableRefObject<boolean>
@@ -52,6 +58,7 @@ interface SelectContextValue {
   setActiveValue: (value: string | null) => void
   moveActive: (delta: number) => void
   selectValue: (value: string) => void
+  items: SelectItemRecord[]
   registerItem: (item: SelectItemRecord) => void
   unregisterItem: (value: string) => void
 }
@@ -95,6 +102,7 @@ function compareItemRecords(
 
 export interface SelectProps extends Omit<Props, "children" | "onChange"> {
   children?: ReactNode
+  items?: readonly SelectItemData[]
   value?: string
   defaultValue?: string
   onValueChange?: (value: string) => void
@@ -106,6 +114,7 @@ export interface SelectProps extends Omit<Props, "children" | "onChange"> {
 
 export function Select({
   children,
+  items: itemsProp,
   value: valueProp,
   defaultValue,
   onValueChange,
@@ -133,7 +142,6 @@ export function Select({
   const triggerPressedWhileOpen = useRef(false)
   const dismissedByOutsidePress = useRef(false)
   const triggerRef = useRef<PublicInstance | null>(null)
-
   // SelectItem registers itself here (instead of Select walking the element
   // tree), so an item wrapped in a user component is still discovered.
   // SelectContent keeps its children mounted even while closed - like Radix's
@@ -178,6 +186,18 @@ export function Select({
       return unchanged ? current : sorted
     })
   })
+  useLayoutEffect(() => {
+    if (!open || activeValue !== null) return
+    const selected = items.find((item) => item.value === value && !item.disabled)
+    if (selected) setActiveValue(selected.value)
+  }, [open, value, items, activeValue])
+  const labels = useMemo(() => {
+    const next = new Map<string, ReactNode>()
+    for (const item of itemsProp ?? []) {
+      next.set(item.value, item.label ?? item.textValue ?? item.value)
+    }
+    return next
+  }, [itemsProp])
 
   const setOpen = (nextOpen: boolean) => {
     setOpenState(nextOpen)
@@ -190,6 +210,7 @@ export function Select({
   }
 
   const moveActive = (delta: number) => {
+    if (disabled) return
     const enabled = items.filter((item) => !item.disabled)
     if (enabled.length === 0) return
     const currentIndex = enabled.findIndex((item) => item.value === activeValue)
@@ -199,6 +220,7 @@ export function Select({
   }
 
   const selectValue = (nextValue: string) => {
+    if (disabled) return
     const item = items.find((candidate) => candidate.value === nextValue)
     if (!item || item.disabled) return
     setValue(nextValue)
@@ -211,6 +233,7 @@ export function Select({
       value,
       disabled,
       items,
+      labels,
       activeValue,
       triggerPressedWhileOpen,
       dismissedByOutsidePress,
@@ -222,7 +245,7 @@ export function Select({
       registerItem,
       unregisterItem,
     }),
-    [open, value, disabled, items, activeValue]
+    [open, value, disabled, items, labels, activeValue]
   )
 
   return (
@@ -309,8 +332,10 @@ export interface SelectValueProps extends Props {
 export const SelectValue = forwardRef<PublicInstance, SelectValueProps>(
   function SelectValue({ placeholder, children, ...props }, ref) {
     const context = useSelectContext("SelectValue")
-    const item = context.items.find((candidate) => candidate.value === context.value)
-    return <div {...props} ref={ref}>{children ?? item?.label ?? placeholder}</div>
+    const label = context.value === undefined ? undefined : context.labels.get(context.value)
+    return <div {...props} ref={ref}>
+      {children ?? label ?? context.items.find((item) => item.value === context.value)?.label ?? context.value ?? placeholder}
+    </div>
   }
 )
 
@@ -430,7 +455,6 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
     // `display: "none"` takes no layout space, is absent from the
     // accessibility tree, and is never hit-tested (see display-none.test.tsx).
     if (!context.open) return <div style={{ display: "none" }} ref={setInstanceRef} />
-
     return (
       <div
         {...props}
@@ -438,11 +462,11 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
         style={resolveStyle(style, state)}
         onMouseEnter={(event: GpuixSyntheticEvent) => {
           onMouseEnter?.(event)
-          if (!disabled) context.setActiveValue(value)
+          if (!disabled && !context.disabled) context.setActiveValue(value)
         }}
         onClick={(event: GpuixSyntheticEvent) => {
           onClick?.(event)
-          if (!disabled) context.selectValue(value)
+          if (!disabled && !context.disabled) context.selectValue(value)
         }}
       >
         {typeof children === "function" ? children(state) : children}

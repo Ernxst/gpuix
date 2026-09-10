@@ -8,12 +8,12 @@ function boundsFor(renderer: TestRenderer, testId: string) {
   const element = renderer.findByTestId(testId)
   expect(element, `missing ${testId}`).toBeDefined()
   const bounds = renderer.getElementBounds(element!.id)
-  expect(bounds, `no bounds for ${testId}`).toEqual(expect.any(Array))
+  expect(bounds, `no bounds for ${testId}`).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) }))
   return bounds!
 }
 
-function bottom(bounds: number[]) {
-  return bounds[1] + bounds[3]
+function bottom(bounds: { y: number; height: number }) {
+  return bounds.y + bounds.height
 }
 
 describe("flex baseline layout", () => {
@@ -80,7 +80,7 @@ describe("flex baseline layout", () => {
     const secondLine = [boundsFor(renderer, "wrapped-2"), boundsFor(renderer, "wrapped-3")]
 
     expect(Math.max(...firstLine.map(bottom))).toBeLessThanOrEqual(
-      Math.min(...secondLine.map((bounds) => bounds[1])),
+      Math.min(...secondLine.map((bounds) => bounds.y)),
     )
     expect(bottom(firstLine[1])).toBeLessThan(bottom(firstLine[0]))
     expect(bottom(secondLine[1])).toBeLessThan(bottom(secondLine[0]))
@@ -104,7 +104,7 @@ describe("flex baseline layout", () => {
     const text = boundsFor(renderer, "baseline-text")
     const row = boundsFor(renderer, "synthesized-baseline-row")
     expect(bottom(text)).toBeGreaterThan(bottom(box))
-    expect(row[3]).toBeGreaterThan(box[3])
+    expect(row.height).toBeGreaterThan(box.height)
   })
 
   it("exports the resolved baseline of a nested container", () => {
@@ -129,8 +129,8 @@ describe("flex baseline layout", () => {
     const nestedLarge = boundsFor(renderer, "nested-large")
     const outerSmall = boundsFor(renderer, "outer-small")
 
-    expect(nestedSmall[1]).toBeCloseTo(outerSmall[1], 0)
-    expect(nestedLarge[1]).toBeLessThan(nestedSmall[1])
+    expect(nestedSmall.y).toBeCloseTo(outerSmall.y, 0)
+    expect(nestedLarge.y).toBeLessThan(nestedSmall.y)
   })
 
   it("uses the shaped font metrics of a flattened inline run", () => {
@@ -154,7 +154,7 @@ describe("flex baseline layout", () => {
 
     const inlineRun = boundsFor(renderer, "inline-run-baseline")
     const reference = boundsFor(renderer, "inline-run-reference")
-    expect(inlineRun[1]).toBeCloseTo(reference[1], 0)
-    expect(inlineRun[3]).toBeCloseTo(reference[3], 0)
+    expect(inlineRun.y).toBeCloseTo(reference.y, 0)
+    expect(inlineRun.height).toBeCloseTo(reference.height, 0)
   })
 })

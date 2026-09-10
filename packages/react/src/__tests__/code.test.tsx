@@ -24,12 +24,12 @@ beforeAll(() => {
 /** Default `codeLineHeight`. One row per source line, at this exact height. */
 const LINE_HEIGHT = 18
 
-function codeBounds(renderer: { findByType(type: string): { id: number }[]; getElementBounds(id: number): number[] | null }) {
+function codeBounds(renderer: { findByType(type: string): { id: number }[]; getElementBounds(id: number): { x: number; y: number; width: number; height: number } | null }) {
   const node = renderer.findByType("code")[0]
   expect(node).toBeDefined()
   const bounds = renderer.getElementBounds(node!.id)
   expect(bounds).not.toBeNull()
-  return { x: bounds![0]!, y: bounds![1]!, width: bounds![2]!, height: bounds![3]! }
+  return bounds!
 }
 
 describe("<code>", { timeout: 16_000 }, () => {

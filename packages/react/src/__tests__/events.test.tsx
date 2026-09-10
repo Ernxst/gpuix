@@ -664,7 +664,7 @@ describeNative("events", () => {
         />
       )
       const canvas = testRoot.renderer.findByTestId("canvas-synthetic-clicks")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(canvas.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(canvas.id)!
       const centerX = x + width / 2
       const centerY = y + height / 2
 
@@ -688,7 +688,7 @@ describeNative("events", () => {
         />
       )
       const code = testRoot.renderer.findByTestId("code-synthetic-clicks")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(code.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(code.id)!
       const centerX = x + width / 2
       const centerY = y + height / 2
 
@@ -716,7 +716,7 @@ describeNative("events", () => {
         </div>
       )
       const code = testRoot.renderer.findByTestId("code-context-menu-child")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(code.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(code.id)!
       const centerX = x + width / 2
       const centerY = y + height / 2
 
@@ -741,7 +741,7 @@ describeNative("events", () => {
         </div>
       )
       const child = testRoot.renderer.findByTestId("context-menu-inert-child")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(child.id)!
       const centerX = x + width / 2
       const centerY = y + height / 2
 
@@ -871,7 +871,7 @@ describeNative("events", () => {
       )
 
       const child = testRoot.renderer.findByTestId("painted-click-child")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(child.id)!
       testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
 
       expect(click).toHaveBeenCalledOnce()
@@ -894,7 +894,7 @@ describeNative("events", () => {
       )
 
       const grandchild = testRoot.renderer.findByTestId("painted-click-grandchild")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(grandchild.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(grandchild.id)!
       testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
 
       expect(click).toHaveBeenCalledOnce()
@@ -917,7 +917,7 @@ describeNative("events", () => {
       )
 
       const button = testRoot.renderer.findByTestId("interactive-painted-click-child")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(button.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(button.id)!
       testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
 
       expect(buttonClick).toHaveBeenCalledOnce()
@@ -939,7 +939,7 @@ describeNative("events", () => {
       )
 
       const child = testRoot.renderer.findByTestId("transparent-click-child")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(child.id)!
       testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
 
       expect(click).toHaveBeenCalledOnce()
@@ -1069,7 +1069,7 @@ describeNative("events", () => {
     it("navigates a bare TanStack Link on primary click", () => {
       vi.stubGlobal("window", { origin: "http://localhost" })
       const { router, anchor } = renderBareTanStackLink()
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(anchor.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(anchor.id)!
 
       testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
 
@@ -1098,7 +1098,7 @@ describeNative("events", () => {
       )
 
       const target = testRoot.renderer.findByTestId("space-activation")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(target.id)!
       testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
       expect(click).toHaveBeenCalledOnce()
 
@@ -1430,8 +1430,8 @@ describeNative("events", () => {
 
       const child = testRoot.renderer.findByTestId("mouse-up-child")!
       const bounds = testRoot.renderer.getElementBounds(child.id)!
-      testRoot.renderer.nativeSimulateMouseDown(bounds[0]! + 10, bounds[1]! + 10)
-      testRoot.renderer.nativeSimulateMouseUp(bounds[0]! + 10, bounds[1]! + 10)
+      testRoot.renderer.nativeSimulateMouseDown(bounds.x! + 10, bounds.y! + 10)
+      testRoot.renderer.nativeSimulateMouseUp(bounds.x! + 10, bounds.y! + 10)
 
       expect(order).toEqual(["mouseUp", "click"])
       expect(mouseUpTarget?.id).toBe(child.id)
@@ -1741,7 +1741,7 @@ describeNative("events", () => {
       const anchor = testRoot.renderer.findByTestId("anchor-events")!
       const paintedChild = testRoot.renderer.findByTestId("anchor-painted-child")!
       const hoverWithin = testRoot.renderer.findByTestId("anchor-hover-within")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(paintedChild.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(paintedChild.id)!
 
       expect(anchor.events).toEqual(new Set(["mouseEnter", "mouseLeave"]))
 
@@ -1828,7 +1828,7 @@ describeNative("events", () => {
 
       const moveTo = (testId: string) => {
         const element = testRoot.renderer.findByTestId(testId)!
-        const [x, y, width, height] = testRoot.renderer.getElementBounds(element.id)!
+        const { x, y, width, height } = testRoot.renderer.getElementBounds(element.id)!
         testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       }
 
@@ -1926,7 +1926,7 @@ describeNative("events", () => {
           if (!tile) throw new Error("Missing tile")
           const bounds = root.renderer.getElementBounds(tile.id)
           if (!bounds) throw new Error("Missing tile bounds")
-          const [left, top] = bounds
+          const { x: left, y: top } = bounds
 
           for (const offset of [18, 25, 32, 38, 44, 38, 32, 25, 18]) {
             root.renderer.nativeSimulateMouseMove(left + offset, top + 18)
@@ -1974,7 +1974,7 @@ describeNative("events", () => {
 
       const moveTo = (testId: string) => {
         const element = testRoot.renderer.findByTestId(testId)!
-        const [x, y, width, height] = testRoot.renderer.getElementBounds(element.id)!
+        const { x, y, width, height } = testRoot.renderer.getElementBounds(element.id)!
         testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       }
 
@@ -2035,15 +2035,15 @@ describeNative("events", () => {
         const surfaceBounds = bounds("hover-surface")
         const labelBounds = bounds("surface-label")
         const surfacePoint = [
-          surfaceBounds[0] + surfaceBounds[2] / 2,
-          surfaceBounds[1] + surfaceBounds[3] / 2,
+          surfaceBounds.x + surfaceBounds.width / 2,
+          surfaceBounds.y + surfaceBounds.height / 2,
         ] as const
         const labelPoint = [
-          labelBounds[0] + labelBounds[2] / 2,
-          labelBounds[1] + labelBounds[3] / 2,
+          labelBounds.x + labelBounds.width / 2,
+          labelBounds.y + labelBounds.height / 2,
         ] as const
         const gapPoint = [
-          (surfaceBounds[0] + surfaceBounds[2] + labelBounds[0]) / 2,
+          (surfaceBounds.x + surfaceBounds.width + labelBounds.x) / 2,
           surfacePoint[1],
         ] as const
 
@@ -2105,12 +2105,12 @@ describeNative("events", () => {
 
       testRoot.render(<UnmountingChild />)
       const child = testRoot.renderer.findByTestId("unmount-child")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(child.id)!
       testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       expect(events).toEqual(["parent-enter", "child-enter"])
 
       const replacement = testRoot.renderer.findByTestId("unmount-replacement")!
-      const [replacementX, replacementY, replacementWidth, replacementHeight] =
+      const { x: replacementX, y: replacementY, width: replacementWidth, height: replacementHeight } =
         testRoot.renderer.getElementBounds(replacement.id)!
       testRoot.renderer.nativeSimulateMouseMove(
         replacementX + replacementWidth / 2,
@@ -2156,7 +2156,7 @@ describeNative("events", () => {
 
       const center = (testId: string) => {
         const element = testRoot.renderer.findByTestId(testId)!
-        const [x, y, width, height] = testRoot.renderer.getElementBounds(element.id)!
+        const { x, y, width, height } = testRoot.renderer.getElementBounds(element.id)!
         return [x + width / 2, y + height / 2] as const
       }
 
@@ -2224,7 +2224,7 @@ describeNative("events", () => {
       )
 
       const child = testRoot.renderer.findByTestId("transition-hover-code")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(child.id)!
       testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       expect(events).toEqual(["parent-enter", "child-enter"])
 
@@ -2264,7 +2264,7 @@ describeNative("events", () => {
       )
 
       const child = testRoot.renderer.findByTestId("transition-hover-canvas")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(child.id)!
       testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       expect(events).toEqual(["parent-enter", "child-enter"])
 
@@ -2297,7 +2297,7 @@ describeNative("events", () => {
       )
 
       const child = testRoot.renderer.findByTestId("ordered-hover-canvas")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(child.id)!
       testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
 
       expect(events).toEqual(["parent-enter", "child-enter", "child-move"])
@@ -2329,7 +2329,7 @@ describeNative("events", () => {
       )
 
       const canvas = testRoot.renderer.findByTestId("drag-hover-canvas")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(canvas.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(canvas.id)!
       const point = (offset: number) => [x + offset, y + height / 2] as const
 
       testRoot.renderer.nativeSimulateMouseMove(...point(width / 2))
@@ -2413,7 +2413,7 @@ describeNative("events", () => {
 
       const moveTo = (testId: string) => {
         const element = testRoot.renderer.findByTestId(testId)!
-        const [x, y, width, height] = testRoot.renderer.getElementBounds(element.id)!
+        const { x, y, width, height } = testRoot.renderer.getElementBounds(element.id)!
         testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       }
 
@@ -2505,7 +2505,7 @@ describeNative("events", () => {
       )
 
       const label = testRoot.renderer.findByTestId("hover-row-label")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(label.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(label.id)!
       const before = `${SHOTS_DIR}/gpuix-descendant-container-hover-before.png`
       const after = `${SHOTS_DIR}/gpuix-descendant-container-hover-after.png`
 
@@ -2981,7 +2981,7 @@ describeNative("events", () => {
         />
       )
       const canvas = testRoot.renderer.findByTestId("wheel-canvas")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(canvas.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(canvas.id)!
       testRoot.renderer.nativeSimulateScrollWheel(
         x + width / 2,
         y + height / 2,
@@ -3004,7 +3004,7 @@ describeNative("events", () => {
         />
       )
       const code = testRoot.renderer.findByTestId("wheel-code")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(code.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(code.id)!
       testRoot.renderer.nativeSimulateScrollWheel(
         x + width / 2,
         y + height / 2,
@@ -3084,6 +3084,144 @@ describeNative("events", () => {
       testRoot.renderer.dispatchNativeEvents()
 
       expect(scrollPositions).toEqual([])
+    })
+  })
+
+  describe("file drop events", () => {
+    it("should handle onFileDrop with the dropped paths", () => {
+      const received: EventPayload[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 200 }}
+          onFileDrop={(event: EventPayload) => received.push(event)}
+        >
+          <text>drop</text>
+        </div>,
+      )
+
+      testRoot.renderer.nativeSimulateFileDrop(100, 100, [
+        "/tmp/gpuix-drop-a.txt",
+      ])
+
+      expect(received).toHaveLength(1)
+      expect(received[0]!.eventType).toBe("fileDrop")
+      expect(received[0]!.paths).toEqual(["/tmp/gpuix-drop-a.txt"])
+      expect(received[0]!.x).toBe(100)
+      expect(received[0]!.y).toBe(100)
+    })
+
+    it("should deliver every path in one drop", () => {
+      const received: string[][] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 200 }}
+          onFileDrop={(event: EventPayload) =>
+            received.push(event.paths ?? [])
+          }
+        />,
+      )
+
+      testRoot.renderer.nativeSimulateFileDrop(40, 40, [
+        "/tmp/gpuix-drop-a.txt",
+        "/tmp/gpuix-drop-b.png",
+      ])
+
+      expect(received).toEqual([
+        ["/tmp/gpuix-drop-a.txt", "/tmp/gpuix-drop-b.png"],
+      ])
+    })
+
+    it("should deliver a nested drop to the inner listener only", () => {
+      const received: string[] = []
+
+      testRoot.render(
+        <div
+          style={{
+            width: 400,
+            height: 400,
+            display: "flex",
+            flexDirection: "column",
+          }}
+          onFileDrop={() => received.push("outer")}
+        >
+          <div
+            style={{ width: 100, height: 100 }}
+            onFileDrop={() => received.push("inner")}
+          />
+        </div>,
+      )
+
+      testRoot.renderer.nativeSimulateFileDrop(50, 50, [
+        "/tmp/gpuix-drop-inner.txt",
+      ])
+      expect(received).toEqual(["inner"])
+
+      testRoot.renderer.nativeSimulateFileDrop(200, 200, [
+        "/tmp/gpuix-drop-outer.txt",
+      ])
+      expect(received).toEqual(["inner", "outer"])
+    })
+
+    it("should not fire an empty drop", () => {
+      const received: EventPayload[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 200 }}
+          onFileDrop={(event: EventPayload) => received.push(event)}
+        />,
+      )
+
+      testRoot.renderer.nativeSimulateFileDrop(40, 40, [])
+      expect(received).toEqual([])
+    })
+
+    it("should deliver a drop on a child to the ancestor listener", () => {
+      const received: string[] = []
+
+      testRoot.render(
+        <div
+          style={{
+            width: 200,
+            height: 200,
+            display: "flex",
+            flexDirection: "column",
+          }}
+          onFileDrop={() => received.push("outer")}
+        >
+          <div style={{ width: 100, height: 100 }} />
+        </div>,
+      )
+
+      testRoot.renderer.nativeSimulateFileDrop(40, 40, [
+        "/tmp/gpuix-drop-child.txt",
+      ])
+      expect(received).toEqual(["outer"])
+    })
+
+    it("should handle onFileDrop on a loaded img leaf", () => {
+      const received: string[][] = []
+      const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#5ca9ff"/></svg>'
+      const src = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`
+
+      testRoot.render(
+        <img
+          src={src}
+          style={{ width: 220, height: 120 }}
+          onFileDrop={(event: EventPayload) =>
+            received.push(event.paths ?? [])
+          }
+        />,
+      )
+
+      testRoot.renderer.nativeSimulateFileDrop(80, 40, [
+        "/tmp/gpuix-drop-img.txt",
+      ])
+
+      expect(received).toEqual([["/tmp/gpuix-drop-img.txt"]])
     })
   })
 
@@ -3259,7 +3397,7 @@ describeNative("events", () => {
       )
 
       const child = testRoot.renderer.findByTestId("painted-press-child")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(child.id)!
       testRoot.renderer.nativeSimulateMouseDown(x + width / 2, y + height / 2)
       testRoot.renderer.nativeSimulateMouseUp(x + width / 2, y + height / 2)
 
@@ -3310,7 +3448,7 @@ describeNative("events", () => {
       )
 
       const child = testRoot.renderer.findByTestId("painted-move-child")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(child.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(child.id)!
       testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
 
       expect(move).toHaveBeenCalledOnce()

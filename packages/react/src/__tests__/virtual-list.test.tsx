@@ -334,12 +334,12 @@ describe("<virtual-list>", () => {
     const focusable = bounds("focusable-row")
     const explicit = bounds("explicit-row")
 
-    expect(plain[2]).toBeCloseTo(400)
-    expect(focusable[2]).toBeCloseTo(plain[2])
-    expect(explicit[2]).toBeCloseTo(120)
-    expect(plain[3]).toBeCloseTo(40)
-    expect(focusable[3]).toBeCloseTo(40)
-    expect(explicit[3]).toBeCloseTo(40)
+    expect(plain.width).toBeCloseTo(400)
+    expect(focusable.width).toBeCloseTo(plain.width)
+    expect(explicit.width).toBeCloseTo(120)
+    expect(plain.height).toBeCloseTo(40)
+    expect(focusable.height).toBeCloseTo(40)
+    expect(explicit.height).toBeCloseTo(40)
   })
 
   it("builds and paints only rows near the viewport", () => {

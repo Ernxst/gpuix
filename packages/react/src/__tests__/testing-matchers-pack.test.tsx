@@ -234,7 +234,7 @@ describeNative("gpuix matcher pack", () => {
 
       // Painted inside the window, clipped out of the scroller.
       const clipped = screen.getByTestId("row-3")
-      expect(screen.renderer.getElementBounds(clipped.id)).toEqual([0, 420, 400, 40])
+      expect(screen.renderer.getElementBounds(clipped.id)).toEqual({ x: 0, y: 420, width: 400, height: 40 })
       expect(clipped).not.toBeInViewport()
       expect(screen.getByTestId("row-5")).not.toBeInViewport()
 
@@ -278,7 +278,7 @@ describeNative("gpuix matcher pack", () => {
       // vertically — but a `visible` axis computes to `auto` once the other one
       // is not, so GPUI masks both and 100 of the child's 300 rows survive.
       const tall = screen.getByTestId("tall")
-      expect(screen.renderer.getElementBounds(tall.id)).toEqual([0, 0, 200, 300])
+      expect(screen.renderer.getElementBounds(tall.id)).toEqual({ x: 0, y: 0, width: 200, height: 300 })
       expect(tall).toBeInViewport()
       expect(tall).toBeInViewport({ ratio: 0.33 })
       expect(tall).not.toBeInViewport({ ratio: 0.34 })
@@ -327,14 +327,14 @@ describeNative("gpuix matcher pack", () => {
 
       // A child flush with the content box is wholly visible.
       const flush = screen.getByTestId("flush")
-      expect(screen.renderer.getElementBounds(flush.id)).toEqual([10, 10, 180, 80])
+      expect(screen.renderer.getElementBounds(flush.id)).toEqual({ x: 10, y: 10, width: 180, height: 80 })
       expect(flush).toBeInViewport({ ratio: 1 })
 
       // A child that reaches the border box's outer edge is clipped by the
       // border, not by the box: 180x80 of its 190x90 survives the mask. Judged
       // against the unindented box it would have been wholly visible.
       const overBorder = screen.getByTestId("over-border")
-      expect(screen.renderer.getElementBounds(overBorder.id)).toEqual([10, 110, 190, 90])
+      expect(screen.renderer.getElementBounds(overBorder.id)).toEqual({ x: 10, y: 110, width: 190, height: 90 })
       expect(overBorder).toBeInViewport({ ratio: 0.84 })
       expect(overBorder).not.toBeInViewport({ ratio: 0.85 })
       expect(overBorder).not.toBeInViewport({ ratio: 1 })

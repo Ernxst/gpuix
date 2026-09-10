@@ -9,8 +9,8 @@ function boundsFor(renderer: TestRenderer, testId: string) {
   const element = renderer.findByTestId(testId)
   expect(element, `missing ${testId}`).toBeDefined()
   const bounds = renderer.getElementBounds(element!.id)
-  expect(bounds, `no bounds for ${testId}`).toEqual(expect.any(Array))
-  return { x: bounds![0], y: bounds![1], width: bounds![2], height: bounds![3] }
+  expect(bounds, `no bounds for ${testId}`).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) }))
+  return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
 }
 
 // Issue #300: `max-content` / `min-content` / `fit-content` and `vw` / `vh`
@@ -311,7 +311,7 @@ describe("intrinsic keywords in state refinements (issue #313)", () => {
       const target = root.renderer.findByTestId("hover-target")!
       expect(boundsFor(root.renderer, "hover-target").width).toBeCloseTo(104, 4)
 
-      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(target.id)!
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       expect(boundsFor(root.renderer, "hover-target").width).toBeCloseTo(140, 4)
 
@@ -378,7 +378,7 @@ describe("intrinsic keyword probe cache (issue #310)", () => {
       expect(afterText).toBeGreaterThan(initial)
 
       const target = root.renderer.findByTestId("cache-target")!
-      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(target.id)!
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       const afterHover = root.renderer.getIntrinsicProbeLayoutCount()
       expect(afterHover).toBeGreaterThan(afterText)
@@ -407,7 +407,7 @@ describe("intrinsic keyword probe cache (issue #310)", () => {
       expect(boundsFor(root.renderer, "ancestor").width).toBeCloseTo(40, 4)
       const initialProbes = root.renderer.getIntrinsicProbeLayoutCount()
       const target = root.renderer.findByTestId("host-descendant")!
-      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(target.id)!
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({ width: 80 })
       expect(boundsFor(root.renderer, "host-descendant").width).toBeCloseTo(80, 4)
@@ -438,7 +438,7 @@ describe("intrinsic keyword probe cache (issue #310)", () => {
       expect(boundsFor(root.renderer, "img-ancestor").width).toBeCloseTo(40, 4)
       const initialProbes = root.renderer.getIntrinsicProbeLayoutCount()
       const target = root.renderer.findByTestId("img-descendant")!
-      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(target.id)!
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({ width: 80 })
       expect(boundsFor(root.renderer, "img-descendant").width).toBeCloseTo(80, 4)
@@ -467,7 +467,7 @@ describe("intrinsic keyword probe cache (issue #310)", () => {
 
       const initialProbes = root.renderer.getIntrinsicProbeLayoutCount()
       const target = root.renderer.findByTestId("custom-group")!
-      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const { x, y, width, height } = root.renderer.getElementBounds(target.id)!
       root.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
       expect(root.renderer.getIntrinsicProbeLayoutCount()).toBeGreaterThan(initialProbes)
       expect(boundsFor(root.renderer, "custom-group-ancestor").width).toBeCloseTo(40, 4)

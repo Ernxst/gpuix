@@ -51,6 +51,11 @@
       "import": "./dist/components/tooltip.js",
       "default": "./dist/components/tooltip.js"
     },
+    "./floating": {
+      "types": "./dist/floating.d.ts",
+      "import": "./dist/floating.js",
+      "default": "./dist/floating.js"
+    },
     "./automation": {
       "types": "./dist/automation/index.d.ts",
       "import": "./dist/automation/index.js",
