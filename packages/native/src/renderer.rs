@@ -660,9 +660,11 @@ impl ApplicationMenuBuilder {
             }
         }
 
-        let key_equivalent = spec
-            .key_equivalent
-            .or_else(|| quit.then(|| "cmd-q".to_string()));
+        let key_equivalent = spec.key_equivalent.or_else(|| {
+            quit.then(default_quit_key_equivalent)
+                .flatten()
+                .map(str::to_string)
+        });
         if let Some(key_equivalent) = key_equivalent {
             validate_menu_key_equivalent(&key_equivalent)?;
             self.bindings
@@ -714,6 +716,19 @@ fn parse_menu_os_action(value: &str) -> std::result::Result<gpui::OsAction, Stri
     }
 }
 
+/// Quit's shortcut when a quit item names none, per platform convention:
+/// Ctrl+Q on Linux and Cmd+Q on macOS. Windows has none; Alt+F4 on the last
+/// window quits there, and `cmd-q` would mean Win+Q, which the shell owns.
+fn default_quit_key_equivalent() -> Option<&'static str> {
+    if cfg!(target_os = "windows") {
+        None
+    } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
+        Some("ctrl-q")
+    } else {
+        Some("cmd-q")
+    }
+}
+
 pub(crate) fn default_application_menus(title: &str) -> Vec<MenuSpec> {
     vec![MenuSpec {
         name: title.to_string(),
@@ -725,7 +740,7 @@ pub(crate) fn default_application_menus(title: &str) -> Vec<MenuSpec> {
             items: None,
             disabled: None,
             checked: None,
-            key_equivalent: Some("cmd-q".to_string()),
+            key_equivalent: None,
             role: Some("quit".to_string()),
             system_menu: None,
             os_action: None,
