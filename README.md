@@ -4967,8 +4967,10 @@ An error the scope itself throws is the caller's and is rethrown — a
 synchronous scope's throw rethrows in the same tick, an asynchronous scope's
 throw surfaces as a rejection of the returned promise. An error React collects
 on its own uncaught path instead — from a child component, not from the
-scope — is delivered to the mounted root the way `render()` reports one,
-rather than thrown out of `act`.
+scope — is delivered to the root `render()` currently has mounted, rather than
+thrown out of `act`. A root created directly with `createTestRoot()` is not
+that root, so with nothing mounted through `render()` — including when only a
+`createTestRoot()` root exists — the error is rethrown from `act` instead.
 
 ### Matchers
 

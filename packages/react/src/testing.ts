@@ -2787,10 +2787,13 @@ function actSync(reportUncaughtError: (error: unknown) => void, scope: () => voi
  * own uncaught path.
  *
  * An error React collected on that uncaught path — from a child component,
- * not from `scope` — is routed to the shared window's root the way `render`
- * and `actSync` route theirs, via {@link reportUncaughtActError}: it never
- * comes back out of `act`. With no root mounted there is nowhere for it to
- * go, so it rethrows there too.
+ * not from `scope` — is routed to the root `render()` currently has mounted,
+ * via {@link reportUncaughtActError}, the same singleton `cleanup()` walks:
+ * it never comes back out of `act`. A root created directly with
+ * `createTestRoot()` is not that registry and is not checked — there is no
+ * second one to keep in sync with it — so with no `render()` root mounted,
+ * including when only a `createTestRoot()` root exists, the error is
+ * rethrown from `act` instead.
  *
  * **The fallback** is `actSync`'s: with no usable `act` — a caller's scope
  * already open, or a production React build — `scope` runs through

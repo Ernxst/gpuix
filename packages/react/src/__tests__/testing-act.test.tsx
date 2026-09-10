@@ -48,6 +48,7 @@ describeNative("act()", () => {
       expect(screen.getByTestId("count")).toHaveTextContent("1:2")
       for (const call of consoleError.mock.calls) {
         expect(String(call[0])).not.toContain("not wrapped in act")
+        expect(String(call[0])).not.toContain("not configured to support act")
       }
     } finally {
       screen.unmount()
@@ -84,5 +85,39 @@ describeNative("act()", () => {
     })
     expect(ranAsyncWork).toBe(true)
     expect(Reflect.get(globalThis, ACT_ENVIRONMENT_GLOBAL)).toBe(previous)
+  })
+
+  it("rethrows a React-collected error when only a createTestRoot() root is mounted", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    const screen = createTestRoot()
+    const triggerRef: { current: (() => void) | null } = { current: null }
+
+    function Boom({ shouldThrow }: { shouldThrow: boolean }): React.ReactElement | null {
+      if (shouldThrow) throw new Error("render boom")
+      return null
+    }
+
+    function Wrapper(): React.ReactElement {
+      const [shouldThrow, setShouldThrow] = useState(false)
+      triggerRef.current = () => setShouldThrow(true)
+      return <Boom shouldThrow={shouldThrow} />
+    }
+
+    try {
+      screen.render(<Wrapper />)
+
+      // `act`'s own scope only calls `setShouldThrow` — it does not itself
+      // throw. `Boom` throwing during the render that schedules is React's
+      // uncaught path, which `act` would otherwise route to the `render()`
+      // root. No such root is mounted here — this is a `createTestRoot()`
+      // root, not `render()`'s — so `act` rethrows instead.
+      expect(() => {
+        act(() => {
+          triggerRef.current?.()
+        })
+      }).toThrow("render boom")
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })
