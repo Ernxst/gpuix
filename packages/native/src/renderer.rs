@@ -1501,7 +1501,7 @@ enum UiCommand {
         path: String,
         response: SyncSender<std::result::Result<(), String>>,
     },
-    /// Posts the real `WM_SETTINGCHANGE` for `SPI_SETCLIENTAREAANIMATION` to
+    /// Sends the real `WM_SETTINGCHANGE` for `SPI_SETCLIENTAREAANIMATION` to
     /// this renderer's own window, then waits for the platform to have
     /// handled it. Used by `test_set_platform_reduced_motion` after it
     /// overrides `should_reduce_motion` for this process, so the test never
@@ -2017,33 +2017,35 @@ async fn run_ui_commands(
                 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
                 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
                 use windows::Win32::UI::WindowsAndMessaging::{
-                    PostMessageW, SPI_SETCLIENTAREAANIMATION, WM_SETTINGCHANGE,
+                    SendMessageW, SPI_SETCLIENTAREAANIMATION, WM_SETTINGCHANGE,
                 };
 
                 let previous_count = gpui_windows::test_reduce_motion_change_count();
-                let post_result = window.update(cx, |_view, window, _cx| {
+                let hwnd_result = window.update(cx, |_view, window, _cx| {
                     let handle = HasWindowHandle::window_handle(window)
                         .map_err(|error| format!("Failed to get the window handle: {error}"))?;
                     let RawWindowHandle::Win32(handle) = handle.as_raw() else {
                         return Err("The GPUI window is not a Win32 window".to_string());
                     };
-                    let hwnd = HWND(handle.hwnd.get() as *mut std::ffi::c_void);
-                    // SAFETY: `hwnd` is the still-live window we were just
-                    // handed; posting `WM_SETTINGCHANGE` only queues a
-                    // message for its own window procedure, the same message
-                    // the system broadcasts when the setting really changes.
-                    unsafe {
-                        PostMessageW(
-                            Some(hwnd),
-                            WM_SETTINGCHANGE,
-                            WPARAM(SPI_SETCLIENTAREAANIMATION.0 as usize),
-                            LPARAM(0),
-                        )
-                    }
-                    .map_err(|error| format!("Failed to post WM_SETTINGCHANGE: {error}"))
+                    Ok(HWND(handle.hwnd.get() as *mut std::ffi::c_void))
                 });
-                match post_result {
-                    Ok(Ok(())) => {
+                match hwnd_result {
+                    Ok(Ok(hwnd)) => {
+                        // Windows refuses to post `WM_SETTINGCHANGE`
+                        // (ERROR_MESSAGE_SYNC_ONLY), so send it. Sending to a
+                        // window on this thread runs its window procedure here,
+                        // outside the `window.update` lease; the procedure posts
+                        // the platform's own reduced-motion message in turn.
+                        // SAFETY: `hwnd` is this renderer's still-live window, and
+                        // this is the message the system sends on a real change.
+                        unsafe {
+                            SendMessageW(
+                                hwnd,
+                                WM_SETTINGCHANGE,
+                                Some(WPARAM(SPI_SETCLIENTAREAANIMATION.0 as usize)),
+                                Some(LPARAM(0)),
+                            );
+                        }
                         // Poll rather than block: the message is handled on
                         // this same UI thread's event loop, which this async
                         // task shares, so nothing but polling can observe it.
