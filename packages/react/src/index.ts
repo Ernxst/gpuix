@@ -149,6 +149,7 @@ export {
 } from "./dom-position.js"
 export { announce } from "./announce.js"
 export type { AnnounceOptions } from "./announce.js"
+export { clipboard } from "./clipboard.js"
 export { __applyCanvasCommands } from "./canvas/commands.js"
 export { createImageBitmap, Image } from "./canvas/image.js"
 export {

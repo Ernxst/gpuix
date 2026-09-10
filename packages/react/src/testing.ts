@@ -722,6 +722,11 @@ export class TestRenderer implements NativeRenderer {
   private animationFrameRequestCount = 0
   private animationFrameCallbacks: Array<(timestamp: number) => void> = []
   private elementMap: Map<number, TestElement> | null = null
+  /** `clipboard.writeText/readText`'s backdoor under the test renderer: an
+   *  in-memory string, never the machine pasteboard the test renderer's real
+   *  platform (`current_platform(false)`, test_renderer.rs) would otherwise
+   *  reach through a native clipboard call. */
+  private clipboardText: string | null = null
 
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
@@ -1479,6 +1484,18 @@ export class TestRenderer implements NativeRenderer {
 
   getActiveElement(): number | null {
     return this.native.getActiveElement()
+  }
+
+  /** `clipboard.writeText/readText`'s test backdoor: read the in-memory
+   *  clipboard, never the machine pasteboard. */
+  getClipboardText(): string | null {
+    return this.clipboardText
+  }
+
+  /** `clipboard.writeText/readText`'s test backdoor: set the in-memory
+   *  clipboard, never the machine pasteboard. */
+  setClipboardText(text: string | null): void {
+    this.clipboardText = text
   }
 
   blur(): void {
