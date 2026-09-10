@@ -38,8 +38,18 @@ defineGlobalIfAbsent("scrollTo", () => undefined)
 // navigator" but "a navigator with no clipboard". Only a `navigator` that is
 // entirely absent gets the shortcut of being defined outright as `{ clipboard }`.
 if (Reflect.has(globalThis, "navigator")) {
-  const navigator = (globalThis as { navigator?: { clipboard?: unknown } }).navigator
-  if (navigator != null && !navigator.clipboard) {
+  // Presence must be judged by presence, not by reading a value: a host
+  // `navigator` getter can throw (that must not abort this whole import),
+  // and testing `.clipboard` for truthiness would overwrite an existing own
+  // `clipboard: undefined` or misfire an accessor. So the read is wrapped,
+  // and existence is checked with `Reflect.has` rather than a value read.
+  let navigator: unknown
+  try {
+    navigator = (globalThis as { navigator?: unknown }).navigator
+  } catch {
+    navigator = undefined
+  }
+  if (typeof navigator === "object" && navigator !== null && !Reflect.has(navigator, "clipboard")) {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       writable: true,
