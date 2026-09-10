@@ -4,6 +4,7 @@
     "infinite-chat.test.tsx",
     "window-order.tsx",
     "window-order.test.ts",
+    "windows-accessibility.test.tsx",
     "../example-app/assets.d.ts"
   ],
   "include": []

@@ -68,6 +68,11 @@ announced correctly on macOS; a green build only proves that they are wired.
 5. On Machine count, use Narrator's announced increment/decrement commands and
    confirm the visible and announced value moves by one in each direction.
 
+`examples/windows-accessibility.test.tsx` covers part of this in Windows CI: it
+checks that the AccessKit adapter exists before the window is first shown, and
+that UI Automation exposes the heading, button and checkbox by name and control
+type. Whether Narrator announces them correctly still needs this manual pass.
+
 ## Linux: Accerciser and Orca
 
 1. Start the fixture from a graphical session with the fontconfig runtime flag:

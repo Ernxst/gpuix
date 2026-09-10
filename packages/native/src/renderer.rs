@@ -2281,6 +2281,26 @@ pub fn test_on_screen_window_owner_pids() -> Result<Vec<u32>> {
     ))
 }
 
+/// Whether the most recent Windows accessibility adapter was created while its
+/// window was already visible. AccessKit requires the adapter before the first
+/// show (#440), so a correct open reports `false`; `null` before any window has
+/// initialized accessibility.
+#[cfg(all(target_os = "windows", feature = "test-support"))]
+#[napi]
+pub fn test_accessibility_initialized_while_visible() -> Result<Option<bool>> {
+    Ok(gpui_windows::test_accessibility_initialized_while_visible())
+}
+
+/// Only the Windows adapter has a first-show ordering to record.
+#[cfg(all(not(target_os = "windows"), feature = "test-support"))]
+#[napi]
+pub fn test_accessibility_initialized_while_visible() -> Result<Option<bool>> {
+    Err(Error::new(
+        Status::GenericFailure,
+        "test_accessibility_initialized_while_visible is only supported on Windows",
+    ))
+}
+
 /// Lifecycle states distinguish an invalid pre-init call from an idempotent
 /// post-termination call after the native window has already been destroyed.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
