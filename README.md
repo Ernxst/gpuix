@@ -635,9 +635,12 @@ have one.
 
 ## Application menus and termination
 
-Every desktop app gets a minimal application menu with **Quit** and Cmd+Q. Pass
-`menus: []` to opt out, or replace it with a cross-platform menu tree. A menu
-action's stable `id` reaches `onMenuAction` exactly once:
+Every desktop app gets a minimal application menu with **Quit**. Its shortcut
+follows each platform's convention: Cmd+Q on macOS and Ctrl+Q on Linux. Windows
+has no default Quit shortcut; closing the last window, including with Alt+F4,
+quits. A `role: 'quit'` item without a `keyEquivalent` gets the same default.
+Pass `menus: []` to opt out, or replace it with a cross-platform menu tree. A
+menu action's stable `id` reaches `onMenuAction` exactly once:
 
 ```tsx
 render(<App />, {
@@ -650,7 +653,7 @@ render(<App />, {
         { kind: 'separator' },
         { kind: 'system', label: 'Services', systemMenu: 'services' },
         { kind: 'separator' },
-        { kind: 'action', label: 'Quit My App', role: 'quit', keyEquivalent: 'cmd-q' },
+        { kind: 'action', label: 'Quit My App', role: 'quit' },
       ],
     },
   ],

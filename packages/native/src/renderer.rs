@@ -660,9 +660,11 @@ impl ApplicationMenuBuilder {
             }
         }
 
-        let key_equivalent = spec
-            .key_equivalent
-            .or_else(|| quit.then(|| "cmd-q".to_string()));
+        let key_equivalent = spec.key_equivalent.or_else(|| {
+            quit.then(default_quit_key_equivalent)
+                .flatten()
+                .map(str::to_string)
+        });
         if let Some(key_equivalent) = key_equivalent {
             validate_menu_key_equivalent(&key_equivalent)?;
             self.bindings
@@ -714,6 +716,19 @@ fn parse_menu_os_action(value: &str) -> std::result::Result<gpui::OsAction, Stri
     }
 }
 
+/// Quit's shortcut when a quit item names none, per platform convention:
+/// Ctrl+Q on Linux and Cmd+Q on macOS. Windows has none; Alt+F4 on the last
+/// window quits there, and `cmd-q` would mean Win+Q, which the shell owns.
+fn default_quit_key_equivalent() -> Option<&'static str> {
+    if cfg!(target_os = "windows") {
+        None
+    } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
+        Some("ctrl-q")
+    } else {
+        Some("cmd-q")
+    }
+}
+
 pub(crate) fn default_application_menus(title: &str) -> Vec<MenuSpec> {
     vec![MenuSpec {
         name: title.to_string(),
@@ -725,7 +740,7 @@ pub(crate) fn default_application_menus(title: &str) -> Vec<MenuSpec> {
             items: None,
             disabled: None,
             checked: None,
-            key_equivalent: Some("cmd-q".to_string()),
+            key_equivalent: None,
             role: Some("quit".to_string()),
             system_menu: None,
             os_action: None,
@@ -1425,6 +1440,12 @@ enum UiCommand {
         id: u64,
         response: SyncSender<Option<crate::automation::ElementBounds>>,
     },
+    GetPaintedText {
+        response: SyncSender<Vec<String>>,
+    },
+    GetPaintedHighlights {
+        response: SyncSender<Vec<crate::text::PaintedHighlight>>,
+    },
     FocusElement {
         id: u64,
         reveal: bool,
@@ -1747,6 +1768,19 @@ async fn run_ui_commands(
             UiCommand::GetElementBounds { id, response } => draw_ui_window_for_read(window, cx)
                 .and_then(|()| {
                     response.send(crate::automation::get_bounds(id)).ok();
+                    Ok(())
+                }),
+            // The paint logs are thread-local to the thread that paints, so
+            // draw and read them here rather than on the calling thread.
+            UiCommand::GetPaintedText { response } => {
+                draw_ui_window_for_read(window, cx).and_then(|()| {
+                    response.send(crate::text::painted_text()).ok();
+                    Ok(())
+                })
+            }
+            UiCommand::GetPaintedHighlights { response } => draw_ui_window_for_read(window, cx)
+                .and_then(|()| {
+                    response.send(crate::text::painted_highlights()).ok();
                     Ok(())
                 }),
             UiCommand::FocusElement { id, reveal } => window.update(cx, move |view, window, cx| {
@@ -4583,7 +4617,23 @@ impl GpuixRenderer {
     pub fn get_painted_text(&self) -> Result<Vec<String>> {
         #[cfg(target_os = "macos")]
         draw_window_for_automation_read()?;
-        Ok(crate::text::painted_text())
+        #[cfg(target_os = "macos")]
+        return Ok(crate::text::painted_text());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetPaintedText { response })?;
+            return recv_ui_response(receiver, "the painted text query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
     }
 
     /// Every highlight wash painted in the last frame, in paint order.
@@ -4594,10 +4644,29 @@ impl GpuixRenderer {
     pub fn get_painted_highlights(&self) -> Result<Vec<crate::element_tree::HighlightMatch>> {
         #[cfg(target_os = "macos")]
         draw_window_for_automation_read()?;
-        Ok(crate::text::painted_highlights()
+        #[cfg(target_os = "macos")]
+        return Ok(crate::text::painted_highlights()
             .into_iter()
             .map(Into::into)
-            .collect())
+            .collect());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetPaintedHighlights { response })?;
+            return Ok(recv_ui_response(receiver, "the painted highlights query")?
+                .into_iter()
+                .map(Into::into)
+                .collect());
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
     }
 
     /// Simulate space-separated keystrokes through the focused element's input pipeline.
