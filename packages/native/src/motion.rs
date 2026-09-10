@@ -790,6 +790,16 @@ impl StyleTransitionState {
         if reduce_motion {
             self.from = self.target.clone();
             self.velocities = TransitionVelocities::default();
+        } else if matches!(&self.transition.easing, TransitionEasing::Spring(_)) {
+            // A spring can pass through the rest thresholds between two
+            // frames. Once the real render path observes that rest state,
+            // latch the endpoint so a later frame cannot resurrect the track
+            // as the decaying oscillation moves away from that sample.
+            let frame = self.frame_with_velocities(&self.target_style, now, false).0;
+            if !frame.active {
+                self.from = self.target.clone();
+                self.velocities = TransitionVelocities::default();
+            }
         }
     }
 

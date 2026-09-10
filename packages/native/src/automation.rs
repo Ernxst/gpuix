@@ -157,7 +157,10 @@ pub fn all_bounds() -> HashMap<u64, ElementBounds> {
 }
 
 enum ClockMode {
-    Live,
+    Live {
+        wall_origin: Instant,
+        logical_origin: Instant,
+    },
     Frozen { now: Instant },
 }
 
@@ -179,10 +182,14 @@ impl Default for AutomationClock {
 
 impl AutomationClock {
     pub fn new() -> Self {
+        let now = Instant::now();
         Self {
             inner: Arc::new(Mutex::new(ClockInner {
-                origin: Instant::now(),
-                mode: ClockMode::Live,
+                origin: now,
+                mode: ClockMode::Live {
+                    wall_origin: now,
+                    logical_origin: now,
+                },
             })),
         }
     }
@@ -190,7 +197,10 @@ impl AutomationClock {
     pub fn now(&self) -> Instant {
         let inner = self.inner.lock().unwrap();
         match inner.mode {
-            ClockMode::Live => Instant::now(),
+            ClockMode::Live {
+                wall_origin,
+                logical_origin,
+            } => logical_origin + Instant::now().saturating_duration_since(wall_origin),
             ClockMode::Frozen { now } => now,
         }
     }
@@ -244,16 +254,22 @@ impl AutomationClock {
 
     pub fn resume(&self) -> f64 {
         let mut inner = self.inner.lock().unwrap();
-        let elapsed = current_instant(&inner).saturating_duration_since(inner.origin);
-        inner.origin = Instant::now() - elapsed;
-        inner.mode = ClockMode::Live;
+        let now = current_instant(&inner);
+        let elapsed = now.saturating_duration_since(inner.origin);
+        inner.mode = ClockMode::Live {
+            wall_origin: Instant::now(),
+            logical_origin: now,
+        };
         elapsed.as_secs_f64() * 1000.0
     }
 }
 
 fn current_instant(inner: &ClockInner) -> Instant {
     match inner.mode {
-        ClockMode::Live => Instant::now(),
+        ClockMode::Live {
+            wall_origin,
+            logical_origin,
+        } => logical_origin + Instant::now().saturating_duration_since(wall_origin),
         ClockMode::Frozen { now } => now,
     }
 }
@@ -609,6 +625,18 @@ mod tests {
             clock.now().saturating_duration_since(later),
             Duration::from_millis(150)
         );
+    }
+
+    #[test]
+    fn resuming_a_frozen_clock_preserves_advanced_absolute_time() {
+        let clock = AutomationClock::new();
+        clock.pause();
+        clock.fast_forward_ms(10_000.0);
+        let advanced = clock.now();
+
+        clock.resume();
+
+        assert!(clock.now() >= advanced);
     }
 
     #[test]
