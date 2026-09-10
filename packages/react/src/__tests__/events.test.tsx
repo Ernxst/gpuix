@@ -399,9 +399,8 @@ describe("frame loop", () => {
         },
       },
     )
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await vi.waitFor(() => expect(terminated).toBe(1))
     expect(ticks).toBe(1)
-    expect(terminated).toBe(1)
     loop.stop()
   })
 
@@ -427,9 +426,8 @@ describe("frame loop", () => {
         },
       }
     )
-    await new Promise((resolve) => setTimeout(resolve, 40))
+    await vi.waitFor(() => expect(terminated).toBe(1))
     expect(ticks).toBe(3)
-    expect(terminated).toBe(1)
     loop.stop()
   })
 
