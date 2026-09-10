@@ -113,7 +113,9 @@ impl CustomElement for MarkdownElement {
             .text_size(gpui::px(theme.metrics.md_text_size))
             .line_height(gpui::px(theme.metrics.md_line_height));
 
-        super::apply_accessibility(super::custom_surface(container, &ctx, cx), &ctx)
+        let container = super::custom_surface(container, &ctx, cx);
+        let container = super::wire_standard_events(container, &ctx, cx);
+        super::apply_accessibility(container, &ctx)
             .child(body)
             .into_any_element()
     }

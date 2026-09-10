@@ -24,7 +24,7 @@ const customDragHosts: Array<[
   string,
   (handlers: DragHandlers) => React.ReactElement,
 ]> = [
-  ["input", (handlers) => <input {...handlers} value="" style={{ width: 200, height: 40 }} />],
+  ["input", (handlers) => <input {...handlers} value="" style={{ width: 200, height: 80 }} />],
   [
     "textarea",
     (handlers) => <textarea {...handlers} value="" style={{ width: 200, height: 80 }} />,
@@ -36,10 +36,11 @@ const customDragHosts: Array<[
       <svg
         {...handlers}
         source='<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#5ca9ff"/></svg>'
+        style={{ width: 200, height: 120 }}
       />
     ),
   ],
-  ["code", (handlers) => <code {...handlers} code="drop" language="txt" style={{ width: 200 }} />],
+  ["code", (handlers) => <code {...handlers} code="drop" language="txt" style={{ width: 200, height: 40 }} />],
   [
     "markdown",
     (handlers) => <markdown {...handlers} source="drop" style={{ width: 200, height: 40 }} />,

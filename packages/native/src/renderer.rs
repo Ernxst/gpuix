@@ -11999,7 +11999,15 @@ where
                 }
             },
         ));
+    }
 
+    // `fileDrop` is non-bubbling on the JS side for the legacy `onFileDrop`
+    // contract. Attach GPUI's submit listener only to hosts that declared a
+    // drop listener themselves; inert descendants still participate in the
+    // drag-move capture walk, but must not steal the native submit target from
+    // an ancestor's direct listener.
+    if element.events.contains("fileDrop") {
+        let id = element.id;
         el = el.on_drop(cx.listener(
             move |view, dropped: &gpui::ExternalPaths, window, _cx| {
                 view.submit_external_drag(id, dropped, window.mouse_position());

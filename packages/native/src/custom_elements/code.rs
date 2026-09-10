@@ -248,6 +248,7 @@ impl CustomElement for CodeElement {
             &ctx,
             cx,
         );
+        let block = super::wire_standard_events(block, &ctx, cx);
         super::apply_accessibility(block, &ctx)
             .child(body)
             .into_any_element()

@@ -523,6 +523,13 @@ export declare class TestGpuixRenderer {
    */
   simulateFileDrop(x: number, y: number, paths: Array<string>): void
   /**
+   * Simulate only the submit phase of a Finder-style file drop. The active
+   * external drag must have been established by `simulate_file_drag_move`;
+   * keeping Entered separate lets React tests prove that submit does not
+   * synthesize another dragOver or dragLeave.
+   */
+  simulateFileDropSubmit(x: number, y: number): void
+  /**
    * Simulate one Finder drag move without dropping. The first move enters
    * the window; later moves use GPUI's pending event.
    */
