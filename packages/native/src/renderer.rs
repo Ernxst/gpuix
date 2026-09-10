@@ -1511,6 +1511,13 @@ enum UiCommand {
         response: SyncSender<std::result::Result<(), String>>,
     },
     Blur,
+    WriteClipboardText {
+        text: String,
+        response: SyncSender<()>,
+    },
+    ReadClipboardText {
+        response: SyncSender<Option<String>>,
+    },
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -2081,6 +2088,28 @@ async fn run_ui_commands(
                 }
             }
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
+            UiCommand::WriteClipboardText { text, response } => {
+                let result = window.update(cx, move |_view, _window, cx| {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                });
+                response.send(()).ok();
+                result
+            }
+            UiCommand::ReadClipboardText { response } => {
+                let result = window.update(cx, move |_view, _window, cx| {
+                    cx.read_from_clipboard().and_then(|item| item.text())
+                });
+                match result {
+                    Ok(text) => {
+                        response.send(text).ok();
+                        Ok(())
+                    }
+                    Err(error) => {
+                        response.send(None).ok();
+                        Err(error)
+                    }
+                }
+            }
         };
         if let Err(error) = result {
             if cx.update(|cx| cx.windows().is_empty()) {
@@ -4139,6 +4168,56 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    // ── Clipboard API ────────────────────────────────────────────────
+
+    /// Write plain text to the platform clipboard.
+    #[napi]
+    pub fn write_clipboard_text(&self, text: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |_window, cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::WriteClipboardText { text, response })?;
+            return recv_ui_response(receiver, "the clipboard write");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Read plain text from the platform clipboard, or null if it holds none.
+    #[napi]
+    pub fn read_clipboard_text(&self) -> Result<Option<String>> {
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(|_window, cx| {
+            cx.read_from_clipboard().and_then(|item| item.text())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::ReadClipboardText { response })?;
+            return recv_ui_response(receiver, "the clipboard read");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     // ── Selection API ────────────────────────────────────────────────
 
     /// The current text selection joined in document order, or null.
@@ -5813,6 +5892,23 @@ impl WebGpuixRenderer {
 
     pub fn blur(&self) -> Result<(), wasm_bindgen::JsValue> {
         update_web_window(|window, _cx| window.blur())
+    }
+
+    // The web build's own consumer already has the real `navigator.clipboard`
+    // — see `@gpuix/react/globals` — so these reject rather than routing
+    // through it a second time.
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = writeClipboardText)]
+    pub fn write_clipboard_text(&self, _text: String) -> Result<(), wasm_bindgen::JsValue> {
+        Err(wasm_bindgen::JsValue::from_str(
+            "Clipboard access is not supported by the wasm renderer; use navigator.clipboard instead",
+        ))
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = readClipboardText)]
+    pub fn read_clipboard_text(&self) -> Result<Option<String>, wasm_bindgen::JsValue> {
+        Err(wasm_bindgen::JsValue::from_str(
+            "Clipboard access is not supported by the wasm renderer; use navigator.clipboard instead",
+        ))
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getSelectedText)]
