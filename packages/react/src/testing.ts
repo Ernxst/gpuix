@@ -285,7 +285,7 @@ interface NativeTestRendererConstructor {
 export interface TestWindowOptions {
   width?: number
   height?: number
-  /** Virtual display scale factor. Unsupported or invalid requests throw. */
+  /** Virtual display scale factor. An invalid request throws. */
   scaleFactor?: number
 }
 
