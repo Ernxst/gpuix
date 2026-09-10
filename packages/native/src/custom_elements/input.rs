@@ -1384,9 +1384,13 @@ impl TextEditorState {
         } else {
             (SharedString::from(self.content.clone()), false)
         };
-        let font_size = style.font_size.to_pixels(window.rem_size());
+        let rem_size = window.rem_size();
+        let font_size = style.font_size.to_pixels(rem_size);
         self.font_size = font_size;
-        self.line_height = window.line_height();
+        // Taffy measures after parent `with_text_style` is gone, so
+        // `window.line_height()` is always 16×φ. Use the style captured during
+        // request_layout instead.
+        self.line_height = style.line_height_in_pixels(rem_size);
         let color = if is_placeholder {
             gpui::rgba(0x8f8f8fff).into()
         } else {

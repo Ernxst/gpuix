@@ -1476,6 +1476,21 @@ inactive. Override its colour through the shared native theme:
 <input theme={{ caret: '#22c55e' }} />
 ```
 
+**`fontSize` and `lineHeight`** in `style` size each row. Without `lineHeight`,
+the row uses GPUI's default leading, so a larger `fontSize` grows the box.
+Pass `lineHeight` to set the row in pixels. `minRows` and `maxRows` multiply
+that height. An explicit `height` still overrides both.
+
+```tsx
+<textarea
+  value={draft}
+  minRows={1}
+  maxRows={8}
+  style={{ fontSize: 14, lineHeight: 20 }}
+  onChange={(event) => setDraft(event.value ?? '')}
+/>
+```
+
 ### Input in a search pill
 
 `<input>` has **no default inner padding** and paints text at the top of its

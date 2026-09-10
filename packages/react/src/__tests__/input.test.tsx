@@ -521,4 +521,37 @@ describeNative("native text editors", () => {
     testRoot.renderer.nativeSimulateMouseUp(150, 20, 2)
     expect(testRoot.renderer.getAllText()).toContain("Events: 1/1")
   })
+
+  function editorBounds(type: "input" | "textarea") {
+    const node = testRoot.renderer.findByType(type)[0]
+    expect(node).toBeDefined()
+    const bounds = testRoot.renderer.getElementBounds(node.id)
+    expect(bounds).not.toBeNull()
+    return bounds!
+  }
+
+  it("sizes a row from style.lineHeight", () => {
+    testRoot.render(
+      <textarea value="one" minRows={1} maxRows={8} style={{ width: 300, lineHeight: 30 }} />,
+    )
+    expect(editorBounds("textarea").height).toBe(30)
+  })
+
+  it("multiplies lineHeight by minRows", () => {
+    testRoot.render(
+      <textarea value="one" minRows={3} maxRows={8} style={{ width: 300, lineHeight: 30 }} />,
+    )
+    expect(editorBounds("textarea").height).toBe(90)
+  })
+
+  it("scales a row from fontSize when lineHeight is unset", () => {
+    testRoot.render(<input value="one" style={{ width: 300, fontSize: 28 }} />)
+    // GPUI default leading is phi, so 28px * 1.618 rounds to 45.
+    expect(editorBounds("input").height).toBe(45)
+  })
+
+  it("uses lineHeight on a single-line input", () => {
+    testRoot.render(<input value="one" style={{ width: 300, lineHeight: 22 }} />)
+    expect(editorBounds("input").height).toBe(22)
+  })
 })
