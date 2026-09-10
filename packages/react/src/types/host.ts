@@ -3,6 +3,7 @@ import type {
   CanvasImageLoadState as NativeCanvasImageLoadState,
   EventPayload,
   MenuSpec,
+  PromptForPathsOptions,
 } from "@gpuix/native"
 import type {
   GpuixChangeEvent,
@@ -1275,6 +1276,10 @@ export interface CanvasProps extends Props {
 export interface NativeRenderer {
   /** Apply one React commit. Returns every element id destroyed by the batch. */
   applyBatch(json: string): Array<number>
+  /** Open the native path picker. A nullish result means that the user cancelled. */
+  promptForPaths?(options: PromptForPathsOptions): Promise<Array<string> | null | undefined>
+  /** Open the native save picker. A nullish result means that the user cancelled. */
+  promptForNewPath?(directory: string, suggestedName?: string): Promise<string | null | undefined>
   /** Replace a retained canvas display list without a React commit. */
   applyCanvasCommands?(
     id: number,
