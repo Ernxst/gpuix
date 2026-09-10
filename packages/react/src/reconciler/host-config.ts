@@ -314,7 +314,7 @@ const EVENT_PROPS = [
   ["onDragOver", "dragOver", "bubble"],
   ["onDragLeaveCapture", "dragLeave", "capture"],
   ["onDragLeave", "dragLeave", "bubble"],
-  ["onDropCapture", "fileDrop", "capture", "drop"],
+  ["onDropCapture", "fileDrop", "capture", "dropCapture"],
   ["onDrop", "fileDrop", "bubble", "drop"],
   // Keyboard events (require focus — tabIndex or autoFocus)
   ["onKeyDownCapture", "keyDown", "capture"],
