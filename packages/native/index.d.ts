@@ -82,9 +82,11 @@ export declare class GpuixRenderer {
   /**
    * Test seam that posts the real macOS accessibility-display notification.
    *
-   * On Windows this instead changes the real `SPI_SETCLIENTAREAANIMATION`
-   * setting for the current login session (not persisted to the user's
-   * profile), so callers should only use it on disposable test machines.
+   * On Windows this instead overrides `should_reduce_motion` for this
+   * process only, and delivers the same `WM_SETTINGCHANGE` the system
+   * sends on a real change to this renderer's own window, returning once
+   * the platform has handled it. It never touches the machine-wide
+   * setting, so it is safe to run alongside other test processes.
    */
   testSetPlatformReducedMotion(enabled: boolean): void
   /** Whether the embedded macOS runtime is still retained by thread-local handles. */
