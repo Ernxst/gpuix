@@ -111,6 +111,65 @@ describeNative("keyboard focus", () => {
     expect(focusedLabel()).toBe("two")
   })
 
+  it.each([
+    ["tabIndex", (focused: boolean) => ({ tabIndex: focused ? -1 : 0 })],
+    ["disabled", (focused: boolean) => ({ disabled: focused })],
+    ["href", (focused: boolean) => ({ href: focused ? undefined : "/second" })],
+  ] as const)(
+    "preserves the focused %s control as a tree-order tab anchor",
+    (transition, secondProps) => {
+      const secondRef = React.createRef<PublicInstance>()
+      const controls = (focused: boolean) => (
+        <div style={{ width: 400, height: 200 }}>
+          <button type="button" ariaLabel="first" style={{ width: 100, height: 40 }}>
+            <text>First</text>
+          </button>
+          {transition === "href" ? (
+            <a
+              ref={secondRef}
+              ariaLabel="second"
+              style={{ width: 100, height: 40 }}
+              {...secondProps(focused)}
+            >
+              <text>Second</text>
+            </a>
+          ) : (
+            <button
+              ref={secondRef}
+              type="button"
+              ariaLabel="second"
+              style={{ width: 100, height: 40 }}
+              {...secondProps(focused)}
+            >
+              <text>Second</text>
+            </button>
+          )}
+          <button type="button" ariaLabel="third" style={{ width: 100, height: 40 }}>
+            <text>Third</text>
+          </button>
+        </div>
+      )
+
+      testRoot.render(controls(false))
+      testRoot.renderer.simulateKeystrokes("tab")
+      testRoot.renderer.simulateKeystrokes("tab")
+      expect(focusedLabel()).toBe("second")
+
+      testRoot.render(controls(true))
+      expect(focusedLabel()).toBe("second")
+      testRoot.renderer.simulateKeystrokes("tab")
+      expect(focusedLabel()).toBe("third")
+
+      testRoot.render(controls(false))
+      testRoot.renderer.focusElement(secondRef.current!.id)
+      expect(focusedLabel()).toBe("second")
+      testRoot.render(controls(true))
+      expect(focusedLabel()).toBe("second")
+      testRoot.renderer.simulateKeystrokes("shift-tab")
+      expect(focusedLabel()).toBe("first")
+    }
+  )
+
   it("keeps focus when Tab is prevented across phases, virtual targets, and queued presses", () => {
     let preventCapture = true
     let preventBubble = true

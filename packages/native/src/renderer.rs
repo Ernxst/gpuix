@@ -8827,6 +8827,10 @@ impl GpuixView {
             }
         }
 
+        let focused_id = self
+            .focus_handles
+            .iter()
+            .find_map(|(&id, handle)| handle.is_focused(window).then_some(id));
         let tab_index = |element: &crate::retained_tree::RetainedElement| {
             if crate::accessibility::is_native_disabled(element)
                 || accessibility_hidden_in_ancestry(tree, element.id)
@@ -8839,6 +8843,20 @@ impl GpuixView {
                 .and_then(|value| value.as_i64())
                 .and_then(|index| isize::try_from(index).ok())
         };
+        let sequential_tab_index = |element: &crate::retained_tree::RetainedElement| {
+            if crate::accessibility::is_native_disabled(element)
+                || accessibility_hidden_in_ancestry(tree, element.id)
+            {
+                return None;
+            }
+            tab_index(element).or_else(|| {
+                matches!(element.element_type.as_str(), "input" | "textarea").then_some(0)
+            })
+        };
+        let is_focus_anchor = |element: &crate::retained_tree::RetainedElement| {
+            focused_id == Some(element.id)
+                && !sequential_tab_index(element).is_some_and(|index| index >= 0)
+        };
         let needs_focus = |element: &crate::retained_tree::RetainedElement| {
             matches!(element.element_type.as_str(), "input" | "textarea")
                 || tab_index(element).is_some()
@@ -8847,19 +8865,21 @@ impl GpuixView {
                 || element.events.contains("keyUp")
                 || element.events.contains("focus")
                 || element.events.contains("blur")
+                || is_focus_anchor(element)
         };
         let mut pending_auto_focus = Vec::new();
         // Create handles for elements that need focus but don't have one yet.
         for (&id, element) in &tree.elements {
-            let tab_index = tab_index(element).or_else(|| {
-                matches!(element.element_type.as_str(), "input" | "textarea").then_some(0)
-            });
+            let tab_index = sequential_tab_index(element);
+            let focus_anchor = is_focus_anchor(element);
+            let traversal_tab_index = focus_anchor.then_some(0).or(tab_index);
+            let tab_stop = !focus_anchor && tab_index.is_some_and(|index| index >= 0);
 
             let native_disabled = crate::accessibility::is_native_disabled(element)
                 || accessibility_hidden_in_ancestry(tree, id);
             if needs_focus(element) && !self.focus_handles.contains_key(&id) {
-                let handle = match tab_index {
-                    Some(index) => cx.focus_handle().tab_index(index).tab_stop(index >= 0),
+                let handle = match traversal_tab_index {
+                    Some(index) => cx.focus_handle().tab_index(index).tab_stop(tab_stop),
                     None => cx.focus_handle(),
                 };
                 // Focus once, at creation. Re-focusing every frame would
@@ -8877,12 +8897,16 @@ impl GpuixView {
                 }
                 self.focus_handles.insert(id, handle);
             } else if let (Some(handle), Some(index)) =
-                (self.focus_handles.get(&id).cloned(), tab_index)
+                (self.focus_handles.get(&id).cloned(), traversal_tab_index)
             {
                 self.focus_handles
-                    .insert(id, handle.tab_index(index).tab_stop(index >= 0));
+                    .insert(id, handle.tab_index(index).tab_stop(tab_stop));
             } else if let Some(handle) = self.focus_handles.get(&id).cloned() {
-                self.focus_handles.insert(id, handle.tab_stop(false));
+                // Keep non-stop handles at the neutral tree-order position.
+                // A stale positive or negative index would move a focused
+                // anchor away from its document position.
+                self.focus_handles
+                    .insert(id, handle.tab_index(0).tab_stop(false));
             }
         }
 
@@ -12515,9 +12539,14 @@ pub(crate) fn build_host_container(
         el = el.child(scroll_tracker);
     }
 
-    let native_disabled =
-        crate::accessibility::is_native_disabled(element) || ctx.inherited.accessibility_hidden;
-    if !native_disabled {
+    let native_disabled = crate::accessibility::is_native_disabled(element);
+    let accessibility_hidden = ctx.inherited.accessibility_hidden;
+    let focused_disabled_anchor = native_disabled
+        && ctx
+            .focus_handles
+            .get(&element.id)
+            .is_some_and(|handle| handle.is_focused(window));
+    if !accessibility_hidden && (!native_disabled || focused_disabled_anchor) {
         if let Some(handle) = ctx.focus_handles.get(&element.id) {
             el = el.track_focus(handle);
         }
@@ -12541,7 +12570,7 @@ pub(crate) fn build_host_container(
             ..Default::default()
         },
     );
-    if !native_disabled {
+    if !native_disabled && !accessibility_hidden {
         if let Some(tab_index) = element
             .custom_props
             .get("tabIndex")
