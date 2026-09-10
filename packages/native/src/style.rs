@@ -2013,6 +2013,18 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             }
             continue;
         }
+        if key == "display"
+            && matches!(prefix, "hover" | "active")
+            && value.as_str() == Some("none")
+        {
+            reject(
+                &mut parsed.problems,
+                property!("display"),
+                value,
+                "display: \"none\" cannot be set by hover or active: hiding the element removes the hit-test box that triggers the state; use visibility: \"hidden\" or hoverWithin on a descendant",
+            );
+            continue;
+        }
         enum_field!(key, value, "display", display, ["none", "flex", "grid"]);
         enum_field!(key, value, "visibility", visibility, ["visible", "hidden"]);
         enum_field!(
@@ -3427,6 +3439,46 @@ mod tests {
         assert_eq!(
             nested.problems[0].reason,
             "hoverGroup marks the base element and cannot be nested in a state style"
+        );
+    }
+
+    #[test]
+    fn rejects_display_none_in_hover_and_active_styles() {
+        let reason = "display: \"none\" cannot be set by hover or active: hiding the element removes the hit-test box that triggers the state; use visibility: \"hidden\" or hoverWithin on a descendant";
+
+        for (state, style) in [
+            ("hover", json!({ "hover": { "display": "none" } })),
+            ("active", json!({ "active": { "display": "none" } })),
+        ] {
+            let parsed = parse_style_value(&style);
+            assert_eq!(parsed.problems.len(), 1, "{state}: {:?}", parsed.problems);
+            assert_eq!(parsed.problems[0].property, format!("{state}.display"));
+            assert_eq!(parsed.problems[0].reason, reason);
+        }
+
+        let hover_grid = parse_style_value(&json!({
+            "hover": { "display": "grid", "opacity": 0.5 }
+        }));
+        assert!(hover_grid.problems.is_empty(), "{:?}", hover_grid.problems);
+        assert_eq!(hover_grid.style.hover.as_deref().unwrap().display.as_deref(), Some("grid"));
+
+        let hover_within_none = parse_style_value(&json!({
+            "hoverWithin": { "display": "none" }
+        }));
+        assert!(
+            hover_within_none.problems.is_empty(),
+            "{:?}",
+            hover_within_none.problems
+        );
+        assert_eq!(
+            hover_within_none
+                .style
+                .hover_within
+                .as_deref()
+                .unwrap()
+                .display
+                .as_deref(),
+            Some("none")
         );
     }
 

@@ -6552,7 +6552,7 @@ impl GpuixView {
         if let Some(handle) = self.focus_handles.get(&id) {
             let hidden = {
                 let tree = self.tree.lock().unwrap();
-                display_none_in_ancestry(&tree, id)
+                self.display_none_in_ancestry(&tree, id, window)
             };
             // A target under `display: none` refuses focus outright: no focus
             // change, so no `focus`/`blur` event and `getActiveElement()` is
@@ -6565,6 +6565,40 @@ impl GpuixView {
             }
         }
         cx.notify();
+    }
+
+    /// Whether `element_id` or any ancestor (including itself) currently
+    /// resolves `display` to `none` from its interaction state.
+    ///
+    /// Focus handle lifetime is unaffected by this: it is a focusability
+    /// predicate, checked only at the points where focus would actually move
+    /// (see issue #426).
+    fn display_none_in_ancestry(
+        &self,
+        tree: &RetainedTree,
+        element_id: u64,
+        window: &gpui::Window,
+    ) -> bool {
+        let mut current = Some(element_id);
+        while let Some(id) = current {
+            let Some(element) = tree.elements.get(&id) else {
+                return false;
+            };
+            let (focused, focus_visible, hover_within) = interaction_state_for_element(
+                tree,
+                &self.focus_handles,
+                &self.interactive_style_states,
+                id,
+                window,
+            );
+            if element.style.as_deref().is_some_and(|style| {
+                effective_display(style, focused, focus_visible, hover_within) == Some("none")
+            }) {
+                return true;
+            }
+            current = element.parent;
+        }
+        false
     }
 }
 
@@ -7513,7 +7547,7 @@ impl GpuixView {
                 .focus_handles
                 .get(&id)
                 .is_some_and(|handle| handle.tab_stop && handle.tab_index >= 0)
-                && !display_none_in_ancestry(&tree, id);
+                && !self.display_none_in_ancestry(&tree, id, window);
             if is_focusable {
                 focusable.push((id, order));
                 order += 1;
@@ -7697,7 +7731,7 @@ impl GpuixView {
             .iter()
             .find_map(|(&id, handle)| handle.is_focused(window).then_some(id))
         {
-            if display_none_in_ancestry(tree, focused_id) {
+            if self.display_none_in_ancestry(tree, focused_id, window) {
                 window.blur();
             }
         }
@@ -7744,7 +7778,10 @@ impl GpuixView {
                 // candidate that isn't rendered rather than deferring it:
                 // an element under `display: none` never autofocuses, even
                 // after it is later shown.
-                if element.auto_focus && !native_disabled && !display_none_in_ancestry(tree, id) {
+                if element.auto_focus
+                    && !native_disabled
+                    && !self.display_none_in_ancestry(tree, id, window)
+                {
                     pending_auto_focus.push((id, handle.clone()));
                 }
                 self.focus_handles.insert(id, handle);
@@ -8514,7 +8551,24 @@ fn build_element_with_parent_layout(
             || retained_gpui_element_id(element),
         );
 
-    if is_display_none(element) {
+    let parent_inherited = ctx.inherited.clone();
+    let focused = ctx
+        .focus_handles
+        .get(&id)
+        .is_some_and(|handle| handle.is_focused(window));
+    let focus_visible = focused && window.last_input_was_keyboard();
+    let hover_within = parent_inherited.hover_groups.iter().any(|group| {
+        ctx.interactive_style_states
+            .get(&group.id)
+            .is_some_and(|state| state.hovered)
+    });
+    let effective_display = element
+        .style
+        .as_deref()
+        .and_then(|style| effective_display(style, focused, focus_visible, hover_within));
+    let effective_display_none = effective_display == Some("none");
+
+    if effective_display_none {
         remove_subtree_motion_and_transition_state(ctx, id);
         remove_subtree_hover_state(ctx, id);
         ctx.scroll_handles.remove(&id);
@@ -8554,12 +8608,6 @@ fn build_element_with_parent_layout(
         _ => None,
     };
     let declared_style = probe_style.as_ref().or(element.style.as_deref());
-    let parent_inherited = ctx.inherited.clone();
-    let hover_within = parent_inherited.hover_groups.iter().any(|group| {
-        ctx.interactive_style_states
-            .get(&group.id)
-            .is_some_and(|state| state.hovered)
-    });
     let supports_style_transitions = matches!(
         element.element_type.as_str(),
         "div"
@@ -8593,13 +8641,9 @@ fn build_element_with_parent_layout(
                 .map(|state| state.frame(ctx.now, ctx.reduce_motion).style)
         }
     } else if let Some(style) = declared_style.filter(|style| style.transition.is_some()) {
-        let focused = ctx
-            .focus_handles
-            .get(&id)
-            .is_some_and(|handle| handle.is_focused(window));
         let focus_state = crate::motion::StyleState {
             focused,
-            focus_visible: focused && window.last_input_was_keyboard(),
+            focus_visible,
         };
         // Intrinsic endpoints are measured on the shared host container only.
         // Measuring a custom surface means re-entering its own `render` inside
@@ -8747,10 +8791,6 @@ fn build_element_with_parent_layout(
     // Inheritable style resolves once here so both built-ins and custom
     // elements see the same cascade.
     let font = parent_inherited.font_for(layered_style, window);
-    let focused = ctx
-        .focus_handles
-        .get(&id)
-        .is_some_and(|handle| handle.is_focused(window));
     let interaction = ctx
         .interactive_style_states
         .get(&id)
@@ -8758,7 +8798,7 @@ fn build_element_with_parent_layout(
         .unwrap_or_default();
     let probe_state = InteractionProbeState {
         focused,
-        focus_visible: focused && window.last_input_was_keyboard(),
+        focus_visible,
         hover_within,
         hovered: interaction.hovered,
         active: interaction.active,
@@ -8790,6 +8830,19 @@ fn build_element_with_parent_layout(
             cx,
         );
     }
+    if let Some(style) = resolved_style.as_mut() {
+        style.display = effective_display.map(str::to_owned);
+        // GPUI's focus, focus-visible, and hover-within refinements can set
+        // `display: "none"`, which must be stripped before the refinement is
+        // built to avoid a prepaint/paint children mismatch. The parser already
+        // rejects it for hover and active, so those display values must remain:
+        // GPUI applies them at layout through the retained interaction state.
+        for refinement in [&mut style.hover_within, &mut style.focus, &mut style.focus_visible] {
+            if let Some(refinement) = refinement.as_mut() {
+                refinement.display = None;
+            }
+        }
+    }
     if default_flex_none {
         default_flex_none_for_parent_layout(resolved_style.get_or_insert_default());
     }
@@ -8808,7 +8861,7 @@ fn build_element_with_parent_layout(
     let current_color = resolved_current_color(
         style,
         focused,
-        focused && window.last_input_was_keyboard(),
+        focus_visible,
         hover_within,
         interaction.hovered,
         interaction.active,
@@ -10763,22 +10816,122 @@ fn is_display_none(element: &crate::retained_tree::RetainedElement) -> bool {
         == Some("none")
 }
 
-/// Whether `element_id` or any ancestor (including itself) is styled
-/// `display: none`. Focus handle lifetime is unaffected by this: it is a
-/// focusability predicate, checked only at the points where focus would
-/// actually move (see issue #426).
-fn display_none_in_ancestry(tree: &RetainedTree, element_id: u64) -> bool {
-    let mut current = Some(element_id);
+fn interaction_state_for_element(
+    tree: &RetainedTree,
+    focus_handles: &HashMap<u64, gpui::FocusHandle>,
+    interactive_style_states: &HashMap<u64, InteractiveStyleState>,
+    element_id: u64,
+    window: &gpui::Window,
+) -> (bool, bool, bool) {
+    let focused = focus_handles
+        .get(&element_id)
+        .is_some_and(|handle| handle.is_focused(window));
+    let focus_visible = focused && window.last_input_was_keyboard();
+    let mut current = tree.elements.get(&element_id).and_then(|element| element.parent);
+    let mut hover_within = false;
     while let Some(id) = current {
         let Some(element) = tree.elements.get(&id) else {
-            return false;
+            break;
         };
-        if is_display_none(element) {
-            return true;
+        if element
+            .style
+            .as_deref()
+            .and_then(|style| style.hover_group.as_deref())
+            .is_some()
+            && interactive_style_states
+                .get(&id)
+                .is_some_and(|state| state.hovered)
+        {
+            hover_within = true;
+            break;
         }
         current = element.parent;
     }
-    false
+    (focused, focus_visible, hover_within)
+}
+
+fn effective_display<'a>(
+    style: &'a StyleDesc,
+    focused: bool,
+    focus_visible: bool,
+    hover_within: bool,
+) -> Option<&'a str> {
+    let mut display = style.display.as_deref();
+    if focused {
+        display = style
+            .focus
+            .as_deref()
+            .and_then(|style| style.display.as_deref())
+            .or(display);
+    }
+    if focus_visible {
+        display = style
+            .focus_visible
+            .as_deref()
+            .and_then(|style| style.display.as_deref())
+            .or(display);
+    }
+    if hover_within {
+        display = style
+            .hover_within
+            .as_deref()
+            .and_then(|style| style.display.as_deref())
+            .or(display);
+    }
+    display
+}
+
+#[cfg(test)]
+mod effective_display_tests {
+    use super::*;
+
+    #[test]
+    fn base_display_none_is_hidden() {
+        let style = StyleDesc {
+            display: Some("none".into()),
+            ..Default::default()
+        };
+        assert_eq!(effective_display(&style, false, false, false), Some("none"));
+    }
+
+    #[test]
+    fn focused_display_none_is_hidden() {
+        let style = StyleDesc {
+            focus: Some(Box::new(StyleDesc {
+                display: Some("none".into()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        assert_eq!(effective_display(&style, true, false, false), Some("none"));
+        assert_eq!(effective_display(&style, false, false, false), None);
+    }
+
+    #[test]
+    fn hover_within_visible_display_overrides_a_hidden_base() {
+        let style = StyleDesc {
+            display: Some("none".into()),
+            hover_within: Some(Box::new(StyleDesc {
+                display: Some("flex".into()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        assert_eq!(effective_display(&style, false, false, true), Some("flex"));
+    }
+
+    #[test]
+    fn focus_visible_display_none_requires_focus_visible_state() {
+        let style = StyleDesc {
+            focus_visible: Some(Box::new(StyleDesc {
+                display: Some("none".into()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        assert_eq!(effective_display(&style, false, false, false), None);
+        assert_eq!(effective_display(&style, false, true, false), Some("none"));
+    }
 }
 
 pub(crate) fn action_disabled_in_ancestry(tree: &RetainedTree, element_id: u64) -> bool {
