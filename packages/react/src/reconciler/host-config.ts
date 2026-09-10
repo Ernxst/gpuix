@@ -319,6 +319,8 @@ const EVENT_PROPS = [
   ["onScroll", "scroll", "bubble"],
   ["onWheelCapture", "wheel", "capture"],
   ["onWheel", "wheel", "bubble"],
+  // Finder / OS file drop
+  ["onFileDrop", "fileDrop"],
 ] as const
 
 const EVENT_PROP_NAMES = new Set<string>(EVENT_PROPS.map(([name]) => name))
@@ -341,7 +343,7 @@ function syncEventListeners(container: Container, id: number, props: Props): voi
       registerEventHandler(
         container.eventHandlers,
         id,
-        eventHandlerKey(eventType, phase),
+        eventHandlerKey(eventType, phase ?? "bubble"),
         handler
       )
     }
@@ -362,7 +364,7 @@ function diffEventListeners(
   for (const [propName, eventType, phase] of EVENT_PROPS) {
     const oldHandler = oldProps[propName]
     const newHandler = newProps[propName]
-    const handlerKey = eventHandlerKey(eventType, phase)
+    const handlerKey = eventHandlerKey(eventType, phase ?? "bubble")
 
     if (oldHandler && !newHandler) {
       unregisterEventHandler(container.eventHandlers, id, handlerKey)
@@ -1255,7 +1257,7 @@ export const hostConfig = {
     rootContainerInstance: Container,
     hostContext: HostContext
   ): Instance {
-    if (hostContext.isInsideText && type !== "text") {
+    if (hostContext?.isInsideText && type !== "text") {
       throw new InlineTextChildError(
         `GPUIX <text> can contain only strings and nested <text> elements; received <${type}>. ` +
           "Move block or custom content outside the flowing text node."
@@ -1272,8 +1274,8 @@ export const hostConfig = {
       if (metrics) return metrics
       const getElementBounds = native.getElementBounds
       const bounds = getElementBounds ? getElementBounds.call(native, id) : null
-      const width = bounds?.[2] ?? 0
-      const height = bounds?.[3] ?? 0
+      const width = bounds?.width ?? 0
+      const height = bounds?.height ?? 0
       return [0, 0, width, height, width, height]
     }
     const scrollToOffset = (left: number, top: number): void => {
@@ -1343,7 +1345,7 @@ export const hostConfig = {
         }
         const bounds = getElementBounds.call(rootContainerInstance.native, id)
         if (!bounds) return null
-        return { x: bounds[0]!, y: bounds[1]!, width: bounds[2]!, height: bounds[3]! }
+        return bounds
       },
       getBoundingClientRect: () => {
         // The DOM reports an all-zero rect for an element with no boxes rather
@@ -1622,11 +1624,19 @@ export const hostConfig = {
   },
 
   hideInstance(instance: Instance): void {
-    rendererFor(instance).setStyle(instance.id, { visibility: "hidden" })
+    // Keep the element's own style. `visibility: hidden` skips the paint and
+    // keeps the layout box, so replacing the whole style here would collapse
+    // the box and lose every other style on the element.
+    //
+    // Hover and active go, because a hidden element must stay hidden. A hover
+    // style that sets `visibility` would otherwise paint an element React
+    // asked to hide.
+    const { hover: _hover, active: _active, ...base } = instance.props.style ?? {}
+    rendererFor(instance).setStyle(instance.id, { ...base, visibility: "hidden" })
   },
 
-  unhideInstance(instance: Instance, _props: Props): void {
-    rendererFor(instance).setStyle(instance.id, instance.props.style ?? {})
+  unhideInstance(instance: Instance, props: Props): void {
+    rendererFor(instance).setStyle(instance.id, props.style ?? {})
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},

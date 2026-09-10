@@ -184,8 +184,8 @@ describeNative('timeline performance', () => {
     const bounds = root.renderer.getElementBounds(clip!.id)
     expect(bounds, 'clip was never painted').toBeTruthy()
 
-    const startX = bounds![0] + bounds![2] / 2
-    const startY = bounds![1] + bounds![3] / 2
+    const startX = bounds!.x + bounds!.width / 2
+    const startY = bounds!.y + bounds!.height / 2
     root.renderer.nativeSimulateMouseDown(startX, startY)
 
     const samples: number[] = []

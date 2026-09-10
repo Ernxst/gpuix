@@ -276,6 +276,7 @@ impl CustomElement for CodeElement {
             "mouseEnter",
             "mouseLeave",
             "wheel",
+            "fileDrop",
         ]
     }
 

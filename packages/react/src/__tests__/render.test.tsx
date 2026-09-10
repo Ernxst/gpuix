@@ -797,7 +797,7 @@ describeNative("render()", () => {
 
     expect(oneX.window).toEqual({ width: 320, height: 200, scaleFactor: 1 })
     expect(twoX.window).toEqual({ width: 320, height: 200, scaleFactor: 2 })
-    expect(oneX.bounds).toEqual([24, 16, 120, 48])
+    expect(oneX.bounds).toEqual({ x: 24, y: 16, width: 120, height: 48 })
     expect(twoX.bounds).toEqual(oneX.bounds)
     expect(oneX.frame).toMatchObject({
       viewport_size: { width: 320, height: 200 },

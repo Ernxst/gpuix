@@ -41,16 +41,16 @@ function boundsFor(renderer: TestRenderer, testId: string) {
   const element = renderer.findByTestId(testId)
   expect(element, `missing ${testId}`).toBeDefined()
   const bounds = renderer.getElementBounds(element!.id)
-  expect(bounds, `no bounds for ${testId}`).toEqual(expect.any(Array))
+  expect(bounds, `no bounds for ${testId}`).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) }))
   return bounds!
 }
 
-function centerX(bounds: number[]) {
-  return bounds[0] + bounds[2] / 2
+function centerX(bounds: { x: number; width: number }) {
+  return bounds.x + bounds.width / 2
 }
 
-function centerY(bounds: number[]) {
-  return bounds[1] + bounds[3] / 2
+function centerY(bounds: { y: number; height: number }) {
+  return bounds.y + bounds.height / 2
 }
 
 function HoverWithinCaptureProbe({ capture }: { capture: "child" | "group" }) {
@@ -169,9 +169,9 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     const ch = boundsFor(renderer, "ch-length")
     const calc = boundsFor(renderer, "calc-length")
     const clamp = boundsFor(renderer, "clamp-length")
-    expect(ch[2]).toBeGreaterThan(100)
-    expect(calc[2]).toBeGreaterThan(ch[2])
-    expect(clamp[2]).toBeGreaterThan(ch[2])
+    expect(ch.width).toBeGreaterThan(100)
+    expect(calc.width).toBeGreaterThan(ch.width)
+    expect(clamp.width).toBeGreaterThan(ch.width)
 
     renderer.captureScreenshot(shot)
     expect(fs.statSync(shot).size).toBeGreaterThan(0)
@@ -200,23 +200,23 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
       </div>,
     )
 
-    expect(boundsFor(renderer, "containing-block")[2]).toBeCloseTo(400, 0)
+    expect(boundsFor(renderer, "containing-block").width).toBeCloseTo(400, 0)
     // 50% of the 400px containing block plus 20px. The old expectation of
     // 210 was the calc scale bug at this scaleFactor: 2 window — absolute
     // atoms resolved unscaled against a device-pixel basis — rationalized at
     // the time as a root inset that does not exist. A viewport resolver
     // would change this value when the window is resized; the containing
     // block does not.
-    expect(boundsFor(renderer, "containing-block-calc")[2]).toBeCloseTo(
+    expect(boundsFor(renderer, "containing-block-calc").width).toBeCloseTo(
       220,
       0,
     )
-    expect(boundsFor(renderer, "inherited-ch")[2]).toBeGreaterThan(
-      boundsFor(renderer, "local-ch")[2],
+    expect(boundsFor(renderer, "inherited-ch").width).toBeGreaterThan(
+      boundsFor(renderer, "local-ch").width,
     )
 
     renderer.simulateResize(800, 600)
-    expect(boundsFor(renderer, "containing-block-calc")[2]).toBeCloseTo(
+    expect(boundsFor(renderer, "containing-block-calc").width).toBeCloseTo(
       220,
       0,
     )
@@ -247,7 +247,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     const before = boundsFor(renderer, "hover-length")
     renderer.nativeSimulateMouseMove(10, 10)
     const after = boundsFor(renderer, "hover-length")
-    expect(after[2]).toBeGreaterThan(before[2])
+    expect(after.width).toBeGreaterThan(before.width)
     renderer.nativeSimulateMouseMove(350, 80)
     renderer.captureScreenshot(idle)
     renderer.nativeSimulateMouseMove(10, 10)
@@ -358,7 +358,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     )
     const sameOnes = boundsFor(same.renderer, "ones")
     const sameNines = boundsFor(same.renderer, "nines")
-    expect(sameOnes[2]).toBeCloseTo(sameNines[2], 0)
+    expect(sameOnes.width).toBeCloseTo(sameNines.width, 0)
 
     // The default digits' width is font-dependent — Segoe UI's default digits
     // are already tabular, unlike most macOS/Linux fonts — so the "differs
@@ -383,7 +383,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     )
     const diffOnes = boundsFor(diff.renderer, "ones")
     const diffNines = boundsFor(diff.renderer, "nines")
-    expect(Math.abs(diffOnes[2] - diffNines[2])).toBeGreaterThan(1)
+    expect(Math.abs(diffOnes.width - diffNines.width)).toBeGreaterThan(1)
 
     comparePixels(
       "font-variant-numeric",
@@ -417,7 +417,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     )
     const inheritedOnes = boundsFor(root.renderer, "ones")
     const inheritedNines = boundsFor(root.renderer, "nines")
-    expect(inheritedOnes[2]).toBeCloseTo(inheritedNines[2], 0)
+    expect(inheritedOnes.width).toBeCloseTo(inheritedNines.width, 0)
   })
 
   it("applies fontSize set on a div, not only on a text node", () => {
@@ -481,10 +481,10 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     // GPUI passes the measured font baseline into Taffy's flex layout. The
     // smaller unit therefore sits above the flex-end approximation while
     // sharing the figure's baseline.
-    expect(baselineUnit[1]).toBeLessThan(flexEndUnit[1])
-    expect(selfBaselineUnit[1]).toBeLessThan(flexEndUnit[1])
-    expect(baselineUnit[1] + baselineUnit[3]).toBeLessThan(
-      baselineFigure[1] + baselineFigure[3],
+    expect(baselineUnit.y).toBeLessThan(flexEndUnit.y)
+    expect(selfBaselineUnit.y).toBeLessThan(flexEndUnit.y)
+    expect(baselineUnit.y + baselineUnit.height).toBeLessThan(
+      baselineFigure.y + baselineFigure.height,
     )
   })
 
@@ -798,7 +798,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
       const element = renderer.findByTestId(testId)
       expect(element, `missing ${testId}`).toBeDefined()
       const result = renderer.getElementBounds(element!.id)
-      expect(result, `no bounds for ${testId}`).toEqual(expect.any(Array))
+      expect(result, `no bounds for ${testId}`).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) }))
       return result!
     }
 
@@ -807,9 +807,9 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     const headerStatus = bounds("header-status")
     const rowStatus = bounds("row-status")
 
-    expect(rowRate[0]).toBeCloseTo(headerRate[0], 4)
-    expect(rowStatus[0]).toBeCloseTo(headerStatus[0], 4)
-    expect(rowRate[1]).toBeGreaterThan(headerRate[1])
+    expect(rowRate.x).toBeCloseTo(headerRate.x, 4)
+    expect(rowStatus.x).toBeCloseTo(headerStatus.x, 4)
+    expect(rowRate.y).toBeGreaterThan(headerRate.y)
   })
 
   it("applies hoverWithin to a descendant of the nearest hoverGroup", () => {
@@ -819,7 +819,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     const label = renderer.findByTestId("destination-label")!
     const underline = renderer.findByTestId("destination-hover-underline")!
     expect(underline.type).toBe("div")
-    const [x, y, width, height] = renderer.getElementBounds(label.id)!
+    const { x, y, width, height } = renderer.getElementBounds(label.id)!
     const before = path.join(SHOTS_DIR, "hover-within-before.png")
     const after = path.join(SHOTS_DIR, "hover-within-after.png")
 
@@ -886,7 +886,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     renderer.nativeSimulateMouseMove(10, 10)
     expect(renderer.getResolvedStyle(target.id)?.opacity).toBe(0.2)
     renderer.captureScreenshot(before)
-    renderer.nativeSimulateMouseMove(groupBounds[0] + 10, groupBounds[1] + 10)
+    renderer.nativeSimulateMouseMove(groupBounds.x + 10, groupBounds.y + 10)
     expect(renderer.getResolvedStyle(target.id)?.opacity).toBe(0.8)
     renderer.captureScreenshot(after)
 
@@ -942,7 +942,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     const outerHovered = path.join(SHOTS_DIR, "nested-hover-within-outer.png")
     const innerHovered = path.join(SHOTS_DIR, "nested-hover-within-inner.png")
 
-    renderer.nativeSimulateMouseMove(outer[0] + outer[2] + 20, outer[1] + outer[3] + 20)
+    renderer.nativeSimulateMouseMove(outer.x + outer.width + 20, outer.y + outer.height + 20)
     expect(renderer.getResolvedStyle(target.id)).toMatchObject({
       backgroundColor: "#334155",
     })
@@ -950,13 +950,13 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
 
     // CSS `.group:hover .descendant` still matches the outer group when an
     // unhovered nested group sits between it and the descendant.
-    renderer.nativeSimulateMouseMove(outer[0] + 10, outer[1] + 10)
+    renderer.nativeSimulateMouseMove(outer.x + 10, outer.y + 10)
     expect(renderer.getResolvedStyle(target.id)).toMatchObject({
       backgroundColor: "#f59e0b",
     })
     renderer.captureScreenshot(outerHovered)
 
-    renderer.nativeSimulateMouseMove(inner[0] + 10, inner[1] + 10)
+    renderer.nativeSimulateMouseMove(inner.x + 10, inner.y + 10)
     expect(renderer.getResolvedStyle(target.id)).toMatchObject({
       backgroundColor: "#f59e0b",
     })
@@ -1026,7 +1026,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     })
     renderer.captureScreenshot(before)
 
-    renderer.nativeSimulateMouseMove(centerX(row), row[1] - 12)
+    renderer.nativeSimulateMouseMove(centerX(row), row.y - 12)
     renderer.captureScreenshot(after)
     expectScreenshotsDiffer(before, after)
   })
@@ -1040,7 +1040,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
       first.render(<HoverWithinSiblingProbe onClick={clicked} />)
 
       const label = first.renderer.findByTestId("destination-label")!
-      const [x, y, width, height] = first.renderer.getElementBounds(label.id)!
+      const { x, y, width, height } = first.renderer.getElementBounds(label.id)!
       const after = path.join(SHOTS_DIR, "multi-root-hover-after.png")
       const expected = path.join(SHOTS_DIR, "multi-root-hover-expected.png")
 
@@ -1095,7 +1095,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
 
     renderer.nativeSimulateMouseDown(centerX(childBounds), centerY(childBounds), 0)
     renderer.nativeSimulateMouseMove(
-      rowBounds[0] + rowBounds[2] - 20,
+      rowBounds.x + rowBounds.width - 20,
       centerY(rowBounds),
       0
     )
@@ -1103,7 +1103,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
 
     expectScreenshotsEqual(hovered, capturedInside)
     renderer.nativeSimulateMouseUp(
-      rowBounds[0] + rowBounds[2] - 20,
+      rowBounds.x + rowBounds.width - 20,
       centerY(rowBounds),
       0
     )
@@ -1139,7 +1139,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     expectScreenshotsDiffer(idle, hovered)
     renderer.nativeSimulateMouseDown(centerX(childBounds), centerY(childBounds), 0)
     renderer.nativeSimulateMouseMove(
-      rowBounds[0] + rowBounds[2] + 40,
+      rowBounds.x + rowBounds.width + 40,
       centerY(rowBounds),
       0
     )
@@ -1147,7 +1147,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
 
     expectScreenshotsEqual(hovered, capturedOutside)
     renderer.nativeSimulateMouseUp(
-      rowBounds[0] + rowBounds[2] + 40,
+      rowBounds.x + rowBounds.width + 40,
       centerY(rowBounds),
       0
     )
@@ -1169,8 +1169,8 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
       SHOTS_DIR,
       "hover-within-group-capture-released.png"
     )
-    const captureX = rowBounds[0] + 20
-    const captureY = rowBounds[1] + 20
+    const captureX = rowBounds.x + 20
+    const captureY = rowBounds.y + 20
 
     renderer.nativeSimulateMouseMove(10, 10)
     renderer.captureScreenshot(idle)
@@ -1179,7 +1179,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     renderer.captureScreenshot(hovered)
     renderer.nativeSimulateMouseDown(captureX, captureY, 0)
     renderer.nativeSimulateMouseMove(
-      rowBounds[0] + rowBounds[2] + 40,
+      rowBounds.x + rowBounds.width + 40,
       centerY(rowBounds),
       0
     )
@@ -1187,7 +1187,7 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
 
     expectScreenshotsEqual(hovered, capturedOutside)
     renderer.nativeSimulateMouseUp(
-      rowBounds[0] + rowBounds[2] + 40,
+      rowBounds.x + rowBounds.width + 40,
       centerY(rowBounds),
       0
     )

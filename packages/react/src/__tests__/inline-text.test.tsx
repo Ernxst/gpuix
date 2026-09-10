@@ -17,7 +17,7 @@ function boundsFor(renderer: ReturnType<typeof createTestRoot>["renderer"], test
   const element = renderer.findByTestId(testId)
   expect(element, `missing ${testId}`).toBeDefined()
   const bounds = renderer.getElementBounds(element!.id)
-  expect(bounds, `no painted bounds for ${testId}`).toEqual(expect.any(Array))
+  expect(bounds, `no painted bounds for ${testId}`).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) }))
   return bounds!
 }
 
@@ -72,7 +72,7 @@ describeNative("inline text runs", () => {
     expect(painted).toContain(sentence)
     expect(painted).toContain("Status: overclocked production line")
     expect(painted).not.toContain("240 parts")
-    expect(boundsFor(renderer, "wrapped-inline")[3]).toBeGreaterThan(40)
+    expect(boundsFor(renderer, "wrapped-inline").height).toBeGreaterThan(40)
 
     renderer.captureScreenshot(shot)
     expect(fs.existsSync(shot)).toBe(true)
@@ -97,7 +97,7 @@ describeNative("inline text runs", () => {
     )
 
     expect(renderer.getPaintedText()).toContain(content)
-    const [x, y, width, height] = boundsFor(renderer, "preformatted-inline")
+    const { x, y, width, height } = boundsFor(renderer, "preformatted-inline")
     expect(height).toBeGreaterThan(40)
     expect(renderer.dragSelect(x + 1, y + 2, x + width + 10, y + height - 2)).toBe(content)
 
@@ -148,7 +148,7 @@ describeNative("inline text runs", () => {
       </div>
     )
 
-    const [x, y, width, height] = boundsFor(renderer, "selection-inline")
+    const { x, y, width, height } = boundsFor(renderer, "selection-inline")
     expect(renderer.dragSelect(x + 1, y + 4, x + width + 200, y + height - 2)).toBe(sentence)
   })
 
@@ -179,7 +179,7 @@ describeNative("inline text runs", () => {
     )
 
     expect(renderer.getPaintedText()).toContain(sentence)
-    const [x, y, width, height] = boundsFor(renderer, "multibyte-inline")
+    const { x, y, width, height } = boundsFor(renderer, "multibyte-inline")
     expect(renderer.dragSelect(x + 1, y + 4, x + width + 100, y + height - 2)).toBe(sentence)
 
     renderer.captureScreenshot(shot)
@@ -214,7 +214,7 @@ describeNative("inline text runs", () => {
       </div>
     )
 
-    const [x, y, width, height] = boundsFor(renderer, "inline-action")
+    const { x, y, width, height } = boundsFor(renderer, "inline-action")
     renderer.nativeSimulateClick(x + width / 2, y + height / 2)
 
     expect(targetClick).toHaveBeenCalledOnce()
@@ -245,7 +245,7 @@ describeNative("inline text runs", () => {
       const hidden = root.renderer.findByTestId("hidden-inline")!
       expect(root.renderer.getPaintedText()).toEqual(["visible run"])
       expect(root.renderer.getAllText()).toEqual(["visible run"])
-      expect(root.renderer.getElementBounds(hidden.id)).toEqual([0, 0, 0, 0])
+      expect(root.renderer.getElementBounds(hidden.id)).toEqual({ x: 0, y: 0, width: 0, height: 0 })
       expect(hidden.getBoundingClientRect()).toEqual({
         x: 0,
         y: 0,

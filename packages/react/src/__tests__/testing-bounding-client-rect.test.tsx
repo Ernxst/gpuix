@@ -19,7 +19,7 @@ describeNative("TestElement.getBoundingClientRect", () => {
 
       const label = screen.getByTestId("label")
       const rect = label.getBoundingClientRect()
-      const [x, y, width, height] = screen.renderer.getElementBounds(label.id)!
+      const { x, y, width, height } = screen.renderer.getElementBounds(label.id)!
 
       // Same source, same space: whatever getElementBounds reports today.
       expect(rect.x).toBe(x)
@@ -132,7 +132,7 @@ describeNative("TestElement.getBoundingClientRect", () => {
 
       // The pre-rerender reference re-resolves, as children and parentElement do.
       const after = box.getBoundingClientRect()
-      const [x, y, width, height] = screen.renderer.getElementBounds(
+      const { x, y, width, height } = screen.renderer.getElementBounds(
         screen.getByTestId("box").id
       )!
 

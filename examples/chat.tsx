@@ -947,6 +947,7 @@ function MenuRow({
 function ChipSelect({
   value,
   onChange,
+  items,
   icon,
   label,
   caret = true,
@@ -957,6 +958,7 @@ function ChipSelect({
 }: {
   value: string
   onChange: (next: string) => void
+  items: { value: string; label: string }[]
   icon: IconName
   label: string
   caret?: boolean
@@ -966,7 +968,7 @@ function ChipSelect({
   children: React.ReactNode
 }) {
   return (
-    <Select value={value} onValueChange={onChange} style={{ flexShrink: 0 }}>
+    <Select items={items} value={value} onValueChange={onChange} style={{ flexShrink: 0 }}>
       <div style={{ position: 'relative', display: 'flex' }}>
         <SelectTrigger
           data-testid={testId}
@@ -1022,6 +1024,7 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (next: stri
     <ChipSelect
       value={value}
       onChange={onChange}
+      items={MODELS.map((model) => ({ value: model.id, label: model.label }))}
       icon={selected.icon}
       label={selected.label}
       testId="model-picker"
@@ -1043,7 +1046,7 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (next: stri
             <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>{group.name}</text>
           </SelectLabel>
           {group.items.map((model) => (
-            <SelectItem key={model.id} value={model.id} textValue={model.label}>
+            <SelectItem key={model.id} value={model.id}>
               {(state) => (
                 <MenuRow
                   label={model.label}
@@ -1066,6 +1069,7 @@ function ReasoningPicker({ value, onChange }: { value: string; onChange: (next: 
     <ChipSelect
       value={value}
       onChange={onChange}
+      items={REASONING.map((option) => ({ value: option.id, label: option.label }))}
       icon={value === 'low' ? 'zap' : 'sparkle'}
       label={selected.label}
       caret={false}
@@ -1081,7 +1085,7 @@ function ReasoningPicker({ value, onChange }: { value: string; onChange: (next: 
         <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Reasoning</text>
       </SelectLabel>
       {REASONING.map((option) => (
-        <SelectItem key={option.id} value={option.id} textValue={option.label}>
+        <SelectItem key={option.id} value={option.id}>
           {(state) => (
             <MenuRow
               label={option.label}
@@ -1102,13 +1106,14 @@ function AccessPicker({ value, onChange }: { value: string; onChange: (next: str
     <ChipSelect
       value={value}
       onChange={onChange}
+      items={ACCESS.map((option) => ({ value: option.id, label: option.label }))}
       icon={selected.icon}
       label={selected.label}
       caret={false}
       menuWidth={288}
     >
       {ACCESS.map((option) => (
-        <SelectItem key={option.id} value={option.id} textValue={option.label}>
+        <SelectItem key={option.id} value={option.id}>
           {(state) => (
             <MenuRow
               label={option.label}
@@ -1130,12 +1135,13 @@ function ProjectPicker({ value, onChange }: { value: string; onChange: (next: st
     <ChipSelect
       value={value}
       onChange={onChange}
+      items={PROJECTS.map((option) => ({ value: option.id, label: option.label }))}
       icon="folder"
       label={selected.label}
       caret={false}
     >
       {PROJECTS.map((option) => (
-        <SelectItem key={option.id} value={option.id} textValue={option.label}>
+        <SelectItem key={option.id} value={option.id}>
           {(state) => (
             <MenuRow
               label={option.label}
@@ -1156,6 +1162,7 @@ function WorkspacePicker({ value, onChange }: { value: string; onChange: (next: 
     <ChipSelect
       value={value}
       onChange={onChange}
+      items={WORKSPACES.map((option) => ({ value: option.id, label: option.label }))}
       icon={selected.icon}
       label={selected.label}
       caret={false}
@@ -1171,7 +1178,7 @@ function WorkspacePicker({ value, onChange }: { value: string; onChange: (next: 
         <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Work in</text>
       </SelectLabel>
       {WORKSPACES.map((option) => (
-        <SelectItem key={option.id} value={option.id} textValue={option.label}>
+        <SelectItem key={option.id} value={option.id}>
           {(state) => (
             <MenuRow
               label={option.label}
@@ -1189,9 +1196,15 @@ function WorkspacePicker({ value, onChange }: { value: string; onChange: (next: 
 function BranchPicker({ value, onChange }: { value: string; onChange: (next: string) => void }) {
   const selected = BRANCHES.find((option) => option.id === value) ?? BRANCHES[0]
   return (
-    <ChipSelect value={value} onChange={onChange} icon="gitBranch" label={selected.label}>
+    <ChipSelect
+      value={value}
+      onChange={onChange}
+      items={BRANCHES.map((option) => ({ value: option.id, label: option.label }))}
+      icon="gitBranch"
+      label={selected.label}
+    >
       {BRANCHES.map((option) => (
-        <SelectItem key={option.id} value={option.id} textValue={option.label}>
+        <SelectItem key={option.id} value={option.id}>
           {(state) => (
             <MenuRow
               label={option.label}

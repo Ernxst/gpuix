@@ -35,6 +35,17 @@ it, not the raw conversation: the repository is public, and a verbatim prompt lo
 tends to carry local paths and workflow detail that don't belong there. This does not
 apply to PRs against the Zed submodule repo.
 
+## Built-in components follow Base UI
+
+Headless controls in `@gpuix/react` (`select`, `combobox`, `tooltip`, and any
+new primitive) should match [Base UI](https://base-ui.com/react/components/select)
+first: same split between Root data and children.
+
+For Select, `items` on Root is optional. It is only a label lookup for
+`SelectValue` while the popup is closed. Keyboard nav and clicks read the mounted
+`SelectItem` children. Do not walk `child.type`. Do not require `items` for the menu
+to work.
+
 Open with a three-line block naming the harness, agent, and model:
 
 - **Harness:** the product that ran the agent (`Claude Code`, `OpenCode`, `Kimaki`,

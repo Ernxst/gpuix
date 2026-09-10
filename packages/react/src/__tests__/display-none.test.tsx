@@ -29,8 +29,8 @@ describeNative('display: "none"', () => {
 
     const first = testRoot.renderer.findByTestId("first")!
     const third = testRoot.renderer.findByTestId("third")!
-    expect(testRoot.renderer.getElementBounds(first.id)?.[0]).toBe(0)
-    expect(testRoot.renderer.getElementBounds(third.id)?.[0]).toBe(100)
+    expect(testRoot.renderer.getElementBounds(first.id)?.x).toBe(0)
+    expect(testRoot.renderer.getElementBounds(third.id)?.x).toBe(100)
   })
 
   it("reports a zero rect and omits hidden text", () => {
@@ -44,7 +44,7 @@ describeNative('display: "none"', () => {
     )
 
     const hidden = testRoot.renderer.findByTestId("hidden-text")!
-    expect(testRoot.renderer.getElementBounds(hidden.id)).toEqual([0, 0, 0, 0])
+    expect(testRoot.renderer.getElementBounds(hidden.id)).toEqual({ x: 0, y: 0, width: 0, height: 0 })
     expect(hidden.getBoundingClientRect()).toEqual({
       x: 0,
       y: 0,
@@ -119,10 +119,10 @@ describeNative('display: "none"', () => {
 
     testRoot.render(<Toggle />)
     const target = testRoot.renderer.findByTestId("target")!
-    expect(testRoot.renderer.getElementBounds(target.id)).toEqual([0, 0, 0, 0])
+    expect(testRoot.renderer.getElementBounds(target.id)).toEqual({ x: 0, y: 0, width: 0, height: 0 })
 
     testRoot.renderer.nativeSimulateClick(50, 10)
-    expect(testRoot.renderer.getElementBounds(target.id)).toEqual([100, 0, 100, 20])
+    expect(testRoot.renderer.getElementBounds(target.id)).toEqual({ x: 100, y: 0, width: 100, height: 20 })
   })
 })
 
@@ -336,7 +336,7 @@ describeNative('state-refined display: "none" (issue #430)', () => {
     const group = testRoot.renderer.findByTestId("group")!
     const target = testRoot.renderer.findByTestId("target")!
     const shown = testRoot.renderer.findByTestId("shown")!
-    const [x, y, width, height] = testRoot.renderer.getElementBounds(group.id)!
+    const { x, y, width, height } = testRoot.renderer.getElementBounds(group.id)!
 
     // Focusing below activates the test window and resets its simulated pointer.
     testRoot.renderer.nativeSimulateWindowActivation(true)
@@ -346,7 +346,7 @@ describeNative('state-refined display: "none" (issue #430)', () => {
     testRoot.renderer.focusElement(target.id)
     expect(testRoot.renderer.getActiveElement()).toBeNull()
     const wrapper = testRoot.renderer.findByTestId("wrapper")!
-    expect(testRoot.renderer.getElementBounds(wrapper.id)).toEqual([0, 0, 0, 0])
+    expect(testRoot.renderer.getElementBounds(wrapper.id)).toEqual({ x: 0, y: 0, width: 0, height: 0 })
 
     testRoot.renderer.focusNext()
     expect(testRoot.renderer.getActiveElement()).toBe(shown.id)
@@ -380,15 +380,15 @@ describeNative('state-refined display: "none" (issue #430)', () => {
     const group = testRoot.renderer.findByTestId("group")!
     const revealed = testRoot.renderer.findByTestId("revealed")!
     const target = testRoot.renderer.findByTestId("target")!
-    expect(testRoot.renderer.getElementBounds(revealed.id)).toEqual([0, 0, 0, 0])
-    const [x, y, width, height] = testRoot.renderer.getElementBounds(group.id)!
+    expect(testRoot.renderer.getElementBounds(revealed.id)).toEqual({ x: 0, y: 0, width: 0, height: 0 })
+    const { x, y, width, height } = testRoot.renderer.getElementBounds(group.id)!
 
     testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
     testRoot.renderer.flush()
 
     const bounds = testRoot.renderer.getElementBounds(revealed.id)!
-    expect(bounds[2]).toBeGreaterThan(0)
-    expect(bounds[3]).toBeGreaterThan(0)
+    expect(bounds.width).toBeGreaterThan(0)
+    expect(bounds.height).toBeGreaterThan(0)
     testRoot.renderer.focusElement(target.id)
     expect(testRoot.renderer.getActiveElement()).toBe(target.id)
   })
@@ -410,7 +410,7 @@ describeNative('state-refined display: "none" (issue #430)', () => {
 
     const group = testRoot.renderer.findByTestId("group")!
     const target = testRoot.renderer.findByTestId("target")!
-    const [x, y, width, height] = testRoot.renderer.getElementBounds(group.id)!
+    const { x, y, width, height } = testRoot.renderer.getElementBounds(group.id)!
 
     testRoot.renderer.focusElement(target.id)
     expect(testRoot.renderer.getActiveElement()).toBe(target.id)
@@ -451,7 +451,7 @@ describeNative('state-refined display: "none" (issue #430)', () => {
     expect(onBlur).not.toHaveBeenCalled()
     expect(testRoot.renderer.getActiveElement()).toBeNull()
     const bounds = testRoot.renderer.getElementBounds(target.id)!
-    expect(bounds[2]).toBeGreaterThan(0)
-    expect(bounds[3]).toBeGreaterThan(0)
+    expect(bounds.width).toBeGreaterThan(0)
+    expect(bounds.height).toBeGreaterThan(0)
   })
 })

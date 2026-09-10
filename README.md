@@ -174,6 +174,163 @@ bun build --compile app.tsx --outfile dist/app
 
 The binary carries the renderer, so it runs with no Bun and no Node install.
 
+### 5. Wrap it in an app with an icon
+
+A raw Mach-O has no Dock icon. Use
+[cargo-packager](https://github.com/crabnebula-dev/cargo-packager) to wrap the
+binary. Config: [Config](https://docs.rs/cargo-packager/latest/cargo_packager/config/struct.Config.html).
+CLI: [docs.rs/cargo-packager](https://docs.rs/cargo-packager/latest/cargo_packager/).
+
+```bash
+cargo install cargo-packager --locked
+```
+
+Build an `.icns` from a 1024 PNG, then pack. Pass the `.icns`, not a 1024 PNG.
+cargo-packager rejected a 1024 PNG with `No matching IconType`.
+
+```bash
+mkdir AppIcon.iconset
+sips -z 16 16 icon-1024.png --out AppIcon.iconset/icon_16x16.png
+sips -z 32 32 icon-1024.png --out AppIcon.iconset/icon_16x16@2x.png
+sips -z 32 32 icon-1024.png --out AppIcon.iconset/icon_32x32.png
+sips -z 64 64 icon-1024.png --out AppIcon.iconset/icon_32x32@2x.png
+sips -z 128 128 icon-1024.png --out AppIcon.iconset/icon_128x128.png
+sips -z 256 256 icon-1024.png --out AppIcon.iconset/icon_128x128@2x.png
+sips -z 256 256 icon-1024.png --out AppIcon.iconset/icon_256x256.png
+sips -z 512 512 icon-1024.png --out AppIcon.iconset/icon_256x256@2x.png
+sips -z 512 512 icon-1024.png --out AppIcon.iconset/icon_512x512.png
+sips -z 1024 1024 icon-1024.png --out AppIcon.iconset/icon_512x512@2x.png
+iconutil -c icns AppIcon.iconset -o AppIcon.icns
+```
+
+**Bun** (one binary):
+
+```json
+{
+  "productName": "My App",
+  "version": "0.1.0",
+  "identifier": "dev.example.app",
+  "binariesDir": "dist",
+  "outDir": "bundle",
+  "binaries": [{ "path": "app", "main": true }],
+  "icons": ["AppIcon.icns"],
+  "formats": ["app"]
+}
+```
+
+```bash
+cargo packager --release --config packager.json
+open "bundle/My App.app"
+```
+
+`formats` is the host OS only:
+
+| OS | `formats` | Output |
+|---|---|---|
+| macOS | `"app"`, then `"dmg"` | `.app`, optional `.dmg` |
+| Windows | `"nsis"` | setup `.exe` |
+| Linux | `"appimage"` | `.AppImage` |
+
+On this machine the Bun chat `.app` is **82 MB**.
+
+### 6. Auto-update
+
+Packaging does **not** turn on updates. The running app calls
+`checkUpdate` on `@gpuix/native`. HTTP uses the same `reqwest_client` as
+`<img>`. There is no second native addon.
+
+Host on **GitHub Releases**. Create the release first. CI packs on each OS,
+signs, and uploads the bundle plus its `.sig`. The app hits
+`https://github.com/OWNER/REPO/releases/latest`. That rewrites to
+`https://api.github.com/repos/OWNER/REPO/releases/latest`. The updater
+reads `tag_name` and `assets`, then GETs the sibling `{name}.sig`.
+
+Sign once:
+
+```bash
+cargo packager signer generate
+```
+
+Store the private key and its password as repo secrets
+`CARGO_PACKAGER_SIGN_PRIVATE_KEY` and
+`CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD`. Put the **public** key in the app.
+
+```tsx
+import { checkUpdate } from '@gpuix/native'
+import { render } from '@gpuix/react'
+import { App } from './app'
+
+async function maybeUpdate() {
+  const update = await checkUpdate('0.1.0', {
+    endpoints: ['https://github.com/OWNER/REPO/releases/latest'],
+    pubkey: '<public key from signer generate>',
+  })
+  if (update) await update.downloadAndInstall()
+}
+
+maybeUpdate()
+render(<App />)
+```
+
+`https://github.com/OWNER/REPO` is the same endpoint.
+
+Packager only builds the **host** OS. Run it on macOS, Linux, and Windows.
+`--release` is the packager profile (look in `binariesDir` for a release
+binary). It is not `cargo build --release`. Signing is automatic when those
+two env vars are set. Source:
+[cargo-packager CLI](https://docs.rs/cargo-packager/latest/cargo_packager/).
+
+With `productName: "My App"`, `version: "0.1.0"`, and
+`binaries: [{ "path": "app", "main": true }]`, packager writes:
+
+| OS | `formats` | Files in `outDir` (`bundle/`) |
+|---|---|---|
+| macOS | `"app"` | `My App.app`, then on sign `My App.app.tar.gz` + `My App.app.tar.gz.sig` |
+| Linux | `"appimage"` | `app_0.1.0_x86_64.AppImage` + `.sig` |
+| Windows | `"nsis"` | `app_0.1.0_x64-setup.exe` + `.sig` |
+
+The macOS updater wants the **`.app.tar.gz`**, not the `.app` and not a
+`.dmg`. Packager tars the `.app` only when it signs. Linux and Windows names
+use the **binary stem** (`app`), not `productName`. NSIS arch is `x64`, not
+`x86_64`. A missing sibling `.sig` is an error.
+
+Create the GitHub release yourself, then pack and upload. `--clobber`
+replaces an asset if CI retries. Do **not** upload a feed JSON.
+
+```bash
+# macOS
+bun build --compile app.tsx --outfile dist/app
+cargo packager --release --config packager.json
+gh release upload v0.1.0 \
+  "bundle/My App.app.tar.gz" \
+  "bundle/My App.app.tar.gz.sig" \
+  --clobber
+
+# Linux
+bun build --compile app.tsx --outfile dist/app
+cargo packager --release --config packager.json
+gh release upload v0.1.0 \
+  bundle/app_0.1.0_x86_64.AppImage \
+  bundle/app_0.1.0_x86_64.AppImage.sig \
+  --clobber
+
+# Windows
+bun build --compile app.tsx --outfile dist/app.exe
+cargo packager --release --config packager.json
+gh release upload v0.1.0 \
+  bundle/app_0.1.0_x64-setup.exe \
+  bundle/app_0.1.0_x64-setup.exe.sig \
+  --clobber
+```
+
+`downloadAndInstall()` replaces the packaged files. It does **not** relaunch.
+Quit after it returns, or the next start uses the new app.
+
+HTTPS is in the native crate. This works on **Bun**. It
+does not exist in the browser wasm build. The repo must be **public**, or
+GitHub will 404 the API. Optional: put a Cloudflare cache in front of
+`api.github.com`. Same GitHub JSON. Not a custom schema.
+
 ### Start from the example app
 
 [`example-app/`](https://github.com/Ernxst/gpuix/tree/main/example-app) is a complete todo app in one file, with `dev`,
@@ -2090,6 +2247,21 @@ prop parks the caret at the end of the new text when the next frame applies it.
 Every read and write above draws the committed tree first, as `getBounds()`
 does, so the caret you write is the one that survives.
 
+**`fontSize` and `lineHeight`** in `style` size each row. Without `lineHeight`,
+the row uses GPUI's default leading, so a larger `fontSize` grows the box.
+Pass `lineHeight` to set the row in pixels. `minRows` and `maxRows` multiply
+that height. An explicit `height` still overrides both.
+
+```tsx
+<textarea
+  value={draft}
+  minRows={1}
+  maxRows={8}
+  style={{ fontSize: 14, lineHeight: 20 }}
+  onChange={(event) => setDraft(event.value ?? '')}
+/>
+```
+
 ### Input in a search pill
 
 `<input>` has **no default inner padding** and paints text at the top of its
@@ -2253,6 +2425,9 @@ const rootRef = useRef<PublicInstance>(null)
 The inconsistent target is in ancestor key delivery generally, not in this
 fallback, and it is why the guard reads focus rather than the event. Until it is
 fixed, `getActiveElement()` is the reliable answer to "what has focus".
+
+Do not also call `focusNext` from an element `onKeyDown`. Both move focus, and
+the window listener cannot stop the native event, so Tab would jump twice.
 
 ### Imperative focus
 
@@ -2661,6 +2836,7 @@ Each primitive has a dedicated namespace entry point:
 | `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Content`, `Item` |
 | `@gpuix/react/combobox` | `Root`, `Input`, `Content`, `List`, `Item`, `Empty` |
 | `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Content` |
+| `@gpuix/react/floating` | `FloatingLayer`, `renderSlot` |
 
 ### Build a local Select
 
@@ -2734,7 +2910,10 @@ export const SelectItem = React.forwardRef<
 ))
 ```
 
-Use the styled local file with the familiar shadcn shape:
+Pass **`items`** on `Root` when `SelectValue` should show a label while the
+menu is closed. Keyboard nav reads the mounted `SelectItem` children. A styled
+wrapper around `Item` is fine. Without `items`, `SelectValue` shows the raw
+value.
 
 ```tsx
 import {
@@ -2746,14 +2925,22 @@ import {
   SelectValue,
 } from './components/ui/select'
 
-<Select value={model} onValueChange={setModel}>
+const models = [
+  { value: 'sonnet', label: 'Sonnet' },
+  { value: 'opus', label: 'Opus' },
+]
+
+<Select items={models} value={model} onValueChange={setModel}>
   <SelectTrigger>
     <SelectValue placeholder="Select a model" />
   </SelectTrigger>
   <SelectContent>
     <SelectGroup>
-      <SelectItem value="sonnet">Sonnet</SelectItem>
-      <SelectItem value="opus">Opus</SelectItem>
+      {models.map((item) => (
+        <SelectItem key={item.value} value={item.value}>
+          {item.label}
+        </SelectItem>
+      ))}
     </SelectGroup>
   </SelectContent>
 </Select>
@@ -2835,7 +3022,7 @@ the virtual list. The list paints after the composer, so you still see the
 markdown through the menu, and clicks hit the text behind it.
 
 ```tsx
-<Select value={model} onValueChange={setModel}>
+<Select items={[{ value: 'flash', label: 'DeepSeek V4 Flash' }]} value={model} onValueChange={setModel}>
   <div style={{ position: 'relative' }}>
     <SelectTrigger>
       <SelectValue />
@@ -2869,6 +3056,21 @@ like a modal backdrop. `<anchored>` occludes by default and has its own
 `pointerEvents: "none"` means the element inserts **no hitbox**, so it blocks
 nothing behind it. It does not disable the listeners on that same element, and
 it does not inherit, so children keep their own hitboxes.
+
+A filled child of a click target (switch thumb, radio dot, check icon) needs
+**`pointerEvents: "none"`**, or it eats the parent's click.
+
+### Measure an element
+
+`getElementBounds(id)` returns the last painted box, or `null` if that node did
+not paint. It works on the live `GpuixRenderer` and on the test renderer.
+Bounds are recorded during **paint**, so read them after a frame, not in the
+same commit as mount.
+
+```tsx
+const box = renderer.getElementBounds?.(ref.current.id)
+// { x, y, width, height }
+```
 
 ## Text selection
 
@@ -3409,6 +3611,7 @@ text imports no longer need a runtime flag.
 | Blur | `onBlur` | — |
 | Wheel | `onWheel` | `x`, `y`, `deltaX`, `deltaY`, `deltaZ`, `deltaMode`, `precise`, `touchPhase`, `modifiers` |
 | Scroll | `onScroll` | — read `scrollLeft` / `scrollTop` from `currentTarget` |
+| File drop | `onFileDrop` | `paths`, `x`, `y` — Unicode filesystem paths from Finder or the OS |
 | Change | `onChange` | `value` — `<input>` and `<textarea>` only |
 | Toggle file | `onToggleFile` | `value` (file path) — `<diff>` only |
 | Show more | `onShowMore` | `value` (hidden line count) — `<diff>` only |
@@ -3436,6 +3639,24 @@ The host ref exposes the same `setPointerCapture()` and
 `releasePointerCapture()` methods when capture is decided outside the handler.
 Window deactivation silently resets the pressed-pointer sequence and capture;
 GPUIX does not currently synthesize `pointercancel` or `lostpointercapture`.
+
+A Finder or OS file drop lands on the hovered element that lists
+**`onFileDrop`**. `paths` is an array of absolute Unicode filesystem paths.
+`x` and `y` are the drop point in window pixels. An empty drop, or a drop
+that contains a non-Unicode path, does not fire.
+
+Put the listener on a **`div`**, **`text`**, **`img`**, **`svg`**, **`input`**,
+**`textarea`**, **`code`**, **`markdown`**, **`diff`**, or **`anchored`**.
+`<virtual-list>` does not take this event. Wrap it:
+
+```tsx
+<div
+  onFileDrop={(event) => openFiles(event.paths ?? [])}
+  style={{ width: 400, height: 300 }}
+>
+  <virtual-list estimatedItemHeight={24}>{rows}</virtual-list>
+</div>
+```
 
 Keyboard and focus listeners create a persistent GPUI `FocusHandle`
 automatically. A listener alone does not put a `div` in the Tab order; add

@@ -158,7 +158,7 @@ describeNative('infinite chat example', () => {
     const before = renderer.getElementBounds(row().id)!
     await waitForIdle(renderer)
     const after = renderer.getElementBounds(row().id)!
-    expect(Math.abs(after[1] - before[1])).toBeLessThanOrEqual(1)
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1)
   })
 
   /**
@@ -190,7 +190,7 @@ describeNative('infinite chat example', () => {
     const before = renderer.getElementBounds(row().id)!
     await waitForIdle(renderer)
     const after = renderer.getElementBounds(row().id)!
-    expect(Math.abs(after[1] - before[1])).toBeLessThanOrEqual(1)
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1)
 
     // The blank space under it became the new page.
     const painted = renderer.getPaintedText().filter((line) => /^message-\d+$/.test(line))

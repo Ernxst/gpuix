@@ -264,17 +264,17 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
                     });
                 });
             }
-            "wheel" => {
-                el = el.on_scroll_wheel(move |scroll, _window, _cx| {
-                    crate::renderer::emit_event_full(&callback, id, "wheel", |p| {
-                        let (x, y) = crate::renderer::point_to_xy(scroll.position);
-                        p.x = Some(x);
-                        p.y = Some(y);
-                        crate::renderer::apply_wheel_delta(p, scroll);
-                    });
+            "mouseEnter" | "mouseLeave" => {}
+            "fileDrop" => {
+                el = el.on_drop(move |dropped: &gpui::ExternalPaths, window, _cx| {
+                    crate::renderer::emit_file_drop(
+                        &callback,
+                        id,
+                        dropped,
+                        window.mouse_position(),
+                    );
                 });
             }
-            "mouseEnter" | "mouseLeave" => {}
             _ => {}
         }
     }

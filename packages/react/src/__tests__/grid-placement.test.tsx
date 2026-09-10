@@ -40,7 +40,7 @@ describeNative("CSS Grid item placement", () => {
     const root = renderGrid({ gridColumn: "1 / -1" })
     try {
       // Three 1fr columns divide 600px into 200px tracks; lines 1 to -1 span all 3.
-      expect(itemBounds(root)).toEqual([0, 0, 600, 40])
+      expect(itemBounds(root)).toEqual({ x: 0, y: 0, width: 600, height: 40 })
     } finally {
       root.unmount()
     }
@@ -50,7 +50,7 @@ describeNative("CSS Grid item placement", () => {
     const root = renderGrid({ gridColumn: "span 2" })
     try {
       // A two-column span covers 2 × (600px / 3) = 400px.
-      expect(itemBounds(root)).toEqual([0, 0, 400, 40])
+      expect(itemBounds(root)).toEqual({ x: 0, y: 0, width: 400, height: 40 })
     } finally {
       root.unmount()
     }
@@ -60,7 +60,7 @@ describeNative("CSS Grid item placement", () => {
     const root = renderGrid({ gridColumn: 3 })
     try {
       // Column line 3 starts after 2 × (600px / 3) = 400px.
-      expect(itemBounds(root)).toEqual([400, 0, 200, 40])
+      expect(itemBounds(root)).toEqual({ x: 400, y: 0, width: 200, height: 40 })
     } finally {
       root.unmount()
     }
@@ -70,7 +70,7 @@ describeNative("CSS Grid item placement", () => {
     const root = renderGrid({ gridRow: 2 })
     try {
       // Row line 2 starts after the first fixed 40px row.
-      expect(itemBounds(root)).toEqual([0, 40, 200, 40])
+      expect(itemBounds(root)).toEqual({ x: 0, y: 40, width: 200, height: 40 })
     } finally {
       root.unmount()
     }
@@ -80,7 +80,7 @@ describeNative("CSS Grid item placement", () => {
     const root = renderGrid({ gridArea: "2 / 1 / 3 / 3" })
     try {
       // Rows 2 to 3 give y = 40; columns 1 to 3 give 2 × 200px = 400px.
-      expect(itemBounds(root)).toEqual([0, 40, 400, 40])
+      expect(itemBounds(root)).toEqual({ x: 0, y: 40, width: 400, height: 40 })
     } finally {
       root.unmount()
     }
@@ -90,7 +90,7 @@ describeNative("CSS Grid item placement", () => {
     const root = renderGrid({ gridColumn: "1 / 3", gridColumnStart: 2 })
     try {
       // The explicit start line 2 wins; line 3 ends at 3 × 200px, so width is 200px.
-      expect(itemBounds(root)).toEqual([200, 0, 200, 40])
+      expect(itemBounds(root)).toEqual({ x: 200, y: 0, width: 200, height: 40 })
     } finally {
       root.unmount()
     }
@@ -103,12 +103,12 @@ describeNative("CSS Grid item placement", () => {
     })
     try {
       // Idle: the base placement spans all 3 columns, 600px wide.
-      expect(itemBounds(root)).toEqual([0, 0, 600, 40])
+      expect(itemBounds(root)).toEqual({ x: 0, y: 0, width: 600, height: 40 })
 
       // Hovered: the declared `auto` is a real value that overrides the
       // inherited base placement, falling back to a single auto-placed cell.
       root.renderer.nativeSimulateMouseMove(10, 10)
-      expect(itemBounds(root)).toEqual([0, 0, 200, 40])
+      expect(itemBounds(root)).toEqual({ x: 0, y: 0, width: 200, height: 40 })
     } finally {
       root.unmount()
     }

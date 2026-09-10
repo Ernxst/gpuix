@@ -10,7 +10,8 @@ import {
   isNativeTestRendererAvailable,
   TestRenderer,
 } from "../testing"
-import type { ImageMimeType, ImageSource } from "../types/host"
+import type { TestRoot } from "../testing"
+import type { ElementBounds, ImageMimeType, ImageSource } from "../types/host"
 import {
   bufferSimilarity,
   expectScreenshotsDiffer,
@@ -82,6 +83,16 @@ function createImageTestRoot(options?: Parameters<typeof createTestRoot>[0]) {
   const testRoot = createTestRoot(options)
   liveTestRoots.add(testRoot)
   return testRoot
+}
+
+function imgBounds(renderer: TestRoot["renderer"], testId: string) {
+  const element = renderer.findByTestId(testId)
+  expect(element, `missing testId ${testId}`).toBeDefined()
+  const rect = renderer.getElementBounds(element!.id)
+  expect(rect, `no painted bounds for ${testId}`).toEqual(
+    expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) })
+  )
+  return rect!
 }
 
 function disposeImageTestRoot(testRoot: ReturnType<typeof createTestRoot>) {
@@ -352,7 +363,7 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
         sourceFrame({ kind: "data", mimeType: "image/png", bytes: PNG_BYTES })
       )
       const image = testRoot.renderer.findByType("img")[0]!
-      let bounds: number[] | null = null
+      let bounds: ElementBounds | null = null
       for (let frame = 0; frame < 100; frame++) {
         testRoot.renderer.flush()
         bounds = testRoot.renderer.getElementBounds(image.id)
@@ -366,9 +377,9 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
       }
 
       expect(testRoot.renderer.getImageLoadState(image.id)).toMatchObject({ status: "loaded" })
-      expect(bounds).toEqual(expect.any(Array))
-      expect(bounds![2]).toBeGreaterThan(300)
-      expect(bounds![3]).toBeGreaterThan(180)
+      expect(bounds).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) }))
+      expect(bounds.width).toBeGreaterThan(300)
+      expect(bounds.height).toBeGreaterThan(180)
     } finally {
       disposeImageTestRoot(testRoot)
     }
@@ -839,7 +850,7 @@ describeNative("custom element: svg", () => {
       />
     )
     const target = interactive.renderer.findByTestId("svg-current-color-state")!
-    const [x, y, width, height] = interactive.renderer.getElementBounds(target.id)!
+    const { x, y, width, height } = interactive.renderer.getElementBounds(target.id)!
     const before = `${SHOTS_DIR}/gpuix-svg-current-color-hover-before.png`
     const hovered = `${SHOTS_DIR}/gpuix-svg-current-color-hover-after.png`
     const expected = `${SHOTS_DIR}/gpuix-svg-current-color-hover-expected.png`
@@ -932,7 +943,7 @@ describeNative("custom element: svg", () => {
     interactive.render(<GroupedSvg color={baseColor} />)
     const group = interactive.renderer.findByTestId("svg-current-color-group")!
     const target = interactive.renderer.findByTestId("svg-current-color-hover-within")!
-    const [x, y, width, height] = interactive.renderer.getElementBounds(group.id)!
+    const { x, y, width, height } = interactive.renderer.getElementBounds(group.id)!
     interactive.renderer.nativeSimulateMouseMove(x + width / 8, y + height / 2)
 
     expect(interactive.renderer.getResolvedStyle(target.id)).toMatchObject({ color: groupHoverColor })

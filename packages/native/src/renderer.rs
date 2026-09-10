@@ -4616,13 +4616,13 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn get_element_bounds(&self, id: f64) -> Result<Option<Vec<f64>>> {
+    pub fn get_element_bounds(&self, id: f64) -> Result<Option<ElementBounds>> {
         let id = to_element_id(id)?;
         #[cfg(target_os = "macos")]
         draw_window_for_automation_read()?;
         Ok(self
             .element_bounds(id)?
-            .map(|bounds| vec![bounds.x, bounds.y, bounds.width, bounds.height]))
+            .map(ElementBounds::from_painted))
     }
 
     #[napi]
@@ -6052,12 +6052,7 @@ impl WebGpuixRenderer {
         let Some(bounds) = crate::automation::get_bounds(web_element_id(element_id)?) else {
             return Ok(wasm_bindgen::JsValue::NULL);
         };
-        Ok(web_number_array([
-            bounds.x,
-            bounds.y,
-            bounds.width,
-            bounds.height,
-        ]))
+        element_bounds_js(bounds)
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getAllText)]
@@ -11767,6 +11762,13 @@ pub(crate) fn build_host_container(
                 });
             }
 
+            // ── File drop (Finder / OS paths) ────────────────────
+            "fileDrop" => {
+                el = el.on_drop(move |dropped: &gpui::ExternalPaths, window, _cx| {
+                    emit_file_drop(&callback, id, dropped, window.mouse_position());
+                });
+            }
+
             // ── Wheel ────────────────────────────────────────────
             "wheel" => {
                 el = el.on_scroll_wheel(move |scroll_event, _window, _cx| {
@@ -13083,6 +13085,9 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(offset) = style.outline_offset {
         el = el.outline_offset(gpui::px(offset as f32));
     }
+    if style.visibility.as_deref() == Some("hidden") {
+        el = el.invisible();
+    }
     if let Some(opacity) = style.opacity {
         el = el.opacity(opacity as f32);
     }
@@ -13178,6 +13183,36 @@ pub(crate) fn apply_wheel_delta(p: &mut EventPayload, event: &gpui::ScrollWheelE
     );
 }
 
+/// Paths that are valid UTF-8, or None when the drop is empty or not Unicode.
+/// `to_string_lossy` would invent a path that does not exist on disk.
+fn file_drop_paths(dropped: &gpui::ExternalPaths) -> Option<Vec<String>> {
+    let paths = dropped.paths();
+    if paths.is_empty() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(paths.len());
+    for path in paths {
+        out.push(path.to_str()?.to_string());
+    }
+    Some(out)
+}
+
+pub(crate) fn emit_file_drop(
+    callback: &Option<EventCallback>,
+    element_id: u64,
+    dropped: &gpui::ExternalPaths,
+    position: gpui::Point<gpui::Pixels>,
+) {
+    let Some(paths) = file_drop_paths(dropped) else {
+        return;
+    };
+    emit_event_full(callback, element_id, "fileDrop", |payload| {
+        let (x, y) = point_to_xy(position);
+        payload.x = Some(x);
+        payload.y = Some(y);
+        payload.paths = Some(paths);
+    });
+}
 /// Convert GPUI MouseButton to our u32 encoding: 0=left, 1=middle, 2=right.
 pub(crate) fn mouse_button_to_u32(button: gpui::MouseButton) -> u32 {
     match button {
@@ -13895,6 +13930,47 @@ fn window_insets_js(
         ("effective", edge_insets_js(effective)?),
     ] {
         js_sys::Reflect::set(&object, &wasm_bindgen::JsValue::from_str(key), &value)?;
+    }
+    Ok(object.into())
+}
+
+/// Last painted box for a host element.
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct ElementBounds {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl ElementBounds {
+    pub(crate) fn from_painted(bounds: crate::automation::ElementBounds) -> Self {
+        Self {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+        }
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn element_bounds_js(
+    bounds: crate::automation::ElementBounds,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    let object = js_sys::Object::new();
+    for (key, value) in [
+        ("x", bounds.x),
+        ("y", bounds.y),
+        ("width", bounds.width),
+        ("height", bounds.height),
+    ] {
+        js_sys::Reflect::set(
+            &object,
+            &wasm_bindgen::JsValue::from_str(key),
+            &wasm_bindgen::JsValue::from_f64(value),
+        )?;
     }
     Ok(object.into())
 }

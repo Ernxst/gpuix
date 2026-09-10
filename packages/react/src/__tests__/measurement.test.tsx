@@ -23,10 +23,10 @@ describeNative("ref element measurement", () => {
       const rawBounds = root.renderer.getElementBounds(instance!.id)
       expect(rawBounds).not.toBeNull()
       expect(instance!.getBounds()).toEqual({
-        x: rawBounds![0],
-        y: rawBounds![1],
-        width: rawBounds![2],
-        height: rawBounds![3],
+        x: rawBounds!.x,
+        y: rawBounds!.y,
+        width: rawBounds!.width,
+        height: rawBounds!.height,
       })
     } finally {
       root.unmount()

@@ -238,7 +238,7 @@ describeNative("DOM parity on refs and events", () => {
       )
 
       const node = testRoot.renderer.findByTestId("coords")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(node.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(node.id)!
       testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
 
       const event = seen! as unknown as GpuixSyntheticEvent
@@ -294,7 +294,7 @@ describeNative("DOM parity on refs and events", () => {
       )
 
       const node = testRoot.renderer.findByTestId("immediate")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(node.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(node.id)!
       testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
 
       // Both target listeners are AT_TARGET, so plain stopPropagation would
@@ -322,7 +322,7 @@ describeNative("DOM parity on refs and events", () => {
       )
 
       const node = testRoot.renderer.findByTestId("plain")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(node.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(node.id)!
       testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
 
       expect(calls).toEqual(["target-capture", "target-bubble"])
@@ -361,16 +361,16 @@ describeNative("DOM parity on refs and events", () => {
       const rightBox = testRoot.renderer.getElementBounds(right.id)!
 
       testRoot.renderer.nativeSimulateMouseMove(
-        leftBox[0] + leftBox[2] / 2,
-        leftBox[1] + leftBox[3] / 2
+        leftBox.x + leftBox.width / 2,
+        leftBox.y + leftBox.height / 2
       )
       // Nothing was hovered before, so the pointer came from nowhere.
       expect(transitions).toEqual([["left-enter", null]])
 
       transitions.length = 0
       testRoot.renderer.nativeSimulateMouseMove(
-        rightBox[0] + rightBox[2] / 2,
-        rightBox[1] + rightBox[3] / 2
+        rightBox.x + rightBox.width / 2,
+        rightBox.y + rightBox.height / 2
       )
       expect(transitions).toEqual([
         ["left-leave", right.id],
@@ -391,7 +391,7 @@ describeNative("DOM parity on refs and events", () => {
       )
 
       const node = testRoot.renderer.findByTestId("down")!
-      const [x, y, width, height] = testRoot.renderer.getElementBounds(node.id)!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(node.id)!
       testRoot.renderer.nativeSimulateClick(x + width / 2, y + height / 2)
 
       expect((seen! as unknown as GpuixSyntheticEvent).relatedTarget).toBeNull()

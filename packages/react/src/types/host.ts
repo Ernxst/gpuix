@@ -1040,6 +1040,9 @@ export interface Props extends AccessibilityProps {
   onWheel?: (event: GpuixSyntheticEvent) => void
   onWheelCapture?: (event: GpuixSyntheticEvent) => void
 
+  // ── File drop (Finder / OS paths) ───────────────────────────────
+  onFileDrop?: (event: EventPayload) => void
+
   // ── Text editor events ─────────────────────────────────────────
   onChange?: (event: GpuixSyntheticEvent) => void
   onChangeCapture?: (event: GpuixSyntheticEvent) => void
@@ -1302,6 +1305,10 @@ export interface NativeRenderer {
   setPointerCapture?(elementId: number): void
   releasePointerCapture?(elementId: number): void
 
+  // ── Bounds API ─────────────────────────────────────────────────
+  /** Last painted box, or null if the node did not paint. */
+  getElementBounds?(elementId: number): ElementBounds | null
+
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll" or
    *  "auto"). x and y are negative pixel values (scroll down = more negative
@@ -1359,13 +1366,6 @@ export interface NativeRenderer {
    *  A quad never appears in getPaintedText(), so this is how `highlight`
    *  is asserted without a screenshot. */
   getPaintedHighlights?(): HighlightMatch[]
-
-  /**
-   * Read one element's current layout bounds. This is a rendered-state read
-   * boundary: implementations draw/flush the committed tree before returning
-   * the last-painted bounds, so it is safe to call after a React commit.
-   */
-  getElementBounds?(elementId: number): readonly number[] | null
 
   // ── Window API ─────────────────────────────────────────────────
   /** Whether the native window is active and receiving key events. */

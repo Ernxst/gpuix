@@ -1,6 +1,12 @@
 /** Shared state, slot, and positioning helpers for headless floating controls. */
 
-import React, { cloneElement, forwardRef, isValidElement, useCallback, useState } from "react"
+import React, {
+  cloneElement,
+  forwardRef,
+  isValidElement,
+  useCallback,
+  useState,
+} from "react"
 import type { ReactElement, ReactNode, Ref } from "react"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance, StyleDesc } from "../types/host.js"

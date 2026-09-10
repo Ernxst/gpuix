@@ -15,8 +15,10 @@ function rect(renderer: ReturnType<typeof createTestRoot>["renderer"], testId: s
   const el = renderer.findByTestId(testId)
   expect(el, `missing testId ${testId}`).toBeDefined()
   const bounds = renderer.getElementBounds(el!.id)
-  expect(bounds, `no painted bounds for ${testId}`).toEqual(expect.any(Array))
-  return { x: bounds![0], y: bounds![1], width: bounds![2], height: bounds![3] }
+  expect(bounds, `no painted bounds for ${testId}`).toEqual(
+    expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) })
+  )
+  return bounds!
 }
 
 function expectInside(

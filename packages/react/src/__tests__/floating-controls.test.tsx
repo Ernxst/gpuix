@@ -62,11 +62,16 @@ describeNative("floating controls", () => {
   })
 
   it("composes a headless Select and supports keyboard selection", () => {
+    const items = [
+      { value: "alpha", label: "Alpha" },
+      { value: "disabled", label: "Disabled" },
+      { value: "beta", label: "Beta" },
+    ]
     function Demo() {
       const [value, setValue] = useState("alpha")
       return (
         <div style={{ width: 400, height: 300, padding: 12 }}>
-          <SelectPrimitive.Root value={value} onValueChange={setValue}>
+          <SelectPrimitive.Root items={items} value={value} onValueChange={setValue}>
             <SelectPrimitive.Trigger style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
@@ -113,7 +118,7 @@ describeNative("floating controls", () => {
     function Demo() {
       return (
         <div style={{ width: 400, height: 260, padding: 12 }}>
-          <Select defaultValue="one">
+          <Select items={[{ value: "one", label: "One" }, { value: "two", label: "Two" }]} defaultValue="one">
             <SelectTrigger style={triggerStyle}>
               <SelectValue />
             </SelectTrigger>
@@ -254,7 +259,7 @@ describeNative("floating controls", () => {
           >
             <text>Behind</text>
           </div>
-          <Select value={value} onValueChange={setValue}>
+          <Select items={[{ value: "one", label: "One" }, { value: "two", label: "Two" }]} value={value} onValueChange={setValue}>
             <SelectTrigger style={triggerStyle}><SelectValue /></SelectTrigger>
             <SelectContent sideOffset={4} style={contentStyle}>
               <SelectItem value="one" style={itemStyle}>One</SelectItem>
@@ -545,4 +550,198 @@ describeNative("floating controls", () => {
 
     expect(testRoot.renderer.getAllText()).toContain("Focused: first")
   })
+
+  it("selects from children when Root has no items", () => {
+    function Demo() {
+      const [value, setValue] = useState("one")
+      return (
+        <div style={{ width: 400, height: 300, padding: 12 }}>
+          <Select value={value} onValueChange={setValue}>
+            <SelectTrigger style={triggerStyle}>
+              <SelectValue placeholder="Choose" />
+            </SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              <SelectItem value="one" style={itemStyle}>One</SelectItem>
+              <SelectItem value="two" style={itemStyle}>Two</SelectItem>
+            </SelectContent>
+          </Select>
+          <text>{`Value: ${value}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    expect(testRoot.renderer.getAllText()).toEqual(["One", "Value: one"])
+
+    testRoot.renderer.nativeSimulateClick(30, 25)
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toEqual(["Two", "Value: two"])
+  })
+
+  it("keeps SelectValue working when items are wrapped components", () => {
+    const items = [
+      { value: "one", label: "One" },
+      { value: "two", label: "Two" },
+    ]
+    const StyledItem = React.forwardRef((props, ref) => (
+      <SelectItem {...props} ref={ref} style={itemStyle} />
+    ))
+
+    function Demo() {
+      const [value, setValue] = useState("one")
+      return (
+        <div style={{ width: 400, height: 300, padding: 12 }}>
+          <Select items={items} value={value} onValueChange={setValue}>
+            <SelectTrigger style={triggerStyle}>
+              <SelectValue placeholder="Choose" />
+            </SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              <StyledItem value="one">One</StyledItem>
+              <StyledItem value="two">Two</StyledItem>
+            </SelectContent>
+          </Select>
+          <text>{`Value: ${value}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    expect(testRoot.renderer.getAllText()).toEqual(["One", "Value: one"])
+
+    testRoot.renderer.nativeSimulateClick(30, 25)
+    expect(testRoot.renderer.getAllText()).toContain("Two")
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toEqual(["Two", "Value: two"])
+  })
+
+  it("does not select a highlighted item after it unmounts", () => {
+    function Demo() {
+      const [value, setValue] = useState("one")
+      const [showTwo, setShowTwo] = useState(true)
+      return (
+        <div style={{ width: 400, height: 320, padding: 12 }}>
+          <Select value={value} onValueChange={setValue} defaultOpen>
+            <SelectTrigger style={triggerStyle}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              <SelectItem value="one" style={itemStyle}>One</SelectItem>
+              {showTwo ? <SelectItem value="two" style={itemStyle}>Two</SelectItem> : null}
+              <div
+                data-testid="hide-two"
+                style={{ height: 24, backgroundColor: "#334155" }}
+                onClick={() => setShowTwo(false)}
+              >
+                Hide
+              </div>
+            </SelectContent>
+          </Select>
+          <text>{`Value: ${value}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    testRoot.renderer.simulateKeystrokes("down")
+    const hide = testRoot.renderer.findByTestId("hide-two")
+    const bounds = testRoot.renderer.getElementBounds(hide.id)
+    testRoot.renderer.nativeSimulateClick(bounds.x + 8, bounds.y + 8)
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toContain("Value: one")
+  })
+
+  it("highlights a selected item that mounts after the popup is open", () => {
+    function Demo({ showOne }: { showOne: boolean }) {
+      const [value, setValue] = useState("one")
+      return (
+        <div style={{ width: 400, height: 320, padding: 12 }}>
+          <Select value={value} onValueChange={setValue} defaultOpen>
+            <SelectTrigger style={triggerStyle}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              {showOne ? <SelectItem value="one" style={itemStyle}>One</SelectItem> : null}
+              <SelectItem value="two" style={itemStyle}>Two</SelectItem>
+            </SelectContent>
+          </Select>
+          <text>{`Value: ${value}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo showOne={false} />)
+    testRoot.render(<Demo showOne={true} />)
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toContain("Value: two")
+  })
+
+  it("keeps keyboard order when a middle item re-renders alone", () => {
+    function Demo() {
+      const [value, setValue] = useState("one")
+      const [tick, setTick] = useState(0)
+      return (
+        <div style={{ width: 400, height: 340, padding: 12 }}>
+          <Select value={value} onValueChange={setValue} defaultOpen>
+            <SelectTrigger style={triggerStyle}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              <SelectItem value="one" style={itemStyle}>One</SelectItem>
+              <SelectItem value="two" style={itemStyle}>{`Two ${tick}`}</SelectItem>
+              <SelectItem value="three" style={itemStyle}>Three</SelectItem>
+              <div
+                data-testid="nudge"
+                style={{ height: 24, backgroundColor: "#334155" }}
+                onClick={() => setTick((count) => count + 1)}
+              >
+                Nudge
+              </div>
+            </SelectContent>
+          </Select>
+          <text>{`Value: ${value}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    const nudge = testRoot.renderer.findByTestId("nudge")
+    const bounds = testRoot.renderer.getElementBounds(nudge.id)
+    testRoot.renderer.nativeSimulateClick(bounds.x + 8, bounds.y + 8)
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toContain("Value: two")
+  })
+
+  it("does not select from a disabled open Select", () => {
+    function Demo() {
+      const [value, setValue] = useState("one")
+      return (
+        <div style={{ width: 400, height: 300, padding: 12 }}>
+          <Select disabled defaultOpen value={value} onValueChange={setValue}>
+            <SelectTrigger style={triggerStyle}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent sideOffset={4} style={contentStyle}>
+              <SelectItem value="one" style={itemStyle}>One</SelectItem>
+              <SelectItem value="two" data-testid="two" style={itemStyle}>Two</SelectItem>
+            </SelectContent>
+          </Select>
+          <text>{`Value: ${value}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    const two = testRoot.renderer.findByTestId("two")
+    const twoBounds = testRoot.renderer.getElementBounds(two.id)
+    testRoot.renderer.nativeSimulateClick(twoBounds.x + 8, twoBounds.y + 8)
+    expect(testRoot.renderer.getAllText()).toContain("Value: one")
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toContain("Value: one")
+  })
+
 })

@@ -1157,9 +1157,9 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
         testRoot.renderer.findByTestId("capture-canvas")!.id
       )!
 
-      testRoot.renderer.nativeSimulateMouseDown(bounds[0]! + 20, bounds[1]! + 20, 0)
-      testRoot.renderer.nativeSimulateMouseMove(bounds[0]! + 180, bounds[1]! + 20, 0)
-      testRoot.renderer.nativeSimulateMouseUp(bounds[0]! + 180, bounds[1]! + 20, 0)
+      testRoot.renderer.nativeSimulateMouseDown(bounds.x! + 20, bounds.y! + 20, 0)
+      testRoot.renderer.nativeSimulateMouseMove(bounds.x! + 180, bounds.y! + 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(bounds.x! + 180, bounds.y! + 20, 0)
 
       expect(trace).toEqual(["down", "move", "up"])
     } finally {
@@ -1255,8 +1255,8 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       expect(bounds).not.toBeNull()
 
       testRoot.renderer.nativeSimulateClick(
-        bounds![0]! + bounds![2]! * 0.25,
-        bounds![1]! + bounds![3]! * 0.5
+        bounds.x! + bounds.width! * 0.25,
+        bounds.y! + bounds.height! * 0.5
       )
       expect(click?.x).toBeCloseTo(100, 4)
       expect(click?.y).toBeCloseTo(100, 4)
@@ -1282,8 +1282,8 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       )
       const canvas = testRoot.renderer.findByTestId("primary-order-canvas")!
       const bounds = testRoot.renderer.getElementBounds(canvas.id)!
-      const x = bounds[0]! + 10
-      const y = bounds[1]! + 10
+      const x = bounds.x! + 10
+      const y = bounds.y! + 10
 
       testRoot.renderer.nativeSimulateMouseDown(x, y, 0)
       testRoot.renderer.nativeSimulateMouseUp(x, y, 0)
@@ -1384,8 +1384,8 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       )
       const canvas = testRoot.renderer.findByTestId("aux-order-canvas")!
       const bounds = testRoot.renderer.getElementBounds(canvas.id)!
-      const x = bounds[0]! + 10
-      const y = bounds[1]! + 10
+      const x = bounds.x! + 10
+      const y = bounds.y! + 10
 
       testRoot.renderer.nativeSimulateClick(x, y, 2)
 

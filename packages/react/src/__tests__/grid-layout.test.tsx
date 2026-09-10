@@ -8,17 +8,20 @@ function boundsFor(renderer: TestRenderer, testId: string) {
   const element = renderer.findByTestId(testId)
   expect(element, `missing ${testId}`).toBeDefined()
   const bounds = renderer.getElementBounds(element!.id)
-  expect(bounds, `no bounds for ${testId}`).toEqual(expect.any(Array))
+  expect(bounds, `no bounds for ${testId}`).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) }))
   return bounds!
 }
 
 function expectBounds(
   renderer: TestRenderer,
   testId: string,
-  expected: [number, number, number, number],
+  expected: { x: number; y: number; width: number; height: number },
 ) {
   const bounds = boundsFor(renderer, testId)
-  expected.forEach((value, index) => expect(bounds[index]).toBeCloseTo(value, 3))
+  expect(bounds.x).toBeCloseTo(expected.x, 3)
+  expect(bounds.y).toBeCloseTo(expected.y, 3)
+  expect(bounds.width).toBeCloseTo(expected.width, 3)
+  expect(bounds.height).toBeCloseTo(expected.height, 3)
 }
 
 function createGridRoot() {
@@ -56,9 +59,9 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     )
 
     // Grid tracks start at 0; the third x coordinate is 100 + 200.
-    expectBounds(renderer, "px-a", [0, 0, 100, 20])
-    expectBounds(renderer, "px-b", [100, 0, 200, 20])
-    expectBounds(renderer, "px-c", [300, 0, 300, 20])
+    expectBounds(renderer, "px-a", { x: 0, y: 0, width: 100, height: 20 })
+    expectBounds(renderer, "px-b", { x: 100, y: 0, width: 200, height: 20 })
+    expectBounds(renderer, "px-c", { x: 300, y: 0, width: 300, height: 20 })
   })
 
   it("divides free space equally across fr tracks", () => {
@@ -72,9 +75,9 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     )
 
     // 600px / 3 equal fractions = 200px per track.
-    expectBounds(renderer, "fr-a", [0, 0, 200, 20])
-    expectBounds(renderer, "fr-b", [200, 0, 200, 20])
-    expectBounds(renderer, "fr-c", [400, 0, 200, 20])
+    expectBounds(renderer, "fr-a", { x: 0, y: 0, width: 200, height: 20 })
+    expectBounds(renderer, "fr-b", { x: 200, y: 0, width: 200, height: 20 })
+    expectBounds(renderer, "fr-c", { x: 400, y: 0, width: 200, height: 20 })
   })
 
   it("sizes percentage tracks from the grid container", () => {
@@ -91,8 +94,8 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
       </div>,
     )
 
-    expectBounds(renderer, "percent-track", [0, 0, 150, 20])
-    expectBounds(renderer, "percent-px-track", [150, 0, 100, 20])
+    expectBounds(renderer, "percent-track", { x: 0, y: 0, width: 150, height: 20 })
+    expectBounds(renderer, "percent-px-track", { x: 150, y: 0, width: 100, height: 20 })
   })
 
   it("clamps fit-content tracks between content contributions and their limit", () => {
@@ -127,9 +130,9 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     const longReference = boundsFor(renderer, "fit-content-long-reference")
     const short = boundsFor(renderer, "fit-content-short")
     const shortReference = boundsFor(renderer, "fit-content-short-reference")
-    expect(long[2]).toBeCloseTo(200, 3)
-    expect(long[2]).toBeLessThan(longReference[2])
-    expect(short[2]).toBeCloseTo(shortReference[2], 3)
+    expect(long.width).toBeCloseTo(200, 3)
+    expect(long.width).toBeLessThan(longReference.width)
+    expect(short.width).toBeCloseTo(shortReference.width, 3)
   })
 
   it("uses percentage minmax bounds when distributing flexible tracks", () => {
@@ -146,8 +149,8 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
       </div>,
     )
 
-    expectBounds(low.renderer, "minmax-percent-low", [0, 0, 300, 20])
-    expectBounds(low.renderer, "minmax-percent-low-second", [300, 0, 300, 20])
+    expectBounds(low.renderer, "minmax-percent-low", { x: 0, y: 0, width: 300, height: 20 })
+    expectBounds(low.renderer, "minmax-percent-low-second", { x: 300, y: 0, width: 300, height: 20 })
 
     const high = createGridRoot()
     high.render(
@@ -162,8 +165,8 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
       </div>,
     )
 
-    expectBounds(high.renderer, "minmax-percent-high", [0, 0, 360, 20])
-    expectBounds(high.renderer, "minmax-percent-high-second", [360, 0, 240, 20])
+    expectBounds(high.renderer, "minmax-percent-high", { x: 0, y: 0, width: 360, height: 20 })
+    expectBounds(high.renderer, "minmax-percent-high-second", { x: 360, y: 0, width: 240, height: 20 })
   })
 
   it("stretches auto tracks after sizing them from content", () => {
@@ -180,9 +183,9 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
 
     // 50/100/150px max-content tracks leave 300px; auto-track stretching adds
     // 300px / 3 = 100px to each, making the tracks 150/200/250px wide.
-    expectBounds(renderer, "auto-a", [0, 0, 150, 20])
-    expectBounds(renderer, "auto-b", [150, 0, 200, 20])
-    expectBounds(renderer, "auto-c", [350, 0, 250, 20])
+    expectBounds(renderer, "auto-a", { x: 0, y: 0, width: 150, height: 20 })
+    expectBounds(renderer, "auto-b", { x: 150, y: 0, width: 200, height: 20 })
+    expectBounds(renderer, "auto-c", { x: 350, y: 0, width: 250, height: 20 })
   })
 
   it("sizes a min-content track to the longest word", () => {
@@ -209,8 +212,8 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     const cell = boundsFor(renderer, "min-content-cell")
     const minReference = boundsFor(renderer, "min-content-reference")
     const maxReference = boundsFor(renderer, "max-content-reference")
-    expect(cell[2]).toBeCloseTo(minReference[2], 3)
-    expect(cell[2]).toBeLessThan(maxReference[2])
+    expect(cell.width).toBeCloseTo(minReference.width, 3)
+    expect(cell.width).toBeLessThan(maxReference.width)
   })
 
   it("sizes a max-content track to the whole line", () => {
@@ -237,8 +240,8 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     const cell = boundsFor(renderer, "max-content-cell")
     const maxReference = boundsFor(renderer, "max-content-reference")
     const minReference = boundsFor(renderer, "min-content-reference")
-    expect(cell[2]).toBeCloseTo(maxReference[2], 3)
-    expect(cell[2]).toBeGreaterThan(minReference[2])
+    expect(cell.width).toBeCloseTo(maxReference.width, 3)
+    expect(cell.width).toBeGreaterThan(minReference.width)
   })
 
   it("clamps minmax tracks at both their minimum and maximum", () => {
@@ -265,13 +268,13 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     // (not the container) is what limits the track: 300px content is capped
     // at the 150px max track size.
     const maximum = renderCase(600, 300, "minmax-maximum")
-    expectBounds(maximum, "minmax-maximum-track", [0, 20, 150, 20])
+    expectBounds(maximum, "minmax-maximum-track", { x: 0, y: 20, width: 150, height: 20 })
 
     // A 60px container is smaller than the 100px min, so the clamp (not the
     // container) is what grows the track: 50px content is raised to the
     // 100px min track size, overflowing the container.
     const minimum = renderCase(60, 50, "minmax-minimum")
-    expectBounds(minimum, "minmax-minimum-track", [0, 20, 100, 20])
+    expectBounds(minimum, "minmax-minimum-track", { x: 0, y: 20, width: 100, height: 20 })
   })
 
   it("expands repeat tracks in source order", () => {
@@ -297,7 +300,7 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
 
     // Each repeat contributes 100px + (600px - 3 * 100px) / 3 = 200px.
     ;[0, 100, 200, 300, 400, 500].forEach((x, index) => {
-      expectBounds(renderer, `repeat-${index}`, [x, 0, 100, 20])
+      expectBounds(renderer, `repeat-${index}`, { x: x, y: 0, width: 100, height: 20 })
     })
   })
 
@@ -320,7 +323,7 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
       </div>,
     )
     ;[0, 200, 400, 600].forEach((x, index) => {
-      expectBounds(wide.renderer, `auto-fill-wide-${index}`, [x, 0, 200, 20])
+      expectBounds(wide.renderer, `auto-fill-wide-${index}`, { x: x, y: 0, width: 200, height: 20 })
     })
 
     // 400px / 180px-minimum tracks fits 2 repetitions (400 / 180 = 2.22).
@@ -333,7 +336,7 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
       </div>,
     )
     ;[0, 200].forEach((x, index) => {
-      expectBounds(narrow.renderer, `auto-fill-narrow-${index}`, [x, 0, 200, 20])
+      expectBounds(narrow.renderer, `auto-fill-narrow-${index}`, { x: x, y: 0, width: 200, height: 20 })
     })
   })
 
@@ -355,8 +358,8 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
         <div data-testid="auto-fill-item-1" style={{ width: "100%", height: 20 }} />
       </div>,
     )
-    expectBounds(fill.renderer, "auto-fill-item-0", [0, 0, 100, 20])
-    expectBounds(fill.renderer, "auto-fill-item-1", [100, 0, 100, 20])
+    expectBounds(fill.renderer, "auto-fill-item-0", { x: 0, y: 0, width: 100, height: 20 })
+    expectBounds(fill.renderer, "auto-fill-item-1", { x: 100, y: 0, width: 100, height: 20 })
 
     // auto-fit collapses those same empty repetitions to zero size, so the
     // two remaining tracks stretch to fill the 800px container.
@@ -367,8 +370,8 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
         <div data-testid="auto-fit-item-1" style={{ width: "100%", height: 20 }} />
       </div>,
     )
-    expectBounds(fit.renderer, "auto-fit-item-0", [0, 0, 400, 20])
-    expectBounds(fit.renderer, "auto-fit-item-1", [400, 0, 400, 20])
+    expectBounds(fit.renderer, "auto-fit-item-0", { x: 0, y: 0, width: 400, height: 20 })
+    expectBounds(fit.renderer, "auto-fit-item-1", { x: 400, y: 0, width: 400, height: 20 })
   })
 
   it("applies column and row gaps between grid tracks", () => {
@@ -392,11 +395,11 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     )
 
     // (600px - 20px column gap) / 2 = 290px; the second column starts at 310px.
-    expectBounds(renderer, "gap-0", [0, 0, 290, 20])
-    expectBounds(renderer, "gap-1", [310, 0, 290, 20])
+    expectBounds(renderer, "gap-0", { x: 0, y: 0, width: 290, height: 20 })
+    expectBounds(renderer, "gap-1", { x: 310, y: 0, width: 290, height: 20 })
     // The second row starts after its 40px row plus the 20px row gap.
-    expectBounds(renderer, "gap-2", [0, 60, 290, 20])
-    expectBounds(renderer, "gap-3", [310, 60, 290, 20])
+    expectBounds(renderer, "gap-2", { x: 0, y: 60, width: 290, height: 20 })
+    expectBounds(renderer, "gap-3", { x: 310, y: 60, width: 290, height: 20 })
   })
 
   it("aligns grid content, items, and individual children", () => {
@@ -414,8 +417,8 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     )
 
     // The 200px grid content is centered in 600px: (600 - 200) / 2 = 200.
-    expectBounds(centered.renderer, "justify-center", [200, 0, 100, 20])
-    expectBounds(centered.renderer, "justify-center-second", [300, 0, 100, 20])
+    expectBounds(centered.renderer, "justify-center", { x: 200, y: 0, width: 100, height: 20 })
+    expectBounds(centered.renderer, "justify-center-second", { x: 300, y: 0, width: 100, height: 20 })
 
     const contentEnd = createGridRoot()
     contentEnd.render(
@@ -430,7 +433,7 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     )
 
     // The 40px row ends at the bottom of the 200px container: 200 - 40 = 160.
-    expectBounds(contentEnd.renderer, "align-content-end", [0, 160, 100, 40])
+    expectBounds(contentEnd.renderer, "align-content-end", { x: 0, y: 160, width: 100, height: 40 })
 
     const items = createGridRoot()
     items.render(
@@ -446,8 +449,8 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     )
 
     // (40px row - 20px child) / 2 = 10px; align-self:end gives 40px - 20px = 20px.
-    expectBounds(items.renderer, "align-items-center", [0, 10, 100, 20])
-    expectBounds(items.renderer, "align-self-end", [100, 20, 100, 20])
+    expectBounds(items.renderer, "align-items-center", { x: 0, y: 10, width: 100, height: 20 })
+    expectBounds(items.renderer, "align-self-end", { x: 100, y: 20, width: 100, height: 20 })
   })
 
   it("uses the tallest auto row before placing a fixed row", () => {
@@ -469,9 +472,9 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     )
 
     // The first auto row is 30px tall, so the fixed 60px row begins at y = 30.
-    expectBounds(renderer, "auto-row-tall", [0, 0, 300, 30])
-    expectBounds(renderer, "auto-row-short", [300, 0, 300, 20])
-    expectBounds(renderer, "fixed-row", [0, 30, 300, 20])
+    expectBounds(renderer, "auto-row-tall", { x: 0, y: 0, width: 300, height: 30 })
+    expectBounds(renderer, "auto-row-short", { x: 300, y: 0, width: 300, height: 20 })
+    expectBounds(renderer, "fixed-row", { x: 0, y: 30, width: 300, height: 20 })
   })
 
   it("keeps absolute track lengths in logical pixels at a device scale factor", () => {
@@ -493,9 +496,9 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
       </div>,
     )
 
-    expectBounds(renderer, "scale-px-a", [0, 0, 100, 20])
-    expectBounds(renderer, "scale-px-b", [100, 0, 200, 20])
-    expect(boundsFor(renderer, "scale-fit-content")[2]).toBeCloseTo(150, 3)
+    expectBounds(renderer, "scale-px-a", { x: 0, y: 0, width: 100, height: 20 })
+    expectBounds(renderer, "scale-px-b", { x: 100, y: 0, width: 200, height: 20 })
+    expect(boundsFor(renderer, "scale-fit-content").width).toBeCloseTo(150, 3)
   })
 
   it("auto-places items column-major when gridAutoFlow is column", () => {
@@ -527,8 +530,8 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     // Column-major placement fills column 0's three rows before moving to
     // column 1: the third item (index 2) lands at column 0, row 2, and the
     // fourth item (index 3) starts the second column at row 0.
-    expectBounds(renderer, "auto-flow-item-2", [0, 80, 100, 40])
-    expectBounds(renderer, "auto-flow-item-3", [100, 0, 100, 40])
+    expectBounds(renderer, "auto-flow-item-2", { x: 0, y: 80, width: 100, height: 40 })
+    expectBounds(renderer, "auto-flow-item-3", { x: 100, y: 0, width: 100, height: 40 })
   })
 
   it("sizes implicit rows from gridAutoRows when no row template is declared", () => {
@@ -551,9 +554,9 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
 
     // Row-major auto-placement fills the two columns before wrapping: the
     // third item (index 2) starts the implicit second row at y = 40.
-    expectBounds(renderer, "auto-row-item-0", [0, 0, 100, 40])
-    expectBounds(renderer, "auto-row-item-1", [100, 0, 100, 40])
-    expectBounds(renderer, "auto-row-item-2", [0, 40, 100, 40])
+    expectBounds(renderer, "auto-row-item-0", { x: 0, y: 0, width: 100, height: 40 })
+    expectBounds(renderer, "auto-row-item-1", { x: 100, y: 0, width: 100, height: 40 })
+    expectBounds(renderer, "auto-row-item-2", { x: 0, y: 40, width: 100, height: 40 })
   })
 
   it("sizes implicit columns from gridAutoColumns when flowing column-major", () => {
@@ -582,9 +585,9 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     // With a single explicit row and no explicit columns, column-major
     // auto-placement gives every item its own implicit column at the
     // declared 150px width.
-    expectBounds(renderer, "auto-col-item-0", [0, 0, 150, 40])
-    expectBounds(renderer, "auto-col-item-1", [150, 0, 150, 40])
-    expectBounds(renderer, "auto-col-item-2", [300, 0, 150, 40])
+    expectBounds(renderer, "auto-col-item-0", { x: 0, y: 0, width: 150, height: 40 })
+    expectBounds(renderer, "auto-col-item-1", { x: 150, y: 0, width: 150, height: 40 })
+    expectBounds(renderer, "auto-col-item-2", { x: 300, y: 0, width: 150, height: 40 })
   })
 
   it("centers items on the inline axis with justifyItems, overridden by justifySelf", () => {
@@ -608,10 +611,10 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     )
 
     // A 50px item centered in a 200px column sits at (200 - 50) / 2 = 75.
-    expectBounds(renderer, "justify-items-center", [75, 0, 50, 40])
+    expectBounds(renderer, "justify-items-center", { x: 75, y: 0, width: 50, height: 40 })
     // justifySelf: "end" overrides the inherited justifyItems, pushing the
     // item flush with the column's end edge: 200 - 50 = 150.
-    expectBounds(renderer, "justify-self-end", [150, 40, 50, 40])
+    expectBounds(renderer, "justify-self-end", { x: 150, y: 40, width: 50, height: 40 })
   })
 
   it("packs an auto-placed item into an earlier hole with gridAutoFlow: column dense", () => {
@@ -651,12 +654,12 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     // once its cursor has advanced past it, so the final item continues on
     // to a new, fourth column.
     const sparse = runFlow("column")
-    expectBounds(sparse.renderer, sparse.testId, [300, 0, 100, 40])
+    expectBounds(sparse.renderer, sparse.testId, { x: 300, y: 0, width: 100, height: 40 })
 
     // "column dense" rescans from the start for every item and finds that
     // same hole still open, packing the final item into column 2 instead.
     const dense = runFlow("column dense")
-    expectBounds(dense.renderer, dense.testId, [100, 0, 100, 40])
+    expectBounds(dense.renderer, dense.testId, { x: 100, y: 0, width: 100, height: 40 })
   })
 
   it("aligns an item to the start or stretches it across the column with justifySelf", () => {
@@ -679,9 +682,9 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     )
 
     // justifySelf: "start" leaves a 50px item flush with the column's start.
-    expectBounds(renderer, "justify-self-start", [0, 0, 50, 40])
+    expectBounds(renderer, "justify-self-start", { x: 0, y: 0, width: 50, height: 40 })
     // justifySelf: "stretch" fills the full 200px column, but only because
     // this item declares no explicit width of its own.
-    expectBounds(renderer, "justify-self-stretch", [0, 40, 200, 40])
+    expectBounds(renderer, "justify-self-stretch", { x: 0, y: 40, width: 200, height: 40 })
   })
 })

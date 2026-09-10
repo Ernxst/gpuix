@@ -431,6 +431,7 @@ impl CustomElement for AnchoredElement {
             "mouseEnter",
             "mouseLeave",
             "wheel",
+            "fileDrop",
         ]
     }
 

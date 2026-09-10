@@ -36,7 +36,7 @@ describeNative("instance reads reuse a clean rendered frame", () => {
         root.renderer.findByTestId("second")!,
         root.renderer.findByTestId("third")!,
       ]
-      expect(root.renderer.getElementBounds(elements[0]!.id)).toEqual([10, 10, 100, 30])
+      expect(root.renderer.getElementBounds(elements[0]!.id)).toEqual({ x: 10, y: 10, width: 100, height: 30 })
       const framesAfterFirstRead = root.renderer.getDebugFrameOverlayStats().frames
 
       for (let iteration = 0; iteration < 10; iteration += 1) {
@@ -57,15 +57,15 @@ describeNative("instance reads reuse a clean rendered frame", () => {
     try {
       root.render(<div data-testid="target" style={{ width: 100, height: 40 }} />)
       const target = root.renderer.findByTestId("target")!
-      expect(root.renderer.getElementBounds(target.id)?.[2]).toBe(100)
+      expect(root.renderer.getElementBounds(target.id).width).toBe(100)
       root.renderer.resetDebugFrameOverlayStats()
-      expect(root.renderer.getElementBounds(target.id)?.[2]).toBe(100)
+      expect(root.renderer.getElementBounds(target.id).width).toBe(100)
       const framesBeforeChangedRead = root.renderer.getDebugFrameOverlayStats().frames
 
       flushSync(() => {
         root.root.render(<div data-testid="target" style={{ width: 240, height: 40 }} />)
       })
-      expect(root.renderer.getElementBounds(target.id)?.[2]).toBe(240)
+      expect(root.renderer.getElementBounds(target.id).width).toBe(240)
       const framesAfterChangedRead = root.renderer.getDebugFrameOverlayStats().frames
       expect(root.renderer.getDebugFrameOverlayStats().frames).toBe(framesAfterChangedRead)
       expect(framesAfterChangedRead - framesBeforeChangedRead).toBe(1)
@@ -93,9 +93,9 @@ describeNative("instance reads reuse a clean rendered frame", () => {
       flushSync(() => root.root.render(tree(true)))
       const pill = root.renderer.findByTestId("pill")!
       const framesBefore = root.renderer.getDebugFrameOverlayStats().frames
-      expect(root.renderer.getElementBounds(pill.id)).toEqual([0, 0, 60, 32])
+      expect(root.renderer.getElementBounds(pill.id)).toEqual({ x: 0, y: 0, width: 60, height: 32 })
       const framesAfterFirstRead = root.renderer.getDebugFrameOverlayStats().frames
-      expect(root.renderer.getElementBounds(pill.id)).toEqual([0, 0, 60, 32])
+      expect(root.renderer.getElementBounds(pill.id)).toEqual({ x: 0, y: 0, width: 60, height: 32 })
       expect(root.renderer.getDebugFrameOverlayStats().frames).toBe(framesAfterFirstRead)
       expect(framesAfterFirstRead - framesBefore).toBe(2)
     } finally {
@@ -141,11 +141,11 @@ describeNative("instance reads reuse a clean rendered frame", () => {
       const framesAfterFirstRead = root.renderer.getDebugFrameOverlayStats().frames
 
       const labelReference = root.renderer.findByTestId("label-reference")!
-      const labelWidth = root.renderer.getElementBounds(labelReference.id)![2]!
+      const labelWidth = root.renderer.getElementBounds(labelReference.id)!.width!
 
       // Both fixed-size images always contribute 18px each; the pill's width
       // grows to fit the label only if the settled read saw it.
-      expect(bounds[2]).toBeCloseTo(18 + 18 + labelWidth, 3)
+      expect(bounds.width).toBeCloseTo(18 + 18 + labelWidth, 3)
 
       const framesBeforeSecondRead = root.renderer.getDebugFrameOverlayStats().frames
       expect(root.renderer.getElementBounds(pillInstance.id)).toEqual(bounds)
@@ -277,7 +277,7 @@ describeNative("instance reads reuse a clean rendered frame", () => {
 
       root.renderer.nativeSimulateMouseMove(20, 20)
 
-      expect(root.renderer.getElementBounds(target.id)?.[2]).toBe(220)
+      expect(root.renderer.getElementBounds(target.id).width).toBe(220)
     } finally {
       root.unmount()
     }

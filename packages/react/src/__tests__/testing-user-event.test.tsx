@@ -49,7 +49,7 @@ describeNative("createTestRoot userEvent", () => {
       const action = screen.getByTestId("action")
       const first = screen.getByTestId("first")
       const second = screen.getByTestId("second")
-      const [x, y, width, height] = screen.renderer.getElementBounds(action.id)!
+      const { x, y, width, height } = screen.renderer.getElementBounds(action.id)!
       const click = vi.spyOn(screen.renderer, "nativeSimulateClick")
       const move = vi.spyOn(screen.renderer, "nativeSimulateMouseMove")
       const focusedLabel = (): string | undefined => {

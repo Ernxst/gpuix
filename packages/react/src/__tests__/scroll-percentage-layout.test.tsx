@@ -10,8 +10,8 @@ function boundsFor(renderer: TestRenderer, testId: string) {
   const element = renderer.findByTestId(testId)
   expect(element, `missing ${testId}`).toBeDefined()
   const bounds = renderer.getElementBounds(element!.id)
-  expect(bounds, `no bounds for ${testId}`).toEqual(expect.any(Array))
-  return { x: bounds![0], y: bounds![1], width: bounds![2], height: bounds![3] }
+  expect(bounds, `no bounds for ${testId}`).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) }))
+  return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
 }
 
 describe("percentage layout inside scroll containers", () => {

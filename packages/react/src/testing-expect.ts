@@ -37,7 +37,7 @@ import {
   type TestRenderer,
 } from "./testing.js"
 import { toMatchScreenshot, type ToMatchScreenshotOptions } from "./testing-screenshot.js"
-import type { Overflow, StyleDesc } from "./types/host.js"
+import type { ElementBounds, Overflow, StyleDesc } from "./types/host.js"
 import { TEXT_EDITING_TYPES } from "./reconciler/text-editing.js"
 import {
   ARIA_PROP_ALIASES,
@@ -267,9 +267,8 @@ interface ClipRect {
   bottom: number
 }
 
-function rectOf(bounds: readonly number[]): ClipRect {
-  const [x = 0, y = 0, width = 0, height = 0] = bounds
-  return { left: x, top: y, right: x + width, bottom: y + height }
+function rectOf(bounds: ElementBounds): ClipRect {
+  return { left: bounds.x, top: bounds.y, right: bounds.x + bounds.width, bottom: bounds.y + bounds.height }
 }
 
 /** An overflow value that establishes a clip, which is every one but `visible`. */
@@ -395,7 +394,7 @@ function clipRectFor(
  * edge, and 0 otherwise. Dividing by zero area would answer nothing, and a
  * zero-height element that is plainly on screen is intersecting.
  */
-function visibleRatio(bounds: readonly number[], clip: ClipRect): number {
+function visibleRatio(bounds: ElementBounds, clip: ClipRect): number {
   const box = rectOf(bounds)
   const area = (box.right - box.left) * (box.bottom - box.top)
   if (area <= 0) {
@@ -677,7 +676,7 @@ export const gpuixMatchers = {
           actual:
             bounds === null
               ? `  ${describe()} painted no bounds`
-              : `  ${describe()} painted [x=${bounds[0]}, y=${bounds[1]}, width=${bounds[2]}, height=${bounds[3]}]`,
+              : `  ${describe()} painted [x=${bounds.x}, y=${bounds.y}, width=${bounds.width}, height=${bounds.height}]`,
         }
       }
     )
@@ -732,7 +731,7 @@ export const gpuixMatchers = {
           // whole must satisfy `{ ratio: 1 }` through floating-point division.
           pass: visible > 0 && visible > ratio - 1e-9,
           actual:
-            `  ${describe()} painted [x=${bounds[0]}, y=${bounds[1]}, width=${bounds[2]}, height=${bounds[3]}]\n` +
+            `  ${describe()} painted [x=${bounds.x}, y=${bounds.y}, width=${bounds.width}, height=${bounds.height}]\n` +
             `  in a ${window.width}x${window.height} window, visible ratio ${visible.toFixed(3)}`,
         }
       }

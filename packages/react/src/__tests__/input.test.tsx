@@ -724,11 +724,44 @@ describeNative("native text editors", () => {
         <input data-testid="input" style={{ width: 300, fontSize: 28 }} />
       </div>,
     )
-    const heightOf = (id: string) => renderer.getElementBounds(renderer.findByTestId(id)!.id)![3]
+    const heightOf = (id: string) => renderer.getElementBounds(renderer.findByTestId(id)!.id)!.height
     // gpui's default leading is 1.618: round(28 * 1.618) = 45. Before the fix every row was 26.
     expect(heightOf("scaled")).toBe(45)
     expect(heightOf("exact")).toBe(40)
     expect(heightOf("rows")).toBe(60)
     expect(heightOf("input")).toBe(45)
+  })
+
+  function editorBounds(type: "input" | "textarea") {
+    const node = testRoot.renderer.findByType(type)[0]
+    expect(node).toBeDefined()
+    const bounds = testRoot.renderer.getElementBounds(node.id)
+    expect(bounds).not.toBeNull()
+    return bounds!
+  }
+
+  it("sizes a row from style.lineHeight", () => {
+    testRoot.render(
+      <textarea value="one" minRows={1} maxRows={8} style={{ width: 300, lineHeight: 30 }} />,
+    )
+    expect(editorBounds("textarea").height).toBe(30)
+  })
+
+  it("multiplies lineHeight by minRows", () => {
+    testRoot.render(
+      <textarea value="one" minRows={3} maxRows={8} style={{ width: 300, lineHeight: 30 }} />,
+    )
+    expect(editorBounds("textarea").height).toBe(90)
+  })
+
+  it("scales a row from fontSize when lineHeight is unset", () => {
+    testRoot.render(<input value="one" style={{ width: 300, fontSize: 28 }} />)
+    // GPUI default leading is phi, so 28px * 1.618 rounds to 45.
+    expect(editorBounds("input").height).toBe(45)
+  })
+
+  it("uses lineHeight on a single-line input", () => {
+    testRoot.render(<input value="one" style={{ width: 300, lineHeight: 22 }} />)
+    expect(editorBounds("input").height).toBe(22)
   })
 })
