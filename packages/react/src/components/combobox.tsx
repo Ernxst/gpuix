@@ -267,7 +267,7 @@ export const ComboboxInput = forwardRef<PublicInstance, ComboboxInputProps>(
             context.moveActive(1)
           } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
             context.moveActive(-1)
-          } else if (event.key === "Enter" && !event.modifiers?.shift) {
+          } else if (event.key === "Enter" && !event.shiftKey) {
             if (context.activeIndex !== null) {
               const item = context.filteredItems[context.activeIndex]
               if (item !== undefined) {

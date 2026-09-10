@@ -102,10 +102,11 @@ export function domKeyName(
  * `nativeEvent` is the escape hatch: the full, unmodified payload, for code
  * that needs a field this base type does not carry (or needs to read a
  * member without first narrowing `type`). `elementId` and `eventType` are
- * kept at the top level too — every kind's payload has them, `eventType` is
- * what `type` is derived from, and keeping both means a handler still typed
- * against the raw `EventPayload` shape (as some tests intentionally are)
- * keeps accepting any of the per-kind events below.
+ * kept at the top level too, alongside `nativeEvent`: every kind's payload
+ * has them, `eventType` is what `type` is derived from, and both are
+ * required on `EventPayload` while everything else on it is optional — so
+ * every per-kind event below remains structurally assignable to the raw
+ * `EventPayload` type.
  *
  * No modifier keys, no pointer fields, no key fields: those belong to the
  * kinds that actually deliver them, below.
@@ -202,6 +203,10 @@ interface GpuixPointerEvent<Type extends string> extends GpuixEvent {
   readonly isRightClick?: boolean
   readonly inputSource?: string
   readonly pressedButton?: number
+  /** `true` = pointer entered the element, `false` = left it.
+   *  Populated for `mouseEnter` and `mouseLeave`. */
+  readonly hovered?: boolean
+  readonly modifiers?: EventModifiers
 }
 
 /** A click, press, hover-transition, or context-menu event. */
@@ -226,6 +231,10 @@ export interface GpuixWheelEvent extends GpuixPointerEvent<"wheel"> {
 /** A key press or release delivered to the focused element. */
 export interface GpuixKeyboardEvent extends GpuixEvent {
   readonly type: "keyDown" | "keyUp"
+  readonly altKey: boolean
+  readonly ctrlKey: boolean
+  readonly metaKey: boolean
+  readonly shiftKey: boolean
   readonly modifiers?: EventModifiers
   /** The UI Events `key` value. See {@link domKeyName}. */
   readonly key: string

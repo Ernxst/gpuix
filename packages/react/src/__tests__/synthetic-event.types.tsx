@@ -9,6 +9,11 @@ import type {
 const key: string = {} as GpuixKeyboardEvent["key"]
 void key
 
+// Keyboard events carry the flattened DOM modifier booleans too, not just
+// the raw `modifiers` object.
+const keyboardShiftKey: boolean = {} as GpuixKeyboardEvent["shiftKey"]
+void keyboardShiftKey
+
 // Reading a kind-specific member off the wrong kind is a type error, not just
 // an absent runtime value: the per-kind types are disjoint on purpose.
 // @ts-expect-error `key` is a keyboard member; mouse events do not carry one.

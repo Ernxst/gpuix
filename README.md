@@ -542,10 +542,10 @@ State update triggers re-render → reconciler sends mutations back to Rust
 Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)`. Rust only knows **whether** an element has a listener (via `setEventListener`), not the closure itself — the actual handler lives in JS.
 
 Handlers receive one of the per-kind `Gpuix*Event` types (`GpuixMouseEvent`,
-`GpuixWheelEvent`, `GpuixKeyboardEvent`, `GpuixFocusEvent`, or plain
-`GpuixEvent` for scroll, change, and the custom-element events), not the raw
-native payload — each prop's type is listed in the table above. Every kind
-shares:
+`GpuixWheelEvent`, `GpuixKeyboardEvent`, `GpuixFocusEvent`, `GpuixScrollEvent`,
+`GpuixChangeEvent`, or `GpuixElementEvent` for the custom-element events), not
+the raw native payload — each prop's type is listed in the table above. Every
+kind shares:
 
 - `target` and phase-specific `currentTarget` host handles with
   `getAttribute(name)`
@@ -3623,13 +3623,13 @@ text imports no longer need a runtime flag.
 | Focus | `onFocus` | `GpuixFocusEvent` | — |
 | Blur | `onBlur` | `GpuixFocusEvent` | — |
 | Wheel | `onWheel` | `GpuixWheelEvent` | `x`, `y`, `deltaX`, `deltaY`, `deltaZ`, `deltaMode`, `precise`, `touchPhase`, `modifiers` |
-| Scroll | `onScroll` | `GpuixEvent` | — read `scrollLeft` / `scrollTop` from `currentTarget` |
+| Scroll | `onScroll` | `GpuixScrollEvent` | — read `scrollLeft` / `scrollTop` from `currentTarget` |
 | File drop | `onFileDrop` | `EventPayload` | `paths`, `x`, `y` — Unicode filesystem paths from Finder or the OS |
-| Change | `onChange` | `GpuixEvent` | `value` — `<input>` and `<textarea>` only |
-| Toggle file | `onToggleFile` | `GpuixEvent` | `value` (file path) — `<diff>` only |
-| Show more | `onShowMore` | `GpuixEvent` | `value` (hidden line count) — `<diff>` only |
-| Line click | `onLineClick` | `GpuixEvent` | `value`, `oldLine`, `newLine` — `<diff>` only |
-| Link click | `onLinkClick` | `GpuixEvent` | `value` (URL) — `<markdown>` only |
+| Change | `onChange` | `GpuixChangeEvent` | `value` — `<input>` and `<textarea>` only |
+| Toggle file | `onToggleFile` | `GpuixElementEvent` | `value` (file path) — `<diff>` only |
+| Show more | `onShowMore` | `GpuixElementEvent` | `value` (hidden line count) — `<diff>` only |
+| Line click | `onLineClick` | `GpuixElementEvent` | `value`, `oldLine`, `newLine` — `<diff>` only |
+| Link click | `onLinkClick` | `GpuixElementEvent` | `value` (URL) — `<markdown>` only |
 
 `GpuixSyntheticEvent` is the union of every event type above (`onFileDrop` is
 the one exception, still typed with the raw `EventPayload`). A handler typed
