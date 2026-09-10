@@ -2796,7 +2796,7 @@ impl GpuixRenderer {
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
         let app_name = options.app_name.clone().unwrap_or_else(|| title.clone());
         let menus = options.menus.clone();
-        let reduced_motion = effective_reduced_motion(options.reduced_motion, || None);
+        let reduced_motion_override = options.reduced_motion;
         // `focus: false` must also skip `cx.activate`: the window flag only
         // decides key status inside the app, activation is what steals focus.
         let activate = options.focus.unwrap_or(true);
@@ -2831,7 +2831,17 @@ impl GpuixRenderer {
                         .with_http_client(default_http_client())
                         .with_quit_mode(gpui::QuitMode::LastWindowClosed);
                     app.run(move |cx| {
+                        let reduced_motion =
+                            effective_reduced_motion(reduced_motion_override, || {
+                                Some(cx.should_reduce_motion())
+                            });
                         cx.set_reduce_motion(reduced_motion);
+                        if reduced_motion_override.is_none() {
+                            cx.on_reduce_motion_change(|cx| {
+                                cx.set_reduce_motion(cx.should_reduce_motion());
+                            })
+                            .detach();
+                        }
                         init_key_bindings(cx);
                         crate::custom_elements::input::init(cx);
                         init_application_menu_support(cx, Some(application_callback.clone()));
@@ -3386,6 +3396,10 @@ impl GpuixRenderer {
     }
 
     /// Test seam that posts the real macOS accessibility-display notification.
+    ///
+    /// On Windows this instead changes the real `SPI_SETCLIENTAREAANIMATION`
+    /// setting for the current login session (not persisted to the user's
+    /// profile), so callers should only use it on disposable test machines.
     #[napi]
     pub fn test_set_platform_reduced_motion(&self, enabled: bool) -> Result<()> {
         #[cfg(all(target_os = "macos", feature = "test-support"))]
@@ -3405,11 +3419,41 @@ impl GpuixRenderer {
             })
         }
 
-        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        #[cfg(all(target_os = "windows", feature = "test-support"))]
+        {
+            use std::ffi::c_void;
+            use windows::Win32::UI::WindowsAndMessaging::{
+                SystemParametersInfoW, SPIF_SENDCHANGE, SPI_SETCLIENTAREAANIMATION,
+            };
+
+            if *self.lifecycle.lock().unwrap() != RendererLifecycle::Running {
+                return Err(Error::from_reason(
+                    "Renderer not initialized. Call init() first.",
+                ));
+            }
+            // Reduced motion means animations off, so the client-area-animation
+            // flag is the negation of `enabled`. `SPIF_SENDCHANGE` broadcasts
+            // `WM_SETTINGCHANGE`; omitting `SPIF_UPDATEINIFILE` keeps this out
+            // of the user's profile.
+            unsafe {
+                SystemParametersInfoW(
+                    SPI_SETCLIENTAREAANIMATION,
+                    0,
+                    Some(usize::from(!enabled) as *mut c_void),
+                    SPIF_SENDCHANGE,
+                )
+                .map_err(|error| Error::from_reason(error.to_string()))
+            }
+        }
+
+        #[cfg(not(any(
+            all(target_os = "macos", feature = "test-support"),
+            all(target_os = "windows", feature = "test-support")
+        )))]
         {
             let _ = enabled;
             Err(Error::from_reason(
-                "Platform reduced-motion test seam requires macOS test support",
+                "Platform reduced-motion test seam requires macOS or Windows test support",
             ))
         }
     }
@@ -13742,7 +13786,9 @@ pub struct WindowOptions {
     pub window_background: Option<String>,
     pub traffic_light_x: Option<f64>,
     pub traffic_light_y: Option<f64>,
-    /// Override GPUI's reduced-motion policy for this application.
+    /// Override the OS reduced-motion preference for this application's
+    /// lifetime, instead of following it (and its live changes) on macOS,
+    /// Windows and Linux.
     pub reduced_motion: Option<bool>,
     /// Allow URL-backed images to connect to loopback and private networks.
     /// Link-local and cloud-metadata ranges remain blocked.

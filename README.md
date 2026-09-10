@@ -593,7 +593,7 @@ values as `atlasTileCount` and `releasedAtlasTileCount` in `getCanvasState()`.
 | `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. The chat example uses `(16, 17)` |
 | `transparent` | boolean | Same as `windowBackground: "transparent"` when that option is unset |
 | `appName` | string | Name inside the macOS `Hide X` and `Quit X` items. Defaults to `title` |
-| `reducedMotion` | boolean | Override macOS Reduce Motion. Omit it to follow live system changes on macOS |
+| `reducedMotion` | boolean | Override the OS reduced-motion preference. Omit it to follow live system changes |
 | `focus` | boolean, default `true` | `false` opens the window behind the active app, like `open -g` |
 | `show` | boolean, default `true` | `false` opens the window hidden. Call `activateWindow()` to reveal it |
 
@@ -1255,11 +1255,13 @@ premultiplied RGB and alpha, then unpremultiplies the result; a zero-alpha
 result keeps the destination RGB. Consequently, the exact midpoint from
 transparent to white is white at 50% alpha, not grey at 50% alpha.
 
-On macOS, both style transitions and `motion.div` follow Accessibility >
-Display > Reduce motion by default, and changes take effect live. Set the
+Both style transitions and `motion.div` follow the OS reduced-motion
+preference by default, and changes take effect live: macOS (Accessibility >
+Display > Reduce motion), Windows (Settings > Accessibility > Visual effects >
+Animation effects) and Linux (the desktop settings portal's reduced-motion
+setting, or GNOME's Enable Animations where the portal lacks it). Set the
 renderer option `reducedMotion: true` or `false` to override the system
-preference for the lifetime of the renderer. Other platforms retain GPUI's
-default policy unless the app supplies an override.
+preference for the lifetime of the renderer.
 
 Use **`motion.div`** to animate from an initial style to a target style. React
 sends the target once. Rust calculates intermediate values and requests GPUI

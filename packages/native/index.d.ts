@@ -79,7 +79,13 @@ export declare class GpuixRenderer {
    * This keeps input and application lifecycle events responsive between frames.
    */
   tickIdle(): boolean
-  /** Test seam that posts the real macOS accessibility-display notification. */
+  /**
+   * Test seam that posts the real macOS accessibility-display notification.
+   *
+   * On Windows this instead changes the real `SPI_SETCLIENTAREAANIMATION`
+   * setting for the current login session (not persisted to the user's
+   * profile), so callers should only use it on disposable test machines.
+   */
   testSetPlatformReducedMotion(enabled: boolean): void
   /** Whether the embedded macOS runtime is still retained by thread-local handles. */
   testHasEmbeddedRuntime(): boolean
@@ -987,7 +993,11 @@ export interface WindowOptions {
   windowBackground?: string
   trafficLightX?: number
   trafficLightY?: number
-  /** Override GPUI's reduced-motion policy for this application. */
+  /**
+   * Override the OS reduced-motion preference for this application's
+   * lifetime, instead of following it (and its live changes) on macOS,
+   * Windows and Linux.
+   */
   reducedMotion?: boolean
   /**
    * Allow URL-backed images to connect to loopback and private networks.
