@@ -1479,12 +1479,12 @@ enum UiCommand {
     },
     PromptForPaths {
         options: PromptForPathsOptions,
-        deferred: PickerDeferred,
+        deferred: PickerDeferredGuard,
     },
     PromptForNewPath {
         directory: PathBuf,
         suggested_name: Option<String>,
-        deferred: PickerPathDeferred,
+        deferred: PickerPathGuard,
     },
     SetPointerCapture {
         id: u64,
@@ -1870,7 +1870,7 @@ async fn run_ui_commands(
                         .await
                         .map_err(|error| anyhow::anyhow!(error))
                         .and_then(|result| result);
-                    settle_picker(deferred, result);
+                    settle_new_path(deferred, result);
                 })
                 .detach();
             }),
@@ -2440,7 +2440,57 @@ type PickerPathDeferred =
     JsDeferred<Option<String>, Box<dyn FnOnce(Env) -> Result<Option<String>> + Send>>;
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-fn settle_picker(deferred: PickerDeferred, result: anyhow::Result<Option<Vec<PathBuf>>>) {
+const PICKER_CLOSED_MESSAGE: &str = "The picker was closed before it answered";
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+struct DeferredGuard<D> {
+    deferred: Option<D>,
+    reject: fn(D, Error),
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+impl<D> DeferredGuard<D> {
+    fn new(deferred: D, reject: fn(D, Error)) -> Self {
+        Self {
+            deferred: Some(deferred),
+            reject,
+        }
+    }
+
+    fn take(mut self) -> D {
+        self.deferred
+            .take()
+            .expect("picker deferred guard already disarmed")
+    }
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+impl<D> Drop for DeferredGuard<D> {
+    fn drop(&mut self) {
+        if let Some(deferred) = self.deferred.take() {
+            (self.reject)(deferred, Error::from_reason(PICKER_CLOSED_MESSAGE));
+        }
+    }
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+type PickerDeferredGuard = DeferredGuard<PickerDeferred>;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+type PickerPathGuard = DeferredGuard<PickerPathDeferred>;
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn reject_picker_deferred(deferred: PickerDeferred, error: Error) {
+    deferred.reject(error);
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn reject_picker_path_deferred(deferred: PickerPathDeferred, error: Error) {
+    deferred.reject(error);
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn settle_picker(guard: PickerDeferredGuard, result: anyhow::Result<Option<Vec<PathBuf>>>) {
+    let deferred = guard.take();
     match result {
         Ok(paths) => {
             let paths = paths
@@ -2465,7 +2515,8 @@ fn settle_picker(deferred: PickerDeferred, result: anyhow::Result<Option<Vec<Pat
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-fn settle_new_path(deferred: PickerPathDeferred, result: anyhow::Result<Option<PathBuf>>) {
+fn settle_new_path(guard: PickerPathGuard, result: anyhow::Result<Option<PathBuf>>) {
+    let deferred = guard.take();
     match result {
         Ok(path) => match path
             .map(|path| {
@@ -3433,6 +3484,7 @@ impl GpuixRenderer {
         options: PromptForPathsOptions,
     ) -> Result<PromiseRaw<'static, Option<Vec<String>>>> {
         let (deferred, promise) = env.create_deferred::<Option<Vec<String>>, _>()?;
+        let deferred = PickerDeferredGuard::new(deferred, reject_picker_deferred);
         // N-API keeps the promise alive independently of this call's Env
         // wrapper. The returned JS value is valid for the lifetime of the
         // addon, as with other N-API values returned from an Env argument.
@@ -3487,6 +3539,7 @@ impl GpuixRenderer {
         suggested_name: Option<String>,
     ) -> Result<PromiseRaw<'static, Option<String>>> {
         let (deferred, promise) = env.create_deferred::<Option<String>, _>()?;
+        let deferred = PickerPathGuard::new(deferred, reject_picker_path_deferred);
         let promise = PromiseRaw::new(env.raw(), promise.raw());
         let directory = PathBuf::from(directory);
 

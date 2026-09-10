@@ -14,13 +14,8 @@ import { existsSync, mkdirSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-<<<<<<< HEAD
 import React, { act as reactAct, createElement, createRef, type ReactNode } from "react"
-import type { EventPayload, MenuSpec } from "@gpuix/native"
-=======
-import React, { act, createElement, createRef, type ReactNode } from "react"
 import type { EventPayload, MenuSpec, PromptForPathsOptions } from "@gpuix/native"
->>>>>>> 0b85b67367 (feat(react): add native file picker dialogs)
 import {
   getDefaultNormalizer,
   matches as matchesMatcher,
