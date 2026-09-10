@@ -4425,18 +4425,41 @@ the user's keyboard has no test benefit. Linux currently ignores `focus`.
 native `<input>` and `<textarea>` elements receive GPUI's keyboard and IME
 handling instead of a test-only input path.
 
+## Clipboard
+
+```tsx
+import { clipboard } from '@gpuix/react'
+
+await clipboard.writeText('copied')
+const text = await clipboard.readText() // "" when the clipboard holds no text
+```
+
+`clipboard` is text-only — no images, no HTML fragments — and reaches the
+platform clipboard through the most recently attached GPUIX root. Calling it
+with no root mounted rejects with `Error("No GPUIX root is mounted")`.
+
+Under the test renderer, `writeText`/`readText` never touch the machine
+pasteboard: they read and write an in-memory string exposed on the renderer as
+`getClipboardText()`/`setClipboardText()`, since the test renderer runs on the
+real platform and a native clipboard call would hit it.
+
 ## Globals
 
 `import "@gpuix/react/globals"` is an opt-in, side-effect-only entry for code
 that assumes a browser: it installs exactly `requestAnimationFrame`,
-`cancelAnimationFrame`, `window`, and `scrollTo` on `globalThis`, and nothing
-else — no `document`. Each name is installed only if it is not already
-present, so a real browser, Vitest's `jsdom`/`happy-dom` environment, or an
-earlier import of this module all win over the shim. `window` is `globalThis`
-itself, not a constructed DOM `Window`; GPUIX has no scroll position to move,
-so `scrollTo` is a no-op returning `undefined`. TanStack Router, for example,
-reads `window?.origin` and calls `scrollTo()` during navigation; without this
-entry those calls hit an undefined global under GPUIX.
+`cancelAnimationFrame`, `window`, `scrollTo`, and `navigator.clipboard` on
+`globalThis`, and nothing else — no `document`. Each name is installed only if
+it is not already present, so a real browser, Vitest's `jsdom`/`happy-dom`
+environment, or an earlier import of this module all win over the shim.
+`window` is `globalThis` itself, not a constructed DOM `Window`; GPUIX has no
+scroll position to move, so `scrollTo` is a no-op returning `undefined`.
+TanStack Router, for example, reads `window?.origin` and calls `scrollTo()`
+during navigation; without this entry those calls hit an undefined global
+under GPUIX. `navigator.clipboard` is installed as the `clipboard` object
+above — defined on a pre-existing `navigator` that lacks a `clipboard` of its
+own, or as part of a newly defined `navigator` when none exists at all
+(Node has had a global `navigator` since v21, so the common case on the
+server is the former).
 
 ## Testing
 

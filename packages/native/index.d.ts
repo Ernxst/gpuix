@@ -182,6 +182,10 @@ export declare class GpuixRenderer {
   /** Release capture only when this retained element currently owns it. */
   releasePointerCapture(elementId: number): void
   blur(): void
+  /** Write plain text to the platform clipboard. */
+  writeClipboardText(text: string): void
+  /** Read plain text from the platform clipboard, or null if it holds none. */
+  readClipboardText(): string | null
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
   /** Drop the current selection and request a repaint. */

@@ -1322,6 +1322,12 @@ export interface NativeRenderer {
   getActiveElement?(): number | null
   blur?(): void
 
+  // ── Clipboard API ────────────────────────────────────────────────
+  /** Write plain text to the platform clipboard. */
+  writeClipboardText?(text: string): void
+  /** Read plain text from the platform clipboard, or null if it holds none. */
+  readClipboardText?(): string | null
+
   // ── Pointer capture API ────────────────────────────────────────
   setPointerCapture?(elementId: number): void
   releasePointerCapture?(elementId: number): void

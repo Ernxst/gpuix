@@ -7,11 +7,12 @@
  */
 
 import React, { useState } from 'react'
-import { render } from '@gpuix/react'
+import { clipboard, render } from '@gpuix/react'
 
 function Counter() {
   const [count, setCount] = useState(0)
   const [hovered, setHovered] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   return (
     <div
@@ -89,15 +90,39 @@ function Counter() {
 
       <div
         style={{
+          display: 'flex',
+          gap: 12,
           marginTop: 16,
-          padding: 16,
-          backgroundColor: '#313244',
-          borderRadius: 8,
-          cursor: 'pointer',
         }}
-        onClick={() => setCount(0)}
       >
-        <div style={{ color: '#bac2de', fontSize: 14 }}>Reset</div>
+        <div
+          style={{
+            padding: 16,
+            backgroundColor: '#313244',
+            borderRadius: 8,
+            cursor: 'pointer',
+          }}
+          onClick={() => setCount(0)}
+        >
+          <div style={{ color: '#bac2de', fontSize: 14 }}>Reset</div>
+        </div>
+
+        <div
+          style={{
+            padding: 16,
+            backgroundColor: '#313244',
+            borderRadius: 8,
+            cursor: 'pointer',
+          }}
+          onClick={() => {
+            clipboard.writeText(String(count)).then(() => {
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1000)
+            })
+          }}
+        >
+          <div style={{ color: '#bac2de', fontSize: 14 }}>{copied ? 'Copied!' : 'Copy'}</div>
+        </div>
       </div>
     </div>
   )
