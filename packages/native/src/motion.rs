@@ -757,7 +757,8 @@ impl StyleTransitionState {
             // Resolve the whole painted style before adopting the new property
             // list. A property added to that list must start at the value it
             // was already painting, not at its new target.
-            let (visible_frame, previous_velocities) = self.frame_with_velocities(now, false);
+            let (visible_frame, previous_velocities) =
+                self.frame_with_velocities(&self.target_style, now, false);
             let carry_velocity = matches!(self.transition.easing, TransitionEasing::Spring(_))
                 && visible_frame.active;
             let visible_style = visible_frame.style;
@@ -793,18 +794,41 @@ impl StyleTransitionState {
     }
 
     pub(crate) fn frame(&self, now: Instant, reduce_motion: bool) -> StyleTransitionFrame {
-        self.frame_with_velocities(now, reduce_motion).0
+        self.frame_with_velocities(&self.target_style, now, reduce_motion).0
+    }
+
+    /// The frame this transition resolves to against `base` instead of the
+    /// retained `target_style`.
+    ///
+    /// A probe measures a descendant at exactly the style its own real build
+    /// will resolve this frame: the current declaration for every property,
+    /// the currently interpolated value for every transitioned property.
+    /// `base` is that current declaration; `self.from`/`self.target` already
+    /// carry the interpolated values a real `sync` established at the last
+    /// frame that actually ran one, and a probe does not advance them.
+    pub(crate) fn frame_against(
+        &self,
+        base: &StyleDesc,
+        state: StyleState,
+        hover_within: bool,
+        now: Instant,
+        reduce_motion: bool,
+    ) -> StyleTransitionFrame {
+        let target_style =
+            resolve_transition_target(base, state, hover_within, self.hovered, self.active);
+        self.frame_with_velocities(&target_style, now, reduce_motion).0
     }
 
     fn frame_with_velocities(
         &self,
+        target_style: &StyleDesc,
         now: Instant,
         reduce_motion: bool,
     ) -> (StyleTransitionFrame, TransitionVelocities) {
         if reduce_motion || (self.from == self.target && self.velocities.is_zero()) {
             return (
                 StyleTransitionFrame {
-                    style: self.target_style.clone(),
+                    style: target_style.clone(),
                     active: false,
                 },
                 TransitionVelocities::default(),
@@ -824,15 +848,15 @@ impl StyleTransitionState {
             if !active {
                 return (
                     StyleTransitionFrame {
-                        style: self.target_style.clone(),
+                        style: target_style.clone(),
                         active: false,
                     },
                     velocities,
                 );
             }
-            let mut style = self.target_style.clone();
+            let mut style = target_style.clone();
             values.apply_to(&mut style);
-            self.keep_settled_intrinsic_axes(&mut style);
+            self.keep_settled_intrinsic_axes(&mut style, target_style);
             return (
                 StyleTransitionFrame {
                     style,
@@ -853,21 +877,21 @@ impl StyleTransitionState {
         if raw >= 1.0 {
             return (
                 StyleTransitionFrame {
-                    style: self.target_style.clone(),
+                    style: target_style.clone(),
                     active: false,
                 },
                 TransitionVelocities::default(),
             );
         }
 
-        let mut style = self.target_style.clone();
+        let mut style = target_style.clone();
         self.from
             .interpolate(
                 &self.target,
                 transition_ease(raw.clamp(0.0, 1.0), &self.transition.easing),
             )
             .apply_to(&mut style);
-        self.keep_settled_intrinsic_axes(&mut style);
+        self.keep_settled_intrinsic_axes(&mut style, target_style);
         (
             StyleTransitionFrame {
                 style,
@@ -885,13 +909,13 @@ impl StyleTransitionState {
     /// number was latched — an `opacity` run would collapse a lane back to
     /// yesterday's content width for its whole duration — so an axis with
     /// nowhere to travel keeps the style it settles on.
-    fn keep_settled_intrinsic_axes(&self, style: &mut StyleDesc) {
-        let (width, height) = self.settles_intrinsic();
+    fn keep_settled_intrinsic_axes(&self, style: &mut StyleDesc, base: &StyleDesc) {
+        let (width, height) = self.settles_intrinsic(base);
         if width && !self.travels(TransitionProperty::Width) {
-            style.width = self.target_style.width.clone();
+            style.width = base.width.clone();
         }
         if height && !self.travels(TransitionProperty::Height) {
-            style.height = self.target_style.height.clone();
+            style.height = base.height.clone();
         }
     }
 
@@ -915,10 +939,10 @@ impl StyleTransitionState {
     /// The renderer needs this for the closing direction: React has already
     /// swapped `width: "auto"` for a number, so only the retained target still
     /// says the element was content-sized a frame ago.
-    fn settles_intrinsic(&self) -> (bool, bool) {
+    fn settles_intrinsic(&self, base: &StyleDesc) -> (bool, bool) {
         (
-            intrinsic_keyword(&self.target_style.width).is_some(),
-            intrinsic_keyword(&self.target_style.height).is_some(),
+            intrinsic_keyword(&base.width).is_some(),
+            intrinsic_keyword(&base.height).is_some(),
         )
     }
 
@@ -1039,8 +1063,8 @@ pub(crate) fn intrinsic_probe(
     {
         return None;
     }
-    let (settled_width, settled_height) =
-        retained.map_or((false, false), StyleTransitionState::settles_intrinsic);
+    let (settled_width, settled_height) = retained
+        .map_or((false, false), |state| state.settles_intrinsic(&state.target_style));
     let latched = retained.map_or(IntrinsicSize::default(), |state| state.intrinsic);
     let previous_width = retained.and_then(|state| intrinsic_keyword(&state.target_style.width));
     let previous_height = retained.and_then(|state| intrinsic_keyword(&state.target_style.height));

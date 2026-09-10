@@ -9089,9 +9089,17 @@ fn build_element_with_parent_layout(
         if probe_style.is_some() {
             None
         } else {
-            ctx.transition_states
-                .get(&id)
-                .map(|state| state.frame(ctx.now, ctx.reduce_motion).style)
+            let focus_state = crate::motion::StyleState {
+                focused,
+                focus_visible,
+            };
+            ctx.transition_states.get(&id).and_then(|state| {
+                declared_style.map(|style| {
+                    state
+                        .frame_against(style, focus_state, hover_within, ctx.now, ctx.reduce_motion)
+                        .style
+                })
+            })
         }
     } else if let Some(style) = declared_style.filter(|style| style.transition.is_some()) {
         let focus_state = crate::motion::StyleState {
