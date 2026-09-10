@@ -73,3 +73,30 @@ export function expectScreenshotsEqual(leftPath: string, rightPath: string) {
   const right = fs.readFileSync(rightPath)
   expect(left.equals(right)).toBe(true)
 }
+
+/** vitest's snapshot update mode, as `toMatchScreenshot` reads it off the
+ *  matcher state. Local runs default to `"new"`; `CI=true` forces `"none"`. */
+interface MatcherStateWithSnapshot {
+  snapshotState?: { _updateSnapshot?: string }
+}
+
+/**
+ * Forces `toMatchScreenshot`'s view of vitest's update mode to `"new"` for
+ * the duration of `run`, restoring whatever it actually was afterward.
+ *
+ * Under `CI=true`, vitest sets the real mode to `"none"`, so a call that
+ * exercises the local "write a missing golden and fail" behaviour needs this
+ * to keep exercising that behaviour under CI too — without flipping
+ * `UPDATE_SNAPSHOT` for the whole run, which would let `--update` semantics
+ * leak into unrelated tests.
+ */
+export async function withNewGoldenWrites<T>(run: () => Promise<T>): Promise<T> {
+  const state = expect.getState() as unknown as MatcherStateWithSnapshot
+  const previous = state.snapshotState?._updateSnapshot
+  if (state.snapshotState) state.snapshotState._updateSnapshot = "new"
+  try {
+    return await run()
+  } finally {
+    if (state.snapshotState) state.snapshotState._updateSnapshot = previous
+  }
+}

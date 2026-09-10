@@ -21,11 +21,13 @@ import { configureScreenshots, gpuixMatchers, type GpuixMatchers } from "../test
 import { decodePng, readPngSize } from "../testing-png.js"
 import {
   decideScreenshotOutcome,
+  sanitizeArg,
   screenshotDiffPaths,
   screenshotPathContext,
   toMatchScreenshot,
   type ScreenshotPathContext,
 } from "../testing-screenshot.js"
+import { withNewGoldenWrites } from "./test-utils.js"
 
 expect.extend(gpuixMatchers)
 
@@ -100,8 +102,8 @@ describeNative("toMatchScreenshot", () => {
       screen.render(<Scene />)
       const golden = path.join(directory, "window.png")
 
-      const message = await failure(
-        expect(screen).toMatchScreenshot({ resolveScreenshotPath: () => golden })
+      const message = await withNewGoldenWrites(() =>
+        failure(expect(screen).toMatchScreenshot({ resolveScreenshotPath: () => golden }))
       )
 
       expect(message).toContain(
@@ -128,8 +130,10 @@ describeNative("toMatchScreenshot", () => {
       const golden = path.join(directory, "window.png")
       const options = { resolveScreenshotPath: () => golden }
 
-      await expect(expect(screen).toMatchScreenshot(options)).rejects.toThrowError(
-        /a new one was created/
+      await withNewGoldenWrites(() =>
+        expect(expect(screen).toMatchScreenshot(options)).rejects.toThrowError(
+          /a new one was created/
+        )
       )
       // Same tree, same window: the second run is the assertion the golden exists for.
       await expect(screen).toMatchScreenshot(options)
@@ -146,8 +150,10 @@ describeNative("toMatchScreenshot", () => {
       const artifacts = screenshotDiffPaths(golden)
 
       screen.render(<Scene />)
-      await expect(expect(screen).toMatchScreenshot(options)).rejects.toThrowError(
-        /a new one was created/
+      await withNewGoldenWrites(() =>
+        expect(expect(screen).toMatchScreenshot(options)).rejects.toThrowError(
+          /a new one was created/
+        )
       )
 
       screen.render(<Scene color={BLUE} />)
@@ -185,8 +191,10 @@ describeNative("toMatchScreenshot", () => {
       const options = { resolveScreenshotPath: () => golden }
       const tile = screen.getByTestId("tile")
 
-      await expect(expect(tile).toMatchScreenshot(options)).rejects.toThrowError(
-        /a new one was created/
+      await withNewGoldenWrites(() =>
+        expect(expect(tile).toMatchScreenshot(options)).rejects.toThrowError(
+          /a new one was created/
+        )
       )
       await expect(tile).toMatchScreenshot(options)
 
@@ -247,8 +255,10 @@ describeNative("toMatchScreenshot", () => {
       const options = { resolveScreenshotPath: () => golden }
       const mark = screen.getByTestId("mark")
 
-      await expect(expect(mark).toMatchScreenshot(options)).rejects.toThrowError(
-        /a new one was created/
+      await withNewGoldenWrites(() =>
+        expect(expect(mark).toMatchScreenshot(options)).rejects.toThrowError(
+          /a new one was created/
+        )
       )
       await expect(mark).toMatchScreenshot(options)
 
@@ -283,9 +293,11 @@ describeNative("toMatchScreenshot", () => {
       const options = { resolveScreenshotPath: () => golden }
 
       screen.render(<Scene />)
-      await expect(
-        expect(screen.getByTestId("tile")).toMatchScreenshot(options)
-      ).rejects.toThrowError(/a new one was created/)
+      await withNewGoldenWrites(() =>
+        expect(
+          expect(screen.getByTestId("tile")).toMatchScreenshot(options)
+        ).rejects.toThrowError(/a new one was created/)
+      )
 
       screen.render(<Scene width={120} />)
       const { scaleFactor } = screen.renderer.getWindowSize()
@@ -305,14 +317,16 @@ describeNative("toMatchScreenshot", () => {
       screen.render(<Scene />)
       const seen: ScreenshotPathContext[] = []
 
-      await expect(
-        expect(screen).toMatchScreenshot("custom name.png", {
-          resolveScreenshotPath: (context) => {
-            seen.push(context)
-            return path.join(directory, "nested", `${context.arg}${context.ext}`)
-          },
-        })
-      ).rejects.toThrowError(/a new one was created/)
+      await withNewGoldenWrites(() =>
+        expect(
+          expect(screen).toMatchScreenshot("custom name.png", {
+            resolveScreenshotPath: (context) => {
+              seen.push(context)
+              return path.join(directory, "nested", `${context.arg}${context.ext}`)
+            },
+          })
+        ).rejects.toThrowError(/a new one was created/)
+      )
 
       expect(existsSync(path.join(directory, "nested", "custom-name.png"))).toBe(true)
       expect(seen).toHaveLength(1)
@@ -341,8 +355,10 @@ describeNative("toMatchScreenshot", () => {
 
       try {
         const golden = path.join(directory, "configured", "suite-default.png")
-        await expect(expect(screen).toMatchScreenshot("suite-default")).rejects.toThrowError(
-          /a new one was created/
+        await withNewGoldenWrites(() =>
+          expect(expect(screen).toMatchScreenshot("suite-default")).rejects.toThrowError(
+            /a new one was created/
+          )
         )
         expect(existsSync(golden)).toBe(true)
         // The configured resolver is handed the same context a per-call one is.
@@ -371,9 +387,11 @@ describeNative("toMatchScreenshot", () => {
       configureScreenshots({ resolveScreenshotPath: () => configured })
 
       try {
-        await expect(
-          expect(screen).toMatchScreenshot({ resolveScreenshotPath: () => perCall })
-        ).rejects.toThrowError(/a new one was created/)
+        await withNewGoldenWrites(() =>
+          expect(
+            expect(screen).toMatchScreenshot({ resolveScreenshotPath: () => perCall })
+          ).rejects.toThrowError(/a new one was created/)
+        )
 
         expect(existsSync(perCall)).toBe(true)
         expect(existsSync(configured)).toBe(false)
@@ -395,8 +413,10 @@ describeNative("toMatchScreenshot", () => {
       })
       configureScreenshots({})
 
-      await expect(expect(screen).toMatchScreenshot("back-to-default")).rejects.toThrowError(
-        /a new one was created/
+      await withNewGoldenWrites(() =>
+        expect(expect(screen).toMatchScreenshot("back-to-default")).rejects.toThrowError(
+          /a new one was created/
+        )
       )
       expect(existsSync(path.join(directory, "back-to-default.png"))).toBe(true)
     } finally {
@@ -411,8 +431,10 @@ describeNative("toMatchScreenshot", () => {
     const screen = createTestRoot({ width: 200, height: 120 })
     try {
       screen.render(<Scene />)
-      await expect(expect(screen).toMatchScreenshot()).rejects.toThrowError(
-        /a new one was created/
+      await withNewGoldenWrites(() =>
+        expect(expect(screen).toMatchScreenshot()).rejects.toThrowError(
+          /a new one was created/
+        )
       )
 
       // The auto-generated name is vitest's: the sanitized test name, then the
@@ -423,8 +445,10 @@ describeNative("toMatchScreenshot", () => {
       )
       expect(existsSync(golden)).toBe(true)
 
-      await expect(expect(screen).toMatchScreenshot()).rejects.toThrowError(
-        /a new one was created/
+      await withNewGoldenWrites(() =>
+        expect(expect(screen).toMatchScreenshot()).rejects.toThrowError(
+          /a new one was created/
+        )
       )
       expect(
         existsSync(
@@ -445,12 +469,16 @@ describeNative("toMatchScreenshot", () => {
     const screen = createTestRoot({ width: 200, height: 120 })
     try {
       screen.render(<Scene />)
-      await expect(expect(screen).toMatchScreenshot("named-first")).rejects.toThrowError(
-        /a new one was created/
+      await withNewGoldenWrites(() =>
+        expect(expect(screen).toMatchScreenshot("named-first")).rejects.toThrowError(
+          /a new one was created/
+        )
       )
       // The named call above consumed slot 1, so the unnamed call is " 2".
-      await expect(expect(screen).toMatchScreenshot()).rejects.toThrowError(
-        /a new one was created/
+      await withNewGoldenWrites(() =>
+        expect(expect(screen).toMatchScreenshot()).rejects.toThrowError(
+          /a new one was created/
+        )
       )
       const golden = path.join(
         directory,
@@ -469,8 +497,10 @@ describeNative("toMatchScreenshot", () => {
       const options = { resolveScreenshotPath: () => golden }
 
       screen.render(<Scene />)
-      await expect(expect(screen).toMatchScreenshot(options)).rejects.toThrowError(
-        /a new one was created/
+      await withNewGoldenWrites(() =>
+        expect(expect(screen).toMatchScreenshot(options)).rejects.toThrowError(
+          /a new one was created/
+        )
       )
       const before = readFileSync(golden)
 
@@ -658,5 +688,20 @@ describe("toMatchScreenshot decisions", () => {
     expect(one.ext).toBe(".png")
     expect(one.testName).toBe("suite-case")
     expect(one.testFileName).toBe("testing-screenshot.test.tsx")
+  })
+
+  it("treats a backslash as a directory separator on win32, and only there", () => {
+    // Issue #443: `path.join`/`path.relative` fold a `\` into the path on
+    // win32, and `sanitize` then silently strips it as a stray character —
+    // `toMatchScreenshot("dir\\name")` collapsed to `dirname.png` instead of
+    // keeping the directory. Exercised here on whichever host this runs on,
+    // by passing the platform explicitly rather than relying on `process.platform`.
+    expect(sanitizeArg("dir\\name", "win32")).toBe("dir/name")
+    expect(sanitizeArg("..\\..\\secret\\Fancy Button!", "win32")).toBe("secret/Fancy-Button")
+
+    // Off win32, a backslash is just a character `sanitize` strips like any
+    // other punctuation — it never becomes a separator.
+    expect(sanitizeArg("dir\\name", "darwin")).toBe("dirname")
+    expect(sanitizeArg("dir\\name", "linux")).toBe("dirname")
   })
 })

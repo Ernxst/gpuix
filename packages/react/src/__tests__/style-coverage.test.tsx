@@ -360,13 +360,23 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     const sameNines = boundsFor(same.renderer, "nines")
     expect(sameOnes[2]).toBeCloseTo(sameNines[2], 0)
 
+    // The default digits' width is font-dependent — Segoe UI's default digits
+    // are already tabular, unlike most macOS/Linux fonts — so the "differs
+    // from tabular" side of the comparison is pinned to `proportional-nums`
+    // explicitly rather than left to rely on whatever the font defaults to.
     const diff = createTestRoot()
     diff.render(
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-        <text data-testid="ones" style={{ color: "#ffffff", fontSize: 28 }}>
+        <text
+          data-testid="ones"
+          style={{ color: "#ffffff", fontSize: 28, fontVariantNumeric: "proportional-nums" }}
+        >
           1111
         </text>
-        <text data-testid="nines" style={{ color: "#ffffff", fontSize: 28 }}>
+        <text
+          data-testid="nines"
+          style={{ color: "#ffffff", fontSize: 28, fontVariantNumeric: "proportional-nums" }}
+        >
           9999
         </text>
       </div>,
@@ -377,7 +387,9 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
 
     comparePixels(
       "font-variant-numeric",
-      <text style={{ color: "#ffffff", fontSize: 28 }}>1111</text>,
+      <text style={{ color: "#ffffff", fontSize: 28, fontVariantNumeric: "proportional-nums" }}>
+        1111
+      </text>,
       <text style={{ color: "#ffffff", fontSize: 28, fontVariantNumeric: "tabular-nums" }}>
         1111
       </text>,

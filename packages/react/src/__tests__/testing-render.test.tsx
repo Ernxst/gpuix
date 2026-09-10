@@ -13,6 +13,7 @@ import {
 } from "../testing.js"
 import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
 import { readPngSize } from "../testing-png.js"
+import { withNewGoldenWrites } from "./test-utils.js"
 
 expect.extend(gpuixMatchers)
 
@@ -548,11 +549,13 @@ describeNative("render", () => {
 
         // The first run always writes the golden and fails; the file it wrote
         // is what this test is about.
-        await expect(
-          expect(screen.container).toMatchScreenshot({
-            resolveScreenshotPath: () => golden,
-          })
-        ).rejects.toThrowError(/a new one was created/)
+        await withNewGoldenWrites(() =>
+          expect(
+            expect(screen.container).toMatchScreenshot({
+              resolveScreenshotPath: () => golden,
+            })
+          ).rejects.toThrowError(/a new one was created/)
+        )
 
         const window = screen.renderer.getWindowSize()
         expect(readPngSize(readFileSync(golden), golden)).toEqual({
@@ -562,9 +565,11 @@ describeNative("render", () => {
 
         // The result itself is still the whole offscreen window.
         const windowGolden = path.join(directory, "window.png")
-        await expect(
-          expect(screen).toMatchScreenshot({ resolveScreenshotPath: () => windowGolden })
-        ).rejects.toThrowError(/a new one was created/)
+        await withNewGoldenWrites(() =>
+          expect(
+            expect(screen).toMatchScreenshot({ resolveScreenshotPath: () => windowGolden })
+          ).rejects.toThrowError(/a new one was created/)
+        )
         expect(readPngSize(readFileSync(windowGolden), windowGolden)).toEqual({
           width: window.width * window.scaleFactor,
           height: window.height * window.scaleFactor,
