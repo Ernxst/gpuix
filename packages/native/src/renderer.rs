@@ -7228,13 +7228,16 @@ impl GpuixView {
     /// it lets the registry retire its acceptance record.
     pub(crate) fn submit_external_drag(
         &mut self,
-        id: u64,
+        preferred_target: Option<u64>,
         dropped: &gpui::ExternalPaths,
         position: gpui::Point<gpui::Pixels>,
     ) {
         let callback = self.event_callback.clone();
+        let target = preferred_target.or(self.external_drag_target);
         self.clear_external_drag();
-        emit_file_drop(&callback, id, dropped, position);
+        if let Some(target) = target {
+            emit_file_drop(&callback, target, dropped, position);
+        }
     }
 
     /// React can detach or retarget an element while GPUI still owns the
@@ -11907,6 +11910,29 @@ mod external_drag_tracking_tests {
         let element = &tree.elements[&1];
         assert!(tracks_external_drag_events(element, &tree));
     }
+
+    #[test]
+    fn submit_target_prefers_the_nearest_direct_drop_host() {
+        let mut tree = RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+        tree.create_element(2, "div".to_string());
+        tree.append_child(1, 2);
+        tree.set_root(Some(1));
+        tree.elements
+            .get_mut(&1)
+            .unwrap()
+            .events
+            .insert("fileDrop".to_string());
+
+        assert_eq!(external_drag_submit_target(2, &tree), Some(1));
+
+        tree.elements
+            .get_mut(&2)
+            .unwrap()
+            .events
+            .insert("fileDrop".to_string());
+        assert_eq!(external_drag_submit_target(2, &tree), Some(2));
+    }
 }
 
 pub(crate) fn tracks_pointer_event(
@@ -11925,6 +11951,23 @@ pub(crate) fn tracks_pointer_event(
         current = current_element.parent;
     }
     false
+}
+
+/// Find the nearest retained host that declared either modern `onDrop` or the
+/// legacy `onFileDrop`. Native GPUI invokes a drop listener on the deepest
+/// hitbox and then stops propagation, while JS intentionally keeps the raw
+/// `fileDrop` dispatch non-bubbling. Selecting this direct listener's host
+/// preserves both contracts when an inert descendant is hit.
+fn external_drag_submit_target(element_id: u64, tree: &RetainedTree) -> Option<u64> {
+    let mut current = Some(element_id);
+    while let Some(id) = current {
+        let element = tree.elements.get(&id)?;
+        if element.events.contains("fileDrop") {
+            return Some(id);
+        }
+        current = element.parent;
+    }
+    None
 }
 
 /// Wire the shared mouse-move and external-file-drag callbacks onto any
@@ -12001,16 +12044,24 @@ where
         ));
     }
 
-    // `fileDrop` is non-bubbling on the JS side for the legacy `onFileDrop`
-    // contract. Attach GPUI's submit listener only to hosts that declared a
-    // drop listener themselves; inert descendants still participate in the
-    // drag-move capture walk, but must not steal the native submit target from
-    // an ancestor's direct listener.
+    // GPUI invokes the deepest matching submit listener and then stops native
+    // propagation. Every tracked host still needs a submit hook so a drag with
+    // only enter/over/leave handlers retires native state, but choose the
+    // nearest direct drop host as the emitted fileDrop target. This preserves
+    // the non-bubbling legacy event while modern `drop` bubbles in JS.
     if element.events.contains("fileDrop") {
         let id = element.id;
         el = el.on_drop(cx.listener(
             move |view, dropped: &gpui::ExternalPaths, window, _cx| {
-                view.submit_external_drag(id, dropped, window.mouse_position());
+                view.submit_external_drag(Some(id), dropped, window.mouse_position());
+            },
+        ));
+    } else if tracks_external_drag {
+        let id = element.id;
+        let submit_target = external_drag_submit_target(id, tree);
+        el = el.on_drop(cx.listener(
+            move |view, dropped: &gpui::ExternalPaths, window, _cx| {
+                view.submit_external_drag(submit_target, dropped, window.mouse_position());
             },
         ));
     }
