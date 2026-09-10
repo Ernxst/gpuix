@@ -142,14 +142,7 @@ const DEFAULT_WINDOW_HEIGHT: f64 = 800.0;
 /// property of the test rather than of the desk it runs on. 2 is the ratio every
 /// golden committed here was rendered at (`CANVAS_GOLDEN_DPR`), so the pin keeps
 /// them valid.
-///
-/// Only platforms whose visual-test window honours a virtual scale factor get
-/// the pin; GPUI rejects one on Windows, where the window still follows the
-/// monitor's DPI.
-#[cfg(target_os = "macos")]
 const DEFAULT_WINDOW_SCALE_FACTOR: Option<f64> = Some(2.0);
-#[cfg(not(target_os = "macos"))]
-const DEFAULT_WINDOW_SCALE_FACTOR: Option<f64> = None;
 
 /// Validate a caller-supplied window dimension, falling back to `default`.
 ///

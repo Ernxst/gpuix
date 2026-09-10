@@ -4636,10 +4636,6 @@ changes shape: calling it drops the window `render()` shares and reopens at the
 new geometry on the next `render()`. Put it in a setup file and no window is
 thrown away.
 
-On Windows the scale factor still follows the monitor's DPI — GPUI has no
-virtual display scale there, which is also why an explicit `scaleFactor` throws
-on that platform. The size is fixed on both.
-
 **`simulateResize` moves the reported size, not the window.** It is GPUI's test
 hook for a native resize, so `useWindowSize()`, layout, and
 `renderer.getWindowSize()` all follow it — but the window's drawable is still
