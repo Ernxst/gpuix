@@ -26,6 +26,7 @@ import {
   unregisterEventHandler,
   unregisterEventHandlers,
 } from "./event-handlers.js"
+import type { GpuixSyntheticEvent } from "./synthetic-event.js"
 import { TEXT_EDITING_TYPES } from "./text-editing.js"
 import {
   ARIA_PROP_ALIASES,
@@ -340,11 +341,16 @@ function syncEventListeners(container: Container, id: number, props: Props): voi
   for (const [propName, eventType, phase] of EVENT_PROPS) {
     const handler = props[propName]
     if (handler) {
+      // `propName` ranges over every entry in EVENT_PROPS here, so `handler`'s
+      // inferred type is a union across every kind's handler signature — wider
+      // than any single one accepts. EVENT_PROPS pairs each prop with the one
+      // native `eventType` that ever reaches it, so the registry only ever
+      // calls this handler with an event of the kind it was declared for.
       registerEventHandler(
         container.eventHandlers,
         id,
         eventHandlerKey(eventType, phase ?? "bubble"),
-        handler
+        handler as (event: GpuixSyntheticEvent) => void
       )
     }
   }
@@ -369,7 +375,12 @@ function diffEventListeners(
     if (oldHandler && !newHandler) {
       unregisterEventHandler(container.eventHandlers, id, handlerKey)
     } else if (newHandler && newHandler !== oldHandler) {
-      registerEventHandler(container.eventHandlers, id, handlerKey, newHandler)
+      registerEventHandler(
+        container.eventHandlers,
+        id,
+        handlerKey,
+        newHandler as (event: GpuixSyntheticEvent) => void
+      )
     }
   }
 

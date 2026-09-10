@@ -541,26 +541,39 @@ State update triggers re-render → reconciler sends mutations back to Rust
 
 Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)`. Rust only knows **whether** an element has a listener (via `setEventListener`), not the closure itself — the actual handler lives in JS.
 
-Handlers receive a `GpuixSyntheticEvent`, not the raw native payload. Native
-fields such as `key`, `x`, and `value` remain available at the top level and
-the unchanged payload is exposed as `nativeEvent`. The synthetic surface adds:
+Handlers receive one of the per-kind `Gpuix*Event` types (`GpuixMouseEvent`,
+`GpuixWheelEvent`, `GpuixKeyboardEvent`, `GpuixFocusEvent`, or plain
+`GpuixEvent` for scroll, change, and the custom-element events), not the raw
+native payload — each prop's type is listed in the table above. Every kind
+shares:
 
 - `target` and phase-specific `currentTarget` host handles with
   `getAttribute(name)`
-- flattened `altKey`, `ctrlKey`, `metaKey`, and `shiftKey` values
-- a primary-button default (`button === 0`)
-- `clientX` / `clientY` and `pageX` / `pageY`, the DOM spellings of `x` and
-  `y`. All four hold the same number: they differ in a browser only by the
-  document's own scroll offset, and this renderer has no scrolling document
-- `relatedTarget` on `mouseEnter` and `mouseLeave` — the element the pointer
-  left, or the one it moved to. Always `null` on `focus` and `blur`: GPUI's
-  focus subscriptions report only the element whose own focus changed, never
-  the other side of the transition
 - capture and bubble dispatch through the retained React ancestry
 - `preventDefault()` / `defaultPrevented`, `stopPropagation()`, and
   `stopImmediatePropagation()`. An element's capture and bubble listeners are
   both AT_TARGET listeners, and as in the DOM `stopPropagation()` still lets
   the second one run — `stopImmediatePropagation()` is the one that does not
+- `nativeEvent`, the unmodified native payload, for any field the specific
+  kind's type does not carry
+
+Beyond that, members live only on the kind that delivers them:
+
+- `GpuixMouseEvent` (and `GpuixWheelEvent`, which extends it) adds flattened
+  `altKey`, `ctrlKey`, `metaKey`, and `shiftKey` values; a primary-button
+  default (`button === 0`); `clientX` / `clientY` and `pageX` / `pageY`, the
+  DOM spellings of `x` and `y` (all four hold the same number here: they
+  differ in a browser only by the document's own scroll offset, and this
+  renderer has no scrolling document); and `relatedTarget` on `mouseEnter`
+  and `mouseLeave` — the element the pointer left, or the one it moved to
+- `GpuixKeyboardEvent` adds `key`, `repeat`, and the raw `modifiers` object
+- `GpuixFocusEvent`'s `relatedTarget` is always `null`: GPUI's focus
+  subscriptions report only the element whose own focus changed, never the
+  other side of the transition, so this renderer genuinely does not know it
+
+`GpuixSyntheticEvent`, the union of every kind, is what a handler shared
+across more than one prop is typed against — narrow on `event.type` before
+reading a kind-specific member, or read `nativeEvent` instead.
 
 `handleGpuixEvent()` returns the synchronous prevention result. A prevented
 Enter or Space key event cancels the keyboard-generated click that follows. A
@@ -3593,30 +3606,35 @@ text imports no longer need a runtime flag.
 
 ## Supported Events
 
-| Event | Props | Payload fields |
-|-------|-------|----------------|
-| Click | `onClick` | `x`, `y`, `button`, `clickCount`, `isRightClick`, `modifiers` — primary button only |
-| Double click | `onDoubleClick` | Same fields, after the second `onClick`; primary button only |
-| Aux click | `onAuxClick` | Same fields, for the non-primary buttons |
-| Context menu | `onContextMenu` | Same fields as `onMouseDown`, on the right-button press; cancelable |
-| Mouse down | `onMouseDown` | `x`, `y`, `button`, `clickCount`, `modifiers` |
-| Mouse up | `onMouseUp` | `x`, `y`, `button`, `clickCount`, `modifiers` |
-| Mouse enter | `onMouseEnter` | `hovered` |
-| Mouse leave | `onMouseLeave` | `hovered` |
-| Mouse move | `onMouseMove` | `x`, `y`, `pressedButton`, `modifiers` |
-| Click outside | `onMouseDownOutside` | `x`, `y`, `button`, `modifiers` |
-| Key down | `onKeyDown` | `key`, `keyChar`, `isHeld`, `modifiers` |
-| Key up | `onKeyUp` | `key`, `keyChar`, `modifiers` |
-| Focus | `onFocus` | — |
-| Blur | `onBlur` | — |
-| Wheel | `onWheel` | `x`, `y`, `deltaX`, `deltaY`, `deltaZ`, `deltaMode`, `precise`, `touchPhase`, `modifiers` |
-| Scroll | `onScroll` | — read `scrollLeft` / `scrollTop` from `currentTarget` |
-| File drop | `onFileDrop` | `paths`, `x`, `y` — Unicode filesystem paths from Finder or the OS |
-| Change | `onChange` | `value` — `<input>` and `<textarea>` only |
-| Toggle file | `onToggleFile` | `value` (file path) — `<diff>` only |
-| Show more | `onShowMore` | `value` (hidden line count) — `<diff>` only |
-| Line click | `onLineClick` | `value`, `oldLine`, `newLine` — `<diff>` only |
-| Link click | `onLinkClick` | `value` (URL) — `<markdown>` only |
+| Event | Props | Event type | Payload fields |
+|-------|-------|------------|----------------|
+| Click | `onClick` | `GpuixMouseEvent` | `x`, `y`, `button`, `clickCount`, `isRightClick`, `modifiers` — primary button only |
+| Double click | `onDoubleClick` | `GpuixMouseEvent` | Same fields, after the second `onClick`; primary button only |
+| Aux click | `onAuxClick` | `GpuixMouseEvent` | Same fields, for the non-primary buttons |
+| Context menu | `onContextMenu` | `GpuixMouseEvent` | Same fields as `onMouseDown`, on the right-button press; cancelable |
+| Mouse down | `onMouseDown` | `GpuixMouseEvent` | `x`, `y`, `button`, `clickCount`, `modifiers` |
+| Mouse up | `onMouseUp` | `GpuixMouseEvent` | `x`, `y`, `button`, `clickCount`, `modifiers` |
+| Mouse enter | `onMouseEnter` | `GpuixMouseEvent` | `hovered` |
+| Mouse leave | `onMouseLeave` | `GpuixMouseEvent` | `hovered` |
+| Mouse move | `onMouseMove` | `GpuixMouseEvent` | `x`, `y`, `pressedButton`, `modifiers` |
+| Click outside | `onMouseDownOutside` | `GpuixMouseEvent` | `x`, `y`, `button`, `modifiers` |
+| Key down | `onKeyDown` | `GpuixKeyboardEvent` | `key`, `keyChar`, `isHeld`, `modifiers` |
+| Key up | `onKeyUp` | `GpuixKeyboardEvent` | `key`, `keyChar`, `modifiers` |
+| Focus | `onFocus` | `GpuixFocusEvent` | — |
+| Blur | `onBlur` | `GpuixFocusEvent` | — |
+| Wheel | `onWheel` | `GpuixWheelEvent` | `x`, `y`, `deltaX`, `deltaY`, `deltaZ`, `deltaMode`, `precise`, `touchPhase`, `modifiers` |
+| Scroll | `onScroll` | `GpuixEvent` | — read `scrollLeft` / `scrollTop` from `currentTarget` |
+| File drop | `onFileDrop` | `EventPayload` | `paths`, `x`, `y` — Unicode filesystem paths from Finder or the OS |
+| Change | `onChange` | `GpuixEvent` | `value` — `<input>` and `<textarea>` only |
+| Toggle file | `onToggleFile` | `GpuixEvent` | `value` (file path) — `<diff>` only |
+| Show more | `onShowMore` | `GpuixEvent` | `value` (hidden line count) — `<diff>` only |
+| Line click | `onLineClick` | `GpuixEvent` | `value`, `oldLine`, `newLine` — `<diff>` only |
+| Link click | `onLinkClick` | `GpuixEvent` | `value` (URL) — `<markdown>` only |
+
+`GpuixSyntheticEvent` is the union of every event type above (`onFileDrop` is
+the one exception, still typed with the raw `EventPayload`). A handler typed
+against the union — for example a shared handler passed to props of more than
+one kind — must narrow on `event.type` before reading a kind-specific member.
 
 `onWheel` reports the input gesture and bubbles; `onScroll` reports that a
 scroll container's own position changed and does not bubble, as in the DOM.

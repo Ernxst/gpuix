@@ -99,10 +99,10 @@ function getElementRef(element: ReactElement<Props>): Ref<PublicInstance> | unde
   return descriptor?.value
 }
 
-function composeHandlers(
-  first?: (event: GpuixSyntheticEvent) => void,
-  second?: (event: GpuixSyntheticEvent) => void
-): ((event: GpuixSyntheticEvent) => void) | undefined {
+function composeHandlers<Event extends GpuixSyntheticEvent>(
+  first?: (event: Event) => void,
+  second?: (event: Event) => void
+): ((event: Event) => void) | undefined {
   if (!first) return second
   if (!second) return first
   return (event) => {

@@ -17,7 +17,10 @@ import {
   DOCUMENT_POSITION_FOLLOWING,
   DOCUMENT_POSITION_PRECEDING,
 } from "../dom-position.js"
-import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
+import type {
+  GpuixKeyboardEvent,
+  GpuixMouseEvent,
+} from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
@@ -340,7 +343,7 @@ export const SelectValue = forwardRef<PublicInstance, SelectValueProps>(
 )
 
 export interface SelectContentProps extends FloatingContentProps {
-  onEscapeKeyDown?: (event: GpuixSyntheticEvent) => void
+  onEscapeKeyDown?: (event: GpuixKeyboardEvent) => void
 }
 
 export const SelectContent = forwardRef<PublicInstance, SelectContentProps>(
@@ -365,7 +368,7 @@ export const SelectContent = forwardRef<PublicInstance, SelectContentProps>(
           ref: forwardedRef,
           tabIndex,
           autoFocus: true,
-          onMouseDownOutside: (event: GpuixSyntheticEvent) => {
+          onMouseDownOutside: (event: GpuixMouseEvent) => {
             onMouseDownOutside?.(event)
             context.dismissedByOutsidePress.current = true
             queueMicrotask(() => {
@@ -373,7 +376,7 @@ export const SelectContent = forwardRef<PublicInstance, SelectContentProps>(
             })
             context.setOpen(false)
           },
-          onKeyDown: (event: GpuixSyntheticEvent) => {
+          onKeyDown: (event: GpuixKeyboardEvent) => {
             onKeyDown?.(event)
             if (event.key === "Escape") {
               onEscapeKeyDown?.(event)
@@ -460,11 +463,11 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
         {...props}
         ref={setInstanceRef}
         style={resolveStyle(style, state)}
-        onMouseEnter={(event: GpuixSyntheticEvent) => {
+        onMouseEnter={(event: GpuixMouseEvent) => {
           onMouseEnter?.(event)
           if (!disabled && !context.disabled) context.setActiveValue(value)
         }}
-        onClick={(event: GpuixSyntheticEvent) => {
+        onClick={(event: GpuixMouseEvent) => {
           onClick?.(event)
           if (!disabled && !context.disabled) context.selectValue(value)
         }}
