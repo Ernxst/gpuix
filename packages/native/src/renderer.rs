@@ -1480,6 +1480,15 @@ enum UiCommand {
         path: String,
         response: SyncSender<std::result::Result<(), String>>,
     },
+    /// Posts the real `WM_SETTINGCHANGE` for `SPI_SETCLIENTAREAANIMATION` to
+    /// this renderer's own window, then waits for the platform to have
+    /// handled it. Used by `test_set_platform_reduced_motion` after it
+    /// overrides `should_reduce_motion` for this process, so the test never
+    /// touches the machine-wide animation setting.
+    #[cfg(all(target_os = "windows", feature = "test-support"))]
+    WaitForReducedMotionChange {
+        response: SyncSender<std::result::Result<(), String>>,
+    },
     Blur,
 }
 
@@ -1968,6 +1977,72 @@ async fn run_ui_commands(
                     error_response.send(Err(format!("{error:#}"))).ok();
                 }
                 result
+            }
+            #[cfg(all(target_os = "windows", feature = "test-support"))]
+            UiCommand::WaitForReducedMotionChange { response } => {
+                use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    PostMessageW, SPI_SETCLIENTAREAANIMATION, WM_SETTINGCHANGE,
+                };
+
+                let previous_count = gpui_windows::test_reduce_motion_change_count();
+                let post_result = window.update(cx, |_view, window, _cx| {
+                    let handle = HasWindowHandle::window_handle(window)
+                        .map_err(|error| format!("Failed to get the window handle: {error}"))?;
+                    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+                        return Err("The GPUI window is not a Win32 window".to_string());
+                    };
+                    let hwnd = HWND(handle.hwnd.get() as *mut std::ffi::c_void);
+                    // SAFETY: `hwnd` is the still-live window we were just
+                    // handed; posting `WM_SETTINGCHANGE` only queues a
+                    // message for its own window procedure, the same message
+                    // the system broadcasts when the setting really changes.
+                    unsafe {
+                        PostMessageW(
+                            Some(hwnd),
+                            WM_SETTINGCHANGE,
+                            WPARAM(SPI_SETCLIENTAREAANIMATION.0 as usize),
+                            LPARAM(0),
+                        )
+                    }
+                    .map_err(|error| format!("Failed to post WM_SETTINGCHANGE: {error}"))
+                });
+                match post_result {
+                    Ok(Ok(())) => {
+                        // Poll rather than block: the message is handled on
+                        // this same UI thread's event loop, which this async
+                        // task shares, so nothing but polling can observe it.
+                        cx.spawn(async move |cx| {
+                            for _ in 0..50 {
+                                if gpui_windows::test_reduce_motion_change_count() > previous_count
+                                {
+                                    response.send(Ok(())).ok();
+                                    return;
+                                }
+                                cx.background_executor()
+                                    .timer(Duration::from_millis(20))
+                                    .await;
+                            }
+                            response
+                                .send(Err(
+                                    "the reduced-motion change was not delivered to the platform"
+                                        .to_string(),
+                                ))
+                                .ok();
+                        })
+                        .detach();
+                        Ok(())
+                    }
+                    Ok(Err(error)) => {
+                        response.send(Err(error)).ok();
+                        Ok(())
+                    }
+                    Err(error) => {
+                        response.send(Err(format!("{error:#}"))).ok();
+                        Err(error)
+                    }
+                }
             }
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
         };
@@ -2784,6 +2859,11 @@ impl GpuixRenderer {
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     fn init_threaded(&self, options: Option<WindowOptions>) -> Result<()> {
+        // A test process reuses this renderer across tests; start each one
+        // from the real system setting rather than a previous test's override.
+        #[cfg(all(target_os = "windows", feature = "test-support"))]
+        gpui_windows::test_set_reduce_motion_override(None);
+
         let options = options.unwrap_or_default();
         if *self.lifecycle.lock().unwrap() != RendererLifecycle::Uninitialized {
             return Err(Error::from_reason("Renderer is already initialized"));
@@ -3397,9 +3477,11 @@ impl GpuixRenderer {
 
     /// Test seam that posts the real macOS accessibility-display notification.
     ///
-    /// On Windows this instead changes the real `SPI_SETCLIENTAREAANIMATION`
-    /// setting for the current login session (not persisted to the user's
-    /// profile), so callers should only use it on disposable test machines.
+    /// On Windows this instead overrides `should_reduce_motion` for this
+    /// process only, and delivers the same `WM_SETTINGCHANGE` the system
+    /// sends on a real change to this renderer's own window, returning once
+    /// the platform has handled it. It never touches the machine-wide
+    /// setting, so it is safe to run alongside other test processes.
     #[napi]
     pub fn test_set_platform_reduced_motion(&self, enabled: bool) -> Result<()> {
         #[cfg(all(target_os = "macos", feature = "test-support"))]
@@ -3421,29 +3503,15 @@ impl GpuixRenderer {
 
         #[cfg(all(target_os = "windows", feature = "test-support"))]
         {
-            use std::ffi::c_void;
-            use windows::Win32::UI::WindowsAndMessaging::{
-                SystemParametersInfoW, SPIF_SENDCHANGE, SPI_SETCLIENTAREAANIMATION,
-            };
-
             if *self.lifecycle.lock().unwrap() != RendererLifecycle::Running {
                 return Err(Error::from_reason(
                     "Renderer not initialized. Call init() first.",
                 ));
             }
-            // Reduced motion means animations off, so the client-area-animation
-            // flag is the negation of `enabled`. `SPIF_SENDCHANGE` broadcasts
-            // `WM_SETTINGCHANGE`; omitting `SPIF_UPDATEINIFILE` keeps this out
-            // of the user's profile.
-            unsafe {
-                SystemParametersInfoW(
-                    SPI_SETCLIENTAREAANIMATION,
-                    0,
-                    Some(usize::from(!enabled) as *mut c_void),
-                    SPIF_SENDCHANGE,
-                )
-                .map_err(|error| Error::from_reason(error.to_string()))
-            }
+            gpui_windows::test_set_reduce_motion_override(Some(enabled));
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::WaitForReducedMotionChange { response })?;
+            recv_ui_response(receiver, "the reduced-motion change")?.map_err(Error::from_reason)
         }
 
         #[cfg(not(any(

@@ -89,13 +89,14 @@ windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dw
 # Same semver line GPUI depends on (zed/Cargo.toml); the workspace lockfile
 # unifies both to one resolved version.
 raw-window-handle = "0.6"
+gpui_windows = { path = "../../zed/crates/gpui_windows", default-features = false }
 
 [features]
 # test-support is default so published binaries include TestGpuixRenderer,
 # letting users write GPU-backed tests for their apps.
 default = ["test-support"]
 display-discovery-fault-injection = ["gpui_macos/display-discovery-fault-injection"]
-test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui_macos/test-support", "gpui_macos/font-kit"]
+test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui_macos/test-support", "gpui_macos/font-kit", "gpui_windows/test-support"]
 
 [build-dependencies]
 napi-build = "2"

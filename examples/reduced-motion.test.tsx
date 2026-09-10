@@ -17,10 +17,8 @@ async function deliverPlatformPreference(
 }
 
 // On Windows the preference reaches the UI thread asynchronously, so wait for
-// the expected widths instead of asserting once. It also flips the machine's
-// live setting, so it only runs there in CI.
-const runsOnThisPlatform =
-  process.platform === 'darwin' || (process.platform === 'win32' && Boolean(process.env.CI))
+// the expected widths instead of asserting once.
+const runsOnThisPlatform = process.platform === 'darwin' || process.platform === 'win32'
 
 describe('reduced-motion example', () => {
   it.skipIf(!runsOnThisPlatform)(
@@ -73,20 +71,16 @@ describe('reduced-motion example', () => {
         await deliverPlatformPreference(renderer, false)
         await expectWidths(280)
       } finally {
-        if (process.platform === 'win32') {
-          try {
-            renderer.testSetPlatformReducedMotion(false)
-          } catch {
-            // Restoring the real OS setting is best-effort; do not mask an
-            // earlier failure from the try block above.
-          }
-        }
         root.unmount()
         await app.close()
         renderer.quit()
       }
 
-      expect(renderer.isInitialized()).toBe(false)
+      // The threaded renderer finishes terminating on its UI thread after
+      // quit() returns, so the lifecycle flips to terminated asynchronously.
+      await vi.waitFor(() => {
+        expect(renderer.isInitialized()).toBe(false)
+      })
       expect(renderer.testHasEmbeddedRuntime()).toBe(false)
     },
   )
