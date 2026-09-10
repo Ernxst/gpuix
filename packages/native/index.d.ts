@@ -395,6 +395,8 @@ export declare class TestGpuixRenderer {
   simulateAccessibilityAction(accesskitId: string, action: "activate" | "increment" | "decrement" | "focus"): void
   /**
    * Draw one platform-style pending frame without notifying the view first.
+   * Unlike `flush`, this does not request invalidation; it only draws when
+   * the window is already dirty.
    * A clean window remains clean, so this only repaints work already
    * scheduled by production code such as an async image load completion.
    */
