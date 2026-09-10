@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react"
 import type {
   CanvasImageLoadState as NativeCanvasImageLoadState,
   EventPayload,
@@ -460,13 +461,13 @@ export type NativeStateStyle = Omit<
 /**
  * A native GPUIX style descriptor.
  *
- * A mapped type over the keys shared by React `CSSProperties` and `StyleDesc`
- * deliberately omits native-only state keys such as `focusVisible`. Prefer a
- * state declaration made only from shared properties when possible (for
- * example, `outlineColor`, `outlineWidth`, and `outlineOffset`). To add native
- * state styles to such a helper, widen it with
- * `Pick<StyleDesc, NativeStateStyleKey>`; alternatively, spread the shared
- * style and add the native state at the GPUIX call site.
+ * `SharedStyle`, below, maps the keys shared by React `CSSProperties` and
+ * `StyleDesc`, deliberately excluding native-only state keys such as
+ * `focusVisible`. Prefer a state declaration made only from shared properties
+ * when possible (for example, `outlineColor`, `outlineWidth`, and
+ * `outlineOffset`). To add native state styles to a `SharedStyle`-typed
+ * helper, widen it with `Pick<StyleDesc, NativeStateStyleKey>`; alternatively,
+ * spread the shared style and add the native state at the GPUIX call site.
  */
 export interface StyleDesc {
   display?: Display
@@ -651,6 +652,26 @@ export interface StyleDesc {
   active?: NativeStateStyle
   focus?: NativeStateStyle
   focusVisible?: NativeStateStyle
+}
+
+/**
+ * The style properties React `CSSProperties` and native {@link StyleDesc}
+ * both accept, each narrowed to the intersection of their value types.
+ *
+ * A style object typed `SharedStyle` compiles against either renderer, so a
+ * component that renders to the DOM and to GPUIX from the same source can
+ * share its style helpers without hand-rolling this mapped type per
+ * consumer. It deliberately excludes native-only keys such as
+ * {@link NativeStateStyleKey} — widen with `Pick<StyleDesc,
+ * NativeStateStyleKey>`, or add the native state at the call site, to use
+ * them alongside a `SharedStyle`.
+ */
+export type SharedStyle = {
+  [Property in keyof CSSProperties & keyof StyleDesc]?: Exclude<
+    CSSProperties[Property],
+    undefined
+  > &
+    Exclude<StyleDesc[Property], undefined>
 }
 
 // Element types supported by GPUIX

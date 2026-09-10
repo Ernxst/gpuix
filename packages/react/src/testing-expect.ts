@@ -1,6 +1,10 @@
 /// jest-dom-shaped matchers over the GPUIX test renderer.
 ///
-/// Wire them up once, in a test setup file or at the top of a suite:
+/// Under Vitest, `@gpuix/react/testing/vitest` already wires this pack up —
+/// import it once, in `setupFiles` or at the top of a file, and `expect(...)`
+/// carries the matchers below.
+///
+/// Any other runner wires the pack in directly:
 ///
 /// ```ts
 /// import { expect } from "vitest"

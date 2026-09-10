@@ -3997,24 +3997,19 @@ tracked element has keyboard-modality focus, matching CSS `:focus-visible`.
 
 ### Shared web and native style helpers
 
-If an application maps only the keys shared by React's `CSSProperties` and
-`StyleDesc`, it deliberately excludes GPUIX-only state keys such as
-`focusVisible`. This preserves a useful guarantee: every property offered by
-the helper has a value type accepted by both renderers. Prefer a state style
-that reduces to shared declarations when possible. For example, a focus ring
-using `outlineColor`, `outlineWidth`, and `outlineOffset` needs no
-renderer-specific escape because those properties exist in both systems.
+`@gpuix/react` exports `SharedStyle`, a mapped type over the keys React's
+`CSSProperties` and `StyleDesc` both accept. It deliberately excludes
+GPUIX-only state keys such as `focusVisible`, which preserves a useful
+guarantee: every property offered by a `SharedStyle`-typed helper has a value
+type accepted by both renderers. Prefer a state style that reduces to shared
+declarations when possible. For example, a focus ring using `outlineColor`,
+`outlineWidth`, and `outlineOffset` needs no renderer-specific escape because
+those properties exist in both systems.
 
 When a native state key is needed, choose one of these escapes:
 
 ```ts
-import type { CSSProperties } from 'react'
-import type { NativeStateStyleKey, StyleDesc } from '@gpuix/react'
-
-type SharedStyle = {
-  [Property in keyof CSSProperties & keyof StyleDesc]?: Exclude<CSSProperties[Property], undefined> &
-    Exclude<StyleDesc[Property], undefined>
-}
+import type { NativeStateStyleKey, SharedStyle, StyleDesc } from '@gpuix/react'
 
 // A: retain the shared-key guarantee and add GPUIX's maintained state-style family.
 type WidenedShared = SharedStyle & Pick<StyleDesc, NativeStateStyleKey>
@@ -4912,13 +4907,13 @@ window's lifetime yourself.
 
 **Automatic cleanup, and where vitest enters.** `@gpuix/react/testing` never
 imports vitest: it also runs from plain scripts, other runners, and the
-automation harness. The `afterEach` that unmounts after each test lives in a
-separate entry point:
+automation harness. The `afterEach` that unmounts after each test, and the
+matcher pack's `expect.extend`, both live in a separate entry point:
 
-| Import | Cleanup |
-|---|---|
-| `@gpuix/react/testing/vitest` | `afterEach(cleanup)` is registered for you |
-| `@gpuix/react/testing` | Call the exported `cleanup()` from your own teardown |
+| Import | Cleanup | Matchers |
+|---|---|---|
+| `@gpuix/react/testing/vitest` | `afterEach(cleanup)` is registered for you | `expect.extend(gpuixMatchers)` is registered for you |
+| `@gpuix/react/testing` | Call the exported `cleanup()` from your own teardown | Call `expect.extend(gpuixMatchers)` yourself — see [Matchers](#matchers) |
 
 Both entries export the same API — `testing/vitest` re-exports all of
 `testing` — so the only difference is the registration. This is
@@ -4936,10 +4931,62 @@ afterEach(cleanup) // exactly what `@gpuix/react/testing/vitest` does for you
 `cleanup()` unmounts the rendered tree and resets the window, keeping it open
 for the next `render()`. It is safe to call when nothing is rendered.
 
+### act()
+
+`render`, `rerender`, `unmount`, and every `userEvent` and `nativeSimulate*`
+call already run their React work inside `act` — see **The effects have run**,
+above, under [render()](#render). `act` itself is exported for the state
+update or effect a test drives some other way: dispatching straight into a
+ref a component exposed, advancing a manually-owned interval, or anything
+else that does not go through one of those wrappers.
+
+```ts
+import { act } from '@gpuix/react/testing/vitest'
+
+act(() => {
+  formRef.current.reset()
+})
+expect(screen.getByRole('textbox')).toHaveValue('')
+```
+
+It is Testing Library's `act`, over this renderer: it sets
+`IS_REACT_ACT_ENVIRONMENT`, runs the scope through React's own `act`, and
+restores the previous value once the scope and everything it scheduled has
+settled — including when the scope throws or its returned promise rejects. A
+synchronous scope commits and flushes its effects before `act()` returns, so
+the assertion above needs no `await`; an asynchronous one returns a promise
+that resolves once React finishes draining:
+
+```ts
+await act(async () => {
+  await flushMicrotasks()
+})
+```
+
+An error the scope itself throws is the caller's and is rethrown — a
+synchronous scope's throw rethrows in the same tick, an asynchronous scope's
+throw surfaces as a rejection of the returned promise. An error React collects
+on its own uncaught path instead — from a child component, not from the
+scope — is delivered to the root `render()` currently has mounted, rather than
+thrown out of `act`. A root created directly with `createTestRoot()` is not
+that root, so with nothing mounted through `render()` — including when only a
+`createTestRoot()` root exists — the error is rethrown from `act` instead.
+
 ### Matchers
 
 `@gpuix/react/testing/matchers` ships a jest-dom-shaped pack for `expect.extend`.
-Wire it once, in a setup file or at the top of a suite:
+Under Vitest, `@gpuix/react/testing/vitest` already wires it up — the same
+import that registers `cleanup()` also calls `expect.extend` and carries the
+`declare module` augmentation, so importing it once, in `setupFiles` or at the
+top of a file, is enough:
+
+```ts
+// vitest setup file, or the top of a test file
+import '@gpuix/react/testing/vitest'
+```
+
+Any other runner — or a suite that wants the matchers without the rest of
+`@gpuix/react/testing/vitest` — wires the pack in directly:
 
 ```ts
 import { expect } from 'vitest'
@@ -4951,6 +4998,9 @@ declare module 'vitest' {
   interface Matchers<T = any> extends GpuixMatchers<T> {}
 }
 ```
+
+`configureScreenshots` is a separate call either way; it is not part of what
+either wiring registers.
 
 | Matcher | Asserts |
 |---|---|
