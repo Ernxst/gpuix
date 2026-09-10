@@ -1205,6 +1205,88 @@ fn invalidate_window() -> Result<()> {
     })
 }
 
+/// Order `window` to the front of the other windows on screen, independent of
+/// whether the app itself became active.
+///
+/// `cx.activate(true)` and `window.activate_window()` both ask the OS to make
+/// this process the foreground app, but a background process can lose that
+/// race (see the macOS and Windows comments below) with no way to recover
+/// from JS. Call this after every activation request so the window still
+/// surfaces even when the app-activation request itself was refused.
+///
+/// Since macOS 14, `NSApplication.activateIgnoringOtherApps:` (what
+/// `cx.activate(true)` calls) is cooperative: the OS can refuse the grant, and
+/// a process that loses the race only orders its window front among its own
+/// windows, leaving it behind whichever app stayed active. `orderFrontRegardless`
+/// bypasses that race entirely.
+#[cfg(target_os = "macos")]
+// cocoa's Objective-C message macros still probe its removed cargo-clippy cfg.
+#[allow(unexpected_cfgs)]
+fn order_window_front_regardless(window: &gpui::Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    // `Window` also has an inherent `window_handle()` returning its GPUI
+    // `AnyWindowHandle`; qualify the call to reach the raw-window-handle trait.
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+    // SAFETY: `ns_view` is the AppKit handle's `NSView*` for the still-live
+    // window we were just handed; `[view window]` and `orderFrontRegardless`
+    // are ordinary AppKit calls made on the platform's main thread.
+    unsafe {
+        let ns_view: id = handle.ns_view.as_ptr() as id;
+        let ns_window: id = msg_send![ns_view, window];
+        if ns_window != nil {
+            let _: () = msg_send![ns_window, orderFrontRegardless];
+        }
+    }
+}
+
+/// Windows' foreground lock refuses `SetForegroundWindow` (what
+/// `activate_window`'s underlying platform call amounts to) from a process
+/// that the user didn't just interact with, so a background process asking
+/// for activation can be denied outright. Raising the HWND's z-order is a
+/// separate privilege the lock does not gate: briefly making it topmost and
+/// then releasing that status puts it above the other windows on screen
+/// without taking focus, which is exactly what a refused activation needs.
+#[cfg(target_os = "windows")]
+fn order_window_front_regardless(window: &gpui::Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    };
+
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = HWND(handle.hwnd.get() as *mut std::ffi::c_void);
+    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+    // SAFETY: `hwnd` is the still-live window we were just handed; both calls
+    // only reorder it in the z-order and never move, resize, or activate it.
+    unsafe {
+        let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
+        let _ = SetWindowPos(hwnd, Some(HWND_NOTOPMOST), 0, 0, 0, 0, flags);
+    }
+}
+
+/// No Linux/FreeBSD desktop lets an unprivileged client raise its own window.
+/// Wayland compositors only honor a raise request that carries an
+/// xdg-activation token minted by the compositor itself, by design: a client
+/// cannot self-attest that its own activation deserves that grant. X11 raising
+/// needs a connection to the X server, which is a GPUI platform concern, not
+/// something reachable from here. `window.activate_window()` already makes
+/// each protocol's allowed request; there is no further OS call this helper
+/// can make.
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+fn order_window_front_regardless(_window: &gpui::Window) {}
+
 #[cfg(target_os = "macos")]
 fn should_defer_idle_pump(dispatch_frame_request: bool, frame_request_outstanding: bool) -> bool {
     !dispatch_frame_request && frame_request_outstanding
@@ -1495,6 +1577,7 @@ async fn run_ui_commands(
             UiCommand::ActivateWindow => window.update(cx, |_view, window, cx| {
                 cx.activate(true);
                 window.activate_window();
+                order_window_front_regardless(window);
             }),
             UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
                 view.window_title = title;
@@ -2342,6 +2425,10 @@ impl GpuixRenderer {
         // `focus: false` must also skip `cx.activate`: the window flag only
         // decides key status inside the app, activation is what steals focus.
         let activate = options.focus.unwrap_or(true);
+        // Must match the `show` GPUI receives below: ordering a `show: false`
+        // window front would reveal it, contradicting `activateWindow()` being
+        // documented as the only way to reveal one.
+        let show = options.show.unwrap_or(true);
         let window_options = options.clone();
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
@@ -2465,6 +2552,13 @@ impl GpuixRenderer {
                     *opened_window_for_app.borrow_mut() = Some(window_handle);
                     if activate {
                         cx.activate(true);
+                        if show {
+                            window_handle
+                                .update(cx, |_view, window, _cx| {
+                                    order_window_front_regardless(window);
+                                })
+                                .ok();
+                        }
                     }
                 }
                 Err(error) => {
@@ -2560,6 +2654,10 @@ impl GpuixRenderer {
         // `focus: false` must also skip `cx.activate`: the window flag only
         // decides key status inside the app, activation is what steals focus.
         let activate = options.focus.unwrap_or(true);
+        // Must match the `show` GPUI receives below: ordering a `show: false`
+        // window front would reveal it, contradicting `activateWindow()` being
+        // documented as the only way to reveal one.
+        let show = options.show.unwrap_or(true);
         let window_options = options.clone();
         let tree = self.tree.clone();
         let canvas_display_lists = self.canvas_display_lists.clone();
@@ -2634,6 +2732,13 @@ impl GpuixRenderer {
                         .detach();
                         if activate {
                             cx.activate(true);
+                            if show {
+                                window
+                                    .update(cx, |_view, window, _cx| {
+                                        order_window_front_regardless(window);
+                                    })
+                                    .ok();
+                            }
                         }
                         *lifecycle_for_app.lock().unwrap() = RendererLifecycle::Running;
                         launched_for_thread.store(true, Ordering::Release);
@@ -3314,7 +3419,10 @@ impl GpuixRenderer {
                 app.update(|cx| cx.activate(true));
                 Ok::<(), Error>(())
             })?;
-            return update_window(|_view, window, _cx| window.activate_window());
+            return update_window(|_view, window, _cx| {
+                window.activate_window();
+                order_window_front_regardless(window);
+            });
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]

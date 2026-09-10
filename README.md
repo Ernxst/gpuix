@@ -755,6 +755,17 @@ function Reveal() {
 
 Outside React, call it on the renderer that `createRenderer()` returned.
 
+Opening a shown window (`focus` and `show` both default) and calling
+`activateWindow()` both request app activation, but the OS can refuse that
+request, most often when several processes ask for it at once. Either way the
+window is still raised above the other windows on screen, even when the app
+itself does not become active. On macOS this bypasses the OS's refusal
+outright; on Windows the window is raised above other windows without taking
+focus, since raising a window's z-order is a separate privilege from the
+foreground-activation lock that can refuse a background process; on Linux the
+compositor decides — a client cannot raise itself without the compositor's
+own consent, and GPUI already makes the platform's normal request.
+
 | Platform | `focus: false` | `show: false` |
 |---|---|---|
 | macOS | window orders in front without becoming key, like `open -g` | honored |
