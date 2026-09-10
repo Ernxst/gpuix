@@ -74,6 +74,9 @@ core-text = "=21.0.0"
 core-graphics = "=0.24.0"
 cocoa = "=0.26.0"
 objc = "0.2"
+# Same version GPUI pins (zed/Cargo.toml), so `Window`'s `HasWindowHandle` impl
+# and this crate's `RawWindowHandle::AppKit` match agree on the ABI.
+raw-window-handle = "0.6"
 # Production uses the embedded AppKit loop; tests use the native Metal renderer.
 gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, features = ["font-kit"] }
 

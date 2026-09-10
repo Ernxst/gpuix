@@ -755,6 +755,12 @@ function Reveal() {
 
 Outside React, call it on the renderer that `createRenderer()` returned.
 
+On macOS, opening a window with `focus: true` (the default) and calling
+`activateWindow()` both request app activation, but macOS 14+ activation is
+cooperative: the OS can refuse it, most often when several processes ask for
+it at once. Either way the window is still ordered in front of the other apps
+on screen, even when the app itself does not become active.
+
 | Platform | `focus: false` | `show: false` |
 |---|---|---|
 | macOS | window orders in front without becoming key, like `open -g` | honored |

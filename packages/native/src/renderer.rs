@@ -1205,6 +1205,39 @@ fn invalidate_window() -> Result<()> {
     })
 }
 
+/// Order `window`'s NSWindow to the front, independent of app activation.
+///
+/// Since macOS 14, `NSApplication.activateIgnoringOtherApps:` (what
+/// `cx.activate(true)` calls) is cooperative: the OS can refuse the grant, and
+/// a process that loses the race only orders its window front among its own
+/// windows, leaving it behind whichever app stayed active. `orderFrontRegardless`
+/// bypasses that race entirely, so call it after every activation request.
+#[cfg(target_os = "macos")]
+// cocoa's Objective-C message macros still probe its removed cargo-clippy cfg.
+#[allow(unexpected_cfgs)]
+fn order_window_front_regardless(window: &gpui::Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    // `Window` also has an inherent `window_handle()` returning its GPUI
+    // `AnyWindowHandle`; qualify the call to reach the raw-window-handle trait.
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+    // SAFETY: `ns_view` is the AppKit handle's `NSView*` for the still-live
+    // window we were just handed; `[view window]` and `orderFrontRegardless`
+    // are ordinary AppKit calls made on the platform's main thread.
+    unsafe {
+        let ns_view: id = handle.ns_view.as_ptr() as id;
+        let ns_window: id = msg_send![ns_view, window];
+        if ns_window != nil {
+            let _: () = msg_send![ns_window, orderFrontRegardless];
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn should_defer_idle_pump(dispatch_frame_request: bool, frame_request_outstanding: bool) -> bool {
     !dispatch_frame_request && frame_request_outstanding
@@ -2465,6 +2498,11 @@ impl GpuixRenderer {
                     *opened_window_for_app.borrow_mut() = Some(window_handle);
                     if activate {
                         cx.activate(true);
+                        window_handle
+                            .update(cx, |_view, window, _cx| {
+                                order_window_front_regardless(window);
+                            })
+                            .ok();
                     }
                 }
                 Err(error) => {
@@ -3314,7 +3352,10 @@ impl GpuixRenderer {
                 app.update(|cx| cx.activate(true));
                 Ok::<(), Error>(())
             })?;
-            return update_window(|_view, window, _cx| window.activate_window());
+            return update_window(|_view, window, _cx| {
+                window.activate_window();
+                order_window_front_regardless(window);
+            });
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
