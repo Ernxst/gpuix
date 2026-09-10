@@ -8634,12 +8634,12 @@ impl GpuixView {
         let mut order = 0usize;
         let mut focusable = Vec::new();
         while let Some(id) = stack.pop() {
-            let is_focusable = self
-                .focus_handles
-                .get(&id)
-                .is_some_and(|handle| handle.tab_stop && handle.tab_index >= 0)
-                && !self.display_none_in_ancestry(&tree, id, window);
-            if is_focusable {
+            let visible = !self.display_none_in_ancestry(&tree, id, window);
+            let is_focusable = self.focus_handles.get(&id).is_some_and(|handle| {
+                (handle.tab_stop && handle.tab_index >= 0)
+                    || (id == current_id && !handle.tab_stop)
+            });
+            if visible && is_focusable {
                 focusable.push((id, order));
                 order += 1;
             }

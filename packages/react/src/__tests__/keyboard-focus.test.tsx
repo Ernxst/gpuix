@@ -495,6 +495,49 @@ describeNative("keyboard focus", () => {
     expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(-40)
   })
 
+  it("reveals an offscreen virtual target after the focused row leaves tab order", () => {
+    const rows = (anchorIndex: number) => (
+      <virtual-list
+        overdraw={0}
+        estimatedItemHeight={40}
+        style={{ width: 240, height: 120 }}
+      >
+        {Array.from({ length: 12 }, (_, index) => (
+          <a
+            key={index}
+            href={`/${index}`}
+            ariaLabel={`anchor-row-${index}`}
+            data-testid={`anchor-row-${index}`}
+            tabIndex={index === anchorIndex ? -1 : 0}
+            style={{ width: 200, height: 40, flexShrink: 0 }}
+          >
+            <text>{`Anchor row ${index}`}</text>
+          </a>
+        ))}
+      </virtual-list>
+    )
+
+    testRoot.render(rows(-1))
+    const list = testRoot.renderer.findByType("virtual-list")[0]!
+    const boundary = testRoot.renderer.findByTestId("anchor-row-2")!
+    testRoot.renderer.focusElement(boundary.id)
+    expect(focusedLabel()).toBe("anchor-row-2")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(0)
+
+    testRoot.render(rows(2))
+    expect(focusedLabel()).toBe("anchor-row-2")
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(focusedLabel()).toBe("anchor-row-3")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(-40)
+
+    testRoot.render(rows(3))
+    expect(focusedLabel()).toBe("anchor-row-3")
+    testRoot.renderer.scrollToItem(list.id, 4)
+    testRoot.renderer.simulateKeystrokes("shift-tab")
+    expect(focusedLabel()).toBe("anchor-row-2")
+    expect(testRoot.renderer.getScrollOffset(list.id)?.[1] ?? 0).toBeCloseTo(-80)
+  })
+
   it("keeps an oversized focused row fixed when both edges are outside the viewport", () => {
     testRoot.render(
       <div style={{ width: 520, height: 520, display: "flex", flexDirection: "column" }}>
