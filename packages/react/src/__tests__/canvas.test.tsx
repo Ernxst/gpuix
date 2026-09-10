@@ -43,11 +43,11 @@ const corruptCanvasImageFixture = fileURLToPath(
 const canvasImageDataUrl = `data:image/png;base64,${readFileSync(canvasImageFixture).toString("base64")}`
 
 function distinctCanvasImagePath(index: number): string {
-  const separator = canvasImageFixture.lastIndexOf("/")
   return (
-    canvasImageFixture.slice(0, separator + 1) +
-    "./".repeat(index + 1) +
-    canvasImageFixture.slice(separator + 1)
+    path.dirname(canvasImageFixture) +
+    path.sep +
+    ("." + path.sep).repeat(index + 1) +
+    path.basename(canvasImageFixture)
   )
 }
 
