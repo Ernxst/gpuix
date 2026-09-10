@@ -139,6 +139,52 @@ describeNative("DOM file drop events", () => {
     expect(received).toEqual(["inner", "outer"])
   })
 
+  it("delivers an accepted drop to onDropCapture", () => {
+    const received: string[] = []
+
+    testRoot.render(
+      <div
+        style={{ width: 200, height: 200 }}
+        onDragOver={(event) => event.preventDefault()}
+        onDropCapture={() => received.push("dropCapture")}
+      />,
+    )
+
+    testRoot.renderer.nativeSimulateFileDrop(40, 40, [
+      "/tmp/gpuix-drop-capture.txt",
+    ])
+
+    expect(received).toEqual(["dropCapture"])
+  })
+
+  it("runs an ancestor drop capture handler before the target bubble handler", () => {
+    const received: string[] = []
+
+    testRoot.render(
+      <div
+        style={{
+          width: 400,
+          height: 400,
+          display: "flex",
+          flexDirection: "column",
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        onDropCapture={() => received.push("outer capture")}
+      >
+        <div
+          style={{ width: 100, height: 100 }}
+          onDrop={() => received.push("inner bubble")}
+        />
+      </div>,
+    )
+
+    testRoot.renderer.nativeSimulateFileDrop(40, 40, [
+      "/tmp/gpuix-drop-capture-order.txt",
+    ])
+
+    expect(received).toEqual(["outer capture", "inner bubble"])
+  })
+
   it("fans one native file drop out to onFileDrop and onDrop", () => {
     const legacy: EventPayload[] = []
     const drops: string[] = []
