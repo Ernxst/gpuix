@@ -10,7 +10,8 @@ enough to get `expect(el).toBeVisible()` and the rest of the pack. The manual
 for other runners.
 
 `SharedStyle` is exported from `@gpuix/react`: the mapped type over the keys
-React `CSSProperties` and `StyleDesc` both accept, which the README's shared
-style helpers previously told consumers to write out by hand.
+React `CSSProperties` and `StyleDesc` both accept, for a style helper that
+compiles against both renderers without hand-rolling the mapped type per
+consumer.
 
 Fixes #458

@@ -1,12 +1,8 @@
 import type { CSSProperties } from "react"
-import type {
-  ImageSource,
-  ImgProps,
-  MotionTransition,
-  Props,
-  SharedStyle,
-  StyleDesc,
-} from "../types/host.js"
+import type { ImageSource, ImgProps, MotionTransition, Props, StyleDesc } from "../types/host.js"
+// `SharedStyle` is imported through the public barrel, not `../types/host.js`
+// directly, so this exercises the export `@gpuix/react` consumers actually see.
+import type { SharedStyle } from "../index.js"
 
 const validStyle = {
   display: "grid",
