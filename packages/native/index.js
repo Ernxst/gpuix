@@ -579,4 +579,5 @@ module.exports = nativeBinding
 module.exports.GpuixRenderer = nativeBinding.GpuixRenderer
 module.exports.TestGpuixRenderer = nativeBinding.TestGpuixRenderer
 module.exports.hasTestGpuixRenderer = nativeBinding.hasTestGpuixRenderer
+module.exports.testAccessibilityInitializedWhileVisible = nativeBinding.testAccessibilityInitializedWhileVisible
 module.exports.testOnScreenWindowOwnerPids = nativeBinding.testOnScreenWindowOwnerPids

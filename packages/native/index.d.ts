@@ -942,6 +942,9 @@ export interface ScrollWheelOptions {
   modifiers?: ScrollWheelModifiers
 }
 
+/** Only the Windows adapter has a first-show ordering to record. */
+export declare function testAccessibilityInitializedWhileVisible(): boolean | null
+
 /**
  * Owning PIDs of on-screen, normal-level (`kCGWindowLayer == 0`) app windows,
  * front to back — the same stacking order the user sees on screen. A
