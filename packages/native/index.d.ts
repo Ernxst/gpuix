@@ -522,6 +522,13 @@ export declare class TestGpuixRenderer {
    * Dispatches FileDrop Entered then Submit, matching GPUI's OS drop path.
    */
   simulateFileDrop(x: number, y: number, paths: Array<string>): void
+  /**
+   * Simulate one Finder drag move without dropping. The first move enters
+   * the window; later moves use GPUI's pending event.
+   */
+  simulateFileDragMove(x: number, y: number, paths: Array<string>): void
+  /** End the current Finder drag without dropping. */
+  simulateFileDragExit(): void
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
   /** Drop the current selection. */

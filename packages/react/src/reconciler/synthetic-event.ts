@@ -1,4 +1,5 @@
 import type { EventModifiers, EventPayload } from "@gpuix/native"
+import { createGpuixDataTransfer } from "./drop-files.js"
 import type { NativeRenderer, PublicInstance } from "../types/host.js"
 
 export type GpuixEventPhase = 1 | 2 | 3
@@ -153,6 +154,10 @@ export type GpuixMouseEventType =
   | "mouseLeave"
   | "mouseMove"
   | "mouseDownOutside"
+  | "dragEnter"
+  | "dragOver"
+  | "dragLeave"
+  | "drop"
 
 /**
  * The pointer members {@link GpuixMouseEvent} and {@link GpuixWheelEvent}
@@ -211,6 +216,34 @@ interface GpuixPointerEvent<Type extends string> extends GpuixEvent {
 
 /** A click, press, hover-transition, or context-menu event. */
 export type GpuixMouseEvent = GpuixPointerEvent<GpuixMouseEventType>
+
+export interface GpuixFile {
+  readonly name: string
+  readonly path: string
+  readonly size: number
+  readonly lastModified: number
+  readonly type: string
+}
+
+export interface GpuixFileList extends ReadonlyArray<GpuixFile> {
+  item(index: number): GpuixFile | null
+}
+
+export interface GpuixDataTransfer {
+  readonly files: GpuixFileList
+  readonly types: readonly string[]
+  dropEffect: "none" | "copy" | "move" | "link"
+  effectAllowed: string
+  getData(): ""
+}
+
+export type GpuixDragEventType = "dragEnter" | "dragOver" | "dragLeave" | "drop"
+
+/** An OS file drag event. File contents are exposed only by `drop`. */
+export interface GpuixDragEvent extends GpuixMouseEvent {
+  readonly type: GpuixDragEventType
+  readonly dataTransfer: GpuixDataTransfer
+}
 
 /** A trackpad or wheel scroll gesture — bubbles, unlike `onScroll`. */
 export interface GpuixWheelEvent extends GpuixPointerEvent<"wheel"> {
@@ -311,6 +344,7 @@ export interface GpuixElementEvent extends GpuixEvent {
  */
 export type GpuixSyntheticEvent =
   | GpuixMouseEvent
+  | GpuixDragEvent
   | GpuixWheelEvent
   | GpuixKeyboardEvent
   | GpuixFocusEvent
@@ -349,11 +383,21 @@ export function createGpuixSyntheticEvent(
     nativeEvent.eventType === "blur" ||
     nativeEvent.eventType === "scroll"
   const isNonBubblingEvent = isNonCancelableEvent
+  const isDragEvent =
+    nativeEvent.eventType === "dragEnter" ||
+    nativeEvent.eventType === "dragOver" ||
+    nativeEvent.eventType === "dragLeave" ||
+    nativeEvent.eventType === "drop"
   const event = {
     ...nativeEvent,
     nativeEvent,
     target,
     type: nativeEvent.eventType,
+    ...(isDragEvent
+      ? {
+          dataTransfer: createGpuixDataTransfer(nativeEvent, nativeEvent.eventType === "drop"),
+        }
+      : {}),
     bubbles: !isNonBubblingEvent,
     cancelable: !isNonCancelableEvent,
     altKey: modifiers?.alt ?? false,

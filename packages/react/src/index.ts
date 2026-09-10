@@ -302,6 +302,9 @@ export type {
 export { handleGpuixEvent } from "./reconciler/event-registry.js"
 export type {
   GpuixChangeEvent,
+  GpuixDataTransfer,
+  GpuixDragEvent,
+  GpuixDragEventType,
   GpuixElementEvent,
   GpuixEvent,
   GpuixEventDispatchResult,
@@ -310,6 +313,8 @@ export type {
   GpuixKeyboardEvent,
   GpuixMouseEvent,
   GpuixMouseEventType,
+  GpuixFile,
+  GpuixFileList,
   GpuixScrollEvent,
   GpuixSyntheticEvent,
   GpuixWheelEvent,

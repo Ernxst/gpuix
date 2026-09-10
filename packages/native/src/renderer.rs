@@ -6761,6 +6761,16 @@ pub(crate) struct GpuixView {
     /// Test-only resolved-style reads use this instead of reconstructing hover
     /// from automation bounds, which cannot account for occlusion or capture.
     pub(crate) interactive_style_states: HashMap<u64, InteractiveStyleState>,
+    /// The deepest retained host hitbox selected during the current external
+    /// drag move. Capture callbacks fill this in; the normal bubble callback
+    /// consumes it after GPUI has visited the whole ancestry.
+    external_drag_move_target: Option<u64>,
+    external_drag_move_paths: Option<Vec<String>>,
+    external_drag_move_position: Option<gpui::Point<gpui::Pixels>>,
+    /// Last external drag target and paths, retained until the next frame after
+    /// GPUI clears `active_drag` for a window exit.
+    external_drag_target: Option<u64>,
+    external_drag_paths: Option<Vec<String>>,
     /// The painted element currently winning hover hit testing. Native records
     /// it once per mouse event; the React bridge expands its ancestry into DOM
     /// mouseenter/mouseleave transitions.
@@ -6809,6 +6819,10 @@ pub(crate) struct GpuixView {
 pub(crate) struct InteractiveStyleState {
     pub hovered: bool,
     pub active: bool,
+    /// Whether this element is in the ancestry of the current external file
+    /// drag target. GPUI clears `active_drag` before it reports a window exit,
+    /// so this survives long enough for the next frame to emit dragLeave.
+    pub drag_inside: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -6854,6 +6868,14 @@ impl InteractiveStyleState {
             return false;
         }
         self.active = active;
+        true
+    }
+
+    pub(crate) fn set_drag_inside(&mut self, inside: bool) -> bool {
+        if self.drag_inside == inside {
+            return false;
+        }
+        self.drag_inside = inside;
         true
     }
 }
@@ -7004,6 +7026,11 @@ impl GpuixView {
             interaction_revision: 0,
             last_focus_state: None,
             interactive_style_states: HashMap::new(),
+            external_drag_move_target: None,
+            external_drag_move_paths: None,
+            external_drag_move_position: None,
+            external_drag_target: None,
+            external_drag_paths: None,
             hover_target: None,
             hovered_targets: HashSet::new(),
             reported_hover_target: None,
@@ -7068,6 +7095,132 @@ impl GpuixView {
         self.hovered_targets.insert(id);
         self.hover_target = Some(id);
         self.dispatch_hover_target_change(false);
+    }
+
+    /// Record the deepest hitbox seen by GPUI's external-drag capture walk.
+    /// The corresponding bubble-phase mouse move consumes this after capture
+    /// has finished, so ancestors do not each produce a second DOM event.
+    pub(crate) fn record_external_drag_move(
+        &mut self,
+        id: u64,
+        paths: Vec<String>,
+        position: gpui::Point<gpui::Pixels>,
+    ) {
+        self.external_drag_move_target = Some(id);
+        self.external_drag_move_paths = Some(paths);
+        self.external_drag_move_position = Some(position);
+    }
+
+    fn set_external_drag_path(&mut self, target: u64, inside: bool) {
+        let tree = self.tree.lock().unwrap();
+        let mut current = Some(target);
+        while let Some(id) = current {
+            self.interactive_style_states
+                .entry(id)
+                .or_default()
+                .set_drag_inside(inside);
+            current = tree.elements.get(&id).and_then(|element| element.parent);
+        }
+    }
+
+    fn clear_external_drag_path(&mut self) {
+        for state in self.interactive_style_states.values_mut() {
+            state.set_drag_inside(false);
+        }
+    }
+
+    fn dispatch_external_drag_event(
+        &self,
+        target: u64,
+        event_type: &str,
+        paths: &[String],
+        position: gpui::Point<gpui::Pixels>,
+    ) {
+        emit_event_full(&self.event_callback, target, event_type, |payload| {
+            let (x, y) = point_to_xy(position);
+            payload.x = Some(x);
+            payload.y = Some(y);
+            payload.paths = Some(paths.to_vec());
+        });
+    }
+
+    /// Turn one GPUI drag move into the DOM-shaped enter/over stream. The
+    /// retained flags cover the whole target ancestry, while only the deepest
+    /// target is emitted so JS bubbling supplies the ancestor listeners.
+    pub(crate) fn dispatch_external_drag_move(
+        &mut self,
+        id: u64,
+        position: gpui::Point<gpui::Pixels>,
+        paths: Vec<String>,
+    ) {
+        self.external_drag_move_target = None;
+        self.external_drag_move_paths = None;
+        self.external_drag_move_position = None;
+
+        if self.external_drag_target != Some(id) {
+            if let Some(previous) = self.external_drag_target {
+                let previous_paths = self.external_drag_paths.as_deref().unwrap_or_default();
+                self.dispatch_external_drag_event(
+                    previous,
+                    "dragLeave",
+                    previous_paths,
+                    position,
+                );
+            }
+            self.clear_external_drag_path();
+            self.set_external_drag_path(id, true);
+            self.dispatch_external_drag_event(id, "dragEnter", &paths, position);
+            self.external_drag_target = Some(id);
+        }
+
+        self.external_drag_paths = Some(paths.clone());
+        self.dispatch_external_drag_event(id, "dragOver", &paths, position);
+    }
+
+    fn dispatch_external_drag_leave_without_target(&mut self) {
+        let Some(previous) = self.external_drag_target else {
+            self.external_drag_move_paths = None;
+            self.external_drag_move_position = None;
+            return;
+        };
+        let paths = self
+            .external_drag_move_paths
+            .as_deref()
+            .or(self.external_drag_paths.as_deref())
+            .unwrap_or_default();
+        let position = self
+            .external_drag_move_position
+            .unwrap_or_else(|| gpui::point(gpui::px(0.), gpui::px(0.)));
+        self.dispatch_external_drag_event(previous, "dragLeave", paths, position);
+        self.clear_external_drag();
+    }
+
+    /// GPUI clears `active_drag` before a window exit reaches the next frame.
+    /// Emit the pending leave there, retaining the native paths in the payload.
+    fn sweep_external_drag_exit(&mut self, position: gpui::Point<gpui::Pixels>) {
+        if self.external_drag_target.is_none() {
+            return;
+        }
+        if let Some(target) = self.external_drag_target {
+            let paths = self.external_drag_paths.as_deref().unwrap_or_default();
+            self.dispatch_external_drag_event(target, "dragLeave", paths, position);
+        }
+        self.clear_external_drag_path();
+        self.external_drag_target = None;
+        self.external_drag_paths = None;
+        self.external_drag_move_target = None;
+        self.external_drag_move_paths = None;
+        self.external_drag_move_position = None;
+    }
+
+    /// A successful drop ends the external drag without a dragLeave event.
+    pub(crate) fn clear_external_drag(&mut self) {
+        self.clear_external_drag_path();
+        self.external_drag_target = None;
+        self.external_drag_paths = None;
+        self.external_drag_move_target = None;
+        self.external_drag_move_paths = None;
+        self.external_drag_move_position = None;
     }
 
     fn dispatch_hover_target_change(&mut self, revalidate: bool) {
@@ -8995,6 +9148,9 @@ impl gpui::Render for GpuixView {
 
         window.set_window_title(&self.window_title);
         self.observe_window_resize(window, cx);
+        if !cx.has_active_drag() {
+            self.sweep_external_drag_exit(window.mouse_position());
+        }
 
         let focus_state = (
             self.focus_handles
@@ -11688,6 +11844,15 @@ fn tracks_mouse_hover_events(
     false
 }
 
+fn tracks_external_drag_events(
+    element: &crate::retained_tree::RetainedElement,
+    tree: &RetainedTree,
+) -> bool {
+    ["dragEnter", "dragOver", "dragLeave", "drop"]
+        .into_iter()
+        .any(|event_type| tracks_pointer_event(element, tree, event_type))
+}
+
 pub(crate) fn tracks_pointer_event(
     element: &crate::retained_tree::RetainedElement,
     tree: &RetainedTree,
@@ -12026,6 +12191,7 @@ pub(crate) fn build_host_container(
     let tracks_hover = tracks_hover(style);
     let tracks_active = tracks_active(style);
     let tracks_mouse_hover = tracks_mouse_hover_events(element, ctx.tree);
+    let tracks_external_drag = tracks_external_drag_events(element, ctx.tree);
 
     if let Some(style) = style {
         el = apply_interactive_styles(el, style);
@@ -12223,9 +12389,10 @@ pub(crate) fn build_host_container(
 
             // ── File drop (Finder / OS paths) ────────────────────
             "fileDrop" => {
-                el = el.on_drop(move |dropped: &gpui::ExternalPaths, window, _cx| {
+                el = el.on_drop(cx.listener(move |view, dropped: &gpui::ExternalPaths, window, _cx| {
+                    view.clear_external_drag();
                     emit_file_drop(&callback, id, dropped, window.mouse_position());
-                });
+                }));
             }
 
             // ── Wheel ────────────────────────────────────────────
@@ -12352,19 +12519,65 @@ pub(crate) fn build_host_container(
         }
     }
 
-    if tracks_pointer_event(element, ctx.tree, "mouseMove") {
+    if tracks_pointer_event(element, ctx.tree, "mouseMove") || tracks_external_drag {
         let callback = ctx.event_callback.clone();
         let id = element.id;
-        el = el.on_mouse_move(move |mouse_event, _window, cx| {
-            emit_event_full(&callback, id, "mouseMove", |p| {
-                let (x, y) = point_to_xy(mouse_event.position);
-                p.x = Some(x);
-                p.y = Some(y);
-                p.modifiers = Some(mouse_event.modifiers.into());
-                p.pressed_button = mouse_event.pressed_button.map(mouse_button_to_u32);
-            });
-            cx.stop_propagation();
-        });
+        let tracks_mouse_move = tracks_pointer_event(element, ctx.tree, "mouseMove");
+        el = el.on_mouse_move(cx.listener(
+            move |view, mouse_event: &gpui::MouseMoveEvent, _window, cx| {
+            if tracks_external_drag {
+                if view.external_drag_move_target == Some(id) {
+                    if let Some(paths) = view.external_drag_move_paths.take() {
+                        view.dispatch_external_drag_move(id, mouse_event.position, paths);
+                        cx.stop_propagation();
+                        return;
+                    }
+                }
+            }
+            if tracks_mouse_move {
+                emit_event_full(&callback, id, "mouseMove", |p| {
+                    let (x, y) = point_to_xy(mouse_event.position);
+                    p.x = Some(x);
+                    p.y = Some(y);
+                    p.modifiers = Some(mouse_event.modifiers.into());
+                    p.pressed_button = mouse_event.pressed_button.map(mouse_button_to_u32);
+                });
+                cx.stop_propagation();
+            }
+            },
+        ));
+    }
+
+    if tracks_external_drag {
+        let id = element.id;
+        el = el.on_drag_move::<gpui::ExternalPaths>(cx.listener(
+            move |view, drag_move: &gpui::DragMoveEvent<gpui::ExternalPaths>, window, cx| {
+                let position = drag_move.event.position;
+                if drag_move.bounds.contains(&drag_move.event.position) {
+                    if let Some(paths) = drag_move
+                        .dragged_item()
+                        .downcast_ref::<gpui::ExternalPaths>()
+                        .and_then(file_drop_paths)
+                    {
+                        view.record_external_drag_move(id, paths, position);
+                    }
+                } else if view.external_drag_target == Some(id) {
+                    if let Some(paths) = drag_move
+                        .dragged_item()
+                        .downcast_ref::<gpui::ExternalPaths>()
+                        .and_then(file_drop_paths)
+                    {
+                        view.external_drag_move_paths = Some(paths);
+                        view.external_drag_move_position = Some(position);
+                        cx.defer_in(window, |view, _window, _cx| {
+                            if view.external_drag_move_target.is_none() {
+                                view.dispatch_external_drag_leave_without_target();
+                            }
+                        });
+                    }
+                }
+            },
+        ));
     }
 
     if captures_pointer_in_ancestry(element, ctx.tree) {

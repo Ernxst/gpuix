@@ -224,6 +224,8 @@ interface NativeTestRendererApi extends NativeRenderer {
     clickCount?: number
   ): void
   simulateFileDrop(x: number, y: number, paths: string[]): void
+  simulateFileDragMove(x: number, y: number, paths: string[]): void
+  simulateFileDragExit(): void
   getTreeJson(): string
   getResolvedStyle(elementId: number): string | null
   getImageLoadState(elementId: number): string | null
@@ -1327,6 +1329,23 @@ export class TestRenderer implements NativeRenderer {
     this.native.simulateFileDrop(x, y, paths)
     this.dispatchNativeEvents()
     this.native.flush()
+  }
+
+  /** End-to-end: move an OS file drag through GPUI without dropping. */
+  nativeSimulateFileDragMove(x: number, y: number, paths: string[]): void {
+    this.native.flush()
+    this.native.simulateFileDragMove(x, y, paths)
+    this.dispatchNativeEvents()
+    this.native.flush()
+  }
+
+  /** End-to-end: leave the window with the current OS file drag. */
+  nativeSimulateFileDragExit(): void {
+    this.native.simulateFileDragExit()
+    // FileDropEvent::Exited clears GPUI's active drag first; the native
+    // dragLeave is emitted by the following build's exit sweep.
+    this.native.flush()
+    this.dispatchNativeEvents()
   }
 
   // ── Tree inspection (queries Rust RetainedTree via napi) ────────

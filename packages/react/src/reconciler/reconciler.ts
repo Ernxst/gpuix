@@ -185,6 +185,7 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     ids: idAllocatorFor(renderer),
     eventHandlers: new Map(),
     eventTargets: new Map(),
+    preventedDragOvers: new Map(),
     hoverPath: [],
     preventedKeyboardActivations: new Map(),
     strictStyles,

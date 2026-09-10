@@ -305,6 +305,17 @@ const EVENT_PROPS = [
   ["onMouseMoveCapture", "mouseMove", "capture"],
   ["onMouseMove", "mouseMove", "bubble"],
   ["onMouseDownOutside", "mouseDownOutside", "bubble"],
+  // OS file drag events. Native `fileDrop` fans out to the legacy raw
+  // handler and the synthetic bubbling `drop` handler, so their registry keys
+  // must remain distinct.
+  ["onDragEnterCapture", "dragEnter", "capture"],
+  ["onDragEnter", "dragEnter", "bubble"],
+  ["onDragOverCapture", "dragOver", "capture"],
+  ["onDragOver", "dragOver", "bubble"],
+  ["onDragLeaveCapture", "dragLeave", "capture"],
+  ["onDragLeave", "dragLeave", "bubble"],
+  ["onDropCapture", "drop", "capture"],
+  ["onDrop", "fileDrop", "bubble", "drop"],
   // Keyboard events (require focus — tabIndex or autoFocus)
   ["onKeyDownCapture", "keyDown", "capture"],
   ["onKeyDown", "keyDown", "bubble"],
@@ -321,7 +332,7 @@ const EVENT_PROPS = [
   ["onWheelCapture", "wheel", "capture"],
   ["onWheel", "wheel", "bubble"],
   // Finder / OS file drop
-  ["onFileDrop", "fileDrop"],
+  ["onFileDrop", "fileDrop", "bubble", "fileDrop"],
 ] as const
 
 const EVENT_PROP_NAMES = new Set<string>(EVENT_PROPS.map(([name]) => name))
@@ -331,6 +342,14 @@ function eventHandlerKey(eventType: string, phase: "capture" | "bubble"): string
   return phase === "capture" ? `${eventType}Capture` : eventType
 }
 
+function registryKey(
+  eventType: string,
+  phase: "capture" | "bubble" | undefined,
+  override: string | undefined
+): string {
+  return override ?? eventHandlerKey(eventType, phase ?? "bubble")
+}
+
 function hasEventListener(props: Props, eventType: string): boolean {
   return EVENT_PROPS.some(
     ([propName, candidateType]) => candidateType === eventType && props[propName] != null
@@ -338,7 +357,7 @@ function hasEventListener(props: Props, eventType: string): boolean {
 }
 
 function syncEventListeners(container: Container, id: number, props: Props): void {
-  for (const [propName, eventType, phase] of EVENT_PROPS) {
+  for (const [propName, eventType, phase, override] of EVENT_PROPS) {
     const handler = props[propName]
     if (handler) {
       // `propName` ranges over every entry in EVENT_PROPS here, so `handler`'s
@@ -349,7 +368,7 @@ function syncEventListeners(container: Container, id: number, props: Props): voi
       registerEventHandler(
         container.eventHandlers,
         id,
-        eventHandlerKey(eventType, phase ?? "bubble"),
+        registryKey(eventType, phase, override),
         handler as (event: GpuixSyntheticEvent) => void
       )
     }
@@ -367,10 +386,10 @@ function diffEventListeners(
   oldProps: Props,
   newProps: Props
 ): void {
-  for (const [propName, eventType, phase] of EVENT_PROPS) {
+  for (const [propName, eventType, phase, override] of EVENT_PROPS) {
     const oldHandler = oldProps[propName]
     const newHandler = newProps[propName]
-    const handlerKey = eventHandlerKey(eventType, phase ?? "bubble")
+    const handlerKey = registryKey(eventType, phase, override)
 
     if (oldHandler && !newHandler) {
       unregisterEventHandler(container.eventHandlers, id, handlerKey)
@@ -1492,6 +1511,7 @@ export const hostConfig = {
       unregisterEventHandlers(parentState.container.eventHandlers, id)
       parentState.container.eventTargets.delete(id)
       parentState.container.preventedKeyboardActivations.delete(id)
+      parentState.container.preventedDragOvers.delete(id)
     }
   },
 
@@ -1529,6 +1549,7 @@ export const hostConfig = {
       unregisterEventHandlers(parent.eventHandlers, id)
       parent.eventTargets.delete(id)
       parent.preventedKeyboardActivations.delete(id)
+      parent.preventedDragOvers.delete(id)
     }
   },
 
@@ -1741,6 +1762,7 @@ export const hostConfig = {
       unregisterEventHandlers(container.eventHandlers, id)
       container.eventTargets.delete(id)
       container.preventedKeyboardActivations.delete(id)
+      container.preventedDragOvers.delete(id)
     }
   },
 

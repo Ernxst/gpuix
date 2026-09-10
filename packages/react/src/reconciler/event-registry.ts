@@ -180,6 +180,37 @@ function eventPath(container: Container, target: Instance): Instance[] {
   return path
 }
 
+function rememberDragOverPrevention(
+  container: Container,
+  payload: EventPayload,
+  defaultPrevented: boolean
+): void {
+  if (payload.eventType !== "dragOver") return
+  const target = container.eventTargets.get(payload.elementId)
+  if (!target) return
+  for (const instance of eventPath(container, target)) {
+    container.preventedDragOvers.set(instance.id, defaultPrevented)
+  }
+}
+
+function clearDragOverPrevention(container: Container, payload: EventPayload): void {
+  if (payload.eventType !== "dragLeave" && payload.eventType !== "fileDrop") return
+  const target = container.eventTargets.get(payload.elementId)
+  if (!target) return
+  for (const instance of eventPath(container, target)) {
+    container.preventedDragOvers.delete(instance.id)
+  }
+}
+
+function acceptsDrop(container: Container, payload: EventPayload): boolean {
+  if (payload.eventType !== "fileDrop") return false
+  const target = container.eventTargets.get(payload.elementId)
+  if (!target) return false
+  return eventPath(container, target).some(
+    (instance) => container.preventedDragOvers.get(instance.id) === true
+  )
+}
+
 /**
  * Native hover hit testing reports one painted element. DOM mouseenter and
  * mouseleave instead describe the change between the old and new ancestry:
@@ -327,9 +358,25 @@ export function handleGpuixEvent(
   // discrete event does, committing before it returns. Every other event keeps
   // the priority it had.
   const editor = textEditorTarget(payload, renderer)
+  const container = eventRegistrySlot().containersByRenderer.get(renderer)
+  const dropAccepted = container ? acceptsDrop(container, payload) : false
   const result = editor
     ? flushSync(() => dispatchGpuixEvent(payload, renderer))
     : dispatchGpuixEvent(payload, renderer)
+
+  if (container && payload.eventType === "dragOver") {
+    rememberDragOverPrevention(container, payload, result.defaultPrevented)
+  }
+  if (container && payload.eventType === "dragLeave") {
+    clearDragOverPrevention(container, payload)
+  }
+  if (payload.eventType === "fileDrop") {
+    if (dropAccepted) {
+      dispatchGpuixEvent({ ...payload, eventType: "drop" }, renderer)
+    }
+    if (container) clearDragOverPrevention(container, payload)
+    return result
+  }
 
   if (
     payload.eventType === "click" &&
@@ -400,7 +447,11 @@ function dispatchGpuixEvent(
     const handler = container.eventHandlers.get(instance.id)?.get(handlerKey)
     if (!handler) return
     controller.setCurrentTarget(instance, phase)
-    handler(event)
+    if (payload.eventType === "fileDrop" && handlerKey === "fileDrop") {
+      handler(payload as unknown as GpuixSyntheticEvent)
+    } else {
+      handler(event)
+    }
   }
 
   try {
