@@ -150,13 +150,17 @@ export function flushFrameRequests(owner: object): void {
 }
 
 /**
- * Queue a one-shot callback for the next display-paced GPUIX frame.
+ * Queue a callback on the GPUIX frame clock itself, bypassing any browser
+ * `requestAnimationFrame`.
  *
- * In a browser this delegates to the browser's own requestAnimationFrame.
+ * `requestAnimationFrame` below defers to a browser implementation when one
+ * is installed on `globalThis`; `@gpuix/react/globals` installs *this*
+ * function as that browser implementation, so it must never re-check for
+ * one itself, or it would recurse into the global it just became.
+ *
+ * @internal
  */
-export function requestAnimationFrame(callback: FrameRequestCallback): number {
-  const browserRequest = browserRequestAnimationFrame()
-  if (browserRequest) return browserRequest.call(globalThis, callback)
+export function requestNativeAnimationFrame(callback: FrameRequestCallback): number {
   if (typeof callback !== "function") {
     throw new TypeError("requestAnimationFrame callback must be a function")
   }
@@ -171,6 +175,30 @@ export function requestAnimationFrame(callback: FrameRequestCallback): number {
   return id
 }
 
+/**
+ * Cancel a callback queued by `requestNativeAnimationFrame`, bypassing any
+ * browser `cancelAnimationFrame`. See `requestNativeAnimationFrame` for why
+ * this does not itself check for a browser implementation.
+ *
+ * @internal
+ */
+export function cancelNativeAnimationFrame(id: number): void {
+  const slot = frameClockSlot()
+  slot.callbacks.delete(id)
+  if (slot.callbacks.size === 0) cancelPendingNativeFrame(slot)
+}
+
+/**
+ * Queue a one-shot callback for the next display-paced GPUIX frame.
+ *
+ * In a browser this delegates to the browser's own requestAnimationFrame.
+ */
+export function requestAnimationFrame(callback: FrameRequestCallback): number {
+  const browserRequest = browserRequestAnimationFrame()
+  if (browserRequest) return browserRequest.call(globalThis, callback)
+  return requestNativeAnimationFrame(callback)
+}
+
 /** Cancel a callback queued by requestAnimationFrame. */
 export function cancelAnimationFrame(id: number): void {
   const browserCancel = Reflect.get(globalThis, "cancelAnimationFrame")
@@ -178,9 +206,7 @@ export function cancelAnimationFrame(id: number): void {
     browserCancel.call(globalThis, id)
     return
   }
-  const slot = frameClockSlot()
-  slot.callbacks.delete(id)
-  if (slot.callbacks.size === 0) cancelPendingNativeFrame(slot)
+  cancelNativeAnimationFrame(id)
 }
 
 export function attachAnimationFrameSource(source: FrameSource): void {
