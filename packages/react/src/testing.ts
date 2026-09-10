@@ -224,6 +224,7 @@ interface NativeTestRendererApi extends NativeRenderer {
     clickCount?: number
   ): void
   simulateFileDrop(x: number, y: number, paths: string[]): void
+  simulateFileDropSubmit(x: number, y: number): void
   simulateFileDragMove(x: number, y: number, paths: string[]): void
   simulateFileDragExit(): void
   getTreeJson(): string
@@ -1327,6 +1328,14 @@ export class TestRenderer implements NativeRenderer {
   nativeSimulateFileDrop(x: number, y: number, paths: string[]): void {
     this.native.flush()
     this.native.simulateFileDrop(x, y, paths)
+    this.dispatchNativeEvents()
+    this.native.flush()
+  }
+
+  /** End-to-end: submit an already-active OS file drag without another Entered/move phase. */
+  nativeSimulateFileDropSubmit(x: number, y: number): void {
+    this.native.flush()
+    this.native.simulateFileDropSubmit(x, y)
     this.dispatchNativeEvents()
     this.native.flush()
   }

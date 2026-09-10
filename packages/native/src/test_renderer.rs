@@ -1586,6 +1586,19 @@ impl TestGpuixRenderer {
         Ok(())
     }
 
+    /// Simulate only the submit phase of a Finder-style file drop. The active
+    /// external drag must have been established by `simulate_file_drag_move`;
+    /// keeping Entered separate lets React tests prove that submit does not
+    /// synthesize another dragOver or dragLeave.
+    #[napi]
+    pub fn simulate_file_drop_submit(&self, x: f64, y: f64) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, _view| {
+            let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+            cx.simulate_event(window, gpui::FileDropEvent::Submit { position });
+            Ok(())
+        })
+    }
+
     /// Simulate one Finder drag move without dropping. The first move enters
     /// the window; later moves use GPUI's pending event.
     #[napi]

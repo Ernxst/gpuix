@@ -265,19 +265,19 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
                 });
             }
             "mouseEnter" | "mouseLeave" => {}
-            "fileDrop" => {
-                el = el.on_drop(move |dropped: &gpui::ExternalPaths, window, _cx| {
-                    crate::renderer::emit_file_drop(
-                        &callback,
-                        id,
-                        dropped,
-                        window.mouse_position(),
-                    );
-                });
-            }
+            // The shared drag helper below owns the submit listener, including
+            // elements that track the drag without declaring onFileDrop.
+            "fileDrop" => {}
             _ => {}
         }
     }
+    let el = crate::renderer::wire_external_drag_events(
+        el,
+        ctx.retained_element,
+        ctx.tree,
+        ctx.event_callback,
+        cx,
+    );
     wire_hover_and_style_transition_events(el, ctx, cx)
 }
 

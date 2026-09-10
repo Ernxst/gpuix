@@ -139,6 +139,9 @@ impl CustomElement for MarkdownElement {
             "mouseEnter",
             "mouseLeave",
             "wheel",
+            "dragEnter",
+            "dragOver",
+            "dragLeave",
             "fileDrop",
         ]
     }

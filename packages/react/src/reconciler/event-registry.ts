@@ -195,11 +195,7 @@ function rememberDragOverPrevention(
 
 function clearDragOverPrevention(container: Container, payload: EventPayload): void {
   if (payload.eventType !== "dragLeave" && payload.eventType !== "fileDrop") return
-  const target = container.eventTargets.get(payload.elementId)
-  if (!target) return
-  for (const instance of eventPath(container, target)) {
-    container.preventedDragOvers.delete(instance.id)
-  }
+  container.preventedDragOvers.clear()
 }
 
 function acceptsDrop(container: Container, payload: EventPayload): boolean {
@@ -359,47 +355,56 @@ export function handleGpuixEvent(
   // the priority it had.
   const editor = textEditorTarget(payload, renderer)
   const container = eventRegistrySlot().containersByRenderer.get(renderer)
-  const dropAccepted = container ? acceptsDrop(container, payload) : false
-  const result = editor
-    ? flushSync(() => dispatchGpuixEvent(payload, renderer))
-    : dispatchGpuixEvent(payload, renderer)
-
   if (container && payload.eventType === "dragOver") {
-    rememberDragOverPrevention(container, payload, result.defaultPrevented)
+    // A new move replaces the one acceptance path, even if native retargeting
+    // did not deliver an intermediate dragLeave.
+    container.preventedDragOvers.clear()
   }
-  if (container && payload.eventType === "dragLeave") {
-    clearDragOverPrevention(container, payload)
-  }
-  if (payload.eventType === "fileDrop") {
-    if (dropAccepted) {
-      dispatchGpuixEvent({ ...payload, eventType: "drop" }, renderer)
+  const dropAccepted = container ? acceptsDrop(container, payload) : false
+  try {
+    const result = editor
+      ? flushSync(() => dispatchGpuixEvent(payload, renderer))
+      : dispatchGpuixEvent(payload, renderer)
+
+    if (container && payload.eventType === "dragOver") {
+      rememberDragOverPrevention(container, payload, result.defaultPrevented)
     }
-    if (container) clearDragOverPrevention(container, payload)
+    if (payload.eventType === "fileDrop") {
+      if (dropAccepted) {
+        dispatchGpuixEvent({ ...payload, eventType: "drop" }, renderer)
+      }
+      return result
+    }
+
+    if (
+      payload.eventType === "click" &&
+      payload.clickCount === 2 &&
+      (payload.button ?? 0) === 0 &&
+      payload.isRightClick !== true &&
+      // Two keyboard activations are two clicks, never a double click.
+      payload.inputSource !== "keyboard"
+    ) {
+      dispatchGpuixEvent({ ...payload, eventType: "doubleClick" }, renderer)
+    } else if (payload.eventType === "mouseDown" && payload.button === 2) {
+      // macOS opens a context menu on the press, so contextmenu follows
+      // mousedown and precedes mouseup and auxclick, as it does in the DOM.
+      dispatchGpuixEvent(
+        { ...payload, eventType: "contextMenu", isRightClick: true },
+        renderer
+      )
+    }
+
+    // After the handlers and after their commit, never before.
+    if (editor) restoreControlledEditor(editor, payload, renderer)
+
     return result
+  } finally {
+    // Terminal drag events retire the complete path even when their target was
+    // destroyed or a handler throws before normal cleanup runs.
+    if (container && (payload.eventType === "dragLeave" || payload.eventType === "fileDrop")) {
+      clearDragOverPrevention(container, payload)
+    }
   }
-
-  if (
-    payload.eventType === "click" &&
-    payload.clickCount === 2 &&
-    (payload.button ?? 0) === 0 &&
-    payload.isRightClick !== true &&
-    // Two keyboard activations are two clicks, never a double click.
-    payload.inputSource !== "keyboard"
-  ) {
-    dispatchGpuixEvent({ ...payload, eventType: "doubleClick" }, renderer)
-  } else if (payload.eventType === "mouseDown" && payload.button === 2) {
-    // macOS opens a context menu on the press, so contextmenu follows
-    // mousedown and precedes mouseup and auxclick, as it does in the DOM.
-    dispatchGpuixEvent(
-      { ...payload, eventType: "contextMenu", isRightClick: true },
-      renderer
-    )
-  }
-
-  // After the handlers and after their commit, never before.
-  if (editor) restoreControlledEditor(editor, payload, renderer)
-
-  return result
 }
 
 function dispatchGpuixEvent(

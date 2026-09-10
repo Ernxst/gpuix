@@ -7223,6 +7223,41 @@ impl GpuixView {
         self.external_drag_move_position = None;
     }
 
+    /// Submit always retires the native drag before the callback can trigger a
+    /// React render. The callback remains useful even when JS has no handler:
+    /// it lets the registry retire its acceptance record.
+    pub(crate) fn submit_external_drag(
+        &mut self,
+        id: u64,
+        dropped: &gpui::ExternalPaths,
+        position: gpui::Point<gpui::Pixels>,
+    ) {
+        let callback = self.event_callback.clone();
+        self.clear_external_drag();
+        emit_file_drop(&callback, id, dropped, position);
+    }
+
+    /// React can detach or retarget an element while GPUI still owns the
+    /// external drag. Do not wait for the next mouse move: the old target must
+    /// receive its leave signal and the window must be ready for a new target.
+    fn revalidate_external_drag_target(&mut self) {
+        let Some(target) = self.external_drag_target else {
+            return;
+        };
+        let invalid = {
+            let tree = self.tree.lock().unwrap();
+            match tree.elements.get(&target) {
+                Some(element) => {
+                    !tree.is_attached(target) || !tracks_external_drag_events(element, &tree)
+                }
+                None => true,
+            }
+        };
+        if invalid {
+            self.dispatch_external_drag_leave_without_target();
+        }
+    }
+
     fn dispatch_hover_target_change(&mut self, revalidate: bool) {
         if revalidate {
             let tree = self.tree.lock().unwrap();
@@ -9148,6 +9183,7 @@ impl gpui::Render for GpuixView {
 
         window.set_window_title(&self.window_title);
         self.observe_window_resize(window, cx);
+        self.revalidate_external_drag_target();
         if !cx.has_active_drag() {
             self.sweep_external_drag_exit(window.mouse_position());
         }
@@ -11848,9 +11884,29 @@ fn tracks_external_drag_events(
     element: &crate::retained_tree::RetainedElement,
     tree: &RetainedTree,
 ) -> bool {
-    ["dragEnter", "dragOver", "dragLeave", "drop"]
+    ["dragEnter", "dragOver", "dragLeave", "fileDrop"]
         .into_iter()
         .any(|event_type| tracks_pointer_event(element, tree, event_type))
+}
+
+#[cfg(test)]
+mod external_drag_tracking_tests {
+    use super::*;
+
+    #[test]
+    fn tracks_external_drag_file_drop() {
+        let mut tree = RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+        tree.set_root(Some(1));
+        tree.elements
+            .get_mut(&1)
+            .unwrap()
+            .events
+            .insert("fileDrop".to_string());
+
+        let element = &tree.elements[&1];
+        assert!(tracks_external_drag_events(element, &tree));
+    }
 }
 
 pub(crate) fn tracks_pointer_event(
@@ -11869,6 +11925,89 @@ pub(crate) fn tracks_pointer_event(
         current = current_element.parent;
     }
     false
+}
+
+/// Wire the shared mouse-move and external-file-drag callbacks onto any
+/// stateful GPUI surface. Custom roots use the same retained id and ancestry
+/// tracking as ordinary hosts, so drag derivation stays in one place.
+pub(crate) fn wire_external_drag_events<E>(
+    mut el: E,
+    element: &crate::retained_tree::RetainedElement,
+    tree: &RetainedTree,
+    event_callback: &Option<EventCallback>,
+    cx: &mut gpui::Context<GpuixView>,
+) -> E
+where
+    E: gpui::StatefulInteractiveElement,
+{
+    let tracks_external_drag = tracks_external_drag_events(element, tree);
+    let tracks_mouse_move = tracks_pointer_event(element, tree, "mouseMove");
+
+    if tracks_mouse_move || tracks_external_drag {
+        let callback = event_callback.clone();
+        let id = element.id;
+        el = el.on_mouse_move(cx.listener(
+            move |view, mouse_event: &gpui::MouseMoveEvent, _window, cx| {
+                if tracks_external_drag && view.external_drag_move_target == Some(id) {
+                    if let Some(paths) = view.external_drag_move_paths.take() {
+                        view.dispatch_external_drag_move(id, mouse_event.position, paths);
+                        cx.stop_propagation();
+                        return;
+                    }
+                }
+                if tracks_mouse_move {
+                    emit_event_full(&callback, id, "mouseMove", |p| {
+                        let (x, y) = point_to_xy(mouse_event.position);
+                        p.x = Some(x);
+                        p.y = Some(y);
+                        p.modifiers = Some(mouse_event.modifiers.into());
+                        p.pressed_button = mouse_event.pressed_button.map(mouse_button_to_u32);
+                    });
+                    cx.stop_propagation();
+                }
+            },
+        ));
+    }
+
+    if tracks_external_drag {
+        let id = element.id;
+        el = el.on_drag_move::<gpui::ExternalPaths>(cx.listener(
+            move |view, drag_move: &gpui::DragMoveEvent<gpui::ExternalPaths>, window, cx| {
+                let position = drag_move.event.position;
+                if drag_move.bounds.contains(&drag_move.event.position) {
+                    if let Some(paths) = drag_move
+                        .dragged_item()
+                        .downcast_ref::<gpui::ExternalPaths>()
+                        .and_then(file_drop_paths)
+                    {
+                        view.record_external_drag_move(id, paths, position);
+                    }
+                } else if view.external_drag_target == Some(id) {
+                    if let Some(paths) = drag_move
+                        .dragged_item()
+                        .downcast_ref::<gpui::ExternalPaths>()
+                        .and_then(file_drop_paths)
+                    {
+                        view.external_drag_move_paths = Some(paths);
+                        view.external_drag_move_position = Some(position);
+                        cx.defer_in(window, |view, _window, _cx| {
+                            if view.external_drag_move_target.is_none() {
+                                view.dispatch_external_drag_leave_without_target();
+                            }
+                        });
+                    }
+                }
+            },
+        ));
+
+        el = el.on_drop(cx.listener(
+            move |view, dropped: &gpui::ExternalPaths, window, _cx| {
+                view.submit_external_drag(id, dropped, window.mouse_position());
+            },
+        ));
+    }
+
+    el
 }
 
 fn accessibility_hidden_in_ancestry(tree: &RetainedTree, element_id: u64) -> bool {
@@ -12191,7 +12330,6 @@ pub(crate) fn build_host_container(
     let tracks_hover = tracks_hover(style);
     let tracks_active = tracks_active(style);
     let tracks_mouse_hover = tracks_mouse_hover_events(element, ctx.tree);
-    let tracks_external_drag = tracks_external_drag_events(element, ctx.tree);
 
     if let Some(style) = style {
         el = apply_interactive_styles(el, style);
@@ -12388,12 +12526,9 @@ pub(crate) fn build_host_container(
             }
 
             // ── File drop (Finder / OS paths) ────────────────────
-            "fileDrop" => {
-                el = el.on_drop(cx.listener(move |view, dropped: &gpui::ExternalPaths, window, _cx| {
-                    view.clear_external_drag();
-                    emit_file_drop(&callback, id, dropped, window.mouse_position());
-                }));
-            }
+            // The shared drag helper below owns the submit listener, including
+            // elements that track the drag without declaring onFileDrop.
+            "fileDrop" => {}
 
             // ── Wheel ────────────────────────────────────────────
             "wheel" => {
@@ -12519,66 +12654,7 @@ pub(crate) fn build_host_container(
         }
     }
 
-    if tracks_pointer_event(element, ctx.tree, "mouseMove") || tracks_external_drag {
-        let callback = ctx.event_callback.clone();
-        let id = element.id;
-        let tracks_mouse_move = tracks_pointer_event(element, ctx.tree, "mouseMove");
-        el = el.on_mouse_move(cx.listener(
-            move |view, mouse_event: &gpui::MouseMoveEvent, _window, cx| {
-            if tracks_external_drag {
-                if view.external_drag_move_target == Some(id) {
-                    if let Some(paths) = view.external_drag_move_paths.take() {
-                        view.dispatch_external_drag_move(id, mouse_event.position, paths);
-                        cx.stop_propagation();
-                        return;
-                    }
-                }
-            }
-            if tracks_mouse_move {
-                emit_event_full(&callback, id, "mouseMove", |p| {
-                    let (x, y) = point_to_xy(mouse_event.position);
-                    p.x = Some(x);
-                    p.y = Some(y);
-                    p.modifiers = Some(mouse_event.modifiers.into());
-                    p.pressed_button = mouse_event.pressed_button.map(mouse_button_to_u32);
-                });
-                cx.stop_propagation();
-            }
-            },
-        ));
-    }
-
-    if tracks_external_drag {
-        let id = element.id;
-        el = el.on_drag_move::<gpui::ExternalPaths>(cx.listener(
-            move |view, drag_move: &gpui::DragMoveEvent<gpui::ExternalPaths>, window, cx| {
-                let position = drag_move.event.position;
-                if drag_move.bounds.contains(&drag_move.event.position) {
-                    if let Some(paths) = drag_move
-                        .dragged_item()
-                        .downcast_ref::<gpui::ExternalPaths>()
-                        .and_then(file_drop_paths)
-                    {
-                        view.record_external_drag_move(id, paths, position);
-                    }
-                } else if view.external_drag_target == Some(id) {
-                    if let Some(paths) = drag_move
-                        .dragged_item()
-                        .downcast_ref::<gpui::ExternalPaths>()
-                        .and_then(file_drop_paths)
-                    {
-                        view.external_drag_move_paths = Some(paths);
-                        view.external_drag_move_position = Some(position);
-                        cx.defer_in(window, |view, _window, _cx| {
-                            if view.external_drag_move_target.is_none() {
-                                view.dispatch_external_drag_leave_without_target();
-                            }
-                        });
-                    }
-                }
-            },
-        ));
-    }
+    el = wire_external_drag_events(el, element, ctx.tree, ctx.event_callback, cx);
 
     if captures_pointer_in_ancestry(element, ctx.tree) {
         el = el.capture_pointer();

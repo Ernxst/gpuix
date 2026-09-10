@@ -81,7 +81,9 @@ export function wrapWithBatching(inner: NativeRenderer): MutationRenderer {
           unregisterEventHandlers(container.eventHandlers, id)
           container.eventTargets.delete(id)
           container.preventedKeyboardActivations.delete(id)
-          container.preventedDragOvers.delete(id)
+          if (container.preventedDragOvers.has(id)) {
+            container.preventedDragOvers.clear()
+          }
         }
       }
 

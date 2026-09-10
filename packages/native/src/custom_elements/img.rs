@@ -2369,6 +2369,9 @@ impl CustomElement for ImgElement {
             "mouseEnter",
             "mouseLeave",
             "wheel",
+            "dragEnter",
+            "dragOver",
+            "dragLeave",
             "fileDrop",
         ]
     }
@@ -2529,6 +2532,9 @@ impl CustomElement for SvgElement {
             "mouseEnter",
             "mouseLeave",
             "wheel",
+            "dragEnter",
+            "dragOver",
+            "dragLeave",
             "fileDrop",
         ]
     }

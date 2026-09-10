@@ -1511,7 +1511,9 @@ export const hostConfig = {
       unregisterEventHandlers(parentState.container.eventHandlers, id)
       parentState.container.eventTargets.delete(id)
       parentState.container.preventedKeyboardActivations.delete(id)
-      parentState.container.preventedDragOvers.delete(id)
+      if (parentState.container.preventedDragOvers.has(id)) {
+        parentState.container.preventedDragOvers.clear()
+      }
     }
   },
 
@@ -1549,7 +1551,9 @@ export const hostConfig = {
       unregisterEventHandlers(parent.eventHandlers, id)
       parent.eventTargets.delete(id)
       parent.preventedKeyboardActivations.delete(id)
-      parent.preventedDragOvers.delete(id)
+      if (parent.preventedDragOvers.has(id)) {
+        parent.preventedDragOvers.clear()
+      }
     }
   },
 
@@ -1762,7 +1766,9 @@ export const hostConfig = {
       unregisterEventHandlers(container.eventHandlers, id)
       container.eventTargets.delete(id)
       container.preventedKeyboardActivations.delete(id)
-      container.preventedDragOvers.delete(id)
+      if (container.preventedDragOvers.has(id)) {
+        container.preventedDragOvers.clear()
+      }
     }
   },
 
