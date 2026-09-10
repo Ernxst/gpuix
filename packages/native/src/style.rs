@@ -38,14 +38,40 @@ pub(crate) fn parse_font_weight(value: &FontWeightValue) -> gpui::FontWeight {
     }
 }
 
+/// One layer of a `boxShadow` value. `inset` defaults to a drop shadow;
+/// setting it draws inside the element's padding box instead (CSS
+/// `box-shadow`'s `inset` keyword).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct BoxShadowValue {
+pub struct BoxShadowLayer {
     pub offset_x: f64,
     pub offset_y: f64,
     pub blur_radius: f64,
     pub spread_radius: f64,
     pub color: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inset: bool,
+}
+
+/// `boxShadow` accepts either a single layer or a CSS-style comma-separated
+/// list of layers. This enum preserves whichever shape the author used, so
+/// resolved-style read-back round-trips it unchanged (`One` stays an object,
+/// `Many` stays an array).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BoxShadowValue {
+    One(BoxShadowLayer),
+    Many(Vec<BoxShadowLayer>),
+}
+
+impl BoxShadowValue {
+    /// The layers in CSS authoring order (first layer paints on top).
+    pub fn layers(&self) -> &[BoxShadowLayer] {
+        match self {
+            BoxShadowValue::One(layer) => std::slice::from_ref(layer),
+            BoxShadowValue::Many(layers) => layers,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -906,6 +932,25 @@ fn decode<T: serde::de::DeserializeOwned>(
             reject(problems, property, value, error.to_string());
             None
         }
+    }
+}
+
+fn decode_box_shadow_layer(
+    property: &str,
+    value: &serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<BoxShadowLayer> {
+    let layer = decode::<BoxShadowLayer>(property, value, problems)?;
+    if crate::color::parse_color_rgba(&layer.color).is_some() {
+        Some(layer)
+    } else {
+        reject(
+            problems,
+            format!("{property}.color"),
+            &serde_json::Value::String(layer.color.clone()),
+            "unsupported color",
+        );
+        None
     }
 }
 
@@ -2580,17 +2625,28 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         );
         if key == "boxShadow" {
             let property = property!("boxShadow");
-            if let Some(shadow) = decode::<BoxShadowValue>(&property, value, &mut parsed.problems) {
-                if crate::color::parse_color_rgba(&shadow.color).is_some() {
-                    parsed.style.box_shadow = Some(shadow);
-                } else {
-                    reject(
-                        &mut parsed.problems,
-                        format!("{property}.color"),
-                        &serde_json::Value::String(shadow.color),
-                        "unsupported color",
-                    );
+            // CSS drops an invalid `box-shadow` declaration wholesale: if any
+            // layer in the list fails to decode, the whole value is rejected
+            // rather than keeping the layers that did parse.
+            if let Some(items) = value.as_array() {
+                let mut layers = Vec::with_capacity(items.len());
+                let mut all_valid = true;
+                for (index, item) in items.iter().enumerate() {
+                    let item_property = format!("{property}[{index}]");
+                    match decode_box_shadow_layer(&item_property, item, &mut parsed.problems) {
+                        Some(layer) => layers.push(layer),
+                        None => all_valid = false,
+                    }
                 }
+                if all_valid {
+                    // `[]` is a valid, present value: CSS `none`. It clears an
+                    // inherited base shadow when authored on a state override.
+                    parsed.style.box_shadow = Some(BoxShadowValue::Many(layers));
+                }
+            } else if let Some(layer) =
+                decode_box_shadow_layer(&property, value, &mut parsed.problems)
+            {
+                parsed.style.box_shadow = Some(BoxShadowValue::One(layer));
             }
             continue;
         }
@@ -5015,5 +5071,104 @@ mod tests {
         assert!(reason.contains("style"), "{reason}");
         assert_eq!(parsed.style.border_style.as_deref(), Some("solid"));
         assert_eq!(parsed.style.border_top_width, None);
+    }
+
+    #[test]
+    fn box_shadow_accepts_a_single_object_and_round_trips_as_an_object() {
+        let parsed = parse_style_value(&json!({
+            "boxShadow": {
+                "offsetX": 0.0,
+                "offsetY": 4.0,
+                "blurRadius": 12.0,
+                "spreadRadius": 0.0,
+                "color": "#00000033",
+            },
+        }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert!(matches!(parsed.style.box_shadow, Some(BoxShadowValue::One(_))));
+
+        let round_tripped = serde_json::to_value(&parsed.style).unwrap();
+        assert!(round_tripped["boxShadow"].is_object());
+        assert!(round_tripped["boxShadow"].get("inset").is_none());
+    }
+
+    #[test]
+    fn box_shadow_accepts_an_array_and_round_trips_as_an_array() {
+        let parsed = parse_style_value(&json!({
+            "boxShadow": [
+                { "offsetX": 0.0, "offsetY": 2.0, "blurRadius": 0.0, "spreadRadius": 0.0, "color": "#ff0000" },
+                {
+                    "offsetX": 0.0,
+                    "offsetY": 0.0,
+                    "blurRadius": 0.0,
+                    "spreadRadius": 2.0,
+                    "color": "#0000ff",
+                    "inset": true,
+                },
+            ],
+        }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        let Some(BoxShadowValue::Many(layers)) = &parsed.style.box_shadow else {
+            panic!("expected an array of layers, got {:?}", parsed.style.box_shadow);
+        };
+        assert_eq!(layers.len(), 2);
+        assert!(!layers[0].inset);
+        assert!(layers[1].inset);
+
+        let round_tripped = serde_json::to_value(&parsed.style).unwrap();
+        let shadow = round_tripped["boxShadow"].as_array().expect("array shape");
+        assert_eq!(shadow.len(), 2);
+        assert!(shadow[0].get("inset").is_none(), "inset omitted when false");
+        assert_eq!(shadow[1]["inset"], true);
+    }
+
+    #[test]
+    fn box_shadow_empty_array_is_a_present_value_that_clears() {
+        let parsed = parse_style_value(&json!({ "boxShadow": [] }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert!(matches!(
+            parsed.style.box_shadow,
+            Some(BoxShadowValue::Many(ref layers)) if layers.is_empty()
+        ));
+    }
+
+    #[test]
+    fn box_shadow_rejects_the_whole_array_when_one_layer_is_invalid() {
+        let parsed = parse_style_value(&json!({
+            "boxShadow": [
+                { "offsetX": 0.0, "offsetY": 2.0, "blurRadius": 0.0, "spreadRadius": 0.0, "color": "#ff0000" },
+                { "offsetX": 0.0, "offsetY": 2.0, "blurRadius": 0.0, "spreadRadius": 0.0, "color": "not-a-color" },
+            ],
+        }));
+        assert_eq!(parsed.style.box_shadow, None, "an invalid layer rejects the whole list");
+        assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+        assert_eq!(parsed.problems[0].property, "boxShadow[1].color");
+    }
+
+    #[test]
+    fn box_shadow_rejects_unknown_fields_in_a_layer() {
+        let parsed = parse_style_value(&json!({
+            "boxShadow": {
+                "offsetX": 0.0,
+                "offsetY": 4.0,
+                "blurRadius": 12.0,
+                "spreadRadius": 0.0,
+                "color": "#00000033",
+                "unknownField": true,
+            },
+        }));
+        assert_eq!(parsed.style.box_shadow, None);
+        assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+        assert_eq!(parsed.problems[0].property, "boxShadow");
+    }
+
+    #[test]
+    fn box_shadow_indexes_the_invalid_layer_in_a_single_object_path() {
+        let parsed = parse_style_value(&json!({
+            "boxShadow": { "offsetX": 0.0, "offsetY": 4.0, "blurRadius": 12.0, "spreadRadius": 0.0, "color": "nope" },
+        }));
+        assert_eq!(parsed.style.box_shadow, None);
+        assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+        assert_eq!(parsed.problems[0].property, "boxShadow.color");
     }
 }
