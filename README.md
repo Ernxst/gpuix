@@ -2830,6 +2830,20 @@ reconstruction from React props.
 See [the platform accessibility smoke guide](./docs/accessibility-smoke.md) for
 the manual OS and screen-reader checks that snapshots cannot prove.
 
+## Dialogs
+
+Import `showOpenFilePicker`, `showDirectoryPicker`, and `showSaveFilePicker`
+from `@gpuix/react/dialogs` to open GPUI's native path prompts. They return
+absolute paths rather than browser `FileSystemHandle` objects; cancelling
+rejects with an error whose `name` is `AbortError`. The option names mirror the
+browser API, including `types` and `startIn`, but native GPUI does not enforce
+file-type filters.
+
+The test renderer scripts one answer at a time with
+`renderer.setNextPickerResult(string[] | string | null)`. A `null` answer
+rejects with `AbortError`, and `renderer.pickerRequests` records each dialog's
+kind and options.
+
 ## Headless controls
 
 The built-in controls are **unstyled primitives**, not a fixed component

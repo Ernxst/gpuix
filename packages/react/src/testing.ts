@@ -15,7 +15,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 import React, { act as reactAct, createElement, createRef, type ReactNode } from "react"
-import type { EventPayload, MenuSpec } from "@gpuix/native"
+import type { EventPayload, MenuSpec, PromptForPathsOptions } from "@gpuix/native"
 import {
   getDefaultNormalizer,
   matches as matchesMatcher,
@@ -714,6 +714,20 @@ export function recordCanvasCommands(
 
 // ── TestRenderer ─────────────────────────────────────────────────────
 
+export type PickerRequest = {
+  kind: "open" | "directory" | "save"
+  options: object
+}
+
+function pickerAbortError(): Error {
+  if (typeof globalThis.DOMException === "function") {
+    return new globalThis.DOMException("The user aborted a request.", "AbortError")
+  }
+  const error = new Error("The user aborted a request.")
+  error.name = "AbortError"
+  return error
+}
+
 export class TestRenderer implements NativeRenderer {
   commitCount = 0
   private disposed = false
@@ -727,6 +741,12 @@ export class TestRenderer implements NativeRenderer {
    *  platform (`current_platform(false)`, test_renderer.rs) would otherwise
    *  reach through a native clipboard call. */
   private clipboardText: string | null = null
+  private pickerResults: Array<string[] | string | null> = []
+  private pickerRequestLog: PickerRequest[] = []
+
+  get pickerRequests(): ReadonlyArray<PickerRequest> {
+    return this.pickerRequestLog
+  }
 
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
@@ -798,6 +818,41 @@ export class TestRenderer implements NativeRenderer {
 
   setMenus(menus: MenuSpec[]): void {
     this.native.setMenus(menus)
+  }
+
+  /** Script the next native picker answer for this renderer. */
+  setNextPickerResult(result: string[] | string | null): void {
+    this.pickerResults.push(result)
+  }
+
+  private takePickerResult(): string[] | string | null {
+    if (this.pickerResults.length === 0) {
+      throw new Error("No picker result scripted; call setNextPickerResult() first")
+    }
+    return this.pickerResults.shift()!
+  }
+
+  promptForPaths(options: PromptForPathsOptions): Promise<string[] | null> {
+    this.pickerRequestLog.push({
+      kind: options.directories ? "directory" : "open",
+      options: { ...options },
+    })
+    const result = this.takePickerResult()
+    if (result === null) return Promise.reject(pickerAbortError())
+    return Promise.resolve(typeof result === "string" ? [result] : result)
+  }
+
+  promptForNewPath(directory: string, suggestedName?: string): Promise<string | null> {
+    this.pickerRequestLog.push({
+      kind: "save",
+      options: {
+        startIn: directory,
+        ...(suggestedName === undefined ? {} : { suggestedName }),
+      },
+    })
+    const result = this.takePickerResult()
+    if (result === null) return Promise.reject(pickerAbortError())
+    return Promise.resolve(typeof result === "string" ? result : (result[0] ?? null))
   }
 
   setApplicationEventHandler(handler: ((event: EventPayload) => void) | null): void {

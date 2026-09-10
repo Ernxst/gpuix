@@ -86,6 +86,16 @@ export declare class GpuixRenderer {
    * Acquires the tree mutex ONCE for the entire batch.
    */
   applyBatch(json: string): Array<number>
+  /**
+   * Open the platform's native path picker and resolve with selected paths.
+   * `None` means that the user cancelled the prompt.
+   */
+  promptForPaths(options: PromptForPathsOptions): Promise<Array<string> | undefined | null>
+  /**
+   * Open the platform's native save picker and resolve with the selected path.
+   * `None` means that the user cancelled the prompt.
+   */
+  promptForNewPath(directory: string, suggestedName?: string | undefined | null): Promise<string | undefined | null>
   /** Replace the application menu bar. Pass an empty array to remove it. */
   setMenus(menus: Array<MenuSpec>): void
   /** Dispatch a configured menu action through the production GPUI application. */
@@ -974,6 +984,13 @@ export interface MenuSpec {
   name: string
   items: Array<MenuItemSpec>
   disabled?: boolean
+}
+
+export interface PromptForPathsOptions {
+  files: boolean
+  directories: boolean
+  multiple: boolean
+  prompt?: string
 }
 
 /**

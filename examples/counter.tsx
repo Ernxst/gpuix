@@ -8,11 +8,13 @@
 
 import React, { useState } from 'react'
 import { clipboard, render } from '@gpuix/react'
+import { showOpenFilePicker } from '@gpuix/react/dialogs'
 
 function Counter() {
   const [count, setCount] = useState(0)
   const [hovered, setHovered] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [pickedPath, setPickedPath] = useState('No file picked yet')
 
   return (
     <div
@@ -124,6 +126,26 @@ function Counter() {
           <div style={{ color: '#bac2de', fontSize: 14 }}>{copied ? 'Copied!' : 'Copy'}</div>
         </div>
       </div>
+
+      <div
+        style={{
+          padding: 12,
+          paddingLeft: 20,
+          paddingRight: 20,
+          backgroundColor: '#89b4fa',
+          borderRadius: 8,
+          cursor: 'pointer',
+        }}
+        onClick={() => {
+          void showOpenFilePicker()
+            .then((paths) => setPickedPath(paths.join(', ')))
+            .catch((error: unknown) => setPickedPath(String(error)))
+        }}
+      >
+        <div style={{ color: '#1e1e2e', fontWeight: 'bold' }}>Pick a file…</div>
+      </div>
+
+      <div style={{ color: '#bac2de', fontSize: 12 }}>{pickedPath}</div>
     </div>
   )
 }

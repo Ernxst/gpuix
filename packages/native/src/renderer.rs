@@ -24,6 +24,10 @@ use gpui::AppContext as _;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use napi::bindgen_prelude::*;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+use napi::bindgen_prelude::PromiseRaw;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+use napi::{JsDeferred, JsValue};
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use napi_derive::napi;
@@ -33,6 +37,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash as _, Hasher as _};
+use std::path::PathBuf;
 #[cfg(any(target_os = "macos", target_family = "wasm"))]
 use std::rc::Rc;
 #[cfg(all(target_os = "macos", feature = "test-support"))]
@@ -1360,6 +1365,16 @@ enum ClockControl {
     Resume,
 }
 
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[derive(Clone, Debug)]
+#[napi(object)]
+pub struct PromptForPathsOptions {
+    pub files: bool,
+    pub directories: bool,
+    pub multiple: bool,
+    pub prompt: Option<String>,
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum UiCommand {
     Invalidate,
@@ -1461,6 +1476,15 @@ enum UiCommand {
     },
     GetActiveElement {
         response: SyncSender<Option<u64>>,
+    },
+    PromptForPaths {
+        options: PromptForPathsOptions,
+        deferred: PickerDeferredGuard,
+    },
+    PromptForNewPath {
+        directory: PathBuf,
+        suggested_name: Option<String>,
+        deferred: PickerPathGuard,
     },
     SetPointerCapture {
         id: u64,
@@ -1817,6 +1841,39 @@ async fn run_ui_commands(
                     response.send(view.active_element_id(window)).ok();
                 })
             }
+            UiCommand::PromptForPaths { options, deferred } => {
+                window.update(cx, move |_view, _window, cx| {
+                    let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+                        files: options.files,
+                        directories: options.directories,
+                        multiple: options.multiple,
+                        prompt: options.prompt.map(Into::into),
+                    });
+                    cx.spawn(async move |_view, _cx| {
+                        let result = receiver
+                            .await
+                            .map_err(|error| anyhow::anyhow!(error))
+                            .and_then(|result| result);
+                        settle_picker(deferred, result);
+                    })
+                    .detach();
+                })
+            }
+            UiCommand::PromptForNewPath {
+                directory,
+                suggested_name,
+                deferred,
+            } => window.update(cx, move |_view, _window, cx| {
+                let receiver = cx.prompt_for_new_path(&directory, suggested_name.as_deref());
+                cx.spawn(async move |_view, _cx| {
+                    let result = receiver
+                        .await
+                        .map_err(|error| anyhow::anyhow!(error))
+                        .and_then(|result| result);
+                    settle_new_path(deferred, result);
+                })
+                .detach();
+            }),
             UiCommand::SetPointerCapture { id, response } => {
                 let result = window.update(cx, move |view, window, _cx| {
                     view.set_pointer_capture(id, window)
@@ -2374,6 +2431,107 @@ pub(crate) type AnimationFrameCallback =
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub(crate) type FrameTimestampOrigin = Arc<Mutex<Option<web_time::Instant>>>;
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+type PickerDeferred =
+    JsDeferred<Option<Vec<String>>, Box<dyn FnOnce(Env) -> Result<Option<Vec<String>>> + Send>>;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+type PickerPathDeferred =
+    JsDeferred<Option<String>, Box<dyn FnOnce(Env) -> Result<Option<String>> + Send>>;
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+const PICKER_CLOSED_MESSAGE: &str = "The picker was closed before it answered";
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+struct DeferredGuard<D> {
+    deferred: Option<D>,
+    reject: fn(D, Error),
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+impl<D> DeferredGuard<D> {
+    fn new(deferred: D, reject: fn(D, Error)) -> Self {
+        Self {
+            deferred: Some(deferred),
+            reject,
+        }
+    }
+
+    fn take(mut self) -> D {
+        self.deferred
+            .take()
+            .expect("picker deferred guard already disarmed")
+    }
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+impl<D> Drop for DeferredGuard<D> {
+    fn drop(&mut self) {
+        if let Some(deferred) = self.deferred.take() {
+            (self.reject)(deferred, Error::from_reason(PICKER_CLOSED_MESSAGE));
+        }
+    }
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+type PickerDeferredGuard = DeferredGuard<PickerDeferred>;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+type PickerPathGuard = DeferredGuard<PickerPathDeferred>;
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn reject_picker_deferred(deferred: PickerDeferred, error: Error) {
+    deferred.reject(error);
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn reject_picker_path_deferred(deferred: PickerPathDeferred, error: Error) {
+    deferred.reject(error);
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn settle_picker(guard: PickerDeferredGuard, result: anyhow::Result<Option<Vec<PathBuf>>>) {
+    let deferred = guard.take();
+    match result {
+        Ok(paths) => {
+            let paths = paths
+                .map(|paths| {
+                    paths
+                        .into_iter()
+                        .map(|path| {
+                            path.into_os_string().into_string().map_err(|_| {
+                                anyhow::anyhow!("The file picker returned a non-UTF-8 path")
+                            })
+                        })
+                        .collect::<anyhow::Result<Vec<_>>>()
+                })
+                .transpose();
+            match paths {
+                Ok(paths) => deferred.resolve(Box::new(move |_| Ok(paths))),
+                Err(error) => deferred.reject(Error::from_reason(error.to_string())),
+            }
+        }
+        Err(error) => deferred.reject(Error::from_reason(error.to_string())),
+    }
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn settle_new_path(guard: PickerPathGuard, result: anyhow::Result<Option<PathBuf>>) {
+    let deferred = guard.take();
+    match result {
+        Ok(path) => match path
+            .map(|path| {
+                path.into_os_string()
+                    .into_string()
+                    .map_err(|_| anyhow::anyhow!("The file picker returned a non-UTF-8 path"))
+            })
+            .transpose()
+        {
+            Ok(path) => deferred.resolve(Box::new(move |_| Ok(path))),
+            Err(error) => deferred.reject(Error::from_reason(error.to_string())),
+        },
+        Err(error) => deferred.reject(Error::from_reason(error.to_string())),
+    }
+}
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub(crate) fn animation_frame_origin(
@@ -3316,6 +3474,112 @@ impl GpuixRenderer {
     }
 
     // ── Frame loop ───────────────────────────────────────────────────
+
+    /// Open the platform's native path picker and resolve with selected paths.
+    /// `None` means that the user cancelled the prompt.
+    #[napi]
+    pub fn prompt_for_paths(
+        &self,
+        env: Env,
+        options: PromptForPathsOptions,
+    ) -> Result<PromiseRaw<'static, Option<Vec<String>>>> {
+        let (deferred, promise) = env.create_deferred::<Option<Vec<String>>, _>()?;
+        let deferred = PickerDeferredGuard::new(deferred, reject_picker_deferred);
+        // N-API keeps the promise alive independently of this call's Env
+        // wrapper. The returned JS value is valid for the lifetime of the
+        // addon, as with other N-API values returned from an Env argument.
+        let promise = PromiseRaw::new(env.raw(), promise.raw());
+
+        #[cfg(target_os = "macos")]
+        {
+            update_window(move |_view, _window, cx| {
+                let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+                    files: options.files,
+                    directories: options.directories,
+                    multiple: options.multiple,
+                    prompt: options.prompt.map(Into::into),
+                });
+                cx.spawn(async move |_view, _cx| {
+                    let result = receiver
+                        .await
+                        .map_err(|error| anyhow::anyhow!(error))
+                        .and_then(|result| result);
+                    settle_picker(deferred, result);
+                })
+                .detach();
+            })?;
+            return Ok(promise);
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            self.send_ui_command(UiCommand::PromptForPaths { options, deferred })?;
+            return Ok(promise);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = deferred;
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    /// Open the platform's native save picker and resolve with the selected path.
+    /// `None` means that the user cancelled the prompt.
+    #[napi]
+    pub fn prompt_for_new_path(
+        &self,
+        env: Env,
+        directory: String,
+        suggested_name: Option<String>,
+    ) -> Result<PromiseRaw<'static, Option<String>>> {
+        let (deferred, promise) = env.create_deferred::<Option<String>, _>()?;
+        let deferred = PickerPathGuard::new(deferred, reject_picker_path_deferred);
+        let promise = PromiseRaw::new(env.raw(), promise.raw());
+        let directory = PathBuf::from(directory);
+
+        #[cfg(target_os = "macos")]
+        {
+            update_window(move |_view, _window, cx| {
+                let receiver = cx.prompt_for_new_path(&directory, suggested_name.as_deref());
+                cx.spawn(async move |_view, _cx| {
+                    let result = receiver
+                        .await
+                        .map_err(|error| anyhow::anyhow!(error))
+                        .and_then(|result| result);
+                    settle_new_path(deferred, result);
+                })
+                .detach();
+            })?;
+            return Ok(promise);
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            self.send_ui_command(UiCommand::PromptForNewPath {
+                directory,
+                suggested_name,
+                deferred,
+            })?;
+            return Ok(promise);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = deferred;
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
 
     /// Replace the application menu bar. Pass an empty array to remove it.
     #[napi]
