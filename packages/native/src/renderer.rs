@@ -7404,28 +7404,30 @@ impl GpuixView {
         id: u64,
         window: &gpui::Window,
     ) -> Option<ElementInteractionState> {
-        if !self.tree.lock().unwrap().elements.contains_key(&id) {
-            return None;
-        }
+        let (tracks_hover, tracks_active) = {
+            let tree = self.tree.lock().unwrap();
+            let element = tree.elements.get(&id)?;
+            let style = element.style.as_deref();
+            (tracks_hover(style), tracks_active(style))
+        };
 
         let focused = self
             .focus_handles
             .get(&id)
             .is_some_and(|handle| handle.is_focused(window));
-        let hovered = match self.interactive_style_states.get(&id) {
-            Some(state) => state.hovered,
-            None => crate::automation::get_bounds(id).is_some_and(|bounds| {
+        let state = self.interactive_style_states.get(&id);
+        let hovered = if tracks_hover {
+            state.is_some_and(|state| state.hovered)
+        } else {
+            crate::automation::get_bounds(id).is_some_and(|bounds| {
                 let (mouse_x, mouse_y) = point_to_xy(window.mouse_position());
                 mouse_x >= bounds.x
                     && mouse_x <= bounds.x + bounds.width
                     && mouse_y >= bounds.y
                     && mouse_y <= bounds.y + bounds.height
-            }),
+            })
         };
-        let active = self
-            .interactive_style_states
-            .get(&id)
-            .is_some_and(|state| state.active);
+        let active = tracks_active && state.is_some_and(|state| state.active);
 
         Some(ElementInteractionState {
             focused,
@@ -11394,6 +11396,14 @@ fn overflow_scrolls(value: &str) -> bool {
     matches!(value, "scroll" | "auto")
 }
 
+fn tracks_hover(style: Option<&StyleDesc>) -> bool {
+    style.is_some_and(|style| style.hover.is_some() || style.hover_group.is_some())
+}
+
+fn tracks_active(style: Option<&StyleDesc>) -> bool {
+    style.is_some_and(|style| style.active.is_some())
+}
+
 fn is_overflow_scroller(element: &crate::retained_tree::RetainedElement) -> bool {
     element.style.as_deref().is_some_and(|style| {
         [
@@ -12013,9 +12023,8 @@ pub(crate) fn build_host_container(
     // Host ids are already unique per renderer. Keeping them as integers avoids
     // allocating a formatted name for every `<div>` and `<text>` on every frame.
     let mut el = gpui::div().id(gpui::ElementId::Integer(element.id));
-    let tracks_hover =
-        style.is_some_and(|style| style.hover.is_some() || style.hover_group.is_some());
-    let tracks_active = style.is_some_and(|style| style.active.is_some());
+    let tracks_hover = tracks_hover(style);
+    let tracks_active = tracks_active(style);
     let tracks_mouse_hover = tracks_mouse_hover_events(element, ctx.tree);
 
     if let Some(style) = style {

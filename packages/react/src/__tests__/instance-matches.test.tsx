@@ -129,6 +129,59 @@ describeNative("PublicInstance.matches", () => {
     expect(target.matches(":active")).toBe(false)
   })
 
+  it("uses painted bounds for hover when only active is tracked", () => {
+    const targetRef = React.createRef<PublicInstance>()
+
+    testRoot.render(
+      <div style={{ width: 400, height: 120, padding: 20 }}>
+        <div
+          ref={targetRef}
+          style={{ width: 160, height: 40, active: { opacity: 0.5 } }}
+        />
+      </div>,
+    )
+
+    const target = targetRef.current!
+    const bounds = testRoot.renderer.getElementBounds(target.id)!
+    const x = bounds.x + bounds.width / 2
+    const y = bounds.y + bounds.height / 2
+
+    testRoot.renderer.nativeSimulateMouseMove(x, y)
+    testRoot.renderer.nativeSimulateMouseDown(x, y)
+    testRoot.renderer.nativeSimulateMouseUp(x, y)
+
+    expect(target.matches(":hover")).toBe(true)
+  })
+
+  it("clears active when the active style is removed during a press", () => {
+    const targetRef = React.createRef<PublicInstance>()
+
+    testRoot.render(
+      <div style={{ width: 400, height: 120, padding: 20 }}>
+        <div
+          ref={targetRef}
+          style={{ width: 160, height: 40, active: { opacity: 0.5 } }}
+        />
+      </div>,
+    )
+
+    const target = targetRef.current!
+    const bounds = testRoot.renderer.getElementBounds(target.id)!
+    const x = bounds.x + bounds.width / 2
+    const y = bounds.y + bounds.height / 2
+
+    testRoot.renderer.nativeSimulateMouseDown(x, y)
+    expect(target.matches(":active")).toBe(true)
+
+    testRoot.render(
+      <div style={{ width: 400, height: 120, padding: 20 }}>
+        <div ref={targetRef} style={{ width: 160, height: 40 }} />
+      </div>,
+    )
+
+    expect(targetRef.current!.matches(":active")).toBe(false)
+  })
+
   it("rejects selectors outside the supported state pseudo-classes", () => {
     const targetRef = React.createRef<PublicInstance>()
     testRoot.render(<div ref={targetRef} style={{ width: 100, height: 40 }} />)
