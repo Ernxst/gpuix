@@ -63,11 +63,12 @@ describe("@gpuix/react/globals", () => {
   })
 
   it("does not install browser automation, and the four-global invariant still holds, after a mount", () => {
-    // "gpuix" is the literal key `installBrowserAutomation` writes
-    // (`BROWSER_AUTOMATION_KEY` in reconciler/renderer.ts); it must stay
-    // absent even though `window` is now defined, or a desktop mount would
-    // stand up the production automation surface as an unrequested fifth
-    // global.
+    // `createTestRoot`/`render()` never installs browser automation on its
+    // own path, so this only proves the marker it would read stays honest:
+    // `document` is still absent after a mount (the check at
+    // reconciler/renderer.ts:736), so `globalThis.gpuix` — the literal key
+    // `installBrowserAutomation` writes, `BROWSER_AUTOMATION_KEY` in
+    // reconciler/renderer.ts — is not defined.
     root = createTestRoot()
     root.render(<text>no automation</text>)
     root.renderer.advanceAsyncClock(FRAME_MS)
