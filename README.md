@@ -3728,19 +3728,24 @@ Limited relative-color forms can derive a new color from a base value:
 />
 ```
 
-`boxShadow` accepts one structured shadow. Its fields are `offsetX`, `offsetY`,
-`blurRadius`, `spreadRadius`, and `color`:
+`boxShadow` accepts one structured shadow or an array of them, matching CSS
+`box-shadow`'s comma-separated layer list. Each layer's fields are `offsetX`,
+`offsetY`, `blurRadius`, `spreadRadius`, `color`, and an optional `inset`
+(defaults to a drop shadow). The first layer paints on top, matching CSS.
+`inset` shadows paint inside the padding box (the border box inset by the
+border widths) and are clipped to it, so a wide border hides the part of the
+shadow that would otherwise fall underneath it. An empty array (`[]`) is a
+present value meaning no shadow, useful for clearing an inherited shadow from
+a state override such as `hover`:
 
 ```tsx
 <div
   style={{
-    boxShadow: {
-      offsetX: 0,
-      offsetY: 4,
-      blurRadius: 12,
-      spreadRadius: 0,
-      color: '#00000033',
-    },
+    boxShadow: [
+      { offsetX: 0, offsetY: 1, blurRadius: 2, spreadRadius: 0, color: '#0000001a' },
+      { offsetX: 0, offsetY: 4, blurRadius: 12, spreadRadius: 0, color: '#00000033' },
+      { offsetX: 0, offsetY: 0, blurRadius: 0, spreadRadius: 1, color: '#00000014', inset: true },
+    ],
   }}
 />
 ```

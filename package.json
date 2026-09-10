@@ -14,6 +14,7 @@
     "canvas:wpt": "cd packages/react && bun run canvas:wpt",
     "canvas:goldens": "bun scripts/canvas-goldens.ts",
     "hatch:goldens": "bun scripts/hatch-goldens.ts",
+    "shadow:goldens": "bun scripts/shadow-goldens.ts",
     "example:counter": "cd examples && bun --hot counter.tsx",
     "dev": "bun scripts/dev.ts",
     "web": "bun scripts/web.ts",

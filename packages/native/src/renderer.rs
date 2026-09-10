@@ -12699,16 +12699,29 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         }
     }
     if let Some(ref shadow) = style.box_shadow {
-        if let Some(color) = crate::color::parse_color_rgba(&shadow.color) {
-            let shadow = gpui::BoxShadow::new(
-                gpui::px(shadow.offset_x as f32),
-                gpui::px(shadow.offset_y as f32),
-                color.into(),
-            )
-            .blur_radius(gpui::px(shadow.blur_radius.max(0.0) as f32))
-            .spread_radius(gpui::px(shadow.spread_radius as f32));
-            el = el.shadow(vec![shadow]);
-        }
+        // CSS paints the first layer on top; GPUI's scene draws later
+        // insertions over earlier ones at the same z-order, so the lowered
+        // list is reversed to match.
+        let shadows = shadow
+            .layers()
+            .iter()
+            .rev()
+            .filter_map(|layer| {
+                let color = crate::color::parse_color_rgba(&layer.color)?;
+                let mut shadow = gpui::BoxShadow::new(
+                    gpui::px(layer.offset_x as f32),
+                    gpui::px(layer.offset_y as f32),
+                    color.into(),
+                )
+                .blur_radius(gpui::px(layer.blur_radius.max(0.0) as f32))
+                .spread_radius(gpui::px(layer.spread_radius as f32));
+                if layer.inset {
+                    shadow = shadow.inset();
+                }
+                Some(shadow)
+            })
+            .collect::<Vec<_>>();
+        el = el.shadow(shadows);
     }
     if let Some(ref color) = style.outline_color {
         if let Some(color) = crate::color::parse_color_rgba(color) {

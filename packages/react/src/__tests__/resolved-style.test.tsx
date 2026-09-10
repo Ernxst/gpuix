@@ -114,6 +114,45 @@ describe("resolved test-renderer styles", () => {
     }
   })
 
+  it("clears a base boxShadow when hover authors an empty array", () => {
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div style={{ width: 400, height: 120, padding: 40, backgroundColor: "#111111" }}>
+          <div
+            data-testid="shadow-target"
+            style={{
+              width: 160,
+              height: 40,
+              backgroundColor: "#333333",
+              boxShadow: { offsetX: 0, offsetY: 4, blurRadius: 12, spreadRadius: 0, color: "#00000033" },
+              hover: { boxShadow: [] },
+            }}
+          />
+        </div>
+      )
+
+      const target = root.renderer.findByTestId("shadow-target")!
+      const [x, y, width, height] = root.renderer.getElementBounds(target.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        boxShadow: { offsetX: 0, offsetY: 4, blurRadius: 12, spreadRadius: 0, color: "#00000033" },
+      })
+
+      root.renderer.nativeSimulateMouseMove(centerX, centerY)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({ boxShadow: [] })
+
+      root.renderer.nativeSimulateMouseMove(300, 100, 0)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        boxShadow: { offsetX: 0, offsetY: 4, blurRadius: 12, spreadRadius: 0, color: "#00000033" },
+      })
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("resolves focus styles at read time", () => {
     const root = createTestRoot()
     try {

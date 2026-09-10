@@ -386,6 +386,8 @@ export interface BoxShadow {
   blurRadius: number
   spreadRadius: number
   color: GpuixColor
+  /** Paints inside the padding box instead of as a drop shadow, matching CSS `inset`. */
+  inset?: boolean
 }
 
 export interface LinearGradientStop {
@@ -581,7 +583,12 @@ export interface StyleDesc {
   borderTopRightRadius?: number
   borderBottomLeftRadius?: number
   borderBottomRightRadius?: number
-  boxShadow?: BoxShadow
+  /**
+   * A single layer or a CSS-style list of layers, painted first-layer-on-top.
+   * An empty array is a present value that clears an inherited base shadow,
+   * matching CSS `box-shadow: none`.
+   */
+  boxShadow?: BoxShadow | BoxShadow[]
   outlineColor?: GpuixColor
   outlineWidth?: number
   outlineOffset?: number
