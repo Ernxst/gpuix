@@ -7228,15 +7228,18 @@ impl GpuixView {
     /// it lets the registry retire its acceptance record.
     pub(crate) fn submit_external_drag(
         &mut self,
-        preferred_target: Option<u64>,
+        legacy_target: Option<u64>,
         dropped: &gpui::ExternalPaths,
         position: gpui::Point<gpui::Pixels>,
     ) {
         let callback = self.event_callback.clone();
-        let target = preferred_target.or(self.external_drag_target);
+        let target = self.external_drag_target;
         self.clear_external_drag();
         if let Some(target) = target {
             emit_file_drop(&callback, target, dropped, position);
+        }
+        if let Some(legacy_target) = legacy_target.filter(|legacy| Some(*legacy) != target) {
+            emit_file_drop(&callback, legacy_target, dropped, position);
         }
     }
 
@@ -11887,7 +11890,7 @@ fn tracks_external_drag_events(
     element: &crate::retained_tree::RetainedElement,
     tree: &RetainedTree,
 ) -> bool {
-    ["dragEnter", "dragOver", "dragLeave", "fileDrop"]
+    ["dragEnter", "dragOver", "dragLeave", "drop", "fileDrop"]
         .into_iter()
         .any(|event_type| tracks_pointer_event(element, tree, event_type))
 }
@@ -11912,7 +11915,7 @@ mod external_drag_tracking_tests {
     }
 
     #[test]
-    fn submit_target_prefers_the_nearest_direct_drop_host() {
+    fn submit_target_markers_distinguish_modern_and_legacy() {
         let mut tree = RetainedTree::new();
         tree.create_element(1, "div".to_string());
         tree.create_element(2, "div".to_string());
@@ -11923,15 +11926,33 @@ mod external_drag_tracking_tests {
             .unwrap()
             .events
             .insert("fileDrop".to_string());
+        tree.elements
+            .get_mut(&2)
+            .unwrap()
+            .events
+            .insert("drop".to_string());
 
-        assert_eq!(external_drag_submit_target(2, &tree), Some(1));
+        assert!(tracks_external_drag_events(&tree.elements[&2], &tree));
+        assert_eq!(external_drag_legacy_target(2, &tree), Some(1));
 
         tree.elements
             .get_mut(&2)
             .unwrap()
             .events
-            .insert("fileDrop".to_string());
-        assert_eq!(external_drag_submit_target(2, &tree), Some(2));
+            .remove("drop");
+        assert_eq!(external_drag_legacy_target(2, &tree), Some(1));
+
+        tree.elements
+            .get_mut(&1)
+            .unwrap()
+            .events
+            .remove("fileDrop");
+        tree.elements
+            .get_mut(&2)
+            .unwrap()
+            .events
+            .insert("drop".to_string());
+        assert_eq!(external_drag_legacy_target(2, &tree), None);
     }
 }
 
@@ -11953,12 +11974,12 @@ pub(crate) fn tracks_pointer_event(
     false
 }
 
-/// Find the nearest retained host that declared either modern `onDrop` or the
-/// legacy `onFileDrop`. Native GPUI invokes a drop listener on the deepest
-/// hitbox and then stops propagation, while JS intentionally keeps the raw
-/// `fileDrop` dispatch non-bubbling. Selecting this direct listener's host
-/// preserves both contracts when an inert descendant is hit.
-fn external_drag_submit_target(element_id: u64, tree: &RetainedTree) -> Option<u64> {
+/// Find the nearest retained host that declared the legacy `onFileDrop`.
+/// Native GPUI invokes a drop listener on the deepest hitbox and then stops
+/// propagation, while JS intentionally keeps the raw `fileDrop` dispatch
+/// non-bubbling. A second payload to this host preserves legacy targeting when
+/// an inert descendant is hit without duplicating the modern bubbling drop.
+fn external_drag_legacy_target(element_id: u64, tree: &RetainedTree) -> Option<u64> {
     let mut current = Some(element_id);
     while let Some(id) = current {
         let element = tree.elements.get(&id)?;
@@ -12045,23 +12066,15 @@ where
     }
 
     // GPUI invokes the deepest matching submit listener and then stops native
-    // propagation. Every tracked host still needs a submit hook so a drag with
-    // only enter/over/leave handlers retires native state, but choose the
-    // nearest direct drop host as the emitted fileDrop target. This preserves
-    // the non-bubbling legacy event while modern `drop` bubbles in JS.
-    if element.events.contains("fileDrop") {
-        let id = element.id;
+    // propagation. Every tracked host still needs one submit hook so a drag
+    // with only enter/over/leave handlers retires native state. The native
+    // active target remains the modern drop target; legacy targeting is a
+    // separate, optional payload selected from its nearest direct marker.
+    if tracks_external_drag {
+        let legacy_target = external_drag_legacy_target(element.id, tree);
         el = el.on_drop(cx.listener(
             move |view, dropped: &gpui::ExternalPaths, window, _cx| {
-                view.submit_external_drag(Some(id), dropped, window.mouse_position());
-            },
-        ));
-    } else if tracks_external_drag {
-        let id = element.id;
-        let submit_target = external_drag_submit_target(id, tree);
-        el = el.on_drop(cx.listener(
-            move |view, dropped: &gpui::ExternalPaths, window, _cx| {
-                view.submit_external_drag(submit_target, dropped, window.mouse_position());
+                view.submit_external_drag(legacy_target, dropped, window.mouse_position());
             },
         ));
     }

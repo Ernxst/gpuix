@@ -281,12 +281,48 @@ describeNative("DOM file drop events", () => {
     expect(drops).toEqual(["drop"])
   })
 
+  it("keeps modern bubbling separate from a legacy ancestor target", () => {
+    const received: string[] = []
+
+    testRoot.render(
+      <div
+        style={{
+          width: 400,
+          height: 400,
+          display: "flex",
+          flexDirection: "column",
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        onDropCapture={() => received.push("outer capture")}
+        onDrop={() => received.push("outer bubble")}
+        onFileDrop={() => received.push("outer legacy")}
+      >
+        <div
+          style={{ width: 100, height: 100 }}
+          onDrop={() => received.push("inner bubble")}
+        />
+      </div>,
+    )
+
+    testRoot.renderer.nativeSimulateFileDrop(40, 40, [
+      "/tmp/gpuix-drop-mixed-targets.txt",
+    ])
+
+    expect(received).toEqual([
+      "outer capture",
+      "inner bubble",
+      "outer bubble",
+      "outer legacy",
+    ])
+  })
+
   for (const [host, renderHost] of customDragHosts) {
     it(`delivers the complete external drag lifecycle on <${host}>`, () => {
       const received: string[] = []
 
       testRoot.render(renderHost(dragHandlers(received)))
-      testRoot.renderer.nativeSimulateFileDrop(50, 50, [
+      const y = host === "code" || host === "markdown" ? 20 : 50
+      testRoot.renderer.nativeSimulateFileDrop(50, y, [
         `/tmp/gpuix-${host}-drop.txt`,
       ])
 
@@ -300,7 +336,8 @@ describeNative("DOM file drop events", () => {
       const received: string[] = []
 
       testRoot.render(renderHost(dragHandlers(received)))
-      testRoot.renderer.nativeSimulateFileDragMove(50, 50, [
+      const y = host === "code" || host === "markdown" ? 20 : 50
+      testRoot.renderer.nativeSimulateFileDragMove(50, y, [
         `/tmp/gpuix-${host}-drag.txt`,
       ])
       testRoot.renderer.nativeSimulateFileDragExit()

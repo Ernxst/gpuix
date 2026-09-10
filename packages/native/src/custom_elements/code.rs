@@ -279,6 +279,7 @@ impl CustomElement for CodeElement {
             "dragEnter",
             "dragOver",
             "dragLeave",
+            "drop",
             "fileDrop",
         ]
     }

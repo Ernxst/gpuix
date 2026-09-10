@@ -577,6 +577,7 @@ impl CustomElement for TextEditorElement {
             "dragEnter",
             "dragOver",
             "dragLeave",
+            "drop",
             "fileDrop",
         ]
     }
