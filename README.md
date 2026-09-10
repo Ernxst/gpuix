@@ -3997,24 +3997,19 @@ tracked element has keyboard-modality focus, matching CSS `:focus-visible`.
 
 ### Shared web and native style helpers
 
-If an application maps only the keys shared by React's `CSSProperties` and
-`StyleDesc`, it deliberately excludes GPUIX-only state keys such as
-`focusVisible`. This preserves a useful guarantee: every property offered by
-the helper has a value type accepted by both renderers. Prefer a state style
-that reduces to shared declarations when possible. For example, a focus ring
-using `outlineColor`, `outlineWidth`, and `outlineOffset` needs no
-renderer-specific escape because those properties exist in both systems.
+`@gpuix/react` exports `SharedStyle`, a mapped type over the keys React's
+`CSSProperties` and `StyleDesc` both accept. It deliberately excludes
+GPUIX-only state keys such as `focusVisible`, which preserves a useful
+guarantee: every property offered by a `SharedStyle`-typed helper has a value
+type accepted by both renderers. Prefer a state style that reduces to shared
+declarations when possible. For example, a focus ring using `outlineColor`,
+`outlineWidth`, and `outlineOffset` needs no renderer-specific escape because
+those properties exist in both systems.
 
 When a native state key is needed, choose one of these escapes:
 
 ```ts
-import type { CSSProperties } from 'react'
-import type { NativeStateStyleKey, StyleDesc } from '@gpuix/react'
-
-type SharedStyle = {
-  [Property in keyof CSSProperties & keyof StyleDesc]?: Exclude<CSSProperties[Property], undefined> &
-    Exclude<StyleDesc[Property], undefined>
-}
+import type { NativeStateStyleKey, SharedStyle, StyleDesc } from '@gpuix/react'
 
 // A: retain the shared-key guarantee and add GPUIX's maintained state-style family.
 type WidenedShared = SharedStyle & Pick<StyleDesc, NativeStateStyleKey>
@@ -4912,13 +4907,13 @@ window's lifetime yourself.
 
 **Automatic cleanup, and where vitest enters.** `@gpuix/react/testing` never
 imports vitest: it also runs from plain scripts, other runners, and the
-automation harness. The `afterEach` that unmounts after each test lives in a
-separate entry point:
+automation harness. The `afterEach` that unmounts after each test, and the
+matcher pack's `expect.extend`, both live in a separate entry point:
 
-| Import | Cleanup |
-|---|---|
-| `@gpuix/react/testing/vitest` | `afterEach(cleanup)` is registered for you |
-| `@gpuix/react/testing` | Call the exported `cleanup()` from your own teardown |
+| Import | Cleanup | Matchers |
+|---|---|---|
+| `@gpuix/react/testing/vitest` | `afterEach(cleanup)` is registered for you | `expect.extend(gpuixMatchers)` is registered for you |
+| `@gpuix/react/testing` | Call the exported `cleanup()` from your own teardown | Call `expect.extend(gpuixMatchers)` yourself — see [Matchers](#matchers) |
 
 Both entries export the same API — `testing/vitest` re-exports all of
 `testing` — so the only difference is the registration. This is
@@ -4939,7 +4934,18 @@ for the next `render()`. It is safe to call when nothing is rendered.
 ### Matchers
 
 `@gpuix/react/testing/matchers` ships a jest-dom-shaped pack for `expect.extend`.
-Wire it once, in a setup file or at the top of a suite:
+Under Vitest, `@gpuix/react/testing/vitest` already wires it up — the same
+import that registers `cleanup()` also calls `expect.extend` and carries the
+`declare module` augmentation, so importing it once, in `setupFiles` or at the
+top of a file, is enough:
+
+```ts
+// vitest setup file, or the top of a test file
+import '@gpuix/react/testing/vitest'
+```
+
+Any other runner — or a suite that wants the matchers without the rest of
+`@gpuix/react/testing/vitest` — wires the pack in directly:
 
 ```ts
 import { expect } from 'vitest'
@@ -4951,6 +4957,9 @@ declare module 'vitest' {
   interface Matchers<T = any> extends GpuixMatchers<T> {}
 }
 ```
+
+`configureScreenshots` is a separate call either way; it is not part of what
+either wiring registers.
 
 | Matcher | Asserts |
 |---|---|

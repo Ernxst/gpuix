@@ -257,6 +257,7 @@ export type {
   ImageSource,
   InputPublicInstance,
   SelectionDirection,
+  SharedStyle,
   LinearGradient,
   LinearGradientStop,
   EdgeInsets,

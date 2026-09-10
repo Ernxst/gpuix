@@ -1,8 +1,10 @@
+import type { CSSProperties } from "react"
 import type {
   ImageSource,
   ImgProps,
   MotionTransition,
   Props,
+  SharedStyle,
   StyleDesc,
 } from "../types/host.js"
 
@@ -244,3 +246,29 @@ void invalidGrid
 void invalidGridFitContentMin
 void invalidGridFitContentMax
 void invalidImage
+
+// `SharedStyle` is exactly the mapped type consumers used to be told to write
+// by hand: mutually assignable in both directions.
+type HandWrittenSharedStyle = {
+  [Property in keyof CSSProperties & keyof StyleDesc]?: Exclude<
+    CSSProperties[Property],
+    undefined
+  > &
+    Exclude<StyleDesc[Property], undefined>
+}
+
+declare const exportedShared: SharedStyle
+declare const handWrittenShared: HandWrittenSharedStyle
+
+const sharedAssignsToHandWritten: HandWrittenSharedStyle = exportedShared
+const handWrittenAssignsToShared: SharedStyle = handWrittenShared
+
+void sharedAssignsToHandWritten
+void handWrittenAssignsToShared
+
+const invalidSharedStyle: SharedStyle = {
+  // @ts-expect-error `focusVisible` is native-only and excluded from the shared surface.
+  focusVisible: { opacity: 1 },
+}
+
+void invalidSharedStyle
