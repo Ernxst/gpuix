@@ -523,3 +523,39 @@ describe("intrinsic keyword probe cache (issue #310)", () => {
     }
   })
 })
+
+describe("intrinsic probe measures a transitioning descendant's current style (issue #461)", () => {
+  it("sizes a max-content ancestor to the descendant's current width, not its last transition frame", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    const view = (wide: boolean) => (
+      <div data-testid="ancestor" style={{ display: "flex", width: "max-content", alignItems: "flex-start" }}>
+        <div
+          data-testid="child"
+          style={{
+            width: wide ? 64 : 32,
+            height: 20,
+            opacity: wide ? 0.5 : 1,
+            transition: { properties: ["opacity"], durationMs: 1_000 },
+          }}
+        />
+      </div>
+    )
+    try {
+      root.render(view(false))
+      expect(boundsFor(root.renderer, "child").width).toBeCloseTo(32, 4)
+      expect(boundsFor(root.renderer, "ancestor").width).toBeCloseTo(32, 4)
+
+      root.render(view(true))
+      const childWidth = boundsFor(root.renderer, "child").width
+      expect(childWidth).toBeCloseTo(64, 4)
+      expect(boundsFor(root.renderer, "ancestor").width).toBeCloseTo(childWidth, 4)
+
+      root.renderer.advanceAsyncClock(2_000)
+      const settledChildWidth = boundsFor(root.renderer, "child").width
+      expect(settledChildWidth).toBeCloseTo(64, 4)
+      expect(boundsFor(root.renderer, "ancestor").width).toBeCloseTo(settledChildWidth, 4)
+    } finally {
+      root.unmount()
+    }
+  })
+})
