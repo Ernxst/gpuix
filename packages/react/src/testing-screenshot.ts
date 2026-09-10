@@ -269,9 +269,24 @@ function sanitize(input: string, keepPaths: boolean): string {
     .join("/")
 }
 
-/** Keeps a name inside the screenshot directory: no traversal, no odd characters. */
-function sanitizeArg(input: string): string {
-  return sanitize(path.relative("/", path.join("/", input)), true)
+/**
+ * Keeps a name inside the screenshot directory: no traversal, no odd
+ * characters.
+ *
+ * `arg` segments are always `/`-separated, the way vitest's own screenshot
+ * names are, regardless of host platform. On win32 a `\` in the name is
+ * therefore treated as that same separator — `path.join`/`path.relative`
+ * there would otherwise fold it into the path and then `sanitize` would
+ * silently strip it as a stray character, collapsing every directory into
+ * the leaf file (`toMatchScreenshot("dir/name")` writing `dirname.png`).
+ * Elsewhere `\` stays a literal character, as it always has.
+ *
+ * `platform` defaults to the real one and only exists so a test can exercise
+ * the win32 branch from any host.
+ */
+export function sanitizeArg(input: string, platform: NodeJS.Platform = process.platform): string {
+  const normalized = platform === "win32" ? input.replaceAll("\\", "/") : input
+  return sanitize(path.posix.relative("/", path.posix.join("/", normalized)), true)
 }
 
 function defaultResolveScreenshotPath({
