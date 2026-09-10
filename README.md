@@ -3489,7 +3489,21 @@ CSS-like styling via the `style` prop:
 testing, accessibility, and text collection. It is not transitioned. A hidden
 element and its descendants are not focusable, are skipped by Tab, and a
 focused element that becomes hidden blurs; `autoFocus` on a hidden element
-does not fire, as in the browser.
+does not fire, as in the browser. A `focus`, `focusVisible` or `hoverWithin`
+refinement may set `display: "none"`; the element then behaves as declared-hidden
+for building, hit testing, focus, Tab and blur. The effective display is resolved
+from the current interaction state, using the same resolution the next frame
+builds from, so programmatic focus, `autoFocus`, Tab order and blur see it
+immediately. A refinement's `display` value is resolved into the element's layout
+as part of that same per-frame resolution, so
+`hoverWithin: { display: "flex" }` over a hidden base reveals the element. An
+element whose own `focus` refinement hides it refuses focus: focusing it hides
+it and the same frame blurs it, so neither `focus` nor `blur` fires and the
+element stays visible.
+`hover` and `active` reject `display: "none"`
+with a diagnostic because hiding the element removes the hit-test box that
+triggers the state. `getAllText` and accessible-name flattening read the
+declared display only.
 
 `gridTemplateColumns` and `gridTemplateRows` accept a typed CSS Grid track list.
 Each entry is an object with a `type`: `px`, `percent`, `fr`, `auto`,
@@ -3835,7 +3849,9 @@ parent's `focus` or `focusVisible` style.
 
 Nesting is one level deep. A state style cannot contain `hover`, `hoverWithin`,
 `active`, `focus`, `focusVisible`, `transition`, or `hoverGroup`; the last two
-are declarations on the base style only.
+are declarations on the base style only. `hover` and `active` also reject
+`display: "none"`, because hiding the element removes the hit-test box that
+triggers the state.
 
 ### Keyboard activation
 

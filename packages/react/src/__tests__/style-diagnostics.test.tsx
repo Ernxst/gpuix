@@ -1091,4 +1091,44 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       ])
     )
   })
+
+  it("rejects display none in hover and active state styles", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+    const reason =
+      'display: "none" cannot be set by hover or active: hiding the element removes the hit-test box that triggers the state; use visibility: "hidden" or hoverWithin on a descendant'
+
+    testRoot.render(
+      <div>
+        <div
+          data-testid="hover-hidden"
+          style={{ hover: { display: "none", opacity: 0.5 } }}
+        />
+        <div data-testid="active-hidden" style={{ active: { display: "none" } }} />
+        <div
+          data-testid="allowed-state-display"
+          style={{ hoverWithin: { display: "none" }, hover: { display: "grid" } }}
+        />
+      </div>,
+    )
+
+    const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(2)
+    for (const [testId, property] of [
+      ["hover-hidden", "hover.display"],
+      ["active-hidden", "active.display"],
+    ] as const) {
+      const element = testRoot.renderer.findByTestId(testId)!
+      expect(diagnostics.find((diagnostic) => diagnostic.dataTestId === testId)).toMatchObject({
+        elementId: element.id,
+        elementType: "div",
+        dataTestId: testId,
+        property,
+        value: '"none"',
+        message: `[gpuix] Invalid style on <div data-testid="${testId}"> (element ${element.id}): property "${property}" rejected value "none": ${reason}`,
+      })
+    }
+    expect(diagnostics.find((diagnostic) => diagnostic.dataTestId === "allowed-state-display")).toBeUndefined()
+    expect(warn).toHaveBeenCalled()
+  })
 })

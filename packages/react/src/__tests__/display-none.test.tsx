@@ -310,3 +310,148 @@ describeNative('display: "none" and focus (issue #426)', () => {
     expect(testRoot.renderer.getActiveElement()).toBe(target.id)
   })
 })
+
+describeNative('state-refined display: "none" (issue #430)', () => {
+  let testRoot: TestRoot
+
+  beforeEach(() => {
+    testRoot = createTestRoot({ width: 400, height: 200 })
+  })
+
+  it("treats a hoverWithin-hidden subtree as hidden for focus and Tab", () => {
+    testRoot.render(
+      <div>
+        <div
+          data-testid="group"
+          style={{ hoverGroup: "g", width: 200, height: 100 }}
+        >
+          <div data-testid="wrapper" style={{ hoverWithin: { display: "none" } }}>
+            <input data-testid="target" />
+          </div>
+        </div>
+        <input data-testid="shown" />
+      </div>,
+    )
+
+    const group = testRoot.renderer.findByTestId("group")!
+    const target = testRoot.renderer.findByTestId("target")!
+    const shown = testRoot.renderer.findByTestId("shown")!
+    const [x, y, width, height] = testRoot.renderer.getElementBounds(group.id)!
+
+    // Focusing below activates the test window and resets its simulated pointer.
+    testRoot.renderer.nativeSimulateWindowActivation(true)
+    testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+    testRoot.renderer.flush()
+
+    testRoot.renderer.focusElement(target.id)
+    expect(testRoot.renderer.getActiveElement()).toBeNull()
+    const wrapper = testRoot.renderer.findByTestId("wrapper")!
+    expect(testRoot.renderer.getElementBounds(wrapper.id)).toEqual([0, 0, 0, 0])
+
+    testRoot.renderer.focusNext()
+    expect(testRoot.renderer.getActiveElement()).toBe(shown.id)
+
+    const window = testRoot.renderer.getWindowSize()
+    testRoot.renderer.nativeSimulateMouseMove(window.width - 1, window.height - 1)
+    testRoot.renderer.focusElement(target.id)
+    expect(testRoot.renderer.getActiveElement()).toBe(target.id)
+  })
+
+  it("lets hoverWithin reveal a base-hidden element and its focusable child", () => {
+    testRoot.render(
+      <div>
+        <div
+          data-testid="group"
+          style={{ hoverGroup: "g", width: 200, height: 100 }}
+        >
+          <div
+            data-testid="revealed"
+            style={{
+              display: "none",
+              hoverWithin: { display: "flex", width: 100, height: 20 },
+            }}
+          >
+            <input data-testid="target" />
+          </div>
+        </div>
+      </div>,
+    )
+
+    const group = testRoot.renderer.findByTestId("group")!
+    const revealed = testRoot.renderer.findByTestId("revealed")!
+    const target = testRoot.renderer.findByTestId("target")!
+    expect(testRoot.renderer.getElementBounds(revealed.id)).toEqual([0, 0, 0, 0])
+    const [x, y, width, height] = testRoot.renderer.getElementBounds(group.id)!
+
+    testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+    testRoot.renderer.flush()
+
+    const bounds = testRoot.renderer.getElementBounds(revealed.id)!
+    expect(bounds[2]).toBeGreaterThan(0)
+    expect(bounds[3]).toBeGreaterThan(0)
+    testRoot.renderer.focusElement(target.id)
+    expect(testRoot.renderer.getActiveElement()).toBe(target.id)
+  })
+
+  it("blurs a focused input when hoverWithin makes it hidden", () => {
+    const onBlur = vi.fn()
+    testRoot.render(
+      <div>
+        <div
+          data-testid="group"
+          style={{ hoverGroup: "g", width: 200, height: 100 }}
+        >
+          <div style={{ hoverWithin: { display: "none" } }}>
+            <input data-testid="target" onBlur={onBlur} />
+          </div>
+        </div>
+      </div>,
+    )
+
+    const group = testRoot.renderer.findByTestId("group")!
+    const target = testRoot.renderer.findByTestId("target")!
+    const [x, y, width, height] = testRoot.renderer.getElementBounds(group.id)!
+
+    testRoot.renderer.focusElement(target.id)
+    expect(testRoot.renderer.getActiveElement()).toBe(target.id)
+
+    testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+    testRoot.renderer.flush()
+    testRoot.renderer.dispatchNativeEvents()
+
+    expect(onBlur).toHaveBeenCalledTimes(1)
+    expect(testRoot.renderer.getActiveElement()).toBeNull()
+  })
+
+  it("refuses focus on an input whose focus style hides it, firing no events", () => {
+    const onFocus = vi.fn()
+    const onBlur = vi.fn()
+    testRoot.render(
+      <input
+        data-testid="target"
+        onFocus={onFocus}
+        onBlur={onBlur}
+        style={{ focus: { display: "none" } }}
+      />,
+    )
+
+    const target = testRoot.renderer.findByTestId("target")!
+
+    testRoot.renderer.focusElement(target.id)
+    testRoot.renderer.flush()
+    testRoot.renderer.dispatchNativeEvents()
+
+    // OBSERVED: focusing the element also resolves its `focus` refinement to
+    // display: none within the same frame, so GPUI's focus-path finalization
+    // nets the focus and blur to no change: neither event fires, the active
+    // element stays null, and the input remains visible (never actually
+    // hidden, since it never held focus long enough for the refinement to
+    // take effect).
+    expect(onFocus).not.toHaveBeenCalled()
+    expect(onBlur).not.toHaveBeenCalled()
+    expect(testRoot.renderer.getActiveElement()).toBeNull()
+    const bounds = testRoot.renderer.getElementBounds(target.id)!
+    expect(bounds[2]).toBeGreaterThan(0)
+    expect(bounds[3]).toBeGreaterThan(0)
+  })
+})
