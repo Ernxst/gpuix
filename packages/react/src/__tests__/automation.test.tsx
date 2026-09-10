@@ -173,11 +173,8 @@ describeNative("automation", () => {
 
     expect(renderer.capabilities()).toMatchObject({
       platform,
-      frameClock:
-        platform === "macos"
-          ? { kind: "timer", requiresTick: true, externalFrame: true }
-          : { kind: "timer", requiresTick: false, externalFrame: false },
-      window: { activation: true, activate: platform === "macos", resize: true, multiple: false },
+      frameClock: { kind: "timer", requiresTick: true, externalFrame: platform === "macos" },
+      window: { activation: true, activate: true, resize: true, multiple: false },
       images: { privateNetwork: true },
       automation: {
         click: true,
