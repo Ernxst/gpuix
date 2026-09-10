@@ -3511,6 +3511,17 @@ Each entry is an object with a `type`: `px`, `percent`, `fr`, `auto`,
 track uses a CSS number (`50` means `50%`). A `fit-content` track has the shape
 `{ type: "fit-content", limit: { type: "px", value: number } | { type: "percent", value: number } }`;
 `fit-content` is valid only as a whole track, not as a `minmax` bound.
+A `repeat` track has the shape `{ type: "repeat", count: number | "auto-fill" | "auto-fit", tracks: GridTrack[] }`.
+A numeric `count` repeats `tracks` that many times (1 through 64, and it cannot
+be nested inside another `repeat`); `"auto-fill"` and `"auto-fit"` instead
+repeat as many times as the container permits, matching CSS's `repeat(auto-fill, …)`
+and `repeat(auto-fit, …)` — `auto-fit` collapses empty repetitions to zero size,
+`auto-fill` keeps them. A template may contain at most one `auto-fill`/`auto-fit`
+repetition, and every track in the template — inside or outside that repetition —
+must include a fixed length or percentage; otherwise, matching CSS, the whole
+declaration is rejected as if the property were never set. Expanding a template's
+tracks (with each `auto-fill`/`auto-fit` repetition counted once, since its real
+repeat count is resolved from the container's size at layout time) must not exceed 64.
 `gridAutoFlow` accepts `"row"`, `"column"`, `"dense"` (short for `"row dense"`),
 `"row dense"`, or `"column dense"`, controlling how items are auto-placed into
 implicit tracks. `gridAutoRows` and `gridAutoColumns` size those implicit

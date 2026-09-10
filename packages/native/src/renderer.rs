@@ -51,8 +51,9 @@ use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::element_tree::EventPayload;
 use crate::retained_tree::{RetainedTree, StyleTable};
 use crate::style::{
-    parse_font_weight, GridLineValue, GridTrackFitContentLimit, GridTrackMaxValue,
-    GridTrackMinValue, GridTrackValue, StyleDesc, StyleProblem,
+    parse_font_weight, GridAutoRepeatKind, GridLineValue, GridRepeatCount,
+    GridTrackFitContentLimit, GridTrackMaxValue, GridTrackMinValue, GridTrackValue, StyleDesc,
+    StyleProblem,
 };
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection, TextTransform};
 use crate::theme::Theme;
@@ -12184,8 +12185,21 @@ fn to_gpui_grid_template(tracks: &[GridTrackValue]) -> gpui::GridTemplate {
     let tracks = tracks
         .iter()
         .map(|track| match track {
-            GridTrackValue::Repeat { count, tracks } => gpui::GridTemplateComponent::Repeat {
+            GridTrackValue::Repeat {
+                count: GridRepeatCount::Fixed(count),
+                tracks,
+            } => gpui::GridTemplateComponent::Repeat {
                 count: *count,
+                tracks: tracks.iter().map(to_gpui_grid_track).collect(),
+            },
+            GridTrackValue::Repeat {
+                count: GridRepeatCount::Auto(kind),
+                tracks,
+            } => gpui::GridTemplateComponent::AutoRepeat {
+                kind: match kind {
+                    GridAutoRepeatKind::AutoFill => gpui::GridAutoRepeat::Fill,
+                    GridAutoRepeatKind::AutoFit => gpui::GridAutoRepeat::Fit,
+                },
                 tracks: tracks.iter().map(to_gpui_grid_track).collect(),
             },
             track => gpui::GridTemplateComponent::Track(to_gpui_grid_track(track)),

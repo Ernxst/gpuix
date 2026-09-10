@@ -301,6 +301,76 @@ describe("CSS Grid track-list layout", { timeout: 16_000 }, () => {
     })
   })
 
+  it("repeats auto-fill tracks as many times as the container permits", () => {
+    const autoFillColumns = [
+      {
+        type: "repeat",
+        count: "auto-fill",
+        tracks: [{ type: "minmax", min: { type: "px", value: 180 }, max: { type: "fr", value: 1 } }],
+      },
+    ]
+
+    // 800px / 180px-minimum tracks fits 4 repetitions (800 / 180 = 4.44).
+    const wide = createGridRoot()
+    wide.render(
+      <div style={gridStyle(autoFillColumns, { width: 800 })}>
+        {[0, 1, 2, 3].map((index) => (
+          <div data-testid={`auto-fill-wide-${index}`} key={index} style={{ width: "100%", height: 20 }} />
+        ))}
+      </div>,
+    )
+    ;[0, 200, 400, 600].forEach((x, index) => {
+      expectBounds(wide.renderer, `auto-fill-wide-${index}`, [x, 0, 200, 20])
+    })
+
+    // 400px / 180px-minimum tracks fits 2 repetitions (400 / 180 = 2.22).
+    const narrow = createGridRoot()
+    narrow.render(
+      <div style={gridStyle(autoFillColumns, { width: 400 })}>
+        {[0, 1].map((index) => (
+          <div data-testid={`auto-fill-narrow-${index}`} key={index} style={{ width: "100%", height: 20 }} />
+        ))}
+      </div>,
+    )
+    ;[0, 200].forEach((x, index) => {
+      expectBounds(narrow.renderer, `auto-fill-narrow-${index}`, [x, 0, 200, 20])
+    })
+  })
+
+  it("distinguishes auto-fill from auto-fit by whether empty repetitions collapse", () => {
+    const columnsFor = (kind: "auto-fill" | "auto-fit") => [
+      {
+        type: "repeat",
+        count: kind,
+        tracks: [{ type: "minmax", min: { type: "px", value: 100 }, max: { type: "fr", value: 1 } }],
+      },
+    ]
+
+    // 800px / 100px-minimum tracks fits 8 repetitions; only 2 hold items, so
+    // the other 6 are empty. auto-fill keeps them, leaving 100px per item.
+    const fill = createGridRoot()
+    fill.render(
+      <div style={gridStyle(columnsFor("auto-fill"), { width: 800 })}>
+        <div data-testid="auto-fill-item-0" style={{ width: "100%", height: 20 }} />
+        <div data-testid="auto-fill-item-1" style={{ width: "100%", height: 20 }} />
+      </div>,
+    )
+    expectBounds(fill.renderer, "auto-fill-item-0", [0, 0, 100, 20])
+    expectBounds(fill.renderer, "auto-fill-item-1", [100, 0, 100, 20])
+
+    // auto-fit collapses those same empty repetitions to zero size, so the
+    // two remaining tracks stretch to fill the 800px container.
+    const fit = createGridRoot()
+    fit.render(
+      <div style={gridStyle(columnsFor("auto-fit"), { width: 800 })}>
+        <div data-testid="auto-fit-item-0" style={{ width: "100%", height: 20 }} />
+        <div data-testid="auto-fit-item-1" style={{ width: "100%", height: 20 }} />
+      </div>,
+    )
+    expectBounds(fit.renderer, "auto-fit-item-0", [0, 0, 400, 20])
+    expectBounds(fit.renderer, "auto-fit-item-1", [400, 0, 400, 20])
+  })
+
   it("applies column and row gaps between grid tracks", () => {
     const { render, renderer } = createGridRoot()
     render(

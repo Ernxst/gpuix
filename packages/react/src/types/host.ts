@@ -434,7 +434,7 @@ export type GridTrackNonRepeat = GridTrackSizing | GridTrackMinmax
 /** A serializable CSS Grid track function. */
 export type GridTrack =
   | GridTrackNonRepeat
-  | { type: "repeat"; count: number; tracks: GridTrackNonRepeat[] }
+  | { type: "repeat"; count: number | "auto-fill" | "auto-fit"; tracks: GridTrackNonRepeat[] }
 
 export type GridTemplate = GridTrack[]
 
