@@ -7,6 +7,7 @@ import type {
 } from "@gpuix/native"
 import type {
   GpuixChangeEvent,
+  GpuixDragEvent,
   GpuixElementEvent,
   GpuixFocusEvent,
   GpuixKeyboardEvent,
@@ -1055,6 +1056,16 @@ export interface Props extends AccessibilityProps {
   /** Fires when user clicks OUTSIDE this element. Use for "click outside to close". */
   onMouseDownOutside?: (event: GpuixMouseEvent) => void
 
+  // ── OS file drag events ────────────────────────────────────────
+  onDragEnter?: (event: GpuixDragEvent) => void
+  onDragEnterCapture?: (event: GpuixDragEvent) => void
+  onDragOver?: (event: GpuixDragEvent) => void
+  onDragOverCapture?: (event: GpuixDragEvent) => void
+  onDragLeave?: (event: GpuixDragEvent) => void
+  onDragLeaveCapture?: (event: GpuixDragEvent) => void
+  onDrop?: (event: GpuixDragEvent) => void
+  onDropCapture?: (event: GpuixDragEvent) => void
+
   // ── Keyboard events (delivered to the focused element) ─────────
   onKeyDown?: (event: GpuixKeyboardEvent) => void
   onKeyDownCapture?: (event: GpuixKeyboardEvent) => void
@@ -1559,6 +1570,8 @@ export interface Container {
   ids: ElementIdAllocator
   eventHandlers: EventHandlerMap
   eventTargets: Map<number, Instance>
+  /** Whether the last dragOver through each element's ancestry was canceled. */
+  preventedDragOvers: Map<number, boolean>
   /** The last hover target path reported by native hit testing. */
   hoverPath: Instance[]
   preventedKeyboardActivations: Map<number, string>

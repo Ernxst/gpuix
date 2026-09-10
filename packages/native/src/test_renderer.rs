@@ -427,6 +427,9 @@ pub struct TestGpuixRenderer {
     /// Mouse-down origin for the current GPUI active-state sequence. Retained
     /// for the native test input path, which must mirror main's press lifetime.
     active_pointer_origin: Mutex<Option<(f64, f64)>>,
+    /// Whether the test input path has an active simulated external drag, so
+    /// subsequent moves use GPUI's Pending event rather than Entered.
+    file_drag_active: AtomicBool,
 }
 
 #[napi]
@@ -545,6 +548,7 @@ impl TestGpuixRenderer {
             canvas_diagnostic_members: Mutex::new(HashSet::new()),
             animation_frame_timestamp_origin: Arc::new(Mutex::new(None)),
             active_pointer_origin: Mutex::new(None),
+            file_drag_active: AtomicBool::new(false),
         })
     }
 
@@ -1559,6 +1563,7 @@ impl TestGpuixRenderer {
     /// Dispatches FileDrop Entered then Submit, matching GPUI's OS drop path.
     #[napi]
     pub fn simulate_file_drop(&self, x: f64, y: f64, paths: Vec<String>) -> Result<()> {
+        self.file_drag_active.store(false, Ordering::Relaxed);
         with_test_state(self.state_id, |cx, window, _view| {
             let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
             let paths = gpui::ExternalPaths(
@@ -1575,6 +1580,53 @@ impl TestGpuixRenderer {
                 },
             );
             cx.simulate_event(window, gpui::FileDropEvent::Submit { position });
+            Ok(())
+        })?;
+        self.file_drag_active.store(false, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Simulate only the submit phase of a Finder-style file drop. The active
+    /// external drag must have been established by `simulate_file_drag_move`;
+    /// keeping Entered separate lets React tests prove that submit does not
+    /// synthesize another dragOver or dragLeave.
+    #[napi]
+    pub fn simulate_file_drop_submit(&self, x: f64, y: f64) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, _view| {
+            let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+            cx.simulate_event(window, gpui::FileDropEvent::Submit { position });
+            Ok(())
+        })
+    }
+
+    /// Simulate one Finder drag move without dropping. The first move enters
+    /// the window; later moves use GPUI's pending event.
+    #[napi]
+    pub fn simulate_file_drag_move(&self, x: f64, y: f64, paths: Vec<String>) -> Result<()> {
+        let entered = !self.file_drag_active.swap(true, Ordering::Relaxed);
+        with_test_state(self.state_id, |cx, window, _view| {
+            let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+            if entered {
+                let paths = gpui::ExternalPaths(
+                    paths
+                        .into_iter()
+                        .map(std::path::PathBuf::from)
+                        .collect(),
+                );
+                cx.simulate_event(window, gpui::FileDropEvent::Entered { position, paths });
+            } else {
+                cx.simulate_event(window, gpui::FileDropEvent::Pending { position });
+            }
+            Ok(())
+        })
+    }
+
+    /// End the current Finder drag without dropping.
+    #[napi]
+    pub fn simulate_file_drag_exit(&self) -> Result<()> {
+        self.file_drag_active.store(false, Ordering::Relaxed);
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.simulate_event(window, gpui::FileDropEvent::Exited);
             Ok(())
         })
     }

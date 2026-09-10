@@ -435,6 +435,10 @@ impl CustomElement for DiffElement {
             "mouseEnter",
             "mouseLeave",
             "wheel",
+            "dragEnter",
+            "dragOver",
+            "dragLeave",
+            "drop",
             "fileDrop",
         ]
     }

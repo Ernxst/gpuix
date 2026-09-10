@@ -3645,15 +3645,19 @@ text imports no longer need a runtime flag.
 | Blur | `onBlur` | `GpuixFocusEvent` | — |
 | Wheel | `onWheel` | `GpuixWheelEvent` | `x`, `y`, `deltaX`, `deltaY`, `deltaZ`, `deltaMode`, `precise`, `touchPhase`, `modifiers` |
 | Scroll | `onScroll` | `GpuixScrollEvent` | — read `scrollLeft` / `scrollTop` from `currentTarget` |
-| File drop | `onFileDrop` | `EventPayload` | `paths`, `x`, `y` — Unicode filesystem paths from Finder or the OS |
+| Drag enter | `onDragEnter` | `GpuixDragEvent` | `x`, `y`, `dataTransfer` — files are hidden until drop |
+| Drag over | `onDragOver` | `GpuixDragEvent` | `x`, `y`, `dataTransfer` — call `preventDefault()` to accept a drop |
+| Drag leave | `onDragLeave` | `GpuixDragEvent` | `x`, `y`, `dataTransfer` |
+| Drop | `onDrop` | `GpuixDragEvent` | `x`, `y`, `dataTransfer.files` — `GpuixFile` objects with `name`, `path`, `size`, `lastModified`, and `type` |
+| File drop (legacy) | `onFileDrop` | `EventPayload` | `paths`, `x`, `y` — desktop-namespace alias for `onDrop` |
 | Change | `onChange` | `GpuixChangeEvent` | `value` — `<input>` and `<textarea>` only |
 | Toggle file | `onToggleFile` | `GpuixElementEvent` | `value` (file path) — `<diff>` only |
 | Show more | `onShowMore` | `GpuixElementEvent` | `value` (hidden line count) — `<diff>` only |
 | Line click | `onLineClick` | `GpuixElementEvent` | `value`, `oldLine`, `newLine` — `<diff>` only |
 | Link click | `onLinkClick` | `GpuixElementEvent` | `value` (URL) — `<markdown>` only |
 
-`GpuixSyntheticEvent` is the union of every event type above (`onFileDrop` is
-the one exception, still typed with the raw `EventPayload`). A handler typed
+`GpuixSyntheticEvent` is the union of every synthetic event type above
+(`onFileDrop` is the one exception, still typed with the raw `EventPayload`). A handler typed
 against the union — for example a shared handler passed to props of more than
 one kind — must narrow on `event.type` before reading a kind-specific member.
 
@@ -3679,10 +3683,18 @@ The host ref exposes the same `setPointerCapture()` and
 Window deactivation silently resets the pressed-pointer sequence and capture;
 GPUIX does not currently synthesize `pointercancel` or `lostpointercapture`.
 
-A Finder or OS file drop lands on the hovered element that lists
-**`onFileDrop`**. `paths` is an array of absolute Unicode filesystem paths.
-`x` and `y` are the drop point in window pixels. An empty drop, or a drop
-that contains a non-Unicode path, does not fire.
+A Finder or OS file drag dispatches bubbling, cancelable `onDragEnter`,
+`onDragOver`, and `onDragLeave` events. During those events,
+`event.dataTransfer.files` is empty and `event.dataTransfer.types` is
+`["Files"]`. Call `event.preventDefault()` in `onDragOver` to accept the drop;
+without a prevented `onDragOver` the subsequent `onDrop` is refused, as in the
+DOM. On an accepted drop, `event.dataTransfer.files` contains one
+`GpuixFile` per path, including the absolute Electron-style `path`.
+
+**`onFileDrop`** remains available as the desktop-namespace alias for
+`onDrop`; new code should read `event.dataTransfer.files` from `onDrop`.
+`x` and `y` are the pointer position in window pixels. An empty drop, or a
+drop that contains a non-Unicode path, does not fire.
 
 Put the listener on a **`div`**, **`text`**, **`img`**, **`svg`**, **`input`**,
 **`textarea`**, **`code`**, **`markdown`**, **`diff`**, or **`anchored`**.
@@ -3690,7 +3702,8 @@ Put the listener on a **`div`**, **`text`**, **`img`**, **`svg`**, **`input`**,
 
 ```tsx
 <div
-  onFileDrop={(event) => openFiles(event.paths ?? [])}
+  onDragOver={(event) => event.preventDefault()}
+  onDrop={(event) => openFiles(event.dataTransfer.files)}
   style={{ width: 400, height: 300 }}
 >
   <virtual-list estimatedItemHeight={24}>{rows}</virtual-list>
