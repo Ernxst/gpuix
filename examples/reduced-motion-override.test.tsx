@@ -1,7 +1,7 @@
 import React from 'react'
 import { createRenderer, createRoot, flushSync } from '@gpuix/react'
 import { connectTest, liveRendererAsTest } from '@gpuix/react/automation'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { ReducedMotionTarget } from './reduced-motion'
 
@@ -16,8 +16,10 @@ async function deliverPlatformPreference(
   }
 }
 
+const runsOnThisPlatform = process.platform === 'darwin' || process.platform === 'win32'
+
 describe('reduced-motion override example', () => {
-  it.skipIf(process.platform !== 'darwin')(
+  it.skipIf(!runsOnThisPlatform)(
     'keeps both animation engines enabled when false overrides an OS-on preference',
     async () => {
       const renderer = createRenderer()
@@ -45,22 +47,33 @@ describe('reduced-motion override example', () => {
           if (!bounds) throw new Error('Reduced-motion target did not paint')
           return bounds[2]
         }
-        expect(width(styleTarget.id)).toBeCloseTo(140)
-        expect(width(motionTarget.id)).toBeCloseTo(140)
+        const expectWidths = async (expected: number): Promise<void> => {
+          await vi.waitFor(
+            () => {
+              expect(width(styleTarget.id)).toBeCloseTo(expected)
+              expect(width(motionTarget.id)).toBeCloseTo(expected)
+            },
+            { timeout: 2000 },
+          )
+        }
+
+        await expectWidths(140)
 
         flushSync(() => root.render(<ReducedMotionTarget expanded />))
-        expect(width(styleTarget.id)).toBeCloseTo(140)
-        expect(width(motionTarget.id)).toBeCloseTo(140)
+        await expectWidths(140)
         renderer.clockFastForward(100)
-        expect(width(styleTarget.id)).toBeCloseTo(210)
-        expect(width(motionTarget.id)).toBeCloseTo(210)
+        await expectWidths(210)
       } finally {
         root.unmount()
         await app.close()
         renderer.quit()
       }
 
-      expect(renderer.isInitialized()).toBe(false)
+      // The threaded renderer finishes terminating on its UI thread after
+      // quit() returns, so the lifecycle flips to terminated asynchronously.
+      await vi.waitFor(() => {
+        expect(renderer.isInitialized()).toBe(false)
+      })
       expect(renderer.testHasEmbeddedRuntime()).toBe(false)
     },
   )

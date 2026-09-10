@@ -2613,6 +2613,7 @@ dependencies = [
  "gpui",
  "gpui_macos",
  "gpui_platform",
+ "gpui_windows",
  "image",
  "js-sys",
  "log",

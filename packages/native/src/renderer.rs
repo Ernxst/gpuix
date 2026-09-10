@@ -1501,6 +1501,15 @@ enum UiCommand {
         path: String,
         response: SyncSender<std::result::Result<(), String>>,
     },
+    /// Sends the real `WM_SETTINGCHANGE` for `SPI_SETCLIENTAREAANIMATION` to
+    /// this renderer's own window, then waits for the platform to have
+    /// handled it. Used by `test_set_platform_reduced_motion` after it
+    /// overrides `should_reduce_motion` for this process, so the test never
+    /// touches the machine-wide animation setting.
+    #[cfg(all(target_os = "windows", feature = "test-support"))]
+    WaitForReducedMotionChange {
+        response: SyncSender<std::result::Result<(), String>>,
+    },
     Blur,
 }
 
@@ -2002,6 +2011,74 @@ async fn run_ui_commands(
                     error_response.send(Err(format!("{error:#}"))).ok();
                 }
                 result
+            }
+            #[cfg(all(target_os = "windows", feature = "test-support"))]
+            UiCommand::WaitForReducedMotionChange { response } => {
+                use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    SendMessageW, SPI_SETCLIENTAREAANIMATION, WM_SETTINGCHANGE,
+                };
+
+                let previous_count = gpui_windows::test_reduce_motion_change_count();
+                let hwnd_result = window.update(cx, |_view, window, _cx| {
+                    let handle = HasWindowHandle::window_handle(window)
+                        .map_err(|error| format!("Failed to get the window handle: {error}"))?;
+                    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+                        return Err("The GPUI window is not a Win32 window".to_string());
+                    };
+                    Ok(HWND(handle.hwnd.get() as *mut std::ffi::c_void))
+                });
+                match hwnd_result {
+                    Ok(Ok(hwnd)) => {
+                        // Windows refuses to post `WM_SETTINGCHANGE`
+                        // (ERROR_MESSAGE_SYNC_ONLY), so send it. Sending to a
+                        // window on this thread runs its window procedure here,
+                        // outside the `window.update` lease; the procedure posts
+                        // the platform's own reduced-motion message in turn.
+                        // SAFETY: `hwnd` is this renderer's still-live window, and
+                        // this is the message the system sends on a real change.
+                        unsafe {
+                            SendMessageW(
+                                hwnd,
+                                WM_SETTINGCHANGE,
+                                Some(WPARAM(SPI_SETCLIENTAREAANIMATION.0 as usize)),
+                                Some(LPARAM(0)),
+                            );
+                        }
+                        // Poll rather than block: the message is handled on
+                        // this same UI thread's event loop, which this async
+                        // task shares, so nothing but polling can observe it.
+                        cx.spawn(async move |cx| {
+                            for _ in 0..50 {
+                                if gpui_windows::test_reduce_motion_change_count() > previous_count
+                                {
+                                    response.send(Ok(())).ok();
+                                    return;
+                                }
+                                cx.background_executor()
+                                    .timer(Duration::from_millis(20))
+                                    .await;
+                            }
+                            response
+                                .send(Err(
+                                    "the reduced-motion change was not delivered to the platform"
+                                        .to_string(),
+                                ))
+                                .ok();
+                        })
+                        .detach();
+                        Ok(())
+                    }
+                    Ok(Err(error)) => {
+                        response.send(Err(error)).ok();
+                        Ok(())
+                    }
+                    Err(error) => {
+                        response.send(Err(format!("{error:#}"))).ok();
+                        Err(error)
+                    }
+                }
             }
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
         };
@@ -2818,6 +2895,11 @@ impl GpuixRenderer {
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     fn init_threaded(&self, options: Option<WindowOptions>) -> Result<()> {
+        // A test process reuses this renderer across tests; start each one
+        // from the real system setting rather than a previous test's override.
+        #[cfg(all(target_os = "windows", feature = "test-support"))]
+        gpui_windows::test_set_reduce_motion_override(None);
+
         let options = options.unwrap_or_default();
         if *self.lifecycle.lock().unwrap() != RendererLifecycle::Uninitialized {
             return Err(Error::from_reason("Renderer is already initialized"));
@@ -2830,7 +2912,7 @@ impl GpuixRenderer {
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
         let app_name = options.app_name.clone().unwrap_or_else(|| title.clone());
         let menus = options.menus.clone();
-        let reduced_motion = effective_reduced_motion(options.reduced_motion, || None);
+        let reduced_motion_override = options.reduced_motion;
         // `focus: false` must also skip `cx.activate`: the window flag only
         // decides key status inside the app, activation is what steals focus.
         let activate = options.focus.unwrap_or(true);
@@ -2865,7 +2947,17 @@ impl GpuixRenderer {
                         .with_http_client(default_http_client())
                         .with_quit_mode(gpui::QuitMode::LastWindowClosed);
                     app.run(move |cx| {
+                        let reduced_motion =
+                            effective_reduced_motion(reduced_motion_override, || {
+                                Some(cx.should_reduce_motion())
+                            });
                         cx.set_reduce_motion(reduced_motion);
+                        if reduced_motion_override.is_none() {
+                            cx.on_reduce_motion_change(|cx| {
+                                cx.set_reduce_motion(cx.should_reduce_motion());
+                            })
+                            .detach();
+                        }
                         init_key_bindings(cx);
                         crate::custom_elements::input::init(cx);
                         init_application_menu_support(cx, Some(application_callback.clone()));
@@ -3420,6 +3512,12 @@ impl GpuixRenderer {
     }
 
     /// Test seam that posts the real macOS accessibility-display notification.
+    ///
+    /// On Windows this instead overrides `should_reduce_motion` for this
+    /// process only, and delivers the same `WM_SETTINGCHANGE` the system
+    /// sends on a real change to this renderer's own window, returning once
+    /// the platform has handled it. It never touches the machine-wide
+    /// setting, so it is safe to run alongside other test processes.
     #[napi]
     pub fn test_set_platform_reduced_motion(&self, enabled: bool) -> Result<()> {
         #[cfg(all(target_os = "macos", feature = "test-support"))]
@@ -3439,11 +3537,27 @@ impl GpuixRenderer {
             })
         }
 
-        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        #[cfg(all(target_os = "windows", feature = "test-support"))]
+        {
+            if *self.lifecycle.lock().unwrap() != RendererLifecycle::Running {
+                return Err(Error::from_reason(
+                    "Renderer not initialized. Call init() first.",
+                ));
+            }
+            gpui_windows::test_set_reduce_motion_override(Some(enabled));
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::WaitForReducedMotionChange { response })?;
+            recv_ui_response(receiver, "the reduced-motion change")?.map_err(Error::from_reason)
+        }
+
+        #[cfg(not(any(
+            all(target_os = "macos", feature = "test-support"),
+            all(target_os = "windows", feature = "test-support")
+        )))]
         {
             let _ = enabled;
             Err(Error::from_reason(
-                "Platform reduced-motion test seam requires macOS test support",
+                "Platform reduced-motion test seam requires macOS or Windows test support",
             ))
         }
     }
@@ -13811,7 +13925,9 @@ pub struct WindowOptions {
     pub window_background: Option<String>,
     pub traffic_light_x: Option<f64>,
     pub traffic_light_y: Option<f64>,
-    /// Override GPUI's reduced-motion policy for this application.
+    /// Override the OS reduced-motion preference for this application's
+    /// lifetime, instead of following it (and its live changes) on macOS,
+    /// Windows and Linux.
     pub reduced_motion: Option<bool>,
     /// Allow URL-backed images to connect to loopback and private networks.
     /// Link-local and cloud-metadata ranges remain blocked.
