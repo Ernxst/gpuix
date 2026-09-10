@@ -4264,22 +4264,30 @@ describeNative("events", () => {
       expect(edges).toEqual(["enter:0"])
       edges.length = 0
 
-      testRoot.renderer.nativeSimulateScrollWheel(20, 20, 0, -40, {
+      const drawPending = () => {
+        testRoot.renderer.drawPendingFrame()
+        testRoot.renderer.dispatchNativeEvents()
+      }
+
+      testRoot.renderer.dispatchScrollWheel(20, 20, 0, -40, {
         phase: "started",
         deltaUnit: "pixels",
       })
+      drawPending()
       expect(edges).toEqual([])
 
-      testRoot.renderer.nativeSimulateScrollWheel(20, 20, 0, -40, {
+      testRoot.renderer.dispatchScrollWheel(20, 20, 0, -40, {
         phase: "moved",
         deltaUnit: "pixels",
       })
+      drawPending()
       expect(edges).toEqual([])
 
-      testRoot.renderer.nativeSimulateScrollWheel(20, 20, 0, 0, {
+      testRoot.renderer.dispatchScrollWheel(20, 20, 0, 0, {
         phase: "ended",
         deltaUnit: "pixels",
       })
+      drawPending()
       expect(edges).toEqual(["leave:0", "enter:2"])
     })
 

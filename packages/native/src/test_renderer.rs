@@ -921,13 +921,19 @@ impl TestGpuixRenderer {
     }
 
     /// Draw one platform-style pending frame without notifying the view first.
+    /// Unlike `flush`, this does not request invalidation; it only draws when
+    /// the window is already dirty.
     /// A clean window remains clean, so this only repaints work already
     /// scheduled by production code such as an async image load completion.
     #[napi]
     pub fn draw_pending_frame(&self) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.update_window(window, |_, window, app| window.draw(app).clear(app))
-                .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.update_window(window, |_, window, app| {
+                if window.is_dirty() {
+                    window.draw(app).clear(app);
+                }
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
             cx.run_until_parked();
             Ok(())
         })?;

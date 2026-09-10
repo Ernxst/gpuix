@@ -901,7 +901,7 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
-  /** Draw only work previously dirtied by native production code. */
+  /** Draw only work previously dirtied by native production code; does not invalidate the view. */
   drawPendingFrame(): void {
     this.native.drawPendingFrame()
   }
