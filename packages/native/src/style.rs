@@ -253,6 +253,27 @@ pub enum LineHeightValue {
     Unitless(String),
 }
 
+/// Which auto-repeat strategy a `repeat()` track uses.
+///
+/// [MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/repeat#auto-fill)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GridAutoRepeatKind {
+    AutoFill,
+    AutoFit,
+}
+
+/// The repetition count of a `repeat()` grid track: either an exact number of
+/// repetitions, or the `auto-fill`/`auto-fit` keywords that repeat as many
+/// times as the container permits. Serializes as a bare number or one of
+/// those two strings, matching the authored form.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum GridRepeatCount {
+    Fixed(u16),
+    Auto(GridAutoRepeatKind),
+}
+
 /// One serializable CSS Grid track. Track lists deliberately use tagged objects
 /// rather than CSS strings so the renderer can validate every nested function.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -278,7 +299,7 @@ pub enum GridTrackValue {
         max: GridTrackMaxValue,
     },
     Repeat {
-        count: u16,
+        count: GridRepeatCount,
         tracks: Vec<GridTrackValue>,
     },
 }
@@ -1324,16 +1345,7 @@ fn parse_grid_track(
         "repeat" if allow_repeat => {
             let fields_ok =
                 reject_unexpected_grid_fields(path, object, &["type", "count", "tracks"], problems);
-            let count = grid_track_number(path, object, "count", problems, true)?;
-            if count.fract() != 0.0 || count > 64.0 {
-                reject(
-                    problems,
-                    format!("{path}.count"),
-                    object.get("count").expect("repeat count is present"),
-                    "expected an integer from 1 through 64",
-                );
-                return None;
-            }
+            let count = parse_grid_repeat_count(path, object, problems)?;
             let Some(tracks) = object.get("tracks").and_then(serde_json::Value::as_array) else {
                 reject(
                     problems,
@@ -1361,7 +1373,7 @@ fn parse_grid_track(
                 }
             }
             valid.then_some(GridTrackValue::Repeat {
-                count: count as u16,
+                count,
                 tracks: parsed_tracks,
             })
         }
@@ -1378,9 +1390,107 @@ fn parse_grid_track(
     }
 }
 
+/// Parses a `repeat()` track's `count` field: an integer from 1 through 64,
+/// or one of the `auto-fill`/`auto-fit` keywords.
+fn parse_grid_repeat_count(
+    path: &str,
+    object: &serde_json::Map<String, serde_json::Value>,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<GridRepeatCount> {
+    let property = format!("{path}.count");
+    let reason = "expected an integer from 1 through 64, or \"auto-fill\"/\"auto-fit\"";
+    match object.get("count") {
+        Some(serde_json::Value::String(keyword)) if keyword == "auto-fill" => {
+            Some(GridRepeatCount::Auto(GridAutoRepeatKind::AutoFill))
+        }
+        Some(serde_json::Value::String(keyword)) if keyword == "auto-fit" => {
+            Some(GridRepeatCount::Auto(GridAutoRepeatKind::AutoFit))
+        }
+        Some(value @ serde_json::Value::Number(_)) => {
+            let count = decode_number(&property, value, problems)?;
+            if count.fract() != 0.0 || count < 1.0 || count > 64.0 {
+                reject(problems, property, value, reason);
+                return None;
+            }
+            Some(GridRepeatCount::Fixed(count as u16))
+        }
+        found => {
+            reject(
+                problems,
+                property,
+                found.unwrap_or(&serde_json::Value::Null),
+                reason,
+            );
+            None
+        }
+    }
+}
+
+/// Whether a single (non-repeat) grid track sizing function has a fixed
+/// (length or percentage) component, mirroring taffy's
+/// `TrackSizingFunction::has_fixed_component`. `fr`, `auto`, `min-content`,
+/// `max-content`, and `fit-content()` never count, even with a px/percent
+/// `fit-content()` limit: taffy tags `fit-content()` distinctly from a plain
+/// length or percentage.
+fn grid_track_sizing_has_fixed_component(track: &GridTrackValue) -> bool {
+    match track {
+        GridTrackValue::Px { .. } | GridTrackValue::Percent { .. } => true,
+        GridTrackValue::Fr { .. }
+        | GridTrackValue::Auto
+        | GridTrackValue::MinContent
+        | GridTrackValue::MaxContent
+        | GridTrackValue::FitContent { .. } => false,
+        GridTrackValue::Minmax { min, max } => {
+            matches!(
+                min,
+                GridTrackMinValue::Px { .. } | GridTrackMinValue::Percent { .. }
+            ) || matches!(
+                max,
+                GridTrackMaxValue::Px { .. } | GridTrackMaxValue::Percent { .. }
+            )
+        }
+        GridTrackValue::Repeat { .. } => unreachable!("repeat cannot be nested inside repeat"),
+    }
+}
+
+/// Whether a parsed `grid-template-columns`/`-rows` track list is one taffy
+/// would keep as the explicit grid, rather than collapsing to zero explicit
+/// tracks (taffy 0.13's `compute_explicit_grid_size_in_axis`,
+/// `explicit_grid.rs:74-90`). CSS's `<auto-track-list>` grammar allows at
+/// most one auto repetition (`auto-fill`/`auto-fit`) per template, and only
+/// when every track in the template — inside or outside that repetition —
+/// carries a fixed length or percentage component.
+fn grid_template_has_valid_auto_repetition(tracks: &[GridTrackValue]) -> bool {
+    let auto_repetition_count = tracks
+        .iter()
+        .filter(|track| matches!(track, GridTrackValue::Repeat { count: GridRepeatCount::Auto(_), .. }))
+        .count();
+
+    match auto_repetition_count {
+        0 => true,
+        1 => tracks.iter().all(|track| match track {
+            GridTrackValue::Repeat { tracks, .. } => {
+                tracks.iter().all(grid_track_sizing_has_fixed_component)
+            }
+            other => grid_track_sizing_has_fixed_component(other),
+        }),
+        _ => false,
+    }
+}
+
 fn grid_track_count(track: &GridTrackValue) -> usize {
     match track {
-        GridTrackValue::Repeat { count, tracks } => usize::from(*count) * tracks.len(),
+        GridTrackValue::Repeat {
+            count: GridRepeatCount::Fixed(count),
+            tracks,
+        } => usize::from(*count) * tracks.len(),
+        // An auto repetition counts as its own track count (one repetition):
+        // its actual repeat count is resolved at layout time from the
+        // container size, not from this cap.
+        GridTrackValue::Repeat {
+            count: GridRepeatCount::Auto(_),
+            tracks,
+        } => tracks.len(),
         _ => 1,
     }
 }
@@ -1454,6 +1564,16 @@ fn parse_grid_template(
         }
     }
     if !valid {
+        return None;
+    }
+    if !grid_template_has_valid_auto_repetition(&parsed_tracks) {
+        reject(
+            problems,
+            property,
+            value,
+            "at most one auto-fill/auto-fit repeat() is allowed per template, and every track \
+             in the template must include a fixed length or percentage",
+        );
         return None;
     }
     if parsed_tracks.iter().map(grid_track_count).sum::<usize>() > 64 {
@@ -3677,6 +3797,140 @@ mod tests {
         assert_eq!(
             repeat_in_columns.problems[0].reason,
             "repeat is not valid in gridAutoRows/gridAutoColumns"
+        );
+    }
+
+    #[test]
+    fn parses_auto_fill_and_auto_fit_grid_repetitions() {
+        for keyword in ["auto-fill", "auto-fit"] {
+            let parsed = parse_style_value(&json!({
+                "gridTemplateColumns": [{
+                    "type": "repeat",
+                    "count": keyword,
+                    "tracks": [{
+                        "type": "minmax",
+                        "min": { "type": "px", "value": 180 },
+                        "max": { "type": "fr", "value": 1 }
+                    }]
+                }]
+            }));
+
+            assert!(parsed.problems.is_empty(), "{keyword}: {:?}", parsed.problems);
+            let expected = match keyword {
+                "auto-fill" => GridAutoRepeatKind::AutoFill,
+                _ => GridAutoRepeatKind::AutoFit,
+            };
+            assert!(
+                matches!(
+                    parsed.style.grid_template_columns,
+                    Some(ref tracks)
+                        if tracks.len() == 1
+                            && matches!(
+                                tracks[0],
+                                GridTrackValue::Repeat { count: GridRepeatCount::Auto(kind), .. }
+                                    if kind == expected
+                            )
+                ),
+                "{keyword}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_a_grid_repeat_count_that_is_neither_an_integer_nor_an_auto_keyword() {
+        let parsed = parse_style_value(&json!({
+            "gridTemplateColumns": [{
+                "type": "repeat",
+                "count": "sometimes",
+                "tracks": [{ "type": "px", "value": 24 }]
+            }]
+        }));
+
+        assert_eq!(parsed.style.grid_template_columns, None);
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "gridTemplateColumns[0].count");
+        assert_eq!(
+            parsed.problems[0].reason,
+            "expected an integer from 1 through 64, or \"auto-fill\"/\"auto-fit\""
+        );
+    }
+
+    #[test]
+    fn rejects_grid_templates_that_would_collapse_the_explicit_grid_to_zero_tracks() {
+        // Mirrors taffy 0.13's `compute_explicit_grid_size_in_axis`
+        // (explicit_grid.rs:74-90): an auto repetition is only valid when
+        // there is exactly one in the template, and every track in the
+        // template has a fixed length or percentage component.
+        let cases = [
+            // The repetition's only track (`1fr`) has no fixed component.
+            json!([{
+                "type": "repeat",
+                "count": "auto-fill",
+                "tracks": [{ "type": "fr", "value": 1 }]
+            }]),
+            // Two auto repetitions in one template.
+            json!([
+                {
+                    "type": "repeat",
+                    "count": "auto-fill",
+                    "tracks": [{ "type": "px", "value": 100 }]
+                },
+                {
+                    "type": "repeat",
+                    "count": "auto-fit",
+                    "tracks": [{ "type": "px", "value": 100 }]
+                }
+            ]),
+            // The repetition itself is fixed, but a track outside it is not.
+            json!([
+                {
+                    "type": "repeat",
+                    "count": "auto-fill",
+                    "tracks": [{ "type": "px", "value": 100 }]
+                },
+                { "type": "fr", "value": 1 }
+            ]),
+        ];
+
+        for tracks in cases {
+            let parsed = parse_style_value(&json!({ "gridTemplateColumns": tracks }));
+            assert_eq!(parsed.style.grid_template_columns, None, "{tracks:?}");
+            assert_eq!(parsed.problems.len(), 1, "{tracks:?}");
+            assert_eq!(
+                parsed.problems[0].property, "gridTemplateColumns",
+                "{tracks:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn counts_an_auto_repetition_as_one_repetition_against_the_64_track_cap() {
+        // 32 tracks outside the repetition + 32 inside it (one repetition,
+        // per the 64-track cap's treatment of auto repetitions) stays at the
+        // cap; a 33rd single track would tip it over.
+        let mut tracks: Vec<serde_json::Value> = (0..32)
+            .map(|_| json!({ "type": "px", "value": 10 }))
+            .collect();
+        tracks.push(json!({
+            "type": "repeat",
+            "count": "auto-fill",
+            "tracks": (0..32).map(|_| json!({ "type": "px", "value": 10 })).collect::<Vec<_>>()
+        }));
+
+        let parsed = parse_style_value(&json!({ "gridTemplateColumns": tracks.clone() }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert!(matches!(
+            parsed.style.grid_template_columns,
+            Some(ref tracks) if tracks.len() == 33
+        ));
+
+        tracks.push(json!({ "type": "px", "value": 10 }));
+        let oversized = parse_style_value(&json!({ "gridTemplateColumns": tracks }));
+        assert_eq!(oversized.style.grid_template_columns, None);
+        assert_eq!(oversized.problems.len(), 1);
+        assert_eq!(
+            oversized.problems[0].reason,
+            "expected no more than 64 expanded grid tracks"
         );
     }
 

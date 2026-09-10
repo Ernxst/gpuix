@@ -882,6 +882,95 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     )
   })
 
+  it("rejects an auto-fill repeat whose tracks lack a fixed component", () => {
+    const renderer = new TestRenderer()
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 86, "div"],
+        ["setCustomPropValue", 86, "data-testid", "no-fixed-component-grid"],
+        [
+          "setStyle",
+          86,
+          {
+            display: "grid",
+            gridTemplateColumns: [
+              { type: "repeat", count: "auto-fill", tracks: [{ type: "fr", value: 1 }] },
+            ],
+          },
+        ],
+      ]),
+    )
+
+    const diagnostics = renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementId: 86,
+      elementType: "div",
+      dataTestId: "no-fixed-component-grid",
+      property: "gridTemplateColumns",
+    })
+  })
+
+  it("rejects a template with two auto-fill/auto-fit repeats", () => {
+    const renderer = new TestRenderer()
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 87, "div"],
+        ["setCustomPropValue", 87, "data-testid", "double-auto-repeat-grid"],
+        [
+          "setStyle",
+          87,
+          {
+            display: "grid",
+            gridTemplateColumns: [
+              { type: "repeat", count: "auto-fill", tracks: [{ type: "px", value: 100 }] },
+              { type: "repeat", count: "auto-fit", tracks: [{ type: "px", value: 100 }] },
+            ],
+          },
+        ],
+      ]),
+    )
+
+    const diagnostics = renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementId: 87,
+      elementType: "div",
+      dataTestId: "double-auto-repeat-grid",
+      property: "gridTemplateColumns",
+    })
+  })
+
+  it("rejects an auto-fill repeat when a track outside it lacks a fixed component", () => {
+    const renderer = new TestRenderer()
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 88, "div"],
+        ["setCustomPropValue", 88, "data-testid", "unfixed-sibling-grid"],
+        [
+          "setStyle",
+          88,
+          {
+            display: "grid",
+            gridTemplateColumns: [
+              { type: "repeat", count: "auto-fill", tracks: [{ type: "px", value: 100 }] },
+              { type: "fr", value: 1 },
+            ],
+          },
+        ],
+      ]),
+    )
+
+    const diagnostics = renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementId: 88,
+      elementType: "div",
+      dataTestId: "unfixed-sibling-grid",
+      property: "gridTemplateColumns",
+    })
+  })
+
   it("rejects a malformed transition as one descriptor with precise paths", () => {
     const renderer = new TestRenderer()
     renderer.applyBatch(
