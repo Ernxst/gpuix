@@ -4931,6 +4931,45 @@ afterEach(cleanup) // exactly what `@gpuix/react/testing/vitest` does for you
 `cleanup()` unmounts the rendered tree and resets the window, keeping it open
 for the next `render()`. It is safe to call when nothing is rendered.
 
+### act()
+
+`render`, `rerender`, `unmount`, and every `userEvent` and `nativeSimulate*`
+call already run their React work inside `act` — see **The effects have run**,
+above, under [render()](#render). `act` itself is exported for the state
+update or effect a test drives some other way: dispatching straight into a
+ref a component exposed, advancing a manually-owned interval, or anything
+else that does not go through one of those wrappers.
+
+```ts
+import { act } from '@gpuix/react/testing/vitest'
+
+act(() => {
+  formRef.current.reset()
+})
+expect(screen.getByRole('textbox')).toHaveValue('')
+```
+
+It is Testing Library's `act`, over this renderer: it sets
+`IS_REACT_ACT_ENVIRONMENT`, runs the scope through React's own `act`, and
+restores the previous value once the scope and everything it scheduled has
+settled — including when the scope throws or its returned promise rejects. A
+synchronous scope commits and flushes its effects before `act()` returns, so
+the assertion above needs no `await`; an asynchronous one returns a promise
+that resolves once React finishes draining:
+
+```ts
+await act(async () => {
+  await flushMicrotasks()
+})
+```
+
+An error the scope itself throws is the caller's and is rethrown — a
+synchronous scope's throw rethrows in the same tick, an asynchronous scope's
+throw surfaces as a rejection of the returned promise. An error React collects
+on its own uncaught path instead — from a child component, not from the
+scope — is delivered to the mounted root the way `render()` reports one,
+rather than thrown out of `act`.
+
 ### Matchers
 
 `@gpuix/react/testing/matchers` ships a jest-dom-shaped pack for `expect.extend`.

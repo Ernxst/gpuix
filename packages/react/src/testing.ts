@@ -14,7 +14,7 @@ import { existsSync, mkdirSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import React, { act, createElement, createRef, type ReactNode } from "react"
+import React, { act as reactAct, createElement, createRef, type ReactNode } from "react"
 import type { EventPayload, MenuSpec } from "@gpuix/native"
 import {
   getDefaultNormalizer,
@@ -2649,6 +2649,48 @@ function actScopeIsOpen(): boolean {
 }
 
 /**
+ * Flip `IS_REACT_ACT_ENVIRONMENT` on and hand back a function that restores
+ * whatever it was before.
+ *
+ * Split out from the `act` calls themselves because the two shapes below
+ * settle at different times: a sync scope is done by the time the call that
+ * opened the bracket returns, an async one only once the returned promise
+ * does — restoring on a fixed schedule instead of leaving each caller decide
+ * would restore too early for one shape or too late for the other.
+ */
+function openActEnvironment(): () => void {
+  const previous = Reflect.get(globalThis, ACT_ENVIRONMENT_GLOBAL)
+  Reflect.set(globalThis, ACT_ENVIRONMENT_GLOBAL, true)
+  return () => Reflect.set(globalThis, ACT_ENVIRONMENT_GLOBAL, previous)
+}
+
+/**
+ * Route an error React collected on its uncaught path the way `render` does:
+ * to the shared window's root, if `render()` or `createTestRoot()` has one
+ * mounted. `cleanup()` is the only other reader of `activeRenderRoot`, and
+ * this is the same singleton it walks — there is no second registry to keep
+ * in sync.
+ *
+ * With no root mounted there is nowhere for `render`'s own reporting to have
+ * gone either, so this rethrows instead of swallowing the error.
+ */
+function reportUncaughtActError(error: unknown): void {
+  const active = activeRenderRoot
+  if (active === null) throw error
+  reportUncaughtErrorToRoot(active.root.root, error)
+}
+
+/** Whether `value` is a thenable — a real `Promise`, or anything shaped like
+ *  one — the way `act()` distinguishes an async `scope` from a sync one. */
+function isThenable<T>(value: unknown): value is PromiseLike<T> {
+  return (
+    (typeof value === "object" || typeof value === "function") &&
+    value !== null &&
+    typeof (value as PromiseLike<T>).then === "function"
+  )
+}
+
+/**
  * Run React work the way Testing Library's `render` does: commit it **and**
  * flush the passive effects, plus every update those effects schedule, before
  * returning.
@@ -2685,7 +2727,7 @@ function actScopeIsOpen(): boolean {
  * queue and is flushed when the caller's scope exits.
  */
 function actSync(reportUncaughtError: (error: unknown) => void, scope: () => void): void {
-  if (typeof act !== "function" || actScopeIsOpen()) {
+  if (typeof reactAct !== "function" || actScopeIsOpen()) {
     flushSync(scope)
     // `flushSync` runs the effects its own commit queued; this covers a commit
     // that happened before it, and reports honestly that nothing was pending.
@@ -2693,12 +2735,11 @@ function actSync(reportUncaughtError: (error: unknown) => void, scope: () => voi
     return
   }
 
-  const previous = Reflect.get(globalThis, ACT_ENVIRONMENT_GLOBAL)
-  Reflect.set(globalThis, ACT_ENVIRONMENT_GLOBAL, true)
+  const restoreActEnvironment = openActEnvironment()
   let scopeThrew = false
   let scopeError: unknown
   try {
-    void act(() => {
+    void reactAct(() => {
       try {
         scope()
       } catch (error) {
@@ -2709,9 +2750,140 @@ function actSync(reportUncaughtError: (error: unknown) => void, scope: () => voi
   } catch (error) {
     reportUncaughtError(error)
   } finally {
-    Reflect.set(globalThis, ACT_ENVIRONMENT_GLOBAL, previous)
+    restoreActEnvironment()
   }
   if (scopeThrew) throw scopeError
+}
+
+/**
+ * The public, async-capable sibling of {@link actSync}: Testing Library's
+ * `act`, over this renderer.
+ *
+ * Sets `IS_REACT_ACT_ENVIRONMENT`, runs `scope` through React's own `act` —
+ * which commits, flushes passive effects, and drains everything those effects
+ * schedule, the same contract `render()` depends on — and restores the flag
+ * once `scope` and everything it queued has settled. A synchronous `scope` is
+ * committed, flushed, and done by the time React's `act` call below returns,
+ * so this returns its result directly and needs no `await`; an asynchronous
+ * one returns a promise that resolves once React finishes draining.
+ *
+ * Those two paths have to stay genuinely separate, not just differently
+ * typed: React's `act` hands back a thenable even for a synchronous `scope`,
+ * already fully settled — but calling `.then()` on that thenable does not
+ * just read its result. React takes it as a request to keep the act queue
+ * open a little longer, in case awaiting a sync scope should also observe
+ * work scheduled after the fact, and defers the actual resolution to a task
+ * queued through its own scheduler. A caller that never awaits a sync `act()`
+ * call would then leave that queue open indefinitely — which is exactly
+ * `actSync`'s own reason for never calling `.then()` on its result either.
+ * So this only reaches for `.then()` once it already knows, from watching
+ * `scope`'s own return value, that React took the asynchronous path.
+ *
+ * `scope`'s own throw is the caller's, not React's: it is caught inside the
+ * callback handed to React's `act`, the same trick {@link actSync} uses, so
+ * that React's `act` always sees a callback that returned normally and the
+ * two error sources stay distinguishable. It is rethrown after the act
+ * environment is restored, ahead of whatever React's `act` collected on its
+ * own uncaught path.
+ *
+ * An error React collected on that uncaught path — from a child component,
+ * not from `scope` — is routed to the shared window's root the way `render`
+ * and `actSync` route theirs, via {@link reportUncaughtActError}: it never
+ * comes back out of `act`. With no root mounted there is nowhere for it to
+ * go, so it rethrows there too.
+ *
+ * **The fallback** is `actSync`'s: with no usable `act` — a caller's scope
+ * already open, or a production React build — `scope` runs through
+ * `flushSync` and an explicit passive-effect flush, awaiting `scope`'s own
+ * promise first when it returns one so a second flush can pick up whatever
+ * that settled work scheduled. The environment flag is untouched here, same
+ * as `actSync`: a caller's own outer scope, or a production build with no
+ * `act` warnings to suppress, already owns it.
+ */
+export function act<T>(scope: () => T | Promise<T>): Promise<T> | T {
+  if (typeof reactAct !== "function" || actScopeIsOpen()) {
+    let value!: T | Promise<T>
+    flushSync(() => {
+      value = scope()
+    })
+    flushPassiveEffects()
+    if (isThenable<T>(value)) {
+      return value.then((resolved) => {
+        flushPassiveEffects()
+        return resolved
+      })
+    }
+    return value
+  }
+
+  const restoreActEnvironment = openActEnvironment()
+  let scopeThrew = false
+  let scopeError: unknown
+  let scopeResult: T | undefined
+  let scopeWasAsync = false
+
+  let actResult: void | Promise<void>
+  try {
+    actResult = reactAct<void>(() => {
+      let value: T | Promise<T>
+      try {
+        value = scope()
+      } catch (error) {
+        scopeThrew = true
+        scopeError = error
+        return undefined
+      }
+      if (isThenable<T>(value)) {
+        scopeWasAsync = true
+        return value.then(
+          (resolved) => {
+            scopeResult = resolved
+          },
+          (error: unknown) => {
+            scopeThrew = true
+            scopeError = error
+          }
+        )
+      }
+      scopeResult = value
+      return undefined
+    })
+  } catch (error) {
+    // A synchronous `scope` whose commit also triggered another component's
+    // uncaught error: React's `act` surfaces the aggregate synchronously,
+    // ahead of the resolved thenable it would otherwise have returned.
+    restoreActEnvironment()
+    if (scopeThrew) throw scopeError
+    reportUncaughtActError(error)
+    return scopeResult as T
+  }
+
+  if (!scopeWasAsync) {
+    // React already flushed and surfaced any uncaught error above before
+    // returning from a synchronous scope; nothing here awaits its thenable.
+    restoreActEnvironment()
+    if (scopeThrew) throw scopeError
+    return scopeResult as T
+  }
+
+  // React's `act` does not return a real `Promise` for the async branch
+  // either — it is a bare object with its own hand-rolled `then` — so
+  // `Promise.resolve` assimilates it into a real, chainable one.
+  return Promise.resolve(actResult).then(
+    () => {
+      restoreActEnvironment()
+      if (scopeThrew) throw scopeError
+      return scopeResult as T
+    },
+    (error: unknown) => {
+      restoreActEnvironment()
+      if (scopeThrew) throw scopeError
+      reportUncaughtActError(error)
+      // `reportUncaughtActError` throws when no root is mounted; when it
+      // returns, the error has been handed to the root instead of the caller.
+      return scopeResult as T
+    }
+  )
 }
 
 export interface TestRootOptions extends TestWindowOptions {
