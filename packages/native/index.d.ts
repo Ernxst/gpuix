@@ -416,6 +416,11 @@ export declare class TestGpuixRenderer {
    * offscreen renderer so lifecycle tests can prove unmounted tracks leave.
    */
   getStyleTransitionCount(): number
+  /**
+   * Number of style-transition and motion tracks that are still active at
+   * the renderer's current animation-clock time.
+   */
+  getActiveAnimationCount(): number
   /** Number of intrinsic probe layouts performed by the offscreen renderer. */
   getIntrinsicProbeLayoutCount(): number
   /**
@@ -671,6 +676,7 @@ export declare class TestGpuixRenderer {
   /** Last painted bounds for an element, or null if it was not painted. */
   getElementBounds(id: number): ElementBounds | null
   clockPause(): number
+  isClockPaused(): boolean
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
   clockResume(): number
