@@ -38,6 +38,7 @@ import type {
   CanvasPublicInstance,
   CanvasImageLoadState,
   ElementBounds,
+  ElementInteractionState,
   HighlightMatch,
   NativeRenderer,
   PublicInstance,
@@ -1550,6 +1551,10 @@ export class TestRenderer implements NativeRenderer {
 
   getActiveElement(): number | null {
     return this.native.getActiveElement()
+  }
+
+  getElementInteractionState(elementId: number): ElementInteractionState | null {
+    return this.native.getElementInteractionState?.(elementId) ?? null
   }
 
   /** `clipboard.writeText/readText`'s test backdoor: read the in-memory

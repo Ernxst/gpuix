@@ -1336,6 +1336,8 @@ export interface NativeRenderer {
   resolveEditorKeyDown?(elementId: number, defaultPrevented: boolean): void
   /** The focused host element id, analogous to `document.activeElement`, or null. */
   getActiveElement?(): number | null
+  /** Read live focus, focus-visible, hover, and active state for one element. */
+  getElementInteractionState?(elementId: number): ElementInteractionState | null
   blur?(): void
 
   // ── Clipboard API ────────────────────────────────────────────────
@@ -1577,6 +1579,14 @@ export interface ElementBounds {
   height: number
 }
 
+/** Live interaction state returned by the native renderer. */
+export interface ElementInteractionState {
+  focused: boolean
+  focusVisible: boolean
+  hovered: boolean
+  active: boolean
+}
+
 /**
  * The `DOMRect` shape `getBoundingClientRect()` returns: the same box as
  * {@link ElementBounds} with the four edges the DOM also exposes.
@@ -1698,6 +1708,13 @@ export interface PublicInstance {
    * window's content origin, which is this renderer's viewport.
    */
   getBoundingClientRect(): ElementRect
+  /**
+   * Tests one of the renderer's supported state pseudo-classes against the
+   * live native interaction state. The accepted selectors are `:focus`,
+   * `:focus-visible`, `:hover`, and `:active`; any other selector throws a
+   * `SyntaxError`.
+   */
+  matches(selector: string): boolean
 }
 
 /**

@@ -1385,6 +1385,27 @@ export const hostConfig = {
           left: bounds.x,
         }
       },
+      matches: (selector: string): boolean => {
+        const normalized = selector.trim()
+        if (
+          normalized !== ":focus" &&
+          normalized !== ":focus-visible" &&
+          normalized !== ":hover" &&
+          normalized !== ":active"
+        ) {
+          throw new SyntaxError(
+            `Failed to execute 'matches' on 'Element': '${selector}' is not a supported selector. ` +
+              "Supported: :focus, :focus-visible, :hover, :active."
+          )
+        }
+
+        const state = rootContainerInstance.native.getElementInteractionState?.(id)
+        if (!state) return false
+        if (normalized === ":focus") return state.focused
+        if (normalized === ":focus-visible") return state.focusVisible
+        if (normalized === ":hover") return state.hovered
+        return state.active
+      },
       __applyCanvasCommands: (ops, operands, strings) => {
         if (instance.type !== "canvas") {
           throw new TypeError(

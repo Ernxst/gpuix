@@ -1737,6 +1737,7 @@ ref.current.scrollIntoView({ block: "nearest" })   // smallest revealing scroll
 
 ref.current.getBoundingClientRect()                // DOMRect-shaped measurement
 ref.current.getBounds()                            // the same box as {x, y, width, height}
+ref.current.matches(":focus")                     // :focus, :focus-visible, :hover, or :active
 
 // "Am I at the bottom?" — the standard DOM test
 const atBottom =
@@ -1748,6 +1749,12 @@ const atBottom =
 element with no painted box reports an all-zero rect, as the DOM does. Use
 `getBounds()` when the distinction between "no box" and "a zero box" matters;
 it returns `null` for the former.
+
+`ref.current.matches()` reads the live native interaction state for `:focus`,
+`:focus-visible`, `:hover`, and `:active`, so it stays current as focus and
+pointer state change. The same line works under `react-dom` for these four
+selectors. Other selectors throw a `SyntaxError` because this renderer
+deliberately supports only these state pseudo-classes.
 
 `ref.current.compareDocumentPosition(other)` matches
 `Node.compareDocumentPosition()`: it returns the same bitmask a browser does —

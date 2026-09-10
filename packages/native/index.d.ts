@@ -187,6 +187,8 @@ export declare class GpuixRenderer {
    * This reads GPUI focus directly, so role-less focusable elements are included.
    */
   getActiveElement(): number | null
+  /** Read the live interaction state for one retained element. */
+  getElementInteractionState(elementId: number): ElementInteractionState | null
   /** Route the active pressed-pointer sequence to this retained element. */
   setPointerCapture(elementId: number): void
   /** Release capture only when this retained element currently owns it. */
@@ -479,6 +481,8 @@ export declare class TestGpuixRenderer {
   focusElement(id: number, preventScroll?: boolean | undefined | null): void
   /** The focused host element id, analogous to `document.activeElement`, or null. */
   getActiveElement(): number | null
+  /** Read the live interaction state for one retained element. */
+  getElementInteractionState(elementId: number): ElementInteractionState | null
   blur(): void
   focusNext(): void
   focusPrevious(): void
@@ -754,6 +758,13 @@ export interface ElementBounds {
   y: number
   width: number
   height: number
+}
+
+export interface ElementInteractionState {
+  focused: boolean
+  focusVisible: boolean
+  hovered: boolean
+  active: boolean
 }
 
 export interface EventModifiers {
