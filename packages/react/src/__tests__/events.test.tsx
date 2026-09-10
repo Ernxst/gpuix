@@ -4239,6 +4239,50 @@ describeNative("events", () => {
   })
 
   describe("scrollable containers", () => {
+    it("defers hover edges until a phased scroll settles", () => {
+      const edges: string[] = []
+
+      function ScrollableHoverList() {
+        return (
+          <div style={{ width: 200, height: 80, overflowY: "scroll" }}>
+            {[0, 1, 2, 3].map((row) => (
+              <div
+                key={row}
+                style={{ width: 180, height: 40, backgroundColor: row % 2 ? "#35415d" : "#27324a" }}
+                onMouseEnter={() => edges.push(`enter:${row}`)}
+                onMouseLeave={() => edges.push(`leave:${row}`)}
+              >
+                <text>Row {row}</text>
+              </div>
+            ))}
+          </div>
+        )
+      }
+
+      testRoot.render(<ScrollableHoverList />)
+      testRoot.renderer.nativeSimulateMouseMove(20, 20)
+      expect(edges).toEqual(["enter:0"])
+      edges.length = 0
+
+      testRoot.renderer.nativeSimulateScrollWheel(20, 20, 0, -40, {
+        phase: "started",
+        deltaUnit: "pixels",
+      })
+      expect(edges).toEqual([])
+
+      testRoot.renderer.nativeSimulateScrollWheel(20, 20, 0, -40, {
+        phase: "moved",
+        deltaUnit: "pixels",
+      })
+      expect(edges).toEqual([])
+
+      testRoot.renderer.nativeSimulateScrollWheel(20, 20, 0, 0, {
+        phase: "ended",
+        deltaUnit: "pixels",
+      })
+      expect(edges).toEqual(["leave:0", "enter:2"])
+    })
+
     it("should scroll content when overflow is scroll", () => {
       function ScrollableList() {
         return (
