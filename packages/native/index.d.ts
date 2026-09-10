@@ -934,6 +934,19 @@ export interface ScrollWheelOptions {
   modifiers?: ScrollWheelModifiers
 }
 
+/**
+ * Owning PIDs of on-screen, normal-level (`kCGWindowLayer == 0`) app windows,
+ * front to back — the same stacking order the user sees on screen. A
+ * regression guard for #322: siblings racing for activation at launch can
+ * leave the losers' windows behind the active app with no visible sign of
+ * it beyond this order.
+ *
+ * Window *names* require Screen Recording permission; owner PIDs need none,
+ * which is what makes this usable as an unprivileged CI probe. This query
+ * never reads `kCGWindowName`.
+ */
+export declare function testOnScreenWindowOwnerPids(): Array<number>
+
 export interface WindowCapabilities {
   /** `isActive()` is available for this renderer/window. */
   activation: boolean

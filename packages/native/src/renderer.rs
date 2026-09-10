@@ -2024,6 +2024,152 @@ pub fn test_macos_native_window_allocation_count() -> u32 {
         .unwrap_or(u32::MAX)
 }
 
+/// Owning PIDs of on-screen, normal-level (`kCGWindowLayer == 0`) app windows,
+/// front to back — the same stacking order the user sees on screen. A
+/// regression guard for #322: siblings racing for activation at launch can
+/// leave the losers' windows behind the active app with no visible sign of
+/// it beyond this order.
+///
+/// Window *names* require Screen Recording permission; owner PIDs need none,
+/// which is what makes this usable as an unprivileged CI probe. This query
+/// never reads `kCGWindowName`.
+#[cfg(all(target_os = "macos", feature = "test-support"))]
+#[napi]
+pub fn test_on_screen_window_owner_pids() -> Result<Vec<u32>> {
+    use core_foundation::array::CFArray;
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::number::CFNumber;
+    use core_foundation::string::CFString;
+    use core_graphics::window::{
+        kCGNullWindowID, kCGWindowLayer, kCGWindowListExcludeDesktopElements,
+        kCGWindowListOptionOnScreenOnly, kCGWindowOwnerPID, CGWindowListCopyWindowInfo,
+    };
+
+    // SAFETY: `CGWindowListCopyWindowInfo` is an ordinary CoreGraphics query;
+    // per Apple's documented contract it returns either null (the query
+    // failed) or a retained `CFArrayRef` of `CFDictionaryRef` window
+    // descriptions, matching what `wrap_under_create_rule` below expects.
+    let windows_ref = unsafe {
+        CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID,
+        )
+    };
+    if windows_ref.is_null() {
+        return Ok(Vec::new());
+    }
+    let windows: CFArray<CFDictionary<CFString, CFType>> =
+        unsafe { TCFType::wrap_under_create_rule(windows_ref) };
+
+    // SAFETY: `kCGWindowLayer`/`kCGWindowOwnerPID` are CoreGraphics' extern
+    // dictionary-key constants; reading them and retaining a reference via
+    // `wrap_under_get_rule` is the documented way to use them as CFString
+    // dictionary keys.
+    let layer_key = unsafe { CFString::wrap_under_get_rule(kCGWindowLayer) };
+    let owner_pid_key = unsafe { CFString::wrap_under_get_rule(kCGWindowOwnerPID) };
+
+    let mut pids = Vec::new();
+    for window in windows.iter() {
+        let is_normal_layer = window
+            .find(layer_key.clone())
+            .and_then(|value| value.downcast::<CFNumber>())
+            .and_then(|number| number.to_i64())
+            == Some(0);
+        if !is_normal_layer {
+            continue;
+        }
+        if let Some(pid) = window
+            .find(owner_pid_key.clone())
+            .and_then(|value| value.downcast::<CFNumber>())
+            .and_then(|number| number.to_i64())
+        {
+            pids.push(pid as u32);
+        }
+    }
+    Ok(pids)
+}
+
+/// Owning PIDs of on-screen, non-tool, non-topmost, uncloaked top-level
+/// windows, in top-to-bottom z-order — `EnumWindows` walks in that order
+/// already. Excludes tool windows (they aren't ordinary app windows), the
+/// always-on-top class (the taskbar is topmost, and would otherwise sort
+/// first regardless of what actually has visual priority), and cloaked
+/// windows (UWP/suspended windows `IsWindowVisible` still reports visible).
+///
+/// A regression guard for #322: the Windows foreground-activation lock lets
+/// only one process win `SetForegroundWindow` when several race for it at
+/// once, and the losers' windows can end up behind without this order
+/// showing it.
+#[cfg(all(target_os = "windows", feature = "test-support"))]
+#[napi]
+pub fn test_on_screen_window_owner_pids() -> Result<Vec<u32>> {
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowLongPtrW, GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE,
+        WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    };
+
+    extern "system" fn collect_window(hwnd: HWND, state: LPARAM) -> BOOL {
+        // SAFETY: `EnumWindows` guarantees `hwnd` is a live top-level window
+        // for the duration of this callback, and `state` is the `*mut
+        // Vec<u32>` this same call passed in below.
+        unsafe {
+            if !IsWindowVisible(hwnd).as_bool() {
+                return true.into();
+            }
+            let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+            if ex_style & WS_EX_TOOLWINDOW.0 != 0 || ex_style & WS_EX_TOPMOST.0 != 0 {
+                return true.into();
+            }
+            let mut cloaked: u32 = 0;
+            let cloaked_ok = DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED,
+                &mut cloaked as *mut u32 as *mut std::ffi::c_void,
+                std::mem::size_of::<u32>() as u32,
+            )
+            .is_ok();
+            if cloaked_ok && cloaked != 0 {
+                return true.into();
+            }
+            let mut pid: u32 = 0;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut u32));
+            if pid != 0 {
+                let pids = &mut *(state.0 as *mut Vec<u32>);
+                pids.push(pid);
+            }
+            true.into()
+        }
+    }
+
+    let mut pids: Vec<u32> = Vec::new();
+    // SAFETY: `collect_window` only reads the HWNDs `EnumWindows` hands it and
+    // writes into `pids` through the `LPARAM` it receives, for the duration
+    // of this synchronous call.
+    unsafe {
+        EnumWindows(Some(collect_window), LPARAM(&mut pids as *mut Vec<u32> as isize))
+            .map_err(|error| Error::new(Status::GenericFailure, format!("{error}")))?;
+    }
+    Ok(pids)
+}
+
+/// `test_on_screen_window_owner_pids` has no window-manager query to make on
+/// this platform: GPUIX doesn't ship an embedded renderer here at all.
+#[cfg(all(
+    not(any(target_os = "macos", target_os = "windows")),
+    feature = "test-support"
+))]
+#[napi]
+pub fn test_on_screen_window_owner_pids() -> Result<Vec<u32>> {
+    Err(Error::new(
+        Status::GenericFailure,
+        "test_on_screen_window_owner_pids is not supported on this platform",
+    ))
+}
+
 /// Lifecycle states distinguish an invalid pre-init call from an idempotent
 /// post-termination call after the native window has already been destroyed.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]

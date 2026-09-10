@@ -72,6 +72,8 @@ web-sys = { version = "0.3", features = ["Event", "EventTarget", "Navigator", "W
 [target.'cfg(target_os = "macos")'.dependencies]
 core-text = "=21.0.0"
 core-graphics = "=0.24.0"
+# Same version core-graphics 0.24 and cocoa 0.26 already resolve to.
+core-foundation = "=0.10.0"
 cocoa = "=0.26.0"
 objc = "0.2"
 # Same semver line GPUI depends on (zed/Cargo.toml); the workspace lockfile
@@ -83,7 +85,7 @@ gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, f
 # Same crate GPUI uses. A .node cannot ship an exe manifest, so Windows DPI
 # awareness is set at runtime in renderer.rs instead of via windows-manifest.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }
 # Same semver line GPUI depends on (zed/Cargo.toml); the workspace lockfile
 # unifies both to one resolved version.
 raw-window-handle = "0.6"
