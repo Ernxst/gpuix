@@ -3935,6 +3935,106 @@ mod tests {
     }
 
     #[test]
+    fn rejects_every_invalid_grid_repeat_count() {
+        for count in [json!(0), json!(2.5), json!(-1), json!(65), json!("auto"), json!("Auto-Fill")] {
+            let parsed = parse_style_value(&json!({
+                "gridTemplateColumns": [{
+                    "type": "repeat",
+                    "count": count,
+                    "tracks": [{ "type": "px", "value": 24 }]
+                }]
+            }));
+
+            assert_eq!(parsed.style.grid_template_columns, None, "{count:?}");
+            assert_eq!(parsed.problems.len(), 1, "{count:?}");
+            assert_eq!(
+                parsed.problems[0].property, "gridTemplateColumns[0].count",
+                "{count:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fit_content_never_counts_as_a_fixed_component_but_a_fixed_minmax_bound_does() {
+        // taffy tags `fit-content()` distinctly from a plain length or
+        // percentage (`CompactLength::is_length_or_percentage`), so it never
+        // satisfies CSS's `<fixed-size>` requirement for an auto repetition's
+        // tracks, even with a px limit.
+        let fit_content_only = parse_style_value(&json!({
+            "gridTemplateColumns": [{
+                "type": "repeat",
+                "count": "auto-fill",
+                "tracks": [{ "type": "fit-content", "limit": { "type": "px", "value": 100 } }]
+            }]
+        }));
+        assert_eq!(fit_content_only.style.grid_template_columns, None);
+        assert_eq!(fit_content_only.problems.len(), 1);
+        assert_eq!(
+            fit_content_only.problems[0].property,
+            "gridTemplateColumns"
+        );
+
+        // A `minmax()` with a fixed percentage lower bound does count, even
+        // though its upper bound (`1fr`) does not.
+        let minmax_with_fixed_min = parse_style_value(&json!({
+            "gridTemplateColumns": [{
+                "type": "repeat",
+                "count": "auto-fill",
+                "tracks": [{
+                    "type": "minmax",
+                    "min": { "type": "percent", "value": 10 },
+                    "max": { "type": "fr", "value": 1 }
+                }]
+            }]
+        }));
+        assert!(
+            minmax_with_fixed_min.problems.is_empty(),
+            "{:?}",
+            minmax_with_fixed_min.problems
+        );
+        assert!(matches!(
+            minmax_with_fixed_min.style.grid_template_columns,
+            Some(ref tracks) if tracks.len() == 1
+        ));
+    }
+
+    #[test]
+    fn serializes_grid_repeat_counts_back_to_their_authored_form() {
+        let auto_fill = parse_style_value(&json!({
+            "gridTemplateColumns": [{
+                "type": "repeat",
+                "count": "auto-fill",
+                "tracks": [{ "type": "px", "value": 100 }]
+            }]
+        }));
+        assert!(auto_fill.problems.is_empty(), "{:?}", auto_fill.problems);
+        let serialized = serde_json::to_value(auto_fill.style).unwrap();
+        assert_eq!(serialized["gridTemplateColumns"][0]["count"], "auto-fill");
+
+        let auto_fit = parse_style_value(&json!({
+            "gridTemplateColumns": [{
+                "type": "repeat",
+                "count": "auto-fit",
+                "tracks": [{ "type": "px", "value": 100 }]
+            }]
+        }));
+        assert!(auto_fit.problems.is_empty(), "{:?}", auto_fit.problems);
+        let serialized = serde_json::to_value(auto_fit.style).unwrap();
+        assert_eq!(serialized["gridTemplateColumns"][0]["count"], "auto-fit");
+
+        let fixed = parse_style_value(&json!({
+            "gridTemplateColumns": [{
+                "type": "repeat",
+                "count": 3,
+                "tracks": [{ "type": "px", "value": 100 }]
+            }]
+        }));
+        assert!(fixed.problems.is_empty(), "{:?}", fixed.problems);
+        let serialized = serde_json::to_value(fixed.style).unwrap();
+        assert_eq!(serialized["gridTemplateColumns"][0]["count"], 3);
+    }
+
+    #[test]
     fn parses_grid_auto_flow_and_inline_axis_justification() {
         for value in ["row", "column", "dense", "row dense", "column dense"] {
             let parsed = parse_style_value(&json!({ "gridAutoFlow": value }));
