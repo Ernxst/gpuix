@@ -29,9 +29,9 @@ const models = [
 
 **Public types.** `@gpuix/react` now exports `Props`, `GpuixTheme`, `GpuixMetrics`, `InputProps`, `AnchoredProps`, and the other host prop types.
 
-**Floating helpers.** Import `FloatingLayer`, `useControllableState`, `renderSlot`, and `useFocusTrap` from `@gpuix/react/floating`.
+**Floating helpers.** Import `FloatingLayer` and `renderSlot` from `@gpuix/react/floating`.
 
-**Bounds and focus.** `getElementBounds(id)` is on the live renderer, not only tests. It returns `{ x, y, width, height }`, or `null`. `getFocusedElementId()`, `focusNextWithin(id)`, and `focusPreviousWithin(id)` walk GPUI's painted tab map, so `tabIndex` order and unpainted nodes match `focusNext`. Put `useFocusTrap` on the panel. Tab from a focused child bubbles to that ancestor.
+**Bounds and focus.** `getElementBounds(id)` is on the live renderer, not only tests. It returns `{ x, y, width, height }`, or `null`. `getFocusedElementId()`, `focusNextWithin(id)`, and `focusPreviousWithin(id)` walk GPUI's painted tab map, so `tabIndex` order and unpainted nodes match `focusNext`. Own Tab on the panel, then call those renderer methods to wrap inside the subtree.
 
 `visibility: "hidden"` now maps to GPUI `invisible()`, so a hidden tab stop is skipped.
 

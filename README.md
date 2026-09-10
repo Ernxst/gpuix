@@ -1636,7 +1636,7 @@ render(<App />, {
 These callbacks observe native events. They do not expose GPUI's propagation
 control, so they cannot cancel or stop the native event.
 
-Do not combine this window Tab handler with `useFocusTrap`. Both move focus, and
+Do not also call `focusNext` from an element `onKeyDown`. Both move focus, and
 the window listener cannot stop the native event, so Tab would jump twice.
 
 ### Imperative focus
@@ -1681,7 +1681,7 @@ Each primitive has a dedicated namespace entry point:
 | `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Content`, `Item` |
 | `@gpuix/react/combobox` | `Root`, `Input`, `Content`, `List`, `Item`, `Empty` |
 | `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Content` |
-| `@gpuix/react/floating` | `FloatingLayer`, `useControllableState`, `renderSlot`, `useFocusTrap` |
+| `@gpuix/react/floating` | `FloatingLayer`, `renderSlot` |
 
 ### Build a local Select
 
@@ -1907,17 +1907,17 @@ const box = renderer.getElementBounds?.(ref.current.id)
 
 ### Trap Tab inside a dialog
 
-GPUIX does not bind Tab. Put `useFocusTrap` on the panel. Tab from a focused
-child bubbles to that ancestor. The trap wraps inside the subtree with
+GPUIX does not bind Tab. Own the key, then wrap inside the panel with
 `focusNextWithin` / `focusPreviousWithin`.
 
 ```tsx
-import { useFocusTrap } from '@gpuix/react/floating'
+function onKeyDown(event: EventPayload) {
+  if (event.key !== 'tab' || !panel) return
+  if (event.modifiers?.shift) renderer.focusPreviousWithin?.(panel.id)
+  else renderer.focusNextWithin?.(panel.id)
+}
 
-const [panel, setPanel] = useState<PublicInstance | null>(null)
-const trapTab = useFocusTrap(panel)
-
-<div ref={setPanel} onKeyDown={trapTab}>
+<div ref={setPanel} onKeyDown={onKeyDown}>
   <div tabIndex={0} autoFocus>Ok</div>
   <div tabIndex={0}>Cancel</div>
 </div>
