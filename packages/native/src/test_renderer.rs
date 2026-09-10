@@ -32,8 +32,8 @@ use crate::renderer::{
     init_application_menu_support, install_application_menus, parse_canvas_image_source,
     parse_debug_frame_overlay_mode, set_application_menus, take_style_diagnostics_for_reporting,
     to_element_id, validate_canvas_target, CanvasImageLoadState, DebugFrameOverlayStats,
-    EventCallback, FocusDirection, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView, MenuSpec,
-    PendingStyleDiagnostics, WindowSize,
+    ElementInteractionState, EventCallback, FocusDirection, FrameTimestampOrigin,
+    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostics, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -1304,6 +1304,22 @@ impl TestGpuixRenderer {
             let view = view.clone();
             cx.update_window(window, |_, window, app| {
                 view.read(app).active_element_id(window).map(|id| id as f64)
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
+    /// Read the live interaction state for one retained element.
+    #[napi]
+    pub fn get_element_interaction_state(
+        &self,
+        element_id: f64,
+    ) -> Result<Option<ElementInteractionState>> {
+        let id = to_element_id(element_id)?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.read(app).element_interaction_state(id, window)
             })
             .map_err(|error| Error::from_reason(error.to_string()))
         })

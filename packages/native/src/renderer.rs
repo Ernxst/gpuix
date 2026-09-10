@@ -1477,6 +1477,10 @@ enum UiCommand {
     GetActiveElement {
         response: SyncSender<Option<u64>>,
     },
+    GetElementInteractionState {
+        id: u64,
+        response: SyncSender<Option<ElementInteractionState>>,
+    },
     PromptForPaths {
         options: PromptForPathsOptions,
         deferred: PickerDeferredGuard,
@@ -1839,6 +1843,11 @@ async fn run_ui_commands(
             UiCommand::GetActiveElement { response } => {
                 window.update(cx, move |view, window, _cx| {
                     response.send(view.active_element_id(window)).ok();
+                })
+            }
+            UiCommand::GetElementInteractionState { id, response } => {
+                window.update(cx, move |view, window, _cx| {
+                    response.send(view.element_interaction_state(id, window)).ok();
                 })
             }
             UiCommand::PromptForPaths { options, deferred } => {
@@ -4359,6 +4368,36 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Read the live interaction state for one retained element.
+    #[napi]
+    pub fn get_element_interaction_state(
+        &self,
+        element_id: f64,
+    ) -> Result<Option<ElementInteractionState>> {
+        let id = to_element_id(element_id)?;
+
+        #[cfg(target_os = "macos")]
+        return update_window(|view, window, _cx| view.element_interaction_state(id, window));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetElementInteractionState { id, response })?;
+            return recv_ui_response(receiver, "the element interaction state query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = id;
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
     /// Route the active pressed-pointer sequence to this retained element.
     #[napi]
     pub fn set_pointer_capture(&self, element_id: f64) -> Result<()> {
@@ -6149,6 +6188,18 @@ impl WebGpuixRenderer {
         }))
     }
 
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getElementInteractionState)]
+    pub fn get_element_interaction_state(
+        &self,
+        element_id: f64,
+    ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        let state = update_web_view(move |view, window, _cx| {
+            view.element_interaction_state(id, window)
+        })?;
+        element_interaction_state_js(state)
+    }
+
     pub fn blur(&self) -> Result<(), wasm_bindgen::JsValue> {
         update_web_window(|window, _cx| window.blur())
     }
@@ -7346,6 +7397,44 @@ impl GpuixView {
         self.focus_handles
             .iter()
             .find_map(|(id, handle)| handle.is_focused(window).then_some(*id))
+    }
+
+    pub(crate) fn element_interaction_state(
+        &self,
+        id: u64,
+        window: &gpui::Window,
+    ) -> Option<ElementInteractionState> {
+        let (tracks_hover, tracks_active) = {
+            let tree = self.tree.lock().unwrap();
+            let element = tree.elements.get(&id)?;
+            let style = element.style.as_deref();
+            (tracks_hover(style), tracks_active(style))
+        };
+
+        let focused = self
+            .focus_handles
+            .get(&id)
+            .is_some_and(|handle| handle.is_focused(window));
+        let state = self.interactive_style_states.get(&id);
+        let hovered = if tracks_hover {
+            state.is_some_and(|state| state.hovered)
+        } else {
+            crate::automation::get_bounds(id).is_some_and(|bounds| {
+                let (mouse_x, mouse_y) = point_to_xy(window.mouse_position());
+                mouse_x >= bounds.x
+                    && mouse_x <= bounds.x + bounds.width
+                    && mouse_y >= bounds.y
+                    && mouse_y <= bounds.y + bounds.height
+            })
+        };
+        let active = tracks_active && state.is_some_and(|state| state.active);
+
+        Some(ElementInteractionState {
+            focused,
+            focus_visible: focused && window.last_input_was_keyboard(),
+            hovered,
+            active,
+        })
     }
 
     /// Move focus to `id`, revealing it inside its scroll ancestors unless the
@@ -11307,6 +11396,14 @@ fn overflow_scrolls(value: &str) -> bool {
     matches!(value, "scroll" | "auto")
 }
 
+fn tracks_hover(style: Option<&StyleDesc>) -> bool {
+    style.is_some_and(|style| style.hover.is_some() || style.hover_group.is_some())
+}
+
+fn tracks_active(style: Option<&StyleDesc>) -> bool {
+    style.is_some_and(|style| style.active.is_some())
+}
+
 fn is_overflow_scroller(element: &crate::retained_tree::RetainedElement) -> bool {
     element.style.as_deref().is_some_and(|style| {
         [
@@ -11926,9 +12023,8 @@ pub(crate) fn build_host_container(
     // Host ids are already unique per renderer. Keeping them as integers avoids
     // allocating a formatted name for every `<div>` and `<text>` on every frame.
     let mut el = gpui::div().id(gpui::ElementId::Integer(element.id));
-    let tracks_hover =
-        style.is_some_and(|style| style.hover.is_some() || style.hover_group.is_some());
-    let tracks_active = style.is_some_and(|style| style.active.is_some());
+    let tracks_hover = tracks_hover(style);
+    let tracks_active = tracks_active(style);
     let tracks_mouse_hover = tracks_mouse_hover_events(element, ctx.tree);
 
     if let Some(style) = style {
@@ -14307,6 +14403,15 @@ pub struct ElementBounds {
     pub height: f64,
 }
 
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct ElementInteractionState {
+    pub focused: bool,
+    pub focus_visible: bool,
+    pub hovered: bool,
+    pub active: bool,
+}
+
 impl ElementBounds {
     pub(crate) fn from_painted(bounds: crate::automation::ElementBounds) -> Self {
         Self {
@@ -14333,6 +14438,29 @@ fn element_bounds_js(
             &object,
             &wasm_bindgen::JsValue::from_str(key),
             &wasm_bindgen::JsValue::from_f64(value),
+        )?;
+    }
+    Ok(object.into())
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn element_interaction_state_js(
+    state: Option<ElementInteractionState>,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    let Some(state) = state else {
+        return Ok(wasm_bindgen::JsValue::NULL);
+    };
+    let object = js_sys::Object::new();
+    for (key, value) in [
+        ("focused", state.focused),
+        ("focusVisible", state.focus_visible),
+        ("hovered", state.hovered),
+        ("active", state.active),
+    ] {
+        js_sys::Reflect::set(
+            &object,
+            &wasm_bindgen::JsValue::from_str(key),
+            &wasm_bindgen::JsValue::from_bool(value),
         )?;
     }
     Ok(object.into())
