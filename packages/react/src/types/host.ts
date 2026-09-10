@@ -308,6 +308,8 @@ export interface MotionTransition {
   /** Delay in seconds. */
   delay?: number
   ease?: MotionEase
+  /** Number of additional repetitions. `Infinity` repeats forever. */
+  repeat?: number
 }
 
 export interface MotionProps {

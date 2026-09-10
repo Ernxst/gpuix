@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
@@ -133,6 +133,15 @@ describeNative("toMatchScreenshot animation settling", () => {
 
       await expect(result).toMatchScreenshot({ resolveScreenshotPath: screenshotPath(directory) })
       expect(result.renderer.getActiveAnimationCount()).toBe(0)
+
+      result.renderer.clockPause()
+      const settled = path.join(directory, "spring-settled.png")
+      result.renderer.captureScreenshot(settled)
+      result.renderer.advanceAsyncClock(500)
+      expect(result.renderer.getActiveAnimationCount()).toBe(0)
+      const afterAdvance = path.join(directory, "spring-after-advance.png")
+      result.renderer.captureScreenshot(afterAdvance)
+      expect(readFileSync(afterAdvance).equals(readFileSync(settled))).toBe(true)
     })
   })
 
@@ -143,14 +152,16 @@ describeNative("toMatchScreenshot animation settling", () => {
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: 200 }}
-          transition={{ duration: 1_000_000_000, ease: "linear" }}
+          transition={{ duration: 0.1, repeat: Infinity, ease: "linear" }}
           style={{ width: 200, height: 80, backgroundColor: "#1e2430" }}
         />
       )
       result.renderer.captureScreenshot(golden)
       const warning = vi.spyOn(console, "warn").mockImplementation(() => {})
       try {
-        await expect(result).toMatchScreenshot({ resolveScreenshotPath: screenshotPath(directory) })
+        await expect(
+          expect(result).toMatchScreenshot({ resolveScreenshotPath: screenshotPath(directory) })
+        ).rejects.toThrow(/Image diff|pixel/i)
         expect(warning).toHaveBeenCalledTimes(1)
         expect(warning.mock.calls[0]?.[0]).toMatch(
           /toMatchScreenshot.*window.*active animation\(s\) remain/

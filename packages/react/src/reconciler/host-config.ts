@@ -775,6 +775,21 @@ function serializeCustomProp(
 ): string | object | number | boolean | null {
   if (value === undefined || typeof value === "function") return null
   if (
+    key === "motion" &&
+    typeof value === "object" &&
+    value !== null &&
+    "transition" in value &&
+    typeof value.transition === "object" &&
+    value.transition !== null &&
+    "repeat" in value.transition &&
+    value.transition.repeat === Number.POSITIVE_INFINITY
+  ) {
+    return {
+      ...value,
+      transition: { ...value.transition, repeat: "Infinity" },
+    }
+  }
+  if (
     typeof value === "number" &&
     !Number.isFinite(value) &&
     [

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use web_time::Instant;
 
 use crate::style::{
@@ -1560,6 +1560,44 @@ struct MotionTransition {
     delay: f64,
     #[serde(default = "default_ease")]
     ease: TransitionEasing,
+    #[serde(default, deserialize_with = "deserialize_motion_repeat")]
+    repeat: MotionRepeat,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum MotionRepeat {
+    Finite(u32),
+    Infinite,
+}
+
+impl Default for MotionRepeat {
+    fn default() -> Self {
+        Self::Finite(0)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum MotionRepeatInput {
+    Number(f64),
+    String(String),
+}
+
+fn deserialize_motion_repeat<'de, D>(deserializer: D) -> Result<MotionRepeat, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match MotionRepeatInput::deserialize(deserializer)? {
+        MotionRepeatInput::Number(value)
+            if value.is_finite()
+                && value >= 0.0
+                && value.fract() == 0.0
+                && value <= u32::MAX as f64 => Ok(MotionRepeat::Finite(value as u32)),
+        MotionRepeatInput::String(value) if value == "Infinity" => Ok(MotionRepeat::Infinite),
+        MotionRepeatInput::Number(_) | MotionRepeatInput::String(_) => Err(
+            serde::de::Error::custom("motion repeat must be a non-negative integer or Infinity"),
+        ),
+    }
 }
 
 impl Default for MotionTransition {
@@ -1568,6 +1606,7 @@ impl Default for MotionTransition {
             duration: default_duration(),
             delay: 0.0,
             ease: default_ease(),
+            repeat: MotionRepeat::default(),
         }
     }
 }
@@ -1661,6 +1700,16 @@ impl MotionState {
             if reduce_motion {
                 self.from = self.target;
                 self.velocity = MotionVelocity::default();
+            } else if matches!(&self.transition.ease, TransitionEasing::Spring(_)) {
+                // A spring can briefly report rest before its numerical tail
+                // re-enters the epsilon window. Latch the endpoint once the
+                // real frame path observes rest so an unchanged source cannot
+                // resurrect the original spring later.
+                let frame = self.frame_with_velocity(now, false).0;
+                if !frame.active {
+                    self.from = self.target;
+                    self.velocity = MotionVelocity::default();
+                }
             }
             return Ok(());
         }
@@ -1761,8 +1810,22 @@ impl MotionState {
         } else {
             elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
         };
-        let active = self.from != self.target && raw < 1.0;
-        let progress = transition_ease(raw.clamp(0.0, 1.0), &self.transition.ease);
+        let (active, progress) = match self.transition.repeat {
+            MotionRepeat::Finite(repeats) => {
+                let total = repeats as f64 + 1.0;
+                let active = self.from != self.target && raw < total;
+                let progress = if active {
+                    raw.fract()
+                } else if raw >= total {
+                    1.0
+                } else {
+                    0.0
+                };
+                (active, progress)
+            }
+            MotionRepeat::Infinite => (self.from != self.target, raw.fract()),
+        };
+        let progress = transition_ease(progress.clamp(0.0, 1.0), &self.transition.ease);
 
         (
             MotionFrame {

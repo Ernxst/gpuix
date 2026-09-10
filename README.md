@@ -5364,6 +5364,9 @@ remains or a 10,000ms clock budget is exhausted. On exhaustion the matcher
 warns once with the target and remaining count, then captures anyway. If the
 clock was running before the assertion it resumes afterward; advanced time is
 not rewound.
+Settling is window-wide: every retained style-transition and motion track is
+considered, so an unrelated animation elsewhere in the window can consume the
+budget or trigger the warning for an element capture.
 
 Both animation handling and comparator knobs are options:
 
