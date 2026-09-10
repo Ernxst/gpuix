@@ -4,7 +4,16 @@ import type {
   EventPayload,
   MenuSpec,
 } from "@gpuix/native"
-import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
+import type {
+  GpuixChangeEvent,
+  GpuixElementEvent,
+  GpuixFocusEvent,
+  GpuixKeyboardEvent,
+  GpuixMouseEvent,
+  GpuixScrollEvent,
+  GpuixSyntheticEvent,
+  GpuixWheelEvent,
+} from "../reconciler/synthetic-event.js"
 import type { AccessibilityRole } from "../index.js"
 
 /**
@@ -998,7 +1007,7 @@ export interface AccessibilityProps {
   /** Keep this semantic node accessible without painting or reserving layout space. */
   visuallyHidden?: VisuallyHidden
   /** Value or focus action requested by assistive technology. Activate uses onClick. */
-  onAccessibilityAction?: (event: GpuixSyntheticEvent) => void
+  onAccessibilityAction?: (event: GpuixElementEvent) => void
 }
 
 // Props passed to elements.
@@ -1021,61 +1030,61 @@ export interface Props extends AccessibilityProps {
 
   // ── Mouse events ───────────────────────────────────────────────
   /** Primary button only, like the DOM. Use `onAuxClick` for the others. */
-  onClick?: (event: GpuixSyntheticEvent) => void
-  onClickCapture?: (event: GpuixSyntheticEvent) => void
+  onClick?: (event: GpuixMouseEvent) => void
+  onClickCapture?: (event: GpuixMouseEvent) => void
   /** Primary-button double click, dispatched after the second `onClick`. */
-  onDoubleClick?: (event: GpuixSyntheticEvent) => void
-  onDoubleClickCapture?: (event: GpuixSyntheticEvent) => void
+  onDoubleClick?: (event: GpuixMouseEvent) => void
+  onDoubleClickCapture?: (event: GpuixMouseEvent) => void
   /** Non-primary click, like the DOM `auxclick`. */
-  onAuxClick?: (event: GpuixSyntheticEvent) => void
-  onAuxClickCapture?: (event: GpuixSyntheticEvent) => void
+  onAuxClick?: (event: GpuixMouseEvent) => void
+  onAuxClickCapture?: (event: GpuixMouseEvent) => void
   /** Cancelable secondary-click context-menu request. */
-  onContextMenu?: (event: GpuixSyntheticEvent) => void
-  onContextMenuCapture?: (event: GpuixSyntheticEvent) => void
-  onMouseDown?: (event: GpuixSyntheticEvent) => void
-  onMouseDownCapture?: (event: GpuixSyntheticEvent) => void
-  onMouseUp?: (event: GpuixSyntheticEvent) => void
-  onMouseUpCapture?: (event: GpuixSyntheticEvent) => void
-  onMouseEnter?: (event: GpuixSyntheticEvent) => void
-  onMouseLeave?: (event: GpuixSyntheticEvent) => void
-  onMouseMove?: (event: GpuixSyntheticEvent) => void
-  onMouseMoveCapture?: (event: GpuixSyntheticEvent) => void
+  onContextMenu?: (event: GpuixMouseEvent) => void
+  onContextMenuCapture?: (event: GpuixMouseEvent) => void
+  onMouseDown?: (event: GpuixMouseEvent) => void
+  onMouseDownCapture?: (event: GpuixMouseEvent) => void
+  onMouseUp?: (event: GpuixMouseEvent) => void
+  onMouseUpCapture?: (event: GpuixMouseEvent) => void
+  onMouseEnter?: (event: GpuixMouseEvent) => void
+  onMouseLeave?: (event: GpuixMouseEvent) => void
+  onMouseMove?: (event: GpuixMouseEvent) => void
+  onMouseMoveCapture?: (event: GpuixMouseEvent) => void
   /** Fires when user clicks OUTSIDE this element. Use for "click outside to close". */
-  onMouseDownOutside?: (event: GpuixSyntheticEvent) => void
+  onMouseDownOutside?: (event: GpuixMouseEvent) => void
 
   // ── Keyboard events (delivered to the focused element) ─────────
-  onKeyDown?: (event: GpuixSyntheticEvent) => void
-  onKeyDownCapture?: (event: GpuixSyntheticEvent) => void
-  onKeyUp?: (event: GpuixSyntheticEvent) => void
-  onKeyUpCapture?: (event: GpuixSyntheticEvent) => void
+  onKeyDown?: (event: GpuixKeyboardEvent) => void
+  onKeyDownCapture?: (event: GpuixKeyboardEvent) => void
+  onKeyUp?: (event: GpuixKeyboardEvent) => void
+  onKeyUpCapture?: (event: GpuixKeyboardEvent) => void
 
   // ── Focus events ───────────────────────────────────────────────
-  onFocus?: (event: GpuixSyntheticEvent) => void
-  onFocusCapture?: (event: GpuixSyntheticEvent) => void
-  onBlur?: (event: GpuixSyntheticEvent) => void
-  onBlurCapture?: (event: GpuixSyntheticEvent) => void
+  onFocus?: (event: GpuixFocusEvent) => void
+  onFocusCapture?: (event: GpuixFocusEvent) => void
+  onBlur?: (event: GpuixFocusEvent) => void
+  onBlurCapture?: (event: GpuixFocusEvent) => void
 
   // ── Scroll events ──────────────────────────────────────────────
-  onScroll?: (event: GpuixSyntheticEvent) => void
-  onScrollCapture?: (event: GpuixSyntheticEvent) => void
-  onWheel?: (event: GpuixSyntheticEvent) => void
-  onWheelCapture?: (event: GpuixSyntheticEvent) => void
+  onScroll?: (event: GpuixScrollEvent) => void
+  onScrollCapture?: (event: GpuixScrollEvent) => void
+  onWheel?: (event: GpuixWheelEvent) => void
+  onWheelCapture?: (event: GpuixWheelEvent) => void
 
   // ── File drop (Finder / OS paths) ───────────────────────────────
   onFileDrop?: (event: EventPayload) => void
 
   // ── Text editor events ─────────────────────────────────────────
-  onChange?: (event: GpuixSyntheticEvent) => void
-  onChangeCapture?: (event: GpuixSyntheticEvent) => void
+  onChange?: (event: GpuixChangeEvent) => void
+  onChangeCapture?: (event: GpuixChangeEvent) => void
 
   // ── Native component events ─────────────────────────────────────
-  onToggleFile?: (event: GpuixSyntheticEvent) => void
-  onShowMore?: (event: GpuixSyntheticEvent) => void
-  onLineClick?: (event: GpuixSyntheticEvent) => void
-  onLinkClick?: (event: GpuixSyntheticEvent) => void
-  onVisibleRange?: (event: GpuixSyntheticEvent) => void
+  onToggleFile?: (event: GpuixElementEvent) => void
+  onShowMore?: (event: GpuixElementEvent) => void
+  onLineClick?: (event: GpuixElementEvent) => void
+  onLinkClick?: (event: GpuixElementEvent) => void
+  onVisibleRange?: (event: GpuixElementEvent) => void
   /** Match count changed for this element's `highlight`. See `matchCount`. */
-  onHighlight?: (event: GpuixSyntheticEvent) => void
+  onHighlight?: (event: GpuixElementEvent) => void
 
   // ── Highlight ──────────────────────────────────────────────────
   /**
@@ -1133,7 +1142,7 @@ export interface VirtualListProps
   itemCount?: number
   /** Logical index of `children[0]`. Ignored when `itemCount` is unset. */
   windowStart?: number
-  onVisibleRange?: (event: GpuixSyntheticEvent) => void
+  onVisibleRange?: (event: GpuixElementEvent) => void
 }
 
 export type ImageMimeType =
@@ -1215,12 +1224,12 @@ export interface DiffProps extends Props {
   maxLines?: number
   theme?: GpuixTheme
   /** Fires when a file header is clicked. `event.value` is the file path. */
-  onToggleFile?: (event: GpuixSyntheticEvent) => void
+  onToggleFile?: (event: GpuixElementEvent) => void
   /** Fires when Show more is clicked. `event.value` is the hidden line count. */
-  onShowMore?: (event: GpuixSyntheticEvent) => void
+  onShowMore?: (event: GpuixElementEvent) => void
   /** Fires when a diff line is clicked. `event.value` is the line text,
    *  `event.oldLine` / `event.newLine` are its line numbers. */
-  onLineClick?: (event: GpuixSyntheticEvent) => void
+  onLineClick?: (event: GpuixElementEvent) => void
 }
 
 // Props for the <markdown> custom element.
@@ -1229,7 +1238,7 @@ export interface MarkdownProps extends Props {
   source?: string
   theme?: GpuixTheme
   /** Fires when a block containing links is clicked. `event.value` is the URL. */
-  onLinkClick?: (event: GpuixSyntheticEvent) => void
+  onLinkClick?: (event: GpuixElementEvent) => void
 }
 
 // Props for the <anchored> custom element.

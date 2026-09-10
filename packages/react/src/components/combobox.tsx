@@ -8,7 +8,12 @@ import React, {
   useState,
 } from "react"
 import type { ReactElement, ReactNode } from "react"
-import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
+import type {
+  GpuixChangeEvent,
+  GpuixFocusEvent,
+  GpuixKeyboardEvent,
+  GpuixMouseEvent,
+} from "../reconciler/synthetic-event.js"
 import type { InputProps, Props, PublicInstance } from "../types/host.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
@@ -240,20 +245,20 @@ export const ComboboxInput = forwardRef<PublicInstance, ComboboxInputProps>(
         value={context.inputValue}
         readOnly={disabled || props.readOnly}
         autoFocus={context.open}
-        onClick={(event: GpuixSyntheticEvent) => {
+        onClick={(event: GpuixMouseEvent) => {
           onClick?.(event)
           if (!disabled) context.setOpen(true)
         }}
-        onFocus={(event: GpuixSyntheticEvent) => {
+        onFocus={(event: GpuixFocusEvent) => {
           onFocus?.(event)
           if (!disabled) context.setOpen(true)
         }}
-        onChange={(event: GpuixSyntheticEvent) => {
+        onChange={(event: GpuixChangeEvent) => {
           onChange?.(event)
           context.setInputValue(event.value ?? "")
           if (!disabled) context.setOpen(true)
         }}
-        onKeyDown={(event: GpuixSyntheticEvent) => {
+        onKeyDown={(event: GpuixKeyboardEvent) => {
           onKeyDown?.(event)
           if (disabled) return
           if (event.key === "Escape") {
@@ -272,7 +277,7 @@ export const ComboboxInput = forwardRef<PublicInstance, ComboboxInputProps>(
             }
           }
         }}
-        onKeyUp={(event: GpuixSyntheticEvent) => {
+        onKeyUp={(event: GpuixKeyboardEvent) => {
           onKeyUp?.(event)
         }}
       />
@@ -401,11 +406,11 @@ export const ComboboxItem = forwardRef<PublicInstance, ComboboxItemProps>(
         {...props}
         ref={itemRef}
         style={resolveStyle(style, state)}
-        onMouseEnter={(event: GpuixSyntheticEvent) => {
+        onMouseEnter={(event: GpuixMouseEvent) => {
           onMouseEnter?.(event)
           if (!disabled && index >= 0) context.setActiveIndex(index)
         }}
-        onClick={(event: GpuixSyntheticEvent) => {
+        onClick={(event: GpuixMouseEvent) => {
           onClick?.(event)
           if (!disabled) context.selectItem(value)
         }}

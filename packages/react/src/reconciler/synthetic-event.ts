@@ -1,4 +1,4 @@
-import type { EventPayload } from "@gpuix/native"
+import type { EventModifiers, EventPayload } from "@gpuix/native"
 import type { NativeRenderer, PublicInstance } from "../types/host.js"
 
 export type GpuixEventPhase = 1 | 2 | 3
@@ -96,13 +96,22 @@ export function domKeyName(
 }
 
 /**
- * The React-facing event delivered for a native GPUIX payload.
+ * The kind-agnostic members every GPUIX synthetic event carries, regardless
+ * of which native payload produced it.
  *
- * Native payload fields remain available at the top level for compatibility.
- * `nativeEvent` preserves the unmodified payload for code that needs to
- * distinguish host data from the DOM-compatible surface.
+ * `nativeEvent` is the escape hatch: the full, unmodified payload, for code
+ * that needs a field this base type does not carry (or needs to read a
+ * member without first narrowing `type`). `elementId` and `eventType` are
+ * kept at the top level too, alongside `nativeEvent`: every kind's payload
+ * has them, `eventType` is what `type` is derived from, and both are
+ * required on `EventPayload` while everything else on it is optional — so
+ * every per-kind event below remains structurally assignable to the raw
+ * `EventPayload` type.
+ *
+ * No modifier keys, no pointer fields, no key fields: those belong to the
+ * kinds that actually deliver them, below.
  */
-export type GpuixSyntheticEvent = EventPayload & {
+export type GpuixEvent = {
   readonly nativeEvent: EventPayload
   readonly target: PublicInstance
   readonly currentTarget: PublicInstance
@@ -111,14 +120,55 @@ export type GpuixSyntheticEvent = EventPayload & {
   readonly bubbles: boolean
   readonly cancelable: boolean
   readonly defaultPrevented: boolean
+
+  preventDefault(): void
+  stopPropagation(): void
+  /**
+   * Stop this event, including any listener still to run on the current
+   * target, matching `Event.stopImmediatePropagation()`.
+   *
+   * `stopPropagation()` alone still lets the target's other listener run — a
+   * `onClickCapture` and `onClick` pair on one element are both AT_TARGET
+   * listeners, and the DOM runs both.
+   */
+  stopImmediatePropagation(): void
+  isDefaultPrevented(): boolean
+  isPropagationStopped(): boolean
+  /** GPUIX events are never pooled, so persist is intentionally a no-op. */
+  persist(): void
+
+  readonly elementId: number
+  readonly eventType: string
+}
+
+/** The mouse event types {@link EVENT_PROPS} declares in `host-config.ts`. */
+export type GpuixMouseEventType =
+  | "click"
+  | "doubleClick"
+  | "auxClick"
+  | "contextMenu"
+  | "mouseDown"
+  | "mouseUp"
+  | "mouseEnter"
+  | "mouseLeave"
+  | "mouseMove"
+  | "mouseDownOutside"
+
+/**
+ * The pointer members {@link GpuixMouseEvent} and {@link GpuixWheelEvent}
+ * both carry, parameterized over each kind's own `type` literal so a wheel
+ * event's `type` can be `"wheel"` rather than a mouse event type.
+ */
+interface GpuixPointerEvent<Type extends string> extends GpuixEvent {
+  readonly type: Type
   readonly altKey: boolean
   readonly ctrlKey: boolean
   readonly metaKey: boolean
   readonly shiftKey: boolean
+  /** Which mouse button: 0=left, 1=middle, 2=right. Defaults to 0. */
   readonly button: number
+  /** Consecutive-click count (1=single, 2=double, 3=triple). */
   readonly detail: number
-  readonly key?: string
-  readonly repeat: boolean
   /**
    * Pointer position in window coordinates, the DOM spelling of `x`.
    *
@@ -140,33 +190,133 @@ export type GpuixSyntheticEvent = EventPayload & {
    * `MouseEvent.relatedTarget`: on `mouseEnter` the element the pointer left,
    * on `mouseLeave` the element it moved to. `null` when the pointer came from
    * or went to nothing outside the tree.
-   *
-   * Always `null` on `focus` and `blur`. GPUI's focus subscriptions report only
-   * the element whose own focus changed, never the other side of the
-   * transition, so this renderer genuinely does not know it.
    */
   readonly relatedTarget: PublicInstance | null
-
-  preventDefault(): void
-  stopPropagation(): void
-  /**
-   * Stop this event, including any listener still to run on the current
-   * target, matching `Event.stopImmediatePropagation()`.
-   *
-   * `stopPropagation()` alone still lets the target's other listener run — a
-   * `onClickCapture` and `onClick` pair on one element are both AT_TARGET
-   * listeners, and the DOM runs both.
-   */
-  stopImmediatePropagation(): void
-  isDefaultPrevented(): boolean
-  isPropagationStopped(): boolean
   /** Route this pressed-pointer sequence to the original event target. */
   setPointerCapture(): void
   /** Stop routing this pressed-pointer sequence to the original event target. */
   releasePointerCapture(): void
-  /** GPUIX events are never pooled, so persist is intentionally a no-op. */
-  persist(): void
+
+  readonly x?: number
+  readonly y?: number
+  readonly clickCount?: number
+  readonly isRightClick?: boolean
+  readonly inputSource?: string
+  readonly pressedButton?: number
+  /** `true` = pointer entered the element, `false` = left it.
+   *  Populated for `mouseEnter` and `mouseLeave`. */
+  readonly hovered?: boolean
+  readonly modifiers?: EventModifiers
 }
+
+/** A click, press, hover-transition, or context-menu event. */
+export type GpuixMouseEvent = GpuixPointerEvent<GpuixMouseEventType>
+
+/** A trackpad or wheel scroll gesture — bubbles, unlike `onScroll`. */
+export interface GpuixWheelEvent extends GpuixPointerEvent<"wheel"> {
+  /** DOM signs: positive scrolls the view right. */
+  readonly deltaX: number
+  /** DOM signs: positive scrolls the view down. */
+  readonly deltaY: number
+  /** GPUI currently supplies two-dimensional wheel input, so this is 0. */
+  readonly deltaZ: number
+  /** `0` = pixels, `1` = lines, `2` = pages. */
+  readonly deltaMode: number
+  /** `true` = pixel-precise (trackpad), `false` = line-based (mouse wheel). */
+  readonly precise?: boolean
+  /** Trackpad gesture phase: "started", "moved", "ended". */
+  readonly touchPhase?: string
+}
+
+/** A key press or release delivered to the focused element. */
+export interface GpuixKeyboardEvent extends GpuixEvent {
+  readonly type: "keyDown" | "keyUp"
+  readonly altKey: boolean
+  readonly ctrlKey: boolean
+  readonly metaKey: boolean
+  readonly shiftKey: boolean
+  readonly modifiers?: EventModifiers
+  /** The UI Events `key` value. See {@link domKeyName}. */
+  readonly key: string
+  /** Whether this is a key-repeat event (key held down). */
+  readonly repeat: boolean
+
+  readonly keyChar?: string
+  readonly isHeld?: boolean
+}
+
+/**
+ * A focus or blur event. `relatedTarget` is always `null`: GPUI's focus
+ * subscriptions report only the element whose own focus changed, never the
+ * other side of the transition, so this renderer genuinely does not know it.
+ */
+export interface GpuixFocusEvent extends GpuixEvent {
+  readonly type: "focus" | "blur"
+  readonly relatedTarget: null
+}
+
+/** A scroll-container position change. Does not bubble, unlike `onWheel`. */
+export interface GpuixScrollEvent extends GpuixEvent {
+  readonly type: "scroll"
+}
+
+/** An `<input>` or `<textarea>` edit. */
+export interface GpuixChangeEvent extends GpuixEvent {
+  readonly type: "change"
+  readonly value?: string
+}
+
+/**
+ * Events from the built-in custom elements: `<diff>`'s `toggleFile`,
+ * `showMore`, and `lineClick`; `<markdown>`'s `linkClick`; `<virtual-list>`'s
+ * `visibleRange`; an element's own `highlight` match count; and an
+ * accessibility action requested by assistive technology.
+ */
+export interface GpuixElementEvent extends GpuixEvent {
+  readonly type:
+    | "toggleFile"
+    | "showMore"
+    | "lineClick"
+    | "linkClick"
+    | "visibleRange"
+    | "highlight"
+    | "accessibilityAction"
+  /** File path (`toggleFile`), hidden line count (`showMore`), line text
+   *  (`lineClick`), or URL (`linkClick`). */
+  readonly value?: string
+  /** Line number on the pre-change side. `<diff>` `lineClick` only. */
+  readonly oldLine?: number
+  /** Line number on the post-change side. `<diff>` `lineClick` only. */
+  readonly newLine?: number
+  /** First visible logical index. `<virtual-list>` `visibleRange` only. */
+  readonly startIndex?: number
+  /** Exclusive end of the visible logical range. `visibleRange` only. */
+  readonly endIndex?: number
+  /** Matches found by this element's `highlight` prop. `highlight` only. */
+  readonly matchCount?: number
+  /** AccessKit action requested by assistive technology.
+   *  `accessibilityAction` only. */
+  readonly accessibilityAction?: "increment" | "decrement" | "focus"
+}
+
+/**
+ * The React-facing event delivered for a native GPUIX payload: the union of
+ * every kind above.
+ *
+ * A handler typed against this union must narrow on `type` before reading a
+ * kind-specific member — `nativeEvent` remains the untyped escape hatch when
+ * narrowing is inconvenient. A handler typed against one specific kind (e.g.
+ * `(e: GpuixKeyboardEvent) => void`) still satisfies `(e: GpuixSyntheticEvent)
+ * => void` call sites, because each kind is a subtype of this union.
+ */
+export type GpuixSyntheticEvent =
+  | GpuixMouseEvent
+  | GpuixWheelEvent
+  | GpuixKeyboardEvent
+  | GpuixFocusEvent
+  | GpuixScrollEvent
+  | GpuixChangeEvent
+  | GpuixElementEvent
 
 export interface GpuixEventDispatchResult {
   defaultPrevented: boolean
@@ -242,7 +392,14 @@ export function createGpuixSyntheticEvent(
       renderer.releasePointerCapture?.(nativeEvent.elementId)
     },
     persist(): void {},
-  } as GpuixSyntheticEvent
+    // The object literal carries every member every kind's interface
+    // declares — `type` just narrows which subset a given caller reads. Three
+    // more (`currentTarget`, `eventPhase`, `defaultPrevented`) are defined
+    // below via `Object.defineProperties` because they're derived from
+    // mutable closure state, so this cast goes through `unknown`: none of the
+    // per-kind interfaces individually has enough overlap with this literal's
+    // type for TypeScript to accept the cast directly.
+  } as unknown as GpuixSyntheticEvent
 
   Object.defineProperties(event, {
     currentTarget: { enumerable: true, get: () => currentTarget },

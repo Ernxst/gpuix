@@ -300,9 +300,18 @@ export type {
 } from "./types/host.js"
 export { handleGpuixEvent } from "./reconciler/event-registry.js"
 export type {
+  GpuixChangeEvent,
+  GpuixElementEvent,
+  GpuixEvent,
   GpuixEventDispatchResult,
   GpuixEventPhase,
+  GpuixFocusEvent,
+  GpuixKeyboardEvent,
+  GpuixMouseEvent,
+  GpuixMouseEventType,
+  GpuixScrollEvent,
   GpuixSyntheticEvent,
+  GpuixWheelEvent,
 } from "./reconciler/synthetic-event.js"
 export {
   applyMacCpuThrottleFromEnv,
