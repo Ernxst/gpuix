@@ -4430,6 +4430,19 @@ the user's keyboard has no test benefit. Linux currently ignores `focus`.
 native `<input>` and `<textarea>` elements receive GPUI's keyboard and IME
 handling instead of a test-only input path.
 
+## Globals
+
+`import "@gpuix/react/globals"` is an opt-in, side-effect-only entry for code
+that assumes a browser: it installs exactly `requestAnimationFrame`,
+`cancelAnimationFrame`, `window`, and `scrollTo` on `globalThis`, and nothing
+else — no `document`. Each name is installed only if it is not already
+present, so a real browser, Vitest's `jsdom`/`happy-dom` environment, or an
+earlier import of this module all win over the shim. `window` is `globalThis`
+itself, not a constructed DOM `Window`; GPUIX has no scroll position to move,
+so `scrollTo` is a no-op returning `undefined`. TanStack Router, for example,
+reads `window?.origin` and calls `scrollTo()` during navigation; without this
+entry those calls hit an undefined global under GPUIX.
+
 ## Testing
 
 The locators above sit on a **GPU-backed test renderer** (`TestGpuixRenderer`).
@@ -4497,20 +4510,6 @@ could only ever be a silenced peer conflict. If you still use a directory link,
 configure Vitest to dedupe `react`, `react-dom`, `react-reconciler`, and
 `scheduler`; that is only a fallback, not a supported way to consume the
 unpublished fork under Bun.
-
-#### Globals
-
-`import "@gpuix/react/globals"` is an opt-in, side-effect-only entry for code
-that assumes a browser: it installs exactly `requestAnimationFrame`,
-`cancelAnimationFrame`, `window`, and `scrollTo` on `globalThis`, and nothing
-else — no `document`. Each name is installed only if it is not already
-present, so a real browser, Vitest's `jsdom`/`happy-dom` environment, or an
-earlier import of this module all win over the shim. `window` is `globalThis`
-itself, not a constructed DOM `Window`; `scrollTo` is a no-op returning
-`undefined` — a DOM global whose meaning here is exact, in the sense that
-GPUIX has no scroll position for it to move. TanStack Router, for example,
-reads `window?.origin` and calls `scrollTo()` during navigation; without this
-entry those calls hit an undefined global under GPUIX.
 
 The native package exports `TestGpuixRenderer` on every platform. Construction
 on Linux or a build without GPU test support throws a clear availability error;

@@ -214,7 +214,7 @@ export class InProcessBackend extends ValidatedAutomationBackend {
       capabilities: (() => {
         const capabilities = this.renderer.capabilities?.()
         if (!capabilities) {
-          return typeof window !== "undefined"
+          return typeof document !== "undefined"
             ? ["input", "clock", "tree"]
             : ["input", "screenshot", "clock", "tree"]
         }
@@ -226,9 +226,11 @@ export class InProcessBackend extends ValidatedAutomationBackend {
         return result
       })(),
       window: (() => {
+        const noBrowserWindow =
+          typeof window === "undefined" || typeof window.innerWidth !== "number"
         return {
-          width: typeof window === "undefined" ? 800 : window.innerWidth,
-          height: typeof window === "undefined" ? 600 : window.innerHeight,
+          width: noBrowserWindow ? 800 : window.innerWidth,
+          height: noBrowserWindow ? 600 : window.innerHeight,
         }
       })(),
     }),
