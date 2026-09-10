@@ -457,9 +457,8 @@ describe("frame loop", () => {
       },
     )
 
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await vi.waitFor(() => expect(terminated).toBe(1))
     expect(ticks).toBe(2)
-    expect(terminated).toBe(1)
     loop.stop()
   })
 
@@ -489,9 +488,8 @@ describe("frame loop", () => {
       },
     )
 
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await vi.waitFor(() => expect(quits).toBe(1))
     expect(ticks).toBe(3)
-    expect(quits).toBe(1)
     expect(failures).toHaveLength(1)
     loop.stop()
   })
@@ -1275,10 +1273,10 @@ describeNative("events", () => {
     )
 
     it("applies focus on pointer focus but reserves focusVisible for keyboard focus", () => {
-      const pointerPath = "/tmp/gpuix-focus-pointer.png"
-      const pointerExpectedPath = "/tmp/gpuix-focus-pointer-expected.png"
-      const keyboardPath = "/tmp/gpuix-focus-keyboard.png"
-      const keyboardExpectedPath = "/tmp/gpuix-focus-keyboard-expected.png"
+      const pointerPath = `${SHOTS_DIR}/gpuix-focus-pointer.png`
+      const pointerExpectedPath = `${SHOTS_DIR}/gpuix-focus-pointer-expected.png`
+      const keyboardPath = `${SHOTS_DIR}/gpuix-focus-keyboard.png`
+      const keyboardExpectedPath = `${SHOTS_DIR}/gpuix-focus-keyboard-expected.png`
 
       const pointer = createTestRoot()
       pointer.render(focusProbe())
@@ -1304,8 +1302,8 @@ describeNative("events", () => {
     }, 20_000)
 
     it("keeps focus-visible styling on the directly focused control", () => {
-      const actualPath = "/tmp/gpuix-focus-scoped.png"
-      const expectedPath = "/tmp/gpuix-focus-scoped-expected.png"
+      const actualPath = `${SHOTS_DIR}/gpuix-focus-scoped.png`
+      const expectedPath = `${SHOTS_DIR}/gpuix-focus-scoped-expected.png`
 
       const tree = (staticChildOutline: boolean) => (
         <div
@@ -2510,8 +2508,8 @@ describeNative("events", () => {
 
       const label = testRoot.renderer.findByTestId("hover-row-label")!
       const [x, y, width, height] = testRoot.renderer.getElementBounds(label.id)!
-      const before = "/tmp/gpuix-descendant-container-hover-before.png"
-      const after = "/tmp/gpuix-descendant-container-hover-after.png"
+      const before = `${SHOTS_DIR}/gpuix-descendant-container-hover-before.png`
+      const after = `${SHOTS_DIR}/gpuix-descendant-container-hover-after.png`
 
       testRoot.renderer.nativeSimulateMouseMove(10, 10)
       testRoot.renderer.captureScreenshot(before)

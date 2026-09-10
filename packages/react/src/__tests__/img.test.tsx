@@ -16,6 +16,7 @@ import {
   expectScreenshotsDiffer,
   expectScreenshotsEqual,
   isCI,
+  SHOTS_DIR,
 } from "./test-utils"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
@@ -61,7 +62,7 @@ function withNonCanonicalTrailingBits(bytes: Buffer) {
   return encoded.slice(0, index) + alphabet[value ^ 1]! + encoded.slice(index + 1)
 }
 const FIXTURE_PATHS = new Map(
-  FIXTURES.map(({ name }) => [name, `/tmp/gpuix-image-source-${name}.${name === "jpeg" ? "jpg" : name}`])
+  FIXTURES.map(({ name }) => [name, `${SHOTS_DIR}/gpuix-image-source-${name}.${name === "jpeg" ? "jpg" : name}`])
 )
 const ETAG = '"gpuix-image-v1"'
 
@@ -135,13 +136,13 @@ async function captureLoadedSource(
 ) {
   const baseline = createImageTestRoot({ allowPrivateNetworkImages: true })
   baseline.render(sourceFrame())
-  const baselinePath = `/tmp/gpuix-image-${name}-baseline.png`
+  const baselinePath = `${SHOTS_DIR}/gpuix-image-${name}-baseline.png`
   baseline.renderer.captureScreenshot(baselinePath)
   const baselineBytes = fs.readFileSync(baselinePath)
 
   const testRoot = createImageTestRoot({ allowPrivateNetworkImages: true })
   testRoot.render(sourceFrame(source, tint))
-  const screenshotPath = `/tmp/gpuix-image-${name}.png`
+  const screenshotPath = `${SHOTS_DIR}/gpuix-image-${name}.png`
 
   try {
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -612,11 +613,11 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
     }
     expect(retryRequestCount).toBe(1)
     expect(testRoot.renderer.getPaintedText().join(" ")).toContain("503")
-    const failureScreenshot = "/tmp/gpuix-image-retry-failure.png"
+    const failureScreenshot = `${SHOTS_DIR}/gpuix-image-retry-failure.png`
     testRoot.renderer.captureScreenshot(failureScreenshot)
 
     testRoot.renderer.advanceAsyncClock(1_100)
-    const successScreenshot = "/tmp/gpuix-image-retry-success.png"
+    const successScreenshot = `${SHOTS_DIR}/gpuix-image-retry-success.png`
     for (let frame = 0; frame < 100; frame++) {
       testRoot.renderer.flush()
       testRoot.renderer.captureScreenshot(successScreenshot)
@@ -707,7 +708,7 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
       expect(painted).toContain("img: failed to load")
       expect(painted).toContain(failure.diagnostic)
 
-      const screenshot = `/tmp/gpuix-image-error-${failure.path}.png`
+      const screenshot = `${SHOTS_DIR}/gpuix-image-error-${failure.path}.png`
       expect(() => testRoot.renderer.captureScreenshot(screenshot)).not.toThrow()
       expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
       disposeImageTestRoot(testRoot)
@@ -737,7 +738,7 @@ describeNative("custom element: svg", () => {
       </div>
     )
 
-    const screenshot = "/tmp/gpuix-svg-icon.png"
+    const screenshot = `${SHOTS_DIR}/gpuix-svg-icon.png`
     testRoot.renderer.captureScreenshot(screenshot)
     expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
   })
@@ -770,8 +771,8 @@ describeNative("custom element: svg", () => {
     }
 
     for (const [name, source] of Object.entries(sources)) {
-      const redPath = `/tmp/gpuix-svg-${name}-inherited-red.png`
-      const bluePath = `/tmp/gpuix-svg-${name}-inherited-blue.png`
+      const redPath = `${SHOTS_DIR}/gpuix-svg-${name}-inherited-red.png`
+      const bluePath = `${SHOTS_DIR}/gpuix-svg-${name}-inherited-blue.png`
       testRoot.render(<SvgProbe ancestorColor="#ff4d6d" source={source} />)
       testRoot.renderer.captureScreenshot(redPath)
       testRoot.render(<SvgProbe ancestorColor="#4da3ff" source={source} />)
@@ -839,13 +840,13 @@ describeNative("custom element: svg", () => {
     )
     const target = interactive.renderer.findByTestId("svg-current-color-state")!
     const [x, y, width, height] = interactive.renderer.getElementBounds(target.id)!
-    const before = "/tmp/gpuix-svg-current-color-hover-before.png"
-    const hovered = "/tmp/gpuix-svg-current-color-hover-after.png"
-    const expected = "/tmp/gpuix-svg-current-color-hover-expected.png"
-    const active = "/tmp/gpuix-svg-current-color-active.png"
-    const activeExpected = "/tmp/gpuix-svg-current-color-active-expected.png"
-    const focused = "/tmp/gpuix-svg-current-color-focus.png"
-    const focusExpected = "/tmp/gpuix-svg-current-color-focus-expected.png"
+    const before = `${SHOTS_DIR}/gpuix-svg-current-color-hover-before.png`
+    const hovered = `${SHOTS_DIR}/gpuix-svg-current-color-hover-after.png`
+    const expected = `${SHOTS_DIR}/gpuix-svg-current-color-hover-expected.png`
+    const active = `${SHOTS_DIR}/gpuix-svg-current-color-active.png`
+    const activeExpected = `${SHOTS_DIR}/gpuix-svg-current-color-active-expected.png`
+    const focused = `${SHOTS_DIR}/gpuix-svg-current-color-focus.png`
+    const focusExpected = `${SHOTS_DIR}/gpuix-svg-current-color-focus-expected.png`
 
     interactive.renderer.nativeSimulateMouseMove(10, 10)
     interactive.renderer.captureScreenshot(before)
@@ -935,8 +936,8 @@ describeNative("custom element: svg", () => {
     interactive.renderer.nativeSimulateMouseMove(x + width / 8, y + height / 2)
 
     expect(interactive.renderer.getResolvedStyle(target.id)).toMatchObject({ color: groupHoverColor })
-    const actual = "/tmp/gpuix-svg-current-color-hover-within.png"
-    const expected = "/tmp/gpuix-svg-current-color-hover-within-expected.png"
+    const actual = `${SHOTS_DIR}/gpuix-svg-current-color-hover-within.png`
+    const expected = `${SHOTS_DIR}/gpuix-svg-current-color-hover-within-expected.png`
     interactive.renderer.captureScreenshot(actual)
 
     const reference = createImageTestRoot()
@@ -982,8 +983,8 @@ describeNative("custom element: svg", () => {
 
     const target = interactive.renderer.findByTestId("svg-current-color-mounted")!
     expect(interactive.renderer.getResolvedStyle(target.id)).toMatchObject({ color: hoverColor })
-    const actual = "/tmp/gpuix-svg-current-color-mounted-under-pointer.png"
-    const expected = "/tmp/gpuix-svg-current-color-mounted-under-pointer-expected.png"
+    const actual = `${SHOTS_DIR}/gpuix-svg-current-color-mounted-under-pointer.png`
+    const expected = `${SHOTS_DIR}/gpuix-svg-current-color-mounted-under-pointer-expected.png`
     interactive.renderer.captureScreenshot(actual)
 
     const reference = createImageTestRoot()
@@ -1039,8 +1040,8 @@ describeNative("custom element: svg", () => {
 
     const target = interactive.renderer.findByTestId("svg-current-color-occluded")!
     expect(interactive.renderer.getResolvedStyle(target.id)).toMatchObject({ color: baseColor })
-    const actual = "/tmp/gpuix-svg-current-color-occluded.png"
-    const expected = "/tmp/gpuix-svg-current-color-occluded-expected.png"
+    const actual = `${SHOTS_DIR}/gpuix-svg-current-color-occluded.png`
+    const expected = `${SHOTS_DIR}/gpuix-svg-current-color-occluded-expected.png`
     interactive.renderer.captureScreenshot(actual)
 
     const reference = createImageTestRoot()
@@ -1052,7 +1053,7 @@ describeNative("custom element: svg", () => {
   it("uses the light default icon colour on a dark surface", () => {
     const baseline = createImageTestRoot()
     baseline.render(<div style={{ width: "100%", height: "100%", backgroundColor: "#101522" }} />)
-    const baselinePath = "/tmp/gpuix-svg-default-baseline.png"
+    const baselinePath = `${SHOTS_DIR}/gpuix-svg-default-baseline.png`
     baseline.renderer.captureScreenshot(baselinePath)
 
     const icon = createImageTestRoot()
@@ -1073,7 +1074,7 @@ describeNative("custom element: svg", () => {
         />
       </div>
     )
-    const iconPath = "/tmp/gpuix-svg-default-light.png"
+    const iconPath = `${SHOTS_DIR}/gpuix-svg-default-light.png`
     icon.renderer.captureScreenshot(iconPath)
     expect(bufferSimilarity(fs.readFileSync(baselinePath), fs.readFileSync(iconPath))).toBeLessThan(
       0.99
