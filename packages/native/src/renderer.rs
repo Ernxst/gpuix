@@ -2088,27 +2088,22 @@ async fn run_ui_commands(
                 }
             }
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
+            // Clipboard access is App-level, not window-level, so this goes
+            // through `cx.update` directly rather than `window.update` — a
+            // closed-but-not-yet-torn-down window must not fail (or silently
+            // report success/empty for) a clipboard read or write it never
+            // needed in the first place.
             UiCommand::WriteClipboardText { text, response } => {
-                let result = window.update(cx, move |_view, _window, cx| {
+                cx.update(move |cx| {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
                 });
                 response.send(()).ok();
-                result
+                Ok(())
             }
             UiCommand::ReadClipboardText { response } => {
-                let result = window.update(cx, move |_view, _window, cx| {
-                    cx.read_from_clipboard().and_then(|item| item.text())
-                });
-                match result {
-                    Ok(text) => {
-                        response.send(text).ok();
-                        Ok(())
-                    }
-                    Err(error) => {
-                        response.send(None).ok();
-                        Err(error)
-                    }
-                }
+                let text = cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text()));
+                response.send(text).ok();
+                Ok(())
             }
         };
         if let Err(error) = result {
