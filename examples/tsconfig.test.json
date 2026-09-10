@@ -1,5 +1,10 @@
 {
   "extends": "./tsconfig.json",
-  "files": ["infinite-chat.test.tsx", "../example-app/assets.d.ts"],
+  "files": [
+    "infinite-chat.test.tsx",
+    "window-order.tsx",
+    "window-order.test.ts",
+    "../example-app/assets.d.ts"
+  ],
   "include": []
 }
