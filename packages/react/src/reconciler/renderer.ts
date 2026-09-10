@@ -7,6 +7,7 @@ import { handleGpuixEvent } from "./event-registry.js"
 import {
   attachAnimationFrameSource,
   detachAnimationFrameSource,
+  requestNativeAnimationFrame,
 } from "../frame-clock.js"
 import {
   App as AutomationApp,
@@ -713,7 +714,15 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
       owner: host,
       request: requestFrame,
     })
-  } else if (typeof browserFrameSource !== "function") {
+  } else if (
+    typeof browserFrameSource !== "function" ||
+    browserFrameSource === requestNativeAnimationFrame
+  ) {
+    // `@gpuix/react/globals` installs `requestNativeAnimationFrame` itself as
+    // the global; finding *that* here is not a display-paced clock, it's this
+    // package's own frame queue with nothing driving it. Identity, not a
+    // `document` check, is the precise test: a real browser's rAF is a
+    // distinct native function.
     throw new Error("The GPUIX renderer does not provide a display-paced frame clock")
   }
   host.setApplicationEventHandler?.((event) => dispatchApplicationEvent(slot, event))
@@ -724,7 +733,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     host.setMenus(menus as MenuSpec[])
   }
   if (
-    typeof window !== "undefined" &&
+    typeof document !== "undefined" &&
     host instanceof GpuixRenderer &&
     !Reflect.has(globalThis, BROWSER_AUTOMATION_KEY)
   ) {

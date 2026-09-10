@@ -4430,6 +4430,19 @@ the user's keyboard has no test benefit. Linux currently ignores `focus`.
 native `<input>` and `<textarea>` elements receive GPUI's keyboard and IME
 handling instead of a test-only input path.
 
+## Globals
+
+`import "@gpuix/react/globals"` is an opt-in, side-effect-only entry for code
+that assumes a browser: it installs exactly `requestAnimationFrame`,
+`cancelAnimationFrame`, `window`, and `scrollTo` on `globalThis`, and nothing
+else — no `document`. Each name is installed only if it is not already
+present, so a real browser, Vitest's `jsdom`/`happy-dom` environment, or an
+earlier import of this module all win over the shim. `window` is `globalThis`
+itself, not a constructed DOM `Window`; GPUIX has no scroll position to move,
+so `scrollTo` is a no-op returning `undefined`. TanStack Router, for example,
+reads `window?.origin` and calls `scrollTo()` during navigation; without this
+entry those calls hit an undefined global under GPUIX.
+
 ## Testing
 
 The locators above sit on a **GPU-backed test renderer** (`TestGpuixRenderer`).

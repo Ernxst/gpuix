@@ -56,6 +56,11 @@
       "import": "./dist/floating.js",
       "default": "./dist/floating.js"
     },
+    "./globals": {
+      "types": "./dist/globals.d.ts",
+      "import": "./dist/globals.js",
+      "default": "./dist/globals.js"
+    },
     "./automation": {
       "types": "./dist/automation/index.d.ts",
       "import": "./dist/automation/index.js",
