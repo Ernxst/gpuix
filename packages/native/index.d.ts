@@ -1032,6 +1032,52 @@ export interface ImageComparisonResult {
 }
 
 /**
+ * Wayland `wlr-layer-shell` surface options. Linux/Wayland only; ignored on
+ * every other platform. When present on `WindowOptions`, the window is opened
+ * as a compositor-anchored surface (a bar, dock, notification overlay or
+ * wallpaper) with no native titlebar instead of a normal floating window.
+ * `width` / `height` then only constrain the axis the surface is not
+ * stretched along by its `anchor`.
+ */
+export interface LayerShellOptions {
+  /**
+   * Compositor surface namespace, used for window rules. Cannot be changed
+   * after the surface is created. Defaults to the empty string.
+   */
+  namespace?: string
+  /** `"background"` | `"bottom"` | `"top"` | `"overlay"`. Defaults to `"top"`. */
+  layer?: string
+  /**
+   * Screen edges to anchor to: any combination of `"top"`, `"bottom"`,
+   * `"left"`, `"right"`. Anchoring two opposite edges stretches the surface
+   * across that axis. Defaults to `["top", "left", "right"]` (a top bar).
+   */
+  anchor?: Array<string>
+  /**
+   * Logical pixels to reserve along the anchored edge so other windows do
+   * not overlap the surface. `0` lets the compositor decide, a negative
+   * value asks it not to reserve any space.
+   */
+  exclusiveZone?: number
+  /**
+   * Which edge the exclusive zone applies to when it cannot be inferred from
+   * a single-edge `anchor`. Same values as one `anchor` entry.
+   */
+  exclusiveEdge?: string
+  /**
+   * Gap between the surface and its anchor edge(s), in CSS order:
+   * `[top, right, bottom, left]`. Must have exactly four entries or it is
+   * ignored.
+   */
+  margin?: Array<number>
+  /**
+   * `"none"` | `"on-demand"` | `"exclusive"`. Defaults to `"none"`: a bar or
+   * overlay that never takes keyboard focus.
+   */
+  keyboardInteractivity?: string
+}
+
+/**
  * A cross-platform application menu item.
  *
  * `kind` is `"action"`, `"separator"`, `"submenu"`, or `"system"`.
@@ -1200,6 +1246,17 @@ export interface WindowOptions {
    * `activateWindow()` to reveal it. Ignored on Linux.
    */
   show?: boolean
+  /**
+   * Application id: Wayland `app_id` / X11 `WM_CLASS`. Desktop environments
+   * use it to group windows and match window rules. Required in practice for
+   * a `layerShell` surface a compositor is meant to target by rule.
+   */
+  appId?: string
+  /**
+   * Open the window as a Wayland `wlr-layer-shell` surface instead of a
+   * normal window. Linux/Wayland only; ignored elsewhere.
+   */
+  layerShell?: LayerShellOptions
 }
 
 export interface WindowSize {
