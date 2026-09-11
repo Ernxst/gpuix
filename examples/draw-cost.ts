@@ -148,6 +148,112 @@ function Page({ rows }: { rows: number }): React.ReactElement {
   )
 }
 
+// A dense data table, the shape the consuming app actually scrolls. There is no
+// table element yet (#367), so this is what one costs today: a CSS grid whose
+// columns are shared across rows, one host node per cell.
+const tableColumns = Number(process.env.DRAW_COST_COLUMNS ?? 8)
+// Content-sized columns make every cell in every row part of track sizing,
+// which is both the expensive case and the reason a table cannot be row
+// virtualised. `DRAW_COST_TRACK=fixed` prices the alternative.
+const tableTrack = process.env.DRAW_COST_TRACK === "fixed" ? "140px" : "max-content"
+
+function TableRow({ index }: { index: number }): React.ReactElement {
+  return React.createElement(
+    React.Fragment,
+    null,
+    ...Array.from({ length: tableColumns }, (_, column) =>
+      React.createElement(
+        "text",
+        {
+          key: column,
+          style: {
+            color: column === 0 ? "#e5e5e5" : "#a1a1aa",
+            fontSize: 12,
+            paddingTop: 6,
+            paddingBottom: 6,
+            paddingLeft: 10,
+            paddingRight: 10,
+            borderBottomWidth: 1,
+            borderColor: "#26262b",
+            backgroundColor: index % 2 === 0 ? "#111114" : "#141418",
+          },
+        },
+        column === 0 ? `Row ${index}` : `${(index * (column + 7)) % 1000}`,
+      ),
+    ),
+  )
+}
+
+function TablePage({ rows }: { rows: number }): React.ReactElement {
+  return React.createElement(
+    "div",
+    {
+      style: {
+        display: "grid",
+        gridTemplateColumns: `repeat(${tableColumns}, ${tableTrack})`,
+        width: 1200,
+        height: 800,
+        overflowY: "scroll",
+        backgroundColor: "#0b0b0e",
+      },
+    },
+    Array.from({ length: rows }, (_, index) =>
+      React.createElement(TableRow, { key: index, index }),
+    ),
+  )
+}
+
+// The same table through `<virtual-list>`: rows are built only near the
+// viewport. Columns must be fixed-width here, because a track shared across the
+// whole grid cannot be sized from rows that were never built — which is why
+// pinning widths matters for virtualisation even though, measured on the grid
+// fixture, it costs the same as `max-content`.
+function VirtualRow({ index }: { index: number }): React.ReactElement {
+  return React.createElement(
+    "div",
+    { style: { display: "flex", alignItems: "center" } },
+    ...Array.from({ length: tableColumns }, (_, column) =>
+      React.createElement(
+        "text",
+        {
+          key: column,
+          style: {
+            width: 140,
+            color: column === 0 ? "#e5e5e5" : "#a1a1aa",
+            fontSize: 12,
+            paddingTop: 6,
+            paddingBottom: 6,
+            paddingLeft: 10,
+            paddingRight: 10,
+            borderBottomWidth: 1,
+            borderColor: "#26262b",
+            backgroundColor: index % 2 === 0 ? "#111114" : "#141418",
+          },
+        },
+        column === 0 ? `Row ${index}` : `${(index * (column + 7)) % 1000}`,
+      ),
+    ),
+  )
+}
+
+function VirtualTablePage({ rows }: { rows: number }): React.ReactElement {
+  return React.createElement(
+    "virtual-list",
+    {
+      estimatedItemHeight: 31,
+      style: { width: 1200, height: 800, backgroundColor: "#0b0b0e" },
+    },
+    Array.from({ length: rows }, (_, index) =>
+      React.createElement(VirtualRow, { key: index, index }),
+    ),
+  )
+}
+
+const FIXTURES = {
+  table: TablePage,
+  "virtual-table": VirtualTablePage,
+} as const
+
 interface ResultRow {
   rows: number
   elements: number
@@ -163,7 +269,8 @@ const results: ResultRow[] = []
 for (const rows of rowCounts) {
   const testRoot = createTestRoot()
   const { render, renderer } = testRoot
-  render(React.createElement(Page, { rows }))
+  const fixture = FIXTURES[process.env.DRAW_COST_FIXTURE as keyof typeof FIXTURES] ?? Page
+  render(React.createElement(fixture, { rows }))
 
   for (let index = 0; index < warmupDraws; index += 1) renderer.flush()
   renderer.takeRenderBuildMicros()
