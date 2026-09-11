@@ -719,8 +719,8 @@ describeNative("native text editors", () => {
     render(
       <div style={{ display: "flex", flexDirection: "column", width: 400 }}>
         <textarea data-testid="scaled" minRows={1} maxRows={1} style={{ width: 300, fontSize: 28 }} />
-        <textarea data-testid="exact" minRows={1} maxRows={1} style={{ width: 300, lineHeight: 40 }} />
-        <textarea data-testid="rows" minRows={3} maxRows={3} style={{ width: 300, lineHeight: 20 }} />
+        <textarea data-testid="exact" minRows={1} maxRows={1} style={{ width: 300, lineHeight: "40px" }} />
+        <textarea data-testid="rows" minRows={3} maxRows={3} style={{ width: 300, lineHeight: "20px" }} />
         <input data-testid="input" style={{ width: 300, fontSize: 28 }} />
       </div>,
     )
@@ -742,14 +742,14 @@ describeNative("native text editors", () => {
 
   it("sizes a row from style.lineHeight", () => {
     testRoot.render(
-      <textarea value="one" minRows={1} maxRows={8} style={{ width: 300, lineHeight: 30 }} />,
+      <textarea value="one" minRows={1} maxRows={8} style={{ width: 300, lineHeight: "30px" }} />,
     )
     expect(editorBounds("textarea").height).toBe(30)
   })
 
   it("multiplies lineHeight by minRows", () => {
     testRoot.render(
-      <textarea value="one" minRows={3} maxRows={8} style={{ width: 300, lineHeight: 30 }} />,
+      <textarea value="one" minRows={3} maxRows={8} style={{ width: 300, lineHeight: "30px" }} />,
     )
     expect(editorBounds("textarea").height).toBe(90)
   })
@@ -761,7 +761,7 @@ describeNative("native text editors", () => {
   })
 
   it("uses lineHeight on a single-line input", () => {
-    testRoot.render(<input value="one" style={{ width: 300, lineHeight: 22 }} />)
+    testRoot.render(<input value="one" style={{ width: 300, lineHeight: "22px" }} />)
     expect(editorBounds("input").height).toBe(22)
   })
 })

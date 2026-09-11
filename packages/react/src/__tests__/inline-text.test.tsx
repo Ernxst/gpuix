@@ -40,7 +40,7 @@ describeNative("inline text runs", () => {
       >
         <text
           data-testid="wrapped-inline"
-          style={{ width: 220, color: "#e6edf7", fontSize: 20, lineHeight: 27 }}
+          style={{ width: 220, color: "#e6edf7", fontSize: 20, lineHeight: "27px" }}
         >
           {"Factory output is "}
           <text style={{ color: "#7dd3fc", fontWeight: 700, letterSpacing: 1.5 }}>
@@ -137,7 +137,7 @@ describeNative("inline text runs", () => {
       <div style={{ display: "flex", padding: 20, width: 220 }}>
         <text
           data-testid="selection-inline"
-          style={{ width: 180, color: "#ffffff", fontSize: 18, lineHeight: 24 }}
+          style={{ width: 180, color: "#ffffff", fontSize: 18, lineHeight: "24px" }}
         >
           {"Alpha beta "}
           <text style={{ color: "#f472b6", fontWeight: 700 }}>gamma delta</text>
@@ -160,7 +160,7 @@ describeNative("inline text runs", () => {
       <div style={{ display: "flex", padding: 24, width: 360, backgroundColor: "#111827" }}>
         <text
           data-testid="multibyte-inline"
-          style={{ width: 240, color: "#f8fafc", fontSize: 22, lineHeight: 30 }}
+          style={{ width: 240, color: "#f8fafc", fontSize: 22, lineHeight: "30px" }}
         >
           {"Ångström "}
           <text

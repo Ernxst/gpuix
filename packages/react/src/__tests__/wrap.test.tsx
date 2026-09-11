@@ -33,6 +33,30 @@ function expectInside(
 }
 
 describeNative("text wrapping", () => {
+  // Issue #486: a bare numeric lineHeight is a unitless multiplier of the
+  // resolved font size, matching React DOM, not a pixel shorthand. 12 * 1.5
+  // resolves to the same 18px row GPUI rounds `"18px"` to, so both elements
+  // must wrap to equal heights.
+  it("resolves a unitless lineHeight multiplier to the same row height as its pixel equivalent", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <text data-testid="multiplier" style={{ fontSize: 12, lineHeight: 1.5, width: 100, color: "#eee" }}>
+          {PROSE}
+        </text>
+        <text data-testid="pixels" style={{ fontSize: 12, lineHeight: "18px", width: 100, color: "#eee" }}>
+          {PROSE}
+        </text>
+      </div>,
+    )
+
+    const multiplier = rect(renderer, "multiplier")
+    const pixels = rect(renderer, "pixels")
+    // Both share one width and text, so they wrap to the same line count.
+    expect(multiplier.height).toBeGreaterThan(18)
+    expect(multiplier.height).toBe(pixels.height)
+  })
+
   it("wraps prose inside a definite width", () => {
     const { render, renderer } = createTestRoot()
     render(
@@ -44,7 +68,7 @@ describeNative("text wrapping", () => {
           backgroundColor: "#111",
         }}
       >
-        <text data-testid="prose" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
+        <text data-testid="prose" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
           {PROSE}
         </text>
       </div>,
@@ -61,7 +85,7 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ width: 160 }}>
-        <text data-testid="prose" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
+        <text data-testid="prose" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
           {PROSE}
         </text>
       </div>,
@@ -70,7 +94,7 @@ describeNative("text wrapping", () => {
 
     render(
       <div style={{ width: 480 }}>
-        <text data-testid="prose" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
+        <text data-testid="prose" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
           {PROSE}
         </text>
       </div>,
@@ -85,7 +109,7 @@ describeNative("text wrapping", () => {
         data-testid="box"
         style={{ width: 140, padding: 4, backgroundColor: "#111" }}
       >
-        <text data-testid="token" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
+        <text data-testid="token" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
           pneumonoultramicroscopicsilicovolcanoconiosis
         </text>
       </div>,
@@ -101,7 +125,7 @@ describeNative("text wrapping", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ width: 120 }}>
-        <text data-testid="line" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
+        <text data-testid="line" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
           {PROSE}
         </text>
       </div>,
@@ -112,7 +136,7 @@ describeNative("text wrapping", () => {
       <div style={{ width: 120 }}>
         <text
           data-testid="line"
-          style={{ fontSize: 14, lineHeight: 20, color: "#eee", whiteSpace: "nowrap" }}
+          style={{ fontSize: 14, lineHeight: "20px", color: "#eee", whiteSpace: "nowrap" }}
         >
           {PROSE}
         </text>
@@ -140,7 +164,7 @@ describeNative("text wrapping", () => {
           data-testid="prose"
           style={{
             fontSize: 14,
-            lineHeight: 20,
+            lineHeight: "20px",
             color: "#eee",
             flexGrow: 1,
             minWidth: 0,
@@ -170,7 +194,7 @@ describeNative("text wrapping", () => {
         }}
       >
         <div style={{ width: 48, flexShrink: 0, backgroundColor: "#333" }} />
-        <text data-testid="prose" style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>
+        <text data-testid="prose" style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>
           A label with enough separate words to wrap
         </text>
       </div>,
@@ -380,7 +404,7 @@ describeNative("test window size", { timeout: 14_000 }, () => {
       root.render(
         <div style={{ width: "100%", flexDirection: "row", justifyContent: "center" }}>
           <div data-testid="column" style={{ width: cap, maxWidth: "100%" }}>
-            <text style={{ fontSize: 14, lineHeight: 20, color: "#eee" }}>{PROSE}</text>
+            <text style={{ fontSize: 14, lineHeight: "20px", color: "#eee" }}>{PROSE}</text>
           </div>
         </div>,
       )

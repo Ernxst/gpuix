@@ -139,13 +139,13 @@ describe("flex baseline layout", () => {
       <div style={{ display: "flex", flexDirection: "row", alignItems: "baseline" }}>
         <text
           data-testid="inline-run-baseline"
-          style={{ fontFamily: "Courier New", fontSize: 32, lineHeight: 40 }}
+          style={{ fontFamily: "Courier New", fontSize: 32, lineHeight: "40px" }}
         >
           <text style={{ fontFamily: "Times New Roman" }}>Ag</text>
         </text>
         <text
           data-testid="inline-run-reference"
-          style={{ fontFamily: "Times New Roman", fontSize: 32, lineHeight: 40 }}
+          style={{ fontFamily: "Times New Roman", fontSize: 32, lineHeight: "40px" }}
         >
           Ag
         </text>
