@@ -610,3 +610,91 @@ describe("intrinsic probe measures a transitioning descendant's current style (i
     }
   })
 })
+
+describe("re-probes a max-content ancestor every frame of a descendant's layout tween (issue #462)", () => {
+  it("tracks a width tween through the parent's own max-content measurement", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    try {
+      root.renderer.clockPause()
+      // `easing: "linear"` makes the mid-tween width deterministic: 40 + 80 *
+      // (100ms / 500ms) = 56, an exact value to assert against instead of a
+      // value tied to the default cubic-bezier's curve.
+      root.render(
+        <div data-testid="ancestor" style={{ display: "flex", width: "max-content", alignItems: "flex-start" }}>
+          <div
+            data-testid="child"
+            style={{
+              width: 40,
+              height: 20,
+              transition: { properties: ["width"], durationMs: 500, easing: "linear" },
+            }}
+          />
+        </div>,
+      )
+      expect(boundsFor(root.renderer, "child").width).toBeCloseTo(40, 4)
+      expect(boundsFor(root.renderer, "ancestor").width).toBeCloseTo(40, 4)
+
+      root.render(
+        <div data-testid="ancestor" style={{ display: "flex", width: "max-content", alignItems: "flex-start" }}>
+          <div
+            data-testid="child"
+            style={{
+              width: 120,
+              height: 20,
+              transition: { properties: ["width"], durationMs: 500, easing: "linear" },
+            }}
+          />
+        </div>,
+      )
+
+      root.renderer.advanceAsyncClock(100)
+      expect(boundsFor(root.renderer, "child").width).toBeCloseTo(56, 4)
+      expect(boundsFor(root.renderer, "ancestor").width).toBeCloseTo(56, 4)
+
+      root.renderer.advanceAsyncClock(400)
+      expect(boundsFor(root.renderer, "child").width).toBeCloseTo(120, 4)
+      expect(boundsFor(root.renderer, "ancestor").width).toBeCloseTo(120, 4)
+
+      const settled = root.renderer.getIntrinsicProbeLayoutCount()
+      root.renderer.flush()
+      root.renderer.flush()
+      expect(root.renderer.getIntrinsicProbeLayoutCount()).toBe(settled)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("does not add a probe per frame for a descendant tween of a non-layout property", () => {
+    const root = createTestRoot({ width: 400, height: 300 })
+    try {
+      root.renderer.clockPause()
+      const view = (wide: boolean) => (
+        <div data-testid="ancestor" style={{ display: "flex", width: "max-content", alignItems: "flex-start" }}>
+          <div
+            data-testid="child"
+            style={{
+              flexShrink: 0,
+              width: wide ? 64 : 32,
+              height: 20,
+              opacity: wide ? 0.5 : 1,
+              transition: { properties: ["opacity"], durationMs: 1_000 },
+            }}
+          />
+        </div>
+      )
+      root.render(view(false))
+      expect(boundsFor(root.renderer, "child").width).toBeCloseTo(32, 4)
+
+      root.render(view(true))
+      const beforeTween = root.renderer.getIntrinsicProbeLayoutCount()
+
+      root.renderer.advanceAsyncClock(500)
+      expect(root.renderer.getIntrinsicProbeLayoutCount()).toBe(beforeTween)
+
+      root.renderer.advanceAsyncClock(600)
+      expect(root.renderer.getIntrinsicProbeLayoutCount()).toBe(beforeTween)
+    } finally {
+      root.unmount()
+    }
+  })
+})

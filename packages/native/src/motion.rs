@@ -945,6 +945,63 @@ impl StyleTransitionState {
         moving || carried
     }
 
+    /// Whether this transition is still actively interpolating, without
+    /// building the style it would produce. Mirrors the timing branch of
+    /// `frame_with_velocities` (the source `frame`/`frame_against` build on
+    /// top of) but skips the `target_style.clone()` and `apply_to` a probe
+    /// has no use for.
+    fn timing_active(&self, now: Instant, reduce_motion: bool) -> bool {
+        if reduce_motion || (self.from == self.target && self.velocities.is_zero()) {
+            return false;
+        }
+        let delay = milliseconds(self.transition.delay_ms);
+        let elapsed = now.saturating_duration_since(self.started);
+        if let TransitionEasing::Spring(spring) = &self.transition.easing {
+            let spring_elapsed = elapsed
+                .checked_sub(delay)
+                .unwrap_or(Duration::ZERO)
+                .as_secs_f64();
+            let (_, _, active) =
+                self.from
+                    .spring_sample(&self.target, &self.velocities, spring_elapsed, spring);
+            return active;
+        }
+        let duration = milliseconds(self.transition.duration_ms);
+        let raw = if elapsed < delay {
+            0.0
+        } else if duration.is_zero() {
+            1.0
+        } else {
+            elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
+        };
+        raw < 1.0
+    }
+
+    /// Whether a layout-affecting property — one that can move a
+    /// `max-content`/`min-content` ancestor's measured size — is actively
+    /// interpolating right now. Used by the intrinsic-probe cache key: an
+    /// ancestor above a subtree with an active layout tween needs a fresh
+    /// probe every frame, since the descendant's contribution to the
+    /// ancestor's measured size is itself moving.
+    pub(crate) fn active_layout_tween(&self, now: Instant, reduce_motion: bool) -> bool {
+        const LAYOUT_PROPERTIES: [TransitionProperty; 10] = [
+            TransitionProperty::Width,
+            TransitionProperty::Height,
+            TransitionProperty::MinWidth,
+            TransitionProperty::MinHeight,
+            TransitionProperty::MaxWidth,
+            TransitionProperty::MaxHeight,
+            TransitionProperty::Top,
+            TransitionProperty::Right,
+            TransitionProperty::Bottom,
+            TransitionProperty::Left,
+        ];
+        self.timing_active(now, reduce_motion)
+            && LAYOUT_PROPERTIES
+                .iter()
+                .any(|property| self.travels(*property))
+    }
+
     /// Whether the style this element settles on leaves an axis intrinsic.
     /// The renderer needs this for the closing direction: React has already
     /// swapped `width: "auto"` for a number, so only the retained target still
