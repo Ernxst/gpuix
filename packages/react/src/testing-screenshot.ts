@@ -130,6 +130,12 @@ export function configureScreenshots(options: ConfigureScreenshotsOptions): void
   screenshotDefaults = { ...options }
 }
 
+/** What `configureScreenshots` was last given, for a caller that wants to
+ *  restore it after changing it for one test. */
+export function configuredScreenshots(): ConfigureScreenshotsOptions {
+  return { ...screenshotDefaults }
+}
+
 /** vitest's snapshot update mode: `--update` is `"all"`, CI is `"none"`. */
 export type SnapshotUpdateState = "all" | "new" | "none"
 

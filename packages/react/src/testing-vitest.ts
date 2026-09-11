@@ -20,10 +20,21 @@
 /// imported more than once — from a `setupFiles` entry and again from a test
 /// file, say — which is harmless.
 
-import { afterEach, expect } from "vitest"
+import { afterAll, afterEach, beforeAll, expect } from "vitest"
 
-import { cleanup } from "./testing.js"
+import {
+  cleanup,
+  configuredTestWindow,
+  configureTestWindow,
+  disposeSharedWindow,
+  type TestWindowOptions,
+} from "./testing.js"
 import { gpuixMatchers, type GpuixMatchers } from "./testing-expect.js"
+import {
+  configuredScreenshots,
+  configureScreenshots,
+  type ConfigureScreenshotsOptions,
+} from "./testing-screenshot.js"
 
 export * from "./testing.js"
 
@@ -36,4 +47,27 @@ expect.extend(gpuixMatchers)
 
 afterEach(() => {
   cleanup()
+})
+
+// Under `isolate: false`, vitest re-executes this module for every collected
+// file, so the `afterEach` above attaches per file — but the modules it
+// imports (`testing.ts`, `testing-screenshot.ts`) are evaluated once per
+// worker, not once per file. Their module-level defaults —
+// `configureTestWindow`, `configureScreenshots`, and the shared window itself
+// — would otherwise leak from one file into the next. `beforeAll` snapshots
+// the defaults a file inherits; `afterAll` restores them and closes the
+// window, which is also the reset for menus, the debug frame overlay, and
+// every other window-level knob `cleanup()` deliberately leaves alone.
+let testWindowSnapshot: TestWindowOptions = {}
+let screenshotSnapshot: ConfigureScreenshotsOptions = {}
+
+beforeAll(() => {
+  testWindowSnapshot = configuredTestWindow()
+  screenshotSnapshot = configuredScreenshots()
+})
+
+afterAll(() => {
+  configureTestWindow(testWindowSnapshot)
+  configureScreenshots(screenshotSnapshot)
+  disposeSharedWindow()
 })

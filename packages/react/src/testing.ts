@@ -3259,6 +3259,19 @@ function disposeSharedRoot(active: ActiveRenderRoot): void {
 }
 
 /**
+ * Drop the shared window if one is open, otherwise do nothing.
+ *
+ * `@gpuix/react/testing/vitest` calls this in an `afterAll`, after the last
+ * test in a file, so menus, the debug frame overlay, held pointer buttons, and
+ * every other window-level knob `resetSharedWindow` deliberately leaves alone
+ * do not leak into the next file. Call it yourself from your own runner's
+ * suite-level teardown when you import `@gpuix/react/testing` directly.
+ */
+export function disposeSharedWindow(): void {
+  if (activeRenderRoot !== null) disposeSharedRoot(activeRenderRoot)
+}
+
+/**
  * Unmount the tree `render()` mounted, keeping the offscreen window for the
  * next `render()` in this file.
  *
