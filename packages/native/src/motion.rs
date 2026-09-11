@@ -585,6 +585,9 @@ impl StyleTransitionTrack {
         if raw >= 1.0 {
             return (self.target.clone(), None, false);
         }
+        if raw <= 0.0 {
+            return (self.from.clone(), None, true);
+        }
         let value = self
             .from
             .as_ref()
@@ -812,12 +815,10 @@ impl StyleTransitionState {
         } else {
             for track in &mut self.tracks {
                 if matches!(&track.easing, TransitionEasing::Spring(_)) {
-                    let (_, velocity, active) = track.sample(now, false);
+                    let (_, _, active) = track.sample(now, false);
                     if !active {
                         track.from = track.target.clone();
                         track.velocity = None;
-                    } else {
-                        track.velocity = velocity;
                     }
                 }
             }
@@ -2475,6 +2476,60 @@ mod tests {
         assert!(
             carried_width > restarted_width + 1.0,
             "state-style interruption must carry velocity: {carried_width} vs {restarted_width}"
+        );
+    }
+
+    #[test]
+    fn style_spring_sync_does_not_resample_an_unchanged_track() {
+        let started = Instant::now();
+        let style = style(serde_json::json!({
+            "width": 100,
+            "hover": { "width": 200 },
+            "transition": {
+                "properties": ["width"],
+                "easing": { "type": "spring" }
+            }
+        }));
+        let mut without_sync =
+            StyleTransitionState::new(&style, StyleState::default(), false, started);
+        let mut with_sync =
+            StyleTransitionState::new(&style, StyleState::default(), false, started);
+        without_sync.set_hovered(true);
+        with_sync.set_hovered(true);
+        without_sync.sync(
+            &style,
+            StyleState::default(),
+            false,
+            started,
+            false,
+            IntrinsicInput::default(),
+        );
+        with_sync.sync(
+            &style,
+            StyleState::default(),
+            false,
+            started,
+            false,
+            IntrinsicInput::default(),
+        );
+        with_sync.sync(
+            &style,
+            StyleState::default(),
+            false,
+            started + Duration::from_millis(50),
+            false,
+            IntrinsicInput::default(),
+        );
+
+        assert_eq!(
+            without_sync
+                .frame(started + Duration::from_millis(100), false)
+                .style
+                .width,
+            with_sync
+                .frame(started + Duration::from_millis(100), false)
+                .style
+                .width
         );
     }
 

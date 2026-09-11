@@ -351,20 +351,30 @@ type KebabCase<S extends string> = S extends `${infer Head}${infer Tail}`
     : `-${Lowercase<Head>}${KebabCase<Tail>}`
   : S
 
-type TransitionPropertyCssName = {
-  [Property in TransitionProperty]: KebabCase<Property>
-}[TransitionProperty]
+type TransitionPropertyCssName = keyof {
+  [Property in TransitionProperty as KebabCase<Property>]: true
+}
 
 type TransitionTime = `${number}ms` | `${number}s`
 type TransitionEasingName = "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
 type TransitionCubicBezier = `cubic-bezier(${number}, ${number}, ${number}, ${number})`
 type TransitionEasingToken = TransitionEasingName | TransitionCubicBezier
 
-type TransitionShorthandItem = `${TransitionPropertyCssName} ${string}`
+type TransitionShorthandEntry =
+  | `${TransitionPropertyCssName} ${TransitionTime}`
+  | `${TransitionPropertyCssName} ${TransitionTime} ${TransitionEasingToken}`
+  | `${TransitionPropertyCssName} ${TransitionTime} ${TransitionTime}`
+  | `${TransitionPropertyCssName} ${TransitionTime} ${TransitionEasingToken} ${TransitionTime}`
+  | `${TransitionPropertyCssName} ${TransitionTime} ${TransitionTime} ${TransitionEasingToken}`
+type TransitionShorthandListProperty =
+  | Extract<TransitionPropertyCssName, "opacity" | "color" | "width" | "height" | "top" | "right" | "bottom" | "left">
+  | `${string}-${string}`
 
+// Keep the recursive shorthand type bounded at three items so TypeScript can represent it.
 type TransitionShorthandList =
-  | TransitionShorthandItem
-  | `${TransitionShorthandItem}, ${TransitionShorthandItem}`
+  | TransitionShorthandEntry
+  | `${TransitionShorthandListProperty} ${string}, ${TransitionShorthandListProperty} ${string}`
+  | `${TransitionShorthandListProperty} ${string}, ${TransitionShorthandListProperty} ${string}, ${TransitionShorthandListProperty} ${string}`
 
 export type TransitionShorthand = "none" | TransitionShorthandList
 

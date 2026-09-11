@@ -1018,7 +1018,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       expect.objectContaining({
         property: "transition",
         dataTestId: "invalid-shorthand",
-        reason: expect.stringContaining("transform"),
+        message: expect.stringContaining("transform"),
       }),
     ])
   })

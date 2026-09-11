@@ -298,7 +298,7 @@ describeNative("native style transitions", () => {
 
       root.renderer.advanceAsyncClock(60)
       expect(root.renderer.getResolvedStyle(target.id).width).toBe(200)
-      expect(root.renderer.getResolvedStyle(target.id).opacity).toBeCloseTo(0.48, 1)
+      expect(root.renderer.getResolvedStyle(target.id).opacity).toBeCloseTo(0.54, 1)
     } finally {
       root.unmount()
     }
