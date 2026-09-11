@@ -67,6 +67,7 @@ interface HostNodeState {
 }
 
 const hostNodeStates = new WeakMap<HostNode, HostNodeState>()
+const publicInstanceContainers = new WeakMap<PublicInstance, Container>()
 const virtualListsPendingValidation = new WeakMap<Container, Set<Instance>>()
 const warnedVirtualListRowContracts = new WeakSet<Instance>()
 
@@ -84,6 +85,10 @@ function stateFor(node: HostNode): HostNodeState {
 
 function containerFor(node: HostNode): Container {
   return stateFor(node).container
+}
+
+export function containerForPublicInstance(instance: PublicInstance): Container | undefined {
+  return publicInstanceContainers.get(instance)
 }
 
 function rendererFor(node: HostNode): MutationRenderer {
@@ -1481,6 +1486,7 @@ export const hostConfig = {
       mounted: false,
       parent: null,
     })
+    publicInstanceContainers.set(instance, rootContainerInstance)
     diagnoseUnsupportedStyleTransition(instance, rootContainerInstance, props)
     diagnoseUnsupportedClassNameProp(instance, rootContainerInstance, props)
     diagnoseUnsupportedAccessibilityRoleProp(instance, rootContainerInstance, props)

@@ -278,6 +278,10 @@ export declare class GpuixRenderer {
   scrollElementIntoView(elementId: number, alignToTop?: boolean | undefined | null): void
   getAutomationTree(): string
   getElementBounds(id: number): ElementBounds | null
+  /** Start reporting post-paint size changes for one retained element. */
+  observeResize(elementId: number): void
+  /** Stop reporting post-paint size changes for one retained element. */
+  unobserveResize(elementId: number): void
   getAllText(): Array<string>
   getPaintedText(): Array<string>
   /**
@@ -591,6 +595,10 @@ export declare class TestGpuixRenderer {
    * which is a miserable thing to debug from JS.
    */
   dragSelect(x1: number, y1: number, x2: number, y2: number): void
+  /** Start reporting post-paint size changes for one retained element. */
+  observeResize(elementId: number): void
+  /** Stop reporting post-paint size changes for one retained element. */
+  unobserveResize(elementId: number): void
   /**
    * Set the scroll offset of a scrollable element.
    * x and y are negative pixel values (scroll down = more negative y).
@@ -933,6 +941,8 @@ export interface EventPayload {
    * Populated for: fileDrop.
    */
   paths?: Array<string>
+  /** Painted border/content sizes for a `resizeObservation` event. */
+  entries?: Array<ResizeObservationEntry>
   modifiers?: EventModifiers
 }
 
@@ -1048,6 +1058,22 @@ export interface RendererCapabilities {
   window: WindowCapabilities
   images: ImageCapabilities
   automation: AutomationCapabilities
+}
+
+/** The native payload for one observed retained element. */
+export interface ResizeObservationEntry {
+  elementId: number
+  borderBox: ResizeObservationSize
+  contentBox: ResizeObservationSize
+  paddingLeft: number
+  paddingTop: number
+  scaleFactor: number
+}
+
+/** One size in a native resize observation entry. */
+export interface ResizeObservationSize {
+  width: number
+  height: number
 }
 
 export interface ScrollWheelModifiers {

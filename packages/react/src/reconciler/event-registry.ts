@@ -14,6 +14,7 @@ import {
 // they evaluate, only later, from inside a dispatch.
 import { flushSync } from "./reconciler.js"
 import { TEXT_EDITING_TYPES } from "./text-editing.js"
+import { dispatchResizeObservation } from "../resize-observer.js"
 
 const EVENT_REGISTRY_KEY = "__gpuixEventRegistry"
 
@@ -414,6 +415,9 @@ function dispatchGpuixEvent(
   payload: EventPayload,
   renderer: NativeRenderer
 ): GpuixEventDispatchResult {
+  if (payload.eventType === "resizeObservation") {
+    return dispatchResizeObservation(payload, renderer)
+  }
   const container = eventRegistrySlot().containersByRenderer.get(renderer)
   if (!container) {
     if (payload.eventType === "keyDown") {

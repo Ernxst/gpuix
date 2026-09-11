@@ -77,6 +77,24 @@ pub struct ElementBounds {
     pub height: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResizeObservationSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+impl ResizeObservationSize {
+    pub const ZERO: Self = Self {
+        width: 0.0,
+        height: 0.0,
+    };
+
+    pub const UNREPORTED: Self = Self {
+        width: -1.0,
+        height: -1.0,
+    };
+}
+
 impl ElementBounds {
     fn from_gpui(bounds: Bounds<Pixels>) -> Self {
         Self {

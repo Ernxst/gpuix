@@ -1378,6 +1378,8 @@ pub struct PromptForPathsOptions {
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum UiCommand {
     Invalidate,
+    ObserveResize(u64),
+    UnobserveResize(u64),
     ObserveCanvasImage {
         observer_id: u64,
         source: crate::custom_elements::img::CanvasImageSource,
@@ -1590,6 +1592,13 @@ async fn run_ui_commands(
     while let Some(command) = commands.next().await {
         let result = match command {
             UiCommand::Invalidate => refresh_ui_window(window, cx),
+            UiCommand::ObserveResize(id) => window.update(cx, move |view, window, _cx| {
+                view.observe_resize(id);
+                window.refresh();
+            }),
+            UiCommand::UnobserveResize(id) => window.update(cx, move |view, _window, _cx| {
+                view.unobserve_resize(id);
+            }),
             UiCommand::ObserveCanvasImage {
                 observer_id,
                 source,
@@ -5031,6 +5040,51 @@ impl GpuixRenderer {
             .map(ElementBounds::from_painted))
     }
 
+    /// Start reporting post-paint size changes for one retained element.
+    #[napi]
+    pub fn observe_resize(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, _cx| {
+            view.observe_resize(id);
+            window.refresh();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ObserveResize(id));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Stop reporting post-paint size changes for one retained element.
+    #[napi]
+    pub fn unobserve_resize(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, _cx| {
+            view.unobserve_resize(id);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::UnobserveResize(id));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     #[napi]
     pub fn get_all_text(&self) -> Vec<String> {
         let tree = self.tree.lock().unwrap();
@@ -6500,6 +6554,25 @@ impl WebGpuixRenderer {
         element_bounds_js(bounds)
     }
 
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = observeResize)]
+    pub fn observe_resize(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_view(move |view, _window, _cx| {
+            view.observe_resize(id);
+        })?;
+        notify_web();
+        Ok(())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = unobserveResize)]
+    pub fn unobserve_resize(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_view(move |view, _window, _cx| {
+            view.unobserve_resize(id);
+        })?;
+        Ok(())
+    }
+
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getAllText)]
     pub fn get_all_text(&self) -> wasm_bindgen::JsValue {
         let tree = self.tree.lock().unwrap();
@@ -6853,6 +6926,14 @@ pub(crate) struct GpuixView {
     /// test snapshot. The accessibility snapshot remains the semantic source;
     /// this map contributes identity only.
     pub(crate) accessibility_host_ids: Option<HashMap<u64, u64>>,
+    /// Observed element ids and their last reported border/content sizes.
+    observed_resizes: HashMap<
+        u64,
+        (
+            crate::automation::ResizeObservationSize,
+            crate::automation::ResizeObservationSize,
+        ),
+    >,
 }
 
 /// The interaction state GPUI has actually delivered for one retained element.
@@ -7094,6 +7175,134 @@ impl GpuixView {
             clock: crate::automation::AutomationClock::new(),
             highlights: HashMap::new(),
             accessibility_host_ids: None,
+            observed_resizes: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn observe_resize(&mut self, id: u64) {
+        self.observed_resizes.entry(id).or_insert((
+            crate::automation::ResizeObservationSize::UNREPORTED,
+            crate::automation::ResizeObservationSize::UNREPORTED,
+        ));
+    }
+
+    pub(crate) fn unobserve_resize(&mut self, id: u64) {
+        self.observed_resizes.remove(&id);
+    }
+
+    fn emit_resize_observations(&mut self, scale_factor: f64) {
+        if self.observed_resizes.is_empty() {
+            return;
+        }
+
+        let tree = self.tree.lock().unwrap();
+        let root_id = tree.root_id;
+        let mut entries = Vec::new();
+        let mut removed = Vec::new();
+        for (&id, (last_border, last_content)) in &mut self.observed_resizes {
+            let element = tree.elements.get(&id);
+            if element.is_none() {
+                removed.push(id);
+            }
+            let border_bounds = crate::automation::get_bounds(id).unwrap_or_else(|| {
+                let zero = crate::automation::ResizeObservationSize::ZERO;
+                crate::automation::ElementBounds {
+                    x: 0.0,
+                    y: 0.0,
+                    width: zero.width,
+                    height: zero.height,
+                }
+            });
+            let style = element.and_then(|element| element.style.as_deref());
+            let side =
+                |longhand: fn(&crate::style::StyleDesc) -> Option<f64>,
+                 shorthand: fn(&crate::style::StyleDesc) -> Option<f64>| {
+                    style
+                        .and_then(|style| longhand(style).or_else(|| shorthand(style)))
+                        .unwrap_or(0.0)
+                };
+            let padding_left = side(|style| style.padding_left, |style| style.padding);
+            let padding_right = side(|style| style.padding_right, |style| style.padding);
+            let padding_top = side(|style| style.padding_top, |style| style.padding);
+            let padding_bottom = side(|style| style.padding_bottom, |style| style.padding);
+            let borders_suppressed = style
+                .and_then(|style| style.border_style.as_deref())
+                .is_some_and(|style| matches!(style, "none" | "hidden"));
+            let border_left = if borders_suppressed {
+                0.0
+            } else {
+                side(|style| style.border_left_width, |style| style.border_width)
+            };
+            let border_right = if borders_suppressed {
+                0.0
+            } else {
+                side(|style| style.border_right_width, |style| style.border_width)
+            };
+            let border_top = if borders_suppressed {
+                0.0
+            } else {
+                side(|style| style.border_top_width, |style| style.border_width)
+            };
+            let border_bottom = if borders_suppressed {
+                0.0
+            } else {
+                side(
+                    |style| style.border_bottom_width,
+                    |style| style.border_width,
+                )
+            };
+            let content = crate::automation::ResizeObservationSize {
+                width: (border_bounds.width
+                    - padding_left
+                    - padding_right
+                    - border_left
+                    - border_right)
+                    .max(0.0),
+                height: (border_bounds.height
+                    - padding_top
+                    - padding_bottom
+                    - border_top
+                    - border_bottom)
+                    .max(0.0),
+            };
+            let border = crate::automation::ResizeObservationSize {
+                width: border_bounds.width,
+                height: border_bounds.height,
+            };
+            if *last_border == border && *last_content == content {
+                continue;
+            }
+            *last_border = border;
+            *last_content = content;
+            entries.push(crate::element_tree::ResizeObservationEntry {
+                element_id: id as f64,
+                border_box: crate::element_tree::ResizeObservationSize {
+                    width: border.width,
+                    height: border.height,
+                },
+                content_box: crate::element_tree::ResizeObservationSize {
+                    width: content.width,
+                    height: content.height,
+                },
+                padding_left,
+                padding_top,
+                scale_factor,
+            });
+        }
+        for id in removed {
+            self.observed_resizes.remove(&id);
+        }
+        drop(tree);
+
+        if let (Some(root_id), false) = (root_id, entries.is_empty()) {
+            emit_event_full(
+                &self.event_callback,
+                root_id,
+                "resizeObservation",
+                |payload| {
+                    payload.entries = Some(entries);
+                },
+            );
         }
     }
 
@@ -9699,6 +9908,7 @@ impl gpui::Render for GpuixView {
             use gpui::prelude::*;
             let drag_move_view = cx.weak_entity();
             let drag_end_view = drag_move_view.clone();
+            let resize_view = drag_move_view.clone();
             let root = gpui::div()
                 .size_full()
                 .text_color(gpui::rgba(0xe2e2e2ff))
@@ -9718,7 +9928,15 @@ impl gpui::Render for GpuixView {
                 )
                 .on_key_up(cx.listener(|view, event: &gpui::KeyUpEvent, window, _cx| {
                     view.dispatch_unfocused_key_event("keyUp", &event.keystroke, None, window);
-                }));
+                }))
+                .on_painted(move |_, window, app| {
+                    let scale_factor = f64::from(window.scale_factor());
+                    resize_view
+                        .update(app, |view, _cx| {
+                            view.emit_resize_observations(scale_factor);
+                        })
+                        .ok();
+                });
             with_window_menu_actions(root)
                 .child(selection_frame_reset(
                     self.selection.clone(),
