@@ -195,11 +195,12 @@ export class ResizeObserver {
       const nativeEntry = byId.get(target.id)
       if (!nativeEntry) continue
       const size = selectedSize(nativeEntry, observation.box)
-      if (!sameSize(size, observation.lastReported)) {
+      const isUnmounted = !observation.container.eventTargets.has(target.id)
+      if (isUnmounted || !sameSize(size, observation.lastReported)) {
         observation.lastReported = size
         delivered.push(new ResizeObserverEntry(target, nativeEntry))
       }
-      if (!observation.container.eventTargets.has(target.id)) unmounted.push(target)
+      if (isUnmounted) unmounted.push(target)
     }
     try {
       if (delivered.length > 0) {
@@ -230,8 +231,4 @@ export function dispatchResizeObservation(
   }
   for (const observer of [...observers]) observer.deliver(payload.entries)
   return { defaultPrevented: false, propagationStopped: false }
-}
-
-export function __observerCountForRenderer(renderer: NativeRenderer): number {
-  return observationsByRenderer.get(renderer)?.size ?? 0
 }

@@ -3,7 +3,7 @@ import "../globals.js"
 import React, { useState } from "react"
 import { describe, expect, it } from "vitest"
 
-import { __observerCountForRenderer, ResizeObserver } from "../resize-observer.js"
+import { ResizeObserver } from "../resize-observer.js"
 import { act, createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import type { PublicInstance } from "../types/host.js"
 
@@ -131,7 +131,6 @@ describeNative("ResizeObserver", () => {
       paint(root)
       expect(callbacks).toHaveLength(2)
       observer.disconnect()
-      expect(__observerCountForRenderer(root.renderer)).toBe(0)
       act(() => setWidth(240))
       paint(root)
       expect(callbacks).toHaveLength(2)
@@ -207,6 +206,7 @@ describeNative("ResizeObserver", () => {
       })
 
       root.renderer.nativeSimulateMouseMove(10, 10)
+      root.renderer.dispatchNativeEvents()
       paint(root)
 
       expect(borderCallbacks).toHaveLength(1)
@@ -277,6 +277,114 @@ describeNative("ResizeObserver", () => {
     } finally {
       globalThis.queueMicrotask = originalQueueMicrotask
       root.unmount()
+    }
+  })
+
+  it("does not deliver a newly observed target during the current broadcast", () => {
+    const root = createTestRoot()
+    const target = React.createRef<PublicInstance>()
+    const createdCallbacks: ResizeObserverEntry[][] = []
+    let createdObserver: ResizeObserver | undefined
+
+    try {
+      root.render(<div ref={target} style={{ width: 100, height: 20 }} />)
+      const firstObserver = new ResizeObserver(() => {
+        createdObserver = new ResizeObserver((entries) => createdCallbacks.push(entries))
+        createdObserver.observe(target.current!)
+      })
+      firstObserver.observe(target.current!)
+      paint(root)
+
+      expect(createdCallbacks).toHaveLength(0)
+      paint(root)
+      expect(createdCallbacks).toHaveLength(1)
+      firstObserver.disconnect()
+      createdObserver?.disconnect()
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("delivers a terminal zero entry after an initial zero entry", () => {
+    const root = createTestRoot()
+    const target = React.createRef<PublicInstance>()
+    const callbacks: ResizeObserverEntry[][] = []
+    let setMounted!: (mounted: boolean) => void
+
+    function Fixture() {
+      const [mounted, updateMounted] = useState(true)
+      setMounted = updateMounted
+      return mounted ? <div ref={target} style={{ width: 0, height: 0 }} /> : null
+    }
+
+    try {
+      root.render(<Fixture />)
+      const observer = new ResizeObserver((entries) => callbacks.push(entries))
+      observer.observe(target.current!)
+      paint(root)
+      expect(callbacks).toHaveLength(1)
+      expect(callbacks[0]![0]!.borderBoxSize[0]).toEqual({ inlineSize: 0, blockSize: 0 })
+
+      act(() => setMounted(false))
+      paint(root)
+      expect(callbacks).toHaveLength(2)
+      expect(callbacks[1]![0]!.borderBoxSize[0]).toEqual({ inlineSize: 0, blockSize: 0 })
+      paint(root)
+      expect(callbacks).toHaveLength(2)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("records insets for custom elements", () => {
+    const root = createTestRoot()
+    const target = React.createRef<PublicInstance>()
+    const callbacks: ResizeObserverEntry[][] = []
+
+    try {
+      root.render(
+        <input
+          ref={target}
+          value=""
+          style={{ width: 100, height: 30, padding: 6, borderWidth: 1, borderStyle: "solid" }}
+        />
+      )
+      const observer = new ResizeObserver((entries) => callbacks.push(entries))
+      observer.observe(target.current!, { box: "content-box" })
+      paint(root)
+
+      const entry = callbacks[0]![0]!
+      expect(entry.contentBoxSize[0]).toEqual({ inlineSize: 86, blockSize: 16 })
+      expect(entry.contentRect.x).toBe(6)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("removes a disconnected observer from each renderer", () => {
+    const firstRoot = createTestRoot()
+    const secondRoot = createTestRoot()
+    const firstTarget = React.createRef<PublicInstance>()
+    const secondTarget = React.createRef<PublicInstance>()
+    const callbacks: ResizeObserverEntry[][] = []
+
+    try {
+      firstRoot.render(<div ref={firstTarget} style={{ width: 100, height: 20 }} />)
+      secondRoot.render(<div ref={secondTarget} style={{ width: 100, height: 20 }} />)
+      const observer = new ResizeObserver((entries) => callbacks.push(entries))
+      observer.observe(firstTarget.current!)
+      observer.observe(secondTarget.current!)
+      paint(firstRoot)
+      paint(secondRoot)
+      expect(callbacks).toHaveLength(2)
+
+      observer.disconnect()
+      firstRoot.render(<div ref={firstTarget} style={{ width: 200, height: 20 }} />)
+      paint(firstRoot)
+      expect(callbacks).toHaveLength(2)
+    } finally {
+      firstRoot.unmount()
+      secondRoot.unmount()
     }
   })
 

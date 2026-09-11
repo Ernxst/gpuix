@@ -10567,7 +10567,23 @@ fn build_element_with_parent_layout(
                 .map(|child_id| build_element(child_id, ctx, window, cx))
                 .collect();
             let inherited = ctx.inherited.clone();
-            let paint_bounds_listener = focus_paint_bounds_listener(id, ctx);
+            let paint_bounds_listener = {
+                let listener = focus_paint_bounds_listener(id, ctx);
+                match box_insets {
+                    Some(insets) => Some(std::rc::Rc::new(
+                        move |
+                            bounds: gpui::Bounds<gpui::Pixels>,
+                            window: &mut gpui::Window,
+                            cx: &mut gpui::App| {
+                        crate::automation::record_box_insets(id, insets);
+                        if let Some(listener) = &listener {
+                            listener(bounds, window, cx);
+                        }
+                        },
+                    ) as crate::automation::PaintBoundsListener),
+                    None => listener,
+                }
+            };
             let render_ctx = CustomRenderContext {
                 id,
                 retained_element: element,
