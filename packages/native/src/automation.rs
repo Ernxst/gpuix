@@ -77,6 +77,18 @@ pub struct ElementBounds {
     pub height: f64,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BoxInsets {
+    pub padding_left: f64,
+    pub padding_top: f64,
+    pub padding_right: f64,
+    pub padding_bottom: f64,
+    pub border_left: f64,
+    pub border_top: f64,
+    pub border_right: f64,
+    pub border_bottom: f64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResizeObservationSize {
     pub width: f64,
@@ -108,6 +120,7 @@ impl ElementBounds {
 
 thread_local! {
     static BOUNDS: RefCell<HashMap<u64, ElementBounds>> = RefCell::new(HashMap::new());
+    static BOX_INSETS: RefCell<HashMap<u64, BoxInsets>> = RefCell::new(HashMap::new());
 }
 
 pub type PaintBoundsListener = Rc<dyn Fn(Bounds<Pixels>, &mut Window, &mut App) + 'static>;
@@ -123,6 +136,7 @@ pub fn bounds_frame_reset() -> impl IntoElement {
         |_, _, _| (),
         move |_, _, _, _| {
             BOUNDS.with(|cell| cell.borrow_mut().clear());
+            BOX_INSETS.with(|cell| cell.borrow_mut().clear());
         },
     )
     .absolute()
@@ -158,8 +172,21 @@ pub fn track_own_bounds<E: gpui::InteractiveElement>(
     selection_start: Option<bool>,
     listener: Option<PaintBoundsListener>,
 ) -> E {
+    track_own_bounds_with_insets(el, id, selection_start, listener, None)
+}
+
+pub fn track_own_bounds_with_insets<E: gpui::InteractiveElement>(
+    el: E,
+    id: u64,
+    selection_start: Option<bool>,
+    listener: Option<PaintBoundsListener>,
+    insets: Option<BoxInsets>,
+) -> E {
     el.on_painted(move |bounds, window, cx| {
         record_bounds(id, bounds);
+        if let Some(insets) = insets {
+            record_box_insets(id, insets);
+        }
         if let Some(listener) = &listener {
             listener(bounds, window, cx);
         }
@@ -178,6 +205,16 @@ pub fn record_bounds(id: u64, bounds: Bounds<Pixels>) {
 
 pub fn get_bounds(id: u64) -> Option<ElementBounds> {
     BOUNDS.with(|cell| cell.borrow().get(&id).copied())
+}
+
+pub fn record_box_insets(id: u64, insets: BoxInsets) {
+    BOX_INSETS.with(|cell| {
+        cell.borrow_mut().insert(id, insets);
+    });
+}
+
+pub fn get_box_insets(id: u64) -> Option<BoxInsets> {
+    BOX_INSETS.with(|cell| cell.borrow().get(&id).copied())
 }
 
 pub fn all_bounds() -> HashMap<u64, ElementBounds> {

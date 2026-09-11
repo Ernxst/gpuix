@@ -11,6 +11,7 @@
     "src/__tests__/synthetic-event.types.tsx",
     "src/__tests__/testing-exports.types.ts",
     "src/__tests__/testing-act.types.ts",
+    "src/__tests__/resize-observer.types.tsx",
     "src/__tests__/element-identity.test.tsx",
     "src/__tests__/testing-screenshot.test.tsx",
     "src/__tests__/testing-vitest-setup.test.tsx",

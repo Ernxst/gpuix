@@ -7180,10 +7180,13 @@ impl GpuixView {
     }
 
     pub(crate) fn observe_resize(&mut self, id: u64) {
-        self.observed_resizes.entry(id).or_insert((
-            crate::automation::ResizeObservationSize::UNREPORTED,
-            crate::automation::ResizeObservationSize::UNREPORTED,
-        ));
+        self.observed_resizes.insert(
+            id,
+            (
+                crate::automation::ResizeObservationSize::UNREPORTED,
+                crate::automation::ResizeObservationSize::UNREPORTED,
+            ),
+        );
     }
 
     pub(crate) fn unobserve_resize(&mut self, id: u64) {
@@ -7201,7 +7204,8 @@ impl GpuixView {
         let mut removed = Vec::new();
         for (&id, (last_border, last_content)) in &mut self.observed_resizes {
             let element = tree.elements.get(&id);
-            if element.is_none() {
+            let was_removed = element.is_none();
+            if was_removed {
                 removed.push(id);
             }
             let border_bounds = crate::automation::get_bounds(id).unwrap_or_else(|| {
@@ -7213,44 +7217,19 @@ impl GpuixView {
                     height: zero.height,
                 }
             });
-            let style = element.and_then(|element| element.style.as_deref());
-            let side =
-                |longhand: fn(&crate::style::StyleDesc) -> Option<f64>,
-                 shorthand: fn(&crate::style::StyleDesc) -> Option<f64>| {
-                    style
-                        .and_then(|style| longhand(style).or_else(|| shorthand(style)))
-                        .unwrap_or(0.0)
-                };
-            let padding_left = side(|style| style.padding_left, |style| style.padding);
-            let padding_right = side(|style| style.padding_right, |style| style.padding);
-            let padding_top = side(|style| style.padding_top, |style| style.padding);
-            let padding_bottom = side(|style| style.padding_bottom, |style| style.padding);
-            let borders_suppressed = style
-                .and_then(|style| style.border_style.as_deref())
-                .is_some_and(|style| matches!(style, "none" | "hidden"));
-            let border_left = if borders_suppressed {
-                0.0
+            let insets = if was_removed {
+                crate::automation::BoxInsets::default()
             } else {
-                side(|style| style.border_left_width, |style| style.border_width)
+                crate::automation::get_box_insets(id).unwrap_or_default()
             };
-            let border_right = if borders_suppressed {
-                0.0
-            } else {
-                side(|style| style.border_right_width, |style| style.border_width)
-            };
-            let border_top = if borders_suppressed {
-                0.0
-            } else {
-                side(|style| style.border_top_width, |style| style.border_width)
-            };
-            let border_bottom = if borders_suppressed {
-                0.0
-            } else {
-                side(
-                    |style| style.border_bottom_width,
-                    |style| style.border_width,
-                )
-            };
+            let padding_left = insets.padding_left;
+            let padding_right = insets.padding_right;
+            let padding_top = insets.padding_top;
+            let padding_bottom = insets.padding_bottom;
+            let border_left = insets.border_left;
+            let border_right = insets.border_right;
+            let border_top = insets.border_top;
+            let border_bottom = insets.border_bottom;
             let content = crate::automation::ResizeObservationSize {
                 width: (border_bounds.width
                     - padding_left
@@ -7269,7 +7248,7 @@ impl GpuixView {
                 width: border_bounds.width,
                 height: border_bounds.height,
             };
-            if *last_border == border && *last_content == content {
+            if !was_removed && *last_border == border && *last_content == content {
                 continue;
             }
             *last_border = border;
@@ -10521,6 +10500,10 @@ fn build_element_with_parent_layout(
             .map(|group| group.name.clone());
     }
     let style = resolved_style.as_ref();
+    let box_insets = style.map(|style| {
+        let effective = effective_intrinsic_state_style(style, probe_state);
+        box_insets_for_style(&effective)
+    });
     let hover_group = style.and_then(|style| style.hover_group.as_deref());
     let current_color = resolved_current_color(
         style,
@@ -10567,11 +10550,11 @@ fn build_element_with_parent_layout(
         // listener, and then silently did nothing.
         "div" | "text" => {
             ctx.custom_registry.destroy(id);
-            build_host_container(element, style, ctx, window, cx)
+            build_host_container(element, style, box_insets, ctx, window, cx)
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
-            build_virtual_list(element, style, hover_within, ctx, window, cx)
+            build_virtual_list(element, style, box_insets, hover_within, ctx, window, cx)
         }
 
         // Polymorphic dispatch for all custom elements.
@@ -11421,6 +11404,34 @@ fn effective_intrinsic_state_style(style: &StyleDesc, state: InteractionProbeSta
     effective
 }
 
+fn box_insets_for_style(style: &StyleDesc) -> crate::automation::BoxInsets {
+    let side =
+        |longhand: fn(&StyleDesc) -> Option<f64>, shorthand: fn(&StyleDesc) -> Option<f64>| {
+            longhand(style).or_else(|| shorthand(style)).unwrap_or(0.0)
+        };
+    let borders_suppressed = style
+        .border_style
+        .as_deref()
+        .is_some_and(|style| matches!(style, "none" | "hidden"));
+    let border = |longhand: fn(&StyleDesc) -> Option<f64>| {
+        if borders_suppressed {
+            0.0
+        } else {
+            side(longhand, |style| style.border_width)
+        }
+    };
+    crate::automation::BoxInsets {
+        padding_left: side(|style| style.padding_left, |style| style.padding),
+        padding_top: side(|style| style.padding_top, |style| style.padding),
+        padding_right: side(|style| style.padding_right, |style| style.padding),
+        padding_bottom: side(|style| style.padding_bottom, |style| style.padding),
+        border_left: border(|style| style.border_left_width),
+        border_top: border(|style| style.border_top_width),
+        border_right: border(|style| style.border_right_width),
+        border_bottom: border(|style| style.border_bottom_width),
+    }
+}
+
 fn intrinsic_wrapping_source(id: u64, style: &StyleDesc) -> HeightWrappingSource {
     match style.width {
         Some(crate::style::DimensionValue::Pixels(_)) => HeightWrappingSource::Definite,
@@ -11862,6 +11873,7 @@ fn default_flex_none_for_parent_layout(style: &mut StyleDesc) {
 fn build_virtual_list(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
+    box_insets: Option<crate::automation::BoxInsets>,
     hover_within: bool,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
@@ -12047,7 +12059,13 @@ fn build_virtual_list(
         ctx.inherited.accessibility_hidden,
         crate::accessibility::AccessibleText::default(),
     );
-    let list = crate::automation::track_own_bounds(list, element.id, None, None);
+    let list = crate::automation::track_own_bounds_with_insets(
+        list,
+        element.id,
+        None,
+        None,
+        box_insets,
+    );
     if let Some(group) = style.and_then(|style| style.hover_group.as_deref()) {
         // `gpui::List` is Styled but has no interactive identity. A transparent
         // stateful surface gives the retained virtual-list node the same group
@@ -13149,6 +13167,7 @@ fn scroll_position_tracker(
 pub(crate) fn build_host_container(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
+    box_insets: Option<crate::automation::BoxInsets>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -13271,11 +13290,12 @@ pub(crate) fn build_host_container(
         el = el.relative();
     }
     let paint_bounds_listener = focus_paint_bounds_listener(element.id, ctx);
-    el = crate::automation::track_own_bounds(
+    el = crate::automation::track_own_bounds_with_insets(
         el,
         element.id,
         selection_start_flag(style),
         paint_bounds_listener,
+        box_insets,
     );
     if let Some(scroll_tracker) = scroll_tracker {
         el = el.child(scroll_tracker);

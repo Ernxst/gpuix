@@ -4548,6 +4548,8 @@ the browser's after-layout, before-paint timing. `observe(target)` defaults to
 `{ box: "device-pixel-content-box" }` to observe another size.
 The underlying native event uses `elementId: 0` when the tree has no root at
 report time; React uses each entry's `target` instead.
+Typed code can import `ResizeObserver` and its entry and option types as named
+exports from `@gpuix/react`.
 
 ## Testing
 

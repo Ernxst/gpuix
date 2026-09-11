@@ -55,7 +55,7 @@ function retainNativeObservation(renderer: NativeRenderer, id: number, observer:
   }
   const count = counts.get(id) ?? 0
   counts.set(id, count + 1)
-  if (count === 0) renderer.observeResize?.(id)
+  renderer.observeResize?.(id)
 }
 
 function releaseNativeObservation(renderer: NativeRenderer, id: number, observer: ResizeObserver): void {
@@ -71,8 +71,9 @@ function releaseNativeObservation(renderer: NativeRenderer, id: number, observer
   }
 
   const observers = observationsByRenderer.get(renderer)
-  if (observers && ![...observers].some((candidate) => candidate.hasRenderer(renderer))) {
+  if (observers && !observer.hasRenderer(renderer)) {
     observers.delete(observer)
+    if (observers.size === 0) observationsByRenderer.delete(renderer)
   }
 }
 
@@ -163,6 +164,8 @@ export class ResizeObserver {
   }
 
   unobserve(target: PublicInstance): void {
+    const container = containerForPublicInstance(target)
+    if (!container) throw invalidTarget()
     const observation = this.observations.get(target)
     if (!observation) return
     this.observations.delete(target)
@@ -170,10 +173,11 @@ export class ResizeObserver {
   }
 
   disconnect(): void {
-    for (const [target, observation] of this.observations) {
+    const observations = [...this.observations]
+    this.observations.clear()
+    for (const [target, observation] of observations) {
       releaseNativeObservation(observation.container.native, target.id, this)
     }
-    this.observations.clear()
   }
 
   hasRenderer(renderer: NativeRenderer): boolean {
@@ -197,12 +201,21 @@ export class ResizeObserver {
       }
       if (!observation.container.eventTargets.has(target.id)) unmounted.push(target)
     }
-    if (delivered.length > 0) {
-      const callback = this.callback
-      callback(delivered, this)
-    }
-    for (const target of unmounted) {
-      if (this.observations.has(target)) this.unobserve(target)
+    try {
+      if (delivered.length > 0) {
+        const callback = this.callback
+        try {
+          callback(delivered, this)
+        } catch (error) {
+          queueMicrotask(() => {
+            throw error
+          })
+        }
+      }
+    } finally {
+      for (const target of unmounted) {
+        if (this.observations.has(target)) this.unobserve(target)
+      }
     }
   }
 }
@@ -215,6 +228,10 @@ export function dispatchResizeObservation(
   if (!observers || !payload.entries) {
     return { defaultPrevented: false, propagationStopped: false }
   }
-  for (const observer of observers) observer.deliver(payload.entries)
+  for (const observer of [...observers]) observer.deliver(payload.entries)
   return { defaultPrevented: false, propagationStopped: false }
+}
+
+export function __observerCountForRenderer(renderer: NativeRenderer): number {
+  return observationsByRenderer.get(renderer)?.size ?? 0
 }

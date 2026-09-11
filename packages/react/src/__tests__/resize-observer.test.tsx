@@ -3,6 +3,7 @@ import "../globals.js"
 import React, { useState } from "react"
 import { describe, expect, it } from "vitest"
 
+import { __observerCountForRenderer, ResizeObserver } from "../resize-observer.js"
 import { act, createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import type { PublicInstance } from "../types/host.js"
 
@@ -130,6 +131,7 @@ describeNative("ResizeObserver", () => {
       paint(root)
       expect(callbacks).toHaveLength(2)
       observer.disconnect()
+      expect(__observerCountForRenderer(root.renderer)).toBe(0)
       act(() => setWidth(240))
       paint(root)
       expect(callbacks).toHaveLength(2)
@@ -181,6 +183,103 @@ describeNative("ResizeObserver", () => {
     }
   })
 
+  it("reports effective hover insets for content-box observations", () => {
+    const root = createTestRoot()
+    const target = React.createRef<PublicInstance>()
+    const borderCallbacks: ResizeObserverEntry[][] = []
+    const contentCallbacks: ResizeObserverEntry[][] = []
+
+    try {
+      root.render(
+        <div
+          ref={target}
+          style={{ width: 100, height: 40, padding: 5, hover: { padding: 20 } }}
+        />
+      )
+      const borderObserver = new ResizeObserver((entries) => borderCallbacks.push(entries))
+      const contentObserver = new ResizeObserver((entries) => contentCallbacks.push(entries))
+      borderObserver.observe(target.current!, { box: "border-box" })
+      contentObserver.observe(target.current!, { box: "content-box" })
+      paint(root)
+      expect(contentCallbacks[0]![0]!.contentBoxSize[0]).toEqual({
+        inlineSize: 90,
+        blockSize: 30,
+      })
+
+      root.renderer.nativeSimulateMouseMove(10, 10)
+      paint(root)
+
+      expect(borderCallbacks).toHaveLength(1)
+      expect(contentCallbacks).toHaveLength(2)
+      expect(contentCallbacks[1]![0]!.contentBoxSize[0]).toEqual({
+        inlineSize: 60,
+        blockSize: 0,
+      })
+      borderObserver.disconnect()
+      contentObserver.disconnect()
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("resets native delivery for a second observer without a geometry change", () => {
+    const root = createTestRoot()
+    const target = React.createRef<PublicInstance>()
+    const first: ResizeObserverEntry[][] = []
+    const second: ResizeObserverEntry[][] = []
+
+    try {
+      root.render(<div ref={target} style={{ width: 100, height: 20 }} />)
+      const firstObserver = new ResizeObserver((entries) => first.push(entries))
+      const secondObserver = new ResizeObserver((entries) => second.push(entries))
+      firstObserver.observe(target.current!)
+      paint(root)
+      expect(first).toHaveLength(1)
+
+      secondObserver.observe(target.current!)
+      paint(root)
+
+      expect(first).toHaveLength(1)
+      expect(second).toHaveLength(1)
+      firstObserver.disconnect()
+      secondObserver.disconnect()
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("isolates callback failures and keeps later observers running", () => {
+    const root = createTestRoot()
+    const target = React.createRef<PublicInstance>()
+    const second: ResizeObserverEntry[][] = []
+    const queued: VoidFunction[] = []
+    const originalQueueMicrotask = globalThis.queueMicrotask
+    const failure = new Error("resize callback")
+
+    globalThis.queueMicrotask = (callback) => {
+      queued.push(callback)
+    }
+    try {
+      root.render(<div ref={target} style={{ width: 100, height: 20 }} />)
+      const firstObserver = new ResizeObserver(() => {
+        throw failure
+      })
+      const secondObserver = new ResizeObserver((entries) => second.push(entries))
+      firstObserver.observe(target.current!)
+      secondObserver.observe(target.current!)
+      paint(root)
+
+      expect(second).toHaveLength(1)
+      expect(queued).toHaveLength(1)
+      expect(() => queued[0]!()).toThrow(failure)
+      firstObserver.disconnect()
+      secondObserver.disconnect()
+    } finally {
+      globalThis.queueMicrotask = originalQueueMicrotask
+      root.unmount()
+    }
+  })
+
   it("delivers one entry to each observer and rejects non-instances", () => {
     const root = createTestRoot()
     const target = React.createRef<PublicInstance>()
@@ -200,6 +299,7 @@ describeNative("ResizeObserver", () => {
       expect(first[0]).toHaveLength(1)
       expect(second[0]).toHaveLength(1)
       expect(() => firstObserver.observe({} as PublicInstance)).toThrow(TypeError)
+      expect(() => firstObserver.unobserve({} as PublicInstance)).toThrow(TypeError)
     } finally {
       root.unmount()
     }
