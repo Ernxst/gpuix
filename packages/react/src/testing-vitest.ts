@@ -20,21 +20,11 @@
 /// imported more than once — from a `setupFiles` entry and again from a test
 /// file, say — which is harmless.
 
-import { afterAll, afterEach, beforeAll, expect } from "vitest"
+import { afterEach, beforeAll, expect } from "vitest"
 
-import {
-  cleanup,
-  configuredTestWindow,
-  configureTestWindow,
-  disposeSharedWindow,
-  type TestWindowOptions,
-} from "./testing.js"
+import { cleanup, configuredTestWindow, configureTestWindow, disposeSharedWindow } from "./testing.js"
 import { gpuixMatchers, type GpuixMatchers } from "./testing-expect.js"
-import {
-  configuredScreenshots,
-  configureScreenshots,
-  type ConfigureScreenshotsOptions,
-} from "./testing-screenshot.js"
+import { configuredScreenshots, configureScreenshots } from "./testing-screenshot.js"
 
 export * from "./testing.js"
 
@@ -54,20 +44,25 @@ afterEach(() => {
 // imports (`testing.ts`, `testing-screenshot.ts`) are evaluated once per
 // worker, not once per file. Their module-level defaults —
 // `configureTestWindow`, `configureScreenshots`, and the shared window itself
-// — would otherwise leak from one file into the next. `beforeAll` snapshots
-// the defaults a file inherits; `afterAll` restores them and closes the
-// window, which is also the reset for menus, the debug frame overlay, and
-// every other window-level knob `cleanup()` deliberately leaves alone.
-let testWindowSnapshot: TestWindowOptions = {}
-let screenshotSnapshot: ConfigureScreenshotsOptions = {}
-
+// — would otherwise leak from one file into the next.
+//
+// The restore is a function `beforeAll` returns, not a separate `afterAll`:
+// vitest calls a `beforeAll`'s returned cleanup after every `afterAll` in the
+// file, regardless of `sequence.hooks` — both `"list"` and `"parallel"` let a
+// plain `afterAll` registered here run concurrently with, or before, the
+// file's own `afterAll`, which would restore the defaults before the file's
+// teardown had finished dirtying them. A returned cleanup has no such race:
+// it is this `beforeAll`'s own teardown, not another hook competing for a
+// slot in the file's `afterAll` list.
 beforeAll(() => {
-  testWindowSnapshot = configuredTestWindow()
-  screenshotSnapshot = configuredScreenshots()
-})
+  const testWindowSnapshot = configuredTestWindow()
+  const screenshotSnapshot = configuredScreenshots()
 
-afterAll(() => {
-  configureTestWindow(testWindowSnapshot)
-  configureScreenshots(screenshotSnapshot)
-  disposeSharedWindow()
+  return () => {
+    configureTestWindow(testWindowSnapshot)
+    configureScreenshots(screenshotSnapshot)
+    // Also the reset for menus, the debug frame overlay, and every other
+    // window-level knob `cleanup()` deliberately leaves alone.
+    disposeSharedWindow()
+  }
 })

@@ -4893,8 +4893,8 @@ shared between files. Under `isolate: false`, a worker keeps one module
 instance for every file it runs, so the window and the `configureTestWindow` /
 `configureScreenshots` defaults would otherwise persist from one file into the
 next; `@gpuix/react/testing/vitest` closes the window and restores both
-defaults in an `afterAll`, so each file still starts fresh — see **Automatic
-cleanup, and where vitest enters**, below.
+defaults in the cleanup its `beforeAll` returns, so each file still starts
+fresh — see **Automatic cleanup, and where vitest enters**, below.
 
 **`options` decide reuse.** `options` is `TestRootOptions` — `width`, `height`,
 `scaleFactor`, `allowPrivateNetworkImages`, `strictStyles` — and every one of
@@ -4974,8 +4974,14 @@ throttling, and any pointer button or modifier left held by a partial drag —
 GPUI exposes no cheap way to read those back, so `render()` does not restore
 them. It is the window closing at the end of the file — see **One window per
 test file**, above — that clears them for the next file, not anything a test
-does. A root that died on an uncaught render error is never reused: its window
-is closed and the next `render()` opens a new one, even mid-test.
+does. "Gone at the end of the file" holds under `isolate: true` (the default),
+or under `isolate: false` when the file runs through
+`@gpuix/react/testing/vitest` (which closes the window itself) or calls
+`disposeSharedWindow()` directly — not for a plain `@gpuix/react/testing`
+import whose only teardown is `cleanup()`, which keeps the window on purpose;
+see **Automatic cleanup, and where vitest enters**, below. A root that died on
+an uncaught render error is never reused: its window is closed and the next
+`render()` opens a new one, even mid-test.
 
 **One tree, not many.** A second `render()` in the same test **replaces** the
 first tree rather than mounting beside it. A browser page has a `document.body`
@@ -4986,22 +4992,26 @@ window's lifetime yourself.
 
 **Automatic cleanup, and where vitest enters.** `@gpuix/react/testing` never
 imports vitest: it also runs from plain scripts, other runners, and the
-automation harness. `@gpuix/react/testing/vitest` registers three hooks:
-`afterEach` unmounts after each test; `beforeAll` and `afterAll` snapshot and
-then restore the `configureTestWindow` / `configureScreenshots` defaults and
-close the shared window, so a file that changes either — or anything through
-`renderer` — leaves nothing for the next file in the same worker under
-`isolate: false`. The matcher pack's `expect.extend` lives in the same entry
-point:
+automation harness. `@gpuix/react/testing/vitest` registers two things:
+`afterEach` unmounts after each test, and a `beforeAll` that snapshots the
+`configureTestWindow` / `configureScreenshots` defaults and returns a cleanup
+that restores them and closes the shared window. The restore is that returned
+cleanup, not a separate `afterAll` — vitest calls it after every `afterAll` in
+the file regardless of `sequence.hooks`, where a plain `afterAll` registered
+here could instead run before, or concurrently with, a file's own `afterAll`
+and restore the defaults too early. Either way, a file that changes the
+configured defaults — or anything through `renderer` — leaves nothing for the
+next file in the same worker under `isolate: false`. The matcher pack's
+`expect.extend` lives in the same entry point:
 
 | Import | Cleanup | Matchers |
 |---|---|---|
-| `@gpuix/react/testing/vitest` | `afterEach(cleanup)`, plus `beforeAll` / `afterAll` restoring the window and its configured defaults, are registered for you | `expect.extend(gpuixMatchers)` is registered for you |
+| `@gpuix/react/testing/vitest` | `afterEach(cleanup)`, plus the window and its configured defaults restored by `beforeAll`'s returned cleanup, are registered for you | `expect.extend(gpuixMatchers)` is registered for you |
 | `@gpuix/react/testing` | Call the exported `cleanup()` from your own teardown | Call `expect.extend(gpuixMatchers)` yourself — see [Matchers](#matchers) |
 
 Under `isolate: false`, put `@gpuix/react/testing/vitest` directly in
 `setupFiles` — vitest re-executes a `setupFiles` entry itself for every
-collected file, but not the modules it imports, so the same three hooks
+collected file, but not the modules it imports, so `afterEach` and `beforeAll`
 register again for each new file. Importing it from your own setup file, or
 from a test file, registers them only once, for the first file the worker
 runs, because that import is one of the modules vitest does not re-execute.
@@ -5016,11 +5026,16 @@ in it has to run outside vitest.
 import { afterEach } from 'vitest'
 import { cleanup, render } from '@gpuix/react/testing'
 
-afterEach(cleanup) // exactly what `@gpuix/react/testing/vitest` does for you
+afterEach(cleanup) // the `afterEach` half of what `@gpuix/react/testing/vitest` does for you
 ```
 
 `cleanup()` unmounts the rendered tree and resets the window, keeping it open
-for the next `render()`. It is safe to call when nothing is rendered.
+for the next `render()`. It is safe to call when nothing is rendered. This
+teardown alone never closes the window or restores `configureTestWindow` /
+`configureScreenshots` — under `isolate: false` that keeps it open, and those
+defaults dirtied, across every file in the worker; add the `beforeAll` /
+returned-cleanup pair `@gpuix/react/testing/vitest` registers, or call
+`disposeSharedWindow()` yourself, if that matters for this runner.
 
 ### act()
 

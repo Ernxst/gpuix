@@ -15,7 +15,8 @@
     "src/__tests__/testing-screenshot.test.tsx",
     "src/__tests__/testing-vitest-setup.test.tsx",
     "src/__tests__/testing-per-file-isolation.test.tsx",
-    "src/__tests__/fixtures/per-file-isolation/01-configure.fixture.tsx",
-    "src/__tests__/fixtures/per-file-isolation/02-verify.fixture.tsx"
+    "src/__tests__/fixtures/per-file-isolation/01-menu.fixture.tsx",
+    "src/__tests__/fixtures/per-file-isolation/02-configure.fixture.tsx",
+    "src/__tests__/fixtures/per-file-isolation/03-verify.fixture.tsx"
   ]
 }
