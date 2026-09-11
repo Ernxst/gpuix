@@ -361,6 +361,12 @@ export declare class TestGpuixRenderer {
    * removal actually freed it.
    */
   getRetainedElementCount(): number
+  /**
+   * Microseconds spent rebuilding the element tree since the last call,
+   * cleared on read. Whatever a draw costs beyond this is layout, prepaint
+   * and paint, which is the split #480 turns on.
+   */
+  takeRenderBuildMicros(): number
   setStrictStyles(enabled: boolean): void
   /**
    * Opt in to loopback and private-network URL image sources for local tests.

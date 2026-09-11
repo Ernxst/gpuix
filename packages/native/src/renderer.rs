@@ -9707,6 +9707,24 @@ fn virtual_focus_scroll_distance_at_offset(
     }
 }
 
+/// Nanoseconds spent inside `GpuixView::render`, which is the element-tree
+/// rebuild half of a draw. The test renderer reads and clears this to separate
+/// rebuild cost from layout and paint (#480).
+pub(crate) static RENDER_BUILD_NANOS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Records on scope exit so early returns from `render` are still counted.
+struct RecordRenderBuild(std::time::Instant);
+
+impl Drop for RecordRenderBuild {
+    fn drop(&mut self) {
+        RENDER_BUILD_NANOS.fetch_add(
+            self.0.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+}
+
 impl gpui::Render for GpuixView {
     fn render(
         &mut self,
@@ -9714,6 +9732,8 @@ impl gpui::Render for GpuixView {
         cx: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
         use gpui::IntoElement;
+
+        let _record_build = RecordRenderBuild(std::time::Instant::now());
 
         window.set_window_title(&self.window_title);
         self.observe_window_resize(window, cx);
