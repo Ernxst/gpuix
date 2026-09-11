@@ -240,6 +240,7 @@ interface NativeTestRendererApi extends NativeRenderer {
     action: "activate" | "increment" | "decrement" | "focus"
   ): void
   getRetainedElementCount(): number
+  takeRenderBuildMicros(): number
   getElementBounds(elementId: number): ElementBounds | null
   observeResize(elementId: number): void
   unobserveResize(elementId: number): void
@@ -1524,6 +1525,13 @@ export class TestRenderer implements NativeRenderer {
    *  from the root, so only this can see a node that was detached and leaked. */
   getRetainedElementCount(): number {
     return this.native.getRetainedElementCount()
+  }
+
+  /** Microseconds spent rebuilding the element tree since the last call,
+   *  cleared on read. Whatever a draw costs beyond this is layout, prepaint
+   *  and paint. */
+  takeRenderBuildMicros(): number {
+    return this.native.takeRenderBuildMicros()
   }
 
   getElementBounds(elementId: number): ElementBounds | null {

@@ -575,6 +575,15 @@ impl TestGpuixRenderer {
         self.tree.lock().unwrap().elements.len() as u32
     }
 
+    /// Microseconds spent rebuilding the element tree since the last call,
+    /// cleared on read. Whatever a draw costs beyond this is layout, prepaint
+    /// and paint, which is the split #480 turns on.
+    #[napi]
+    pub fn take_render_build_micros(&self) -> f64 {
+        crate::renderer::RENDER_BUILD_NANOS.swap(0, std::sync::atomic::Ordering::Relaxed) as f64
+            / 1_000.0
+    }
+
     #[napi]
     pub fn set_strict_styles(&self, enabled: bool) {
         self.strict_styles.store(enabled, Ordering::Relaxed);
