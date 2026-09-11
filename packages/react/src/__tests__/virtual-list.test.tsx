@@ -4,6 +4,7 @@ import React from "react"
 import { describe, expect, it, vi } from "vitest"
 import { flushSync } from "../reconciler/reconciler.js"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
+import type { PublicInstance } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -135,6 +136,52 @@ describe("<virtual-list>", () => {
       } finally {
         screen.unmount()
       }
+    })
+  })
+
+  describeNative("painted bounds", () => {
+    it("reports its own viewport as painted bounds and matches :hover under the pointer", () => {
+      const listRef = React.createRef<PublicInstance>()
+      const { render, renderer } = createTestRoot()
+      render(
+        <virtual-list
+          ref={listRef}
+          overdraw={0}
+          estimatedItemHeight={40}
+          style={{ width: 400, height: 160 }}
+        >
+          <Rows count={30} />
+        </virtual-list>,
+      )
+
+      const list = renderer.findByType("virtual-list")[0]
+      const bounds = renderer.getElementBounds(list.id)
+      expect(bounds).not.toBeNull()
+      expect(bounds!.width).toBeCloseTo(400)
+      expect(bounds!.height).toBeCloseTo(160)
+
+      renderer.nativeSimulateMouseMove(bounds!.x + bounds!.width / 2, bounds!.y + 20)
+      expect(listRef.current!.matches(":hover")).toBe(true)
+    })
+
+    it("reports its own width, not a hoverGroup parent's, when hoverGroup is set", () => {
+      const { render, renderer } = createTestRoot()
+      render(
+        <div style={{ width: 1280 }}>
+          <virtual-list
+            overdraw={0}
+            estimatedItemHeight={40}
+            style={{ width: 400, height: 160, hoverGroup: "g" }}
+          >
+            <Rows count={30} />
+          </virtual-list>
+        </div>,
+      )
+
+      const list = renderer.findByType("virtual-list")[0]
+      const bounds = renderer.getElementBounds(list.id)
+      expect(bounds).not.toBeNull()
+      expect(bounds!.width).toBeCloseTo(400)
     })
   })
 

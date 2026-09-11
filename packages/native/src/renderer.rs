@@ -11551,6 +11551,7 @@ fn build_virtual_list(
         ctx.inherited.accessibility_hidden,
         crate::accessibility::AccessibleText::default(),
     );
+    let list = crate::automation::track_own_bounds(list, element.id, None, None);
     if let Some(group) = style.and_then(|style| style.hover_group.as_deref()) {
         // `gpui::List` is Styled but has no interactive identity. A transparent
         // stateful surface gives the retained virtual-list node the same group
@@ -11584,7 +11585,6 @@ fn build_virtual_list(
         if style.and_then(|style| style.pointer_events.as_deref()) == Some("none") {
             surface = surface.ignore_mouse();
         }
-        let surface = crate::automation::track_own_bounds(surface, id, None, None);
         return surface.into_any_element();
     }
     list.into_any_element()
