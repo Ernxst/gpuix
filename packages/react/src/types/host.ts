@@ -1382,7 +1382,7 @@ export interface NativeRenderer {
   resolveTabKeyDown?(defaultPrevented: boolean): void
   /** @internal Complete a scroll key's default after synthetic dispatch. */
   resolveScrollKeyDown?(defaultPrevented: boolean): void
-  /** @internal Complete an editor's Enter default after synthetic dispatch. */
+  /** @internal Complete an editor's deferred keydown default after synthetic dispatch. */
   resolveEditorKeyDown?(elementId: number, defaultPrevented: boolean): void
   /** The focused host element id, analogous to `document.activeElement`, or null. */
   getActiveElement?(): number | null

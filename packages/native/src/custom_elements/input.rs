@@ -150,82 +150,18 @@ fn single_line_text(text: &str) -> String {
 }
 
 pub fn init(cx: &mut App) {
-    let word_navigation_uses_alt = word_navigation_uses_alt();
     let bind_paste_shortcut = !cfg!(all(target_arch = "wasm32", target_os = "unknown"));
-    let mut bindings = text_editor_bindings(
-        INPUT_KEY_CONTEXT,
-        false,
-        word_navigation_uses_alt,
-        bind_paste_shortcut,
-    );
+    let mut bindings = text_editor_bindings(INPUT_KEY_CONTEXT, bind_paste_shortcut);
     bindings.extend(text_editor_bindings(
         TEXTAREA_KEY_CONTEXT,
-        true,
-        word_navigation_uses_alt,
         bind_paste_shortcut,
     ));
     cx.bind_keys(bindings);
 }
 
-fn text_editor_bindings(
-    context: &'static str,
-    multiline: bool,
-    word_navigation_uses_alt: bool,
-    bind_paste_shortcut: bool,
-) -> Vec<KeyBinding> {
+fn text_editor_bindings(context: &'static str, bind_paste_shortcut: bool) -> Vec<KeyBinding> {
     let context = Some(context);
-    let mut bindings = vec![
-        KeyBinding::new("backspace", Backspace, context),
-        KeyBinding::new("delete", Delete, context),
-        KeyBinding::new("left", Left, context),
-        KeyBinding::new("right", Right, context),
-        KeyBinding::new("shift-left", SelectLeft, context),
-        KeyBinding::new("shift-right", SelectRight, context),
-        KeyBinding::new("home", Home, context),
-        KeyBinding::new("end", End, context),
-        KeyBinding::new("shift-home", SelectHome, context),
-        KeyBinding::new("shift-end", SelectEnd, context),
-        KeyBinding::new("cmd-left", Home, context),
-        KeyBinding::new("cmd-right", End, context),
-        KeyBinding::new("cmd-backspace", DeleteToLineStart, context),
-        KeyBinding::new("cmd-delete", DeleteToLineEnd, context),
-        KeyBinding::new("cmd-up", DocStart, context),
-        KeyBinding::new("cmd-down", DocEnd, context),
-        KeyBinding::new("shift-cmd-left", SelectHome, context),
-        KeyBinding::new("shift-cmd-right", SelectEnd, context),
-        KeyBinding::new("shift-cmd-up", SelectDocStart, context),
-        KeyBinding::new("shift-cmd-down", SelectDocEnd, context),
-    ];
-    if multiline {
-        bindings.extend([
-            KeyBinding::new("up", Up, context),
-            KeyBinding::new("down", Down, context),
-            KeyBinding::new("shift-up", SelectUp, context),
-            KeyBinding::new("shift-down", SelectDown, context),
-        ]);
-    }
-
-    let word_prefix = if word_navigation_uses_alt {
-        "alt"
-    } else {
-        "ctrl"
-    };
-    bindings.extend([
-        KeyBinding::new(&format!("{word_prefix}-backspace"), DeleteWordLeft, context),
-        KeyBinding::new(&format!("{word_prefix}-delete"), DeleteWordRight, context),
-        KeyBinding::new(&format!("{word_prefix}-left"), WordLeft, context),
-        KeyBinding::new(&format!("{word_prefix}-right"), WordRight, context),
-        KeyBinding::new(
-            &format!("shift-{word_prefix}-left"),
-            SelectWordLeft,
-            context,
-        ),
-        KeyBinding::new(
-            &format!("shift-{word_prefix}-right"),
-            SelectWordRight,
-            context,
-        ),
-    ]);
+    let mut bindings = Vec::new();
     for prefix in ["cmd", "ctrl"] {
         bindings.extend([
             KeyBinding::new(&format!("{prefix}-a"), SelectAll, context),
@@ -238,6 +174,142 @@ fn text_editor_bindings(
             bindings.push(KeyBinding::new(&format!("{prefix}-v"), Paste, context));
         }
     }
+    bindings
+}
+
+fn deferred_text_editor_bindings(
+    context: &'static str,
+    multiline: bool,
+    word_navigation_uses_alt: bool,
+) -> Vec<(KeyBinding, EditorAction)> {
+    let context = Some(context);
+    let mut bindings = vec![
+        (
+            KeyBinding::new("backspace", Backspace, context),
+            EditorAction::Backspace,
+        ),
+        (
+            KeyBinding::new("delete", Delete, context),
+            EditorAction::Delete,
+        ),
+        (KeyBinding::new("left", Left, context), EditorAction::Left),
+        (
+            KeyBinding::new("right", Right, context),
+            EditorAction::Right,
+        ),
+        (
+            KeyBinding::new("shift-left", SelectLeft, context),
+            EditorAction::SelectLeft,
+        ),
+        (
+            KeyBinding::new("shift-right", SelectRight, context),
+            EditorAction::SelectRight,
+        ),
+        (KeyBinding::new("home", Home, context), EditorAction::Home),
+        (KeyBinding::new("end", End, context), EditorAction::End),
+        (
+            KeyBinding::new("shift-home", SelectHome, context),
+            EditorAction::SelectHome,
+        ),
+        (
+            KeyBinding::new("shift-end", SelectEnd, context),
+            EditorAction::SelectEnd,
+        ),
+        (
+            KeyBinding::new("cmd-left", Home, context),
+            EditorAction::Home,
+        ),
+        (
+            KeyBinding::new("cmd-right", End, context),
+            EditorAction::End,
+        ),
+        (
+            KeyBinding::new("cmd-backspace", DeleteToLineStart, context),
+            EditorAction::DeleteToLineStart,
+        ),
+        (
+            KeyBinding::new("cmd-delete", DeleteToLineEnd, context),
+            EditorAction::DeleteToLineEnd,
+        ),
+        (
+            KeyBinding::new("cmd-up", DocStart, context),
+            EditorAction::DocStart,
+        ),
+        (
+            KeyBinding::new("cmd-down", DocEnd, context),
+            EditorAction::DocEnd,
+        ),
+        (
+            KeyBinding::new("shift-cmd-left", SelectHome, context),
+            EditorAction::SelectHome,
+        ),
+        (
+            KeyBinding::new("shift-cmd-right", SelectEnd, context),
+            EditorAction::SelectEnd,
+        ),
+        (
+            KeyBinding::new("shift-cmd-up", SelectDocStart, context),
+            EditorAction::SelectDocStart,
+        ),
+        (
+            KeyBinding::new("shift-cmd-down", SelectDocEnd, context),
+            EditorAction::SelectDocEnd,
+        ),
+    ];
+    if multiline {
+        bindings.extend([
+            (KeyBinding::new("up", Up, context), EditorAction::Up),
+            (KeyBinding::new("down", Down, context), EditorAction::Down),
+            (
+                KeyBinding::new("shift-up", SelectUp, context),
+                EditorAction::SelectUp,
+            ),
+            (
+                KeyBinding::new("shift-down", SelectDown, context),
+                EditorAction::SelectDown,
+            ),
+        ]);
+    }
+
+    let word_prefix = if word_navigation_uses_alt {
+        "alt"
+    } else {
+        "ctrl"
+    };
+    bindings.extend([
+        (
+            KeyBinding::new(&format!("{word_prefix}-backspace"), DeleteWordLeft, context),
+            EditorAction::DeleteWordLeft,
+        ),
+        (
+            KeyBinding::new(&format!("{word_prefix}-delete"), DeleteWordRight, context),
+            EditorAction::DeleteWordRight,
+        ),
+        (
+            KeyBinding::new(&format!("{word_prefix}-left"), WordLeft, context),
+            EditorAction::WordLeft,
+        ),
+        (
+            KeyBinding::new(&format!("{word_prefix}-right"), WordRight, context),
+            EditorAction::WordRight,
+        ),
+        (
+            KeyBinding::new(
+                &format!("shift-{word_prefix}-left"),
+                SelectWordLeft,
+                context,
+            ),
+            EditorAction::SelectWordLeft,
+        ),
+        (
+            KeyBinding::new(
+                &format!("shift-{word_prefix}-right"),
+                SelectWordRight,
+                context,
+            ),
+            EditorAction::SelectWordRight,
+        ),
+    ]);
     bindings
 }
 
@@ -374,6 +446,15 @@ impl CustomElement for TextEditorElement {
         let emits_key_down = ctx.events.contains("keyDown");
         let emits_key_up = ctx.events.contains("keyUp");
         let callback = ctx.event_callback.clone();
+        let deferred_bindings = deferred_text_editor_bindings(
+            if self.multiline {
+                TEXTAREA_KEY_CONTEXT
+            } else {
+                INPUT_KEY_CONTEXT
+            },
+            self.multiline,
+            word_navigation_uses_alt(),
+        );
 
         let state = self
             .state
@@ -405,6 +486,7 @@ impl CustomElement for TextEditorElement {
                     action_disabled,
                     min_rows,
                     max_rows,
+                    deferred_bindings,
                     selected_range: cursor..cursor,
                     selection_reversed: false,
                     marked_range: None,
@@ -428,7 +510,7 @@ impl CustomElement for TextEditorElement {
                     blink_anchor: cx.background_executor().now(),
                     blink_task: None,
                     pending_values: VecDeque::new(),
-                    enter_resolutions: VecDeque::new(),
+                    deferred_defaults: VecDeque::new(),
                     queue: VecDeque::new(),
                     undo_stack: VecDeque::new(),
                     redo_stack: Vec::new(),
@@ -823,28 +905,35 @@ enum EditorAction {
     Redo,
 }
 
-/// One input this editor received while a deferrable Enter keydown was still
-/// waiting on JS (`enter_resolutions` holds a `true` entry). Everything that
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingDefault {
+    Newline,
+    Action(EditorAction),
+}
+
+/// One input this editor received while a deferred keydown default was still
+/// waiting on JS (`deferred_defaults` holds a `Some` entry). Everything that
 /// would otherwise land on the editor during that window is captured here
-/// instead, in the order it arrived, and replayed once that Enter resolves —
+/// instead, in the order it arrived, and replayed once that default resolves —
 /// so native batching can never overtake the DOM order a browser would
 /// deliver.
 ///
 /// Mouse handlers are not gated and never appear here: a press or drag is not
-/// part of the DOM's Enter-then-effects ordering, and holding one up behind an
+/// part of the DOM's deferred-keydown ordering, and holding one up behind an
 /// async keydown would make dragging a selection stutter for no browser-
 /// observable reason.
 enum QueuedInput {
     /// A key that reached `on_key_down`. Replayed by feeding it back through
-    /// `on_key_down`, so a replayed deferrable Enter re-arms the wait and JS
-    /// is told about the key only at replay time — after the newline it
+    /// `on_key_down`, so a replayed deferred default re-arms the wait and JS
+    /// is told about the key only at replay time — after the default it
     /// followed actually exists, as in the DOM.
     KeyDown(gpui::KeyDownEvent),
     /// A key that reached `on_key_up`. Replayed by feeding it back through
     /// `on_key_up`, so JS never sees a keyup before the keydown it pairs
     /// with, even though the keydown was itself deferred.
     KeyUp(gpui::KeyUpEvent),
-    /// An action bound to a key (backspace, arrows, undo, …).
+    /// An action dispatched through an editor handler (backspace, arrows,
+    /// undo, …).
     Action(EditorAction),
     /// `EntityInputHandler::replace_text_in_range`.
     ReplaceText {
@@ -901,24 +990,22 @@ struct TextEditorState {
     blink_anchor: Instant,
     blink_task: Option<Task<()>>,
     pending_values: VecDeque<String>,
-    /// One entry per Enter keydown emitted to JS that has not yet resolved,
-    /// oldest first: `true` if that Enter is deferrable (multiline, not
-    /// read-only, no ctrl/alt/platform/function) and so armed the wait,
-    /// `false` if it was only sent to JS to observe. `resolve_key_down_default`
-    /// pops the front on each resolution — never just clears a flag — so a
-    /// non-deferrable Enter's answer (say, a plain Enter that raced ahead of
-    /// an outstanding ctrl-Enter) can never be mistaken for the deferrable
-    /// one's. Every other entry point queues its input instead of applying it
-    /// while any entry here is `true`; because input behind a deferrable
-    /// Enter is queued rather than dispatched, at most one `true` entry is
-    /// ever outstanding at a time.
-    enter_resolutions: VecDeque<bool>,
-    /// Inputs received while a deferrable Enter was outstanding, in dispatch
-    /// order. Drained by `resolve_key_down_default` once that Enter resolves.
+    /// One entry per editor keydown emitted to JS that has not yet resolved,
+    /// oldest first. `Some` owns a deferred default; `None` was sent to JS
+    /// only for observation. `resolve_key_down_default` pops the front on each
+    /// resolution, preserving FIFO alignment across ordinary keys, Enter,
+    /// and bound editor actions. Every other entry point queues its input
+    /// instead of applying it while any entry here is `Some`; because input
+    /// behind a deferred default is queued rather than dispatched, at most one
+    /// deferred default is ever outstanding at a time.
+    deferred_defaults: VecDeque<Option<PendingDefault>>,
+    /// Inputs received while a deferred default was outstanding, in dispatch
+    /// order. Drained by `resolve_key_down_default` once that default resolves.
     queue: VecDeque<QueuedInput>,
     undo_stack: VecDeque<EditSnapshot>,
     redo_stack: Vec<EditSnapshot>,
     last_edit: Option<LastEdit>,
+    deferred_bindings: Vec<(KeyBinding, EditorAction)>,
 }
 
 impl TextEditorState {
@@ -1152,7 +1239,7 @@ impl TextEditorState {
     }
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::Backspace));
             return;
@@ -1171,7 +1258,7 @@ impl TextEditorState {
     }
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::Delete));
             return;
@@ -1190,7 +1277,7 @@ impl TextEditorState {
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::Left));
             return;
@@ -1204,7 +1291,7 @@ impl TextEditorState {
     }
 
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::Right));
             return;
@@ -1218,7 +1305,7 @@ impl TextEditorState {
     }
 
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue.push_back(QueuedInput::Action(EditorAction::Up));
             return;
         }
@@ -1228,7 +1315,7 @@ impl TextEditorState {
     }
 
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::Down));
             return;
@@ -1239,7 +1326,7 @@ impl TextEditorState {
     }
 
     fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::SelectLeft));
             return;
@@ -1248,7 +1335,7 @@ impl TextEditorState {
     }
 
     fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::SelectRight));
             return;
@@ -1257,7 +1344,7 @@ impl TextEditorState {
     }
 
     fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::SelectUp));
             return;
@@ -1268,7 +1355,7 @@ impl TextEditorState {
     }
 
     fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::SelectDown));
             return;
@@ -1279,7 +1366,7 @@ impl TextEditorState {
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::SelectAll));
             return;
@@ -1291,7 +1378,7 @@ impl TextEditorState {
     }
 
     fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::Home));
             return;
@@ -1300,7 +1387,7 @@ impl TextEditorState {
     }
 
     fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue.push_back(QueuedInput::Action(EditorAction::End));
             return;
         }
@@ -1308,7 +1395,7 @@ impl TextEditorState {
     }
 
     fn doc_start(&mut self, _: &DocStart, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::DocStart));
             return;
@@ -1317,7 +1404,7 @@ impl TextEditorState {
     }
 
     fn doc_end(&mut self, _: &DocEnd, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::DocEnd));
             return;
@@ -1326,7 +1413,7 @@ impl TextEditorState {
     }
 
     fn select_home(&mut self, _: &SelectHome, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::SelectHome));
             return;
@@ -1335,7 +1422,7 @@ impl TextEditorState {
     }
 
     fn select_end(&mut self, _: &SelectEnd, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::SelectEnd));
             return;
@@ -1344,7 +1431,7 @@ impl TextEditorState {
     }
 
     fn select_doc_start(&mut self, _: &SelectDocStart, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::SelectDocStart));
             return;
@@ -1353,7 +1440,7 @@ impl TextEditorState {
     }
 
     fn select_doc_end(&mut self, _: &SelectDocEnd, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::SelectDocEnd));
             return;
@@ -1362,7 +1449,7 @@ impl TextEditorState {
     }
 
     fn word_left(&mut self, _: &WordLeft, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::WordLeft));
             return;
@@ -1371,7 +1458,7 @@ impl TextEditorState {
     }
 
     fn word_right(&mut self, _: &WordRight, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::WordRight));
             return;
@@ -1380,7 +1467,7 @@ impl TextEditorState {
     }
 
     fn select_word_left(&mut self, _: &SelectWordLeft, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::SelectWordLeft));
             return;
@@ -1389,7 +1476,7 @@ impl TextEditorState {
     }
 
     fn select_word_right(&mut self, _: &SelectWordRight, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::SelectWordRight));
             return;
@@ -1403,7 +1490,7 @@ impl TextEditorState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::DeleteWordLeft));
             return;
@@ -1423,7 +1510,7 @@ impl TextEditorState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::DeleteWordRight));
             return;
@@ -1443,7 +1530,7 @@ impl TextEditorState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::DeleteToLineStart));
             return;
@@ -1467,7 +1554,7 @@ impl TextEditorState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::DeleteToLineEnd));
             return;
@@ -1486,7 +1573,7 @@ impl TextEditorState {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::Copy));
             return;
@@ -1499,7 +1586,7 @@ impl TextEditorState {
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue.push_back(QueuedInput::Action(EditorAction::Cut));
             return;
         }
@@ -1511,7 +1598,7 @@ impl TextEditorState {
     }
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::Paste));
             return;
@@ -1525,7 +1612,7 @@ impl TextEditorState {
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::Undo));
             return;
@@ -1540,7 +1627,7 @@ impl TextEditorState {
     }
 
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::Action(EditorAction::Redo));
             return;
@@ -1561,34 +1648,37 @@ impl TextEditorState {
         }
     }
 
-    /// True while some Enter keydown this editor emitted to JS is both
-    /// unresolved and deferrable — the only condition under which any other
-    /// entry point queues its input instead of applying it.
-    fn enter_wait_armed(&self) -> bool {
-        self.enter_resolutions.iter().any(|&deferrable| deferrable)
+    /// True while some editor keydown emitted to JS owns an unresolved default
+    /// — the only condition under which any other entry point queues its input
+    /// instead of applying it.
+    fn deferred_default_wait_armed(&self) -> bool {
+        self.deferred_defaults.iter().any(Option::is_some)
     }
 
-    /// DOM order is keydown then default. Stopping propagation keeps gpui's
-    /// key-char path and the platform from inserting their own newline —
-    /// needed at both the live site below (this Enter) and the enqueue site
-    /// above (a later Enter arriving while an earlier one is still
-    /// outstanding), since either one reaching the platform unstopped would
-    /// insert a newline gpui, not this queue, controls the timing of.
+    fn deferred_action(&self, event: &gpui::KeyDownEvent) -> Option<EditorAction> {
+        self.deferred_bindings.iter().find_map(|(binding, action)| {
+            (binding.match_keystrokes(std::slice::from_ref(&event.keystroke)) == Some(false))
+                .then_some(*action)
+        })
+    }
+
+    /// DOM order is keydown then default. Stopping propagation keeps GPUI's
+    /// key-char path, the platform, and the scroll path from applying a
+    /// default before JS has resolved it.
     ///
-    /// While `enter_wait_armed()` is true, an unrelated key arriving here
-    /// (native batching can deliver several before JS answers the
-    /// outstanding Enter) is queued rather than acted on: emitting its
-    /// keydown now, and letting it take effect now, would let it overtake
-    /// the Enter's own effect — something that cannot happen one key at a
-    /// time in a browser.
+    /// While `deferred_default_wait_armed()` is true, an unrelated key arriving here
+    /// (native batching can deliver several before JS answers the outstanding
+    /// default) is queued rather than acted on: emitting its keydown now, and
+    /// letting it take effect now, would let it overtake the earlier default —
+    /// something that cannot happen one key at a time in a browser.
     fn on_key_down(
         &mut self,
         event: &gpui::KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.enter_wait_armed() {
-            if event.keystroke.key == "enter" {
+        if self.deferred_default_wait_armed() {
+            if event.keystroke.key == "enter" || self.deferred_action(event).is_some() {
                 cx.stop_propagation();
             }
             self.queue.push_back(QueuedInput::KeyDown(event.clone()));
@@ -1596,11 +1686,10 @@ impl TextEditorState {
         }
 
         let is_enter = event.keystroke.key == "enter";
-        // Non-Enter keys keep the emits_key_down gate: only emit if this
-        // editor itself listens. Enter always reaches JS when a callback
-        // exists, even with no listener here, so an ancestor-only onKeyDown
-        // (or capture handler) can still preventDefault() and cancel it.
-        if self.emits_key_down || (is_enter && self.callback.is_some()) {
+        let action = self.deferred_action(event);
+        let emits_key_down =
+            self.callback.is_some() && (self.emits_key_down || is_enter || action.is_some());
+        if emits_key_down {
             emit_event_full(&self.callback, self.element_id, "keyDown", |payload| {
                 payload.key = Some(event.keystroke.key.clone());
                 payload.key_char = event.keystroke.key_char.clone();
@@ -1609,9 +1698,24 @@ impl TextEditorState {
             });
         }
 
-        if !is_enter {
+        if let Some(action) = action {
+            cx.stop_propagation();
+            if emits_key_down {
+                self.deferred_defaults
+                    .push_back(Some(PendingDefault::Action(action)));
+            } else {
+                self.apply_action(action, window, cx);
+            }
             return;
         }
+
+        if !is_enter {
+            if emits_key_down {
+                self.deferred_defaults.push_back(None);
+            }
+            return;
+        }
+
         cx.stop_propagation();
         let modifiers = event.keystroke.modifiers;
         let deferrable = self.multiline
@@ -1622,11 +1726,9 @@ impl TextEditorState {
             && !modifiers.function;
         if self.callback.is_some() {
             // Every Enter sent to JS — deferrable or not — gets exactly one
-            // resolution back. Recording it here, in arrival order, is what
-            // lets `resolve_key_down_default` match each answer to the Enter
-            // it actually answers instead of whichever Enter merely happens
-            // to be outstanding.
-            self.enter_resolutions.push_back(deferrable);
+            // resolution back, in arrival order.
+            self.deferred_defaults
+                .push_back(deferrable.then_some(PendingDefault::Newline));
         } else if deferrable {
             self.insert_newline(window, cx);
         }
@@ -1637,7 +1739,7 @@ impl TextEditorState {
     /// observe a keyup before the keydown it pairs with, even when that
     /// keydown itself only reaches JS at replay time.
     fn on_key_up(&mut self, event: &gpui::KeyUpEvent, _: &mut Window, _: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue.push_back(QueuedInput::KeyUp(event.clone()));
             return;
         }
@@ -1656,16 +1758,20 @@ impl TextEditorState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        match self.enter_resolutions.pop_front() {
-            None | Some(false) => false,
-            Some(true) => {
-                if !default_prevented {
-                    self.insert_newline(window, cx);
-                }
-                self.drain_queue(window, cx);
-                true
+        let Some(pending) = self.deferred_defaults.pop_front() else {
+            return false;
+        };
+        let Some(pending) = pending else {
+            return false;
+        };
+        if !default_prevented {
+            match pending {
+                PendingDefault::Newline => self.insert_newline(window, cx),
+                PendingDefault::Action(action) => self.apply_action(action, window, cx),
             }
         }
+        self.drain_queue(window, cx);
+        true
     }
 
     /// Replay a queued action by calling the editor's own handler directly
@@ -1738,11 +1844,11 @@ impl TextEditorState {
         }
     }
 
-    /// Drain queued inputs in order. A replayed Enter can re-arm the wait
-    /// (`on_key_down` records it exactly as it would live), which stops the
-    /// drain with the rest still queued until that Enter resolves in turn.
+    /// Drain queued inputs in order. A replayed deferred keydown can re-arm
+    /// the wait (`on_key_down` records it exactly as it would live), which
+    /// stops the drain with the rest still queued until that default resolves.
     fn drain_queue(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        while !self.enter_wait_armed() {
+        while !self.deferred_default_wait_armed() {
             let Some(item) = self.queue.pop_front() else {
                 break;
             };
@@ -2133,7 +2239,7 @@ impl EntityInputHandler for TextEditorState {
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue.push_back(QueuedInput::UnmarkText);
             return;
         }
@@ -2148,7 +2254,7 @@ impl EntityInputHandler for TextEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue.push_back(QueuedInput::ReplaceText {
                 range_utf16,
                 new_text: new_text.to_string(),
@@ -2191,7 +2297,7 @@ impl EntityInputHandler for TextEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue.push_back(QueuedInput::ReplaceAndMarkText {
                 range_utf16,
                 new_text: new_text.to_string(),
@@ -2270,7 +2376,7 @@ impl EntityInputHandler for TextEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.enter_wait_armed() {
+        if self.deferred_default_wait_armed() {
             self.queue
                 .push_back(QueuedInput::SetSelectedTextRange(range_utf16));
             return;
@@ -2569,6 +2675,18 @@ mod tests {
         })
     }
 
+    fn has_deferred_binding(
+        bindings: &[(KeyBinding, EditorAction)],
+        keystroke: &str,
+        action: EditorAction,
+    ) -> bool {
+        let keystroke = gpui::Keystroke::parse(keystroke).unwrap();
+        bindings.iter().any(|(binding, binding_action)| {
+            binding.match_keystrokes(std::slice::from_ref(&keystroke)) == Some(false)
+                && *binding_action == action
+        })
+    }
+
     fn echoes(values: &[&str]) -> VecDeque<String> {
         let mut pending = VecDeque::new();
         for value in values {
@@ -2623,8 +2741,8 @@ mod tests {
     #[test]
     fn enter_is_not_a_key_binding() {
         for bindings in [
-            text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true),
-            text_editor_bindings(TEXTAREA_KEY_CONTEXT, true, true, true),
+            text_editor_bindings(INPUT_KEY_CONTEXT, true),
+            text_editor_bindings(TEXTAREA_KEY_CONTEXT, true),
         ] {
             assert!(bindings.iter().all(|binding| {
                 binding.match_keystrokes(std::slice::from_ref(
@@ -2641,27 +2759,59 @@ mod tests {
 
     #[test]
     fn macos_word_navigation_uses_alt() {
-        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true);
+        let bindings = deferred_text_editor_bindings(INPUT_KEY_CONTEXT, false, true);
 
-        assert!(has_binding(&bindings, "alt-left", &WordLeft));
-        assert!(has_binding(&bindings, "alt-right", &WordRight));
-        assert!(!has_binding(&bindings, "ctrl-left", &WordLeft));
-        assert!(!has_binding(&bindings, "ctrl-right", &WordRight));
+        assert!(has_deferred_binding(
+            &bindings,
+            "alt-left",
+            EditorAction::WordLeft
+        ));
+        assert!(has_deferred_binding(
+            &bindings,
+            "alt-right",
+            EditorAction::WordRight
+        ));
+        assert!(!has_deferred_binding(
+            &bindings,
+            "ctrl-left",
+            EditorAction::WordLeft
+        ));
+        assert!(!has_deferred_binding(
+            &bindings,
+            "ctrl-right",
+            EditorAction::WordRight
+        ));
     }
 
     #[test]
     fn non_macos_word_navigation_uses_control() {
-        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, false, true);
+        let bindings = deferred_text_editor_bindings(INPUT_KEY_CONTEXT, false, false);
 
-        assert!(has_binding(&bindings, "ctrl-left", &WordLeft));
-        assert!(has_binding(&bindings, "ctrl-right", &WordRight));
-        assert!(!has_binding(&bindings, "alt-left", &WordLeft));
-        assert!(!has_binding(&bindings, "alt-right", &WordRight));
+        assert!(has_deferred_binding(
+            &bindings,
+            "ctrl-left",
+            EditorAction::WordLeft
+        ));
+        assert!(has_deferred_binding(
+            &bindings,
+            "ctrl-right",
+            EditorAction::WordRight
+        ));
+        assert!(!has_deferred_binding(
+            &bindings,
+            "alt-left",
+            EditorAction::WordLeft
+        ));
+        assert!(!has_deferred_binding(
+            &bindings,
+            "alt-right",
+            EditorAction::WordRight
+        ));
     }
 
     #[test]
     fn browser_paste_stays_with_the_dom_event() {
-        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, false);
+        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false);
 
         assert!(!has_binding(&bindings, "cmd-v", &Paste));
         assert!(!has_binding(&bindings, "ctrl-v", &Paste));
@@ -2669,7 +2819,7 @@ mod tests {
 
     #[test]
     fn desktop_paste_uses_the_platform_clipboard_action() {
-        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true, true);
+        let bindings = text_editor_bindings(INPUT_KEY_CONTEXT, true);
 
         assert!(has_binding(&bindings, "cmd-v", &Paste));
         assert!(has_binding(&bindings, "ctrl-v", &Paste));

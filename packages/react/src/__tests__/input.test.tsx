@@ -43,6 +43,146 @@ describeNative("native text editors", () => {
     expect(testRoot.renderer.getPaintedText()).toContain("hi")
   })
 
+  it("delivers bound navigation and deletion keys through the editor target", () => {
+    const editorEvents: EventPayload[] = []
+    const ancestorEvents: EventPayload[] = []
+
+    testRoot.render(
+      <div
+        style={{ width: 400, height: 160 }}
+        onKeyDown={(event: EventPayload) => ancestorEvents.push(event)}
+      >
+        <textarea
+          style={{ width: 300 }}
+          onKeyDown={(event: EventPayload) => editorEvents.push(event)}
+        />
+      </div>,
+    )
+    const textarea = testRoot.renderer.findByType("textarea")[0]
+
+    for (const key of ["down", "home", "end", "backspace"]) {
+      testRoot.renderer.nativeSimulateKeyDown(textarea.id, key)
+    }
+
+    expect(editorEvents.map((event) => event.key)).toEqual([
+      "down",
+      "home",
+      "end",
+      "backspace",
+    ])
+    expect(ancestorEvents.map((event) => event.key)).toEqual([
+      "down",
+      "home",
+      "end",
+      "backspace",
+    ])
+    expect(editorEvents).toHaveLength(4)
+    expect(ancestorEvents).toHaveLength(4)
+    expect(editorEvents.every((event) => event.target.id === textarea.id)).toBe(true)
+    expect(ancestorEvents.every((event) => event.target.id === textarea.id)).toBe(true)
+  })
+
+  it("lets the editor keydown cancel a navigation default", () => {
+    function Textarea({ prevent }: { prevent: boolean }) {
+      const [text, setText] = useState("")
+      return (
+        <textarea
+          value={text}
+          style={{ width: 300 }}
+          onChange={(event: EventPayload) => setText(event.value ?? "")}
+          onKeyDown={(event: EventPayload) => {
+            if (prevent && event.key === "left") event.preventDefault()
+          }}
+        />
+      )
+    }
+
+    testRoot.render(<Textarea prevent />)
+    let textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokes(textarea.id, "a b left c")
+    expect(testRoot.renderer.getInputValue(textarea.id)).toBe("abc")
+
+    testRoot.render(null)
+    testRoot.render(<Textarea prevent={false} />)
+    textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokes(textarea.id, "a b left c")
+    expect(testRoot.renderer.getInputValue(textarea.id)).toBe("acb")
+  })
+
+  it("lets an ancestor keydown cancel an editor navigation default", () => {
+    function Textarea({ prevent }: { prevent: boolean }) {
+      const [text, setText] = useState("")
+      return (
+        <div
+          style={{ width: 400, height: 160 }}
+          onKeyDown={(event: EventPayload) => {
+            if (prevent && event.key === "left") event.preventDefault()
+          }}
+        >
+          <textarea
+            value={text}
+            style={{ width: 300 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+          />
+        </div>
+      )
+    }
+
+    testRoot.render(<Textarea prevent />)
+    let textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokes(textarea.id, "a b left c")
+    expect(testRoot.renderer.getInputValue(textarea.id)).toBe("abc")
+
+    testRoot.render(null)
+    testRoot.render(<Textarea prevent={false} />)
+    textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokes(textarea.id, "a b left c")
+    expect(testRoot.renderer.getInputValue(textarea.id)).toBe("acb")
+  })
+
+  it("keeps deferred editor actions in batch order", () => {
+    function Textarea() {
+      const [text, setText] = useState("")
+      return (
+        <textarea
+          value={text}
+          style={{ width: 300 }}
+          onChange={(event: EventPayload) => setText(event.value ?? "")}
+        />
+      )
+    }
+
+    testRoot.render(<Textarea />)
+    let textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokeBatch(textarea.id, "h i shift-enter left x")
+    expect(testRoot.renderer.getInputValue(textarea.id)).toBe("hix\n")
+
+    testRoot.render(null)
+    testRoot.render(<Textarea />)
+    textarea = testRoot.renderer.findByType("textarea")[0]
+    testRoot.renderer.nativeSimulateKeystrokeBatch(textarea.id, "a b left left c")
+    expect(testRoot.renderer.getInputValue(textarea.id)).toBe("cab")
+  })
+
+  it("moves to the document start with cmd-left before the next insertion", () => {
+    function TextInput() {
+      const [text, setText] = useState("ab")
+      return (
+        <input
+          value={text}
+          style={{ width: 300 }}
+          onChange={(event: EventPayload) => setText(event.value ?? "")}
+        />
+      )
+    }
+
+    testRoot.render(<TextInput />)
+    const input = testRoot.renderer.findByType("input")[0]
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "cmd-left c")
+
+    expect(testRoot.renderer.getInputValue(input.id)).toBe("cab")
+  })
+
   it("inserts a newline on Enter and Shift+Enter in a textarea", () => {
     function Textarea() {
       const [text, setText] = useState("")

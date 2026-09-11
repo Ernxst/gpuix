@@ -183,7 +183,7 @@ export declare class GpuixRenderer {
    */
   resolveScrollKeyDown(defaultPrevented: boolean): void
   /**
-   * Complete the DOM default of an editor's Enter keydown after React capture and
+   * Complete a deferred keydown default for an editor after React capture and
    * bubble handlers have had a chance to call preventDefault().
    */
   resolveEditorKeyDown(elementId: number, defaultPrevented: boolean): void
@@ -495,6 +495,10 @@ export declare class TestGpuixRenderer {
   focusPrevious(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   resolveScrollKeyDown(defaultPrevented: boolean): void
+  /**
+   * Complete a deferred keydown default for an editor after React handlers
+   * have had a chance to call preventDefault().
+   */
   resolveEditorKeyDown(elementId: number, defaultPrevented: boolean): void
   setPointerCapture(id: number): void
   releasePointerCapture(id: number): void

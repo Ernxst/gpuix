@@ -471,8 +471,8 @@ pub trait CustomElement: 'static {
         false
     }
 
-    /// Complete the DOM default of an Enter keydown after React has had its
-    /// chance to cancel it; false for an element with nothing pending.
+    /// Complete a deferred keydown default for an editor after React has had
+    /// its chance to cancel it; false for an element with nothing pending.
     fn resolve_key_down_default(
         &self,
         _default_prevented: bool,
@@ -669,8 +669,8 @@ impl CustomElementRegistry {
             .is_some_and(|entry| entry.element.set_text_value(value, cx))
     }
 
-    /// Complete the DOM default of an editor's Enter keydown after React has
-    /// had its chance to cancel it.
+    /// Complete a deferred keydown default for an editor after React has had
+    /// its chance to cancel it.
     pub fn resolve_editor_key_down(
         &self,
         id: u64,

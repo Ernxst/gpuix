@@ -1405,6 +1405,8 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Complete a deferred keydown default for an editor after React handlers
+    /// have had a chance to call preventDefault().
     #[napi]
     pub fn resolve_editor_key_down(&self, element_id: f64, default_prevented: bool) -> Result<()> {
         let id = to_element_id(element_id)?;
