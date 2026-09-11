@@ -270,8 +270,9 @@ pub enum CalcOperator {
     Subtract,
 }
 
-/// CSS treats an unadorned line-height as a multiplier, while a pixel length
-/// is absolute. A JSON number remains the backwards-compatible pixel shorthand.
+/// A bare number (or numeric string) is a multiplier of the resolved font
+/// size, matching React DOM's `lineHeight`. A `${number}px` string is an
+/// absolute pixel length.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum LineHeightValue {
@@ -604,28 +605,32 @@ impl<'de> Deserialize<'de> for LineHeightValue {
             type Value = LineHeightValue;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a positive pixel number, px length, or unitless multiplier")
+                formatter.write_str("a unitless multiplier number/string, or a px length")
             }
 
             fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
             where
                 E: de::Error,
             {
-                Ok(LineHeightValue::Pixels(value))
+                if value.is_finite() {
+                    Ok(LineHeightValue::Unitless(value.to_string()))
+                } else {
+                    Err(de::Error::custom("invalid unitless lineHeight at byte 0"))
+                }
             }
 
             fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
             where
                 E: de::Error,
             {
-                Ok(LineHeightValue::Pixels(value as f64))
+                Ok(LineHeightValue::Unitless(value.to_string()))
             }
 
             fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
             where
                 E: de::Error,
             {
-                Ok(LineHeightValue::Pixels(value as f64))
+                Ok(LineHeightValue::Unitless(value.to_string()))
             }
 
             fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
@@ -3351,6 +3356,42 @@ mod tests {
             serde_json::to_value(parsed.style).unwrap()["width"],
             "calc(100% - 4ch)"
         );
+    }
+
+    // Issue #486: a bare number is a unitless multiplier, matching React DOM's
+    // `lineHeight`, not the legacy pixel shorthand.
+    #[test]
+    fn bare_numeric_line_height_is_a_unitless_multiplier() {
+        let parsed = parse_style_value(&json!({ "lineHeight": 1.35 }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(
+            parsed.style.line_height,
+            Some(LineHeightValue::Unitless("1.35".into()))
+        );
+
+        let parsed = parse_style_value(&json!({ "lineHeight": 2 }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(
+            parsed.style.line_height,
+            Some(LineHeightValue::Unitless("2".into()))
+        );
+
+        let parsed = parse_style_value(&json!({ "lineHeight": "16px" }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.line_height, Some(LineHeightValue::Pixels(16.0)));
+    }
+
+    #[test]
+    fn non_positive_numeric_line_height_is_still_rejected() {
+        let parsed = parse_style_value(&json!({ "lineHeight": 0 }));
+        assert_eq!(parsed.style.line_height, None);
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "lineHeight");
+
+        let parsed = parse_style_value(&json!({ "lineHeight": -1 }));
+        assert_eq!(parsed.style.line_height, None);
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "lineHeight");
     }
 
     #[test]
