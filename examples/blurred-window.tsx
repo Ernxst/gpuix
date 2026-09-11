@@ -122,7 +122,7 @@ function App() {
 
           <div style={{ ...glass, padding: 18, gap: 7 }}>
             <text style={{ color: muted, fontSize: 12, fontWeight: 600 }}>INTENTION</text>
-            <text style={{ color: '#FFFFFFE8', fontSize: 14, lineHeight: 21 }}>
+            <text style={{ color: '#FFFFFFE8', fontSize: 14, lineHeight: '21px' }}>
               Make one thing clear and useful.
             </text>
           </div>
