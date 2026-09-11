@@ -65,16 +65,16 @@ describeNative("native text editors", () => {
     }
 
     expect(editorEvents.map((event) => event.key)).toEqual([
-      "down",
-      "home",
-      "end",
-      "backspace",
+      "ArrowDown",
+      "Home",
+      "End",
+      "Backspace",
     ])
     expect(ancestorEvents.map((event) => event.key)).toEqual([
-      "down",
-      "home",
-      "end",
-      "backspace",
+      "ArrowDown",
+      "Home",
+      "End",
+      "Backspace",
     ])
     expect(editorEvents).toHaveLength(4)
     expect(ancestorEvents).toHaveLength(4)
@@ -91,7 +91,7 @@ describeNative("native text editors", () => {
           style={{ width: 300 }}
           onChange={(event: EventPayload) => setText(event.value ?? "")}
           onKeyDown={(event: EventPayload) => {
-            if (prevent && event.key === "left") event.preventDefault()
+            if (prevent && event.key === "ArrowLeft") event.preventDefault()
           }}
         />
       )
@@ -116,7 +116,7 @@ describeNative("native text editors", () => {
         <div
           style={{ width: 400, height: 160 }}
           onKeyDown={(event: EventPayload) => {
-            if (prevent && event.key === "left") event.preventDefault()
+            if (prevent && event.key === "ArrowLeft") event.preventDefault()
           }}
         >
           <textarea

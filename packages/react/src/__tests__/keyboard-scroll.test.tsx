@@ -221,7 +221,7 @@ describeNative("keyboard scrolling", () => {
 
     testRoot.renderer.simulateKeystrokes("pagedown")
 
-    expect(textareaKeydowns).toEqual(["pagedown"])
+    expect(textareaKeydowns).toEqual(["PageDown"])
     expect(scrollTop(pageDown.inner.id)).toBe(beforePageDown)
   })
 
