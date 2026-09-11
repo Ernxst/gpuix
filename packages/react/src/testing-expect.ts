@@ -49,7 +49,7 @@ import {
   AUTHORED_ROLE_PROP,
 } from "./reconciler/aria-props.js"
 
-export { configureScreenshots } from "./testing-screenshot.js"
+export { configuredScreenshots, configureScreenshots } from "./testing-screenshot.js"
 export type {
   ConfigureScreenshotsOptions,
   ResolveScreenshotPath,

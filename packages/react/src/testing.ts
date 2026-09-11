@@ -3206,7 +3206,10 @@ interface ActiveRenderRoot {
 }
 
 /** The one offscreen window `render()` shares, per module instance — which
- *  vitest gives each test file its own copy of. */
+ *  vitest gives each test file its own copy of under `isolate: true` (the
+ *  default). Under `isolate: false`, a worker keeps one module instance for
+ *  every file it runs, so this persists across files unless something closes
+ *  it — see `disposeSharedWindow`. */
 let activeRenderRoot: ActiveRenderRoot | null = null
 
 /** Every field of `TestRootOptions` is fixed when the window is constructed,
@@ -3256,6 +3259,20 @@ function resetSharedWindow(active: ActiveRenderRoot): void {
 function disposeSharedRoot(active: ActiveRenderRoot): void {
   if (activeRenderRoot === active) activeRenderRoot = null
   active.root.unmount()
+}
+
+/**
+ * Drop the shared window if one is open, otherwise do nothing.
+ *
+ * `@gpuix/react/testing/vitest` calls this from the cleanup its `beforeAll`
+ * returns, which vitest runs after every `afterAll` in the file whatever
+ * `sequence.hooks` says, so menus, the debug frame overlay, held pointer buttons, and
+ * every other window-level knob `resetSharedWindow` deliberately leaves alone
+ * do not leak into the next file. Call it yourself from your own runner's
+ * suite-level teardown when you import `@gpuix/react/testing` directly.
+ */
+export function disposeSharedWindow(): void {
+  if (activeRenderRoot !== null) disposeSharedRoot(activeRenderRoot)
 }
 
 /**
@@ -3315,12 +3332,16 @@ export function cleanup(): void {
  *
  * **One window per test file.** Opening an offscreen GPUI window costs about a
  * second, so the window created by the first `render()` is reused by every
- * later one in the same file — vitest isolates module state per file, so
- * nothing is shared between files. Each `render()` unmounts the previous tree
- * and starts from a reset window (see `cleanup`), so a reused window is never a
- * reused tree; it **replaces** the previous tree rather than mounting a second
- * one beside it, since a desktop window has one root, not a `document.body`
- * that can hold many containers.
+ * later one in the same file — vitest isolates module state per file under
+ * `isolate: true` (the default), so nothing is shared between files. Under
+ * `isolate: false`, a worker keeps this module for every file it runs, so
+ * something has to close the window between files itself: see
+ * `disposeSharedWindow`, which `@gpuix/react/testing/vitest` calls for you.
+ * Each `render()` unmounts the previous tree and starts from a reset window
+ * (see `cleanup`), so a reused window is never a reused tree; it **replaces**
+ * the previous tree rather than mounting a second one beside it, since a
+ * desktop window has one root, not a `document.body` that can hold many
+ * containers.
  *
  * **Options decide reuse.** `options` are the `createTestRoot()` options, all
  * of which are fixed when the window is constructed. A call whose options match
