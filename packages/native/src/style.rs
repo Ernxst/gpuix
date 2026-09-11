@@ -173,25 +173,27 @@ impl TransitionProperty {
     pub(crate) fn from_name(name: &str) -> Option<Self> {
         Some(match name {
             "opacity" => Self::Opacity,
-            "backgroundColor" => Self::BackgroundColor,
+            "backgroundColor" | "background-color" => Self::BackgroundColor,
             "color" => Self::Color,
-            "borderColor" => Self::BorderColor,
-            "outlineColor" => Self::OutlineColor,
+            "borderColor" | "border-color" => Self::BorderColor,
+            "outlineColor" | "outline-color" => Self::OutlineColor,
             "width" => Self::Width,
             "height" => Self::Height,
-            "minWidth" => Self::MinWidth,
-            "minHeight" => Self::MinHeight,
-            "maxWidth" => Self::MaxWidth,
-            "maxHeight" => Self::MaxHeight,
+            "minWidth" | "min-width" => Self::MinWidth,
+            "minHeight" | "min-height" => Self::MinHeight,
+            "maxWidth" | "max-width" => Self::MaxWidth,
+            "maxHeight" | "max-height" => Self::MaxHeight,
             "top" => Self::Top,
             "right" => Self::Right,
             "bottom" => Self::Bottom,
             "left" => Self::Left,
-            "borderRadius" => Self::BorderRadius,
-            "borderTopLeftRadius" => Self::BorderTopLeftRadius,
-            "borderTopRightRadius" => Self::BorderTopRightRadius,
-            "borderBottomLeftRadius" => Self::BorderBottomLeftRadius,
-            "borderBottomRightRadius" => Self::BorderBottomRightRadius,
+            "borderRadius" | "border-radius" => Self::BorderRadius,
+            "borderTopLeftRadius" | "border-top-left-radius" => Self::BorderTopLeftRadius,
+            "borderTopRightRadius" | "border-top-right-radius" => Self::BorderTopRightRadius,
+            "borderBottomLeftRadius" | "border-bottom-left-radius" => Self::BorderBottomLeftRadius,
+            "borderBottomRightRadius" | "border-bottom-right-radius" => {
+                Self::BorderBottomRightRadius
+            }
             _ => return None,
         })
     }
@@ -262,6 +264,26 @@ pub struct StyleTransition {
     pub(crate) delay_ms: f64,
     #[serde(default = "default_transition_easing")]
     pub(crate) easing: TransitionEasing,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum TransitionListInput {
+    One(StyleTransition),
+    Many(Vec<StyleTransition>),
+}
+
+fn deserialize_transition_list<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<StyleTransition>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<TransitionListInput>::deserialize(deserializer)?;
+    Ok(value.map(|value| match value {
+        TransitionListInput::One(transition) => vec![transition],
+        TransitionListInput::Many(transitions) => transitions,
+    }))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -879,7 +901,8 @@ pub struct StyleDesc {
     /// intrinsic endpoint as the number. Inherited, like the CSS property.
     pub interpolate_size: Option<String>,
 
-    pub transition: Option<StyleTransition>,
+    #[serde(default, deserialize_with = "deserialize_transition_list")]
+    pub transition: Option<Vec<StyleTransition>>,
     pub hover_group: Option<String>,
 
     /// Nearest ancestor hover group, resolved by the renderer for this frame.
@@ -1654,6 +1677,16 @@ fn parse_nested_style(
 fn parse_transition(
     value: &serde_json::Value,
     problems: &mut Vec<StyleProblem>,
+) -> Option<Vec<StyleTransition>> {
+    if let Some(shorthand) = value.as_str() {
+        return parse_transition_shorthand(shorthand, problems);
+    }
+    parse_transition_object(value, problems).map(|transition| vec![transition])
+}
+
+fn parse_transition_object(
+    value: &serde_json::Value,
+    problems: &mut Vec<StyleProblem>,
 ) -> Option<StyleTransition> {
     let Some(object) = value.as_object() else {
         reject(
@@ -1836,6 +1869,204 @@ fn parse_transition(
         delay_ms,
         easing,
     })
+}
+
+fn split_transition_items(value: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut current = String::new();
+    let mut depth: i32 = 0;
+    for ch in value.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                items.push(std::mem::take(&mut current));
+            }
+            ch => current.push(ch),
+        }
+    }
+    items.push(current);
+    items
+}
+
+fn parse_transition_time(token: &str) -> Result<f64, String> {
+    let (number, unit) = if let Some(number) = token.strip_suffix("ms") {
+        (number, "ms")
+    } else if let Some(number) = token.strip_suffix('s') {
+        (number, "s")
+    } else {
+        return Err(format!(
+            "expected a time in ms or s, got unsupported unit in {token:?}"
+        ));
+    };
+    let value = number
+        .parse::<f64>()
+        .map_err(|_| format!("expected a finite non-negative time, got {token:?}"))?;
+    if !value.is_finite() || value < 0.0 {
+        return Err(format!(
+            "expected a finite non-negative time, got {token:?}"
+        ));
+    }
+    let milliseconds = if unit == "s" { value * 1000.0 } else { value };
+    if !valid_transition_milliseconds(milliseconds) {
+        return Err(format!(
+            "expected a finite non-negative time, got {token:?}"
+        ));
+    }
+    Ok(milliseconds)
+}
+
+fn parse_transition_easing_token(token: &str) -> Result<TransitionEasing, String> {
+    let name = match token {
+        "linear" => return Ok(TransitionEasing::Name("linear".into())),
+        "ease" => return Ok(TransitionEasing::Name("ease".into())),
+        "ease-in" => return Ok(TransitionEasing::Name("easeIn".into())),
+        "ease-out" => return Ok(TransitionEasing::Name("easeOut".into())),
+        "ease-in-out" => return Ok(TransitionEasing::Name("easeInOut".into())),
+        _ => "",
+    };
+    if let Some(arguments) = token
+        .strip_prefix("cubic-bezier(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        let values = arguments
+            .split(',')
+            .map(str::trim)
+            .map(|value| value.parse::<f64>())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "cubic-bezier() expects four finite numbers".to_string())?;
+        if values.len() != 4
+            || values.iter().any(|value| !value.is_finite())
+            || !(0.0..=1.0).contains(&values[0])
+            || !(0.0..=1.0).contains(&values[2])
+        {
+            return Err(
+                "cubic-bezier() expects four finite numbers with x values from 0 through 1".into(),
+            );
+        }
+        return Ok(TransitionEasing::CubicBezier([
+            values[0], values[1], values[2], values[3],
+        ]));
+    }
+    if let Some(function) = token.split_once('(').map(|(name, _)| name) {
+        return Err(format!("unsupported easing function {function}()"));
+    }
+    if name.is_empty() {
+        return Err(format!("unsupported easing token {token:?}"));
+    }
+    unreachable!()
+}
+
+fn parse_transition_shorthand(
+    value: &str,
+    problems: &mut Vec<StyleProblem>,
+) -> Option<Vec<StyleTransition>> {
+    let value = value.trim();
+    if value == "none" {
+        return None;
+    }
+
+    let items = split_transition_items(value);
+    let mut transitions = Vec::with_capacity(items.len());
+    let mut valid = true;
+    for (index, item) in items.iter().enumerate() {
+        let tokens = tokenize_border_value(item);
+        let fail = |reason: String, problems: &mut Vec<StyleProblem>| {
+            reject(
+                problems,
+                "transition",
+                &serde_json::Value::String(value.to_string()),
+                format!("item {index}: {reason}"),
+            );
+        };
+        let Some(property_name) = tokens.first() else {
+            fail("expected a property name".into(), problems);
+            valid = false;
+            continue;
+        };
+        let Some(property) = TransitionProperty::from_name(property_name) else {
+            fail(
+                format!("property {property_name:?} is not transitionable"),
+                problems,
+            );
+            valid = false;
+            continue;
+        };
+        if matches!(property_name.as_str(), "all" | "none") {
+            fail(
+                format!("property {property_name:?} is not allowed in a list"),
+                problems,
+            );
+            valid = false;
+            continue;
+        }
+
+        let mut duration = None;
+        let mut delay = 0.0;
+        let mut time_count = 0;
+        let mut time_error = false;
+        let mut easing = None;
+        for token in tokens.iter().skip(1) {
+            if token.ends_with("ms")
+                || token.ends_with('s')
+                || token.chars().next().is_some_and(|ch| {
+                    ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+'
+                })
+            {
+                match parse_transition_time(token) {
+                    Ok(value) if time_count == 0 => {
+                        duration = Some(value);
+                        time_count += 1;
+                    }
+                    Ok(value) if time_count == 1 => {
+                        delay = value;
+                        time_count += 1;
+                    }
+                    Ok(_) => {
+                        fail("contains a third time value".into(), problems);
+                        valid = false;
+                    }
+                    Err(reason) => {
+                        fail(reason, problems);
+                        valid = false;
+                        time_error = true;
+                    }
+                }
+            } else {
+                match parse_transition_easing_token(token) {
+                    Ok(value) if easing.is_none() => easing = Some(value),
+                    Ok(_) => {
+                        fail("contains two easing values".into(), problems);
+                        valid = false;
+                    }
+                    Err(reason) => {
+                        fail(reason, problems);
+                        valid = false;
+                    }
+                }
+            }
+        }
+        let Some(duration_ms) = duration else {
+            if !time_error {
+                fail("is missing a duration".into(), problems);
+                valid = false;
+            }
+            continue;
+        };
+        transitions.push(StyleTransition {
+            properties: vec![property],
+            duration_ms,
+            delay_ms: delay,
+            easing: easing.unwrap_or_else(default_transition_easing),
+        });
+    }
+    valid.then_some(transitions)
 }
 
 fn valid_transition_milliseconds(value: f64) -> bool {
@@ -3324,6 +3555,55 @@ mod tests {
 
         assert_eq!(transition.delay_ms, 0.0);
         assert_eq!(transition.easing, TransitionEasing::Name("ease".into()));
+    }
+
+    #[test]
+    fn parses_transition_shorthand_items_and_css_property_spellings() {
+        let parsed = parse_style_value(&json!({
+            "transition": "background-color 120ms ease-out, borderRadius 0.2s 40ms linear"
+        }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        let transitions = parsed.style.transition.expect("transition list");
+        assert_eq!(transitions.len(), 2);
+        assert_eq!(transitions[0].properties, vec![TransitionProperty::BackgroundColor]);
+        assert_eq!(transitions[0].duration_ms, 120.0);
+        assert_eq!(transitions[0].delay_ms, 0.0);
+        assert_eq!(transitions[0].easing, TransitionEasing::Name("easeOut".into()));
+        assert_eq!(transitions[1].properties, vec![TransitionProperty::BorderRadius]);
+        assert_eq!(transitions[1].duration_ms, 200.0);
+        assert_eq!(transitions[1].delay_ms, 40.0);
+        assert_eq!(transitions[1].easing, TransitionEasing::Name("linear".into()));
+    }
+
+    #[test]
+    fn transition_none_has_no_diagnostic_and_serialized_transition_is_an_array() {
+        let parsed = parse_style_value(&json!({ "transition": "none" }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.transition, None);
+
+        let style: StyleDesc = serde_json::from_value(json!({
+            "transition": { "properties": ["opacity"], "durationMs": 150 }
+        }))
+        .expect("legacy transition object");
+        assert!(serde_json::to_value(style).unwrap()["transition"].is_array());
+    }
+
+    #[test]
+    fn malformed_transition_shorthand_is_rejected_as_a_whole() {
+        for (value, reason) in [
+            ("width 1s 2s 3s", "third time"),
+            ("width ease", "missing a duration"),
+            ("width 1s ease linear", "two easing"),
+            ("width 1foo", "foo"),
+            ("transform 1s", "transform"),
+            ("opacity 1s steps(2)", "steps"),
+        ] {
+            let parsed = parse_style_value(&json!({ "transition": value }));
+            assert!(parsed.style.transition.is_none(), "{value:?}");
+            assert_eq!(parsed.problems.len(), 1, "{value:?}: {:?}", parsed.problems);
+            assert!(parsed.problems[0].property == "transition");
+            assert!(parsed.problems[0].reason.contains(reason), "{:?}", parsed.problems);
+        }
     }
 
     #[test]

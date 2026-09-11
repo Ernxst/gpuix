@@ -183,6 +183,25 @@ impl TransitionValue {
     }
 
     fn interpolate(&self, target: &Self, progress: f64) -> Self {
+        let interpolable = matches!(
+            (self, target),
+            (Self::Number(_), Self::Number(_))
+                | (
+                    Self::Dimension(DimensionValue::Pixels(_)),
+                    Self::Dimension(DimensionValue::Pixels(_))
+                )
+                | (
+                    Self::Dimension(DimensionValue::Percentage(_)),
+                    Self::Dimension(DimensionValue::Percentage(_))
+                )
+                | (Self::Color(_), Self::Color(_))
+        );
+        if interpolable && progress == 0.0 {
+            return self.clone();
+        }
+        if interpolable && progress == 1.0 {
+            return target.clone();
+        }
         let number = |from: f64, to: f64| from + (to - from) * progress;
         match (self, target) {
             (Self::Number(from), Self::Number(to)) => Self::Number(number(*from, *to)),
@@ -465,11 +484,10 @@ struct TransitionVelocities(Vec<(TransitionProperty, Option<TransitionVelocity>)
 impl TransitionValues {
     fn from_style(
         style: &StyleDesc,
-        transition: &StyleTransition,
+        properties: &[TransitionProperty],
         intrinsic: IntrinsicSize,
         basis: Option<f64>,
     ) -> Self {
-        let properties = canonical_transition_properties(transition);
         let canonical_style = properties
             .iter()
             .any(|property| is_corner_radius(*property))
@@ -492,111 +510,6 @@ impl TransitionValues {
         )
     }
 
-    fn interpolate(&self, target: &Self, progress: f64) -> Self {
-        Self(
-            target
-                .0
-                .iter()
-                .map(|(property, target)| {
-                    let from = self
-                        .0
-                        .iter()
-                        .find(|(candidate, _)| candidate == property)
-                        .and_then(|(_, value)| value.as_ref());
-                    let value = match (from, target.as_ref()) {
-                        (Some(from), Some(target)) => Some(from.interpolate(target, progress)),
-                        (_, target) => target.cloned(),
-                    };
-                    (*property, value)
-                })
-                .collect(),
-        )
-    }
-
-    fn apply_to(&self, style: &mut StyleDesc) {
-        for (property, value) in &self.0 {
-            if let Some(value) = value {
-                value.apply_to(style, *property);
-            }
-        }
-    }
-
-    fn spring_velocities(
-        &self,
-        target: &Self,
-        previous: &TransitionVelocities,
-        carry_previous: bool,
-        initial_velocity: f64,
-    ) -> TransitionVelocities {
-        TransitionVelocities(
-            target
-                .0
-                .iter()
-                .map(|(property, target)| {
-                    let from = self
-                        .0
-                        .iter()
-                        .find(|(candidate, _)| candidate == property)
-                        .and_then(|(_, value)| value.as_ref());
-                    let target = target.as_ref();
-                    let carried = carry_previous
-                        .then(|| previous.get(*property))
-                        .flatten()
-                        .filter(|velocity| {
-                            from.zip(target).is_some_and(|(from, target)| {
-                                from.accepts_spring_velocity(target, velocity)
-                            })
-                        })
-                        .cloned();
-                    let velocity = carried.or_else(|| {
-                        from.zip(target).and_then(|(from, target)| {
-                            from.initial_spring_velocity_to(target, initial_velocity)
-                        })
-                    });
-                    (*property, velocity)
-                })
-                .collect(),
-        )
-    }
-
-    fn spring_sample(
-        &self,
-        target: &Self,
-        velocities: &TransitionVelocities,
-        elapsed: f64,
-        spring: &SpringEasing,
-    ) -> (Self, TransitionVelocities, bool) {
-        let mut active = false;
-        let mut sampled_velocities = Vec::with_capacity(target.0.len());
-        let values = target
-            .0
-            .iter()
-            .map(|(property, target)| {
-                let from = self
-                    .0
-                    .iter()
-                    .find(|(candidate, _)| candidate == property)
-                    .and_then(|(_, value)| value.as_ref());
-                let velocity = velocities.get(*property);
-                let (value, velocity, value_active) = match (from, target.as_ref()) {
-                    (Some(from), Some(target)) => {
-                        let (value, velocity, active) =
-                            from.spring_to(target, velocity, elapsed, spring, *property);
-                        (Some(value), velocity, active)
-                    }
-                    (_, target) => (target.cloned(), None, false),
-                };
-                active |= value_active;
-                sampled_velocities.push((*property, velocity));
-                (*property, value)
-            })
-            .collect();
-        (
-            Self(values),
-            TransitionVelocities(sampled_velocities),
-            active,
-        )
-    }
 }
 
 impl TransitionValues {
@@ -605,24 +518,6 @@ impl TransitionValues {
             .iter()
             .find(|(candidate, _)| *candidate == property)
             .and_then(|(_, value)| value.as_ref())
-    }
-}
-
-impl TransitionVelocities {
-    fn get(&self, property: TransitionProperty) -> Option<&TransitionVelocity> {
-        self.0
-            .iter()
-            .find(|(candidate, _)| *candidate == property)
-            .and_then(|(_, velocity)| velocity.as_ref())
-    }
-
-    fn is_zero(&self) -> bool {
-        self.0.iter().all(|(_, velocity)| match velocity {
-            None => true,
-            Some(TransitionVelocity::Number(value))
-            | Some(TransitionVelocity::Dimension(value)) => *value == 0.0,
-            Some(TransitionVelocity::Color(values)) => values.iter().all(|value| *value == 0.0),
-        })
     }
 }
 
@@ -637,21 +532,115 @@ pub(crate) struct StyleTransitionFrame {
     pub active: bool,
 }
 
-pub(crate) struct StyleTransitionState {
-    from: TransitionValues,
-    target: TransitionValues,
-    velocities: TransitionVelocities,
-    target_style: StyleDesc,
-    transition: StyleTransition,
+#[derive(Clone, Debug, PartialEq)]
+struct StyleTransitionTrack {
+    property: TransitionProperty,
+    from: Option<TransitionValue>,
+    target: Option<TransitionValue>,
+    velocity: Option<TransitionVelocity>,
     started: Instant,
+    duration_ms: f64,
+    delay_ms: f64,
+    easing: TransitionEasing,
+}
+
+impl StyleTransitionTrack {
+    fn timing_equals(&self, spec: &TransitionSpec) -> bool {
+        self.duration_ms == spec.duration_ms
+            && self.delay_ms == spec.delay_ms
+            && self.easing == spec.easing
+    }
+
+    fn settled(&self) -> bool {
+        self.from == self.target && self.velocity_is_zero()
+    }
+
+    fn velocity_is_zero(&self) -> bool {
+        match &self.velocity {
+            None => true,
+            Some(TransitionVelocity::Number(value))
+            | Some(TransitionVelocity::Dimension(value)) => *value == 0.0,
+            Some(TransitionVelocity::Color(values)) => values.iter().all(|value| *value == 0.0),
+        }
+    }
+
+    fn sample(
+        &self,
+        now: Instant,
+        reduce_motion: bool,
+    ) -> (Option<TransitionValue>, Option<TransitionVelocity>, bool) {
+        if reduce_motion || self.settled() {
+            return (self.target.clone(), None, false);
+        }
+        let elapsed = now.saturating_duration_since(self.started);
+        let delay = milliseconds(self.delay_ms);
+        if let TransitionEasing::Spring(spring) = &self.easing {
+            let spring_elapsed = elapsed
+                .checked_sub(delay)
+                .unwrap_or(Duration::ZERO)
+                .as_secs_f64();
+            let Some((from, target)) = self.from.as_ref().zip(self.target.as_ref()) else {
+                return (self.target.clone(), None, false);
+            };
+            let (value, velocity, active) = from.spring_to(
+                target,
+                self.velocity.as_ref(),
+                spring_elapsed,
+                spring,
+                self.property,
+            );
+            return (Some(value), velocity, active);
+        }
+
+        let duration = milliseconds(self.duration_ms);
+        let raw = if duration.is_zero() {
+            if elapsed < delay { 0.0 } else { 1.0 }
+        } else {
+            elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
+        };
+        let eased = if raw <= 0.0 {
+            0.0
+        } else if raw >= 1.0 {
+            1.0
+        } else {
+            transition_ease(raw, &self.easing)
+        };
+        let value = self
+            .from
+            .as_ref()
+            .zip(self.target.as_ref())
+            .map(|(from, target)| from.interpolate(target, eased))
+            .or_else(|| self.target.clone());
+        (value, None, raw < 1.0)
+    }
+
+    fn timing_active(&self, now: Instant, reduce_motion: bool) -> bool {
+        self.sample(now, reduce_motion).2
+    }
+
+    fn travels(&self) -> bool {
+        self.from != self.target || !self.velocity_is_zero()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TransitionSpec {
+    property: TransitionProperty,
+    duration_ms: f64,
+    delay_ms: f64,
+    easing: TransitionEasing,
+}
+
+pub(crate) struct StyleTransitionState {
+    tracks: Vec<StyleTransitionTrack>,
+    target_style: StyleDesc,
     hovered: bool,
     active: bool,
     /// The measurement of this element's intrinsic endpoints, latched when the
     /// endpoint last changed. It is not re-taken while a run is in flight:
-    /// `sync` restarts the clock whenever the target moves, so a target that
-    /// followed the content — a nested transition, streaming text — would push
-    /// the finish line away on every frame and the declared duration would
-    /// never elapse.
+    /// a target that followed the content — a nested transition, streaming
+    /// text — would push the finish line away on every frame and the declared
+    /// duration would never elapse.
     intrinsic: IntrinsicSize,
     /// The `fit-content` clamp basis, latched alongside `intrinsic` for the
     /// same reason.
@@ -670,22 +659,31 @@ impl StyleTransitionState {
             .transition
             .clone()
             .expect("a transition state is created only for a declared transition");
+        let specs = transition_specs(&transition);
         // No measurement on the frame an element mounts: the renderer calls
         // `sync` before the first `frame`, and a state whose `from` equals its
         // `target` paints the target style either way.
         let target = TransitionValues::from_style(
             &target_style,
-            &transition,
+            &specs.iter().map(|spec| spec.property).collect::<Vec<_>>(),
             IntrinsicSize::default(),
             None,
         );
         Self {
-            from: target.clone(),
-            target,
-            velocities: TransitionVelocities::default(),
+            tracks: specs
+                .into_iter()
+                .map(|spec| StyleTransitionTrack {
+                    property: spec.property,
+                    from: target.get(spec.property).cloned(),
+                    target: target.get(spec.property).cloned(),
+                    velocity: None,
+                    started: now,
+                    duration_ms: spec.duration_ms,
+                    delay_ms: spec.delay_ms,
+                    easing: spec.easing,
+                })
+                .collect(),
             target_style,
-            transition,
-            started: now,
             hovered: false,
             active: false,
             intrinsic: IntrinsicSize::default(),
@@ -747,75 +745,110 @@ impl StyleTransitionState {
         let basis = self.intrinsic_basis;
         let target_style =
             resolve_transition_target(style, state, hover_within, self.hovered, self.active);
-        let transition = style
+        let transitions = style
             .transition
             .clone()
             .expect("a transition state is retained only for a declared transition");
-        let target = TransitionValues::from_style(&target_style, &transition, intrinsic, basis);
+        let specs = transition_specs(&transitions);
+        let properties = specs.iter().map(|spec| spec.property).collect::<Vec<_>>();
+        let target = TransitionValues::from_style(&target_style, &properties, intrinsic, basis);
+        let visible_frame = self.frame_with_velocities(&self.target_style, now, false).0;
 
-        if target != self.target || transition != self.transition {
-            // Resolve the whole painted style before adopting the new property
-            // list. A property added to that list must start at the value it
-            // was already painting, not at its new target.
-            let (visible_frame, previous_velocities) =
-                self.frame_with_velocities(&self.target_style, now, false);
-            let carry_velocity = matches!(self.transition.easing, TransitionEasing::Spring(_))
-                && visible_frame.active;
-            let visible_style = visible_frame.style;
-            let visible_style = resolve_transition_properties(
-                &visible_style,
-                state,
-                hover_within,
-                self.hovered,
-                self.active,
-                &transition,
-            );
-            let visible =
-                TransitionValues::from_style(&visible_style, &transition, intrinsic, basis);
-            self.from = visible.interpolate(&target, 0.0);
-            self.velocities = match &transition.easing {
-                TransitionEasing::Spring(spring) => self.from.spring_velocities(
-                    &target,
-                    &previous_velocities,
-                    carry_velocity,
-                    spring.velocity,
-                ),
-                _ => TransitionVelocities::default(),
-            };
-            self.target = target;
-            self.started = now;
-        }
+        let visible_style = visible_frame.style;
+        let visible_style = resolve_transition_properties(
+            &visible_style,
+            state,
+            hover_within,
+            self.hovered,
+            self.active,
+            &transitions,
+        );
+        let visible = TransitionValues::from_style(&visible_style, &properties, intrinsic, basis);
+        let old_tracks = std::mem::take(&mut self.tracks);
+        self.tracks = specs
+            .into_iter()
+            .map(|spec| {
+                let from = visible.get(spec.property).cloned();
+                let target_value = target.get(spec.property).cloned();
+                if let Some(old) = old_tracks
+                    .iter()
+                    .find(|track| track.property == spec.property)
+                {
+                    if old.target == target_value && old.timing_equals(&spec) {
+                        return old.clone();
+                    }
+                }
+
+                let old = old_tracks
+                    .iter()
+                    .find(|track| track.property == spec.property);
+                let (old_velocity, old_active) = old
+                    .map(|track| {
+                        let (_value, velocity, active) = track.sample(now, false);
+                        (velocity, active)
+                    })
+                    .unwrap_or((None, false));
+                let velocity = match &spec.easing {
+                    TransitionEasing::Spring(spring) => {
+                        let carried = old
+                            .filter(|track| {
+                                matches!(track.easing, TransitionEasing::Spring(_)) && old_active
+                            })
+                            .and_then(|_| old_velocity)
+                            .filter(|velocity| {
+                                from.as_ref().zip(target_value.as_ref()).is_some_and(
+                                    |(from, target)| from.accepts_spring_velocity(target, velocity),
+                                )
+                            });
+                        carried.or_else(|| {
+                            from.as_ref()
+                                .zip(target_value.as_ref())
+                                .and_then(|(from, target)| {
+                                    from.initial_spring_velocity_to(target, spring.velocity)
+                                })
+                        })
+                    }
+                    _ => None,
+                };
+                StyleTransitionTrack {
+                    property: spec.property,
+                    from,
+                    target: target_value,
+                    velocity,
+                    started: now,
+                    duration_ms: spec.duration_ms,
+                    delay_ms: spec.delay_ms,
+                    easing: spec.easing,
+                }
+            })
+            .collect();
+
         self.target_style = target_style;
-        self.transition = transition;
         if reduce_motion {
-            self.from = self.target.clone();
-            self.velocities = TransitionVelocities::default();
-        } else if matches!(&self.transition.easing, TransitionEasing::Spring(_)) {
-            // A spring can pass through the rest thresholds between two
-            // frames. Once the real render path observes that rest state,
-            // latch the endpoint so a later frame cannot resurrect the track
-            // as the decaying oscillation moves away from that sample.
-            let frame = self.frame_with_velocities(&self.target_style, now, false).0;
-            if !frame.active {
-                self.from = self.target.clone();
-                self.velocities = TransitionVelocities::default();
+            for track in &mut self.tracks {
+                track.from = track.target.clone();
+                track.velocity = None;
+            }
+        } else {
+            for track in &mut self.tracks {
+                if matches!(&track.easing, TransitionEasing::Spring(_)) {
+                    let (_, _, active) = track.sample(now, false);
+                    if !active {
+                        track.from = track.target.clone();
+                        track.velocity = None;
+                    }
+                }
             }
         }
     }
 
     pub(crate) fn frame(&self, now: Instant, reduce_motion: bool) -> StyleTransitionFrame {
-        self.frame_with_velocities(&self.target_style, now, reduce_motion).0
+        self.frame_with_velocities(&self.target_style, now, reduce_motion)
+            .0
     }
 
     /// The frame this transition resolves to against `base` instead of the
     /// retained `target_style`.
-    ///
-    /// A probe measures a descendant at exactly the style its own real build
-    /// will resolve this frame: the current declaration for every property,
-    /// the currently interpolated value for every transitioned property.
-    /// `base` is that current declaration; `self.from`/`self.target` already
-    /// carry the interpolated values a real `sync` established at the last
-    /// frame that actually ran one, and a probe does not advance them.
     pub(crate) fn frame_against(
         &self,
         base: &StyleDesc,
@@ -826,7 +859,8 @@ impl StyleTransitionState {
     ) -> StyleTransitionFrame {
         let target_style =
             resolve_transition_target(base, state, hover_within, self.hovered, self.active);
-        self.frame_with_velocities(&target_style, now, reduce_motion).0
+        self.frame_with_velocities(&target_style, now, reduce_motion)
+            .0
     }
 
     fn frame_with_velocities(
@@ -835,90 +869,33 @@ impl StyleTransitionState {
         now: Instant,
         reduce_motion: bool,
     ) -> (StyleTransitionFrame, TransitionVelocities) {
-        if reduce_motion || (self.from == self.target && self.velocities.is_zero()) {
-            return (
-                StyleTransitionFrame {
-                    style: target_style.clone(),
-                    active: false,
-                },
-                TransitionVelocities::default(),
-            );
-        }
-
-        let delay = milliseconds(self.transition.delay_ms);
-        let elapsed = now.saturating_duration_since(self.started);
-        if let TransitionEasing::Spring(spring) = &self.transition.easing {
-            let spring_elapsed = elapsed
-                .checked_sub(delay)
-                .unwrap_or(Duration::ZERO)
-                .as_secs_f64();
-            let (values, velocities, active) =
-                self.from
-                    .spring_sample(&self.target, &self.velocities, spring_elapsed, spring);
-            if !active {
-                return (
-                    StyleTransitionFrame {
-                        style: target_style.clone(),
-                        active: false,
-                    },
-                    velocities,
-                );
-            }
-            let mut style = target_style.clone();
-            values.apply_to(&mut style);
-            self.keep_settled_intrinsic_axes(&mut style, target_style);
-            return (
-                StyleTransitionFrame {
-                    style,
-                    active: true,
-                },
-                velocities,
-            );
-        }
-
-        let duration = milliseconds(self.transition.duration_ms);
-        let raw = if elapsed < delay {
-            0.0
-        } else if duration.is_zero() {
-            1.0
-        } else {
-            elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
-        };
-        if raw >= 1.0 {
-            return (
-                StyleTransitionFrame {
-                    style: target_style.clone(),
-                    active: false,
-                },
-                TransitionVelocities::default(),
-            );
-        }
-
         let mut style = target_style.clone();
-        self.from
-            .interpolate(
-                &self.target,
-                transition_ease(raw.clamp(0.0, 1.0), &self.transition.easing),
-            )
-            .apply_to(&mut style);
+        let mut active = false;
+        let mut velocities = Vec::with_capacity(self.tracks.len());
+        for track in &self.tracks {
+            let (value, velocity, track_active) = track.sample(now, reduce_motion);
+            if let Some(value) = value {
+                value.apply_to(&mut style, track.property);
+            }
+            velocities.push((track.property, velocity));
+            active |= track_active;
+        }
+        if !active {
+            return (
+                StyleTransitionFrame {
+                    style: target_style.clone(),
+                    active: false,
+                },
+                TransitionVelocities(velocities),
+            );
+        }
         self.keep_settled_intrinsic_axes(&mut style, target_style);
         (
-            StyleTransitionFrame {
-                style,
-                active: true,
-            },
-            TransitionVelocities::default(),
+            StyleTransitionFrame { style, active },
+            TransitionVelocities(velocities),
         )
     }
 
-    /// Keep the declared `auto` on an intrinsic axis that is not travelling.
-    ///
-    /// A run driven by another property still writes every channel it tracks,
-    /// and a settled intrinsic axis's channel is the latched pixel on both
-    /// sides. Writing it would pin the element to the size it had when that
-    /// number was latched — an `opacity` run would collapse a lane back to
-    /// yesterday's content width for its whole duration — so an axis with
-    /// nowhere to travel keeps the style it settles on.
     fn keep_settled_intrinsic_axes(&self, style: &mut StyleDesc, base: &StyleDesc) {
         let (width, height) = self.settles_intrinsic(base);
         if width && !self.travels(TransitionProperty::Width) {
@@ -929,60 +906,13 @@ impl StyleTransitionState {
         }
     }
 
-    /// Whether this property has anywhere to go: different endpoints, or a
-    /// spring velocity still carrying it.
     fn travels(&self, property: TransitionProperty) -> bool {
-        let moving = self
-            .from
-            .get(property)
-            .zip(self.target.get(property))
-            .is_some_and(|(from, target)| from != target);
-        let carried = matches!(
-            self.velocities.get(property),
-            Some(TransitionVelocity::Number(velocity) | TransitionVelocity::Dimension(velocity))
-                if *velocity != 0.0
-        );
-        moving || carried
+        self.tracks
+            .iter()
+            .find(|track| track.property == property)
+            .is_some_and(StyleTransitionTrack::travels)
     }
 
-    /// Whether this transition is still actively interpolating, without
-    /// building the style it would produce. Mirrors the timing branch of
-    /// `frame_with_velocities` (the source `frame`/`frame_against` build on
-    /// top of) but skips the `target_style.clone()` and `apply_to` a probe
-    /// has no use for.
-    fn timing_active(&self, now: Instant, reduce_motion: bool) -> bool {
-        if reduce_motion || (self.from == self.target && self.velocities.is_zero()) {
-            return false;
-        }
-        let delay = milliseconds(self.transition.delay_ms);
-        let elapsed = now.saturating_duration_since(self.started);
-        if let TransitionEasing::Spring(spring) = &self.transition.easing {
-            let spring_elapsed = elapsed
-                .checked_sub(delay)
-                .unwrap_or(Duration::ZERO)
-                .as_secs_f64();
-            let (_, _, active) =
-                self.from
-                    .spring_sample(&self.target, &self.velocities, spring_elapsed, spring);
-            return active;
-        }
-        let duration = milliseconds(self.transition.duration_ms);
-        let raw = if elapsed < delay {
-            0.0
-        } else if duration.is_zero() {
-            1.0
-        } else {
-            elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
-        };
-        raw < 1.0
-    }
-
-    /// Whether a layout-affecting property — one that can move a
-    /// `max-content`/`min-content` ancestor's measured size — is actively
-    /// interpolating right now. Used by the intrinsic-probe cache key: an
-    /// ancestor above a subtree with an active layout tween needs a fresh
-    /// probe every frame, since the descendant's contribution to the
-    /// ancestor's measured size is itself moving.
     pub(crate) fn active_layout_tween(&self, now: Instant, reduce_motion: bool) -> bool {
         const LAYOUT_PROPERTIES: [TransitionProperty; 10] = [
             TransitionProperty::Width,
@@ -996,16 +926,14 @@ impl StyleTransitionState {
             TransitionProperty::Bottom,
             TransitionProperty::Left,
         ];
-        self.timing_active(now, reduce_motion)
-            && LAYOUT_PROPERTIES
+        LAYOUT_PROPERTIES.iter().any(|property| {
+            self.tracks
                 .iter()
-                .any(|property| self.travels(*property))
+                .find(|track| track.property == *property)
+                .is_some_and(|track| track.timing_active(now, reduce_motion) && track.travels())
+        })
     }
 
-    /// Whether the style this element settles on leaves an axis intrinsic.
-    /// The renderer needs this for the closing direction: React has already
-    /// swapped `width: "auto"` for a number, so only the retained target still
-    /// says the element was content-sized a frame ago.
     fn settles_intrinsic(&self, base: &StyleDesc) -> (bool, bool) {
         (
             intrinsic_keyword(&base.width).is_some(),
@@ -1013,10 +941,6 @@ impl StyleTransitionState {
         )
     }
 
-    /// The style this element's transition is currently aiming at. The
-    /// renderer reads this to decide whether an explicit keyword endpoint —
-    /// unlike `auto` — needs measuring on an axis its parent would otherwise
-    /// stretch.
     pub(crate) fn target_style(&self) -> &StyleDesc {
         &self.target_style
     }
@@ -1047,6 +971,29 @@ const CORNER_RADIUS_PROPERTIES: [TransitionProperty; 4] = [
 
 fn is_corner_radius(property: TransitionProperty) -> bool {
     CORNER_RADIUS_PROPERTIES.contains(&property)
+}
+
+fn transition_specs(transitions: &[StyleTransition]) -> Vec<TransitionSpec> {
+    let mut specs: Vec<TransitionSpec> = Vec::new();
+    for transition in transitions {
+        for property in canonical_transition_properties(transition) {
+            let spec = TransitionSpec {
+                property,
+                duration_ms: transition.duration_ms,
+                delay_ms: transition.delay_ms,
+                easing: transition.easing.clone(),
+            };
+            if let Some(existing) = specs
+                .iter_mut()
+                .find(|existing| existing.property == property)
+            {
+                *existing = spec;
+            } else {
+                specs.push(spec);
+            }
+        }
+    }
+    specs
 }
 
 fn canonical_transition_properties(transition: &StyleTransition) -> Vec<TransitionProperty> {
@@ -1117,14 +1064,17 @@ fn canonicalize_transition_radii(style: &mut StyleDesc) {
 /// (`auto` -> `0`) needs the same number as its start.
 pub(crate) fn intrinsic_probe(
     target: &StyleDesc,
-    transition: &StyleTransition,
+    transitions: &[StyleTransition],
     content_sized: IntrinsicAxes,
     retained: Option<&StyleTransitionState>,
 ) -> Option<IntrinsicProbe> {
     if !content_sized.width && !content_sized.height {
         return None;
     }
-    let properties = canonical_transition_properties(transition);
+    let properties = transition_specs(transitions)
+        .into_iter()
+        .map(|spec| spec.property)
+        .collect::<Vec<_>>();
     if !properties.contains(&TransitionProperty::Width)
         && !properties.contains(&TransitionProperty::Height)
     {
@@ -1252,9 +1202,12 @@ fn resolve_transition_properties(
     hover_within: bool,
     hovered: bool,
     active: bool,
-    transition: &StyleTransition,
+    transitions: &[StyleTransition],
 ) -> StyleDesc {
-    let properties = canonical_transition_properties(transition);
+    let properties = transition_specs(transitions)
+        .into_iter()
+        .map(|spec| spec.property)
+        .collect::<Vec<_>>();
     let mut declared = style.clone();
     if properties
         .iter()
@@ -2018,6 +1971,73 @@ mod tests {
     }
 
     #[test]
+    fn style_transition_tracks_have_independent_clocks() {
+        let started = Instant::now();
+        let style = style(serde_json::json!({
+            "width": 100,
+            "opacity": 0.0,
+            "hover": { "width": 200, "opacity": 1.0 },
+            "transition": "width 100ms linear, opacity 200ms linear"
+        }));
+        let mut state = StyleTransitionState::new(&style, StyleState::default(), false, started);
+        state.set_hovered(true);
+        state.sync(
+            &style,
+            StyleState::default(),
+            false,
+            started,
+            false,
+            IntrinsicInput::default(),
+        );
+
+        let middle = state.frame(started + Duration::from_millis(50), false);
+        assert_eq!(middle.style.width, Some(DimensionValue::Pixels(150.0)));
+        assert_eq!(middle.style.opacity, Some(0.25));
+        let width_done = state.frame(started + Duration::from_millis(100), false);
+        assert_eq!(width_done.style.width, Some(DimensionValue::Pixels(200.0)));
+        assert_eq!(width_done.style.opacity, Some(0.5));
+    }
+
+    #[test]
+    fn retargeting_one_style_transition_track_keeps_the_other_clock() {
+        let started = Instant::now();
+        let first = style(serde_json::json!({
+            "width": 100,
+            "opacity": 0.0,
+            "hover": { "width": 200, "opacity": 1.0 },
+            "transition": "width 100ms linear, opacity 200ms linear"
+        }));
+        let second = style(serde_json::json!({
+            "width": 100,
+            "opacity": 0.0,
+            "hover": { "width": 300, "opacity": 1.0 },
+            "transition": "width 100ms linear, opacity 200ms linear"
+        }));
+        let mut state = StyleTransitionState::new(&first, StyleState::default(), false, started);
+        state.set_hovered(true);
+        state.sync(
+            &first,
+            StyleState::default(),
+            false,
+            started,
+            false,
+            IntrinsicInput::default(),
+        );
+        let retargeted_at = started + Duration::from_millis(50);
+        state.sync(
+            &second,
+            StyleState::default(),
+            false,
+            retargeted_at,
+            false,
+            IntrinsicInput::default(),
+        );
+        let frame = state.frame(started + Duration::from_millis(100), false);
+        assert_eq!(frame.style.width, Some(DimensionValue::Pixels(225.0)));
+        assert_eq!(frame.style.opacity, Some(0.5));
+    }
+
+    #[test]
     fn style_transition_interpolates_state_refinements_and_retargets() {
         let started = Instant::now();
         let style = style(serde_json::json!({
@@ -2081,6 +2101,19 @@ mod tests {
                 .opacity,
             Some(0.25)
         );
+    }
+
+    #[test]
+    fn transition_value_endpoint_exactness_respects_pair_compatibility() {
+        let from = TransitionValue::Number(0.1);
+        let target = TransitionValue::Number(0.3);
+        assert_eq!(from.interpolate(&target, 0.0), from);
+        assert_eq!(from.interpolate(&target, 1.0), target);
+
+        let from = TransitionValue::Dimension(DimensionValue::Pixels(0.0));
+        let target = TransitionValue::Dimension(DimensionValue::Auto);
+        assert_eq!(from.interpolate(&target, 0.0), target);
+        assert_eq!(from.interpolate(&target, 1.0), target);
     }
 
     #[test]
@@ -2473,6 +2506,60 @@ mod tests {
         assert!(
             carried_width > restarted_width + 1.0,
             "state-style interruption must carry velocity: {carried_width} vs {restarted_width}"
+        );
+    }
+
+    #[test]
+    fn style_spring_sync_does_not_resample_an_unchanged_track() {
+        let started = Instant::now();
+        let style = style(serde_json::json!({
+            "width": 100,
+            "hover": { "width": 200 },
+            "transition": {
+                "properties": ["width"],
+                "easing": { "type": "spring" }
+            }
+        }));
+        let mut without_sync =
+            StyleTransitionState::new(&style, StyleState::default(), false, started);
+        let mut with_sync =
+            StyleTransitionState::new(&style, StyleState::default(), false, started);
+        without_sync.set_hovered(true);
+        with_sync.set_hovered(true);
+        without_sync.sync(
+            &style,
+            StyleState::default(),
+            false,
+            started,
+            false,
+            IntrinsicInput::default(),
+        );
+        with_sync.sync(
+            &style,
+            StyleState::default(),
+            false,
+            started,
+            false,
+            IntrinsicInput::default(),
+        );
+        with_sync.sync(
+            &style,
+            StyleState::default(),
+            false,
+            started + Duration::from_millis(50),
+            false,
+            IntrinsicInput::default(),
+        );
+
+        assert_eq!(
+            without_sync
+                .frame(started + Duration::from_millis(100), false)
+                .style
+                .width,
+            with_sync
+                .frame(started + Duration::from_millis(100), false)
+                .style
+                .width
         );
     }
 
@@ -2977,6 +3064,7 @@ mod tests {
             sampled_width(&stepped, started + Duration::from_millis(50)),
             Some(DimensionValue::Auto)
         );
+        assert_eq!(sampled_width(&stepped, started), Some(DimensionValue::Auto));
     }
 
     #[test]
@@ -2998,6 +3086,41 @@ mod tests {
         assert_eq!(
             sampled_width(&state, started + Duration::from_millis(100)),
             Some(DimensionValue::Pixels(0.0))
+        );
+    }
+
+    #[test]
+    fn measured_intrinsic_width_is_kept_during_a_closing_delay() {
+        let started = Instant::now();
+        let opened = style(serde_json::json!({
+            "width": "auto",
+            "overflow": "hidden",
+            "minWidth": 0,
+            "transition": {
+                "properties": ["width"],
+                "durationMs": 100,
+                "delayMs": 50,
+                "easing": "linear"
+            }
+        }));
+        let closed = style(serde_json::json!({
+            "width": 0,
+            "overflow": "hidden",
+            "minWidth": 0,
+            "transition": {
+                "properties": ["width"],
+                "durationMs": 100,
+                "delayMs": 50,
+                "easing": "linear"
+            }
+        }));
+        let mut state = StyleTransitionState::new(&opened, StyleState::default(), false, started);
+        assert!(drive(&mut state, &opened, started, || max_content(500.0)));
+        assert!(drive(&mut state, &closed, started, || max_content(500.0)));
+
+        assert_eq!(
+            sampled_width(&state, started + Duration::from_millis(25)),
+            Some(DimensionValue::Pixels(500.0))
         );
     }
 
@@ -3354,6 +3477,7 @@ mod tests {
             false,
             stretched,
         );
+        assert_eq!(sampled_width(&state, started), Some(DimensionValue::Auto));
         assert_eq!(
             sampled_width(&state, started + Duration::from_millis(50)),
             Some(DimensionValue::Auto)

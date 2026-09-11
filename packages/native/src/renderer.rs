@@ -10502,7 +10502,7 @@ fn containing_block_basis(
 fn intrinsic_transition_size(
     id: u64,
     target: &StyleDesc,
-    transition: &crate::style::StyleTransition,
+    transitions: &[crate::style::StyleTransition],
     content_sized: crate::motion::IntrinsicAxes,
     parent: Option<&crate::retained_tree::RetainedElement>,
     parent_id: Option<u64>,
@@ -10520,7 +10520,7 @@ fn intrinsic_transition_size(
     // a run cost nothing.
     let Some(probe) = crate::motion::intrinsic_probe(
         target,
-        transition,
+        transitions,
         content_sized,
         ctx.transition_states.get(&id),
     ) else {
@@ -15087,8 +15087,9 @@ mod resolve_styles_tests {
         let transition = strict_style
             .transition
             .expect("partial transition is valid");
-        assert_eq!(transition.delay_ms, 0.0);
-        assert_eq!(transition.easing, TransitionEasing::Name("ease".into()));
+        assert_eq!(transition.len(), 1);
+        assert_eq!(transition[0].delay_ms, 0.0);
+        assert_eq!(transition[0].easing, TransitionEasing::Name("ease".into()));
         assert_eq!(strict_diagnostics.len(), 2);
         assert!(non_strict_diagnostics.is_empty());
     }

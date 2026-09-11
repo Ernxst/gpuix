@@ -721,14 +721,17 @@ function diagnoseUnsupportedStyleTransition(
     "<diff>, <input>, <textarea>, <markdown>, and <anchored> support outer-container " +
     "properties only."
   let message: string
+  const transition = style.transition
   if (style.transition == null) {
     return
   } else if (!supportsStyleTransitions(instance.type)) {
     message = `[gpuix] ${subject} does not support style.transition. ${support}`
   } else if (
     ELEMENT_INTERNAL_COLOR_TRANSITION_TYPES.has(instance.type) &&
-    Array.isArray(style.transition.properties) &&
-    style.transition.properties.includes("color")
+    ((typeof transition === "string" && /(?:^|,)\s*color(?:\s|$)/.test(transition)) ||
+      (typeof transition === "object" &&
+        Array.isArray(transition.properties) &&
+        transition.properties.includes("color")))
   ) {
     message =
       `[gpuix] ${subject} does not support style.transition property "color". ` +

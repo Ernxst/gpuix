@@ -132,6 +132,34 @@ const missingTransitionDuration: StyleDesc = {
   transition: { properties: ["opacity"] },
 }
 
+const validTransitionShorthand: StyleDesc = {
+  transition: "background-color 120ms ease-out, border-radius 0.2s 40ms linear",
+}
+
+const validTransitionShorthandThreeItems: StyleDesc = {
+  transition: "width 120ms, opacity 160ms ease-out 60ms, border-radius 0.2s 40ms linear",
+}
+
+void validTransitionShorthandThreeItems
+
+const invalidTransitionShorthand: StyleDesc = {
+  // @ts-expect-error The native transition surface does not interpolate transform.
+  transition: "transform 1s",
+}
+
+const invalidLaterTransitionProperty: StyleDesc = {
+  // @ts-expect-error Every shorthand item must name a natively interpolated property.
+  transition: "width 1s, transform 1s",
+}
+
+const invalidCamelCaseTransitionProperty: StyleDesc = {
+  // @ts-expect-error Shorthand properties use kebab-case CSS names.
+  transition: "width 1s, borderRadius 1s",
+}
+
+void invalidLaterTransitionProperty
+void invalidCamelCaseTransitionProperty
+
 const validSpringTransition: StyleDesc = {
   transition: {
     properties: ["width", "opacity"],
@@ -232,6 +260,8 @@ void invalidTextWrap
 void invalidHoverStyle
 void invalidTransitionProperty
 void missingTransitionDuration
+void validTransitionShorthand
+void invalidTransitionShorthand
 void validSpringTransition
 void validMotionSpring
 void unknownSpringType

@@ -297,6 +297,7 @@ export type {
   StyleDesc,
   StyleSpringTransition,
   TransitionProperty,
+  TransitionShorthand,
   StyleTweenTransition,
 } from "./types/host.js"
 export { handleGpuixEvent } from "./reconciler/event-registry.js"

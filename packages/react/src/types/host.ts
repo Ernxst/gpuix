@@ -345,6 +345,39 @@ export type TransitionProperty =
   | "borderBottomLeftRadius"
   | "borderBottomRightRadius"
 
+type KebabCase<S extends string> = S extends `${infer Head}${infer Tail}`
+  ? Head extends Lowercase<Head>
+    ? `${Head}${KebabCase<Tail>}`
+    : `-${Lowercase<Head>}${KebabCase<Tail>}`
+  : S
+
+type TransitionPropertyCssName = keyof {
+  [Property in TransitionProperty as KebabCase<Property>]: true
+}
+
+type TransitionTime = `${number}ms` | `${number}s`
+type TransitionEasingName = "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
+type TransitionCubicBezier = `cubic-bezier(${number}, ${number}, ${number}, ${number})`
+type TransitionEasingToken = TransitionEasingName | TransitionCubicBezier
+
+type TransitionShorthandEntry =
+  | `${TransitionPropertyCssName} ${TransitionTime}`
+  | `${TransitionPropertyCssName} ${TransitionTime} ${TransitionEasingToken}`
+  | `${TransitionPropertyCssName} ${TransitionTime} ${TransitionTime}`
+  | `${TransitionPropertyCssName} ${TransitionTime} ${TransitionEasingToken} ${TransitionTime}`
+  | `${TransitionPropertyCssName} ${TransitionTime} ${TransitionTime} ${TransitionEasingToken}`
+type TransitionShorthandListProperty =
+  | Extract<TransitionPropertyCssName, "opacity" | "color" | "width" | "height" | "top" | "right" | "bottom" | "left">
+  | `${string}-${string}`
+
+// Keep the recursive shorthand type bounded at three items so TypeScript can represent it.
+type TransitionShorthandList =
+  | TransitionShorthandEntry
+  | `${TransitionShorthandListProperty} ${string}, ${TransitionShorthandListProperty} ${string}`
+  | `${TransitionShorthandListProperty} ${string}, ${TransitionShorthandListProperty} ${string}, ${TransitionShorthandListProperty} ${string}`
+
+export type TransitionShorthand = "none" | TransitionShorthandList
+
 interface StyleTransitionBase {
   properties: TransitionProperty[]
   delayMs?: number
@@ -647,7 +680,7 @@ export interface StyleDesc {
   selectionColor?: GpuixColor
 
   /** Native, interruptible interpolation for the named properties. */
-  transition?: StyleTransition
+  transition?: StyleTransition | TransitionShorthand
 
   /** CSS `interpolate-size`. `"allow-keywords"` lets a `width` or `height`
    *  transition travel to or from `auto`: the intrinsic endpoint contributes
