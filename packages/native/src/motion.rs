@@ -183,6 +183,12 @@ impl TransitionValue {
     }
 
     fn interpolate(&self, target: &Self, progress: f64) -> Self {
+        if progress == 0.0 {
+            return self.clone();
+        }
+        if progress == 1.0 {
+            return target.clone();
+        }
         let number = |from: f64, to: f64| from + (to - from) * progress;
         match (self, target) {
             (Self::Number(from), Self::Number(to)) => Self::Number(number(*from, *to)),
@@ -573,28 +579,26 @@ impl StyleTransitionTrack {
             return (Some(value), velocity, active);
         }
 
-        if elapsed < delay {
-            return (self.from.clone(), None, true);
-        }
         let duration = milliseconds(self.duration_ms);
         let raw = if duration.is_zero() {
-            1.0
+            if elapsed < delay { 0.0 } else { 1.0 }
         } else {
             elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
         };
-        if raw >= 1.0 {
-            return (self.target.clone(), None, false);
-        }
-        if raw <= 0.0 {
-            return (self.from.clone(), None, true);
-        }
+        let eased = if raw <= 0.0 {
+            0.0
+        } else if raw >= 1.0 {
+            1.0
+        } else {
+            transition_ease(raw, &self.easing)
+        };
         let value = self
             .from
             .as_ref()
             .zip(self.target.as_ref())
-            .map(|(from, target)| from.interpolate(target, transition_ease(raw, &self.easing)))
+            .map(|(from, target)| from.interpolate(target, eased))
             .or_else(|| self.target.clone());
-        (value, None, true)
+        (value, None, raw < 1.0)
     }
 
     fn timing_active(&self, now: Instant, reduce_motion: bool) -> bool {
@@ -3055,6 +3059,41 @@ mod tests {
         assert_eq!(
             sampled_width(&state, started + Duration::from_millis(100)),
             Some(DimensionValue::Pixels(0.0))
+        );
+    }
+
+    #[test]
+    fn measured_intrinsic_width_is_kept_during_a_closing_delay() {
+        let started = Instant::now();
+        let opened = style(serde_json::json!({
+            "width": "auto",
+            "overflow": "hidden",
+            "minWidth": 0,
+            "transition": {
+                "properties": ["width"],
+                "durationMs": 100,
+                "delayMs": 50,
+                "easing": "linear"
+            }
+        }));
+        let closed = style(serde_json::json!({
+            "width": 0,
+            "overflow": "hidden",
+            "minWidth": 0,
+            "transition": {
+                "properties": ["width"],
+                "durationMs": 100,
+                "delayMs": 50,
+                "easing": "linear"
+            }
+        }));
+        let mut state = StyleTransitionState::new(&opened, StyleState::default(), false, started);
+        assert!(drive(&mut state, &opened, started, || max_content(500.0)));
+        assert!(drive(&mut state, &closed, started, || max_content(500.0)));
+
+        assert_eq!(
+            sampled_width(&state, started + Duration::from_millis(25)),
+            Some(DimensionValue::Pixels(500.0))
         );
     }
 
