@@ -5,19 +5,10 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ReducedMotionTarget } from './reduced-motion'
 
-async function deliverPlatformPreference(
-  renderer: ReturnType<typeof createRenderer>,
-  reduceMotion: boolean,
-): Promise<void> {
-  renderer.testSetPlatformReducedMotion(reduceMotion)
-  for (let index = 0; index < 4; index += 1) {
-    await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    renderer.tickIdle()
-  }
-}
-
-// On Windows the preference reaches the UI thread asynchronously, so wait for
-// the expected widths instead of asserting once.
+// The platform applies a preference change on a later pump of its event loop,
+// not inside the call that delivers it: macOS defers the notification to the
+// main dispatch queue, Windows to the UI thread. An app's frame loop pumps
+// continuously; this test has none, so it pumps before every read.
 const runsOnThisPlatform = process.platform === 'darwin' || process.platform === 'win32'
 
 describe('reduced-motion example', () => {
@@ -38,7 +29,7 @@ describe('reduced-motion example', () => {
 
       try {
         renderer.clockPause()
-        await deliverPlatformPreference(renderer, false)
+        renderer.testSetPlatformReducedMotion(false)
         flushSync(() => root.render(<ReducedMotionTarget expanded={false} />))
 
         const styleTarget = await app.getByTestId('style-transition-target').element()
@@ -51,6 +42,7 @@ describe('reduced-motion example', () => {
         const expectWidths = async (expected: number): Promise<void> => {
           await vi.waitFor(
             () => {
+              renderer.tickIdle()
               expect(width(styleTarget.id)).toBeCloseTo(expected)
               expect(width(motionTarget.id)).toBeCloseTo(expected)
             },
@@ -65,10 +57,10 @@ describe('reduced-motion example', () => {
         renderer.clockFastForward(100)
         await expectWidths(210)
 
-        await deliverPlatformPreference(renderer, true)
+        renderer.testSetPlatformReducedMotion(true)
         await expectWidths(280)
 
-        await deliverPlatformPreference(renderer, false)
+        renderer.testSetPlatformReducedMotion(false)
         await expectWidths(280)
       } finally {
         root.unmount()
