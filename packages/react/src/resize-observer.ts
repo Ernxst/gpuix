@@ -187,11 +187,14 @@ export class ResizeObserver {
     return false
   }
 
-  deliver(nativeEntries: readonly NativeResizeEntry[]): void {
+  deliver(renderer: NativeRenderer, nativeEntries: readonly NativeResizeEntry[]): void {
     const byId = new Map(nativeEntries.map((entry) => [entry.elementId, entry]))
     const delivered: ResizeObserverEntry[] = []
     const unmounted: PublicInstance[] = []
     for (const [target, observation] of this.observations) {
+      // Element ids restart per renderer, so an entry only matches an
+      // observation made on the renderer that broadcast it.
+      if (observation.container.native !== renderer) continue
       const nativeEntry = byId.get(target.id)
       if (!nativeEntry) continue
       const size = selectedSize(nativeEntry, observation.box)
@@ -229,6 +232,6 @@ export function dispatchResizeObservation(
   if (!observers || !payload.entries) {
     return { defaultPrevented: false, propagationStopped: false }
   }
-  for (const observer of [...observers]) observer.deliver(payload.entries)
+  for (const observer of [...observers]) observer.deliver(renderer, payload.entries)
   return { defaultPrevented: false, propagationStopped: false }
 }
