@@ -1204,7 +1204,8 @@ display-link clock; neither uses JavaScript timers.
 ### Transition style changes
 
 Declare exactly which properties may interpolate. The transition lives on the
-base style, while a state refinement supplies the next target:
+base style, while a state refinement supplies the next target. An object
+declares one timing entry:
 
 ```tsx
 function HoverCard() {
@@ -1239,6 +1240,20 @@ function HoverCard() {
   )
 }
 ```
+
+For CSS-compatible shared styles, use the shorthand string. Each comma-separated
+item is one timing entry, and its property token uses the kebab-case CSS spelling:
+
+```tsx
+style={{
+  transition: 'width 120ms cubic-bezier(0.2, 0, 0, 1), opacity 160ms ease-out 60ms',
+}}
+```
+
+Every property has its own delay, duration, easing, and clock. If a property is
+listed more than once, the last entry wins, matching CSS. The shorthand accepts
+`ms` and `s` durations, the named easings, and `cubic-bezier(...)`; springs remain
+object-form only. Use `none` to disable transitions.
 
 The same declaration animates React-driven changes to those fields. An
 interrupted transition retargets from its current painted value. Unlisted

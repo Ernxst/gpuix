@@ -273,6 +273,37 @@ describeNative("native style transitions", () => {
     }
   })
 
+  it("uses independent clocks for CSS transition shorthand items", () => {
+    const root = createTestRoot()
+    const card = (expanded: boolean) => (
+      <div
+        data-testid="shorthand-transition-target"
+        style={{
+          width: expanded ? 200 : 100,
+          opacity: expanded ? 1 : 0,
+          transition: "width 120ms cubic-bezier(0.2, 0, 0, 1), opacity 160ms ease-out 60ms",
+        }}
+      />
+    )
+
+    try {
+      root.renderer.clockPause()
+      root.render(card(false))
+      const target = root.renderer.findByTestId("shorthand-transition-target")!
+
+      root.render(card(true))
+      root.renderer.advanceAsyncClock(60)
+      expect(root.renderer.getResolvedStyle(target.id).width).toBeCloseTo(187.5, 0)
+      expect(root.renderer.getResolvedStyle(target.id).opacity).toBe(0)
+
+      root.renderer.advanceAsyncClock(60)
+      expect(root.renderer.getResolvedStyle(target.id).width).toBe(200)
+      expect(root.renderer.getResolvedStyle(target.id).opacity).toBeCloseTo(0.48, 1)
+    } finally {
+      root.unmount()
+    }
+  })
+
   it.each(customSurfaceFixtures)(
     "interpolates React-driven container styles on the <$name> custom surface",
     ({ render }) => {

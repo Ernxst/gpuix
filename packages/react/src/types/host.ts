@@ -345,6 +345,29 @@ export type TransitionProperty =
   | "borderBottomLeftRadius"
   | "borderBottomRightRadius"
 
+type KebabCase<S extends string> = S extends `${infer Head}${infer Tail}`
+  ? Head extends Lowercase<Head>
+    ? `${Head}${KebabCase<Tail>}`
+    : `-${Lowercase<Head>}${KebabCase<Tail>}`
+  : S
+
+type TransitionPropertyCssName = {
+  [Property in TransitionProperty]: KebabCase<Property>
+}[TransitionProperty]
+
+type TransitionTime = `${number}ms` | `${number}s`
+type TransitionEasingName = "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
+type TransitionCubicBezier = `cubic-bezier(${number}, ${number}, ${number}, ${number})`
+type TransitionEasingToken = TransitionEasingName | TransitionCubicBezier
+
+type TransitionShorthandItem = `${TransitionPropertyCssName} ${string}`
+
+type TransitionShorthandList =
+  | TransitionShorthandItem
+  | `${TransitionShorthandItem}, ${TransitionShorthandItem}`
+
+export type TransitionShorthand = "none" | TransitionShorthandList
+
 interface StyleTransitionBase {
   properties: TransitionProperty[]
   delayMs?: number
@@ -647,7 +670,7 @@ export interface StyleDesc {
   selectionColor?: GpuixColor
 
   /** Native, interruptible interpolation for the named properties. */
-  transition?: StyleTransition
+  transition?: StyleTransition | TransitionShorthand
 
   /** CSS `interpolate-size`. `"allow-keywords"` lets a `width` or `height`
    *  transition travel to or from `auto`: the intrinsic endpoint contributes

@@ -132,6 +132,15 @@ const missingTransitionDuration: StyleDesc = {
   transition: { properties: ["opacity"] },
 }
 
+const validTransitionShorthand: StyleDesc = {
+  transition: "background-color 120ms ease-out, border-radius 0.2s 40ms linear",
+}
+
+const invalidTransitionShorthand: StyleDesc = {
+  // @ts-expect-error The native transition surface does not interpolate transform.
+  transition: "transform 1s",
+}
+
 const validSpringTransition: StyleDesc = {
   transition: {
     properties: ["width", "opacity"],
@@ -232,6 +241,8 @@ void invalidTextWrap
 void invalidHoverStyle
 void invalidTransitionProperty
 void missingTransitionDuration
+void validTransitionShorthand
+void invalidTransitionShorthand
 void validSpringTransition
 void validMotionSpring
 void unknownSpringType

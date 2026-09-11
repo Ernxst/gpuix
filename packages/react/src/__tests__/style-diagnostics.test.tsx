@@ -1002,6 +1002,27 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     ])
   })
 
+  it("names the unsupported property in a malformed transition shorthand", () => {
+    const renderer = new TestRenderer()
+    renderer.applyBatch(
+      JSON.stringify([
+        ["createElement", 84, "div"],
+        ["setCustomPropValue", 84, "data-testid", "invalid-shorthand"],
+        ["setStyle", 84, { opacity: 0.4, transition: "transform 1s" }],
+        ["setRoot", 84],
+      ])
+    )
+
+    expect(renderer.getElement(84)?.style).not.toHaveProperty("transition")
+    expect(renderer.drainStyleDiagnostics()).toEqual([
+      expect.objectContaining({
+        property: "transition",
+        dataTestId: "invalid-shorthand",
+        reason: expect.stringContaining("transform"),
+      }),
+    ])
+  })
+
   it("keeps deterministic field dropping when strict diagnostics are disabled", () => {
     const renderer = new TestRenderer()
     renderer.setStrictStyles(false)
