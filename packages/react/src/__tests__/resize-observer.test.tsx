@@ -1,4 +1,4 @@
-import "@gpuix/react/globals"
+import "../globals.js"
 
 import React, { useState } from "react"
 import { describe, expect, it } from "vitest"
@@ -26,6 +26,7 @@ describeNative("ResizeObserver", () => {
           style={{ width: 100, height: 40, padding: 5, borderWidth: 2, borderStyle: "solid" }}
         />
       )
+      expect(globalThis.ResizeObserver).toBeDefined()
       const observer = new ResizeObserver((entries) => callbacks.push(entries))
       observer.observe(target.current!)
       paint(root)
