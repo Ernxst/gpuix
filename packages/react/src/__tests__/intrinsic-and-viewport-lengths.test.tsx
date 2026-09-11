@@ -485,7 +485,7 @@ describe("intrinsic keyword probe cache (issue #310)", () => {
           data-testid="fit-content-wrap"
           style={{ display: "flex", width: "fit-content", height: "max-content" }}
         >
-          <text style={{ fontSize: 14, lineHeight: 20 }}>{paragraph}</text>
+          <text style={{ fontSize: 14, lineHeight: "20px" }}>{paragraph}</text>
         </div>
       </div>
     )

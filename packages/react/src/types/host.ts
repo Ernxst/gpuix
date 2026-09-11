@@ -37,7 +37,11 @@ export type DimensionValue =
   | `calc(${CalcExpression})`
   | `clamp(${LengthAtom}, ${LengthAtom}, ${LengthAtom})`
 
-/** A line-height is either an absolute length or a unitless font-size multiplier. */
+/**
+ * A bare number or numeric string is a unitless multiplier of the resolved
+ * font size, matching React DOM's `lineHeight`. A `${number}px` string is an
+ * absolute length.
+ */
 export type LineHeightValue = number | `${number}px` | `${number}`
 
 type Booleanish = boolean | "true" | "false"

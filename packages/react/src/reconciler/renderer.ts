@@ -544,7 +544,7 @@ function runtimeErrorOverlay(
           {
             style: {
               fontSize: 13,
-              lineHeight: 20,
+              lineHeight: "20px",
               color: "#fccfcf",
               fontFamily: OVERLAY_MONO,
               whiteSpace: "nowrap",

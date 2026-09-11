@@ -2269,15 +2269,15 @@ does, so the caret you write is the one that survives.
 
 **`fontSize` and `lineHeight`** in `style` size each row. Without `lineHeight`,
 the row uses GPUI's default leading, so a larger `fontSize` grows the box.
-Pass `lineHeight` to set the row in pixels. `minRows` and `maxRows` multiply
-that height. An explicit `height` still overrides both.
+Pass `lineHeight` as `"Npx"` to set the row in pixels. `minRows` and `maxRows`
+multiply that height. An explicit `height` still overrides both.
 
 ```tsx
 <textarea
   value={draft}
   minRows={1}
   maxRows={8}
-  style={{ fontSize: 14, lineHeight: 20 }}
+  style={{ fontSize: 14, lineHeight: "20px" }}
   onChange={(event) => setDraft(event.value ?? '')}
 />
 ```
@@ -3333,7 +3333,7 @@ header. `style` is the surface, so the card look is yours.
 
 `fontFamily`, `fontSize`, `fontWeight`, `lineHeight` and `color` in `style` beat
 the theme. Rows are a fixed height, so `fontSize` alone scales that height by the
-theme's ratio; pass `lineHeight` to set it exactly.
+theme's ratio; pass `lineHeight` as `"Npx"` to set it exactly.
 
 Two things stay owned by the element: lines **never wrap**, and the block is its
 own horizontal scroller. A long line pans on a horizontal wheel inside it, so
@@ -4030,7 +4030,7 @@ a state override such as `hover`:
 
 **Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` and `"auto"` create a native scrollable container with persistent scroll state (`"auto"` is identical to `"scroll"`: no scrollbar gutter is painted either way, so there is nothing to reserve)
 
-**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `fontVariantNumeric` (`"normal"` or a space-separated set of `lining-nums` | `oldstyle-nums`, `proportional-nums` | `tabular-nums`, `diagonal-fractions` | `stacked-fractions`, `ordinal`, `slashed-zero`; inherited), `textDecoration` (`"underline"` | `"line-through"` | `"none"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A numeric `lineHeight` is the legacy pixel form; a unitless string such as `"1.4"` multiplies the resolved font size.
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `fontVariantNumeric` (`"normal"` or a space-separated set of `lining-nums` | `oldstyle-nums`, `proportional-nums` | `tabular-nums`, `diagonal-fractions` | `stacked-fractions`, `ordinal`, `slashed-zero`; inherited), `textDecoration` (`"underline"` | `"line-through"` | `"none"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A bare number or numeric string, such as `1.4` or `"1.4"`, multiplies the resolved font size, matching `lineHeight` in React DOM; `"20px"` is an absolute length.
 
 `textWrap` accepts `"wrap"` and `"nowrap"`. `"balance"` and `"pretty"` are
 recognized but explicitly rejected with a strict-style diagnostic because GPUI
