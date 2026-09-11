@@ -7834,6 +7834,14 @@ struct IntrinsicProbeCacheKey {
     wrapping_width: Option<HeightWrappingSource>,
     interaction_revision: u64,
     image_revision: u64,
+    /// True when some descendant of the probed element is mid-transition on
+    /// a property that can change the probed element's measured size (see
+    /// `StyleTransitionState::active_layout_tween`). Poisoned by design: a
+    /// `true` key never matches, not even against an identical `true` key
+    /// (see `matches`), so a tweening frame always re-probes and the first
+    /// settled frame — `false` against the stored `true` — probes exactly
+    /// once more before the cache goes flat again.
+    descendant_layout_tween: bool,
 }
 
 struct IntrinsicProbeCacheKeyView<'a> {
@@ -7850,11 +7858,14 @@ struct IntrinsicProbeCacheKeyView<'a> {
     wrapping_width: Option<HeightWrappingSource>,
     interaction_revision: u64,
     image_revision: u64,
+    descendant_layout_tween: bool,
 }
 
 impl IntrinsicProbeCacheKey {
     fn matches(&self, candidate: &IntrinsicProbeCacheKeyView<'_>) -> bool {
-        self.subtree_revision == candidate.subtree_revision
+        self.descendant_layout_tween == false
+            && candidate.descendant_layout_tween == false
+            && self.subtree_revision == candidate.subtree_revision
             && self.state == candidate.state
             && self.probe_style == *candidate.probe_style
             && self.needed == candidate.needed
@@ -7905,12 +7916,38 @@ mod intrinsic_probe_cache_key_tests {
             wrapping_width: None,
             interaction_revision: 1,
             image_revision: 1,
+            descendant_layout_tween: false,
         }
     }
 
     #[test]
     fn identical_keys_are_equal() {
         assert_eq!(key(), key());
+    }
+
+    #[test]
+    fn descendant_layout_tween_never_matches_even_itself() {
+        let mut tweening = key();
+        tweening.descendant_layout_tween = true;
+        assert_ne!(tweening, key());
+
+        let candidate = IntrinsicProbeCacheKeyView {
+            subtree_revision: tweening.subtree_revision,
+            state: tweening.state,
+            probe_style: &tweening.probe_style,
+            needed: tweening.needed,
+            viewport_width: tweening.viewport_width,
+            viewport_height: tweening.viewport_height,
+            scale_factor: tweening.scale_factor,
+            rem_size: tweening.rem_size,
+            inherited_font: &tweening.inherited_font,
+            text_transform: tweening.text_transform,
+            wrapping_width: tweening.wrapping_width,
+            interaction_revision: tweening.interaction_revision,
+            image_revision: tweening.image_revision,
+            descendant_layout_tween: true,
+        };
+        assert!(!tweening.matches(&candidate));
     }
 
     #[test]
@@ -7973,6 +8010,10 @@ mod intrinsic_probe_cache_key_tests {
 
         let mut changed = key();
         changed.image_revision += 1;
+        assert_ne!(changed, key());
+
+        let mut changed = key();
+        changed.descendant_layout_tween = !changed.descendant_layout_tween;
         assert_ne!(changed, key());
     }
 }
@@ -10105,6 +10146,34 @@ fn remove_subtree_motion_and_transition_state(ctx: &mut BuildCtx<'_>, root_id: u
     }
 }
 
+/// Whether any descendant of `root_id` (not `root_id` itself) is mid-transition
+/// on a property that can move `root_id`'s measured size — width, height, or
+/// one of their min/max/inset counterparts. A `max-content`/`min-content`
+/// ancestor above such a descendant needs a fresh probe every frame the
+/// descendant is travelling, since the descendant's contribution to the
+/// ancestor's measured size is itself moving.
+fn subtree_has_descendant_layout_tween(ctx: &BuildCtx<'_>, root_id: u64) -> bool {
+    let mut pending: Vec<u64> = ctx
+        .tree
+        .elements
+        .get(&root_id)
+        .map(|element| element.children.iter().copied().collect())
+        .unwrap_or_default();
+    while let Some(id) = pending.pop() {
+        if ctx
+            .transition_states
+            .get(&id)
+            .is_some_and(|state| state.active_layout_tween(ctx.now, ctx.reduce_motion))
+        {
+            return true;
+        }
+        if let Some(element) = ctx.tree.elements.get(&id) {
+            pending.extend(element.children.iter().copied());
+        }
+    }
+    false
+}
+
 fn remove_subtree_hover_state(ctx: &mut BuildCtx<'_>, root_id: u64) {
     let mut pending = vec![root_id];
     while let Some(id) = pending.pop() {
@@ -11105,6 +11174,7 @@ fn resolve_intrinsic_keywords(
         .elements
         .get(&id)
         .map_or(0, |element| element.subtree_revision);
+    let descendant_layout_tween = subtree_has_descendant_layout_tween(ctx, id);
     let candidate_key = IntrinsicProbeCacheKeyView {
         subtree_revision,
         state,
@@ -11119,6 +11189,7 @@ fn resolve_intrinsic_keywords(
         wrapping_width,
         interaction_revision: ctx.interaction_revision,
         image_revision: ctx.img_image_store.revision(),
+        descendant_layout_tween,
     };
     if ctx
         .intrinsic_probe_cache
@@ -11148,6 +11219,7 @@ fn resolve_intrinsic_keywords(
         wrapping_width,
         interaction_revision: candidate_key.interaction_revision,
         image_revision: candidate_key.image_revision,
+        descendant_layout_tween,
     };
 
     let measured_widths = measure_intrinsic_triple(
