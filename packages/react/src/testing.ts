@@ -181,6 +181,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   focusNext(): void
   focusPrevious(): void
   resolveTabKeyDown(defaultPrevented: boolean): void
+  resolveScrollKeyDown(defaultPrevented: boolean): void
   resolveEditorKeyDown(elementId: number, defaultPrevented: boolean): void
   setPointerCapture(elementId: number): void
   releasePointerCapture(elementId: number): void
@@ -1621,6 +1622,12 @@ export class TestRenderer implements NativeRenderer {
     this.native.resolveTabKeyDown(defaultPrevented)
     // Production reports the resulting focus transition on a later frame.
     // Draw it now so the enclosing drain loop observes blur/focus in order.
+    this.native.flush()
+  }
+
+  resolveScrollKeyDown(defaultPrevented: boolean): void {
+    this.native.resolveScrollKeyDown(defaultPrevented)
+    // The native scroll default invalidates the same frame as production.
     this.native.flush()
   }
 

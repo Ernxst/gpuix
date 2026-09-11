@@ -2385,6 +2385,11 @@ phase to keep focus on the current element, matching the browser:
 </div>
 ```
 
+A focused scroll container responds to the arrow, Page, Space, and Home/End
+keys using Chromium's step sizes, and chains each key to the nearest ancestor
+scroll container that can still move. Calling `preventDefault()` in
+`onKeyDown` cancels the keyboard scroll.
+
 ### Keys with nothing focused
 
 A browser targets `document.body` when no element has focus, so a listener on

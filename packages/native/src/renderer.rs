@@ -1470,6 +1470,9 @@ enum UiCommand {
     ResolveTabKeyDown {
         default_prevented: bool,
     },
+    ResolveScrollKeyDown {
+        default_prevented: bool,
+    },
     ResolveEditorKeyDown {
         id: u64,
         default_prevented: bool,
@@ -1831,6 +1834,11 @@ async fn run_ui_commands(
             UiCommand::ResolveTabKeyDown { default_prevented } => {
                 window.update(cx, move |view, window, cx| {
                     view.resolve_tab_key_down(default_prevented, window, cx);
+                })
+            }
+            UiCommand::ResolveScrollKeyDown { default_prevented } => {
+                window.update(cx, move |view, window, cx| {
+                    view.resolve_scroll_key_down(default_prevented, window, cx);
                 })
             }
             UiCommand::ResolveEditorKeyDown {
@@ -4316,6 +4324,27 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Complete the DOM default for a scrollable keydown after React capture
+    /// and bubble handlers have had a chance to call preventDefault().
+    #[napi]
+    pub fn resolve_scroll_key_down(&self, default_prevented: bool) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.resolve_scroll_key_down(default_prevented, window, cx);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ResolveScrollKeyDown { default_prevented });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// Complete the DOM default of an editor's Enter keydown after React capture and
     /// bubble handlers have had a chance to call preventDefault().
     #[napi]
@@ -6167,6 +6196,16 @@ impl WebGpuixRenderer {
         })
     }
 
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = resolveScrollKeyDown)]
+    pub fn resolve_scroll_key_down(
+        &self,
+        default_prevented: bool,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        update_web_view(move |view, window, cx| {
+            view.resolve_scroll_key_down(default_prevented, window, cx);
+        })
+    }
+
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = resolveEditorKeyDown)]
     pub fn resolve_editor_key_down(
         &self,
@@ -6733,6 +6772,11 @@ pub(crate) struct GpuixView {
     /// before it, just like a browser event loop.
     pending_tab_key_down: Option<FocusDirection>,
     queued_tab_key_downs: VecDeque<FocusDirection>,
+    /// Scroll defaults wait for the matching React keydown dispatch. Each
+    /// queued request captures its target before an earlier key's JS handler
+    /// can change focus, just like a browser event loop.
+    pending_scroll_key_down: Option<PendingScrollKeyDown>,
+    queued_scroll_key_downs: VecDeque<PendingScrollKeyDown>,
     /// Active focus/blur subscriptions keyed by element and event type.
     pub(crate) focus_subscriptions: HashMap<(u64, String), gpui::Subscription>,
     /// Registry for custom element types (input, editor, diff, etc.).
@@ -7015,6 +7059,8 @@ impl GpuixView {
             pending_autofocus_reveals: Vec::new(),
             pending_tab_key_down: None,
             queued_tab_key_downs: VecDeque::new(),
+            pending_scroll_key_down: None,
+            queued_scroll_key_downs: VecDeque::new(),
             focus_subscriptions: HashMap::new(),
             custom_registry: CustomElementRegistry::with_defaults(),
             scroll_handles: HashMap::new(),
@@ -8603,6 +8649,225 @@ impl GpuixView {
         });
     }
 
+    fn enqueue_scroll_key_down(
+        &mut self,
+        request: PendingScrollKeyDown,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.queued_scroll_key_downs.push_back(request);
+        self.dispatch_next_scroll_key_down(window, cx);
+    }
+
+    fn dispatch_next_scroll_key_down(
+        &mut self,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.pending_scroll_key_down.is_some() {
+            return;
+        }
+        let Some(request) = self.queued_scroll_key_downs.pop_front() else {
+            return;
+        };
+        if self.event_callback.is_none() {
+            self.apply_keyboard_scroll(request, window, cx);
+            self.dispatch_next_scroll_key_down(window, cx);
+            return;
+        }
+
+        let event_emitted = request.event_emitted;
+        self.pending_scroll_key_down = Some(request.clone());
+        if !event_emitted {
+            emit_event_full(
+                &self.event_callback,
+                request.target_id,
+                "keyDown",
+                |payload| {
+                    payload.key = Some(request.keystroke.key.clone());
+                    payload.key_char = request.keystroke.key_char.clone();
+                    payload.is_held = Some(request.is_held);
+                    payload.modifiers = Some(request.keystroke.modifiers.into());
+                },
+            );
+        }
+    }
+
+    pub(crate) fn resolve_scroll_key_down(
+        &mut self,
+        default_prevented: bool,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(request) = self.pending_scroll_key_down.take() else {
+            return;
+        };
+        if !default_prevented {
+            self.apply_keyboard_scroll(request, window, cx);
+        }
+        self.dispatch_next_scroll_key_down(window, cx);
+    }
+
+    fn handle_scroll_key_down(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(action) = keyboard_scroll_action(&event.keystroke) else {
+            return;
+        };
+        let target_id = self
+            .active_element_id(window)
+            .or_else(|| self.tree.lock().unwrap().root_id);
+        let Some(target_id) = target_id else {
+            return;
+        };
+
+        let tree = self.tree.lock().unwrap();
+        let Some(target) = tree.elements.get(&target_id) else {
+            return;
+        };
+        if matches!(target.element_type.as_str(), "input" | "textarea") {
+            return;
+        }
+        let event_emitted = target.events.contains("keyDown");
+        drop(tree);
+
+        self.enqueue_scroll_key_down(
+            PendingScrollKeyDown {
+                target_id,
+                keystroke: event.keystroke.clone(),
+                is_held: event.is_held,
+                action,
+                event_emitted,
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn apply_keyboard_scroll(
+        &mut self,
+        request: PendingScrollKeyDown,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let tree_arc = self.tree.clone();
+        let tree = tree_arc.lock().unwrap();
+        let mut current = request.target_id;
+
+        loop {
+            if let Some(candidate) = keyboard_scroll_candidate(&tree, current) {
+                if self.apply_keyboard_scroll_candidate(&tree, candidate, request.action) {
+                    cx.notify();
+                    window.refresh();
+                    return;
+                }
+            }
+
+            let Some(ancestor) = nearest_scroll_ancestor(&tree, current) else {
+                return;
+            };
+            current = match ancestor {
+                ScrollAncestor::Overflow(id) | ScrollAncestor::VirtualList(id) => id,
+            };
+        }
+    }
+
+    fn apply_keyboard_scroll_candidate(
+        &mut self,
+        tree: &RetainedTree,
+        candidate: ScrollAncestor,
+        action: KeyboardScrollAction,
+    ) -> bool {
+        match candidate {
+            ScrollAncestor::Overflow(id) => {
+                let axis = action.axis();
+                let Some(element) = tree.elements.get(&id) else {
+                    return false;
+                };
+                let allowed = match axis {
+                    ScrollAxis::Horizontal => scrolls_horizontally(element),
+                    ScrollAxis::Vertical => scrolls_vertically(element),
+                };
+                if !allowed {
+                    return false;
+                }
+                let Some(handle) = self.scroll_handles.get(&id) else {
+                    return false;
+                };
+                let current_offset = handle.offset();
+                let max_offset = handle.max_offset();
+                let viewport = handle.bounds().size;
+                let (current, next) = match axis {
+                    ScrollAxis::Horizontal => {
+                        let current = f32::from(current_offset.x);
+                        let max = f32::from(max_offset.x).max(0.0);
+                        let next = keyboard_scroll_offset(current, max, action, viewport.width);
+                        (current, next)
+                    }
+                    ScrollAxis::Vertical => {
+                        let current = f32::from(current_offset.y);
+                        let max = f32::from(max_offset.y).max(0.0);
+                        let next = keyboard_scroll_offset(current, max, action, viewport.height);
+                        (current, next)
+                    }
+                };
+                if next == current {
+                    return false;
+                }
+                match axis {
+                    ScrollAxis::Horizontal => {
+                        handle.set_offset(gpui::point(gpui::px(next), current_offset.y));
+                    }
+                    ScrollAxis::Vertical => {
+                        handle.set_offset(gpui::point(current_offset.x, gpui::px(next)));
+                    }
+                }
+                true
+            }
+            ScrollAncestor::VirtualList(id) => {
+                if !matches!(action.axis(), ScrollAxis::Vertical) {
+                    return false;
+                }
+                let Some(entry) = self.virtual_lists.get(&id) else {
+                    return false;
+                };
+                let state = &entry.state;
+                let before = f32::from(state.scroll_px_offset_for_scrollbar().y);
+                let viewport = state.viewport_bounds().size.height;
+                match action {
+                    KeyboardScrollAction::Home => state.scroll_to(gpui::ListOffset {
+                        item_ix: 0,
+                        offset_in_item: gpui::px(0.),
+                    }),
+                    KeyboardScrollAction::End => state.scroll_to(gpui::ListOffset {
+                        item_ix: entry.config.logical_count(entry.child_ids.len()),
+                        offset_in_item: gpui::px(0.),
+                    }),
+                    KeyboardScrollAction::Line { .. } | KeyboardScrollAction::Page { .. } => {
+                        let distance = match action {
+                            KeyboardScrollAction::Line { dom_delta, .. } => dom_delta,
+                            KeyboardScrollAction::Page { dom_delta } => {
+                                let step = keyboard_page_step(viewport);
+                                if dom_delta < 0.0 {
+                                    -step
+                                } else {
+                                    step
+                                }
+                            }
+                            _ => unreachable!(),
+                        };
+                        state.scroll_by(gpui::px(distance));
+                    }
+                }
+                let after = f32::from(state.scroll_px_offset_for_scrollbar().y);
+                after != before
+            }
+        }
+    }
+
     pub(crate) fn resolve_tab_key_down(
         &mut self,
         default_prevented: bool,
@@ -9431,13 +9696,14 @@ impl gpui::Render for GpuixView {
                 .on_action(cx.listener(Self::focus_next_action))
                 .on_action(cx.listener(Self::focus_previous_action))
                 .on_key_down(
-                    cx.listener(|view, event: &gpui::KeyDownEvent, window, _cx| {
+                    cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
                         view.dispatch_unfocused_key_event(
                             "keyDown",
                             &event.keystroke,
                             Some(event.is_held),
                             window,
                         );
+                        view.handle_scroll_key_down(event, window, cx);
                     }),
                 )
                 .on_key_up(cx.listener(|view, event: &gpui::KeyUpEvent, window, _cx| {
@@ -11612,6 +11878,168 @@ enum ScrollAncestor {
     VirtualList(u64),
 }
 
+#[derive(Clone)]
+struct PendingScrollKeyDown {
+    target_id: u64,
+    keystroke: gpui::Keystroke,
+    is_held: bool,
+    action: KeyboardScrollAction,
+    event_emitted: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScrollAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Clone, Copy)]
+enum KeyboardScrollAction {
+    Line { axis: ScrollAxis, dom_delta: f32 },
+    Page { dom_delta: f32 },
+    Home,
+    End,
+}
+
+impl KeyboardScrollAction {
+    fn axis(self) -> ScrollAxis {
+        match self {
+            Self::Line { axis, .. } => axis,
+            Self::Page { .. } | Self::Home | Self::End => ScrollAxis::Vertical,
+        }
+    }
+}
+
+fn keyboard_scroll_action(keystroke: &gpui::Keystroke) -> Option<KeyboardScrollAction> {
+    let key = keystroke.key.to_ascii_lowercase();
+    let modifiers = keystroke.modifiers;
+    if modifiers.platform {
+        return None;
+    }
+
+    match key.as_str() {
+        "up" if !modifiers.shift && !modifiers.control && !modifiers.alt => {
+            Some(KeyboardScrollAction::Line {
+                axis: ScrollAxis::Vertical,
+                dom_delta: -40.0,
+            })
+        }
+        "down" if !modifiers.shift && !modifiers.control && !modifiers.alt => {
+            Some(KeyboardScrollAction::Line {
+                axis: ScrollAxis::Vertical,
+                dom_delta: 40.0,
+            })
+        }
+        "left" if !modifiers.shift && !modifiers.control && !modifiers.alt => {
+            Some(KeyboardScrollAction::Line {
+                axis: ScrollAxis::Horizontal,
+                dom_delta: -40.0,
+            })
+        }
+        "right" if !modifiers.shift && !modifiers.control && !modifiers.alt => {
+            Some(KeyboardScrollAction::Line {
+                axis: ScrollAxis::Horizontal,
+                dom_delta: 40.0,
+            })
+        }
+        "up" if modifiers.alt && !modifiers.shift && !modifiers.control => {
+            Some(KeyboardScrollAction::Page { dom_delta: -1.0 })
+        }
+        "down" if modifiers.alt && !modifiers.shift && !modifiers.control => {
+            Some(KeyboardScrollAction::Page { dom_delta: 1.0 })
+        }
+        "pageup" if !modifiers.shift && !modifiers.control && !modifiers.alt => {
+            Some(KeyboardScrollAction::Page { dom_delta: -1.0 })
+        }
+        "pagedown" if !modifiers.shift && !modifiers.control && !modifiers.alt => {
+            Some(KeyboardScrollAction::Page { dom_delta: 1.0 })
+        }
+        "space" if !modifiers.control && !modifiers.alt && !modifiers.platform => {
+            Some(KeyboardScrollAction::Page {
+                dom_delta: if modifiers.shift { -1.0 } else { 1.0 },
+            })
+        }
+        "home" if !modifiers.shift && !modifiers.alt && !modifiers.control => {
+            Some(KeyboardScrollAction::Home)
+        }
+        "end" if !modifiers.shift && !modifiers.alt && !modifiers.control => {
+            Some(KeyboardScrollAction::End)
+        }
+        "home" if modifiers.control && !modifiers.shift && !modifiers.alt => {
+            Some(KeyboardScrollAction::Home)
+        }
+        "end" if modifiers.control && !modifiers.shift && !modifiers.alt => {
+            Some(KeyboardScrollAction::End)
+        }
+        _ => None,
+    }
+}
+
+fn keyboard_page_step(viewport: gpui::Pixels) -> f32 {
+    let length = f32::from(viewport).max(0.0);
+    let overlap = if cfg!(target_os = "macos") {
+        40.0
+    } else {
+        i32::MAX as f32
+    };
+    (0.875 * length).floor().max(length - overlap).max(1.0)
+}
+
+fn keyboard_scroll_offset(
+    current: f32,
+    max: f32,
+    action: KeyboardScrollAction,
+    viewport: gpui::Pixels,
+) -> f32 {
+    let current = current.clamp(-max, 0.0);
+    let target = match action {
+        KeyboardScrollAction::Line { dom_delta, .. } => current - dom_delta,
+        KeyboardScrollAction::Page { dom_delta } => {
+            current - dom_delta * keyboard_page_step(viewport)
+        }
+        KeyboardScrollAction::Home => 0.0,
+        KeyboardScrollAction::End => -max,
+    };
+    target.clamp(-max, 0.0)
+}
+
+fn keyboard_scroll_candidate(tree: &RetainedTree, id: u64) -> Option<ScrollAncestor> {
+    let element = tree.elements.get(&id)?;
+    if element.element_type == "virtual-list" {
+        Some(ScrollAncestor::VirtualList(id))
+    } else if is_overflow_scroller(element) {
+        Some(ScrollAncestor::Overflow(id))
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod keyboard_scroll_tests {
+    use super::*;
+
+    #[test]
+    fn keyboard_line_step_is_forty_pixels() {
+        let action = KeyboardScrollAction::Line {
+            axis: ScrollAxis::Vertical,
+            dom_delta: 40.0,
+        };
+        assert_eq!(
+            keyboard_scroll_offset(0.0, 1000.0, action, gpui::px(200.)),
+            -40.0
+        );
+    }
+
+    #[test]
+    fn keyboard_page_step_uses_the_viewport_and_platform_overlap() {
+        assert_eq!(keyboard_page_step(gpui::px(200.)), 175.0);
+        #[cfg(target_os = "macos")]
+        assert_eq!(keyboard_page_step(gpui::px(1000.)), 960.0);
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(keyboard_page_step(gpui::px(1000.)), 875.0);
+    }
+}
+
 /// How far a reveal scrolls, mirroring the DOM's `scrollIntoView` `block`.
 /// `Start` is the DOM default; `Nearest` is what programmatic focus uses.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -11718,6 +12146,18 @@ fn scrolls_vertically(element: &crate::retained_tree::RetainedElement) -> bool {
     element.style.as_deref().is_some_and(|style| {
         style
             .overflow_y
+            .as_deref()
+            .or(style.overflow.as_deref())
+            .is_some_and(overflow_scrolls)
+    })
+}
+
+/// Whether the element declares a horizontal scroll viewport, resolved with
+/// the axis property taking precedence over the shorthand.
+fn scrolls_horizontally(element: &crate::retained_tree::RetainedElement) -> bool {
+    element.style.as_deref().is_some_and(|style| {
+        style
+            .overflow_x
             .as_deref()
             .or(style.overflow.as_deref())
             .is_some_and(overflow_scrolls)
