@@ -1814,6 +1814,35 @@ impl TestGpuixRenderer {
 
     // ── Scroll API ─────────────────────────────────────────────────────
 
+    /// Start reporting post-paint size changes for one retained element.
+    #[napi]
+    pub fn observe_resize(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, _cx| view.observe_resize(id));
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            Ok(())
+        })?;
+        self.request_invalidate()
+    }
+
+    /// Stop reporting post-paint size changes for one retained element.
+    #[napi]
+    pub fn unobserve_resize(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, _cx| view.unobserve_resize(id));
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            Ok(())
+        })
+    }
+
     /// Set the scroll offset of a scrollable element.
     /// x and y are negative pixel values (scroll down = more negative y).
     /// Call flush() after to apply the offset and re-render.

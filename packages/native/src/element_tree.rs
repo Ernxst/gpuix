@@ -141,6 +141,9 @@ pub struct EventPayload {
     /// Populated for: fileDrop.
     pub paths: Option<Vec<String>>,
 
+    /// Painted border/content sizes for a `resizeObservation` event.
+    pub entries: Option<Vec<ResizeObservationEntry>>,
+
     // ── Modifiers ────────────────────────────────────────────────────
     pub modifiers: Option<EventModifiers>,
 }
@@ -179,9 +182,32 @@ impl Default for EventPayload {
             match_count: None,
             accessibility_action: None,
             paths: None,
+            entries: None,
             modifiers: None,
         }
     }
+}
+
+/// One size in a native resize observation entry.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct ResizeObservationSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+/// The native payload for one observed retained element.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct ResizeObservationEntry {
+    pub element_id: f64,
+    pub border_box: ResizeObservationSize,
+    pub content_box: ResizeObservationSize,
+    pub padding_left: f64,
+    pub padding_top: f64,
+    pub scale_factor: f64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

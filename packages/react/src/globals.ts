@@ -1,8 +1,8 @@
 /**
  * Opt-in `globalThis` shims for code written against the browser DOM.
  *
- * `import "@gpuix/react/globals"` installs exactly five names —
- * `requestAnimationFrame`, `cancelAnimationFrame`, `window`, `scrollTo`, and
+ * `import "@gpuix/react/globals"` installs exactly six names —
+ * `requestAnimationFrame`, `cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, and
  * `navigator.clipboard` — and nothing else. Nobody is required to import
  * this: the root `@gpuix/react` entry installs no global, so a consumer who
  * never touches the DOM never gets one either.
@@ -18,6 +18,7 @@ import {
   cancelNativeAnimationFrame,
   requestNativeAnimationFrame,
 } from "./frame-clock.js"
+import { ResizeObserver } from "./resize-observer.js"
 
 function defineGlobalIfAbsent(name: string, value: unknown): void {
   if (Reflect.has(globalThis, name)) return
@@ -32,6 +33,7 @@ defineGlobalIfAbsent("requestAnimationFrame", requestNativeAnimationFrame)
 defineGlobalIfAbsent("cancelAnimationFrame", cancelNativeAnimationFrame)
 defineGlobalIfAbsent("window", globalThis)
 defineGlobalIfAbsent("scrollTo", () => undefined)
+defineGlobalIfAbsent("ResizeObserver", ResizeObserver)
 
 // `navigator.clipboard` needs its own path rather than `defineGlobalIfAbsent`:
 // Node has had a global `navigator` since v21, so the common case is not "no

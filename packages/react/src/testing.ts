@@ -241,6 +241,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   ): void
   getRetainedElementCount(): number
   getElementBounds(elementId: number): ElementBounds | null
+  observeResize(elementId: number): void
+  unobserveResize(elementId: number): void
   clockPause(): number
   isClockPaused(): boolean
   clockSet(nowMs: number): number
@@ -1526,6 +1528,14 @@ export class TestRenderer implements NativeRenderer {
 
   getElementBounds(elementId: number): ElementBounds | null {
     return this.native.getElementBounds(elementId)
+  }
+
+  observeResize(elementId: number): void {
+    this.native.observeResize(elementId)
+  }
+
+  unobserveResize(elementId: number): void {
+    this.native.unobserveResize(elementId)
   }
 
   clockPause(): number {

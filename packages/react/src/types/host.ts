@@ -1403,6 +1403,10 @@ export interface NativeRenderer {
   // ── Bounds API ─────────────────────────────────────────────────
   /** Last painted box, or null if the node did not paint. */
   getElementBounds?(elementId: number): ElementBounds | null
+  /** Start reporting post-paint size changes for one element. */
+  observeResize?(elementId: number): void
+  /** Stop reporting post-paint size changes for one element. */
+  unobserveResize?(elementId: number): void
 
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll" or

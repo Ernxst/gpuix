@@ -4519,7 +4519,8 @@ real platform and a native clipboard call would hit it.
 
 `import "@gpuix/react/globals"` is an opt-in, side-effect-only entry for code
 that assumes a browser: it installs exactly `requestAnimationFrame`,
-`cancelAnimationFrame`, `window`, `scrollTo`, and `navigator.clipboard` on
+`cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, and
+`navigator.clipboard` on
 `globalThis`, and nothing else — no `document`. Each name is installed only if
 it is not already present, so a real browser, Vitest's `jsdom`/`happy-dom`
 environment, or an earlier import of this module all win over the shim.
@@ -4532,6 +4533,23 @@ above — defined on a pre-existing `navigator` that lacks a `clipboard` of its
 own, or as part of a newly defined `navigator` when none exists at all
 (Node has had a global `navigator` since v21, so the common case on the
 server is the former).
+
+### ResizeObserver
+
+`ResizeObserver` observes GPUIX public instances and delivers entries after a
+frame paints. Each entry has `target`, a content-box `contentRect`, and
+one-element `borderBoxSize`, `contentBoxSize`, and
+`devicePixelContentBoxSize` arrays. The latter uses device pixels at the
+renderer scale factor.
+
+The native renderer reports after paint, so delivery is one frame later than
+the browser's after-layout, before-paint timing. `observe(target)` defaults to
+`content-box`; pass `{ box: "border-box" }` or
+`{ box: "device-pixel-content-box" }` to observe another size.
+The underlying native event uses `elementId: 0` when the tree has no root at
+report time; React uses each entry's `target` instead.
+Typed code can import `ResizeObserver` and its entry and option types as named
+exports from `@gpuix/react`.
 
 ## Testing
 

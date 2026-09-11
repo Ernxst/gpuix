@@ -1378,6 +1378,8 @@ pub struct PromptForPathsOptions {
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum UiCommand {
     Invalidate,
+    ObserveResize(u64),
+    UnobserveResize(u64),
     ObserveCanvasImage {
         observer_id: u64,
         source: crate::custom_elements::img::CanvasImageSource,
@@ -1590,6 +1592,13 @@ async fn run_ui_commands(
     while let Some(command) = commands.next().await {
         let result = match command {
             UiCommand::Invalidate => refresh_ui_window(window, cx),
+            UiCommand::ObserveResize(id) => window.update(cx, move |view, window, _cx| {
+                view.observe_resize(id);
+                window.refresh();
+            }),
+            UiCommand::UnobserveResize(id) => window.update(cx, move |view, _window, _cx| {
+                view.unobserve_resize(id);
+            }),
             UiCommand::ObserveCanvasImage {
                 observer_id,
                 source,
@@ -5031,6 +5040,51 @@ impl GpuixRenderer {
             .map(ElementBounds::from_painted))
     }
 
+    /// Start reporting post-paint size changes for one retained element.
+    #[napi]
+    pub fn observe_resize(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, _cx| {
+            view.observe_resize(id);
+            window.refresh();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ObserveResize(id));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Stop reporting post-paint size changes for one retained element.
+    #[napi]
+    pub fn unobserve_resize(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, _cx| {
+            view.unobserve_resize(id);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::UnobserveResize(id));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     #[napi]
     pub fn get_all_text(&self) -> Vec<String> {
         let tree = self.tree.lock().unwrap();
@@ -6500,6 +6554,25 @@ impl WebGpuixRenderer {
         element_bounds_js(bounds)
     }
 
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = observeResize)]
+    pub fn observe_resize(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_view(move |view, _window, _cx| {
+            view.observe_resize(id);
+        })?;
+        notify_web();
+        Ok(())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = unobserveResize)]
+    pub fn unobserve_resize(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_view(move |view, _window, _cx| {
+            view.unobserve_resize(id);
+        })?;
+        Ok(())
+    }
+
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getAllText)]
     pub fn get_all_text(&self) -> wasm_bindgen::JsValue {
         let tree = self.tree.lock().unwrap();
@@ -6853,6 +6926,14 @@ pub(crate) struct GpuixView {
     /// test snapshot. The accessibility snapshot remains the semantic source;
     /// this map contributes identity only.
     pub(crate) accessibility_host_ids: Option<HashMap<u64, u64>>,
+    /// Observed element ids and their last reported border/content sizes.
+    observed_resizes: HashMap<
+        u64,
+        (
+            crate::automation::ResizeObservationSize,
+            crate::automation::ResizeObservationSize,
+        ),
+    >,
 }
 
 /// The interaction state GPUI has actually delivered for one retained element.
@@ -7094,6 +7175,113 @@ impl GpuixView {
             clock: crate::automation::AutomationClock::new(),
             highlights: HashMap::new(),
             accessibility_host_ids: None,
+            observed_resizes: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn observe_resize(&mut self, id: u64) {
+        self.observed_resizes.insert(
+            id,
+            (
+                crate::automation::ResizeObservationSize::UNREPORTED,
+                crate::automation::ResizeObservationSize::UNREPORTED,
+            ),
+        );
+    }
+
+    pub(crate) fn unobserve_resize(&mut self, id: u64) {
+        self.observed_resizes.remove(&id);
+    }
+
+    fn emit_resize_observations(&mut self, scale_factor: f64) {
+        if self.observed_resizes.is_empty() {
+            return;
+        }
+
+        let tree = self.tree.lock().unwrap();
+        let root_id = tree.root_id.unwrap_or(0);
+        let mut entries = Vec::new();
+        let mut removed = Vec::new();
+        for (&id, (last_border, last_content)) in &mut self.observed_resizes {
+            let element = tree.elements.get(&id);
+            let was_removed = element.is_none();
+            if was_removed {
+                removed.push(id);
+            }
+            let border_bounds = crate::automation::get_bounds(id).unwrap_or_else(|| {
+                let zero = crate::automation::ResizeObservationSize::ZERO;
+                crate::automation::ElementBounds {
+                    x: 0.0,
+                    y: 0.0,
+                    width: zero.width,
+                    height: zero.height,
+                }
+            });
+            let insets = if was_removed {
+                crate::automation::BoxInsets::default()
+            } else {
+                crate::automation::get_box_insets(id).unwrap_or_default()
+            };
+            let padding_left = insets.padding_left;
+            let padding_right = insets.padding_right;
+            let padding_top = insets.padding_top;
+            let padding_bottom = insets.padding_bottom;
+            let border_left = insets.border_left;
+            let border_right = insets.border_right;
+            let border_top = insets.border_top;
+            let border_bottom = insets.border_bottom;
+            let content = crate::automation::ResizeObservationSize {
+                width: (border_bounds.width
+                    - padding_left
+                    - padding_right
+                    - border_left
+                    - border_right)
+                    .max(0.0),
+                height: (border_bounds.height
+                    - padding_top
+                    - padding_bottom
+                    - border_top
+                    - border_bottom)
+                    .max(0.0),
+            };
+            let border = crate::automation::ResizeObservationSize {
+                width: border_bounds.width,
+                height: border_bounds.height,
+            };
+            if !was_removed && *last_border == border && *last_content == content {
+                continue;
+            }
+            *last_border = border;
+            *last_content = content;
+            entries.push(crate::element_tree::ResizeObservationEntry {
+                element_id: id as f64,
+                border_box: crate::element_tree::ResizeObservationSize {
+                    width: border.width,
+                    height: border.height,
+                },
+                content_box: crate::element_tree::ResizeObservationSize {
+                    width: content.width,
+                    height: content.height,
+                },
+                padding_left,
+                padding_top,
+                scale_factor,
+            });
+        }
+        for id in removed {
+            self.observed_resizes.remove(&id);
+        }
+        drop(tree);
+
+        if !entries.is_empty() {
+            emit_event_full(
+                &self.event_callback,
+                root_id,
+                "resizeObservation",
+                |payload| {
+                    payload.entries = Some(entries);
+                },
+            );
         }
     }
 
@@ -9699,6 +9887,7 @@ impl gpui::Render for GpuixView {
             use gpui::prelude::*;
             let drag_move_view = cx.weak_entity();
             let drag_end_view = drag_move_view.clone();
+            let resize_view = drag_move_view.clone();
             let root = gpui::div()
                 .size_full()
                 .text_color(gpui::rgba(0xe2e2e2ff))
@@ -9738,6 +9927,16 @@ impl gpui::Render for GpuixView {
                     self.pointer_router.clone(),
                 ))
                 .child(result)
+                .child(crate::automation::resize_observation_frame(
+                    move |window, app| {
+                        let scale_factor = f64::from(window.scale_factor());
+                        resize_view
+                            .update(app, |view, _cx| {
+                                view.emit_resize_observations(scale_factor);
+                            })
+                            .ok();
+                    },
+                ))
                 .into_any_element()
         };
 
@@ -10301,6 +10500,10 @@ fn build_element_with_parent_layout(
             .map(|group| group.name.clone());
     }
     let style = resolved_style.as_ref();
+    let box_insets = style.map(|style| {
+        let effective = effective_intrinsic_state_style(style, probe_state);
+        box_insets_for_style(&effective)
+    });
     let hover_group = style.and_then(|style| style.hover_group.as_deref());
     let current_color = resolved_current_color(
         style,
@@ -10347,11 +10550,11 @@ fn build_element_with_parent_layout(
         // listener, and then silently did nothing.
         "div" | "text" => {
             ctx.custom_registry.destroy(id);
-            build_host_container(element, style, ctx, window, cx)
+            build_host_container(element, style, box_insets, ctx, window, cx)
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
-            build_virtual_list(element, style, hover_within, ctx, window, cx)
+            build_virtual_list(element, style, box_insets, hover_within, ctx, window, cx)
         }
 
         // Polymorphic dispatch for all custom elements.
@@ -10364,7 +10567,23 @@ fn build_element_with_parent_layout(
                 .map(|child_id| build_element(child_id, ctx, window, cx))
                 .collect();
             let inherited = ctx.inherited.clone();
-            let paint_bounds_listener = focus_paint_bounds_listener(id, ctx);
+            let paint_bounds_listener = {
+                let listener = focus_paint_bounds_listener(id, ctx);
+                match box_insets {
+                    Some(insets) => Some(std::rc::Rc::new(
+                        move |
+                            bounds: gpui::Bounds<gpui::Pixels>,
+                            window: &mut gpui::Window,
+                            cx: &mut gpui::App| {
+                        crate::automation::record_box_insets(id, insets);
+                        if let Some(listener) = &listener {
+                            listener(bounds, window, cx);
+                        }
+                        },
+                    ) as crate::automation::PaintBoundsListener),
+                    None => listener,
+                }
+            };
             let render_ctx = CustomRenderContext {
                 id,
                 retained_element: element,
@@ -11201,6 +11420,34 @@ fn effective_intrinsic_state_style(style: &StyleDesc, state: InteractionProbeSta
     effective
 }
 
+fn box_insets_for_style(style: &StyleDesc) -> crate::automation::BoxInsets {
+    let side =
+        |longhand: fn(&StyleDesc) -> Option<f64>, shorthand: fn(&StyleDesc) -> Option<f64>| {
+            longhand(style).or_else(|| shorthand(style)).unwrap_or(0.0)
+        };
+    let borders_suppressed = style
+        .border_style
+        .as_deref()
+        .is_some_and(|style| matches!(style, "none" | "hidden"));
+    let border = |longhand: fn(&StyleDesc) -> Option<f64>| {
+        if borders_suppressed {
+            0.0
+        } else {
+            side(longhand, |style| style.border_width)
+        }
+    };
+    crate::automation::BoxInsets {
+        padding_left: side(|style| style.padding_left, |style| style.padding),
+        padding_top: side(|style| style.padding_top, |style| style.padding),
+        padding_right: side(|style| style.padding_right, |style| style.padding),
+        padding_bottom: side(|style| style.padding_bottom, |style| style.padding),
+        border_left: border(|style| style.border_left_width),
+        border_top: border(|style| style.border_top_width),
+        border_right: border(|style| style.border_right_width),
+        border_bottom: border(|style| style.border_bottom_width),
+    }
+}
+
 fn intrinsic_wrapping_source(id: u64, style: &StyleDesc) -> HeightWrappingSource {
     match style.width {
         Some(crate::style::DimensionValue::Pixels(_)) => HeightWrappingSource::Definite,
@@ -11642,6 +11889,7 @@ fn default_flex_none_for_parent_layout(style: &mut StyleDesc) {
 fn build_virtual_list(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
+    box_insets: Option<crate::automation::BoxInsets>,
     hover_within: bool,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
@@ -11827,7 +12075,13 @@ fn build_virtual_list(
         ctx.inherited.accessibility_hidden,
         crate::accessibility::AccessibleText::default(),
     );
-    let list = crate::automation::track_own_bounds(list, element.id, None, None);
+    let list = crate::automation::track_own_bounds_with_insets(
+        list,
+        element.id,
+        None,
+        None,
+        box_insets,
+    );
     if let Some(group) = style.and_then(|style| style.hover_group.as_deref()) {
         // `gpui::List` is Styled but has no interactive identity. A transparent
         // stateful surface gives the retained virtual-list node the same group
@@ -12929,6 +13183,7 @@ fn scroll_position_tracker(
 pub(crate) fn build_host_container(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
+    box_insets: Option<crate::automation::BoxInsets>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -13051,11 +13306,12 @@ pub(crate) fn build_host_container(
         el = el.relative();
     }
     let paint_bounds_listener = focus_paint_bounds_listener(element.id, ctx);
-    el = crate::automation::track_own_bounds(
+    el = crate::automation::track_own_bounds_with_insets(
         el,
         element.id,
         selection_start_flag(style),
         paint_bounds_listener,
+        box_insets,
     );
     if let Some(scroll_tracker) = scroll_tracker {
         el = el.child(scroll_tracker);

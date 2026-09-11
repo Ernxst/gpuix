@@ -1,4 +1,11 @@
 // GPUIX React - React bindings for GPUI
+export { ResizeObserver, ResizeObserverEntry } from "./resize-observer.js"
+export type {
+  ResizeObserverBoxOptions,
+  ResizeObserverCallback,
+  ResizeObserverOptions,
+} from "./resize-observer.js"
+
 /**
  * Native ARIA roles translated to AccessKit.
  *
