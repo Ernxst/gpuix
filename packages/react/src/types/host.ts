@@ -1347,6 +1347,8 @@ export interface NativeRenderer {
   focusPrevious?(): void
   /** @internal Complete Tab's default focus traversal after synthetic dispatch. */
   resolveTabKeyDown?(defaultPrevented: boolean): void
+  /** @internal Complete a scroll key's default after synthetic dispatch. */
+  resolveScrollKeyDown?(defaultPrevented: boolean): void
   /** @internal Complete an editor's Enter default after synthetic dispatch. */
   resolveEditorKeyDown?(elementId: number, defaultPrevented: boolean): void
   /** The focused host element id, analogous to `document.activeElement`, or null. */

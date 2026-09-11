@@ -1391,6 +1391,21 @@ impl TestGpuixRenderer {
     }
 
     #[napi]
+    pub fn resolve_scroll_key_down(&self, default_prevented: bool) -> Result<()> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.resolve_scroll_key_down(default_prevented, window, cx);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
     pub fn resolve_editor_key_down(&self, element_id: f64, default_prevented: bool) -> Result<()> {
         let id = to_element_id(element_id)?;
         with_test_state(self.state_id, |cx, window, view| {

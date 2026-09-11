@@ -322,6 +322,9 @@ function finishKeyboardDispatch(
   result: GpuixEventDispatchResult
 ): GpuixEventDispatchResult {
   rememberKeyboardPrevention(container, payload, result.defaultPrevented)
+  if (payload.eventType === "keyDown") {
+    container.native.resolveScrollKeyDown?.(result.defaultPrevented)
+  }
   if (payload.eventType === "keyDown" && activationKey(payload) === "tab") {
     const defaultPrevented = container.preventedKeyboardActivations.delete(payload.elementId)
     container.native.resolveTabKeyDown?.(defaultPrevented)
@@ -413,6 +416,9 @@ function dispatchGpuixEvent(
 ): GpuixEventDispatchResult {
   const container = eventRegistrySlot().containersByRenderer.get(renderer)
   if (!container) {
+    if (payload.eventType === "keyDown") {
+      renderer.resolveScrollKeyDown?.(false)
+    }
     if (payload.eventType === "keyDown" && activationKey(payload) === "tab") {
       renderer.resolveTabKeyDown?.(false)
     }
@@ -493,8 +499,7 @@ function dispatchGpuixEvent(
   } finally {
     if (
       !keyboardDispatchFinished &&
-      payload.eventType === "keyDown" &&
-      (activationKey(payload) === "tab" || payload.key?.toLowerCase() === "enter")
+      payload.eventType === "keyDown"
     ) {
       finishDispatch({
         defaultPrevented: event.defaultPrevented,
