@@ -8728,11 +8728,25 @@ impl GpuixView {
         let Some(target) = tree.elements.get(&target_id) else {
             return;
         };
-        if matches!(target.element_type.as_str(), "input" | "textarea") {
-            return;
-        }
+        let is_editor = matches!(target.element_type.as_str(), "input" | "textarea");
         let event_emitted = target.events.contains("keyDown");
         drop(tree);
+
+        // Editors own caret movement, but the keydown still follows the DOM
+        // dispatch path so an ancestor can observe or cancel it. Their custom
+        // element emits when the editor itself listens; otherwise the scroll
+        // path supplies the focused-target event here.
+        if is_editor {
+            if !event_emitted {
+                emit_event_full(&self.event_callback, target_id, "keyDown", |payload| {
+                    payload.key = Some(event.keystroke.key.clone());
+                    payload.key_char = event.keystroke.key_char.clone();
+                    payload.is_held = Some(event.is_held);
+                    payload.modifiers = Some(event.keystroke.modifiers.into());
+                });
+            }
+            return;
+        }
 
         self.enqueue_scroll_key_down(
             PendingScrollKeyDown {
@@ -8859,7 +8873,12 @@ impl GpuixView {
                             }
                             _ => unreachable!(),
                         };
-                        state.scroll_by(gpui::px(distance));
+                        let max = f32::from(state.max_offset_for_scrollbar().y).max(0.0);
+                        let target = (before - distance).clamp(-max, 0.0);
+                        if target == before {
+                            return false;
+                        }
+                        state.set_offset_from_scrollbar(gpui::point(gpui::px(0.), gpui::px(target)));
                     }
                 }
                 let after = f32::from(state.scroll_px_offset_for_scrollbar().y);
@@ -13159,7 +13178,20 @@ pub(crate) fn build_host_container(
             // Requires .focusable() (set above). Element must be focused
             // (clicked or tabbed to) for these to fire.
             "keyDown" => {
-                el = el.on_key_down(move |key_event, _window, _cx| {
+                let focus_handle = ctx.focus_handles.get(&id).cloned();
+                el = el.on_key_down(move |key_event, window, _cx| {
+                    // GPUI invokes every key listener on the focus path. A
+                    // classified scroll key is emitted by its focused target
+                    // (or by the scroll path when the target has no listener),
+                    // so ancestor native listeners must not create a second,
+                    // ancestor-targeted event.
+                    if keyboard_scroll_action(&key_event.keystroke).is_some()
+                        && !focus_handle
+                            .as_ref()
+                            .is_some_and(|handle| handle.is_focused(window))
+                    {
+                        return;
+                    }
                     emit_event_full(&callback, id, "keyDown", |p| {
                         p.key = Some(key_event.keystroke.key.clone());
                         p.key_char = key_event.keystroke.key_char.clone();
