@@ -183,10 +183,23 @@ impl TransitionValue {
     }
 
     fn interpolate(&self, target: &Self, progress: f64) -> Self {
-        if progress == 0.0 {
+        let interpolable = matches!(
+            (self, target),
+            (Self::Number(_), Self::Number(_))
+                | (
+                    Self::Dimension(DimensionValue::Pixels(_)),
+                    Self::Dimension(DimensionValue::Pixels(_))
+                )
+                | (
+                    Self::Dimension(DimensionValue::Percentage(_)),
+                    Self::Dimension(DimensionValue::Percentage(_))
+                )
+                | (Self::Color(_), Self::Color(_))
+        );
+        if interpolable && progress == 0.0 {
             return self.clone();
         }
-        if progress == 1.0 {
+        if interpolable && progress == 1.0 {
             return target.clone();
         }
         let number = |from: f64, to: f64| from + (to - from) * progress;
@@ -2091,6 +2104,19 @@ mod tests {
     }
 
     #[test]
+    fn transition_value_endpoint_exactness_respects_pair_compatibility() {
+        let from = TransitionValue::Number(0.1);
+        let target = TransitionValue::Number(0.3);
+        assert_eq!(from.interpolate(&target, 0.0), from);
+        assert_eq!(from.interpolate(&target, 1.0), target);
+
+        let from = TransitionValue::Dimension(DimensionValue::Pixels(0.0));
+        let target = TransitionValue::Dimension(DimensionValue::Auto);
+        assert_eq!(from.interpolate(&target, 0.0), target);
+        assert_eq!(from.interpolate(&target, 1.0), target);
+    }
+
+    #[test]
     fn style_transition_uses_state_precedence_and_reduced_motion() {
         let now = Instant::now();
         let style = style(serde_json::json!({
@@ -3038,6 +3064,7 @@ mod tests {
             sampled_width(&stepped, started + Duration::from_millis(50)),
             Some(DimensionValue::Auto)
         );
+        assert_eq!(sampled_width(&stepped, started), Some(DimensionValue::Auto));
     }
 
     #[test]
@@ -3450,6 +3477,7 @@ mod tests {
             false,
             stretched,
         );
+        assert_eq!(sampled_width(&state, started), Some(DimensionValue::Auto));
         assert_eq!(
             sampled_width(&state, started + Duration::from_millis(50)),
             Some(DimensionValue::Auto)
