@@ -130,6 +130,16 @@ pub fn bounds_frame_reset() -> impl IntoElement {
     .h(px(0.0))
 }
 
+/// Run a callback at the end of paint without adding a visible element.
+pub fn resize_observation_frame(
+    callback: impl 'static + FnOnce(&mut Window, &mut App),
+) -> impl IntoElement {
+    canvas(|_, _, _| (), move |_, _, window, cx| callback(window, cx))
+        .absolute()
+        .w(px(0.0))
+        .h(px(0.0))
+}
+
 /// Record this element's own painted box, with no extra element in the tree.
 ///
 /// This is the border box, like `getBoundingClientRect()`. An earlier version

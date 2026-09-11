@@ -7196,7 +7196,7 @@ impl GpuixView {
         }
 
         let tree = self.tree.lock().unwrap();
-        let root_id = tree.root_id;
+        let root_id = tree.root_id.unwrap_or(0);
         let mut entries = Vec::new();
         let mut removed = Vec::new();
         for (&id, (last_border, last_content)) in &mut self.observed_resizes {
@@ -7294,7 +7294,7 @@ impl GpuixView {
         }
         drop(tree);
 
-        if let (Some(root_id), false) = (root_id, entries.is_empty()) {
+        if !entries.is_empty() {
             emit_event_full(
                 &self.event_callback,
                 root_id,
@@ -9928,15 +9928,7 @@ impl gpui::Render for GpuixView {
                 )
                 .on_key_up(cx.listener(|view, event: &gpui::KeyUpEvent, window, _cx| {
                     view.dispatch_unfocused_key_event("keyUp", &event.keystroke, None, window);
-                }))
-                .on_painted(move |_, window, app| {
-                    let scale_factor = f64::from(window.scale_factor());
-                    resize_view
-                        .update(app, |view, _cx| {
-                            view.emit_resize_observations(scale_factor);
-                        })
-                        .ok();
-                });
+                }));
             with_window_menu_actions(root)
                 .child(selection_frame_reset(
                     self.selection.clone(),
@@ -9956,6 +9948,16 @@ impl gpui::Render for GpuixView {
                     self.pointer_router.clone(),
                 ))
                 .child(result)
+                .child(crate::automation::resize_observation_frame(
+                    move |window, app| {
+                        let scale_factor = f64::from(window.scale_factor());
+                        resize_view
+                            .update(app, |view, _cx| {
+                                view.emit_resize_observations(scale_factor);
+                            })
+                            .ok();
+                    },
+                ))
                 .into_any_element()
         };
 

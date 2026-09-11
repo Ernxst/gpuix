@@ -59,19 +59,19 @@ describeNative("ResizeObserver", () => {
     const root = createTestRoot()
     const target = React.createRef<PublicInstance>()
     const callbacks: ResizeObserverEntry[][] = []
-    let setWide!: (wide: boolean) => void
+    let setTall!: (tall: boolean) => void
     let observedRenders = 0
 
     function ResizedChild() {
-      const [wide, updateWide] = useState(false)
-      setWide = updateWide
-      return <div style={{ width: wide ? 220 : 100, height: 20 }} />
+      const [tall, updateTall] = useState(false)
+      setTall = updateTall
+      return <div style={{ width: 100, height: tall ? 60 : 20 }} />
     }
 
     function Observed() {
       observedRenders += 1
       return (
-        <div ref={target} style={{ display: "flex", height: 20 }}>
+        <div ref={target} style={{ display: "flex", width: 300 }}>
           <ResizedChild />
         </div>
       )
@@ -84,12 +84,14 @@ describeNative("ResizeObserver", () => {
       paint(root)
       expect(callbacks).toHaveLength(1)
 
-      act(() => setWide(true))
+      act(() => setTall(true))
       paint(root)
       expect(callbacks).toHaveLength(2)
-      expect(callbacks[1]![0]!.borderBoxSize[0]!.inlineSize).toBe(220)
+      expect(callbacks[1]![0]!.borderBoxSize[0]!.blockSize).toBe(60)
       expect(observedRenders).toBe(1)
 
+      paint(root)
+      expect(callbacks).toHaveLength(2)
       paint(root)
       expect(callbacks).toHaveLength(2)
     } finally {

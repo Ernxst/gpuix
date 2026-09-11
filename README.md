@@ -4546,6 +4546,8 @@ The native renderer reports after paint, so delivery is one frame later than
 the browser's after-layout, before-paint timing. `observe(target)` defaults to
 `content-box`; pass `{ box: "border-box" }` or
 `{ box: "device-pixel-content-box" }` to observe another size.
+The underlying native event uses `elementId: 0` when the tree has no root at
+report time; React uses each entry's `target` instead.
 
 ## Testing
 
