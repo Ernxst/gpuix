@@ -4345,7 +4345,7 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
-    /// Complete the DOM default of an editor's Enter keydown after React capture and
+    /// Complete a deferred keydown default for an editor after React capture and
     /// bubble handlers have had a chance to call preventDefault().
     #[napi]
     pub fn resolve_editor_key_down(&self, element_id: f64, default_prevented: bool) -> Result<()> {
@@ -8733,7 +8733,9 @@ impl GpuixView {
         drop(tree);
 
         if is_editor {
-            // Editor action bindings consume these keys before raw listeners reach here.
+            // A focused editor never enters the ancestor scroll-default chain:
+            // its navigation keys resolve through the editor's own deferred
+            // default, and its page and space keys are simply not scrolled.
             return;
         }
 

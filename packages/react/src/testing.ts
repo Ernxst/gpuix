@@ -1631,6 +1631,7 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
+  /** Complete an editor's deferred keydown default after synthetic dispatch. */
   resolveEditorKeyDown(elementId: number, defaultPrevented: boolean): void {
     this.native.resolveEditorKeyDown(elementId, defaultPrevented)
     this.native.flush()

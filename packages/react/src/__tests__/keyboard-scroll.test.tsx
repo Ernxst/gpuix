@@ -21,6 +21,7 @@ describeNative("keyboard scrolling", () => {
     innerTabIndex?: number
     innerOnKeyDown?: (event: GpuixKeyboardEvent) => void
     outerOnKeyDown?: (event: GpuixKeyboardEvent) => void
+    textareaOnKeyDown?: (event: GpuixKeyboardEvent) => void
     childTabIndex?: number
     textarea?: boolean
   } = {}) {
@@ -54,6 +55,7 @@ describeNative("keyboard scrolling", () => {
               <textarea
                 ref={textareaRef}
                 data-testid="textarea"
+                onKeyDown={options.textareaOnKeyDown}
                 style={{ width: 280, height: 40, flexShrink: 0 }}
               />
             ) : (
@@ -196,7 +198,7 @@ describeNative("keyboard scrolling", () => {
 
   it("does not scroll an input or textarea editor", async () => {
     const calls: GpuixKeyboardEvent[] = []
-    const { inner } = fixture({
+    const { inner, textareaRef } = fixture({
       textarea: true,
       outerOnKeyDown: (event) => calls.push(event),
     })
@@ -205,9 +207,22 @@ describeNative("keyboard scrolling", () => {
 
     testRoot.renderer.simulateKeystrokes("down")
     expect(scrollTop(inner.id)).toBe(0)
-    // Editor action bindings consume the key before raw listeners; editor
-    // keydown delivery is tracked separately.
-    expect(calls).toHaveLength(0)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.target.id).toBe(textareaRef.current!.id)
+
+    const textareaKeydowns: string[] = []
+    testRoot.render(null)
+    const pageDown = fixture({
+      textarea: true,
+      textareaOnKeyDown: (event) => textareaKeydowns.push(event.key),
+    })
+    await focusFirstTabStop()
+    const beforePageDown = scrollTop(pageDown.inner.id)
+
+    testRoot.renderer.simulateKeystrokes("pagedown")
+
+    expect(textareaKeydowns).toEqual(["PageDown"])
+    expect(scrollTop(pageDown.inner.id)).toBe(beforePageDown)
   })
 
   it("chains past a virtual list already at its bottom", () => {
