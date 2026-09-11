@@ -8732,19 +8732,8 @@ impl GpuixView {
         let event_emitted = target.events.contains("keyDown");
         drop(tree);
 
-        // Editors own caret movement, but the keydown still follows the DOM
-        // dispatch path so an ancestor can observe or cancel it. Their custom
-        // element emits when the editor itself listens; otherwise the scroll
-        // path supplies the focused-target event here.
         if is_editor {
-            if !event_emitted {
-                emit_event_full(&self.event_callback, target_id, "keyDown", |payload| {
-                    payload.key = Some(event.keystroke.key.clone());
-                    payload.key_char = event.keystroke.key_char.clone();
-                    payload.is_held = Some(event.is_held);
-                    payload.modifiers = Some(event.keystroke.modifiers.into());
-                });
-            }
+            // Editor action bindings consume these keys before raw listeners reach here.
             return;
         }
 
