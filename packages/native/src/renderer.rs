@@ -8733,8 +8733,9 @@ impl GpuixView {
         drop(tree);
 
         if is_editor {
-            // Editor keydowns are handled by the editor's own deferred default;
-            // never send them through the ancestor scroll chain.
+            // A focused editor never enters the ancestor scroll-default chain:
+            // its navigation keys resolve through the editor's own deferred
+            // default, and its page and space keys are simply not scrolled.
             return;
         }
 
