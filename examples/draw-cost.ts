@@ -249,6 +249,86 @@ function VirtualTablePage({ rows }: { rows: number }): React.ReactElement {
   )
 }
 
+// Structurally identical to `Row`, differing only in that every node declares
+// state styles. Real app rows do: a row hover, plus hover and focus-visible on
+// each link or button inside. Each refinement is another `apply_styles` call
+// for that node, so this is the pessimistic end of what style derivation costs.
+function makeRefinementRow(
+  refinement: Record<string, unknown>,
+): ({ index }: { index: number }) => React.ReactElement {
+  return function RefinedRow({ index }: { index: number }): React.ReactElement {
+    const cell = (color: string) => ({ color, fontSize: 12, ...refinement })
+    return React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: 8,
+          borderBottomWidth: 1,
+          borderColor: "#26262b",
+          backgroundColor: index % 2 === 0 ? "#111114" : "#141418",
+          ...refinement,
+        },
+      },
+      React.createElement("div", {
+        style: {
+          width: 10,
+          height: 10,
+          borderRadius: 5,
+          backgroundColor: index % 3 === 0 ? "#4ade80" : "#f59e0b",
+          ...refinement,
+        },
+      }),
+      React.createElement("text", { style: cell("#e5e5e5") }, `Row ${index}`),
+      React.createElement("text", { style: cell("#a1a1aa") }, `${(index * 37) % 1000} events`),
+      React.createElement(
+        "text",
+        { style: cell("#71717a") },
+        index % 2 === 0 ? "healthy" : "degraded",
+      ),
+    )
+  }
+}
+
+function RefinementRow({ index }: { index: number }): React.ReactElement {
+  const cell = (color: string) => ({
+    color,
+    fontSize: 12,
+    hover: { color: "#ffffff" },
+    focusVisible: { outlineColor: "#89b4fa" },
+  })
+  return React.createElement(
+    "div",
+    {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: 8,
+        borderBottomWidth: 1,
+        borderColor: "#26262b",
+        backgroundColor: index % 2 === 0 ? "#111114" : "#141418",
+        hover: { backgroundColor: "#1d1d22" },
+      },
+    },
+    React.createElement("div", {
+      style: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: index % 3 === 0 ? "#4ade80" : "#f59e0b",
+        hover: { backgroundColor: "#a3e635" },
+        active: { opacity: 0.6 },
+      },
+    }),
+    React.createElement("text", { style: cell("#e5e5e5") }, `Row ${index}`),
+    React.createElement("text", { style: cell("#a1a1aa") }, `${(index * 37) % 1000} events`),
+    React.createElement("text", { style: cell("#71717a") }, index % 2 === 0 ? "healthy" : "degraded"),
+  )
+}
+
 const FIXTURES = {
   table: TablePage,
   "virtual-table": VirtualTablePage,
@@ -320,6 +400,12 @@ const variants: Array<[string, ({ index }: { index: number }) => React.ReactElem
   ["quads", QuadRow],
   ["text", TextRow],
   ["full", Row],
+  ["refinements", RefinementRow],
+  // Which refinement carries the cost: focus styles force a native focus
+  // handle per node, hover and active do not.
+  ["hover-only", makeRefinementRow({ hover: { backgroundColor: "#1d1d22" } })],
+  ["focus-only", makeRefinementRow({ focusVisible: { outlineColor: "#89b4fa" } })],
+  ["active-only", makeRefinementRow({ active: { opacity: 0.6 } })],
 ]
 const variantResults: Array<{
   variant: string
@@ -328,6 +414,8 @@ const variantResults: Array<{
   usPerElement: number
   buildMsPerDraw: number
   buildSharePercent: number
+  applyStylesMsPerDraw: number
+  applyStylesSharePercent: number
 }> = []
 
 for (const [variant, RowComponent] of variants) {
@@ -345,6 +433,7 @@ for (const [variant, RowComponent] of variants) {
 
   for (let index = 0; index < warmupDraws; index += 1) renderer.flush()
   renderer.takeRenderBuildMicros()
+  renderer.takeApplyStylesMicros()
 
   const samples: number[] = []
   for (let index = 0; index < measuredDraws; index += 1) {
@@ -353,6 +442,7 @@ for (const [variant, RowComponent] of variants) {
     samples.push(performance.now() - started)
   }
   const buildMsPerDraw = renderer.takeRenderBuildMicros() / 1_000 / measuredDraws
+  const applyStylesMsPerDraw = renderer.takeApplyStylesMicros() / 1_000 / measuredDraws
 
   const sorted = [...samples].sort((a, b) => a - b)
   const elements = renderer.getRetainedElementCount()
@@ -364,6 +454,8 @@ for (const [variant, RowComponent] of variants) {
     usPerElement: round((drawP50Ms * 1_000) / Math.max(1, elements), 2),
     buildMsPerDraw: round(buildMsPerDraw),
     buildSharePercent: round((buildMsPerDraw / Math.max(0.001, drawP50Ms)) * 100, 1),
+    applyStylesMsPerDraw: round(applyStylesMsPerDraw),
+    applyStylesSharePercent: round((applyStylesMsPerDraw / Math.max(0.001, drawP50Ms)) * 100, 1),
   })
 
   const disposable = testRoot as { unmount?: () => void; cleanup?: () => void }
