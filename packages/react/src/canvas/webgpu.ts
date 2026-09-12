@@ -12,7 +12,11 @@ export class GPUTextureView {
 }
 
 export class GPUTexture {
-  constructor(readonly context: GPUCanvasContext, readonly generation: number) {}
+  constructor(
+    readonly context: GPUCanvasContext,
+    readonly device: GPUDevice,
+    readonly generation: number
+  ) {}
   createView(): GPUTextureView {
     this.context.assertCurrent(this.generation)
     return new GPUTextureView(this, this.generation)
@@ -32,6 +36,9 @@ export class GPUCommandEncoder {
     if (this.finished) throw new DOMException("The command encoder is already finished", "InvalidStateError")
     const attachment = descriptor.colorAttachments[0]
     if (!attachment) throw new TypeError("A color attachment is required")
+    if (attachment.view.texture.device !== this.device) {
+      throw new TypeError("Texture view belongs to a different device")
+    }
     attachment.view.texture.context.assertCurrent(attachment.view.generation)
     this.view = attachment.view
     this.color = attachment.clearValue ?? { a: 1 }
@@ -60,6 +67,7 @@ export class GPUQueue {
       if (buffer.device !== this.device) throw new TypeError("Command buffer belongs to a different device")
       if (!buffer.view) continue
       const context = buffer.view.texture.context
+      context.assertOwner(this.device)
       context.assertCurrent(buffer.view.generation)
       context.present(colorToRgba(buffer.color))
     }
@@ -95,7 +103,12 @@ export class GPUCanvasContext {
   getCurrentTexture(): GPUTexture {
     if (!this.configured) throw new DOMException("The context is not configured", "InvalidStateError")
     this.configured.device.assertAlive(); this.generation++; this.presented = false
-    return new GPUTexture(this, this.generation)
+    return new GPUTexture(this, this.configured.device, this.generation)
+  }
+  assertOwner(device: GPUDevice): void {
+    if (!this.configured || this.configured.device !== device) {
+      throw new TypeError("Canvas context belongs to a different device")
+    }
   }
   assertCurrent(generation: number): void {
     if (this.disposed || !this.configured || generation !== this.generation || this.presented) throw new DOMException("The canvas texture is stale", "InvalidStateError")
