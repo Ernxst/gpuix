@@ -371,6 +371,86 @@ function ShallowRow({ index }: { index: number }): React.ReactElement {
   )
 }
 
+// Style variety at identical geometry. A real page's rows use ~20 distinct
+// style objects; these fixtures reuse two. Only colour values differ between
+// the arms — never a size, padding or font — so painted area and glyph count
+// stay fixed and any difference is what heterogeneity itself costs, most
+// plausibly through primitive batching.
+const PALETTE = [
+  "#e5e5e5", "#a1a1aa", "#71717a", "#4ade80", "#f59e0b", "#60a5fa", "#f472b6",
+  "#34d399", "#fbbf24", "#a78bfa", "#fb7185", "#22d3ee", "#c084fc", "#facc15",
+  "#2dd4bf", "#f87171", "#818cf8", "#bef264", "#fda4af", "#5eead4",
+]
+
+function makeStyleVarietyRow(varied: boolean): ({ index }: { index: number }) => React.ReactElement {
+  return function StyleVarietyRow({ index }: { index: number }): React.ReactElement {
+    const pick = (slot: number) => (varied ? PALETTE[(index * 4 + slot) % PALETTE.length]! : "#a1a1aa")
+    const surface = varied ? PALETTE[(index * 7) % PALETTE.length]! : "#111114"
+    return React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: 8,
+          borderBottomWidth: 1,
+          borderColor: pick(3),
+          backgroundColor: surface,
+        },
+      },
+      React.createElement("div", {
+        style: { width: 10, height: 10, borderRadius: 5, backgroundColor: pick(0) },
+      }),
+      React.createElement("text", { style: { color: pick(1), fontSize: 12 } }, `Row ${index}`),
+      React.createElement(
+        "text",
+        { style: { color: pick(2), fontSize: 12 } },
+        `${(index * 37) % 1000} events`,
+      ),
+    )
+  }
+}
+
+// Accessibility annotation at identical geometry. `accessibility::apply` runs
+// inside the per-node build path, and a real table is densely annotated —
+// rowgroup, row, cell, column headers, labels — while these fixtures carry no
+// roles at all. Only the role and label props differ between the arms.
+function makeSemanticRow(annotated: boolean): ({ index }: { index: number }) => React.ReactElement {
+  return function SemanticRow({ index }: { index: number }): React.ReactElement {
+    const cell = (label: string, color: string) =>
+      React.createElement(
+        "text",
+        {
+          style: { color, fontSize: 12 },
+          ...(annotated ? { role: "cell", "aria-label": label } : {}),
+        },
+        label,
+      )
+    return React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: 8,
+          borderBottomWidth: 1,
+          borderColor: "#26262b",
+          backgroundColor: index % 2 === 0 ? "#111114" : "#141418",
+        },
+        ...(annotated ? { role: "row", "aria-label": `Row ${index}` } : {}),
+      },
+      React.createElement("div", {
+        style: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#4ade80" },
+        ...(annotated ? { role: "presentation" } : {}),
+      }),
+      cell(`Row ${index}`, "#e5e5e5"),
+      cell(`${(index * 37) % 1000} events`, "#a1a1aa"),
+    )
+  }
+}
+
 const FIXTURES = {
   table: TablePage,
   "virtual-table": VirtualTablePage,
@@ -451,6 +531,12 @@ const variants: Array<[string, ({ index }: { index: number }) => React.ReactElem
   // Identical node count and text; only the nesting differs.
   ["deep", DeepRow],
   ["shallow", ShallowRow],
+  // Identical geometry; only colour values differ.
+  ["styles-uniform", makeStyleVarietyRow(false)],
+  ["styles-varied", makeStyleVarietyRow(true)],
+  // Identical geometry; only role and aria-label props differ.
+  ["semantics-bare", makeSemanticRow(false)],
+  ["semantics-annotated", makeSemanticRow(true)],
 ]
 const variantResults: Array<{
   variant: string
