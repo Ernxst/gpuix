@@ -2623,6 +2623,8 @@ pub struct GpuixRenderer {
     window_event_callback: WindowEventCallback,
     tree: Arc<Mutex<RetainedTree>>,
     canvas_display_lists: SharedDisplayLists,
+    #[cfg(target_os = "macos")]
+    web_gpu_canvases: crate::webgpu_canvas::WebGpuCanvasStore,
     lifecycle: Arc<Mutex<RendererLifecycle>>,
     animation_frame_timestamp_origin: FrameTimestampOrigin,
     #[cfg(target_os = "macos")]
@@ -2811,6 +2813,8 @@ impl GpuixRenderer {
             window_event_callback: Arc::new(Mutex::new(None)),
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             canvas_display_lists: SharedDisplayLists::default(),
+            #[cfg(target_os = "macos")]
+            web_gpu_canvases: crate::webgpu_canvas::WebGpuCanvasStore::default(),
             lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
             animation_frame_timestamp_origin: Arc::new(Mutex::new(None)),
             #[cfg(target_os = "macos")]
@@ -3392,6 +3396,21 @@ impl GpuixRenderer {
         Ok(())
     }
 
+    /// Present one GPU-produced clear through the real macOS window renderer.
+    /// The producer signals GPUI with a Metal event and never reads pixels back.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn present_web_gpu_clear(&self, id: f64, width: u32, height: u32, rgba: u32) -> Result<()> {
+        let id = to_element_id(id)?;
+        validate_canvas_target(&self.tree.lock().unwrap(), id).map_err(Error::from_reason)?;
+        let source = self
+            .web_gpu_canvases
+            .present(id, width, height, rgba)
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+        self.canvas_display_lists.install_presentation(id, source);
+        self.request_invalidate()
+    }
+
     /// Start or join one renderer-local canvas image load. The observer keeps
     /// the decoded entry alive until JavaScript changes or releases the source.
     #[napi]
@@ -3517,6 +3536,8 @@ impl GpuixRenderer {
         let destroyed_canvas_ids: Vec<u64> =
             outcome.destroyed_ids.iter().map(|id| *id as u64).collect();
         crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed_canvas_ids);
+        #[cfg(target_os = "macos")]
+        self.web_gpu_canvases.remove(&destroyed_canvas_ids);
         forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed_canvas_ids);
         self.request_invalidate()?;
         Ok(outcome.destroyed_ids)

@@ -1,4 +1,4 @@
-/** Narrow browser-shaped state for the native WebGPU clear-and-present proof. */
+/** Narrow browser-shaped state for the native macOS WebGPU clear-and-present slice. */
 export interface WebGpuCanvasTransport {
   presentWebGpuClear?(id: number, width: number, height: number, rgba: number): void
 }

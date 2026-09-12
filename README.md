@@ -742,6 +742,29 @@ returns `undefined`. Keep the source data you drew from and re-encode that, or
 capture through the automation screenshot path when a window image is what you
 actually want.
 
+### Native WebGPU clear-and-present slice
+
+macOS production windows expose an experimental, deliberately narrow WebGPU
+path when `@gpuix/react/globals` is imported. It uses the ordinary browser
+shape—`navigator.gpu`, `canvas.getContext("webgpu")`, `configure()`, a render
+pass and `queue.submit()`—and composites GPU-produced Metal textures in GPUI
+without mapping or copying their pixels through the CPU.
+
+Only `bgra8unorm` clear passes are implemented. Buffers, shaders, pipelines,
+bind groups, texture uploads, depth and Three.js `WebGPURenderer` are not yet
+supported, so this is a presentation slice rather than WebGPU conformance.
+Canvas 2D and WebGPU remain mutually exclusive on one canvas. Submitted frame
+textures are retained until GPUI retires the scenes that reference them; frame
+submission signals the compositor on the GPU queue rather than waiting on the
+JavaScript thread.
+
+Run the two-canvas animated fixture with:
+
+```sh
+cd examples
+bun run native-webgpu
+```
+
 ### Canvas image residency
 
 Decoded canvas images are shared by source within one renderer, but their GPU

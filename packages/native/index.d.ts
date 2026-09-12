@@ -59,6 +59,11 @@ export declare class GpuixRenderer {
    */
   applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
   /**
+   * Present one GPU-produced clear through the real macOS window renderer.
+   * The producer signals GPUI with a Metal event and never reads pixels back.
+   */
+  presentWebGpuClear(id: number, width: number, height: number, rgba: number): void
+  /**
    * Start or join one renderer-local canvas image load. The observer keeps
    * the decoded entry alive until JavaScript changes or releases the source.
    */
@@ -404,8 +409,7 @@ export declare class TestGpuixRenderer {
   applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
   /**
    * Install a GPU-only test texture into one live `<canvas>` presentation.
-   * This exists solely to exercise the retained Metal surface path before a
-   * browser WebGPU API is exposed.
+   * This exercises the same retained Metal surface path as production.
    */
   installTestGpuCanvas(id: number, width: number, height: number, rgba: number): void
   /**

@@ -650,6 +650,118 @@ render(React.createElement("text", null, "injected native menu smoke"), {
 setTimeout(() => renderer.simulateMenuAction("mark"), 50)
 `
 
+const PRODUCTION_WEBGPU_PROGRAM = `
+import { readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import React from "react"
+import ${JSON.stringify(join(srcDir, "globals.ts"))}
+import { flushSync, render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
+import { decodePng } from ${JSON.stringify(join(srcDir, "testing-png.ts"))}
+
+let renderer
+let redCanvas
+let blueCanvas
+
+function Scene({ showBlue = true, redWidth = 64 }) {
+  renderer = useGpuixRequired()
+  return React.createElement(
+    "div",
+    { style: { width: 160, height: 120, position: "relative", backgroundColor: "#101010" } },
+    React.createElement("canvas", {
+      ref: (canvas) => { redCanvas = canvas },
+      width: redWidth,
+      height: 40,
+      style: { position: "absolute", left: 8, top: 8 },
+    }),
+    showBlue ? React.createElement("canvas", {
+      ref: (canvas) => { blueCanvas = canvas },
+      width: 64,
+      height: 40,
+      style: { position: "absolute", left: 40, top: 24 },
+    }) : null,
+  )
+}
+
+async function configure(canvas) {
+  const adapter = await navigator.gpu.requestAdapter()
+  const device = await adapter.requestDevice()
+  const context = canvas.getContext("webgpu")
+  if (!context) throw new Error("production canvas.getContext('webgpu') returned null")
+  context.configure({ device, format: "bgra8unorm" })
+  return { context, device }
+}
+
+function clear(target, color) {
+  const texture = target.context.getCurrentTexture()
+  const encoder = target.device.createCommandEncoder()
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{ view: texture.createView(), clearValue: color }],
+  })
+  pass.end()
+  target.device.queue.submit([encoder.finish()])
+}
+
+function pixel(image, x, y, scale) {
+  const offset = (Math.floor(y * scale) * image.width + Math.floor(x * scale)) * 4
+  return Array.from(image.data.slice(offset, offset + 4))
+}
+
+const screenshot = join(tmpdir(), "gpuix-production-webgpu-" + process.pid + ".png")
+const timeout = setTimeout(() => {
+  console.error("PRODUCTION_WEBGPU_TIMEOUT")
+  process.exitCode = 1
+  renderer?.quit()
+}, 5_000)
+const root = render(React.createElement(Scene), {
+  title: "GPUIX production WebGPU smoke",
+  width: 160,
+  height: 120,
+  menus: [],
+  focus: false,
+  show: false,
+})
+
+setTimeout(async () => {
+  try {
+    const red = await configure(redCanvas)
+    const blue = await configure(blueCanvas)
+    clear(red, { r: 1, a: 1 })
+    clear(blue, { b: 1, a: 1 })
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    clear(red, { g: 1, a: 1 })
+
+    renderer.captureScreenshot(screenshot)
+    let image = decodePng(readFileSync(screenshot), screenshot)
+    const scale = renderer.getWindowSize().scaleFactor
+    if (String(pixel(image, 16, 16, scale)) !== "0,255,0,255") {
+      throw new Error("first production WebGPU canvas did not present its second frame")
+    }
+    if (String(pixel(image, 48, 32, scale)) !== "0,0,255,255") {
+      throw new Error("second production WebGPU canvas did not composite above the first")
+    }
+
+    flushSync(() => root.render(React.createElement(Scene, { showBlue: false, redWidth: 80 })))
+    clear(red, { r: 1, g: 1, a: 1 })
+    renderer.captureScreenshot(screenshot)
+    image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 48, 32, scale)) !== "255,255,0,255") {
+      throw new Error("resized production WebGPU canvas did not replace its presentation")
+    }
+
+    console.log("PRODUCTION_WEBGPU_OK")
+  } catch (error) {
+    console.error(error)
+    process.exitCode = 1
+  } finally {
+    clearTimeout(timeout)
+    try { rmSync(screenshot) } catch {}
+    renderer.quit()
+  }
+}, 50)
+`
+
 const ESM_TESTING_PROGRAM = `
 import {
   TestRenderer,
@@ -746,6 +858,7 @@ console.log("LAZY_NATIVE_TEST_RENDERER_OK")
 `
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+const itMac = process.platform === "darwin" ? it : it.skip
 
 describe("native test renderer diagnostics", () => {
   it("loads and constructs the native renderer only on first use", async () => {
@@ -1414,4 +1527,21 @@ describeNative("render()", () => {
       } catch {}
     }
   }, 10_000)
+
+  itMac("presents successive WebGPU frames through the production macOS renderer", async () => {
+    const file = join(srcDir, "__tests__", "production-webgpu.tmp.tsx")
+    writeFileSync(file, PRODUCTION_WEBGPU_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file], 8_000)
+      expect(result.code, result.output).toBe(0)
+      expect(result.signal).toBeNull()
+      expect(result.output).not.toContain("PRODUCTION_WEBGPU_TIMEOUT")
+      expect(result.output.match(/^PRODUCTION_WEBGPU_OK$/gm), result.output).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 15_000)
 })
