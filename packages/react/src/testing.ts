@@ -857,13 +857,37 @@ export class TestRenderer implements NativeRenderer {
     return this.native.createWebGpuShaderModule!(deviceId, label, code)
   }
 
+  createWebGpuBuffer(
+    deviceId: number,
+    label: string | undefined,
+    size: number,
+    usage: number,
+    initialData: Uint8Array
+  ): number {
+    return this.native.createWebGpuBuffer!(deviceId, label, size, usage, initialData)
+  }
+
+  destroyWebGpuBuffer(deviceId: number, bufferId: number): void {
+    this.native.destroyWebGpuBuffer!(deviceId, bufferId)
+  }
+
+  writeWebGpuBuffer(
+    deviceId: number,
+    bufferId: number,
+    offset: number,
+    data: Uint8Array
+  ): void {
+    this.native.writeWebGpuBuffer!(deviceId, bufferId, offset, data)
+  }
+
   createWebGpuRenderPipeline(
     deviceId: number,
     label: string | undefined,
     vertexModuleId: number,
     vertexEntryPoint: string | undefined,
     fragmentModuleId: number,
-    fragmentEntryPoint: string | undefined
+    fragmentEntryPoint: string | undefined,
+    vertexBuffersJson: string
   ): number {
     return this.native.createWebGpuRenderPipeline!(
       deviceId,
@@ -871,7 +895,8 @@ export class TestRenderer implements NativeRenderer {
       vertexModuleId,
       vertexEntryPoint,
       fragmentModuleId,
-      fragmentEntryPoint
+      fragmentEntryPoint,
+      vertexBuffersJson
     )
   }
 

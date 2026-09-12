@@ -746,22 +746,24 @@ actually want.
 
 macOS production windows expose an experimental, deliberately narrow WebGPU
 path when `@gpuix/react/globals` is imported. It uses the ordinary browser
-shape—`navigator.gpu`, `canvas.getContext("webgpu")`, `configure()`, WGSL shader
-modules, an automatic-layout render pipeline, a render pass and
+shape—`navigator.gpu`, `canvas.getContext("webgpu")`, `configure()`, buffers,
+WGSL shader modules, an automatic-layout render pipeline, a render pass and
 `queue.submit()`—and composites GPU-produced Metal textures in GPUI without
 mapping or copying their pixels through the CPU.
 
-The current pipeline is intentionally minimal: one `bgra8unorm` color target,
-triangle-list geometry generated from shader built-ins, `setPipeline()`, and
-`draw()`. Buffers, bind groups, texture uploads, depth, compute, multisampling,
-error scopes and Three.js `WebGPURenderer` are not yet supported, so this is an
-incremental compatibility slice rather than WebGPU conformance.
+The current pipeline supports one `bgra8unorm` color target, triangle-list
+geometry, mapped-at-creation buffer initialization, `queue.writeBuffer()`,
+vertex and index layouts, `setVertexBuffer()`, `setIndexBuffer()`, `draw()`, and
+`drawIndexed()`. Asynchronous buffer mapping, bind groups, texture uploads,
+depth, compute, multisampling, error scopes and Three.js `WebGPURenderer` are
+not yet supported, so this is an incremental compatibility slice rather than
+WebGPU conformance.
 Canvas 2D and WebGPU remain mutually exclusive on one canvas. Submitted frame
 textures are retained until GPUI retires the scenes that reference them; frame
 submission signals the compositor on the GPU queue rather than waiting on the
 JavaScript thread.
 
-Run the two-canvas animated triangle fixture with:
+Run the two-canvas animated indexed-geometry fixture with:
 
 ```sh
 cd examples

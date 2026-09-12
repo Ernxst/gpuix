@@ -35,10 +35,11 @@ observable API stays the same and no frame pixels pass through the CPU.
 | --- | --- | --- |
 | macOS wgpu-to-GPUI texture proof | Complete | `plans/evidence/native-webgpu-macos/phase1-proof.md` |
 | Production macOS clear-and-present | Complete | `plans/evidence/native-webgpu-macos/production-clear-present.md` |
-| Browser-shaped binding foundation | Partial | Logical devices, shader modules, render pipelines, and draw commands implemented |
+| Browser-shaped binding foundation | Partial | Logical devices, buffers, shader modules, render pipelines, and draw commands implemented |
 | First shader pipeline | Complete | `plans/evidence/native-webgpu-macos/first-shader-pipeline.md` |
-| Buffers and indexed geometry | Next | No buffers, mappings, writes, vertex layouts, or indexed draw yet |
-| Three.js compatibility | Unstarted | No buffers, textures, bind groups, or depth |
+| Buffers and indexed geometry | Complete | `plans/evidence/native-webgpu-macos/buffers-indexed-geometry.md` |
+| Bindings, textures, and depth | Next | No bind groups, texture upload, or depth attachment yet |
+| Three.js compatibility | Unstarted | No textures, bind groups, depth, or observed renderer gap pass |
 | Linux presentation | Architecturally mapped | Runtime implementation and X11/Wayland validation remain |
 | Windows presentation | Needs backend decision | D3D11 compositor and DX12 WebGPU interop remain unresolved |
 
@@ -54,19 +55,21 @@ On native macOS, importing `@gpuix/react/globals` enables:
 - `GPUCanvasContext.configure()` for `bgra8unorm`;
 - `getCurrentTexture()`, `createView()`, command encoders, one color
   attachment, render-pass clear, command-buffer finish, and `queue.submit()`;
-- WGSL shader modules, automatic-layout no-buffer triangle-list render
-  pipelines, `setPipeline()`, and `draw()` with vertex and instance ranges;
-- renderer-owned logical-device, shader-module, and render-pipeline lifetimes
-  with device and renderer ownership checks;
+- WGSL shader modules, automatic-layout triangle-list render pipelines,
+  `setPipeline()`, and `draw()` with vertex and instance ranges;
+- buffer creation, mapped-at-creation ranges, `unmap()`, `queue.writeBuffer()`,
+  vertex/index layouts and bindings, and `drawIndexed()`;
+- renderer-owned logical-device, buffer, shader-module, and render-pipeline
+  lifetimes with device and renderer ownership checks;
 - independently updating canvases with normal GPUI bounds, overlap,
   rectangular clipping, scrolling, and stacking;
 - frame replacement, resize, unmount, remount, and retained texture release;
 - GPU-ordered Metal shared-event synchronization without CPU polling or frame
   readback.
 
-This is deliberately not general WebGPU. Buffers, mapped memory, bind groups,
-texture uploads, depth, compute, multisampling, query sets, error scopes, and
-Three.js remain unsupported.
+This is deliberately not general WebGPU. `mapAsync()`, mapped reads, bind
+groups, texture uploads, depth, compute, multisampling, query sets, error
+scopes, and Three.js remain unsupported.
 
 ## Settled architecture
 
@@ -182,14 +185,17 @@ inside an ordinary GPU-IX canvas with no CPU frame readback.
 
 ### 2. Buffers and indexed geometry
 
-Add buffers, mapped ranges, `writeBuffer`, vertex/index layouts,
-`setVertexBuffer`, `setIndexBuffer`, and indexed drawing. Make logical-device
-destruction release every owned native resource deterministically.
+Completed on 2026-09-12: add buffers, mapped-at-creation ranges, `writeBuffer`,
+vertex/index layouts, `setVertexBuffer`, `setIndexBuffer`, and indexed drawing.
+Make logical-device destruction release every owned native resource
+deterministically.
 
 Acceptance: animated indexed geometry updates a buffer after initialization
 and continues presenting through resize and remount.
 
 ### 3. Bindings, textures, and depth
+
+Next:
 
 Add bind-group layouts, bind groups, samplers, textures, texture views,
 `writeTexture`, depth attachments, and the relevant copy commands.

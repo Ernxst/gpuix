@@ -762,26 +762,22 @@ setTimeout(async () => {
 }, 50)
 `
 
-const TRIANGLE_WGSL = `
+const INDEXED_GEOMETRY_WGSL = `
+struct VertexInput {
+  @location(0) position: vec2f,
+  @location(1) color: vec3f,
+}
+
 struct VertexOutput {
   @builtin(position) position: vec4f,
   @location(0) color: vec3f,
 }
 
 @vertex
-fn vertex_main(
-  @builtin(vertex_index) vertex_index: u32,
-  @builtin(instance_index) instance_index: u32,
-) -> VertexOutput {
-  let positions = array(
-    vec2f(-0.28, -0.45),
-    vec2f(0.28, -0.45),
-    vec2f(0.0, 0.45),
-  );
-  let alternate = f32(instance_index & 1u);
+fn vertex_main(input: VertexInput) -> VertexOutput {
   var output: VertexOutput;
-  output.position = vec4f(positions[vertex_index].x - 0.4 + alternate * 0.8, positions[vertex_index].y, 0.0, 1.0);
-  output.color = mix(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), alternate);
+  output.position = vec4f(input.position, 0.0, 1.0);
+  output.color = input.color;
   return output;
 }
 
@@ -791,25 +787,26 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4f {
 }
 `
 
-const PRODUCTION_WEBGPU_TRIANGLE_PROGRAM = `
+const PRODUCTION_WEBGPU_INDEXED_PROGRAM = `
 import { readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import React from "react"
 import ${JSON.stringify(join(srcDir, "globals.ts"))}
-import { render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
+import { flushSync, render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
 import { decodePng } from ${JSON.stringify(join(srcDir, "testing-png.ts"))}
 
 let renderer
-let canvas
+let canvas = null
 
-function Scene() {
+function Scene({ canvasKey, width }) {
   renderer = useGpuixRequired()
   return React.createElement("canvas", {
+    key: canvasKey,
     ref: (value) => { canvas = value },
-    width: 96,
+    width,
     height: 72,
-    style: { width: 96, height: 72 },
+    style: { width, height: 72 },
   })
 }
 
@@ -818,7 +815,16 @@ function pixel(image, x, y, scale) {
   return Array.from(image.data.slice(offset, offset + 4))
 }
 
-function draw(target, pipeline, firstInstance) {
+function vertices(left, right, red, green) {
+  return new Float32Array([
+    left, -0.3, red, green, 0,
+    right, -0.3, red, green, 0,
+    left, 0.3, red, green, 0,
+    right, 0.3, red, green, 0,
+  ])
+}
+
+function draw(target, pipeline, vertexBuffer, indexBuffer) {
   const encoder = target.device.createCommandEncoder()
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
@@ -829,20 +835,22 @@ function draw(target, pipeline, firstInstance) {
     }],
   })
   pass.setPipeline(pipeline)
-  pass.draw(3, 1, 0, firstInstance)
+  pass.setVertexBuffer(0, vertexBuffer)
+  pass.setIndexBuffer(indexBuffer, "uint16")
+  pass.drawIndexed(6)
   pass.end()
   target.device.queue.submit([encoder.finish()])
 }
 
-const screenshot = join(tmpdir(), "gpuix-production-webgpu-triangle-" + process.pid + ".png")
+const screenshot = join(tmpdir(), "gpuix-production-webgpu-indexed-" + process.pid + ".png")
 const timeout = setTimeout(() => {
-  console.error("PRODUCTION_WEBGPU_TRIANGLE_TIMEOUT")
+  console.error("PRODUCTION_WEBGPU_INDEXED_TIMEOUT")
   process.exitCode = 1
   renderer?.quit()
 }, 5_000)
 
-render(React.createElement(Scene), {
-  title: "GPUIX production WebGPU triangle smoke",
+const root = render(React.createElement(Scene, { canvasKey: "initial", width: 96 }), {
+  title: "GPUIX production WebGPU indexed geometry smoke",
   width: 96,
   height: 72,
   menus: [],
@@ -859,44 +867,84 @@ setTimeout(async () => {
     if (!context) throw new Error("production canvas.getContext('webgpu') returned null")
     context.configure({ device, format: "bgra8unorm" })
     const module = device.createShaderModule({
-      label: "animated triangle shader",
-      code: ${JSON.stringify(TRIANGLE_WGSL)},
+      label: "indexed geometry shader",
+      code: ${JSON.stringify(INDEXED_GEOMETRY_WGSL)},
     })
     const pipeline = device.createRenderPipeline({
-      label: "animated triangle pipeline",
+      label: "indexed geometry pipeline",
       layout: "auto",
-      vertex: { module, entryPoint: "vertex_main" },
+      vertex: {
+        module,
+        entryPoint: "vertex_main",
+        buffers: [{
+          arrayStride: 20,
+          attributes: [
+            { shaderLocation: 0, offset: 0, format: "float32x2" },
+            { shaderLocation: 1, offset: 8, format: "float32x3" },
+          ],
+        }],
+      },
       fragment: {
         module,
         entryPoint: "fragment_main",
         targets: [{ format: "bgra8unorm" }],
       },
     })
+    const initialVertices = vertices(-0.75, -0.15, 1, 0)
+    const vertexBuffer = device.createBuffer({
+      label: "dynamic quad vertices",
+      size: initialVertices.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      mappedAtCreation: true,
+    })
+    new Float32Array(vertexBuffer.getMappedRange()).set(initialVertices)
+    vertexBuffer.unmap()
+    const indexBuffer = device.createBuffer({
+      label: "quad indices",
+      size: 12,
+      usage: GPUBufferUsage.INDEX,
+      mappedAtCreation: true,
+    })
+    new Uint16Array(indexBuffer.getMappedRange()).set([0, 1, 2, 2, 1, 3])
+    indexBuffer.unmap()
     const target = { context, device }
     const scale = renderer.getWindowSize().scaleFactor
 
-    draw(target, pipeline, 0)
+    draw(target, pipeline, vertexBuffer, indexBuffer)
     renderer.captureScreenshot(screenshot)
     let image = decodePng(readFileSync(screenshot), screenshot)
-    if (String(pixel(image, 29, 42, scale)) !== "255,0,0,255") {
-      throw new Error("first shader frame did not render the red triangle")
+    if (String(pixel(image, 26, 36, scale)) !== "255,0,0,255") {
+      throw new Error("mapped vertex and index buffers did not render the red quad")
     }
-    if (String(pixel(image, 67, 42, scale)) !== "0,0,0,255") {
-      throw new Error("first shader frame did not clear the future triangle position")
+    if (String(pixel(image, 70, 36, scale)) !== "0,0,0,255") {
+      throw new Error("first indexed frame did not clear the future quad position")
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    draw(target, pipeline, 1)
+    device.queue.writeBuffer(vertexBuffer, 0, vertices(0.15, 0.75, 0, 1))
+    draw(target, pipeline, vertexBuffer, indexBuffer)
     renderer.captureScreenshot(screenshot)
     image = decodePng(readFileSync(screenshot), screenshot)
-    if (String(pixel(image, 29, 42, scale)) !== "0,0,0,255") {
-      throw new Error("second shader frame did not clear the previous triangle position")
+    if (String(pixel(image, 26, 36, scale)) !== "0,0,0,255") {
+      throw new Error("writeBuffer frame did not clear the previous quad position")
     }
-    if (String(pixel(image, 67, 42, scale)) !== "0,255,0,255") {
-      throw new Error("second shader frame did not render the green triangle")
+    if (String(pixel(image, 70, 36, scale)) !== "0,255,0,255") {
+      throw new Error("writeBuffer did not move and recolor the indexed quad")
     }
 
-    console.log("PRODUCTION_WEBGPU_TRIANGLE_OK")
+    flushSync(() => root.render(
+      React.createElement(Scene, { canvasKey: "remounted", width: 80 })
+    ))
+    const remountedContext = canvas.getContext("webgpu")
+    if (!remountedContext) throw new Error("remounted canvas lost its WebGPU context")
+    remountedContext.configure({ device, format: "bgra8unorm" })
+    draw({ context: remountedContext, device }, pipeline, vertexBuffer, indexBuffer)
+    renderer.captureScreenshot(screenshot)
+    image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 58, 36, scale)) !== "0,255,0,255") {
+      throw new Error("indexed resources did not survive canvas resize and remount")
+    }
+
+    console.log("PRODUCTION_WEBGPU_INDEXED_OK")
   } catch (error) {
     console.error(error)
     process.exitCode = 1
@@ -1692,17 +1740,17 @@ describeNative("render()", () => {
     }
   }, 15_000)
 
-  itMac("renders successive shader pipeline frames through production WebGPU", async () => {
-    const file = join(srcDir, "__tests__", "production-webgpu-triangle.tmp.tsx")
-    writeFileSync(file, PRODUCTION_WEBGPU_TRIANGLE_PROGRAM)
+  itMac("renders updated indexed geometry through production WebGPU resize and remount", async () => {
+    const file = join(srcDir, "__tests__", "production-webgpu-indexed.tmp.tsx")
+    writeFileSync(file, PRODUCTION_WEBGPU_INDEXED_PROGRAM)
 
     try {
       const result = await runChildWithStatus("bun", [file], 8_000)
       expect(result.code, result.output).toBe(0)
       expect(result.signal).toBeNull()
-      expect(result.output).not.toContain("PRODUCTION_WEBGPU_TRIANGLE_TIMEOUT")
+      expect(result.output).not.toContain("PRODUCTION_WEBGPU_INDEXED_TIMEOUT")
       expect(
-        result.output.match(/^PRODUCTION_WEBGPU_TRIANGLE_OK$/gm),
+        result.output.match(/^PRODUCTION_WEBGPU_INDEXED_OK$/gm),
         result.output
       ).toHaveLength(1)
     } finally {

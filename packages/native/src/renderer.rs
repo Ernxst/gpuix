@@ -3443,7 +3443,47 @@ impl GpuixRenderer {
             .map_err(|error| Error::from_reason(error.to_string()))
     }
 
-    /// Create the initial no-buffer, triangle-list WebGPU render pipeline.
+    /// Create one logical-device-owned WebGPU buffer.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn create_web_gpu_buffer(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        size: f64,
+        usage: u32,
+        initial_data: Uint8Array,
+    ) -> Result<f64> {
+        self.web_gpu_canvases
+            .create_buffer(device_id, label, size, usage, initial_data.as_ref())
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Destroy one logical-device-owned WebGPU buffer.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn destroy_web_gpu_buffer(&self, device_id: f64, buffer_id: f64) -> Result<()> {
+        self.web_gpu_canvases
+            .destroy_buffer(device_id, buffer_id)
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Queue one copy into a logical-device-owned WebGPU buffer.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn write_web_gpu_buffer(
+        &self,
+        device_id: f64,
+        buffer_id: f64,
+        offset: f64,
+        data: Uint8Array,
+    ) -> Result<()> {
+        self.web_gpu_canvases
+            .write_buffer(device_id, buffer_id, offset, data.as_ref())
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Create a triangle-list WebGPU render pipeline with optional vertex layouts.
     #[cfg(target_os = "macos")]
     #[napi]
     pub fn create_web_gpu_render_pipeline(
@@ -3454,6 +3494,7 @@ impl GpuixRenderer {
         vertex_entry_point: Option<String>,
         fragment_module_id: f64,
         fragment_entry_point: Option<String>,
+        vertex_buffers_json: String,
     ) -> Result<f64> {
         self.web_gpu_canvases
             .create_render_pipeline(
@@ -3463,6 +3504,7 @@ impl GpuixRenderer {
                 vertex_entry_point,
                 fragment_module_id,
                 fragment_entry_point,
+                vertex_buffers_json,
             )
             .map_err(|error| Error::from_reason(error.to_string()))
     }

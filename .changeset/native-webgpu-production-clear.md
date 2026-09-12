@@ -8,6 +8,6 @@ windows. GPU-produced Metal textures now compose inside ordinary `<canvas>`
 elements without CPU pixel readback or blocking frame submission.
 
 This experimental slice supports `bgra8unorm` clear passes, WGSL shader modules,
-automatic-layout no-buffer triangle-list pipelines, `setPipeline()`, and
-`draw()`. It does not yet include buffers, bind groups, texture uploads, depth,
-or Three.js support.
+automatic-layout triangle-list pipelines, mapped-at-creation buffers,
+`writeBuffer`, vertex and index layouts, and indexed drawing. It does not yet
+include bind groups, texture uploads, depth, or Three.js support.

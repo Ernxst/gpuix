@@ -1374,13 +1374,28 @@ export interface NativeRenderer {
   createWebGpuDevice?(): number
   destroyWebGpuDevice?(deviceId: number): void
   createWebGpuShaderModule?(deviceId: number, label: string | undefined, code: string): number
+  createWebGpuBuffer?(
+    deviceId: number,
+    label: string | undefined,
+    size: number,
+    usage: number,
+    initialData: Uint8Array
+  ): number
+  destroyWebGpuBuffer?(deviceId: number, bufferId: number): void
+  writeWebGpuBuffer?(
+    deviceId: number,
+    bufferId: number,
+    offset: number,
+    data: Uint8Array
+  ): void
   createWebGpuRenderPipeline?(
     deviceId: number,
     label: string | undefined,
     vertexModuleId: number,
     vertexEntryPoint: string | undefined,
     fragmentModuleId: number,
-    fragmentEntryPoint: string | undefined
+    fragmentEntryPoint: string | undefined,
+    vertexBuffersJson: string
   ): number
   /** Present an internal WebGPU render-pass command stream. */
   presentWebGpuCommands?(
