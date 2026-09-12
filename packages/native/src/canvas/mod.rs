@@ -62,9 +62,16 @@ impl SharedDisplayLists {
     }
 
     #[cfg(target_os = "macos")]
-    #[allow(dead_code)] // wired by the later internal WebGPU binding slice
+    pub(crate) fn presentation_count(&self) -> u32 {
+        self.presentations.lock().unwrap().len() as u32
+    }
+
+    #[cfg(target_os = "macos")]
     pub(crate) fn install_presentation(&self, element_id: u64, source: gpui::SurfaceSource) {
-        self.presentations.lock().unwrap().insert(element_id, source);
+        self.presentations
+            .lock()
+            .unwrap()
+            .insert(element_id, source);
     }
 }
 

@@ -402,6 +402,19 @@ export declare class TestGpuixRenderer {
    * offscreen view without requiring a React commit.
    */
   applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  /**
+   * Install a GPU-only test texture into one live `<canvas>` presentation.
+   * This exists solely to exercise the retained Metal surface path before a
+   * browser WebGPU API is exposed.
+   */
+  installTestGpuCanvas(id: number, width: number, height: number, rgba: number): void
+  /**
+   * Render one new GPU-only producer frame for an already installed test
+   * texture. Callers advance this from the existing test frame clock.
+   */
+  advanceTestGpuCanvas(id: number, rgba: number): void
+  /** Test-only lifetime counters for the retained GPU presentation seam. */
+  getTestGpuCanvasState(): TestGpuCanvasState
   loadCanvasImage(observerId: number, sourceJson: string): void
   getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
   releaseCanvasImage(observerId: number): void
@@ -1177,6 +1190,12 @@ export interface ScrollWheelOptions {
 
 /** Only the Windows adapter has a first-show ordering to record. */
 export declare function testAccessibilityInitializedWhileVisible(): boolean | null
+
+export interface TestGpuCanvasState {
+  installed: number
+  presentations: number
+  released: number
+}
 
 /**
  * Owning PIDs of on-screen, normal-level (`kCGWindowLayer == 0`) app windows,
