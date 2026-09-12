@@ -578,6 +578,15 @@ impl TestGpuixRenderer {
     /// Microseconds spent rebuilding the element tree since the last call,
     /// cleared on read. Whatever a draw costs beyond this is layout, prepaint
     /// and paint, which is the split #480 turns on.
+    /// Microseconds spent re-deriving gpui styles from `StyleDesc` since the
+    /// last call, cleared on read. A subset of the rebuild time, and the part a
+    /// per-node style cache could remove.
+    #[napi]
+    pub fn take_apply_styles_micros(&self) -> f64 {
+        crate::renderer::APPLY_STYLES_NANOS.swap(0, std::sync::atomic::Ordering::Relaxed) as f64
+            / 1_000.0
+    }
+
     #[napi]
     pub fn take_render_build_micros(&self) -> f64 {
         crate::renderer::RENDER_BUILD_NANOS.swap(0, std::sync::atomic::Ordering::Relaxed) as f64

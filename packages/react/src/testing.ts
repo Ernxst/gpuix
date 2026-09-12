@@ -241,6 +241,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   ): void
   getRetainedElementCount(): number
   takeRenderBuildMicros(): number
+  takeApplyStylesMicros(): number
   getElementBounds(elementId: number): ElementBounds | null
   observeResize(elementId: number): void
   unobserveResize(elementId: number): void
@@ -1532,6 +1533,12 @@ export class TestRenderer implements NativeRenderer {
    *  and paint. */
   takeRenderBuildMicros(): number {
     return this.native.takeRenderBuildMicros()
+  }
+
+  /** Microseconds spent re-deriving gpui styles from `StyleDesc` since the last
+   *  call, cleared on read. A subset of the rebuild time. */
+  takeApplyStylesMicros(): number {
+    return this.native.takeApplyStylesMicros()
   }
 
   getElementBounds(elementId: number): ElementBounds | null {

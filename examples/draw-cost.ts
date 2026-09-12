@@ -262,6 +262,8 @@ interface ResultRow {
   usPerElement: number
   buildMsPerDraw: number
   buildSharePercent: number
+  applyStylesMsPerDraw: number
+  applyStylesSharePercent: number
 }
 
 const results: ResultRow[] = []
@@ -274,6 +276,7 @@ for (const rows of rowCounts) {
 
   for (let index = 0; index < warmupDraws; index += 1) renderer.flush()
   renderer.takeRenderBuildMicros()
+  renderer.takeApplyStylesMicros()
 
   const samples: number[] = []
   for (let index = 0; index < measuredDraws; index += 1) {
@@ -283,6 +286,9 @@ for (const rows of rowCounts) {
   }
   // Summed over the measured draws, so this is a mean against a median draw.
   const buildMsPerDraw = renderer.takeRenderBuildMicros() / 1_000 / measuredDraws
+  // A subset of the rebuild: what re-deriving styles costs, which is what a
+  // per-node style cache could remove.
+  const applyStylesMsPerDraw = renderer.takeApplyStylesMicros() / 1_000 / measuredDraws
 
   const sorted = [...samples].sort((a, b) => a - b)
   const elements = renderer.getRetainedElementCount()
@@ -295,6 +301,8 @@ for (const rows of rowCounts) {
     usPerElement: round((drawP50Ms * 1_000) / Math.max(1, elements), 2),
     buildMsPerDraw: round(buildMsPerDraw),
     buildSharePercent: round((buildMsPerDraw / Math.max(0.001, drawP50Ms)) * 100, 1),
+    applyStylesMsPerDraw: round(applyStylesMsPerDraw),
+    applyStylesSharePercent: round((applyStylesMsPerDraw / Math.max(0.001, drawP50Ms)) * 100, 1),
   })
 
   const disposable = testRoot as { unmount?: () => void; cleanup?: () => void }

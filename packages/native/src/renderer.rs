@@ -14349,7 +14349,25 @@ fn align_items_keyword(value: Option<&str>) -> Option<gpui::AlignItems> {
     }
 }
 
+/// Nanoseconds spent inside `apply_styles`, which re-derives a gpui style from
+/// a `StyleDesc` for every node and every state refinement on every draw. Read
+/// and cleared through the test renderer to size what a style cache could save.
+pub(crate) static APPLY_STYLES_NANOS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+struct RecordApplyStyles(std::time::Instant);
+
+impl Drop for RecordApplyStyles {
+    fn drop(&mut self) {
+        APPLY_STYLES_NANOS.fetch_add(
+            self.0.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+}
+
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
+    let _record_apply_styles = RecordApplyStyles(std::time::Instant::now());
     match style.visibility.as_deref() {
         Some("hidden") => el = el.invisible(),
         Some("visible") => el = el.visible(),

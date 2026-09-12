@@ -365,7 +365,11 @@ export declare class TestGpuixRenderer {
    * Microseconds spent rebuilding the element tree since the last call,
    * cleared on read. Whatever a draw costs beyond this is layout, prepaint
    * and paint, which is the split #480 turns on.
+   * Microseconds spent re-deriving gpui styles from `StyleDesc` since the
+   * last call, cleared on read. A subset of the rebuild time, and the part a
+   * per-node style cache could remove.
    */
+  takeApplyStylesMicros(): number
   takeRenderBuildMicros(): number
   setStrictStyles(enabled: boolean): void
   /**
