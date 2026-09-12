@@ -13,6 +13,7 @@ import {
 import type { TestRoot } from "../testing"
 import type { ElementBounds, ImageMimeType, ImageSource } from "../types/host"
 import type { GpuixLoadEvent } from "../reconciler/synthetic-event"
+import { handleGpuixEvent } from "../reconciler/event-registry"
 import {
   bufferSimilarity,
   expectScreenshotsDiffer,
@@ -184,6 +185,16 @@ async function waitForImageEvents(
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
   expect(events).toHaveLength(count)
+}
+
+async function takeQueuedImageEvent(testRoot: ReturnType<typeof createTestRoot>) {
+  for (let frame = 0; frame < 100; frame++) {
+    testRoot.renderer.flush()
+    const event = testRoot.renderer.drainEvents().find((candidate) => candidate.eventType === "load")
+    if (event) return event
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error("image load did not reach the native event queue")
 }
 
 describeNative("custom element: img", { timeout: 28_000 }, () => {
@@ -477,6 +488,100 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
       } finally {
         disposeImageTestRoot(testRoot)
       }
+    }
+  })
+
+  it("delivers delegated load capture and ancestor handlers without changing bubbles", async () => {
+    const testRoot = createImageTestRoot()
+    const events: GpuixLoadEvent[] = []
+    const delivery: Array<{ listener: string; bubbles: boolean; phase: number }> = []
+    const record = (listener: string) => (event: GpuixLoadEvent) => {
+      delivery.push({ listener, bubbles: event.bubbles, phase: event.eventPhase })
+    }
+    try {
+      testRoot.render(
+        <div onLoadCapture={record("ancestor-capture")} onLoad={record("ancestor")}>
+          <img
+            src={{ kind: "data", mimeType: "image/png", bytes: PNG_BYTES }}
+            style={{ width: 32, height: 24 }}
+            onLoadCapture={record("image-capture")}
+            onLoad={(event) => {
+              events.push(event)
+              record("image")(event)
+            }}
+          />
+        </div>
+      )
+      await waitForImageEvents(testRoot, events, 1)
+      expect(delivery).toEqual([
+        { listener: "ancestor-capture", bubbles: false, phase: 1 },
+        { listener: "image-capture", bubbles: false, phase: 2 },
+        { listener: "image", bubbles: false, phase: 2 },
+        { listener: "ancestor", bubbles: false, phase: 3 },
+      ])
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
+  it("starts image lifecycle delivery when only an ancestor observes it", async () => {
+    const testRoot = createImageTestRoot()
+    const events: GpuixLoadEvent[] = []
+    const delivery: Array<{ listener: string; bubbles: boolean }> = []
+    try {
+      testRoot.render(
+        <div
+          onLoadCapture={(event) => delivery.push({ listener: "ancestor-capture", bubbles: event.bubbles })}
+          onLoad={(event) => {
+            events.push(event)
+            delivery.push({ listener: "ancestor", bubbles: event.bubbles })
+          }}
+        >
+          <img
+            src={{ kind: "data", mimeType: "image/png", bytes: PNG_BYTES }}
+            style={{ width: 32, height: 24 }}
+          />
+        </div>
+      )
+      await waitForImageEvents(testRoot, events, 1)
+      expect(delivery).toEqual([
+        { listener: "ancestor-capture", bubbles: false },
+        { listener: "ancestor", bubbles: false },
+      ])
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
+  it("suppresses a lifecycle completion queued before src replacement", async () => {
+    const testRoot = createImageTestRoot()
+    const currentEvents: GpuixLoadEvent[] = []
+    try {
+      testRoot.render(
+        <img
+          src={{ kind: "data", mimeType: "image/png", bytes: PNG_BYTES }}
+          style={{ width: 32, height: 24 }}
+          onLoad={() => {
+            throw new Error("a queued completion must not use the previous lifecycle")
+          }}
+        />
+      )
+      const queued = await takeQueuedImageEvent(testRoot)
+
+      testRoot.render(
+        <img
+          src={{ kind: "data", mimeType: "image/jpeg", bytes: JPEG_BYTES }}
+          style={{ width: 32, height: 24 }}
+          onLoad={(event) => currentEvents.push(event)}
+        />
+      )
+      handleGpuixEvent(queued, testRoot.renderer)
+      expect(currentEvents).toEqual([])
+
+      await waitForImageEvents(testRoot, currentEvents, 1)
+      expect(currentEvents[0]?.type).toBe("load")
+    } finally {
+      disposeImageTestRoot(testRoot)
     }
   })
 

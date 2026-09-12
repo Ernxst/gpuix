@@ -1122,6 +1122,13 @@ export interface Props extends AccessibilityProps {
   onWheel?: (event: GpuixWheelEvent) => void
   onWheelCapture?: (event: GpuixWheelEvent) => void
 
+  // ── Resource lifecycle events ───────────────────────────────────
+  // React delegates these even though the underlying DOM events do not bubble.
+  onLoad?: (event: GpuixLoadEvent) => void
+  onLoadCapture?: (event: GpuixLoadEvent) => void
+  onError?: (event: GpuixLoadEvent) => void
+  onErrorCapture?: (event: GpuixLoadEvent) => void
+
   // ── File drop (Finder / OS paths) ───────────────────────────────
   onFileDrop?: (event: EventPayload) => void
 
@@ -1226,10 +1233,6 @@ export interface ImgProps extends Props {
   /** For SVG only: resolve authored `currentColor` references from inherited style.color. */
   tint?: "currentColor"
   alt?: string
-  /** Fires once the current source has decoded and is ready to paint. */
-  onLoad?: (event: GpuixLoadEvent) => void
-  /** Fires once the current source fails to load or decode. */
-  onError?: (event: GpuixLoadEvent) => void
 }
 
 // Props for monochrome SVGs tinted by style.color.
@@ -1880,6 +1883,8 @@ export interface Instance extends PublicInstance {
     operands: Float64Array,
     strings: readonly string[]
   ): void
+  /** Internal lifecycle identity for queued image load/error events. */
+  imageRequestGeneration?: number
 }
 
 // Text instance for raw text nodes

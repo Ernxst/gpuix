@@ -837,6 +837,11 @@ export interface EventPayload {
    * e.g. "click", "mouseDown", "mouseEnter", "keyDown", "scroll", etc.
    */
   eventType: string
+  /**
+   * Lifecycle generation of an image request. Populated for `load` and
+   * `error`, so JS can discard a completion queued before `src` changed.
+   */
+  imageRequestGeneration?: number
   /** Logical GPUI window width. Populated for `windowResize`. */
   width?: number
   /** Logical GPUI window height. Populated for `windowResize`. */

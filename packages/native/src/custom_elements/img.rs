@@ -2071,6 +2071,7 @@ pub struct ImgElement {
     tint_current_color: bool,
     last_request: Option<ImageRequest>,
     last_reported_terminal_state: Option<(ImageRequest, ImgTerminalState)>,
+    request_generation: f64,
     element_id: Option<u64>,
     store: Option<SharedImgImageStore>,
 }
@@ -2084,6 +2085,7 @@ impl Default for ImgElement {
             tint_current_color: false,
             last_request: None,
             last_reported_terminal_state: None,
+            request_generation: 0.0,
             element_id: None,
             store: None,
         }
@@ -2131,6 +2133,22 @@ impl ImgElement {
             Ok(source) => self.source = Some(source),
             Err(error) => self.source_error = Some(error),
         }
+    }
+}
+
+fn has_image_lifecycle_listener(ctx: &CustomRenderContext, event_type: &str) -> bool {
+    let mut element = ctx.retained_element;
+    loop {
+        if element.events.contains(event_type) {
+            return true;
+        }
+        let Some(parent_id) = element.parent else {
+            return false;
+        };
+        let Some(parent) = ctx.tree.elements.get(&parent_id) else {
+            return false;
+        };
+        element = parent;
     }
 }
 
@@ -2318,12 +2336,12 @@ impl CustomElement for ImgElement {
                     ImgTerminalState::Loaded => "load",
                     ImgTerminalState::Error => "error",
                 };
-                if ctx.events.contains(event_type) {
+                if has_image_lifecycle_listener(&ctx, event_type) {
                     crate::renderer::emit_event_full(
                         ctx.event_callback,
                         ctx.id,
                         event_type,
-                        |_| {},
+                        |payload| payload.image_request_generation = Some(self.request_generation),
                     );
                 }
             }
@@ -2389,12 +2407,15 @@ impl CustomElement for ImgElement {
             "tint" => {
                 self.tint_current_color = value.as_str() == Some("currentColor");
             }
+            "__gpuixImageRequestGeneration" => {
+                self.request_generation = value.as_f64().unwrap_or(0.0);
+            }
             _ => {}
         }
     }
 
     fn supported_props(&self) -> &'static [&'static str] {
-        &["src", "objectFit", "tint"]
+        &["src", "objectFit", "tint", "__gpuixImageRequestGeneration"]
     }
 
     fn supported_events(&self) -> &'static [&'static str] {

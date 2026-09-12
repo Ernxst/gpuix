@@ -65,5 +65,14 @@ const onImageLifecycle = (
   void event.cancelable
   event.preventDefault()
 }
-const imageLifecycleHandlersAccepted = <img onLoad={onImageLifecycle} onError={onImageLifecycle} />
+const imageLifecycleHandlersAccepted = (
+  <div onLoadCapture={onImageLifecycle} onErrorCapture={onImageLifecycle}>
+    <img
+      onLoadCapture={onImageLifecycle}
+      onLoad={onImageLifecycle}
+      onErrorCapture={onImageLifecycle}
+      onError={onImageLifecycle}
+    />
+  </div>
+)
 void imageLifecycleHandlersAccepted

@@ -55,6 +55,9 @@ const TARGET_ONLY_EVENTS = new Set([
 ])
 
 const NON_BUBBLING_EVENTS = new Set(["focus", "blur", "scroll", "fileDrop", "load", "error"])
+// React delegates resource events: ancestors observe `onLoad` and `onError`
+// even though the DOM event's `bubbles` property remains false.
+const REACT_DELEGATED_NON_BUBBLING_EVENTS = new Set(["load", "error"])
 
 /**
  * The editor a change event came from, when there is one whose state React
@@ -448,6 +451,14 @@ function dispatchGpuixEvent(
     })
   }
 
+  if (
+    (payload.eventType === "load" || payload.eventType === "error") &&
+    payload.imageRequestGeneration !== undefined &&
+    payload.imageRequestGeneration !== target.imageRequestGeneration
+  ) {
+    return { defaultPrevented: false, propagationStopped: false }
+  }
+
   const path = TARGET_ONLY_EVENTS.has(payload.eventType) ? [target] : eventPath(container, target)
   const controller = createGpuixSyntheticEvent(payload, target, renderer)
   const { event } = controller
@@ -489,7 +500,11 @@ function dispatchGpuixEvent(
       invoke(target, payload.eventType, 2)
     }
 
-    if (!event.isPropagationStopped() && !NON_BUBBLING_EVENTS.has(payload.eventType)) {
+    if (
+      !event.isPropagationStopped() &&
+      (!NON_BUBBLING_EVENTS.has(payload.eventType) ||
+        REACT_DELEGATED_NON_BUBBLING_EVENTS.has(payload.eventType))
+    ) {
       for (let index = 1; index < path.length; index += 1) {
         invoke(path[index]!, payload.eventType, 3)
         if (event.isPropagationStopped()) break
