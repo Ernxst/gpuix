@@ -9,6 +9,7 @@ import { DefaultEventPriority } from "react-reconciler/constants.js"
 
 const NoEventPriority = 0
 import type {
+  CanvasPublicInstance,
   Container,
   ElementType,
   HostContext,
@@ -1535,6 +1536,33 @@ export const hostConfig = {
       },
     }
     if (type === "canvas") {
+      const bitmapSize = (value: unknown, fallback: number): number => {
+        const number = Number(value)
+        if (!Number.isFinite(number) || number < 0) return fallback
+        return Math.min(Math.floor(number), 0xffff_ffff)
+      }
+      let bitmapWidth = bitmapSize((instance.props as Props & { width?: number }).width, 300)
+      let bitmapHeight = bitmapSize((instance.props as Props & { height?: number }).height, 150)
+      Object.defineProperties(instance, {
+        width: {
+          configurable: true,
+          enumerable: true,
+          get: () => bitmapWidth,
+          set: (value: unknown) => {
+            bitmapWidth = bitmapSize(value, 300)
+            webGpuContext(instance)?.resize()
+          },
+        },
+        height: {
+          configurable: true,
+          enumerable: true,
+          get: () => bitmapHeight,
+          set: (value: unknown) => {
+            bitmapHeight = bitmapSize(value, 150)
+            webGpuContext(instance)?.resize()
+          },
+        },
+      })
       const diagnosticTarget = {
         describeElement: () => describeCanvas(instance),
         strict: rootContainerInstance.strictStyles,
@@ -1549,8 +1577,8 @@ export const hostConfig = {
         if (contextId === "webgpu") {
           if (recordingContext2D(instance)) return null
           return getOrCreateWebGpuContext(instance, rootContainerInstance.native, id, () => ({
-            width: Number((instance.props as Props & { width?: number }).width ?? 300),
-            height: Number((instance.props as Props & { height?: number }).height ?? 150),
+            width: bitmapWidth,
+            height: bitmapHeight,
           }))
         }
         return null
@@ -1750,6 +1778,21 @@ export const hostConfig = {
     diffEventListeners(container, instance.id, oldProps, newProps)
     // Custom prop diff (for non-div/text elements)
     instance.props = newProps
+    const oldCanvasProps = oldProps as Props & { width?: number; height?: number }
+    const newCanvasProps = newProps as Props & { width?: number; height?: number }
+    if (
+      instance.type === "canvas" &&
+      (oldCanvasProps.width !== newCanvasProps.width ||
+        oldCanvasProps.height !== newCanvasProps.height)
+    ) {
+      const canvas = instance as unknown as CanvasPublicInstance
+      if (oldCanvasProps.width !== newCanvasProps.width) {
+        canvas.width = Number(newCanvasProps.width ?? 300)
+      }
+      if (oldCanvasProps.height !== newCanvasProps.height) {
+        canvas.height = Number(newCanvasProps.height ?? 150)
+      }
+    }
     diffCustomProps(container.renderer, instance, oldProps, newProps)
     // After the new props are installed, so the descendants' ancestor walk
     // reads the role this update just applied.

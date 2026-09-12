@@ -683,9 +683,9 @@ function Scene({ showBlue = true, redWidth = 64 }) {
   )
 }
 
-async function configure(canvas) {
-  const adapter = await navigator.gpu.requestAdapter()
-  const device = await adapter.requestDevice()
+async function configure(canvas, existingDevice) {
+  const adapter = existingDevice ? null : await navigator.gpu.requestAdapter()
+  const device = existingDevice ?? await adapter.requestDevice()
   const context = canvas.getContext("webgpu")
   if (!context) throw new Error("production canvas.getContext('webgpu') returned null")
   context.configure({ device, format: "bgra8unorm" })
@@ -700,6 +700,29 @@ function clear(target, color) {
   })
   pass.end()
   target.device.queue.submit([encoder.finish()])
+}
+
+function clearTogether(first, second) {
+  const target = first
+  const texture = target.context.getCurrentTexture()
+  if (target.context.getCurrentTexture() !== texture) {
+    throw new Error("getCurrentTexture did not preserve the current canvas texture")
+  }
+  const view = texture.createView()
+  const encoder = target.device.createCommandEncoder()
+  for (const clearValue of [{ r: 1, a: 1 }, { g: 1, a: 1 }]) {
+    const pass = encoder.beginRenderPass({ colorAttachments: [{ view, clearValue }] })
+    pass.end()
+  }
+  const otherEncoder = second.device.createCommandEncoder()
+  const otherPass = otherEncoder.beginRenderPass({
+    colorAttachments: [{
+      view: second.context.getCurrentTexture().createView(),
+      clearValue: { b: 1, a: 1 },
+    }],
+  })
+  otherPass.end()
+  target.device.queue.submit([encoder.finish(), otherEncoder.finish()])
 }
 
 function pixel(image, x, y, scale) {
@@ -725,12 +748,19 @@ const root = render(React.createElement(Scene), {
 setTimeout(async () => {
   try {
     const red = await configure(redCanvas)
-    const blue = await configure(blueCanvas)
-    clear(red, { r: 1, a: 1 })
-    clear(blue, { b: 1, a: 1 })
-
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    clear(red, { g: 1, a: 1 })
+    const blue = await configure(blueCanvas, red.device)
+    red.device.pushErrorScope("validation")
+    const invalidModule = red.device.createShaderModule({ code: "this is not WGSL" })
+    red.device.createRenderPipeline({
+      layout: "auto",
+      vertex: { module: invalidModule },
+      fragment: { module: invalidModule, targets: [{ format: "bgra8unorm" }] },
+    })
+    const validationError = await red.device.popErrorScope()
+    if (validationError?.name !== "GPUValidationError") {
+      throw new Error("invalid WGSL was not attributed to its logical device")
+    }
+    clearTogether(red, blue)
 
     renderer.captureScreenshot(screenshot)
     let image = decodePng(readFileSync(screenshot), screenshot)
@@ -741,6 +771,91 @@ setTimeout(async () => {
     if (String(pixel(image, 48, 32, scale)) !== "0,0,255,255") {
       throw new Error("second production WebGPU canvas did not composite above the first")
     }
+
+    clear(red, { r: 1, a: 0 })
+    renderer.captureScreenshot(screenshot)
+    image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 16, 16, scale)) !== "255,0,0,255") {
+      throw new Error("default WebGPU alpha mode did not composite as opaque")
+    }
+
+    const module = red.device.createShaderModule({ code:
+      "@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {" +
+      "let p = array(vec2f(-1, -1), vec2f(3, -1), vec2f(-1, 3));" +
+      "return vec4f(p[i], 0, 1);}" +
+      "@fragment fn fs() -> @location(0) vec4f { return vec4f(1, 0, 0, 1); }"
+    })
+    const maskedPipeline = red.device.createRenderPipeline({
+      layout: "auto",
+      vertex: { module, entryPoint: "vs" },
+      fragment: { module, entryPoint: "fs", targets: [{ format: "bgra8unorm" }] },
+      multisample: { mask: 0 },
+    })
+    const maskedEncoder = red.device.createCommandEncoder()
+    const maskedPass = maskedEncoder.beginRenderPass({
+      colorAttachments: [{
+        view: red.context.getCurrentTexture().createView(),
+        clearValue: { g: 1, a: 1 },
+      }],
+    })
+    maskedPass.setPipeline(maskedPipeline)
+    maskedPass.draw(3)
+    maskedPass.end()
+    red.device.queue.submit([maskedEncoder.finish()])
+    renderer.captureScreenshot(screenshot)
+    image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 16, 16, scale)) !== "0,255,0,255") {
+      throw new Error("zero multisample mask did not suppress fragment writes")
+    }
+
+    red.device.pushErrorScope("validation")
+    red.device.createRenderPipeline({
+      layout: "auto",
+      vertex: { module, entryPoint: "missing_vertex_entry" },
+      fragment: { module, entryPoint: "fs", targets: [{ format: "bgra8unorm" }] },
+    })
+    if ((await red.device.popErrorScope())?.name !== "GPUValidationError") {
+      throw new Error("invalid pipeline was not contained by its logical device")
+    }
+
+    red.device.pushErrorScope("validation")
+    red.device.createBuffer({ size: Number.MAX_SAFE_INTEGER, usage: GPUBufferUsage.COPY_DST })
+    if ((await red.device.popErrorScope())?.name !== "GPUValidationError") {
+      throw new Error("invalid buffer limits were not contained by its logical device")
+    }
+
+    const drawPipeline = red.device.createRenderPipeline({
+      layout: "auto",
+      vertex: { module, entryPoint: "vs" },
+      fragment: { module, entryPoint: "fs", targets: [{ format: "bgra8unorm" }] },
+    })
+    const shortIndices = red.device.createBuffer({
+      size: 4,
+      usage: GPUBufferUsage.INDEX,
+      mappedAtCreation: true,
+    })
+    new Uint16Array(shortIndices.getMappedRange()).set([0, 1])
+    shortIndices.unmap()
+    red.device.pushErrorScope("validation")
+    const invalidDrawEncoder = red.device.createCommandEncoder()
+    const invalidDrawPass = invalidDrawEncoder.beginRenderPass({
+      colorAttachments: [{ view: red.context.getCurrentTexture().createView() }],
+    })
+    invalidDrawPass.setPipeline(drawPipeline)
+    invalidDrawPass.setIndexBuffer(shortIndices, "uint16")
+    invalidDrawPass.drawIndexed(3)
+    invalidDrawPass.end()
+    red.device.queue.submit([invalidDrawEncoder.finish()])
+    if ((await red.device.popErrorScope())?.name !== "GPUValidationError") {
+      throw new Error("invalid draw range was not contained by its logical device")
+    }
+    renderer.captureScreenshot(screenshot)
+    image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 16, 16, scale)) !== "0,255,0,255") {
+      throw new Error("invalid submission replaced the last complete canvas frame")
+    }
+
+    clear(blue, { b: 1, a: 1 })
 
     flushSync(() => root.render(React.createElement(Scene, { showBlue: false, redWidth: 80 })))
     clear(red, { r: 1, g: 1, a: 1 })

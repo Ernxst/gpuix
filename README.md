@@ -754,10 +754,17 @@ mapping or copying their pixels through the CPU.
 The current pipeline supports one `bgra8unorm` color target, triangle-list
 geometry, mapped-at-creation buffer initialization, `queue.writeBuffer()`,
 vertex and index layouts, `setVertexBuffer()`, `setIndexBuffer()`, `draw()`, and
-`drawIndexed()`. Asynchronous buffer mapping, bind groups, texture uploads,
-depth, compute, multisampling, error scopes and Three.js `WebGPURenderer` are
-not yet supported, so this is an incremental compatibility slice rather than
-WebGPU conformance.
+`drawIndexed()`. Command buffers may contain multiple render passes and one
+queue submission may update multiple canvases in order. Validation failures are
+contained by logical-device error scopes or `uncapturederror` delivery rather
+than aborting the process.
+
+Canvas presentation currently supports the default `opaque` alpha mode;
+`premultiplied` is rejected until that compositor path is implemented.
+Asynchronous buffer mapping, bind groups, texture uploads, depth, compute,
+multisampling above one sample and Three.js `WebGPURenderer` are not yet
+supported, so this is an incremental compatibility slice rather than WebGPU
+conformance.
 Canvas 2D and WebGPU remain mutually exclusive on one canvas. Submitted frame
 textures are retained until GPUI retires the scenes that reference them; frame
 submission signals the compositor on the GPU queue rather than waiting on the

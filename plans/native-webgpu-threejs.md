@@ -38,6 +38,7 @@ observable API stays the same and no frame pixels pass through the CPU.
 | Browser-shaped binding foundation | Partial | Logical devices, buffers, shader modules, render pipelines, and draw commands implemented |
 | First shader pipeline | Complete | `plans/evidence/native-webgpu-macos/first-shader-pipeline.md` |
 | Buffers and indexed geometry | Complete | `plans/evidence/native-webgpu-macos/buffers-indexed-geometry.md` |
+| Submission, errors, and lifetime repair | Complete | `plans/evidence/native-webgpu-macos/foundation-review-repair.md` |
 | Bindings, textures, and depth | Next | No bind groups, texture upload, or depth attachment yet |
 | Three.js compatibility | Unstarted | No textures, bind groups, depth, or observed renderer gap pass |
 | Linux presentation | Architecturally mapped | Runtime implementation and X11/Wayland validation remain |
@@ -55,12 +56,18 @@ On native macOS, importing `@gpuix/react/globals` enables:
 - `GPUCanvasContext.configure()` for `bgra8unorm`;
 - `getCurrentTexture()`, `createView()`, command encoders, one color
   attachment, render-pass clear, command-buffer finish, and `queue.submit()`;
+- stable current-texture identity, multiple ordered passes per texture, and
+  atomic multi-canvas submission;
 - WGSL shader modules, automatic-layout triangle-list render pipelines,
   `setPipeline()`, and `draw()` with vertex and instance ranges;
 - buffer creation, mapped-at-creation ranges, `unmap()`, `queue.writeBuffer()`,
   vertex/index layouts and bindings, and `drawIndexed()`;
 - renderer-owned logical-device, buffer, shader-module, and render-pipeline
-  lifetimes with device and renderer ownership checks;
+  lifetimes with weak wrapper ownership, native release paths, and renderer
+  replacement checks;
+- validation error scopes and uncaptured-error events that contain native wgpu
+  failures per logical device;
+- default opaque canvas composition and single-sample pipeline masks;
 - independently updating canvases with normal GPUI bounds, overlap,
   rectangular clipping, scrolling, and stacking;
 - frame replacement, resize, unmount, remount, and retained texture release;
@@ -68,8 +75,9 @@ On native macOS, importing `@gpuix/react/globals` enables:
   readback.
 
 This is deliberately not general WebGPU. `mapAsync()`, mapped reads, bind
-groups, texture uploads, depth, compute, multisampling, query sets, error
-scopes, and Three.js remain unsupported.
+groups, texture uploads, depth, compute, multisampling above one sample, query
+sets, premultiplied canvas alpha, full adapter feature/limit negotiation,
+`device.lost`, and Three.js remain unsupported.
 
 ## Settled architecture
 
@@ -90,13 +98,17 @@ must remain observably isolated:
   destroying the compositor device;
 - every child resource and canvas context belongs to one logical device and
   renderer;
-- wrappers reject deterministically after device destruction, renderer
-  replacement, or physical device loss;
+- wrappers reject deterministically after device destruction or renderer
+  replacement;
+- native operations reject after physical device loss; proactive JavaScript
+  `device.lost` delivery remains to be implemented;
 - JavaScript cannot replace or interfere with GPUI's recovery machinery.
 
-These rules are executable for logical devices, shader modules, render
-pipelines, canvas binding, and command submission. Later resource families must
-join the same registry rather than create parallel ownership machinery.
+The implemented rules are executable for logical devices, shader modules,
+render pipelines, buffers, canvas binding, and command submission. Later
+resource families must join the same registry rather than create parallel
+ownership machinery. Feature/limit negotiation and proactive physical-loss
+delivery remain prerequisites for claiming the full lifecycle model.
 
 ### Canvas ownership and sizing
 
@@ -220,22 +232,33 @@ materials and `copyExternalImageToTexture` are a later explicit capability.
 
 ### 5. Runtime semantics and hardening
 
-Cover descriptor validation, buffer mapping and `ArrayBuffer` lifetime, queue
-ordering, encoder/pass invalidation, resource destruction, error scopes,
-uncaptured errors, multiple canvases and logical devices, renderer replacement,
-physical device loss, and scheduling only while presentation changes.
+Extend the implemented descriptor validation, buffer mapping and `ArrayBuffer`
+lifetime, queue ordering, encoder/pass invalidation, resource destruction,
+error scopes, uncaptured errors, multiple canvases and logical devices, and
+renderer replacement. Add adapter feature/limit negotiation, `device.lost`,
+physical-device recovery, and scheduling only while presentation changes.
 
 Use a maintained allowlist of relevant WebGPU conformance cases where they can
 run against the N-API surface. Do not claim general conformance from a small
 subset.
 
-### 6. Platform expansion
+### 6. Compute capability
+
+Add compute pipelines, storage bindings, compute passes, dispatch commands and
+the synchronization/copy operations needed to move results into rendering.
+Keep this as an explicit post-Three capability rather than making it a hidden
+requirement of the first useful Three.js scene.
+
+Acceptance: a compute pass updates GPU-resident data consumed by a render pass
+without CPU readback.
+
+### 7. Platform expansion
 
 Port the proven common resource layer to Linux using GPUI's device directly.
 Validate X11 and Wayland on hardware. Treat Windows as a separate GPUI renderer
 milestone and settle its D3D11/DX12 direction before implementation.
 
-### 7. Public completion
+### 8. Public completion
 
 Document the exact supported API and gaps, add changesets, generate native
 declarations through the build, preserve upstream attribution, run native,

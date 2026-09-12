@@ -11,7 +11,8 @@ export interface WebGpuCanvasTransport {
     vertexEntryPoint: string | undefined,
     fragmentModuleId: number,
     fragmentEntryPoint: string | undefined,
-    vertexBuffers: string
+    vertexBuffers: string,
+    sampleMask: number
   ): number
   createWebGpuBuffer?(
     deviceId: number,
@@ -21,26 +22,56 @@ export interface WebGpuCanvasTransport {
     initialData: Uint8Array
   ): number
   destroyWebGpuBuffer?(deviceId: number, bufferId: number): void
+  destroyWebGpuShaderModule?(deviceId: number, shaderModuleId: number): void
+  destroyWebGpuRenderPipeline?(deviceId: number, renderPipelineId: number): void
   writeWebGpuBuffer?(
     deviceId: number,
     bufferId: number,
     offset: number,
     data: Uint8Array
   ): void
-  presentWebGpuCommands?(
-    id: number,
-    width: number,
-    height: number,
+  submitWebGpuCommands?(
     deviceId: number,
-    rgba: number,
+    submission: string,
     ops: Uint32Array,
     operands: Float64Array
   ): void
 }
 
-export type GPUColor = { r?: number; g?: number; b?: number; a?: number }
+export type GPUColor =
+  | { r?: number; g?: number; b?: number; a?: number }
+  | readonly [number, number, number, number]
 export type GPUTextureFormat = "bgra8unorm"
 export type GPUShaderModuleDescriptor = { label?: string; code: string }
+export type GPUErrorFilter = "validation" | "out-of-memory" | "internal"
+
+export class GPUValidationError extends Error {
+  override readonly name = "GPUValidationError"
+}
+
+export class GPUOutOfMemoryError extends Error {
+  override readonly name = "GPUOutOfMemoryError"
+}
+
+export class GPUInternalError extends Error {
+  override readonly name = "GPUInternalError"
+}
+
+export type GPUError = GPUValidationError | GPUOutOfMemoryError | GPUInternalError
+
+function isGpuError(error: unknown): error is GPUError {
+  return (
+    error instanceof GPUValidationError ||
+    error instanceof GPUOutOfMemoryError ||
+    error instanceof GPUInternalError
+  )
+}
+
+export class GPUUncapturedErrorEvent extends Event {
+  constructor(readonly error: GPUError) {
+    super("uncapturederror")
+  }
+}
 export const GPUBufferUsage = Object.freeze({
   MAP_READ: 0x0001,
   MAP_WRITE: 0x0002,
@@ -125,7 +156,11 @@ export type GPURenderPipelineDescriptor = {
   multisample?: { count?: 1; mask?: number; alphaToCoverageEnabled?: false }
 }
 
-type Configure = { device: GPUDevice; format: GPUTextureFormat }
+type Configure = {
+  device: GPUDevice
+  format: GPUTextureFormat
+  alphaMode?: "opaque" | "premultiplied"
+}
 type Attachment = {
   view: GPUTextureView
   clearValue?: GPUColor
@@ -173,9 +208,21 @@ type RenderCommand =
   | DrawIndexedCommand
 type RenderPassRecord = {
   view: GPUTextureView
-  color: GPUColor
+  rgba: number
   commands: RenderCommand[]
   ended: boolean
+}
+
+type NativeSubmission = {
+  frames: Array<{ id: number; width: number; height: number }>
+  passes: Array<{
+    frame: number
+    rgba: number
+    opStart: number
+    opCount: number
+    operandStart: number
+    operandCount: number
+  }>
 }
 
 // Keep these internal wire opcodes in sync with packages/native/src/webgpu_canvas.rs.
@@ -218,7 +265,64 @@ function operationError(message: string): DOMException {
 }
 
 function detachArrayBuffer(buffer: ArrayBuffer): void {
-  structuredClone(buffer, { transfer: [buffer] })
+  if (buffer.byteLength === 0) return
+  try {
+    structuredClone(buffer, { transfer: [buffer] })
+  } catch {
+    // A caller may already have transferred the range. Cleanup must still finish.
+  }
+}
+
+type TransportState = { alive: boolean }
+const transportStates = new WeakMap<WebGpuCanvasTransport, TransportState>()
+
+function stateForTransport(transport: WebGpuCanvasTransport): TransportState {
+  let state = transportStates.get(transport)
+  if (!state) {
+    state = { alive: true }
+    transportStates.set(transport, state)
+  }
+  return state
+}
+
+export function invalidateWebGpuTransport(transport: WebGpuCanvasTransport): void {
+  stateForTransport(transport).alive = false
+}
+
+type NativeResourceKind = "buffer" | "shaderModule" | "renderPipeline"
+type NativeResourceToken = {
+  state: TransportState
+  transport: WebGpuCanvasTransport
+  deviceId: number
+  resourceId: number
+  kind: NativeResourceKind
+  released: boolean
+}
+
+const nativeResourceFinalizer = new FinalizationRegistry<NativeResourceToken>((token) => {
+  if (token.released || !token.state.alive) return
+  try {
+    releaseNativeResource(token)
+  } catch {
+    // Native renderer teardown can race collection. Renderer invalidation is authoritative.
+  }
+})
+
+function releaseNativeResource(token: NativeResourceToken): void {
+  if (token.released) return
+  token.released = true
+  if (!token.state.alive) return
+  switch (token.kind) {
+    case "buffer":
+      token.transport.destroyWebGpuBuffer?.(token.deviceId, token.resourceId)
+      break
+    case "shaderModule":
+      token.transport.destroyWebGpuShaderModule?.(token.deviceId, token.resourceId)
+      break
+    case "renderPipeline":
+      token.transport.destroyWebGpuRenderPipeline?.(token.deviceId, token.resourceId)
+      break
+  }
 }
 
 function copyBufferSource(
@@ -268,7 +372,7 @@ export class GPUTexture {
   }
 }
 
-type MappedRange = { offset: number; data: ArrayBuffer }
+type MappedRange = { offset: number; size: number; data: ArrayBuffer }
 type PendingBufferWrite = { offset: number; data: Uint8Array }
 
 export class GPUBuffer {
@@ -280,6 +384,8 @@ export class GPUBuffer {
   private mappedRanges: MappedRange[] = []
   private initialData: Uint8Array | null = null
   private pendingWrites: PendingBufferWrite[] = []
+  private nativeToken: NativeResourceToken | null = null
+  private nativeFailure: GPUError | null = null
 
   constructor(
     readonly device: GPUDevice,
@@ -308,13 +414,14 @@ export class GPUBuffer {
     }
     if (
       this.mappedRanges.some(
-        (range) => rangeOffset < range.offset + range.data.byteLength && range.offset < rangeOffset + rangeSize
+        (range) =>
+          rangeOffset < range.offset + range.size && range.offset < rangeOffset + rangeSize
       )
     ) {
       throw operationError("Mapped ranges must not overlap")
     }
     const data = new ArrayBuffer(rangeSize)
-    this.mappedRanges.push({ offset: rangeOffset, data })
+    this.mappedRanges.push({ offset: rangeOffset, size: rangeSize, data })
     return data
   }
 
@@ -322,31 +429,41 @@ export class GPUBuffer {
     this.assertUsable()
     if (this.mapStateValue !== "mapped") return
     const initialData = new Uint8Array(this.size)
-    for (const range of this.mappedRanges) {
-      initialData.set(new Uint8Array(range.data), range.offset)
+    let detachedRange = false
+    try {
+      for (const range of this.mappedRanges) {
+        if (range.data.byteLength !== range.size) {
+          detachedRange = true
+          continue
+        }
+        initialData.set(new Uint8Array(range.data), range.offset)
+      }
+    } finally {
+      for (const range of this.mappedRanges) detachArrayBuffer(range.data)
+      this.mappedRanges = []
+      this.mapStateValue = "unmapped"
     }
-    for (const range of this.mappedRanges) detachArrayBuffer(range.data)
-    this.mappedRanges = []
+    if (detachedRange) {
+      this.initialData = null
+      throw operationError("A mapped range was detached before the GPUBuffer was unmapped")
+    }
     this.initialData = initialData
-    this.mapStateValue = "unmapped"
     if (this.device.isBound()) this.nativeId()
   }
 
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
-    this.device.forgetBuffer(this)
     this.detachMappedRanges()
     this.initialData = null
     this.pendingWrites = []
-    if (this.nativeIdValue !== null) {
-      const binding = this.device.nativeBindingIfAlive()
-      binding?.transport.destroyWebGpuBuffer?.(binding.deviceId, this.nativeIdValue)
-    }
+    if (this.nativeToken) releaseNativeResource(this.nativeToken)
+    nativeResourceFinalizer.unregister(this)
   }
 
   nativeId(): number {
     this.assertUsable()
+    if (this.nativeFailure) throw this.nativeFailure
     if (this.mapStateValue === "mapped") {
       throw new DOMException("A mapped GPUBuffer cannot be used by the GPU", "InvalidStateError")
     }
@@ -356,24 +473,51 @@ export class GPUBuffer {
       throw unsupported("Native WebGPU buffers are unavailable")
     }
     const initialData = this.initialData ?? new Uint8Array()
-    this.nativeIdValue = transport.createWebGpuBuffer(
+    try {
+      this.nativeIdValue = transport.createWebGpuBuffer(
+        deviceId,
+        this.descriptor.label,
+        this.size,
+        this.usage,
+        initialData,
+      )
+    } catch (cause) {
+      this.nativeFailure = this.device.captureNativeError(cause)
+      throw this.nativeFailure
+    }
+    this.nativeToken = {
+      state: this.device.transportState(),
+      transport,
       deviceId,
-      this.descriptor.label,
-      this.size,
-      this.usage,
-      initialData
-    )
+      resourceId: this.nativeIdValue,
+      kind: "buffer",
+      released: false,
+    }
+    nativeResourceFinalizer.register(this, this.nativeToken, this)
     this.initialData = null
     if (this.pendingWrites.length > 0) {
       if (!transport.writeWebGpuBuffer) {
         throw unsupported("Native WebGPU buffer writes are unavailable")
       }
-      for (const write of this.pendingWrites) {
-        transport.writeWebGpuBuffer(deviceId, this.nativeIdValue, write.offset, write.data)
+      try {
+        for (const write of this.pendingWrites) {
+          transport.writeWebGpuBuffer(deviceId, this.nativeIdValue, write.offset, write.data)
+        }
+      } catch (cause) {
+        this.nativeFailure = this.device.captureNativeError(cause)
+        throw this.nativeFailure
       }
       this.pendingWrites = []
     }
     return this.nativeIdValue
+  }
+
+  materialize(): void {
+    try {
+      this.nativeId()
+    } catch (error) {
+      if (!isGpuError(error)) throw error
+    }
   }
 
   write(offset: number, data: Uint8Array): void {
@@ -399,7 +543,11 @@ export class GPUBuffer {
     if (!transport.writeWebGpuBuffer) {
       throw unsupported("Native WebGPU buffer writes are unavailable")
     }
-    transport.writeWebGpuBuffer(deviceId, this.nativeId(), bufferOffset, data)
+    try {
+      transport.writeWebGpuBuffer(deviceId, this.nativeId(), bufferOffset, data)
+    } catch (cause) {
+      if (!isGpuError(cause)) this.device.captureNativeError(cause)
+    }
   }
 
   destroyFromDevice(): void {
@@ -408,6 +556,8 @@ export class GPUBuffer {
     this.detachMappedRanges()
     this.initialData = null
     this.pendingWrites = []
+    if (this.nativeToken) this.nativeToken.released = true
+    nativeResourceFinalizer.unregister(this)
   }
 
   private assertUsable(): void {
@@ -426,6 +576,8 @@ export class GPUBuffer {
 
 export class GPUShaderModule {
   private nativeIdValue: number | null = null
+  private nativeToken: NativeResourceToken | null = null
+  private nativeFailure: GPUError | null = null
 
   constructor(
     readonly device: GPUDevice,
@@ -434,22 +586,44 @@ export class GPUShaderModule {
 
   nativeId(): number {
     this.device.assertAlive()
+    if (this.nativeFailure) throw this.nativeFailure
     if (this.nativeIdValue !== null) return this.nativeIdValue
     const { transport, deviceId } = this.device.nativeBinding()
     if (!transport.createWebGpuShaderModule) {
       throw unsupported("Native WebGPU shader modules are unavailable")
     }
-    this.nativeIdValue = transport.createWebGpuShaderModule(
+    try {
+      this.nativeIdValue = transport.createWebGpuShaderModule(
+        deviceId,
+        this.descriptor.label,
+        this.descriptor.code,
+      )
+    } catch (cause) {
+      this.nativeFailure = this.device.captureNativeError(cause)
+      throw this.nativeFailure
+    }
+    this.nativeToken = {
+      state: this.device.transportState(),
+      transport,
       deviceId,
-      this.descriptor.label,
-      this.descriptor.code
-    )
+      resourceId: this.nativeIdValue,
+      kind: "shaderModule",
+      released: false,
+    }
+    nativeResourceFinalizer.register(this, this.nativeToken, this)
     return this.nativeIdValue
+  }
+
+  destroyFromDevice(): void {
+    if (this.nativeToken) this.nativeToken.released = true
+    nativeResourceFinalizer.unregister(this)
   }
 }
 
 export class GPURenderPipeline {
   private nativeIdValue: number | null = null
+  private nativeToken: NativeResourceToken | null = null
+  private nativeFailure: GPUError | null = null
 
   constructor(
     readonly device: GPUDevice,
@@ -458,21 +632,54 @@ export class GPURenderPipeline {
 
   nativeId(): number {
     this.device.assertAlive()
+    if (this.nativeFailure) throw this.nativeFailure
     if (this.nativeIdValue !== null) return this.nativeIdValue
     const { transport, deviceId } = this.device.nativeBinding()
     if (!transport.createWebGpuRenderPipeline) {
       throw unsupported("Native WebGPU render pipelines are unavailable")
     }
-    this.nativeIdValue = transport.createWebGpuRenderPipeline(
+    try {
+      this.nativeIdValue = transport.createWebGpuRenderPipeline(
+        deviceId,
+        this.descriptor.label,
+        this.descriptor.vertex.module.nativeId(),
+        this.descriptor.vertex.entryPoint,
+        this.descriptor.fragment.module.nativeId(),
+        this.descriptor.fragment.entryPoint,
+        JSON.stringify(normalizeVertexBuffers(this.descriptor.vertex.buffers)),
+        this.descriptor.multisample?.mask ?? 0xffff_ffff,
+      )
+    } catch (cause) {
+      if (isGpuError(cause)) {
+        this.nativeFailure = cause
+      } else {
+        this.nativeFailure = this.device.captureNativeError(cause)
+      }
+      throw this.nativeFailure
+    }
+    this.nativeToken = {
+      state: this.device.transportState(),
+      transport,
       deviceId,
-      this.descriptor.label,
-      this.descriptor.vertex.module.nativeId(),
-      this.descriptor.vertex.entryPoint,
-      this.descriptor.fragment.module.nativeId(),
-      this.descriptor.fragment.entryPoint,
-      JSON.stringify(normalizeVertexBuffers(this.descriptor.vertex.buffers))
-    )
+      resourceId: this.nativeIdValue,
+      kind: "renderPipeline",
+      released: false,
+    }
+    nativeResourceFinalizer.register(this, this.nativeToken, this)
     return this.nativeIdValue
+  }
+
+  materialize(): void {
+    try {
+      this.nativeId()
+    } catch (error) {
+      if (!isGpuError(error)) throw error
+    }
+  }
+
+  destroyFromDevice(): void {
+    if (this.nativeToken) this.nativeToken.released = true
+    nativeResourceFinalizer.unregister(this)
   }
 }
 
@@ -484,13 +691,16 @@ class GPUCommandBuffer {
     private readonly passes: readonly RenderPassRecord[]
   ) {}
 
-  consume(device: GPUDevice): readonly RenderPassRecord[] {
+  validate(device: GPUDevice): readonly RenderPassRecord[] {
     if (this.device !== device) throw new TypeError("Command buffer belongs to a different device")
     if (this.submitted) {
       throw new DOMException("The command buffer was already submitted", "InvalidStateError")
     }
-    this.submitted = true
     return this.passes
+  }
+
+  markSubmitted(): void {
+    this.submitted = true
   }
 }
 
@@ -523,7 +733,7 @@ export class GPUCommandEncoder {
 
     const record: RenderPassRecord = {
       view: attachment.view,
-      color: attachment.clearValue ?? { a: 1 },
+      rgba: colorToRgba(attachment.clearValue ?? { a: 1 }),
       commands: [],
       ended: false,
     }
@@ -710,26 +920,136 @@ export class GPUQueue {
 
   submit(buffers: Iterable<GPUCommandBuffer>): void {
     this.device.assertAlive()
-    for (const buffer of buffers) {
+    const commandBuffers = Array.from(buffers)
+    const passes: RenderPassRecord[] = []
+    for (const buffer of commandBuffers) {
       if (!(buffer instanceof GPUCommandBuffer)) {
         throw new TypeError("queue.submit requires GPUCommandBuffer values")
       }
-      for (const pass of buffer.consume(this.device)) {
-        const context = pass.view.texture.context
-        context.assertOwner(this.device)
-        context.assertCurrent(pass.view.generation)
-        context.present(this.device, pass.color, pass.commands)
+      passes.push(...buffer.validate(this.device))
+    }
+
+    const { transport, deviceId } = this.device.nativeBinding()
+    if (!transport.submitWebGpuCommands) {
+      throw unsupported("Native WebGPU command submission is unavailable")
+    }
+
+    const submission: NativeSubmission = { frames: [], passes: [] }
+    const frameIndexes = new Map<GPUTexture, number>()
+    const textures: GPUTexture[] = []
+    const ops: number[] = []
+    const operands: number[] = []
+
+    for (const pass of passes) {
+      const texture = pass.view.texture
+      const context = texture.context
+      context.assertOwner(this.device)
+      context.assertCurrent(pass.view.generation)
+      if (context.transport !== transport) {
+        throw new TypeError("GPUDevice is bound to a different renderer")
       }
+      let frame = frameIndexes.get(texture)
+      if (frame === undefined) {
+        frame = submission.frames.length
+        frameIndexes.set(texture, frame)
+        textures.push(texture)
+        submission.frames.push(context.frameDescriptor())
+      }
+      const opStart = ops.length
+      const operandStart = operands.length
+      try {
+        encodeRenderCommands(pass.commands, ops, operands)
+      } catch (error) {
+        if (!isGpuError(error)) throw error
+        for (const buffer of commandBuffers) buffer.markSubmitted()
+        return
+      }
+      submission.passes.push({
+        frame,
+        rgba: pass.rgba,
+        opStart,
+        opCount: ops.length - opStart,
+        operandStart,
+        operandCount: operands.length - operandStart,
+      })
+    }
+
+    for (const buffer of commandBuffers) buffer.markSubmitted()
+    try {
+      transport.submitWebGpuCommands(
+        deviceId,
+        JSON.stringify(submission),
+        Uint32Array.from(ops),
+        Float64Array.from(operands),
+      )
+    } catch (cause) {
+      this.device.captureNativeError(cause)
+      return
+    }
+    for (const texture of textures) texture.context.didPresent(texture)
+  }
+}
+
+function encodeRenderCommands(
+  commands: readonly RenderCommand[],
+  ops: number[],
+  operands: number[],
+): void {
+  for (const command of commands) {
+    switch (command.kind) {
+      case "setPipeline":
+        ops.push(WEB_GPU_SET_PIPELINE)
+        operands.push(command.pipeline.nativeId())
+        break
+      case "setVertexBuffer":
+        ops.push(WEB_GPU_SET_VERTEX_BUFFER)
+        operands.push(command.slot, command.buffer.nativeId(), command.offset, command.size)
+        break
+      case "setIndexBuffer":
+        ops.push(WEB_GPU_SET_INDEX_BUFFER)
+        operands.push(
+          command.buffer.nativeId(),
+          command.indexFormat === "uint16" ? 0 : 1,
+          command.offset,
+          command.size,
+        )
+        break
+      case "draw":
+        ops.push(WEB_GPU_DRAW)
+        operands.push(
+          command.vertexCount,
+          command.instanceCount,
+          command.firstVertex,
+          command.firstInstance,
+        )
+        break
+      case "drawIndexed":
+        ops.push(WEB_GPU_DRAW_INDEXED)
+        operands.push(
+          command.indexCount,
+          command.instanceCount,
+          command.firstIndex,
+          command.baseVertex,
+          command.firstInstance,
+        )
+        break
     }
   }
 }
 
-export class GPUDevice {
+export class GPUDevice extends EventTarget {
   readonly queue = new GPUQueue(this)
+  onuncapturederror: ((event: GPUUncapturedErrorEvent) => void) | null = null
   private destroyed = false
   private transport: WebGpuCanvasTransport | null = null
+  private boundTransportState: TransportState | null = null
   private nativeIdValue: number | null = null
-  private readonly buffers = new Set<GPUBuffer>()
+  private readonly resources = new Set<WeakRef<{ destroyFromDevice(): void }>>()
+  private readonly errorScopes: Array<{ filter: GPUErrorFilter; error: GPUError | null }> = []
+
+  constructor() {
+    super()
+  }
 
   createCommandEncoder(): GPUCommandEncoder {
     this.assertAlive()
@@ -742,7 +1062,7 @@ export class GPUDevice {
       throw new TypeError("createShaderModule requires WGSL source code")
     }
     const module = new GPUShaderModule(this, { label: descriptor.label, code: descriptor.code })
-    if (this.transport) module.nativeId()
+    this.trackResource(module)
     return module
   }
 
@@ -755,8 +1075,8 @@ export class GPUDevice {
       usage: descriptor.usage,
       mappedAtCreation: descriptor.mappedAtCreation ?? false,
     })
-    this.buffers.add(buffer)
-    if (this.transport && !descriptor.mappedAtCreation) buffer.nativeId()
+    this.trackResource(buffer)
+    if (this.transport && !descriptor.mappedAtCreation) buffer.materialize()
     return buffer
   }
 
@@ -765,17 +1085,66 @@ export class GPUDevice {
     const snapshot = snapshotRenderPipelineDescriptor(descriptor)
     validateRenderPipelineDescriptor(this, snapshot)
     const pipeline = new GPURenderPipeline(this, snapshot)
-    if (this.transport) pipeline.nativeId()
+    this.trackResource(pipeline)
+    if (this.transport) pipeline.materialize()
     return pipeline
+  }
+
+  pushErrorScope(filter: GPUErrorFilter): void {
+    this.assertAlive()
+    if (filter !== "validation" && filter !== "out-of-memory" && filter !== "internal") {
+      throw new TypeError("Unknown WebGPU error filter")
+    }
+    this.errorScopes.push({ filter, error: null })
+  }
+
+  async popErrorScope(): Promise<GPUError | null> {
+    this.assertAlive()
+    const scope = this.errorScopes.pop()
+    if (!scope) throw operationError("No WebGPU error scope is available to pop")
+    await Promise.resolve()
+    return scope.error
+  }
+
+  captureNativeError(cause: unknown): GPUError {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    const error = message.includes("out-of-memory")
+      ? new GPUOutOfMemoryError(message)
+      : message.includes("internal error")
+        ? new GPUInternalError(message)
+        : new GPUValidationError(message)
+    const filter: GPUErrorFilter =
+      error instanceof GPUOutOfMemoryError
+        ? "out-of-memory"
+        : error instanceof GPUInternalError
+          ? "internal"
+          : "validation"
+    const scope = [...this.errorScopes]
+      .reverse()
+      .find((candidate) => candidate.filter === filter && candidate.error === null)
+    if (scope) {
+      scope.error = error
+    } else {
+      queueMicrotask(() => {
+        const event = new GPUUncapturedErrorEvent(error)
+        this.dispatchEvent(event)
+        this.onuncapturederror?.(event)
+      })
+    }
+    return error
   }
 
   destroy(): void {
     if (this.destroyed) return
-    for (const buffer of this.buffers) buffer.destroyFromDevice()
-    this.buffers.clear()
     this.destroyed = true
-    if (this.nativeIdValue !== null) {
-      this.transport?.destroyWebGpuDevice?.(this.nativeIdValue)
+    for (const resource of this.resources) resource.deref()?.destroyFromDevice()
+    this.resources.clear()
+    if (this.nativeIdValue !== null && this.boundTransportState?.alive) {
+      try {
+        this.transport?.destroyWebGpuDevice?.(this.nativeIdValue)
+      } catch {
+        // Destruction is final even when the renderer has already lost its device.
+      }
     }
   }
 
@@ -784,7 +1153,12 @@ export class GPUDevice {
     if (this.transport && this.transport !== transport) {
       throw new TypeError("GPUDevice is already bound to a different renderer")
     }
+    const state = stateForTransport(transport)
+    if (!state.alive) {
+      throw new DOMException("The native WebGPU renderer is unavailable", "InvalidStateError")
+    }
     this.transport = transport
+    this.boundTransportState = state
   }
 
   nativeBinding(): { transport: WebGpuCanvasTransport; deviceId: number } {
@@ -813,13 +1187,24 @@ export class GPUDevice {
     return this.transport !== null
   }
 
-  forgetBuffer(buffer: GPUBuffer): void {
-    this.buffers.delete(buffer)
+  transportState(): TransportState {
+    this.assertAlive()
+    if (!this.boundTransportState) {
+      throw new DOMException("GPUDevice is not bound to a renderer", "InvalidStateError")
+    }
+    return this.boundTransportState
+  }
+
+  private trackResource(resource: { destroyFromDevice(): void }): void {
+    this.resources.add(new WeakRef(resource))
   }
 
   assertAlive(): void {
     if (this.destroyed) {
       throw new DOMException("The logical GPUDevice is destroyed", "InvalidStateError")
+    }
+    if (this.boundTransportState && !this.boundTransportState.alive) {
+      throw new DOMException("The native WebGPU renderer was replaced", "InvalidStateError")
     }
   }
 }
@@ -976,6 +1361,9 @@ function validateRenderPipelineDescriptor(
   if (descriptor.multisample?.count !== undefined && descriptor.multisample.count !== 1) {
     throw unsupported("Multisampling is not supported yet")
   }
+  if (descriptor.multisample?.mask !== undefined) {
+    gpuSize32(descriptor.multisample.mask, "multisample mask")
+  }
   if (descriptor.multisample?.alphaToCoverageEnabled) {
     throw unsupported("Alpha-to-coverage is not supported yet")
   }
@@ -996,11 +1384,11 @@ export class GPU {
 export class GPUCanvasContext {
   private configured: Configure | null = null
   private generation = 0
-  private presented = false
+  private currentTexture: GPUTexture | null = null
   private disposed = false
 
   constructor(
-    private readonly transport: WebGpuCanvasTransport,
+    readonly transport: WebGpuCanvasTransport,
     private readonly id: number,
     private readonly dimensions: () => { width: number; height: number }
   ) {}
@@ -1014,10 +1402,16 @@ export class GPUCanvasContext {
     if (configuration.format !== "bgra8unorm") {
       throw new TypeError("Only bgra8unorm is supported")
     }
+    if (configuration.alphaMode === "premultiplied") {
+      throw unsupported("Premultiplied WebGPU canvas alpha is not supported yet")
+    }
+    if (configuration.alphaMode !== undefined && configuration.alphaMode !== "opaque") {
+      throw new TypeError("WebGPU canvas alphaMode must be opaque or premultiplied")
+    }
     configuration.device.bind(this.transport)
-    this.configured = configuration
+    this.configured = { ...configuration, alphaMode: "opaque" }
     this.generation++
-    this.presented = false
+    this.currentTexture = null
   }
 
   getCurrentTexture(): GPUTexture {
@@ -1025,9 +1419,11 @@ export class GPUCanvasContext {
       throw new DOMException("The context is not configured", "InvalidStateError")
     }
     this.configured.device.assertAlive()
-    this.generation++
-    this.presented = false
-    return new GPUTexture(this, this.configured.device, this.generation)
+    if (!this.currentTexture) {
+      this.generation++
+      this.currentTexture = new GPUTexture(this, this.configured.device, this.generation)
+    }
+    return this.currentTexture
   }
 
   assertOwner(device: GPUDevice): void {
@@ -1037,91 +1433,36 @@ export class GPUCanvasContext {
   }
 
   assertCurrent(generation: number): void {
-    if (this.disposed || !this.configured || generation !== this.generation || this.presented) {
+    if (
+      this.disposed ||
+      !this.configured ||
+      generation !== this.generation ||
+      !this.currentTexture
+    ) {
       throw new DOMException("The canvas texture is stale", "InvalidStateError")
     }
     this.configured.device.assertAlive()
   }
 
-  present(device: GPUDevice, color: GPUColor, commands: readonly RenderCommand[]): void {
+  frameDescriptor(): { id: number; width: number; height: number } {
     const { width, height } = this.dimensions()
-    const rgba = colorToRgba(color)
-    if (commands.length === 0) {
-      if (!this.transport.presentWebGpuClear) {
-        throw unsupported("Native WebGPU canvas presentation is unavailable")
-      }
-      this.transport.presentWebGpuClear(this.id, width, height, rgba)
-    } else {
-      const { transport, deviceId } = device.nativeBinding()
-      if (transport !== this.transport) {
-        throw new TypeError("GPUDevice is bound to a different renderer")
-      }
-      if (!transport.presentWebGpuCommands) {
-        throw unsupported("Native WebGPU draw commands are unavailable")
-      }
-      const ops: number[] = []
-      const operands: number[] = []
-      for (const command of commands) {
-        switch (command.kind) {
-          case "setPipeline":
-            ops.push(WEB_GPU_SET_PIPELINE)
-            operands.push(command.pipeline.nativeId())
-            break
-          case "setVertexBuffer":
-            ops.push(WEB_GPU_SET_VERTEX_BUFFER)
-            operands.push(
-              command.slot,
-              command.buffer.nativeId(),
-              command.offset,
-              command.size
-            )
-            break
-          case "setIndexBuffer":
-            ops.push(WEB_GPU_SET_INDEX_BUFFER)
-            operands.push(
-              command.buffer.nativeId(),
-              command.indexFormat === "uint16" ? 0 : 1,
-              command.offset,
-              command.size
-            )
-            break
-          case "draw":
-            ops.push(WEB_GPU_DRAW)
-            operands.push(
-              command.vertexCount,
-              command.instanceCount,
-              command.firstVertex,
-              command.firstInstance
-            )
-            break
-          case "drawIndexed":
-            ops.push(WEB_GPU_DRAW_INDEXED)
-            operands.push(
-              command.indexCount,
-              command.instanceCount,
-              command.firstIndex,
-              command.baseVertex,
-              command.firstInstance
-            )
-            break
-        }
-      }
-      transport.presentWebGpuCommands(
-        this.id,
-        width,
-        height,
-        deviceId,
-        rgba,
-        Uint32Array.from(ops),
-        Float64Array.from(operands)
-      )
-    }
-    this.presented = true
+    return { id: this.id, width, height }
+  }
+
+  didPresent(texture: GPUTexture): void {
+    if (this.currentTexture === texture) this.currentTexture = null
+  }
+
+  resize(): void {
+    if (this.disposed) return
+    this.generation++
+    this.currentTexture = null
   }
 
   dispose(): void {
     this.disposed = true
     this.generation++
+    this.currentTexture = null
   }
 }
 
@@ -1133,7 +1474,7 @@ export function getOrCreateWebGpuContext(
   id: number,
   dimensions: () => { width: number; height: number }
 ): GPUCanvasContext | null {
-  if (!transport.presentWebGpuClear) return null
+  if (!transport.submitWebGpuCommands) return null
   let context = contexts.get(owner)
   if (!context) {
     context = new GPUCanvasContext(transport, id, dimensions)
@@ -1167,16 +1508,26 @@ export function installWebGpuGlobal(): void {
       value: GPUBufferUsage,
     })
   }
+  for (const [name, value] of [
+    ["GPUValidationError", GPUValidationError],
+    ["GPUOutOfMemoryError", GPUOutOfMemoryError],
+    ["GPUInternalError", GPUInternalError],
+    ["GPUUncapturedErrorEvent", GPUUncapturedErrorEvent],
+  ] as const) {
+    if (!Reflect.has(globalThis, name)) {
+      Object.defineProperty(globalThis, name, { configurable: true, value })
+    }
+  }
 }
 
 function colorToRgba(color: GPUColor): number {
   const channel = (value: number | undefined, fallback: number) =>
     Math.round(Math.max(0, Math.min(1, value ?? fallback)) * 255)
+  const dictionary = color as { r?: number; g?: number; b?: number; a?: number }
+  const [r, g, b, a] = Array.isArray(color)
+    ? color
+    : [dictionary.r, dictionary.g, dictionary.b, dictionary.a]
   return (
-    ((channel(color.r, 0) << 24) |
-      (channel(color.g, 0) << 16) |
-      (channel(color.b, 0) << 8) |
-      channel(color.a, 1)) >>>
-    0
+    ((channel(r, 0) << 24) | (channel(g, 0) << 16) | (channel(b, 0) << 8) | channel(a, 1)) >>> 0
   )
 }

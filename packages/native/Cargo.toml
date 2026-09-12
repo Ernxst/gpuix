@@ -117,6 +117,9 @@ test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui_macos/t
 [build-dependencies]
 napi-build = "2"
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+wgpu = { version = "29.0.4", features = ["noop"] }
+
 # Only the serialization bench needs a MessagePack codec. Keep it out of the
 # shipped addon: the wire format is still JSON until the bench says otherwise.
 [dev-dependencies]

@@ -62,6 +62,7 @@ import {
   getOrCreateRecordingContext2D,
 } from "./canvas/context-2d.js"
 import { Image } from "./canvas/image.js"
+import { invalidateWebGpuTransport } from "./canvas/webgpu.js"
 import {
   attachAnimationFrameSource,
   detachAnimationFrameSource,
@@ -789,6 +790,7 @@ export class TestRenderer implements NativeRenderer {
   dispose(): void {
     if (this.disposed) return
     detachAnimationFrameSource(this)
+    invalidateWebGpuTransport(this)
     this.native.dispose()
     this.disposed = true
     // Native disposal clears the retained tree; a cached snapshot would keep
@@ -871,6 +873,14 @@ export class TestRenderer implements NativeRenderer {
     this.native.destroyWebGpuBuffer!(deviceId, bufferId)
   }
 
+  destroyWebGpuShaderModule(deviceId: number, shaderModuleId: number): void {
+    this.native.destroyWebGpuShaderModule!(deviceId, shaderModuleId)
+  }
+
+  destroyWebGpuRenderPipeline(deviceId: number, renderPipelineId: number): void {
+    this.native.destroyWebGpuRenderPipeline!(deviceId, renderPipelineId)
+  }
+
   writeWebGpuBuffer(
     deviceId: number,
     bufferId: number,
@@ -887,7 +897,8 @@ export class TestRenderer implements NativeRenderer {
     vertexEntryPoint: string | undefined,
     fragmentModuleId: number,
     fragmentEntryPoint: string | undefined,
-    vertexBuffersJson: string
+    vertexBuffersJson: string,
+    sampleMask: number
   ): number {
     return this.native.createWebGpuRenderPipeline!(
       deviceId,
@@ -896,21 +907,20 @@ export class TestRenderer implements NativeRenderer {
       vertexEntryPoint,
       fragmentModuleId,
       fragmentEntryPoint,
-      vertexBuffersJson
+      vertexBuffersJson,
+      sampleMask
     )
   }
 
-  presentWebGpuCommands(
-    id: number,
-    width: number,
-    height: number,
+  submitWebGpuCommands(
     deviceId: number,
-    rgba: number,
+    submissionJson: string,
     ops: Uint32Array,
     operands: Float64Array
   ): void {
-    this.native.presentWebGpuCommands!(id, width, height, deviceId, rgba, ops, operands)
-    this.webGpuCanvasIds.add(id)
+    this.native.submitWebGpuCommands!(deviceId, submissionJson, ops, operands)
+    const submission = JSON.parse(submissionJson) as { frames: Array<{ id: number }> }
+    for (const frame of submission.frames) this.webGpuCanvasIds.add(frame.id)
   }
 
   getTestGpuCanvasState(): { installed: number; presentations: number; released: number } {

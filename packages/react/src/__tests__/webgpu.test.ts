@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   GPUAdapter,
   GPUCanvasContext,
+  invalidateWebGpuTransport,
   type WebGpuCanvasTransport,
 } from "../canvas/webgpu.js"
 
@@ -30,6 +31,7 @@ class RecordingTransport implements WebGpuCanvasTransport {
     fragmentModuleId: number
     fragmentEntryPoint: string | undefined
     vertexBuffers: string
+    sampleMask: number
     id: number
   }> = []
   buffers: Array<{
@@ -41,6 +43,8 @@ class RecordingTransport implements WebGpuCanvasTransport {
     id: number
   }> = []
   destroyedBuffers: Array<{ deviceId: number; bufferId: number }> = []
+  destroyedShaderModules: Array<{ deviceId: number; shaderModuleId: number }> = []
+  destroyedRenderPipelines: Array<{ deviceId: number; renderPipelineId: number }> = []
   writes: Array<{ deviceId: number; bufferId: number; offset: number; data: number[] }> = []
   frames: Array<{
     id: number
@@ -48,6 +52,22 @@ class RecordingTransport implements WebGpuCanvasTransport {
     height: number
     deviceId: number
     rgba: number
+    ops: number[]
+    operands: number[]
+  }> = []
+  submissions: Array<{
+    deviceId: number
+    submission: {
+      frames: Array<{ id: number; width: number; height: number }>
+      passes: Array<{
+        frame: number
+        rgba: number
+        opStart: number
+        opCount: number
+        operandStart: number
+        operandCount: number
+      }>
+    }
     ops: number[]
     operands: number[]
   }> = []
@@ -81,7 +101,8 @@ class RecordingTransport implements WebGpuCanvasTransport {
     vertexEntryPoint: string | undefined,
     fragmentModuleId: number,
     fragmentEntryPoint: string | undefined,
-    vertexBuffers: string
+    vertexBuffers: string,
+    sampleMask: number
   ): number {
     const id = this.nextId++
     this.pipelines.push({
@@ -92,6 +113,7 @@ class RecordingTransport implements WebGpuCanvasTransport {
       fragmentModuleId,
       fragmentEntryPoint,
       vertexBuffers,
+      sampleMask,
       id,
     })
     return id
@@ -120,6 +142,14 @@ class RecordingTransport implements WebGpuCanvasTransport {
     this.destroyedBuffers.push({ deviceId, bufferId })
   }
 
+  destroyWebGpuShaderModule(deviceId: number, shaderModuleId: number): void {
+    this.destroyedShaderModules.push({ deviceId, shaderModuleId })
+  }
+
+  destroyWebGpuRenderPipeline(deviceId: number, renderPipelineId: number): void {
+    this.destroyedRenderPipelines.push({ deviceId, renderPipelineId })
+  }
+
   writeWebGpuBuffer(
     deviceId: number,
     bufferId: number,
@@ -129,23 +159,29 @@ class RecordingTransport implements WebGpuCanvasTransport {
     this.writes.push({ deviceId, bufferId, offset, data: Array.from(data) })
   }
 
-  presentWebGpuCommands(
-    id: number,
-    width: number,
-    height: number,
+  submitWebGpuCommands(
     deviceId: number,
-    rgba: number,
+    submissionJson: string,
     ops: Uint32Array,
     operands: Float64Array
   ): void {
-    this.frames.push({
-      id,
-      width,
-      height,
-      deviceId,
-      rgba,
-      ops: Array.from(ops),
-      operands: Array.from(operands),
+    const submission = JSON.parse(
+      submissionJson,
+    ) as RecordingTransport["submissions"][number]["submission"]
+    const opValues = Array.from(ops)
+    const operandValues = Array.from(operands)
+    this.submissions.push({ deviceId, submission, ops: opValues, operands: operandValues })
+    submission.frames.forEach((frame, frameIndex) => {
+      const passes = submission.passes.filter((pass) => pass.frame === frameIndex)
+      this.frames.push({
+        ...frame,
+        deviceId,
+        rgba: passes[0]?.rgba ?? 0,
+        ops: passes.flatMap((pass) => opValues.slice(pass.opStart, pass.opStart + pass.opCount)),
+        operands: passes.flatMap((pass) =>
+          operandValues.slice(pass.operandStart, pass.operandStart + pass.operandCount),
+        ),
+      })
     })
   }
 }
@@ -200,6 +236,7 @@ describe("native WebGPU command model", () => {
         fragmentModuleId: 2,
         fragmentEntryPoint: "fragment_main",
         vertexBuffers: "[]",
+        sampleMask: 0xffff_ffff,
         id: 3,
       },
     ])
@@ -451,5 +488,139 @@ describe("native WebGPU command model", () => {
     expect(transport.destroyedBuffers).toEqual([{ deviceId: 1, bufferId: 2 }])
     expect(() => writable.destroy()).not.toThrow()
     expect(() => device.queue.writeBuffer(writable, 0, new Uint32Array([1]))).toThrow(/destroyed/)
+  })
+
+  it("keeps one current texture through ordered passes and expires it after submission", async () => {
+    const transport = new RecordingTransport()
+    const device = await new GPUAdapter().requestDevice()
+    const context = new GPUCanvasContext(transport, 31, () => ({ width: 48, height: 24 }))
+    context.configure({ device, format: "bgra8unorm" })
+    const texture = context.getCurrentTexture()
+    expect(context.getCurrentTexture()).toBe(texture)
+    const view = texture.createView()
+    const encoder = device.createCommandEncoder()
+    for (const clearValue of [
+      { r: 1, a: 1 },
+      { b: 1, a: 1 },
+    ]) {
+      encoder.beginRenderPass({ colorAttachments: [{ view, clearValue }] }).end()
+    }
+
+    device.queue.submit([encoder.finish()])
+
+    expect(transport.submissions).toHaveLength(1)
+    expect(transport.submissions[0]?.submission.frames).toEqual([{ id: 31, width: 48, height: 24 }])
+    expect(transport.submissions[0]?.submission.passes.map((pass) => pass.rgba)).toEqual([
+      0xff0000ff, 0x0000ffff,
+    ])
+    expect(() => texture.createView()).toThrow(/stale/)
+    expect(context.getCurrentTexture()).not.toBe(texture)
+  })
+
+  it("snapshots dictionary and array clear colors while recording", async () => {
+    const transport = new RecordingTransport()
+    const device = await new GPUAdapter().requestDevice()
+    const context = new GPUCanvasContext(transport, 32, () => ({ width: 8, height: 8 }))
+    context.configure({ device, format: "bgra8unorm" })
+    const dictionary = { r: 1, g: 0, b: 0, a: 1 }
+    const encoder = device.createCommandEncoder()
+    encoder
+      .beginRenderPass({
+        colorAttachments: [
+          { view: context.getCurrentTexture().createView(), clearValue: dictionary },
+        ],
+      })
+      .end()
+    dictionary.r = 0
+    dictionary.g = 1
+    device.queue.submit([encoder.finish()])
+    expect(transport.frames[0]?.rgba).toBe(0xff0000ff)
+
+    const next = device.createCommandEncoder()
+    next
+      .beginRenderPass({
+        colorAttachments: [
+          { view: context.getCurrentTexture().createView(), clearValue: [1, 0, 0, 1] },
+        ],
+      })
+      .end()
+    device.queue.submit([next.finish()])
+    expect(transport.frames[1]?.rgba).toBe(0xff0000ff)
+  })
+
+  it("routes sample masks and rejects premultiplied canvas configuration", async () => {
+    const { context, device, module, transport } = await pipelineFixture()
+    const pipeline = device.createRenderPipeline({
+      layout: "auto",
+      vertex: { module, entryPoint: "vertex_main" },
+      fragment: { module, entryPoint: "fragment_main", targets: [{ format: "bgra8unorm" }] },
+      multisample: { mask: 0 },
+    })
+    const encoder = device.createCommandEncoder()
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [{ view: context.getCurrentTexture().createView() }],
+    })
+    pass.setPipeline(pipeline)
+    pass.draw(3)
+    pass.end()
+    device.queue.submit([encoder.finish()])
+    expect(transport.pipelines.at(-1)?.sampleMask).toBe(0)
+
+    const otherContext = new GPUCanvasContext(transport, 33, () => ({ width: 8, height: 8 }))
+    expect(() =>
+      otherContext.configure({ device, format: "bgra8unorm", alphaMode: "premultiplied" }),
+    ).toThrow(/not supported/)
+  })
+
+  it("finishes destruction after a caller transfers a mapped range", async () => {
+    const device = await new GPUAdapter().requestDevice()
+    const mapped = device.createBuffer({ size: 16, usage: 0x20, mappedAtCreation: true })
+    const range = mapped.getMappedRange()
+    structuredClone(range, { transfer: [range] })
+    expect(() => device.destroy()).not.toThrow()
+    expect(() => device.createCommandEncoder()).toThrow(/destroyed/)
+  })
+
+  it("invalidates every device wrapper when its renderer is replaced", async () => {
+    const transport = new RecordingTransport()
+    const device = await new GPUAdapter().requestDevice()
+    const context = new GPUCanvasContext(transport, 34, () => ({ width: 8, height: 8 }))
+    context.configure({ device, format: "bgra8unorm" })
+    const buffer = device.createBuffer({ size: 16, usage: 0x08 })
+    invalidateWebGpuTransport(transport)
+    expect(() => device.createCommandEncoder()).toThrow(/replaced/)
+    expect(() => device.queue.writeBuffer(buffer, 0, new Uint32Array([1]))).toThrow(/replaced/)
+    expect(() => device.createShaderModule({ code: SHADER })).toThrow(/replaced/)
+    expect(() => device.destroy()).not.toThrow()
+  })
+
+  it("attributes native validation failures to one logical device", async () => {
+    const transport = new RecordingTransport()
+    transport.createWebGpuShaderModule = () => {
+      throw new Error("WGSL parse error")
+    }
+    const device = await new GPUAdapter().requestDevice()
+    const context = new GPUCanvasContext(transport, 35, () => ({ width: 8, height: 8 }))
+    context.configure({ device, format: "bgra8unorm" })
+    device.pushErrorScope("validation")
+    const module = device.createShaderModule({ code: "not wgsl" })
+    expect(() =>
+      device.createRenderPipeline({
+        layout: "auto",
+        vertex: { module },
+        fragment: { module, targets: [{ format: "bgra8unorm" }] },
+      }),
+    ).not.toThrow()
+    await expect(device.popErrorScope()).resolves.toMatchObject({
+      name: "GPUValidationError",
+      message: "WGSL parse error",
+    })
+
+    const otherTransport = new RecordingTransport()
+    const otherDevice = await new GPUAdapter().requestDevice()
+    const otherContext = new GPUCanvasContext(otherTransport, 36, () => ({ width: 8, height: 8 }))
+    otherContext.configure({ device: otherDevice, format: "bgra8unorm" })
+    expect(() => otherDevice.createShaderModule({ code: SHADER })).not.toThrow()
+    expect(() => otherDevice.createCommandEncoder()).not.toThrow()
   })
 })

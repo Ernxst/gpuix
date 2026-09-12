@@ -104,6 +104,46 @@ struct WebGpuVertexAttributeDescriptor {
     format: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebGpuSubmissionDescriptor {
+    frames: Vec<WebGpuFrameDescriptor>,
+    passes: Vec<WebGpuRenderPassDescriptor>,
+}
+
+#[derive(Deserialize)]
+struct WebGpuFrameDescriptor {
+    id: u64,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebGpuRenderPassDescriptor {
+    frame: usize,
+    rgba: u32,
+    op_start: usize,
+    op_count: usize,
+    operand_start: usize,
+    operand_count: usize,
+}
+
+struct PreparedWebGpuPass {
+    frame: usize,
+    rgba: u32,
+    commands: Vec<WebGpuPassCommand>,
+}
+
+struct PreparedWebGpuFrame {
+    id: u64,
+    width: u32,
+    height: u32,
+    _texture: Arc<wgpu::Texture>,
+    view: wgpu::TextureView,
+    surface: gpui_apple::metal_renderer::MetalTextureSurface,
+}
+
 struct WebGpuProducer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -112,6 +152,7 @@ struct WebGpuProducer {
     shader_modules: FxHashMap<u64, WebGpuShaderModule>,
     render_pipelines: FxHashMap<u64, WebGpuRenderPipeline>,
     buffers: FxHashMap<u64, WebGpuBuffer>,
+    physical_loss: Arc<Mutex<Option<String>>>,
 }
 
 impl WebGpuProducer {
@@ -128,6 +169,14 @@ impl WebGpuProducer {
         }
         let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
             .context("Native WebGPU device creation failed")?;
+        let physical_loss = Arc::new(Mutex::new(None));
+        let physical_loss_callback = physical_loss.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            *physical_loss_callback.lock().unwrap() = Some(format!("{reason:?}: {message}"));
+        });
+        device.on_uncaptured_error(Arc::new(|error| {
+            log::error!("contained uncaptured native WebGPU error: {error}");
+        }));
         Ok(Self {
             device,
             queue,
@@ -136,6 +185,7 @@ impl WebGpuProducer {
             shader_modules: FxHashMap::default(),
             render_pipelines: FxHashMap::default(),
             buffers: FxHashMap::default(),
+            physical_loss,
         })
     }
 
@@ -157,6 +207,9 @@ impl WebGpuProducer {
     }
 
     fn require_logical_device(&self, device_id: u64) -> Result<()> {
+        if let Some(loss) = self.physical_loss.lock().unwrap().as_ref() {
+            anyhow::bail!("Native WebGPU physical device is lost: {loss}");
+        }
         if !self.logical_devices.contains(&device_id) {
             anyhow::bail!("Native WebGPU logical device {device_id} is destroyed or unknown");
         }
@@ -215,12 +268,14 @@ impl WebGpuProducer {
         if mapped_at_creation && size % wgpu::COPY_BUFFER_ALIGNMENT != 0 {
             anyhow::bail!("A WebGPU buffer mapped at creation must have a 4-byte aligned size");
         }
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label,
-            size,
-            usage,
-            mapped_at_creation,
-        });
+        let buffer = capture_gpu_operation(&self.device, || {
+            Ok(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label,
+                size,
+                usage,
+                mapped_at_creation,
+            }))
+        })?;
         if mapped_at_creation {
             buffer
                 .slice(..)
@@ -277,7 +332,10 @@ impl WebGpuProducer {
         if end > buffer.size {
             anyhow::bail!("WebGPU buffer write exceeds the destination buffer");
         }
-        self.queue.write_buffer(&buffer.buffer, offset, data);
+        capture_gpu_operation(&self.device, || {
+            self.queue.write_buffer(&buffer.buffer, offset, data);
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -288,16 +346,44 @@ impl WebGpuProducer {
         code: String,
     ) -> Result<u64> {
         self.require_logical_device(device_id)?;
-        let module = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label,
-                source: wgpu::ShaderSource::Wgsl(code.into()),
-            });
+        let module = capture_gpu_operation(&self.device, || {
+            Ok(self
+                .device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label,
+                    source: wgpu::ShaderSource::Wgsl(code.into()),
+                }))
+        })?;
         let id = self.allocate_resource_id()?;
         self.shader_modules
             .insert(id, WebGpuShaderModule { device_id, module });
         Ok(id)
+    }
+
+    fn destroy_shader_module(&mut self, device_id: u64, shader_module_id: u64) -> Result<()> {
+        self.require_logical_device(device_id)?;
+        let module = self
+            .shader_modules
+            .get(&shader_module_id)
+            .with_context(|| format!("Unknown WebGPU shader module {shader_module_id}"))?;
+        if module.device_id != device_id {
+            anyhow::bail!("WebGPU shader module belongs to a different logical device");
+        }
+        self.shader_modules.remove(&shader_module_id);
+        Ok(())
+    }
+
+    fn destroy_render_pipeline(&mut self, device_id: u64, render_pipeline_id: u64) -> Result<()> {
+        self.require_logical_device(device_id)?;
+        let pipeline = self
+            .render_pipelines
+            .get(&render_pipeline_id)
+            .with_context(|| format!("Unknown WebGPU render pipeline {render_pipeline_id}"))?;
+        if pipeline.device_id != device_id {
+            anyhow::bail!("WebGPU render pipeline belongs to a different logical device");
+        }
+        self.render_pipelines.remove(&render_pipeline_id);
+        Ok(())
     }
 
     fn create_render_pipeline(
@@ -309,6 +395,7 @@ impl WebGpuProducer {
         fragment_module_id: u64,
         fragment_entry_point: Option<&str>,
         vertex_buffers_json: &str,
+        sample_mask: u32,
     ) -> Result<u64> {
         self.require_logical_device(device_id)?;
         let vertex_module = self
@@ -363,31 +450,44 @@ impl WebGpuProducer {
         let targets = [Some(wgpu::ColorTargetState {
             format: wgpu::TextureFormat::Bgra8Unorm,
             blend: None,
-            write_mask: wgpu::ColorWrites::ALL,
+            // At the currently supported sample count of one, only mask bit zero
+            // addresses a sample. Metal does not apply a zero sample mask to a
+            // single-sampled target, so preserve the WebGPU result explicitly.
+            write_mask: if sample_mask & 1 == 0 {
+                wgpu::ColorWrites::empty()
+            } else {
+                wgpu::ColorWrites::ALL
+            },
         })];
-        let pipeline = self
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label,
-                layout: None,
-                vertex: wgpu::VertexState {
-                    module: &vertex_module.module,
-                    entry_point: vertex_entry_point,
-                    buffers: &vertex_buffers,
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &fragment_module.module,
-                    entry_point: fragment_entry_point,
-                    targets: &targets,
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview_mask: None,
-                cache: None,
-            });
+        let pipeline = capture_gpu_operation(&self.device, || {
+            Ok(self
+                .device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label,
+                    layout: None,
+                    vertex: wgpu::VertexState {
+                        module: &vertex_module.module,
+                        entry_point: vertex_entry_point,
+                        buffers: &vertex_buffers,
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &fragment_module.module,
+                        entry_point: fragment_entry_point,
+                        targets: &targets,
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState {
+                        count: 1,
+                        mask: sample_mask as u64,
+                        alpha_to_coverage_enabled: false,
+                    },
+                    multiview_mask: None,
+                    cache: None,
+                }))
+        })?;
         let id = self.allocate_resource_id()?;
         self.render_pipelines.insert(
             id,
@@ -596,6 +696,320 @@ impl WebGpuProducer {
             gpui::DevicePixels(height as i32),
         )))
     }
+
+    fn submit(
+        &self,
+        device_id: u64,
+        submission: WebGpuSubmissionDescriptor,
+        ops: &[u32],
+        operands: &[f64],
+        released: Arc<AtomicU64>,
+    ) -> Result<Vec<(u64, gpui::SurfaceSource)>> {
+        self.require_logical_device(device_id)?;
+
+        let mut canvas_ids = FxHashSet::default();
+        for frame in &submission.frames {
+            if !canvas_ids.insert(frame.id) {
+                anyhow::bail!(
+                    "WebGPU submission contains canvas {} more than once",
+                    frame.id
+                );
+            }
+            validate_frame_dimensions(&self.device, frame.width, frame.height)?;
+        }
+
+        let passes = submission
+            .passes
+            .into_iter()
+            .map(|pass| {
+                if pass.frame >= submission.frames.len() {
+                    anyhow::bail!("WebGPU render pass references unknown frame {}", pass.frame);
+                }
+                let op_end = pass
+                    .op_start
+                    .checked_add(pass.op_count)
+                    .context("WebGPU pass opcode range overflow")?;
+                let operand_end = pass
+                    .operand_start
+                    .checked_add(pass.operand_count)
+                    .context("WebGPU pass operand range overflow")?;
+                let pass_ops = ops
+                    .get(pass.op_start..op_end)
+                    .context("WebGPU pass opcode range exceeds the submission")?;
+                let pass_operands = operands
+                    .get(pass.operand_start..operand_end)
+                    .context("WebGPU pass operand range exceeds the submission")?;
+                Ok(PreparedWebGpuPass {
+                    frame: pass.frame,
+                    rgba: pass.rgba,
+                    commands: decode_pass_commands(pass_ops, pass_operands)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let frames = capture_gpu_operation(&self.device, || {
+            submission
+                .frames
+                .into_iter()
+                .map(|frame| {
+                    let texture = Arc::new(self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("GPU-IX native WebGPU canvas frame"),
+                        size: wgpu::Extent3d {
+                            width: frame.width,
+                            height: frame.height,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Bgra8Unorm,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    }));
+                    let view = texture.create_view(&Default::default());
+                    let metal_texture = retained_metal_texture(&texture)?;
+                    let owner = Arc::new(WebGpuCanvasFrame {
+                        _texture: texture.clone(),
+                        released: released.clone(),
+                    });
+                    let surface = gpui_apple::metal_renderer::MetalTextureSurface::new_opaque(
+                        metal_texture,
+                        1,
+                        owner,
+                    );
+                    Ok(PreparedWebGpuFrame {
+                        id: frame.id,
+                        width: frame.width,
+                        height: frame.height,
+                        _texture: texture,
+                        view,
+                        surface,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()
+        })?;
+
+        let command_buffer = capture_gpu_operation(&self.device, || {
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("GPU-IX native WebGPU submission"),
+                });
+            for prepared in &passes {
+                let frame = &frames[prepared.frame];
+                let red = ((prepared.rgba >> 24) & 0xff) as f64 / 255.0;
+                let green = ((prepared.rgba >> 16) & 0xff) as f64 / 255.0;
+                let blue = ((prepared.rgba >> 8) & 0xff) as f64 / 255.0;
+                let alpha = (prepared.rgba & 0xff) as f64 / 255.0;
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("GPU-IX native WebGPU render pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &frame.view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: red,
+                                g: green,
+                                b: blue,
+                                a: alpha,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+
+                let mut pipeline_is_set = false;
+                let mut index_buffer_is_set = false;
+                for command in &prepared.commands {
+                    match *command {
+                        WebGpuPassCommand::SetPipeline(pipeline_id) => {
+                            let pipeline =
+                                self.render_pipelines.get(&pipeline_id).with_context(|| {
+                                    format!("Unknown WebGPU render pipeline {pipeline_id}")
+                                })?;
+                            if pipeline.device_id != device_id {
+                                anyhow::bail!(
+                                    "WebGPU render pipeline belongs to a different logical device"
+                                );
+                            }
+                            pass.set_pipeline(&pipeline.pipeline);
+                            pipeline_is_set = true;
+                        }
+                        WebGpuPassCommand::SetVertexBuffer {
+                            slot,
+                            buffer_id,
+                            offset,
+                            size,
+                        } => {
+                            let buffer = self
+                                .buffers
+                                .get(&buffer_id)
+                                .with_context(|| format!("Unknown WebGPU buffer {buffer_id}"))?;
+                            if buffer.device_id != device_id {
+                                anyhow::bail!(
+                                    "WebGPU vertex buffer belongs to a different logical device"
+                                );
+                            }
+                            if !buffer.usage.contains(wgpu::BufferUsages::VERTEX) {
+                                anyhow::bail!("WebGPU buffer usage does not include VERTEX");
+                            }
+                            let end = checked_buffer_binding_end(buffer, offset, size)?;
+                            pass.set_vertex_buffer(slot, buffer.buffer.slice(offset..end));
+                        }
+                        WebGpuPassCommand::SetIndexBuffer {
+                            buffer_id,
+                            ref format,
+                            offset,
+                            size,
+                        } => {
+                            let buffer = self
+                                .buffers
+                                .get(&buffer_id)
+                                .with_context(|| format!("Unknown WebGPU buffer {buffer_id}"))?;
+                            if buffer.device_id != device_id {
+                                anyhow::bail!(
+                                    "WebGPU index buffer belongs to a different logical device"
+                                );
+                            }
+                            if !buffer.usage.contains(wgpu::BufferUsages::INDEX) {
+                                anyhow::bail!("WebGPU buffer usage does not include INDEX");
+                            }
+                            let end = checked_buffer_binding_end(buffer, offset, size)?;
+                            let format = match format {
+                                WebGpuIndexFormat::Uint16 => wgpu::IndexFormat::Uint16,
+                                WebGpuIndexFormat::Uint32 => wgpu::IndexFormat::Uint32,
+                            };
+                            pass.set_index_buffer(buffer.buffer.slice(offset..end), format);
+                            index_buffer_is_set = true;
+                        }
+                        WebGpuPassCommand::Draw {
+                            vertex_count,
+                            instance_count,
+                            first_vertex,
+                            first_instance,
+                        } => {
+                            if !pipeline_is_set {
+                                anyhow::bail!("A WebGPU render pipeline must be set before draw");
+                            }
+                            let vertex_end = first_vertex
+                                .checked_add(vertex_count)
+                                .context("WebGPU vertex range overflow")?;
+                            let instance_end = first_instance
+                                .checked_add(instance_count)
+                                .context("WebGPU instance range overflow")?;
+                            pass.draw(first_vertex..vertex_end, first_instance..instance_end);
+                        }
+                        WebGpuPassCommand::DrawIndexed {
+                            index_count,
+                            instance_count,
+                            first_index,
+                            base_vertex,
+                            first_instance,
+                        } => {
+                            if !pipeline_is_set {
+                                anyhow::bail!(
+                                    "A WebGPU render pipeline must be set before drawIndexed"
+                                );
+                            }
+                            if !index_buffer_is_set {
+                                anyhow::bail!(
+                                    "A WebGPU index buffer must be set before drawIndexed"
+                                );
+                            }
+                            let index_end = first_index
+                                .checked_add(index_count)
+                                .context("WebGPU index range overflow")?;
+                            let instance_end = first_instance
+                                .checked_add(instance_count)
+                                .context("WebGPU instance range overflow")?;
+                            pass.draw_indexed(
+                                first_index..index_end,
+                                base_vertex,
+                                first_instance..instance_end,
+                            );
+                        }
+                    }
+                }
+            }
+            Ok(encoder.finish())
+        })?;
+
+        capture_gpu_operation(&self.device, || {
+            self.queue.submit([command_buffer]);
+            Ok(())
+        })?;
+        for frame in &frames {
+            signal_after_submitted_work(
+                &self.queue,
+                &frame.surface.ready_event,
+                frame.surface.ready_value,
+            )?;
+        }
+
+        Ok(frames
+            .into_iter()
+            .map(|frame| {
+                let size = gpui::size(
+                    gpui::DevicePixels(frame.width as i32),
+                    gpui::DevicePixels(frame.height as i32),
+                );
+                (frame.id, frame.surface.surface_source(size))
+            })
+            .collect())
+    }
+}
+
+fn capture_gpu_operation<T>(
+    device: &wgpu::Device,
+    operation: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let out_of_memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let result = operation();
+    let validation_error = pollster::block_on(validation.pop());
+    let internal_error = pollster::block_on(internal.pop());
+    let out_of_memory_error = pollster::block_on(out_of_memory.pop());
+    let value = result?;
+    if let Some(error) = validation_error {
+        anyhow::bail!("Native WebGPU validation error: {error}");
+    }
+    if let Some(error) = internal_error {
+        anyhow::bail!("Native WebGPU internal error: {error}");
+    }
+    if let Some(error) = out_of_memory_error {
+        anyhow::bail!("Native WebGPU out-of-memory error: {error}");
+    }
+    Ok(value)
+}
+
+fn validate_frame_dimensions(device: &wgpu::Device, width: u32, height: u32) -> Result<()> {
+    if width == 0 || height == 0 {
+        anyhow::bail!("Native WebGPU canvas dimensions must be positive");
+    }
+    let max_dimension = device.limits().max_texture_dimension_2d;
+    if width > max_dimension || height > max_dimension {
+        anyhow::bail!(
+            "Native WebGPU canvas dimensions {width}x{height} exceed the device limit {max_dimension}"
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn submission_canvas_ids(submission_json: &str) -> Result<Vec<u64>> {
+    let submission: WebGpuSubmissionDescriptor =
+        serde_json::from_str(submission_json).context("Invalid WebGPU submission descriptor")?;
+    Ok(submission
+        .frames
+        .into_iter()
+        .map(|frame| frame.id)
+        .collect())
 }
 
 fn checked_buffer_binding_end(buffer: &WebGpuBuffer, offset: u64, size: u64) -> Result<u64> {
@@ -837,6 +1251,28 @@ impl WebGpuCanvasStore {
         })
     }
 
+    pub(crate) fn destroy_shader_module(
+        &self,
+        device_id: f64,
+        shader_module_id: f64,
+    ) -> Result<()> {
+        let device_id = js_resource_id(device_id, "logical device")?;
+        let shader_module_id = js_resource_id(shader_module_id, "shader module")?;
+        self.with_producer(|producer| producer.destroy_shader_module(device_id, shader_module_id))
+    }
+
+    pub(crate) fn destroy_render_pipeline(
+        &self,
+        device_id: f64,
+        render_pipeline_id: f64,
+    ) -> Result<()> {
+        let device_id = js_resource_id(device_id, "logical device")?;
+        let render_pipeline_id = js_resource_id(render_pipeline_id, "render pipeline")?;
+        self.with_producer(|producer| {
+            producer.destroy_render_pipeline(device_id, render_pipeline_id)
+        })
+    }
+
     pub(crate) fn create_buffer(
         &self,
         device_id: f64,
@@ -882,6 +1318,7 @@ impl WebGpuCanvasStore {
         fragment_module_id: f64,
         fragment_entry_point: Option<String>,
         vertex_buffers_json: String,
+        sample_mask: u32,
     ) -> Result<f64> {
         let device_id = js_resource_id(device_id, "logical device")?;
         let vertex_module_id = js_resource_id(vertex_module_id, "vertex shader module")?;
@@ -896,9 +1333,33 @@ impl WebGpuCanvasStore {
                     fragment_module_id,
                     fragment_entry_point.as_deref(),
                     &vertex_buffers_json,
+                    sample_mask,
                 )
                 .map(|id| id as f64)
         })
+    }
+
+    pub(crate) fn submit_commands(
+        &self,
+        device_id: f64,
+        submission_json: String,
+        ops: &[u32],
+        operands: &[f64],
+    ) -> Result<Vec<(u64, gpui::SurfaceSource)>> {
+        let device_id = js_resource_id(device_id, "logical device")?;
+        let submission: WebGpuSubmissionDescriptor = serde_json::from_str(&submission_json)
+            .context("Invalid WebGPU submission descriptor")?;
+        let dimensions = submission
+            .frames
+            .iter()
+            .map(|frame| (frame.id, (frame.width, frame.height)))
+            .collect::<Vec<_>>();
+        let released = self.released.clone();
+        let sources = self.with_producer(|producer| {
+            producer.submit(device_id, submission, ops, operands, released)
+        })?;
+        self.dimensions.lock().unwrap().extend(dimensions);
+        Ok(sources)
     }
 
     pub(crate) fn present(
@@ -911,26 +1372,6 @@ impl WebGpuCanvasStore {
         let released = self.released.clone();
         let source = self.with_producer(|producer| {
             producer.render_frame(width, height, rgba, None, &[], released)
-        })?;
-        self.dimensions.lock().unwrap().insert(id, (width, height));
-        Ok(source)
-    }
-
-    pub(crate) fn present_commands(
-        &self,
-        id: u64,
-        width: u32,
-        height: u32,
-        device_id: f64,
-        rgba: u32,
-        ops: &[u32],
-        operands: &[f64],
-    ) -> Result<gpui::SurfaceSource> {
-        let device_id = js_resource_id(device_id, "logical device")?;
-        let commands = decode_pass_commands(ops, operands)?;
-        let released = self.released.clone();
-        let source = self.with_producer(|producer| {
-            producer.render_frame(width, height, rgba, Some(device_id), &commands, released)
         })?;
         self.dimensions.lock().unwrap().insert(id, (width, height));
         Ok(source)
@@ -1049,5 +1490,29 @@ mod tests {
             &[3.0, 1.0, 0.0, i32::MAX as f64 + 1.0, 0.0]
         )
         .is_err());
+    }
+
+    #[test]
+    fn contains_wgpu_validation_errors() {
+        let (device, _) = wgpu::Device::noop(&wgpu::DeviceDescriptor::default());
+        let error = capture_gpu_operation(&device, || {
+            Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("invalid test WGSL"),
+                source: wgpu::ShaderSource::Wgsl("this is not WGSL".into()),
+            }))
+        })
+        .expect_err("invalid WGSL should be returned through the validation scope");
+        assert!(error.to_string().contains("Native WebGPU validation error"));
+    }
+
+    #[test]
+    fn decodes_submission_canvas_ids() {
+        assert_eq!(
+            submission_canvas_ids(
+                r#"{"frames":[{"id":7,"width":32,"height":24},{"id":9,"width":16,"height":8}],"passes":[]}"#
+            )
+            .unwrap(),
+            vec![7, 9]
+        );
     }
 }

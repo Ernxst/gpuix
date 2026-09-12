@@ -1382,6 +1382,8 @@ export interface NativeRenderer {
     initialData: Uint8Array
   ): number
   destroyWebGpuBuffer?(deviceId: number, bufferId: number): void
+  destroyWebGpuShaderModule?(deviceId: number, shaderModuleId: number): void
+  destroyWebGpuRenderPipeline?(deviceId: number, renderPipelineId: number): void
   writeWebGpuBuffer?(
     deviceId: number,
     bufferId: number,
@@ -1395,15 +1397,13 @@ export interface NativeRenderer {
     vertexEntryPoint: string | undefined,
     fragmentModuleId: number,
     fragmentEntryPoint: string | undefined,
-    vertexBuffersJson: string
+    vertexBuffersJson: string,
+    sampleMask: number
   ): number
-  /** Present an internal WebGPU render-pass command stream. */
-  presentWebGpuCommands?(
-    id: number,
-    width: number,
-    height: number,
+  /** Submit ordered WebGPU command buffers and install completed canvas frames atomically. */
+  submitWebGpuCommands?(
     deviceId: number,
-    rgba: number,
+    submissionJson: string,
     ops: Uint32Array,
     operands: Float64Array
   ): void
@@ -1909,6 +1909,8 @@ export interface InputPublicInstance extends PublicInstance {
 
 export interface CanvasPublicInstance extends PublicInstance {
   type: "canvas"
+  width: number
+  height: number
   getContext(
     contextId: "2d",
     options?: CanvasRenderingContext2DSettings

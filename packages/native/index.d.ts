@@ -73,12 +73,14 @@ export declare class GpuixRenderer {
   createWebGpuBuffer(deviceId: number, label: string | undefined | null, size: number, usage: number, initialData: Uint8Array): number
   /** Destroy one logical-device-owned WebGPU buffer. */
   destroyWebGpuBuffer(deviceId: number, bufferId: number): void
+  destroyWebGpuShaderModule(deviceId: number, shaderModuleId: number): void
+  destroyWebGpuRenderPipeline(deviceId: number, renderPipelineId: number): void
   /** Queue one copy into a logical-device-owned WebGPU buffer. */
   writeWebGpuBuffer(deviceId: number, bufferId: number, offset: number, data: Uint8Array): void
   /** Create a triangle-list WebGPU render pipeline with optional vertex layouts. */
-  createWebGpuRenderPipeline(deviceId: number, label: string | undefined | null, vertexModuleId: number, vertexEntryPoint: string | undefined | null, fragmentModuleId: number, fragmentEntryPoint: string | undefined | null, vertexBuffersJson: string): number
-  /** Render one native WebGPU pass command stream and present its canvas texture. */
-  presentWebGpuCommands(id: number, width: number, height: number, deviceId: number, rgba: number, ops: Uint32Array, operands: Float64Array): void
+  createWebGpuRenderPipeline(deviceId: number, label: string | undefined | null, vertexModuleId: number, vertexEntryPoint: string | undefined | null, fragmentModuleId: number, fragmentEntryPoint: string | undefined | null, vertexBuffersJson: string, sampleMask: number): number
+  /** Submit ordered WebGPU command buffers, then install every completed canvas frame. */
+  submitWebGpuCommands(deviceId: number, submissionJson: string, ops: Uint32Array, operands: Float64Array): void
   /**
    * Start or join one renderer-local canvas image load. The observer keeps
    * the decoded entry alive until JavaScript changes or releases the source.
@@ -445,12 +447,14 @@ export declare class TestGpuixRenderer {
   createWebGpuBuffer(deviceId: number, label: string | undefined | null, size: number, usage: number, initialData: Uint8Array): number
   /** Destroy one logical-device-owned WebGPU buffer. */
   destroyWebGpuBuffer(deviceId: number, bufferId: number): void
+  destroyWebGpuShaderModule(deviceId: number, shaderModuleId: number): void
+  destroyWebGpuRenderPipeline(deviceId: number, renderPipelineId: number): void
   /** Queue one copy into a logical-device-owned WebGPU buffer. */
   writeWebGpuBuffer(deviceId: number, bufferId: number, offset: number, data: Uint8Array): void
   /** Create a triangle-list WebGPU render pipeline with optional vertex layouts. */
-  createWebGpuRenderPipeline(deviceId: number, label: string | undefined | null, vertexModuleId: number, vertexEntryPoint: string | undefined | null, fragmentModuleId: number, fragmentEntryPoint: string | undefined | null, vertexBuffersJson: string): number
-  /** Render one native WebGPU pass command stream and present its canvas texture. */
-  presentWebGpuCommands(id: number, width: number, height: number, deviceId: number, rgba: number, ops: Uint32Array, operands: Float64Array): void
+  createWebGpuRenderPipeline(deviceId: number, label: string | undefined | null, vertexModuleId: number, vertexEntryPoint: string | undefined | null, fragmentModuleId: number, fragmentEntryPoint: string | undefined | null, vertexBuffersJson: string, sampleMask: number): number
+  /** Submit ordered WebGPU command buffers, then install every completed canvas frame. */
+  submitWebGpuCommands(deviceId: number, submissionJson: string, ops: Uint32Array, operands: Float64Array): void
   loadCanvasImage(observerId: number, sourceJson: string): void
   getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
   releaseCanvasImage(observerId: number): void
