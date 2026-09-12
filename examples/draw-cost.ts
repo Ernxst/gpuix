@@ -329,6 +329,48 @@ function RefinementRow({ index }: { index: number }): React.ReactElement {
   )
 }
 
+// Depth against breadth at identical node count. A real page nests about five
+// deep per row; these fixtures were two. Same nodes, same text, same styles —
+// only the arrangement differs, so any difference is what nesting costs.
+function DeepRow({ index }: { index: number }): React.ReactElement {
+  const leaf = (label: string) =>
+    React.createElement("text", { style: { color: "#a1a1aa", fontSize: 12 } }, label)
+  const wrap = (child: React.ReactElement, depth: number): React.ReactElement =>
+    depth === 0
+      ? child
+      : React.createElement(
+          "div",
+          { style: { display: "flex", alignItems: "center" } },
+          wrap(child, depth - 1),
+        )
+  return React.createElement(
+    "div",
+    { style: { display: "flex", alignItems: "center", gap: 12, padding: 8 } },
+    wrap(leaf(`Row ${index}`), 3),
+    wrap(leaf(`${(index * 37) % 1000} events`), 3),
+  )
+}
+
+// The same 9 nodes and the same 2 texts as DeepRow, arranged as siblings.
+function ShallowRow({ index }: { index: number }): React.ReactElement {
+  const leaf = (label: string) =>
+    React.createElement("text", { style: { color: "#a1a1aa", fontSize: 12 } }, label)
+  const filler = () =>
+    React.createElement("div", { style: { display: "flex", alignItems: "center" } })
+  return React.createElement(
+    "div",
+    { style: { display: "flex", alignItems: "center", gap: 12, padding: 8 } },
+    leaf(`Row ${index}`),
+    leaf(`${(index * 37) % 1000} events`),
+    filler(),
+    filler(),
+    filler(),
+    filler(),
+    filler(),
+    filler(),
+  )
+}
+
 const FIXTURES = {
   table: TablePage,
   "virtual-table": VirtualTablePage,
@@ -406,6 +448,9 @@ const variants: Array<[string, ({ index }: { index: number }) => React.ReactElem
   ["hover-only", makeRefinementRow({ hover: { backgroundColor: "#1d1d22" } })],
   ["focus-only", makeRefinementRow({ focusVisible: { outlineColor: "#89b4fa" } })],
   ["active-only", makeRefinementRow({ active: { opacity: 0.6 } })],
+  // Identical node count and text; only the nesting differs.
+  ["deep", DeepRow],
+  ["shallow", ShallowRow],
 ]
 const variantResults: Array<{
   variant: string
