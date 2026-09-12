@@ -223,6 +223,12 @@ export declare class GpuixRenderer {
   /** `HTMLInputElement.setSelectionRange()` in UTF-16 code units. */
   setInputSelection(elementId: number, start: number, end: number, backward: boolean): void
   /**
+   * Read the current native image lifecycle generation after synchronizing
+   * the retained tree. Queued load/error payloads use this to reject stale
+   * completions without duplicating image request equality in JavaScript.
+   */
+  getImageRequestGeneration(elementId: number): number | null
+  /**
    * Set the scroll offset of a scrollable element.
    * x and y are negative pixel values (scroll down = more negative y).
    */
@@ -582,6 +588,7 @@ export declare class TestGpuixRenderer {
   getInputSelection(elementId: number): Array<number> | null
   setInputValue(elementId: number, value: string): void
   setInputSelection(elementId: number, start: number, end: number, backward: boolean): void
+  getImageRequestGeneration(elementId: number): number | null
   /**
    * Syntax-cache counters as `[hits, misses, documents]`.
    *

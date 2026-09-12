@@ -12,7 +12,6 @@ import type {
   Container,
   ElementType,
   HostContext,
-  ImgProps,
   Instance,
   MutationRenderer,
   Props,
@@ -347,7 +346,7 @@ const EVENT_PROPS = [
 
 const EVENT_PROP_NAMES = new Set<string>(EVENT_PROPS.map(([name]) => name))
 const NATIVE_EVENT_TYPES = new Set(EVENT_PROPS.map(([, eventType]) => eventType))
-type EventProps = Props & Pick<ImgProps, "onLoad" | "onLoadCapture" | "onError" | "onErrorCapture">
+type EventProps = Props
 
 function eventHandlerKey(eventType: string, phase: "capture" | "bubble"): string {
   return phase === "capture" ? `${eventType}Capture` : eventType
@@ -870,53 +869,6 @@ function serializeCustomProp(
   return value
 }
 
-const IMAGE_REQUEST_GENERATION_PROP = "__gpuixImageRequestGeneration"
-
-/**
- * Match the native wire source's equality where it matters for lifecycle
- * delivery. In particular, a freshly allocated `Uint8Array` with identical
- * bytes is the same cached image request, not a second load.
- */
-function imageSourceSignature(props: Props): string {
-  const source = serializeCustomProp("img", "src", (props as ImgProps).src)
-  if (source === null) return "none"
-  if (typeof source === "string") {
-    if (source.startsWith("http://") || source.startsWith("https://")) return `url:${source}`
-    return `string:${source}`
-  }
-  if (typeof source === "object" && "kind" in source) {
-    const imageSource = source as {
-      kind?: unknown
-      path?: unknown
-      url?: unknown
-      mimeType?: unknown
-      bytes?: unknown
-    }
-    if (imageSource.kind === "path") return `path:${String(imageSource.path)}`
-    if (imageSource.kind === "url") return `url:${String(imageSource.url)}`
-    if (imageSource.kind === "data") {
-      const mimeType = typeof imageSource.mimeType === "string"
-        ? imageSource.mimeType.split(";", 1)[0]!.trim().toLowerCase()
-        : String(imageSource.mimeType)
-      return `data:${mimeType}:${JSON.stringify(imageSource.bytes)}`
-    }
-  }
-  return `wire:${JSON.stringify(source)}`
-}
-
-function syncImageRequestGeneration(
-  renderer: MutationRenderer,
-  instance: Instance,
-  oldProps?: Props
-): void {
-  if (instance.type !== "img") return
-  if (oldProps !== undefined && imageSourceSignature(oldProps) === imageSourceSignature(instance.props)) {
-    return
-  }
-  instance.imageRequestGeneration = (instance.imageRequestGeneration ?? 0) + 1
-  renderer.setCustomProp(instance.id, IMAGE_REQUEST_GENERATION_PROP, instance.imageRequestGeneration)
-}
-
 type CustomPropInput = object | string | number | boolean | null | undefined
 
 /** Preserve native tab stops when JSX aliases become native divs. */
@@ -1332,7 +1284,6 @@ function materialize(node: HostNode): HostNodeState {
     sendStyle(state.container, node)
     syncEventListeners(state.container, node.id, node.props)
     syncCustomProps(renderer, node, node.props)
-    syncImageRequestGeneration(renderer, node)
   } else {
     // Native hit testing reports the deepest painted retained node. A raw React
     // text node has no public host instance of its own, so route that source to
@@ -1723,7 +1674,6 @@ export const hostConfig = {
     // Custom prop diff (for non-div/text elements)
     instance.props = newProps
     diffCustomProps(container.renderer, instance, oldProps, newProps)
-    syncImageRequestGeneration(container.renderer, instance, oldProps)
     // After the new props are installed, so the descendants' ancestor walk
     // reads the role this update just applied.
     if (

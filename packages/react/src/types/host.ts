@@ -1349,6 +1349,8 @@ export interface NativeRenderer {
   loadCanvasImage?(observerId: number, sourceJson: string): void
   getCanvasImageLoadState?(observerId: number): CanvasImageLoadState | null
   releaseCanvasImage?(observerId: number): void
+  /** Native-authoritative lifecycle generation for one current `<img>` request. */
+  getImageRequestGeneration?(elementId: number): number | null
   /** Stable platform and renderer feature read. */
   capabilities?(): RendererCapabilities
   /** Drop renderer-owned buffered work when a custom transport maintains its own queue. */
@@ -1883,8 +1885,6 @@ export interface Instance extends PublicInstance {
     operands: Float64Array,
     strings: readonly string[]
   ): void
-  /** Internal lifecycle identity for queued image load/error events. */
-  imageRequestGeneration?: number
 }
 
 // Text instance for raw text nodes

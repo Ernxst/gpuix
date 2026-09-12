@@ -585,6 +585,71 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
     }
   })
 
+  it("delivers a queued completion after an equivalent bare and tagged path source", async () => {
+    const testRoot = createImageTestRoot()
+    const currentEvents: GpuixLoadEvent[] = []
+    const path = FIXTURE_PATHS.get("png")!
+    try {
+      testRoot.render(
+        <img
+          src={path}
+          style={{ width: 32, height: 24 }}
+          onLoad={() => {
+            throw new Error("the queued completion must resolve through the current handler")
+          }}
+        />
+      )
+      const queued = await takeQueuedImageEvent(testRoot)
+
+      testRoot.render(
+        <img
+          src={{ kind: "path", path }}
+          style={{ width: 32, height: 24 }}
+          onLoad={(event) => currentEvents.push(event)}
+        />
+      )
+      handleGpuixEvent(queued, testRoot.renderer)
+      expect(currentEvents).toHaveLength(1)
+      expect(currentEvents[0]?.type).toBe("load")
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
+  it("suppresses a queued completion when tint changes the current image request", async () => {
+    const testRoot = createImageTestRoot()
+    const currentEvents: GpuixLoadEvent[] = []
+    const source = { kind: "data" as const, mimeType: "image/svg+xml" as const, bytes: SVG_BYTES }
+    try {
+      testRoot.render(
+        <img
+          src={source}
+          style={{ width: 32, height: 24, color: "#e96b67" }}
+          onLoad={() => {
+            throw new Error("a queued completion must not use the tinted lifecycle handler")
+          }}
+        />
+      )
+      const queued = await takeQueuedImageEvent(testRoot)
+
+      testRoot.render(
+        <img
+          src={source}
+          tint="currentColor"
+          style={{ width: 32, height: 24, color: "#e96b67" }}
+          onLoad={(event) => currentEvents.push(event)}
+        />
+      )
+      handleGpuixEvent(queued, testRoot.renderer)
+      expect(currentEvents).toEqual([])
+
+      await waitForImageEvents(testRoot, currentEvents, 1)
+      expect(currentEvents[0]?.type).toBe("load")
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
   it("follows Fetch metadata and forgiving-base64 rules for PNG data URLs", async () => {
     const sources = [
       `data:;base64,${PNG_BYTES.toString("base64")}`,

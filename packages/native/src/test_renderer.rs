@@ -1787,6 +1787,22 @@ impl TestGpuixRenderer {
         })
     }
 
+    #[napi]
+    pub fn get_image_request_generation(&self, element_id: f64) -> Result<Option<f64>> {
+        let id = to_element_id(element_id)?;
+        self.settle_for_read()?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.read(app)
+                    .custom_registry
+                    .image_request_generation(id)
+                    .map(|generation| generation as f64)
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
     /// Syntax-cache counters as `[hits, misses, documents]`.
     ///
     /// GPUIX rebuilds its whole element tree every frame, so a `<code>` block

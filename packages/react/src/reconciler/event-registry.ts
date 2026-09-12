@@ -451,10 +451,14 @@ function dispatchGpuixEvent(
     })
   }
 
+  const currentImageRequestGeneration =
+    payload.eventType === "load" || payload.eventType === "error"
+      ? renderer.getImageRequestGeneration?.(payload.elementId)
+      : undefined
   if (
-    (payload.eventType === "load" || payload.eventType === "error") &&
     payload.imageRequestGeneration !== undefined &&
-    payload.imageRequestGeneration !== target.imageRequestGeneration
+    currentImageRequestGeneration != null &&
+    payload.imageRequestGeneration !== currentImageRequestGeneration
   ) {
     return { defaultPrevented: false, propagationStopped: false }
   }

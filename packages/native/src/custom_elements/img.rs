@@ -2071,7 +2071,7 @@ pub struct ImgElement {
     tint_current_color: bool,
     last_request: Option<ImageRequest>,
     last_reported_terminal_state: Option<(ImageRequest, ImgTerminalState)>,
-    request_generation: f64,
+    request_generation: u64,
     element_id: Option<u64>,
     store: Option<SharedImgImageStore>,
 }
@@ -2085,7 +2085,7 @@ impl Default for ImgElement {
             tint_current_color: false,
             last_request: None,
             last_reported_terminal_state: None,
-            request_generation: 0.0,
+            request_generation: 0,
             element_id: None,
             store: None,
         }
@@ -2287,9 +2287,6 @@ impl CustomElement for ImgElement {
                 .tint_current_color
                 .then(|| u32::from(ctx.current_color)),
         });
-        if self.last_request.as_ref() != request.as_ref() {
-            self.release_current_request();
-        }
         let store = ctx.img_image_store.clone();
         self.store = Some(store.clone());
         self.element_id = Some(ctx.id);
@@ -2297,7 +2294,12 @@ impl CustomElement for ImgElement {
             let _ = window.drop_image(image);
         }
 
-        if let Some(error) = self.source_error.as_deref() {
+        if let Some(error) = self.source_error.clone() {
+            if self.last_request.is_some() {
+                self.release_current_request();
+                self.request_generation = self.request_generation.wrapping_add(1);
+                self.last_reported_terminal_state = None;
+            }
             let fallback = Self::fallback(format!("img: invalid src: {error}"))
                 .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)));
             let fallback = super::custom_surface(fallback, &ctx, cx);
@@ -2305,6 +2307,11 @@ impl CustomElement for ImgElement {
         }
 
         let Some(request) = request else {
+            if self.last_request.is_some() {
+                self.release_current_request();
+                self.request_generation = self.request_generation.wrapping_add(1);
+                self.last_reported_terminal_state = None;
+            }
             let fallback = Self::fallback("img: no src")
                 .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)));
             let fallback = super::custom_surface(fallback, &ctx, cx);
@@ -2317,11 +2324,13 @@ impl CustomElement for ImgElement {
             cx,
         );
         let request_changed = self.last_request.as_ref() != Some(&request);
-        self.source = Some(request.source.clone());
-        self.last_request = Some(request.clone());
         if request_changed {
+            self.release_current_request();
+            self.request_generation = self.request_generation.wrapping_add(1);
             self.last_reported_terminal_state = None;
         }
+        self.source = Some(request.source.clone());
+        self.last_request = Some(request.clone());
 
         let terminal_state = match result_handle.lock().unwrap().as_ref() {
             Some(Ok(_)) => Some(ImgTerminalState::Loaded),
@@ -2341,7 +2350,9 @@ impl CustomElement for ImgElement {
                         ctx.event_callback,
                         ctx.id,
                         event_type,
-                        |payload| payload.image_request_generation = Some(self.request_generation),
+                        |payload| {
+                            payload.image_request_generation = Some(self.request_generation as f64)
+                        },
                     );
                 }
             }
@@ -2407,15 +2418,12 @@ impl CustomElement for ImgElement {
             "tint" => {
                 self.tint_current_color = value.as_str() == Some("currentColor");
             }
-            "__gpuixImageRequestGeneration" => {
-                self.request_generation = value.as_f64().unwrap_or(0.0);
-            }
             _ => {}
         }
     }
 
     fn supported_props(&self) -> &'static [&'static str] {
-        &["src", "objectFit", "tint", "__gpuixImageRequestGeneration"]
+        &["src", "objectFit", "tint"]
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
@@ -2451,6 +2459,10 @@ impl CustomElement for ImgElement {
             .and_then(|(store, element_id)| store.status(element_id))
             .unwrap_or_else(|| serde_json::json!({ "status": "loading" }));
         Some(status)
+    }
+
+    fn image_request_generation(&self) -> Option<u64> {
+        Some(self.request_generation)
     }
 
     fn destroy(&mut self) {
