@@ -242,6 +242,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getRetainedElementCount(): number
   takeRenderBuildMicros(): number
   takeApplyStylesMicros(): number
+  isWindowDirty(): boolean
   getElementBounds(elementId: number): ElementBounds | null
   observeResize(elementId: number): void
   unobserveResize(elementId: number): void
@@ -1539,6 +1540,13 @@ export class TestRenderer implements NativeRenderer {
    *  call, cleared on read. A subset of the rebuild time. */
   takeApplyStylesMicros(): number {
     return this.native.takeApplyStylesMicros()
+  }
+
+  /** Whether the window still needs drawing. A tree at rest reports `false`
+   *  after a draw; a window that re-dirties every frame costs a second full
+   *  draw per update. Needs no debug overlay, which would dirty it. */
+  isWindowDirty(): boolean {
+    return this.native.isWindowDirty()
   }
 
   getElementBounds(elementId: number): ElementBounds | null {

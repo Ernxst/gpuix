@@ -578,6 +578,21 @@ impl TestGpuixRenderer {
     /// Microseconds spent rebuilding the element tree since the last call,
     /// cleared on read. Whatever a draw costs beyond this is layout, prepaint
     /// and paint, which is the split #480 turns on.
+    /// Whether the window still needs drawing.
+    ///
+    /// A tree at rest reports `false` after a draw, so `drawPendingFrame` is a
+    /// no-op. Anything that re-dirties the window every frame makes a page pay
+    /// a second full draw per update, which is invisible to a timing harness
+    /// that only calls `flush`. Reading this needs no debug overlay, which
+    /// would itself dirty the window.
+    #[napi]
+    pub fn is_window_dirty(&self) -> Result<bool> {
+        with_test_state(self.state_id, |cx, window, _view| {
+            cx.update_window(window, |_, window, _app| window.is_dirty())
+                .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
     /// Microseconds spent re-deriving gpui styles from `StyleDesc` since the
     /// last call, cleared on read. A subset of the rebuild time, and the part a
     /// per-node style cache could remove.

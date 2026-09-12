@@ -467,6 +467,7 @@ interface ResultRow {
   applyStylesMsPerDraw: number
   applyStylesSharePercent: number
   secondDrawP50Ms: number
+  dirtyAfterDraw: boolean
 }
 
 const results: ResultRow[] = []
@@ -520,6 +521,9 @@ for (const rows of rowCounts) {
         50,
       ),
     ),
+    // False for a tree at rest. True means the page re-dirties its window and
+    // pays a second full draw per update.
+    dirtyAfterDraw: renderer.isWindowDirty(),
   })
 
   const disposable = testRoot as { unmount?: () => void; cleanup?: () => void }
