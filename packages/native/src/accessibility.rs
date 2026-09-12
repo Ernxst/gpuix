@@ -83,6 +83,7 @@ macro_rules! define_accessibility_roles {
 }
 
 define_accessibility_roles! {
+    "abbr" => Abbr, false,
     "alert" => Alert, false,
     "alertdialog" => AlertDialog, false,
     "application" => Application, false,
@@ -158,7 +159,7 @@ define_accessibility_roles! {
     "table" => Table, false,
     "tablist" => TabList, false,
     "tabpanel" => TabPanel, false,
-    "term" => Term, false,
+    "term" => Term, true,
     "textbox" => TextInput, false,
     "time" => Time, false,
     "timer" => Timer, false,
@@ -1767,7 +1768,7 @@ mod tests {
             .copied()
             .collect::<std::collections::HashSet<_>>();
 
-        assert_eq!(SUPPORTED_ACCESSIBILITY_ROLE_NAMES.len(), 128);
+        assert_eq!(SUPPORTED_ACCESSIBILITY_ROLE_NAMES.len(), 129);
         assert_eq!(unique.len(), SUPPORTED_ACCESSIBILITY_ROLE_NAMES.len());
         for name in SUPPORTED_ACCESSIBILITY_ROLE_NAMES {
             assert!(
@@ -1808,6 +1809,7 @@ mod tests {
                 "rowheader",
                 "switch",
                 "tab",
+                "term",
                 "treeitem",
                 "graphics-object",
                 "doc-backlink",
