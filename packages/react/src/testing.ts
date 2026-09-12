@@ -759,6 +759,7 @@ export class TestRenderer implements NativeRenderer {
   private clipboardText: string | null = null
   private pickerResults: Array<string[] | string | null> = []
   private pickerRequestLog: PickerRequest[] = []
+  private webGpuCanvasIds = new Set<number>()
 
   get pickerRequests(): ReadonlyArray<PickerRequest> {
     return this.pickerRequestLog
@@ -828,6 +829,16 @@ export class TestRenderer implements NativeRenderer {
   /** Render one fixture texture update, normally from requestAnimationFrame. */
   advanceTestGpuCanvas(id: number, rgba: number): void {
     this.native.advanceTestGpuCanvas(id, rgba)
+  }
+
+  /** Browser-shaped WebGPU proof transport used by live React canvas contexts. */
+  presentWebGpuClear(id: number, width: number, height: number, rgba: number): void {
+    if (this.webGpuCanvasIds.has(id)) {
+      this.native.advanceTestGpuCanvas(id, rgba)
+    } else {
+      this.native.installTestGpuCanvas(id, width, height, rgba)
+      this.webGpuCanvasIds.add(id)
+    }
   }
 
   getTestGpuCanvasState(): { installed: number; presentations: number; released: number } {

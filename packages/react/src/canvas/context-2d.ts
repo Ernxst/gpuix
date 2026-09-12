@@ -1233,6 +1233,11 @@ export function disposeRecordingContext2D(owner: object): void {
   recordersByOwner.delete(owner)
 }
 
+/** Whether this canvas has already locked itself to a 2D context. */
+export function recordingContext2D(owner: object): CanvasRenderingContext2D | undefined {
+  return recorderRegistry().contextsByOwner.get(owner)
+}
+
 /** Test/equivalence seam: synchronously drain the already-recorded microtask batch. */
 export function flushRecordingContext2D(context: CanvasRenderingContext2D): void {
   const { recordersByContext } = recorderRegistry()

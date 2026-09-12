@@ -19,6 +19,7 @@ import {
   requestNativeAnimationFrame,
 } from "./frame-clock.js"
 import { ResizeObserver } from "./resize-observer.js"
+import { installWebGpuGlobal } from "./canvas/webgpu.js"
 
 function defineGlobalIfAbsent(name: string, value: unknown): void {
   if (Reflect.has(globalThis, name)) return
@@ -61,3 +62,7 @@ if (Reflect.has(globalThis, "navigator")) {
 } else {
   defineGlobalIfAbsent("navigator", { clipboard })
 }
+
+// A browser's navigator.gpu always wins. Desktop installs only the narrow
+// clear-and-present proof API; it does not manufacture a document.
+installWebGpuGlobal()
