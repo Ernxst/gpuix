@@ -1,6 +1,7 @@
 import type {
   GpuixFocusEvent,
   GpuixKeyboardEvent,
+  GpuixLoadEvent,
   GpuixMouseEvent,
   GpuixSyntheticEvent,
 } from "../reconciler/synthetic-event.js"
@@ -47,3 +48,22 @@ const onSharedMouseFields = (
 }
 const sharedHandlerAccepted = <div onClick={onSharedMouseFields} />
 void sharedHandlerAccepted
+
+// Image lifecycle handlers use the same browser-shaped synthetic-event base:
+// the event identifies its target and exposes the usual event controls without
+// pretending it has pointer or keyboard fields.
+const onImageLifecycle = (
+  event: Pick<
+    GpuixLoadEvent,
+    "type" | "target" | "currentTarget" | "bubbles" | "cancelable" | "preventDefault"
+  >
+): void => {
+  void event.type
+  void event.target
+  void event.currentTarget
+  void event.bubbles
+  void event.cancelable
+  event.preventDefault()
+}
+const imageLifecycleHandlersAccepted = <img onLoad={onImageLifecycle} onError={onImageLifecycle} />
+void imageLifecycleHandlersAccepted

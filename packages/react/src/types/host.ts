@@ -11,6 +11,7 @@ import type {
   GpuixElementEvent,
   GpuixFocusEvent,
   GpuixKeyboardEvent,
+  GpuixLoadEvent,
   GpuixMouseEvent,
   GpuixScrollEvent,
   GpuixSyntheticEvent,
@@ -1225,6 +1226,10 @@ export interface ImgProps extends Props {
   /** For SVG only: resolve authored `currentColor` references from inherited style.color. */
   tint?: "currentColor"
   alt?: string
+  /** Fires once the current source has decoded and is ready to paint. */
+  onLoad?: (event: GpuixLoadEvent) => void
+  /** Fires once the current source fails to load or decode. */
+  onError?: (event: GpuixLoadEvent) => void
 }
 
 // Props for monochrome SVGs tinted by style.color.

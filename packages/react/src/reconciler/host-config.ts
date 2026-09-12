@@ -12,6 +12,7 @@ import type {
   Container,
   ElementType,
   HostContext,
+  ImgProps,
   Instance,
   MutationRenderer,
   Props,
@@ -290,6 +291,8 @@ const EVENT_PROPS = [
   ["onVisibleRange", "visibleRange", "bubble"],
   ["onHighlight", "highlight", "bubble"],
   ["onAccessibilityAction", "accessibilityAction", "bubble"],
+  ["onLoad", "load", "bubble"],
+  ["onError", "error", "bubble"],
   ["onChangeCapture", "change", "capture"],
   ["onChange", "change", "bubble"],
   // Mouse events
@@ -342,6 +345,7 @@ const EVENT_PROPS = [
 
 const EVENT_PROP_NAMES = new Set<string>(EVENT_PROPS.map(([name]) => name))
 const NATIVE_EVENT_TYPES = new Set(EVENT_PROPS.map(([, eventType]) => eventType))
+type EventProps = Props & Pick<ImgProps, "onLoad" | "onError">
 
 function eventHandlerKey(eventType: string, phase: "capture" | "bubble"): string {
   return phase === "capture" ? `${eventType}Capture` : eventType
@@ -356,14 +360,16 @@ function registryKey(
 }
 
 function hasEventListener(props: Props, eventType: string): boolean {
+  const eventProps = props as EventProps
   return EVENT_PROPS.some(
-    ([propName, candidateType]) => candidateType === eventType && props[propName] != null
+    ([propName, candidateType]) => candidateType === eventType && eventProps[propName] != null
   )
 }
 
 function syncEventListeners(container: Container, id: number, props: Props): void {
+  const eventProps = props as EventProps
   for (const [propName, eventType, phase, override] of EVENT_PROPS) {
-    const handler = props[propName]
+    const handler = eventProps[propName]
     if (handler) {
       // `propName` ranges over every entry in EVENT_PROPS here, so `handler`'s
       // inferred type is a union across every kind's handler signature — wider
@@ -391,9 +397,11 @@ function diffEventListeners(
   oldProps: Props,
   newProps: Props
 ): void {
+  const oldEventProps = oldProps as EventProps
+  const newEventProps = newProps as EventProps
   for (const [propName, eventType, phase, override] of EVENT_PROPS) {
-    const oldHandler = oldProps[propName]
-    const newHandler = newProps[propName]
+    const oldHandler = oldEventProps[propName]
+    const newHandler = newEventProps[propName]
     const handlerKey = registryKey(eventType, phase, override)
 
     if (oldHandler && !newHandler) {

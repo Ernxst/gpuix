@@ -2070,6 +2070,7 @@ pub struct ImgElement {
     object_fit: ImgObjectFit,
     tint_current_color: bool,
     last_request: Option<ImageRequest>,
+    last_reported_terminal_state: Option<(ImageRequest, ImgTerminalState)>,
     element_id: Option<u64>,
     store: Option<SharedImgImageStore>,
 }
@@ -2082,10 +2083,17 @@ impl Default for ImgElement {
             object_fit: ImgObjectFit::default(),
             tint_current_color: false,
             last_request: None,
+            last_reported_terminal_state: None,
             element_id: None,
             store: None,
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ImgTerminalState {
+    Loaded,
+    Error,
 }
 
 impl ImgElement {
@@ -2290,8 +2298,36 @@ impl CustomElement for ImgElement {
             ctx.image_network_policy.clone(),
             cx,
         );
+        let request_changed = self.last_request.as_ref() != Some(&request);
         self.source = Some(request.source.clone());
         self.last_request = Some(request.clone());
+        if request_changed {
+            self.last_reported_terminal_state = None;
+        }
+
+        let terminal_state = match result_handle.lock().unwrap().as_ref() {
+            Some(Ok(_)) => Some(ImgTerminalState::Loaded),
+            Some(Err(_)) => Some(ImgTerminalState::Error),
+            None => None,
+        };
+        if let Some(terminal_state) = terminal_state {
+            let completion = (request.clone(), terminal_state);
+            if self.last_reported_terminal_state.as_ref() != Some(&completion) {
+                self.last_reported_terminal_state = Some(completion);
+                let event_type = match terminal_state {
+                    ImgTerminalState::Loaded => "load",
+                    ImgTerminalState::Error => "error",
+                };
+                if ctx.events.contains(event_type) {
+                    crate::renderer::emit_event_full(
+                        ctx.event_callback,
+                        ctx.id,
+                        event_type,
+                        |_| {},
+                    );
+                }
+            }
+        }
 
         // One GPUI identity for the image and for the accessibility projection
         // below: the projection is never laid out, painted, or hit-tested, so a
@@ -2363,6 +2399,8 @@ impl CustomElement for ImgElement {
 
     fn supported_events(&self) -> &'static [&'static str] {
         &[
+            "load",
+            "error",
             "click",
             "doubleClick",
             "contextMenu",

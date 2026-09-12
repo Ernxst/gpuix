@@ -54,7 +54,7 @@ const TARGET_ONLY_EVENTS = new Set([
   "visibleRange",
 ])
 
-const NON_BUBBLING_EVENTS = new Set(["focus", "blur", "scroll", "fileDrop"])
+const NON_BUBBLING_EVENTS = new Set(["focus", "blur", "scroll", "fileDrop", "load", "error"])
 
 /**
  * The editor a change event came from, when there is one whose state React

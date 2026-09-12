@@ -299,6 +299,11 @@ export interface GpuixChangeEvent extends GpuixEvent {
   readonly value?: string
 }
 
+/** An `<img>` source reached a terminal load or decode state. */
+export interface GpuixLoadEvent extends GpuixEvent {
+  readonly type: "load" | "error"
+}
+
 /**
  * Events from the built-in custom elements: `<diff>`'s `toggleFile`,
  * `showMore`, and `lineClick`; `<markdown>`'s `linkClick`; `<virtual-list>`'s
@@ -350,6 +355,7 @@ export type GpuixSyntheticEvent =
   | GpuixFocusEvent
   | GpuixScrollEvent
   | GpuixChangeEvent
+  | GpuixLoadEvent
   | GpuixElementEvent
 
 export interface GpuixEventDispatchResult {
@@ -381,7 +387,9 @@ export function createGpuixSyntheticEvent(
   const isNonCancelableEvent =
     nativeEvent.eventType === "focus" ||
     nativeEvent.eventType === "blur" ||
-    nativeEvent.eventType === "scroll"
+    nativeEvent.eventType === "scroll" ||
+    nativeEvent.eventType === "load" ||
+    nativeEvent.eventType === "error"
   const isNonBubblingEvent = isNonCancelableEvent
   const isDragEvent =
     nativeEvent.eventType === "dragEnter" ||

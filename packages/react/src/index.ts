@@ -319,6 +319,7 @@ export type {
   GpuixEventPhase,
   GpuixFocusEvent,
   GpuixKeyboardEvent,
+  GpuixLoadEvent,
   GpuixMouseEvent,
   GpuixMouseEventType,
   GpuixFile,
