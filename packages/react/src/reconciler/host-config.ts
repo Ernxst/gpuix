@@ -62,6 +62,8 @@ let currentUpdatePriority = NoEventPriority
 
 type HostNode = Instance | TextInstance
 
+const HOST_NODE_REGISTRY_KEY = "__gpuixHostNodeRegistry"
+
 interface HostNodeState {
   container: Container
   children: HostNode[]
@@ -72,8 +74,33 @@ interface HostNodeState {
   parent: Instance | null
 }
 
-const hostNodeStates = new WeakMap<HostNode, HostNodeState>()
-const publicInstanceContainers = new WeakMap<PublicInstance, Container>()
+type HostNodeRegistry = {
+  hostNodeStates: WeakMap<HostNode, HostNodeState>
+  publicInstanceContainers: WeakMap<PublicInstance, Container>
+  disconnectedRootOrder: WeakMap<HostNode, number>
+  nextDisconnectedRootOrder: number
+}
+
+function hostNodeRegistry(): HostNodeRegistry {
+  // `render()` keeps its native host and React root on globalThis so bun --hot
+  // can remount in place. Public instances outlive a module evaluation too:
+  // globals installed by an earlier evaluation can receive refs created by a
+  // later one, so their ownership and tree-position state share that lifetime.
+  const existing = Reflect.get(globalThis, HOST_NODE_REGISTRY_KEY) as HostNodeRegistry | undefined
+  if (existing) return existing
+
+  const created: HostNodeRegistry = {
+    hostNodeStates: new WeakMap(),
+    publicInstanceContainers: new WeakMap(),
+    disconnectedRootOrder: new WeakMap(),
+    nextDisconnectedRootOrder: 0,
+  }
+  Reflect.set(globalThis, HOST_NODE_REGISTRY_KEY, created)
+  return created
+}
+
+const sharedHostNodes = hostNodeRegistry()
+const { hostNodeStates, publicInstanceContainers } = sharedHostNodes
 const virtualListsPendingValidation = new WeakMap<Container, Set<Instance>>()
 const warnedVirtualListRowContracts = new WeakSet<Instance>()
 
@@ -187,14 +214,11 @@ function ancestorChain(node: HostNode): HostNode[] {
 // each renderer gets its own id allocator (`idAllocatorFor`), starting back
 // at 1, so two different roots routinely share ids. First-seen order across
 // roots is unique by construction and never collides.
-let nextDisconnectedRootOrder = 0
-const disconnectedRootOrder = new WeakMap<HostNode, number>()
-
 function orderForDisconnectedRoot(root: HostNode): number {
-  let order = disconnectedRootOrder.get(root)
+  let order = sharedHostNodes.disconnectedRootOrder.get(root)
   if (order === undefined) {
-    order = nextDisconnectedRootOrder++
-    disconnectedRootOrder.set(root, order)
+    order = sharedHostNodes.nextDisconnectedRootOrder++
+    sharedHostNodes.disconnectedRootOrder.set(root, order)
   }
   return order
 }

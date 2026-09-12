@@ -77,6 +77,41 @@ setInterval(() => {}, 1 << 30)
 `
 }
 
+function hotResizeObserverAppSource(label: string): string {
+  return `
+import React from "react"
+import ${JSON.stringify(join(srcDir, "globals.ts"))}
+import { TestRenderer } from ${JSON.stringify(join(srcDir, "testing.ts"))}
+import { render } from ${JSON.stringify(join(srcDir, "reconciler/renderer.ts"))}
+
+const slot = globalThis
+slot.__hotResizeEvals = (slot.__hotResizeEvals ?? 0) + 1
+if (!slot.__hotResizeRenderer) {
+  slot.__hotResizeRenderer = new TestRenderer()
+}
+const renderer = slot.__hotResizeRenderer
+const target = React.createRef()
+render(
+  React.createElement("div", { ref: target, style: { width: 100, height: 100 } }, ${JSON.stringify(label)}),
+  { renderer }
+)
+if (slot.__hotResizePrevious) {
+  slot.__hotResizePrevious.compareDocumentPosition(target.current)
+  console.log("HOT_RESIZE_POSITION", ${JSON.stringify(label)})
+}
+slot.__hotResizePrevious = target.current
+const observer = new ResizeObserver(() => {
+  slot.__hotResizeCallbacks = (slot.__hotResizeCallbacks ?? 0) + 1
+  console.log("HOT_RESIZE", ${JSON.stringify(label)}, slot.__hotResizeCallbacks)
+})
+observer.observe(target.current)
+renderer.flush()
+renderer.dispatchNativeEvents()
+console.log("HOT_RESIZE_EVAL", slot.__hotResizeEvals)
+setInterval(() => {}, 1 << 30)
+`
+}
+
 function collectOutput(child: ReturnType<typeof spawn>) {
   let buf = ""
   child.stdout?.on("data", (chunk) => {
@@ -1088,6 +1123,37 @@ describeNative("render()", () => {
       await output.wait("HOT_CLICK world 2", 1000)
       const hotOutput = await output.wait("HOT_FRAME world", 1000)
       expect(hotOutput).not.toContain("HOT_FRAME hello")
+    } finally {
+      child.kill("SIGTERM")
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 40_000)
+
+  it("keeps the global ResizeObserver attached to refs from a hot-reloaded tree", async () => {
+    const file = join(srcDir, "__tests__", "hot-resize-observer.tmp.tsx")
+    writeFileSync(file, hotResizeObserverAppSource("before"))
+
+    const child = spawn("bun", ["--hot", file], {
+      cwd: srcDir,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    const output = collectOutput(child)
+
+    try {
+      await output.wait("HOT_RESIZE before 1", 15_000)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+
+      writeFileSync(file, hotResizeObserverAppSource("after"))
+
+      // The observer from the first evaluation receives its terminal entry
+      // first and releases the stale native target; the new observer then
+      // delivers the live ref from the remounted tree.
+      await output.wait("HOT_RESIZE before 2", 15_000)
+      await output.wait("HOT_RESIZE after 3", 1_000)
+      await output.wait("HOT_RESIZE_POSITION after", 1_000)
+      await output.wait("HOT_RESIZE_EVAL 2", 1_000)
     } finally {
       child.kill("SIGTERM")
       try {
