@@ -1561,6 +1561,8 @@ impl CustomElement for CanvasElement {
         let height = self.height;
         let id = ctx.id;
         let retained_list = ctx.canvas_display_lists.lock().unwrap().get(&id).cloned();
+        #[cfg(target_os = "macos")]
+        let presentation = ctx.canvas_display_lists.presentation(id);
         let image_sources = retained_list
             .as_deref()
             .map(crate::canvas::DisplayList::image_sources)
@@ -1722,6 +1724,10 @@ impl CustomElement for CanvasElement {
             ctx.paint_bounds_listener.clone(),
         );
         root = root.child(drawing);
+        #[cfg(target_os = "macos")]
+        if let Some(source) = presentation {
+            root = root.child(gpui::surface(source).absolute().top_0().left_0().size_full());
+        }
         let root = self.attach_mouse_events(root, &ctx, cx);
         super::apply_accessibility(root, &ctx).into_any_element()
     }
