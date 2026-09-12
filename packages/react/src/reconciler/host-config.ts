@@ -494,6 +494,28 @@ const DIV_ALIASES = new Set([
   "a",
   "button",
   "kbd",
+  "abbr",
+  "address",
+  "b",
+  "blockquote",
+  "cite",
+  "del",
+  "dfn",
+  "figure",
+  "figcaption",
+  "i",
+  "ins",
+  "mark",
+  "menu",
+  "pre",
+  "s",
+  "samp",
+  "small",
+  "sub",
+  "sup",
+  "time",
+  "u",
+  "var",
 ])
 
 // Built-in element types that don't use custom props.
@@ -929,11 +951,20 @@ function nativeActivationKind(_type: string, props: Props): "anchor" | undefined
  * role (`p`, `span`, `strong`, `em`, `kbd`) or need their surroundings to
  * resolve, and are handled in `nativeRole`.
  */
-const IMPLICIT_ROLES: Readonly<Record<string, NonNullable<Props["role"]>>> = {
+type NativeImplicitRole = NonNullable<Props["role"]> | "abbr"
+
+const IMPLICIT_ROLES: Readonly<Record<string, NativeImplicitRole>> = {
   a: "link",
+  abbr: "abbr",
+  address: "group",
   article: "article",
   aside: "complementary",
+  blockquote: "blockquote",
   button: "button",
+  del: "deletion",
+  dfn: "term",
+  figcaption: "caption",
+  figure: "figure",
   h1: "heading",
   h2: "heading",
   h3: "heading",
@@ -942,11 +973,16 @@ const IMPLICIT_ROLES: Readonly<Record<string, NonNullable<Props["role"]>>> = {
   h6: "heading",
   li: "listitem",
   main: "main",
+  mark: "mark",
+  menu: "list",
   nav: "navigation",
   ol: "list",
+  s: "deletion",
   // SVG-AAM gives a bare `<svg>` the graphics-document role.
   svg: "graphics-document",
+  time: "time",
   ul: "list",
+  ins: "insertion",
 }
 
 /**
@@ -964,7 +1000,7 @@ const LANDMARK_SCOPING_ROLES = new Set([
 ])
 
 /** The list containers that make an `<li>` a listitem rather than a generic. */
-const LIST_OWNER_TYPES = new Set(["ul", "ol"])
+const LIST_OWNER_TYPES = new Set(["ul", "ol", "menu"])
 
 function isScopedToBody(instance: Instance): boolean {
   for (let node = stateFor(instance).parent; node !== null; node = stateFor(node).parent) {
@@ -1001,7 +1037,7 @@ function nativeRole(
   type: string,
   props: Props,
   instance: Instance
-): Props["role"] | undefined {
+): NativeImplicitRole | undefined {
   if (props.role !== undefined) return props.role
   // HTML-AAM maps `<a>` to `link` only when it has an `href`. A placeholder
   // anchor without one computes `generic`, and announcing it as a link tells a

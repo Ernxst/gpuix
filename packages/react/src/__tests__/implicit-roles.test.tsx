@@ -72,6 +72,99 @@ describeNative("implicit ARIA roles for semantic aliases", () => {
     }
   })
 
+  it("treats menu as a list and its children as list items", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <menu data-testid="menu">
+          <li data-testid="item">
+            <text>Inspect</text>
+          </li>
+        </menu>
+      )
+
+      expect(screen.getByRole("list")).toBe(screen.getByTestId("menu"))
+      expect(screen.getByRole("listitem")).toBe(screen.getByTestId("item"))
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("gives the new semantic aliases their Chromium roles", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <address data-testid="address" />
+          <blockquote data-testid="blockquote" />
+          <s data-testid="s" />
+          <del data-testid="del" />
+          <mark data-testid="mark" />
+          <time data-testid="time" />
+          <ins data-testid="ins" />
+          <dfn data-testid="dfn">
+            <text>Manifold</text>
+          </dfn>
+          <figure data-testid="figure">
+            <figcaption data-testid="figcaption">
+              <text>Factory output</text>
+            </figcaption>
+          </figure>
+        </div>
+      )
+
+      expect(screen.getByRole("group")).toBe(screen.getByTestId("address"))
+      expect(screen.getByRole("blockquote")).toBe(screen.getByTestId("blockquote"))
+      expect(screen.getAllByRole("deletion")).toEqual([
+        screen.getByTestId("s"),
+        screen.getByTestId("del"),
+      ])
+      expect(screen.getByRole("mark")).toBe(screen.getByTestId("mark"))
+      expect(screen.getByRole("time")).toBe(screen.getByTestId("time"))
+      expect(screen.getByRole("insertion")).toBe(screen.getByTestId("ins"))
+      expect(screen.getByRole("term", { name: "Manifold" })).toBe(
+        screen.getByTestId("dfn")
+      )
+      expect(screen.getByRole("figure")).toBe(screen.getByTestId("figure"))
+      expect(screen.getByRole("caption")).toBe(screen.getByTestId("figcaption"))
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  it("lets an authored name label a figure instead of deriving one from figcaption", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <figure data-testid="unnamed">
+            <figcaption>
+              <text>Visible caption</text>
+            </figcaption>
+          </figure>
+          <figure ariaLabel="Production chart" data-testid="named">
+            <figcaption>
+              <text>Visible caption</text>
+            </figcaption>
+          </figure>
+        </div>
+      )
+
+      expect(screen.getByRole("figure", { name: "Production chart" })).toBe(
+        screen.getByTestId("named")
+      )
+      expect(screen.getAllByRole("figure")).toEqual([
+        screen.getByTestId("unnamed"),
+        screen.getByTestId("named"),
+      ])
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("leaves a list item outside a list generic, as HTML-AAM does", () => {
     const screen = createTestRoot()
 
@@ -485,6 +578,17 @@ describeNative("implicit ARIA roles for semantic aliases", () => {
           <kbd data-testid="kbd">
             <text>Ctrl</text>
           </kbd>
+          <abbr data-testid="abbr"><text>GPU</text></abbr>
+          <b data-testid="b"><text>Bold</text></b>
+          <i data-testid="i"><text>Alternate voice</text></i>
+          <u data-testid="u"><text>Annotation</text></u>
+          <small data-testid="small"><text>Side comment</text></small>
+          <sub data-testid="sub"><text>2</text></sub>
+          <sup data-testid="sup"><text>3</text></sup>
+          <cite data-testid="cite"><text>Specification</text></cite>
+          <samp data-testid="samp"><text>stdout</text></samp>
+          <var data-testid="var"><text>x</text></var>
+          <pre data-testid="pre"><text>preserved by authored whiteSpace</text></pre>
         </div>
       )
 
@@ -492,6 +596,11 @@ describeNative("implicit ARIA roles for semantic aliases", () => {
       expect(screen.queryByRole("strong")).toBeNull()
       expect(screen.queryByRole("emphasis")).toBeNull()
       expect(screen.queryByRole("generic")).toBeNull()
+      expect(screen.getByRole("abbr")).toBe(screen.getByTestId("abbr"))
+      for (const testId of ["b", "i", "u", "small", "sub", "sup", "cite", "samp", "var", "pre"]) {
+        const element = screen.getByTestId(testId)
+        expect(screen.renderer.getElementBounds(element.id), testId).not.toBeNull()
+      }
     } finally {
       screen.unmount()
     }

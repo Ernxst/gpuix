@@ -2525,7 +2525,7 @@ add semantics and focus behavior, but no visual defaults.
 | `<article>` | `article` |
 | `<aside>` | `complementary` |
 | `<h1>`–`<h6>` | `heading`, with the matching `ariaLevel` |
-| `<ul>`, `<ol>` | `list` |
+| `<ul>`, `<ol>`, `<menu>` | `list` |
 | `<li>` | `listitem` |
 | `<button>` | `button` |
 | `<a href>` | `link` |
@@ -2533,7 +2533,17 @@ add semantics and focus behavior, but no visual defaults.
 | `<header>` | `banner` |
 | `<footer>` | `contentinfo` |
 | `<section>` | `region` |
-| `<p>`, `<span>`, `<strong>`, `<em>`, `<kbd>` | none |
+| `<address>` | `group` |
+| `<abbr>` | platform `abbr` role |
+| `<blockquote>` | `blockquote` |
+| `<s>`, `<del>` | `deletion` |
+| `<dfn>` | `term`, named from its contents |
+| `<figure>` | `figure` |
+| `<figcaption>` | `caption` |
+| `<mark>` | `mark` |
+| `<time>` | `time` |
+| `<ins>` | `insertion` |
+| `<p>`, `<span>`, `<strong>`, `<em>`, `<kbd>`, `<b>`, `<i>`, `<u>`, `<small>`, `<sub>`, `<sup>`, `<cite>`, `<samp>`, `<var>`, `<pre>` | none |
 
 Four of those roles depend on where the element sits, how it is named, or what
 it declares, and GPUIX resolves them the way HTML-AAM does:
@@ -3471,6 +3481,20 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `svg`           | Tintable monochrome SVG icons from source or disk |
 | `anchored`      | Positioned overlay                               |
 | `canvas`        | Immediate-mode 2D paths, fills, strokes, transforms, and images |
+
+HTML aliases support the same layout, style, event, ref, and accessibility
+surface as `div`: `main`, `header`, `footer`, `nav`, `section`, `article`,
+`aside`, `h1`–`h6`, `p`, `span`, `strong`, `em`, `ul`, `ol`, `li`, `a`,
+`button`, `kbd`, `abbr`, `address`, `b`, `blockquote`, `cite`, `del`, `dfn`,
+`figure`, `figcaption`, `i`, `ins`, `mark`, `menu`, `pre`, `s`, `samp`,
+`small`, `sub`, `sup`, `time`, `u`, and `var`.
+
+As with the existing aliases, the native renderer does not apply browser user
+agent styles. Author the presentation explicitly: for example, `pre` needs
+`whiteSpace: "pre"`, and the typographic appearance of `b`, `i`, `small`,
+`sub`, and `sup` comes from the supplied style rather than tag defaults.
+GPUI does not yet expose AccessKit's subscript/superscript text-position
+metadata, so `sub` and `sup` remain generic accessibility containers on native.
 
 ### Inline text runs
 

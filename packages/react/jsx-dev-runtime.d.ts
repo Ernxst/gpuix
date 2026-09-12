@@ -55,6 +55,28 @@ export namespace JSX {
     a: Props & { href?: string; target?: string }
     button: Props & { type?: "button" | "submit" | "reset" }
     kbd: Props
+    abbr: Props
+    address: Props
+    b: Props
+    blockquote: Props
+    cite: Props
+    del: Props
+    dfn: Props
+    figure: Props
+    figcaption: Props
+    i: Props
+    ins: Props
+    mark: Props
+    menu: Props
+    pre: Props
+    s: Props
+    samp: Props
+    small: Props
+    sub: Props
+    sup: Props
+    time: Props
+    u: Props
+    var: Props
     img: ImgProps
     svg: SvgProps
     canvas: CanvasProps
