@@ -160,6 +160,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   loadCanvasImage(observerId: number, sourceJson: string): void
   getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
   releaseCanvasImage(observerId: number): void
+  getImageRequestGeneration(elementId: number): number | null
   flush(): void
   drawPendingFrame(): void
   advanceAsyncClock(deltaMs: number): void
@@ -822,6 +823,10 @@ export class TestRenderer implements NativeRenderer {
 
   getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null {
     return this.native.getCanvasImageLoadState(observerId)
+  }
+
+  getImageRequestGeneration(elementId: number): number | null {
+    return this.native.getImageRequestGeneration(elementId)
   }
 
   releaseCanvasImage(observerId: number): void {

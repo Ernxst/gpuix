@@ -1507,6 +1507,10 @@ enum UiCommand {
         id: u64,
         response: SyncSender<Option<TextEditingState>>,
     },
+    GetImageRequestGeneration {
+        id: u64,
+        response: SyncSender<Option<f64>>,
+    },
     SetTextSelection {
         id: u64,
         start: usize,
@@ -1930,6 +1934,19 @@ async fn run_ui_commands(
                             .ok();
                     })
                 }),
+            UiCommand::GetImageRequestGeneration { id, response } => {
+                draw_ui_window_for_read(window, cx).and_then(|()| {
+                    window.update(cx, move |view, _window, _cx| {
+                        response
+                            .send(
+                                view.custom_registry
+                                    .image_request_generation(id)
+                                    .map(|generation| generation as f64),
+                            )
+                            .ok();
+                    })
+                })
+            }
             UiCommand::SetTextSelection {
                 id,
                 start,
@@ -4698,6 +4715,40 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    fn image_request_generation(&self, id: u64) -> Result<Option<f64>> {
+        #[cfg(target_os = "macos")]
+        draw_window_for_automation_read()?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, _cx| {
+            view.custom_registry
+                .image_request_generation(id)
+                .map(|generation| generation as f64)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetImageRequestGeneration { id, response })?;
+            return recv_ui_response(receiver, "the image lifecycle generation query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Read the current native image lifecycle generation after synchronizing
+    /// the retained tree. Queued load/error payloads use this to reject stale
+    /// completions without duplicating image request equality in JavaScript.
+    #[napi]
+    pub fn get_image_request_generation(&self, element_id: f64) -> Result<Option<f64>> {
+        self.image_request_generation(to_element_id(element_id)?)
+    }
+
     // ── Scroll API ───────────────────────────────────────────────────
     // GpuixView syncs scroll handles and virtual list states to thread-local maps.
 
@@ -6351,6 +6402,21 @@ impl WebGpuixRenderer {
         })?;
         Ok(state.map_or(wasm_bindgen::JsValue::NULL, |state| {
             wasm_bindgen::JsValue::from_str(&state.value)
+        }))
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getImageRequestGeneration)]
+    pub fn get_image_request_generation(
+        &self,
+        element_id: f64,
+    ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        draw_web_window_for_read()?;
+        let generation = update_web_view(move |view, _window, _cx| {
+            view.custom_registry.image_request_generation(id)
+        })?;
+        Ok(generation.map_or(wasm_bindgen::JsValue::NULL, |generation| {
+            wasm_bindgen::JsValue::from_f64(generation as f64)
         }))
     }
 

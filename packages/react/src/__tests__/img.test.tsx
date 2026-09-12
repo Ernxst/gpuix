@@ -12,6 +12,8 @@ import {
 } from "../testing"
 import type { TestRoot } from "../testing"
 import type { ElementBounds, ImageMimeType, ImageSource } from "../types/host"
+import type { GpuixLoadEvent } from "../reconciler/synthetic-event"
+import { handleGpuixEvent } from "../reconciler/event-registry"
 import {
   bufferSimilarity,
   expectScreenshotsDiffer,
@@ -170,6 +172,29 @@ async function captureLoadedSource(
     disposeImageTestRoot(testRoot)
     disposeImageTestRoot(baseline)
   }
+}
+
+async function waitForImageEvents(
+  testRoot: ReturnType<typeof createTestRoot>,
+  events: readonly GpuixLoadEvent[],
+  count: number
+) {
+  for (let frame = 0; frame < 100 && events.length < count; frame++) {
+    testRoot.renderer.flush()
+    testRoot.renderer.dispatchNativeEvents()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  expect(events).toHaveLength(count)
+}
+
+async function takeQueuedImageEvent(testRoot: ReturnType<typeof createTestRoot>) {
+  for (let frame = 0; frame < 100; frame++) {
+    testRoot.renderer.flush()
+    const event = testRoot.renderer.drainEvents().find((candidate) => candidate.eventType === "load")
+    if (event) return event
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error("image load did not reach the native event queue")
 }
 
 describeNative("custom element: img", { timeout: 28_000 }, () => {
@@ -402,6 +427,229 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
     }
   }, 20_000)
 
+  it("emits one browser-shaped load event for path, URL, and data sources", async () => {
+    const sources: Array<{ name: string; source: ImageSource | string; privateNetwork?: true }> = [
+      { name: "path", source: FIXTURE_PATHS.get("png")! },
+      {
+        name: "url",
+        source: `http://127.0.0.1:${serverPort}/png`,
+        privateNetwork: true,
+      },
+      {
+        name: "data",
+        source: { kind: "data", mimeType: "image/png", bytes: PNG_BYTES },
+      },
+    ]
+
+    for (const { name, source, privateNetwork } of sources) {
+      const testRoot = createImageTestRoot(
+        privateNetwork ? { allowPrivateNetworkImages: true } : undefined
+      )
+      const events: GpuixLoadEvent[] = []
+      try {
+        testRoot.render(
+          <img
+            data-testid={`${name}-load-event`}
+            src={source}
+            style={{ width: 32, height: 24 }}
+            onLoad={(event) => events.push(event)}
+          />
+        )
+        await waitForImageEvents(testRoot, events, 1)
+
+        const image = testRoot.renderer.findByTestId(`${name}-load-event`)!
+        expect(events[0]).toMatchObject({
+          type: "load",
+          eventType: "load",
+          bubbles: false,
+          cancelable: false,
+          target: { id: image.id },
+          currentTarget: { id: image.id },
+        })
+
+        if (name === "data") {
+          testRoot.render(
+            <img
+              data-testid={`${name}-load-event`}
+              src={{ kind: "data", mimeType: "image/png", bytes: new Uint8Array(PNG_BYTES) }}
+              style={{ width: 32, height: 24 }}
+              onLoad={(event) => events.push(event)}
+            />
+          )
+          testRoot.renderer.flush()
+          testRoot.renderer.dispatchNativeEvents()
+        }
+
+        for (let frame = 0; frame < 3; frame++) {
+          testRoot.renderer.flush()
+          testRoot.renderer.dispatchNativeEvents()
+        }
+        expect(events).toHaveLength(1)
+      } finally {
+        disposeImageTestRoot(testRoot)
+      }
+    }
+  })
+
+  it("delivers delegated load capture and ancestor handlers without changing bubbles", async () => {
+    const testRoot = createImageTestRoot()
+    const events: GpuixLoadEvent[] = []
+    const delivery: Array<{ listener: string; bubbles: boolean; phase: number }> = []
+    const record = (listener: string) => (event: GpuixLoadEvent) => {
+      delivery.push({ listener, bubbles: event.bubbles, phase: event.eventPhase })
+    }
+    try {
+      testRoot.render(
+        <div onLoadCapture={record("ancestor-capture")} onLoad={record("ancestor")}>
+          <img
+            src={{ kind: "data", mimeType: "image/png", bytes: PNG_BYTES }}
+            style={{ width: 32, height: 24 }}
+            onLoadCapture={record("image-capture")}
+            onLoad={(event) => {
+              events.push(event)
+              record("image")(event)
+            }}
+          />
+        </div>
+      )
+      await waitForImageEvents(testRoot, events, 1)
+      expect(delivery).toEqual([
+        { listener: "ancestor-capture", bubbles: false, phase: 1 },
+        { listener: "image-capture", bubbles: false, phase: 2 },
+        { listener: "image", bubbles: false, phase: 2 },
+        { listener: "ancestor", bubbles: false, phase: 3 },
+      ])
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
+  it("starts image lifecycle delivery when only an ancestor observes it", async () => {
+    const testRoot = createImageTestRoot()
+    const events: GpuixLoadEvent[] = []
+    const delivery: Array<{ listener: string; bubbles: boolean }> = []
+    try {
+      testRoot.render(
+        <div
+          onLoadCapture={(event) => delivery.push({ listener: "ancestor-capture", bubbles: event.bubbles })}
+          onLoad={(event) => {
+            events.push(event)
+            delivery.push({ listener: "ancestor", bubbles: event.bubbles })
+          }}
+        >
+          <img
+            src={{ kind: "data", mimeType: "image/png", bytes: PNG_BYTES }}
+            style={{ width: 32, height: 24 }}
+          />
+        </div>
+      )
+      await waitForImageEvents(testRoot, events, 1)
+      expect(delivery).toEqual([
+        { listener: "ancestor-capture", bubbles: false },
+        { listener: "ancestor", bubbles: false },
+      ])
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
+  it("suppresses a lifecycle completion queued before src replacement", async () => {
+    const testRoot = createImageTestRoot()
+    const currentEvents: GpuixLoadEvent[] = []
+    try {
+      testRoot.render(
+        <img
+          src={{ kind: "data", mimeType: "image/png", bytes: PNG_BYTES }}
+          style={{ width: 32, height: 24 }}
+          onLoad={() => {
+            throw new Error("a queued completion must not use the previous lifecycle")
+          }}
+        />
+      )
+      const queued = await takeQueuedImageEvent(testRoot)
+
+      testRoot.render(
+        <img
+          src={{ kind: "data", mimeType: "image/jpeg", bytes: JPEG_BYTES }}
+          style={{ width: 32, height: 24 }}
+          onLoad={(event) => currentEvents.push(event)}
+        />
+      )
+      handleGpuixEvent(queued, testRoot.renderer)
+      expect(currentEvents).toEqual([])
+
+      await waitForImageEvents(testRoot, currentEvents, 1)
+      expect(currentEvents[0]?.type).toBe("load")
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
+  it("delivers a queued completion after an equivalent bare and tagged path source", async () => {
+    const testRoot = createImageTestRoot()
+    const currentEvents: GpuixLoadEvent[] = []
+    const path = FIXTURE_PATHS.get("png")!
+    try {
+      testRoot.render(
+        <img
+          src={path}
+          style={{ width: 32, height: 24 }}
+          onLoad={() => {
+            throw new Error("the queued completion must resolve through the current handler")
+          }}
+        />
+      )
+      const queued = await takeQueuedImageEvent(testRoot)
+
+      testRoot.render(
+        <img
+          src={{ kind: "path", path }}
+          style={{ width: 32, height: 24 }}
+          onLoad={(event) => currentEvents.push(event)}
+        />
+      )
+      handleGpuixEvent(queued, testRoot.renderer)
+      expect(currentEvents).toHaveLength(1)
+      expect(currentEvents[0]?.type).toBe("load")
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
+  it("suppresses a queued completion when tint changes the current image request", async () => {
+    const testRoot = createImageTestRoot()
+    const currentEvents: GpuixLoadEvent[] = []
+    const source = { kind: "data" as const, mimeType: "image/svg+xml" as const, bytes: SVG_BYTES }
+    try {
+      testRoot.render(
+        <img
+          src={source}
+          style={{ width: 32, height: 24, color: "#e96b67" }}
+          onLoad={() => {
+            throw new Error("a queued completion must not use the tinted lifecycle handler")
+          }}
+        />
+      )
+      const queued = await takeQueuedImageEvent(testRoot)
+
+      testRoot.render(
+        <img
+          src={source}
+          tint="currentColor"
+          style={{ width: 32, height: 24, color: "#e96b67" }}
+          onLoad={(event) => currentEvents.push(event)}
+        />
+      )
+      handleGpuixEvent(queued, testRoot.renderer)
+      expect(currentEvents).toEqual([])
+
+      await waitForImageEvents(testRoot, currentEvents, 1)
+      expect(currentEvents[0]?.type).toBe("load")
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
   it("follows Fetch metadata and forgiving-base64 rules for PNG data URLs", async () => {
     const sources = [
       `data:;base64,${PNG_BYTES.toString("base64")}`,
@@ -609,6 +857,39 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
     }
   })
 
+  it("emits one error event when the current source fails to decode", async () => {
+    const testRoot = createImageTestRoot({ allowPrivateNetworkImages: true })
+    const events: GpuixLoadEvent[] = []
+    try {
+      testRoot.render(
+        <img
+          data-testid="decode-error-event"
+          src={`http://127.0.0.1:${serverPort}/decode-error`}
+          style={{ width: 32, height: 24 }}
+          onError={(event) => events.push(event)}
+        />
+      )
+      await waitForImageEvents(testRoot, events, 1)
+      const image = testRoot.renderer.findByTestId("decode-error-event")!
+      expect(events[0]).toMatchObject({
+        type: "error",
+        eventType: "error",
+        bubbles: false,
+        cancelable: false,
+        target: { id: image.id },
+        currentTarget: { id: image.id },
+      })
+
+      for (let frame = 0; frame < 3; frame++) {
+        testRoot.renderer.flush()
+        testRoot.renderer.dispatchNativeEvents()
+      }
+      expect(events).toHaveLength(1)
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
   it("retries a transient failure after the bounded failure TTL", async () => {
     const testRoot = createImageTestRoot({ allowPrivateNetworkImages: true })
     testRoot.render(
@@ -690,6 +971,52 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
       expect(slowResponseCloseCount).toBe(1)
+    } finally {
+      disposeImageTestRoot(testRoot)
+    }
+  })
+
+  it("suppresses completion from a replaced or unmounted source", async () => {
+    const testRoot = createImageTestRoot({ allowPrivateNetworkImages: true })
+    const events: GpuixLoadEvent[] = []
+    const handlers = {
+      onLoad: (event: GpuixLoadEvent) => events.push(event),
+      onError: (event: GpuixLoadEvent) => events.push(event),
+    }
+    try {
+      testRoot.render(
+        <img
+          src={`http://127.0.0.1:${serverPort}/slow?replace`}
+          style={{ width: 32, height: 24 }}
+          {...handlers}
+        />
+      )
+      for (let frame = 0; frame < 50 && slowRequestCount < 1; frame++) {
+        testRoot.renderer.flush()
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(slowRequestCount).toBe(1)
+
+      testRoot.render(
+        <img
+          src={{ kind: "data", mimeType: "image/png", bytes: PNG_BYTES }}
+          style={{ width: 32, height: 24 }}
+          {...handlers}
+        />
+      )
+      await waitForImageEvents(testRoot, events, 1)
+      expect(events[0]?.type).toBe("load")
+
+      testRoot.render(null)
+      for (let attempt = 0; attempt < 50 && slowResponseCloseCount < 1; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(slowResponseCloseCount).toBe(1)
+      for (let frame = 0; frame < 3; frame++) {
+        testRoot.renderer.flush()
+        testRoot.renderer.dispatchNativeEvents()
+      }
+      expect(events).toHaveLength(1)
     } finally {
       disposeImageTestRoot(testRoot)
     }

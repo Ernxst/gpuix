@@ -447,6 +447,11 @@ pub trait CustomElement: 'static {
         None
     }
 
+    /// Native-authoritative lifecycle generation for queued image events.
+    fn image_request_generation(&self) -> Option<u64> {
+        None
+    }
+
     /// This element's DOM-shaped text editing state, or None for every element
     /// that does not edit text — everything but `<input>` and `<textarea>`.
     fn text_editing_state(&self, _cx: &gpui::App) -> Option<input::TextEditingState> {
@@ -639,6 +644,13 @@ impl CustomElementRegistry {
         self.instances
             .get(&id)
             .and_then(|entry| entry.element.test_state())
+    }
+
+    /// One live `<img>` request generation, or None for any other element.
+    pub fn image_request_generation(&self, id: u64) -> Option<u64> {
+        self.instances
+            .get(&id)
+            .and_then(|entry| entry.element.image_request_generation())
     }
 
     /// One live `<input>`/`<textarea>`'s DOM-shaped text editing state.

@@ -11,6 +11,7 @@ import type {
   GpuixElementEvent,
   GpuixFocusEvent,
   GpuixKeyboardEvent,
+  GpuixLoadEvent,
   GpuixMouseEvent,
   GpuixScrollEvent,
   GpuixSyntheticEvent,
@@ -1121,6 +1122,13 @@ export interface Props extends AccessibilityProps {
   onWheel?: (event: GpuixWheelEvent) => void
   onWheelCapture?: (event: GpuixWheelEvent) => void
 
+  // ── Resource lifecycle events ───────────────────────────────────
+  // React delegates these even though the underlying DOM events do not bubble.
+  onLoad?: (event: GpuixLoadEvent) => void
+  onLoadCapture?: (event: GpuixLoadEvent) => void
+  onError?: (event: GpuixLoadEvent) => void
+  onErrorCapture?: (event: GpuixLoadEvent) => void
+
   // ── File drop (Finder / OS paths) ───────────────────────────────
   onFileDrop?: (event: EventPayload) => void
 
@@ -1341,6 +1349,8 @@ export interface NativeRenderer {
   loadCanvasImage?(observerId: number, sourceJson: string): void
   getCanvasImageLoadState?(observerId: number): CanvasImageLoadState | null
   releaseCanvasImage?(observerId: number): void
+  /** Native-authoritative lifecycle generation for one current `<img>` request. */
+  getImageRequestGeneration?(elementId: number): number | null
   /** Stable platform and renderer feature read. */
   capabilities?(): RendererCapabilities
   /** Drop renderer-owned buffered work when a custom transport maintains its own queue. */

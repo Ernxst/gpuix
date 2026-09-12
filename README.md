@@ -3538,6 +3538,10 @@ the image, and `alt=""` marks it decorative and keeps it out of the
 accessibility tree. See [native accessibility](#native-accessibility) for the
 implicit role that carries it.
 
+`onLoad` fires once the current source has decoded and is ready to paint, and
+`onError` fires once when it cannot load or decode. Replacing `src` begins a
+new lifecycle; completion from the replaced source is suppressed.
+
 `objectFit` matches CSS: `"contain"` (default), `"cover"`, `"fill"`,
 `"scaleDown"`, or `"none"`. `bytes` accepts an `ArrayBuffer`, `Uint8Array`
 (including Node.js `Buffer`), or a number array. Every source is capped at

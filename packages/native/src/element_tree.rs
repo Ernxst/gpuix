@@ -20,6 +20,10 @@ pub struct EventPayload {
     /// e.g. "click", "mouseDown", "mouseEnter", "keyDown", "scroll", etc.
     pub event_type: String,
 
+    /// Lifecycle generation of an image request. Populated for `load` and
+    /// `error`, so JS can discard a completion queued before `src` changed.
+    pub image_request_generation: Option<f64>,
+
     // ── Window ───────────────────────────────────────────────────────
     /// Logical GPUI window width. Populated for `windowResize`.
     pub width: Option<f64>,
@@ -153,6 +157,7 @@ impl Default for EventPayload {
         Self {
             element_id: 0.0,
             event_type: String::new(),
+            image_request_generation: None,
             width: None,
             height: None,
             scale_factor: None,

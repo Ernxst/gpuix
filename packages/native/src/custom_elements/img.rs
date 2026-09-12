@@ -2070,6 +2070,8 @@ pub struct ImgElement {
     object_fit: ImgObjectFit,
     tint_current_color: bool,
     last_request: Option<ImageRequest>,
+    last_reported_terminal_state: Option<(ImageRequest, ImgTerminalState)>,
+    request_generation: u64,
     element_id: Option<u64>,
     store: Option<SharedImgImageStore>,
 }
@@ -2082,10 +2084,18 @@ impl Default for ImgElement {
             object_fit: ImgObjectFit::default(),
             tint_current_color: false,
             last_request: None,
+            last_reported_terminal_state: None,
+            request_generation: 0,
             element_id: None,
             store: None,
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ImgTerminalState {
+    Loaded,
+    Error,
 }
 
 impl ImgElement {
@@ -2123,6 +2133,22 @@ impl ImgElement {
             Ok(source) => self.source = Some(source),
             Err(error) => self.source_error = Some(error),
         }
+    }
+}
+
+fn has_image_lifecycle_listener(ctx: &CustomRenderContext, event_type: &str) -> bool {
+    let mut element = ctx.retained_element;
+    loop {
+        if element.events.contains(event_type) {
+            return true;
+        }
+        let Some(parent_id) = element.parent else {
+            return false;
+        };
+        let Some(parent) = ctx.tree.elements.get(&parent_id) else {
+            return false;
+        };
+        element = parent;
     }
 }
 
@@ -2261,9 +2287,6 @@ impl CustomElement for ImgElement {
                 .tint_current_color
                 .then(|| u32::from(ctx.current_color)),
         });
-        if self.last_request.as_ref() != request.as_ref() {
-            self.release_current_request();
-        }
         let store = ctx.img_image_store.clone();
         self.store = Some(store.clone());
         self.element_id = Some(ctx.id);
@@ -2271,7 +2294,12 @@ impl CustomElement for ImgElement {
             let _ = window.drop_image(image);
         }
 
-        if let Some(error) = self.source_error.as_deref() {
+        if let Some(error) = self.source_error.clone() {
+            if self.last_request.is_some() {
+                self.release_current_request();
+                self.request_generation = self.request_generation.wrapping_add(1);
+                self.last_reported_terminal_state = None;
+            }
             let fallback = Self::fallback(format!("img: invalid src: {error}"))
                 .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)));
             let fallback = super::custom_surface(fallback, &ctx, cx);
@@ -2279,6 +2307,11 @@ impl CustomElement for ImgElement {
         }
 
         let Some(request) = request else {
+            if self.last_request.is_some() {
+                self.release_current_request();
+                self.request_generation = self.request_generation.wrapping_add(1);
+                self.last_reported_terminal_state = None;
+            }
             let fallback = Self::fallback("img: no src")
                 .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)));
             let fallback = super::custom_surface(fallback, &ctx, cx);
@@ -2290,8 +2323,40 @@ impl CustomElement for ImgElement {
             ctx.image_network_policy.clone(),
             cx,
         );
+        let request_changed = self.last_request.as_ref() != Some(&request);
+        if request_changed {
+            self.release_current_request();
+            self.request_generation = self.request_generation.wrapping_add(1);
+            self.last_reported_terminal_state = None;
+        }
         self.source = Some(request.source.clone());
         self.last_request = Some(request.clone());
+
+        let terminal_state = match result_handle.lock().unwrap().as_ref() {
+            Some(Ok(_)) => Some(ImgTerminalState::Loaded),
+            Some(Err(_)) => Some(ImgTerminalState::Error),
+            None => None,
+        };
+        if let Some(terminal_state) = terminal_state {
+            let completion = (request.clone(), terminal_state);
+            if self.last_reported_terminal_state.as_ref() != Some(&completion) {
+                self.last_reported_terminal_state = Some(completion);
+                let event_type = match terminal_state {
+                    ImgTerminalState::Loaded => "load",
+                    ImgTerminalState::Error => "error",
+                };
+                if has_image_lifecycle_listener(&ctx, event_type) {
+                    crate::renderer::emit_event_full(
+                        ctx.event_callback,
+                        ctx.id,
+                        event_type,
+                        |payload| {
+                            payload.image_request_generation = Some(self.request_generation as f64)
+                        },
+                    );
+                }
+            }
+        }
 
         // One GPUI identity for the image and for the accessibility projection
         // below: the projection is never laid out, painted, or hit-tested, so a
@@ -2363,6 +2428,8 @@ impl CustomElement for ImgElement {
 
     fn supported_events(&self) -> &'static [&'static str] {
         &[
+            "load",
+            "error",
             "click",
             "doubleClick",
             "contextMenu",
@@ -2392,6 +2459,10 @@ impl CustomElement for ImgElement {
             .and_then(|(store, element_id)| store.status(element_id))
             .unwrap_or_else(|| serde_json::json!({ "status": "loading" }));
         Some(status)
+    }
+
+    fn image_request_generation(&self) -> Option<u64> {
+        Some(self.request_generation)
     }
 
     fn destroy(&mut self) {
