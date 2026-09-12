@@ -466,6 +466,7 @@ interface ResultRow {
   buildSharePercent: number
   applyStylesMsPerDraw: number
   applyStylesSharePercent: number
+  secondDrawP50Ms: number
 }
 
 const results: ResultRow[] = []
@@ -481,10 +482,18 @@ for (const rows of rowCounts) {
   renderer.takeApplyStylesMicros()
 
   const samples: number[] = []
+  // `drawPendingFrame` is the same `window.draw` as `flush`, minus the
+  // invalidation request: it draws only if the window is still dirty. On a
+  // static tree it should cost nothing, and anything it does cost is a second
+  // full draw the page asked for.
+  const secondDraws: number[] = []
   for (let index = 0; index < measuredDraws; index += 1) {
     const started = performance.now()
     renderer.flush()
-    samples.push(performance.now() - started)
+    const flushed = performance.now()
+    renderer.drawPendingFrame()
+    samples.push(flushed - started)
+    secondDraws.push(performance.now() - flushed)
   }
   // Summed over the measured draws, so this is a mean against a median draw.
   const buildMsPerDraw = renderer.takeRenderBuildMicros() / 1_000 / measuredDraws
@@ -505,6 +514,12 @@ for (const rows of rowCounts) {
     buildSharePercent: round((buildMsPerDraw / Math.max(0.001, drawP50Ms)) * 100, 1),
     applyStylesMsPerDraw: round(applyStylesMsPerDraw),
     applyStylesSharePercent: round((applyStylesMsPerDraw / Math.max(0.001, drawP50Ms)) * 100, 1),
+    secondDrawP50Ms: round(
+      percentile(
+        [...secondDraws].sort((a, b) => a - b),
+        50,
+      ),
+    ),
   })
 
   const disposable = testRoot as { unmount?: () => void; cleanup?: () => void }
