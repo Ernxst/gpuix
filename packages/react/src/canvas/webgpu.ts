@@ -133,7 +133,12 @@ export function getOrCreateWebGpuContext(owner: object, transport: WebGpuCanvasT
 export function webGpuContext(owner: object): GPUCanvasContext | undefined { return contexts.get(owner) }
 export function disposeWebGpuContext(owner: object): void { contexts.get(owner)?.dispose(); contexts.delete(owner) }
 export function installWebGpuGlobal(): void {
-  const navigatorValue = Reflect.get(globalThis, "navigator") as object | undefined
+  let navigatorValue: object | undefined
+  try {
+    navigatorValue = Reflect.get(globalThis, "navigator") as object | undefined
+  } catch {
+    return
+  }
   if (navigatorValue && !Reflect.has(navigatorValue, "gpu")) Object.defineProperty(navigatorValue, "gpu", { configurable: true, value: new GPU() })
 }
 function colorToRgba(color: GPUColor): number {
