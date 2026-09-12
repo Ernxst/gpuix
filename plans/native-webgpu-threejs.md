@@ -35,9 +35,10 @@ observable API stays the same and no frame pixels pass through the CPU.
 | --- | --- | --- |
 | macOS wgpu-to-GPUI texture proof | Complete | `plans/evidence/native-webgpu-macos/phase1-proof.md` |
 | Production macOS clear-and-present | Complete | `plans/evidence/native-webgpu-macos/production-clear-present.md` |
-| Browser-shaped binding foundation | Partial | Clear passes only; no general resource registry |
-| First shader pipeline | Next | Unstarted |
-| Three.js compatibility | Unstarted | No buffers, shaders, pipelines, textures, or bind groups |
+| Browser-shaped binding foundation | Partial | Logical devices, shader modules, render pipelines, and draw commands implemented |
+| First shader pipeline | Complete | `plans/evidence/native-webgpu-macos/first-shader-pipeline.md` |
+| Buffers and indexed geometry | Next | No buffers, mappings, writes, vertex layouts, or indexed draw yet |
+| Three.js compatibility | Unstarted | No buffers, textures, bind groups, or depth |
 | Linux presentation | Architecturally mapped | Runtime implementation and X11/Wayland validation remain |
 | Windows presentation | Needs backend decision | D3D11 compositor and DX12 WebGPU interop remain unresolved |
 
@@ -53,15 +54,19 @@ On native macOS, importing `@gpuix/react/globals` enables:
 - `GPUCanvasContext.configure()` for `bgra8unorm`;
 - `getCurrentTexture()`, `createView()`, command encoders, one color
   attachment, render-pass clear, command-buffer finish, and `queue.submit()`;
+- WGSL shader modules, automatic-layout no-buffer triangle-list render
+  pipelines, `setPipeline()`, and `draw()` with vertex and instance ranges;
+- renderer-owned logical-device, shader-module, and render-pipeline lifetimes
+  with device and renderer ownership checks;
 - independently updating canvases with normal GPUI bounds, overlap,
   rectangular clipping, scrolling, and stacking;
 - frame replacement, resize, unmount, remount, and retained texture release;
 - GPU-ordered Metal shared-event synchronization without CPU polling or frame
   readback.
 
-This is deliberately not general WebGPU. Buffers, mapped memory, shader
-modules, bind groups, pipelines, texture uploads, depth, compute, multisampling,
-query sets, error scopes, and Three.js remain unsupported.
+This is deliberately not general WebGPU. Buffers, mapped memory, bind groups,
+texture uploads, depth, compute, multisampling, query sets, error scopes, and
+Three.js remain unsupported.
 
 ## Settled architecture
 
@@ -86,8 +91,9 @@ must remain observably isolated:
   replacement, or physical device loss;
 - JavaScript cannot replace or interfere with GPUI's recovery machinery.
 
-These rules should become executable ownership tests as the resource registry
-is introduced.
+These rules are executable for logical devices, shader modules, render
+pipelines, canvas binding, and command submission. Later resource families must
+join the same registry rather than create parallel ownership machinery.
 
 ### Canvas ownership and sizing
 
@@ -159,7 +165,7 @@ handling should vary.
 
 ### 1. First shader pipeline
 
-Deliver the next vertical slice through the browser-shaped API:
+Completed on 2026-09-12 through the browser-shaped API:
 
 1. Introduce renderer-owned opaque IDs and ownership checks for shader modules
    and render pipelines.

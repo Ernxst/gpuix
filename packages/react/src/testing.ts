@@ -841,6 +841,53 @@ export class TestRenderer implements NativeRenderer {
     }
   }
 
+  createWebGpuDevice(): number {
+    return this.native.createWebGpuDevice!()
+  }
+
+  destroyWebGpuDevice(deviceId: number): void {
+    this.native.destroyWebGpuDevice!(deviceId)
+  }
+
+  createWebGpuShaderModule(
+    deviceId: number,
+    label: string | undefined,
+    code: string
+  ): number {
+    return this.native.createWebGpuShaderModule!(deviceId, label, code)
+  }
+
+  createWebGpuRenderPipeline(
+    deviceId: number,
+    label: string | undefined,
+    vertexModuleId: number,
+    vertexEntryPoint: string | undefined,
+    fragmentModuleId: number,
+    fragmentEntryPoint: string | undefined
+  ): number {
+    return this.native.createWebGpuRenderPipeline!(
+      deviceId,
+      label,
+      vertexModuleId,
+      vertexEntryPoint,
+      fragmentModuleId,
+      fragmentEntryPoint
+    )
+  }
+
+  presentWebGpuCommands(
+    id: number,
+    width: number,
+    height: number,
+    deviceId: number,
+    rgba: number,
+    ops: Uint32Array,
+    operands: Float64Array
+  ): void {
+    this.native.presentWebGpuCommands!(id, width, height, deviceId, rgba, ops, operands)
+    this.webGpuCanvasIds.add(id)
+  }
+
   getTestGpuCanvasState(): { installed: number; presentations: number; released: number } {
     return this.native.getTestGpuCanvasState()
   }

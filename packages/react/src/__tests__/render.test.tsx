@@ -762,6 +762,153 @@ setTimeout(async () => {
 }, 50)
 `
 
+const TRIANGLE_WGSL = `
+struct VertexOutput {
+  @builtin(position) position: vec4f,
+  @location(0) color: vec3f,
+}
+
+@vertex
+fn vertex_main(
+  @builtin(vertex_index) vertex_index: u32,
+  @builtin(instance_index) instance_index: u32,
+) -> VertexOutput {
+  let positions = array(
+    vec2f(-0.28, -0.45),
+    vec2f(0.28, -0.45),
+    vec2f(0.0, 0.45),
+  );
+  let alternate = f32(instance_index & 1u);
+  var output: VertexOutput;
+  output.position = vec4f(positions[vertex_index].x - 0.4 + alternate * 0.8, positions[vertex_index].y, 0.0, 1.0);
+  output.color = mix(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), alternate);
+  return output;
+}
+
+@fragment
+fn fragment_main(input: VertexOutput) -> @location(0) vec4f {
+  return vec4f(input.color, 1.0);
+}
+`
+
+const PRODUCTION_WEBGPU_TRIANGLE_PROGRAM = `
+import { readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import React from "react"
+import ${JSON.stringify(join(srcDir, "globals.ts"))}
+import { render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
+import { decodePng } from ${JSON.stringify(join(srcDir, "testing-png.ts"))}
+
+let renderer
+let canvas
+
+function Scene() {
+  renderer = useGpuixRequired()
+  return React.createElement("canvas", {
+    ref: (value) => { canvas = value },
+    width: 96,
+    height: 72,
+    style: { width: 96, height: 72 },
+  })
+}
+
+function pixel(image, x, y, scale) {
+  const offset = (Math.floor(y * scale) * image.width + Math.floor(x * scale)) * 4
+  return Array.from(image.data.slice(offset, offset + 4))
+}
+
+function draw(target, pipeline, firstInstance) {
+  const encoder = target.device.createCommandEncoder()
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: target.context.getCurrentTexture().createView(),
+      clearValue: { r: 0, g: 0, b: 0, a: 1 },
+      loadOp: "clear",
+      storeOp: "store",
+    }],
+  })
+  pass.setPipeline(pipeline)
+  pass.draw(3, 1, 0, firstInstance)
+  pass.end()
+  target.device.queue.submit([encoder.finish()])
+}
+
+const screenshot = join(tmpdir(), "gpuix-production-webgpu-triangle-" + process.pid + ".png")
+const timeout = setTimeout(() => {
+  console.error("PRODUCTION_WEBGPU_TRIANGLE_TIMEOUT")
+  process.exitCode = 1
+  renderer?.quit()
+}, 5_000)
+
+render(React.createElement(Scene), {
+  title: "GPUIX production WebGPU triangle smoke",
+  width: 96,
+  height: 72,
+  menus: [],
+  focus: false,
+  show: false,
+})
+
+setTimeout(async () => {
+  let device
+  try {
+    const adapter = await navigator.gpu.requestAdapter()
+    device = await adapter.requestDevice()
+    const context = canvas.getContext("webgpu")
+    if (!context) throw new Error("production canvas.getContext('webgpu') returned null")
+    context.configure({ device, format: "bgra8unorm" })
+    const module = device.createShaderModule({
+      label: "animated triangle shader",
+      code: ${JSON.stringify(TRIANGLE_WGSL)},
+    })
+    const pipeline = device.createRenderPipeline({
+      label: "animated triangle pipeline",
+      layout: "auto",
+      vertex: { module, entryPoint: "vertex_main" },
+      fragment: {
+        module,
+        entryPoint: "fragment_main",
+        targets: [{ format: "bgra8unorm" }],
+      },
+    })
+    const target = { context, device }
+    const scale = renderer.getWindowSize().scaleFactor
+
+    draw(target, pipeline, 0)
+    renderer.captureScreenshot(screenshot)
+    let image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 29, 42, scale)) !== "255,0,0,255") {
+      throw new Error("first shader frame did not render the red triangle")
+    }
+    if (String(pixel(image, 67, 42, scale)) !== "0,0,0,255") {
+      throw new Error("first shader frame did not clear the future triangle position")
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    draw(target, pipeline, 1)
+    renderer.captureScreenshot(screenshot)
+    image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 29, 42, scale)) !== "0,0,0,255") {
+      throw new Error("second shader frame did not clear the previous triangle position")
+    }
+    if (String(pixel(image, 67, 42, scale)) !== "0,255,0,255") {
+      throw new Error("second shader frame did not render the green triangle")
+    }
+
+    console.log("PRODUCTION_WEBGPU_TRIANGLE_OK")
+  } catch (error) {
+    console.error(error)
+    process.exitCode = 1
+  } finally {
+    clearTimeout(timeout)
+    device?.destroy()
+    try { rmSync(screenshot) } catch {}
+    renderer.quit()
+  }
+}, 50)
+`
+
 const ESM_TESTING_PROGRAM = `
 import {
   TestRenderer,
@@ -1538,6 +1685,26 @@ describeNative("render()", () => {
       expect(result.signal).toBeNull()
       expect(result.output).not.toContain("PRODUCTION_WEBGPU_TIMEOUT")
       expect(result.output.match(/^PRODUCTION_WEBGPU_OK$/gm), result.output).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 15_000)
+
+  itMac("renders successive shader pipeline frames through production WebGPU", async () => {
+    const file = join(srcDir, "__tests__", "production-webgpu-triangle.tmp.tsx")
+    writeFileSync(file, PRODUCTION_WEBGPU_TRIANGLE_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file], 8_000)
+      expect(result.code, result.output).toBe(0)
+      expect(result.signal).toBeNull()
+      expect(result.output).not.toContain("PRODUCTION_WEBGPU_TRIANGLE_TIMEOUT")
+      expect(
+        result.output.match(/^PRODUCTION_WEBGPU_TRIANGLE_OK$/gm),
+        result.output
+      ).toHaveLength(1)
     } finally {
       try {
         unlinkSync(file)

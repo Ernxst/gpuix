@@ -781,6 +781,146 @@ impl TestGpuixRenderer {
         }
     }
 
+    /// Create one renderer-owned logical WebGPU device over the shared test producer.
+    #[napi]
+    pub fn create_web_gpu_device(&self) -> Result<f64> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .create_device()
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        Err(Error::from_reason(
+            "Native WebGPU resources require the macOS test-support build",
+        ))
+    }
+
+    /// Destroy a logical WebGPU device and every native resource it owns.
+    #[napi]
+    pub fn destroy_web_gpu_device(&self, device_id: f64) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .destroy_device(device_id)
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = device_id;
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Compile one WGSL shader module for a logical WebGPU device.
+    #[napi]
+    pub fn create_web_gpu_shader_module(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        code: String,
+    ) -> Result<f64> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .create_shader_module(device_id, label, code)
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, label, code);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Create the initial no-buffer, triangle-list WebGPU render pipeline.
+    #[napi]
+    pub fn create_web_gpu_render_pipeline(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        vertex_module_id: f64,
+        vertex_entry_point: Option<String>,
+        fragment_module_id: f64,
+        fragment_entry_point: Option<String>,
+    ) -> Result<f64> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .create_render_pipeline(
+                    device_id,
+                    label,
+                    vertex_module_id,
+                    vertex_entry_point,
+                    fragment_module_id,
+                    fragment_entry_point,
+                )
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (
+                device_id,
+                label,
+                vertex_module_id,
+                vertex_entry_point,
+                fragment_module_id,
+                fragment_entry_point,
+            );
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Render one native WebGPU pass command stream and present its canvas texture.
+    #[napi]
+    pub fn present_web_gpu_commands(
+        &self,
+        id: f64,
+        width: u32,
+        height: u32,
+        device_id: f64,
+        rgba: u32,
+        ops: Uint32Array,
+        operands: Float64Array,
+    ) -> Result<()> {
+        let id = to_element_id(id)?;
+        validate_canvas_target(&self.tree.lock().unwrap(), id).map_err(Error::from_reason)?;
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            let source = self
+                .test_gpu_canvases
+                .present_commands(
+                    id,
+                    width,
+                    height,
+                    device_id,
+                    rgba,
+                    ops.as_ref(),
+                    operands.as_ref(),
+                )
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            self.canvas_display_lists.install_presentation(id, source);
+            return self.request_invalidate();
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (width, height, device_id, rgba, ops, operands);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
     #[napi]
     pub fn load_canvas_image(&self, observer_id: f64, source_json: String) -> Result<()> {
         let observer_id = to_element_id(observer_id)?;

@@ -3411,6 +3411,93 @@ impl GpuixRenderer {
         self.request_invalidate()
     }
 
+    /// Create one renderer-owned logical WebGPU device over the shared wgpu device.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn create_web_gpu_device(&self) -> Result<f64> {
+        self.web_gpu_canvases
+            .create_device()
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Destroy a logical WebGPU device and every native resource it owns.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn destroy_web_gpu_device(&self, device_id: f64) -> Result<()> {
+        self.web_gpu_canvases
+            .destroy_device(device_id)
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Compile one WGSL shader module for a logical WebGPU device.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn create_web_gpu_shader_module(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        code: String,
+    ) -> Result<f64> {
+        self.web_gpu_canvases
+            .create_shader_module(device_id, label, code)
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Create the initial no-buffer, triangle-list WebGPU render pipeline.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn create_web_gpu_render_pipeline(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        vertex_module_id: f64,
+        vertex_entry_point: Option<String>,
+        fragment_module_id: f64,
+        fragment_entry_point: Option<String>,
+    ) -> Result<f64> {
+        self.web_gpu_canvases
+            .create_render_pipeline(
+                device_id,
+                label,
+                vertex_module_id,
+                vertex_entry_point,
+                fragment_module_id,
+                fragment_entry_point,
+            )
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Render one native WebGPU pass command stream and present its canvas texture.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn present_web_gpu_commands(
+        &self,
+        id: f64,
+        width: u32,
+        height: u32,
+        device_id: f64,
+        rgba: u32,
+        ops: Uint32Array,
+        operands: Float64Array,
+    ) -> Result<()> {
+        let id = to_element_id(id)?;
+        validate_canvas_target(&self.tree.lock().unwrap(), id).map_err(Error::from_reason)?;
+        let source = self
+            .web_gpu_canvases
+            .present_commands(
+                id,
+                width,
+                height,
+                device_id,
+                rgba,
+                ops.as_ref(),
+                operands.as_ref(),
+            )
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+        self.canvas_display_lists.install_presentation(id, source);
+        self.request_invalidate()
+    }
+
     /// Start or join one renderer-local canvas image load. The observer keeps
     /// the decoded entry alive until JavaScript changes or releases the source.
     #[napi]

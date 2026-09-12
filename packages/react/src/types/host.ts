@@ -1370,6 +1370,28 @@ export interface NativeRenderer {
   ): void
   /** Present one native WebGPU clear into a live canvas. */
   presentWebGpuClear?(id: number, width: number, height: number, rgba: number): void
+  /** Create one logical WebGPU device in this renderer's native resource registry. */
+  createWebGpuDevice?(): number
+  destroyWebGpuDevice?(deviceId: number): void
+  createWebGpuShaderModule?(deviceId: number, label: string | undefined, code: string): number
+  createWebGpuRenderPipeline?(
+    deviceId: number,
+    label: string | undefined,
+    vertexModuleId: number,
+    vertexEntryPoint: string | undefined,
+    fragmentModuleId: number,
+    fragmentEntryPoint: string | undefined
+  ): number
+  /** Present an internal WebGPU render-pass command stream. */
+  presentWebGpuCommands?(
+    id: number,
+    width: number,
+    height: number,
+    deviceId: number,
+    rgba: number,
+    ops: Uint32Array,
+    operands: Float64Array
+  ): void
   /** Decode one canvas image source through this renderer's native image store. */
   loadCanvasImage?(observerId: number, sourceJson: string): void
   getCanvasImageLoadState?(observerId: number): CanvasImageLoadState | null

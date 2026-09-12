@@ -63,6 +63,16 @@ export declare class GpuixRenderer {
    * The producer signals GPUI with a Metal event and never reads pixels back.
    */
   presentWebGpuClear(id: number, width: number, height: number, rgba: number): void
+  /** Create one renderer-owned logical WebGPU device over the shared wgpu device. */
+  createWebGpuDevice(): number
+  /** Destroy a logical WebGPU device and every native resource it owns. */
+  destroyWebGpuDevice(deviceId: number): void
+  /** Compile one WGSL shader module for a logical WebGPU device. */
+  createWebGpuShaderModule(deviceId: number, label: string | undefined | null, code: string): number
+  /** Create the initial no-buffer, triangle-list WebGPU render pipeline. */
+  createWebGpuRenderPipeline(deviceId: number, label: string | undefined | null, vertexModuleId: number, vertexEntryPoint: string | undefined | null, fragmentModuleId: number, fragmentEntryPoint?: string | undefined | null): number
+  /** Render one native WebGPU pass command stream and present its canvas texture. */
+  presentWebGpuCommands(id: number, width: number, height: number, deviceId: number, rgba: number, ops: Uint32Array, operands: Float64Array): void
   /**
    * Start or join one renderer-local canvas image load. The observer keeps
    * the decoded entry alive until JavaScript changes or releases the source.
@@ -419,6 +429,16 @@ export declare class TestGpuixRenderer {
   advanceTestGpuCanvas(id: number, rgba: number): void
   /** Test-only lifetime counters for the retained GPU presentation seam. */
   getTestGpuCanvasState(): TestGpuCanvasState
+  /** Create one renderer-owned logical WebGPU device over the shared test producer. */
+  createWebGpuDevice(): number
+  /** Destroy a logical WebGPU device and every native resource it owns. */
+  destroyWebGpuDevice(deviceId: number): void
+  /** Compile one WGSL shader module for a logical WebGPU device. */
+  createWebGpuShaderModule(deviceId: number, label: string | undefined | null, code: string): number
+  /** Create the initial no-buffer, triangle-list WebGPU render pipeline. */
+  createWebGpuRenderPipeline(deviceId: number, label: string | undefined | null, vertexModuleId: number, vertexEntryPoint: string | undefined | null, fragmentModuleId: number, fragmentEntryPoint?: string | undefined | null): number
+  /** Render one native WebGPU pass command stream and present its canvas texture. */
+  presentWebGpuCommands(id: number, width: number, height: number, deviceId: number, rgba: number, ops: Uint32Array, operands: Float64Array): void
   loadCanvasImage(observerId: number, sourceJson: string): void
   getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
   releaseCanvasImage(observerId: number): void
