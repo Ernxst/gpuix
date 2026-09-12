@@ -12,6 +12,7 @@ import {
   flushRecordingContext2D,
 } from "../canvas/context-2d.js"
 import { createImageBitmap, Image } from "../canvas/image.js"
+import type { GPUAdapter } from "../canvas/webgpu.js"
 import {
   CANVAS_OPCODES,
   CANVAS_STREAM_MAGIC,
@@ -152,6 +153,68 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       expect(first).toBeDefined()
       expect(canvasRef.current?.getContext("2d")).toBe(first)
       expect(canvasRef.current?.getContext("webgl")).toBeNull()
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("clears successive native WebGPU canvas frames and locks the context type", async () => {
+    const testRoot = createTestRoot({ width: 120, height: 80 })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(<canvas ref={canvasRef} width={120} height={80} />)
+      const context = canvasRef.current!.getContext("webgpu")!
+      expect(context).not.toBeNull()
+      expect(canvasRef.current!.getContext("2d")).toBeNull()
+      await import("../globals.js")
+      const adapter = await (globalThis.navigator as Navigator & {
+        gpu: { requestAdapter(): Promise<GPUAdapter> }
+      }).gpu.requestAdapter()
+      const device = await adapter.requestDevice()
+      context.configure({ device, format: "bgra8unorm" })
+      const firstTexture = context.getCurrentTexture()
+      for (const [index, color] of [{ r: 1, a: 1 }, { g: 1, a: 1 }].entries()) {
+        const texture = index === 0 ? firstTexture : context.getCurrentTexture()
+        if (index === 1) expect(() => firstTexture.createView()).toThrow(/stale/)
+        const encoder = device.createCommandEncoder()
+        const pass = encoder.beginRenderPass({
+          colorAttachments: [{ view: texture.createView(), clearValue: color }],
+        })
+        pass.end()
+        device.queue.submit([encoder.finish()])
+      }
+      expect(() => context.getCurrentTexture().createView()).not.toThrow()
+      expect(testRoot.renderer.getTestGpuCanvasState().presentations).toBe(1)
+      const screenshot = path.join(SHOTS_DIR, "webgpu-public-clear.png")
+      testRoot.renderer.captureScreenshot(screenshot)
+      expect(readFileSync(screenshot).byteLength).toBeGreaterThan(0)
+      flushSync(() => testRoot.render(<div />))
+      expect(testRoot.renderer.getTestGpuCanvasState().installed).toBe(0)
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("rejects command encoders from a different logical WebGPU device", async () => {
+    const testRoot = createTestRoot({ width: 120, height: 80 })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(<canvas ref={canvasRef} width={120} height={80} />)
+      await import("../globals.js")
+      const gpu = (globalThis.navigator as Navigator & {
+        gpu: { requestAdapter(): Promise<GPUAdapter> }
+      }).gpu
+      const adapter = await gpu.requestAdapter()
+      const device = await adapter.requestDevice()
+      const otherDevice = await adapter.requestDevice()
+      const context = canvasRef.current!.getContext("webgpu")!
+      context.configure({ device, format: "bgra8unorm" })
+      const texture = context.getCurrentTexture()
+      const encoder = otherDevice.createCommandEncoder()
+      expect(() => encoder.beginRenderPass({
+        colorAttachments: [{ view: texture.createView(), clearValue: { r: 1, a: 1 } }],
+      })).toThrow(/different device/)
+      expect(testRoot.renderer.getTestGpuCanvasState().presentations).toBe(0)
     } finally {
       testRoot.unmount()
     }

@@ -91,6 +91,13 @@ tar = "0.4"
 flate2 = "1"
 # Production uses the embedded AppKit loop; tests use the native Metal renderer.
 gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, features = ["font-kit"] }
+# TestGpuixRenderer's macOS-only texture fixture creates a producer texture on
+# the same Metal adapter that GPUI composites. These are test-support plumbing,
+# not a browser WebGPU API surface.
+gpui_apple = { path = "../../zed/crates/gpui_apple", optional = true }
+metal = { version = "0.33", optional = true }
+pollster = { version = "0.4.0", optional = true }
+wgpu = { version = "29.0.4", optional = true }
 
 # Same crate GPUI uses. A .node cannot ship an exe manifest, so Windows DPI
 # awareness is set at runtime in renderer.rs instead of via windows-manifest.
@@ -106,7 +113,7 @@ gpui_windows = { path = "../../zed/crates/gpui_windows", default-features = fals
 # letting users write GPU-backed tests for their apps.
 default = ["test-support"]
 display-discovery-fault-injection = ["gpui_macos/display-discovery-fault-injection"]
-test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui_macos/test-support", "gpui_macos/font-kit", "gpui_windows/test-support"]
+test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui_macos/test-support", "gpui_macos/font-kit", "gpui_windows/test-support", "dep:gpui_apple", "dep:metal", "dep:pollster", "dep:wgpu"]
 
 [build-dependencies]
 napi-build = "2"

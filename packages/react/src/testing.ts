@@ -157,6 +157,9 @@ interface NativeTestRendererApi extends NativeRenderer {
     operands: Float64Array,
     strings: readonly string[]
   ): void
+  installTestGpuCanvas(id: number, width: number, height: number, rgba: number): void
+  advanceTestGpuCanvas(id: number, rgba: number): void
+  getTestGpuCanvasState(): { installed: number; presentations: number; released: number }
   loadCanvasImage(observerId: number, sourceJson: string): void
   getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
   releaseCanvasImage(observerId: number): void
@@ -756,6 +759,7 @@ export class TestRenderer implements NativeRenderer {
   private clipboardText: string | null = null
   private pickerResults: Array<string[] | string | null> = []
   private pickerRequestLog: PickerRequest[] = []
+  private webGpuCanvasIds = new Set<number>()
 
   get pickerRequests(): ReadonlyArray<PickerRequest> {
     return this.pickerRequestLog
@@ -815,6 +819,30 @@ export class TestRenderer implements NativeRenderer {
     strings: readonly string[]
   ): void {
     this.native.applyCanvasCommands(id, ops, operands, strings)
+  }
+
+  /** Internal macOS visual-test seam; it is not a browser WebGPU API. */
+  installTestGpuCanvas(id: number, width: number, height: number, rgba: number): void {
+    this.native.installTestGpuCanvas(id, width, height, rgba)
+  }
+
+  /** Render one fixture texture update, normally from requestAnimationFrame. */
+  advanceTestGpuCanvas(id: number, rgba: number): void {
+    this.native.advanceTestGpuCanvas(id, rgba)
+  }
+
+  /** Browser-shaped WebGPU proof transport used by live React canvas contexts. */
+  presentWebGpuClear(id: number, width: number, height: number, rgba: number): void {
+    if (this.webGpuCanvasIds.has(id)) {
+      this.native.advanceTestGpuCanvas(id, rgba)
+    } else {
+      this.native.installTestGpuCanvas(id, width, height, rgba)
+      this.webGpuCanvasIds.add(id)
+    }
+  }
+
+  getTestGpuCanvasState(): { installed: number; presentations: number; released: number } {
+    return this.native.getTestGpuCanvasState()
   }
 
   loadCanvasImage(observerId: number, sourceJson: string): void {

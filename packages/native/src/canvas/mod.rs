@@ -22,6 +22,8 @@ pub(crate) struct CanvasPreparationDiagnostic {
 #[derive(Clone, Default)]
 pub struct SharedDisplayLists {
     lists: Arc<Mutex<DisplayLists>>,
+    #[cfg(target_os = "macos")]
+    presentations: Arc<Mutex<FxHashMap<u64, gpui::SurfaceSource>>>,
     last_revisions: Arc<Mutex<FxHashMap<u64, u64>>>,
     preparation_diagnostics: Arc<Mutex<Vec<CanvasPreparationDiagnostic>>>,
 }
@@ -52,6 +54,24 @@ impl SharedDisplayLists {
 
     pub(crate) fn take_preparation_diagnostics(&self) -> Vec<CanvasPreparationDiagnostic> {
         std::mem::take(&mut *self.preparation_diagnostics.lock().unwrap())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn presentation(&self, element_id: u64) -> Option<gpui::SurfaceSource> {
+        self.presentations.lock().unwrap().get(&element_id).cloned()
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn presentation_count(&self) -> u32 {
+        self.presentations.lock().unwrap().len() as u32
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn install_presentation(&self, element_id: u64, source: gpui::SurfaceSource) {
+        self.presentations
+            .lock()
+            .unwrap()
+            .insert(element_id, source);
     }
 }
 
@@ -1817,6 +1837,13 @@ pub fn remove_display_lists(display_lists: &SharedDisplayLists, element_ids: &[u
         lists.remove(id);
     }
     drop(lists);
+    #[cfg(target_os = "macos")]
+    {
+        let mut presentations = display_lists.presentations.lock().unwrap();
+        for id in element_ids {
+            presentations.remove(id);
+        }
+    }
     if !element_ids.is_empty() {
         let mut revisions = display_lists.last_revisions.lock().unwrap();
         for id in element_ids {

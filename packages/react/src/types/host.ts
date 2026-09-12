@@ -18,6 +18,7 @@ import type {
   GpuixWheelEvent,
 } from "../reconciler/synthetic-event.js"
 import type { AccessibilityRole } from "../index.js"
+import type { GPUCanvasContext } from "../canvas/webgpu.js"
 
 /**
  * CSS-compatible lengths accepted by the native layout parser. The grammar is
@@ -1345,6 +1346,8 @@ export interface NativeRenderer {
     operands: Float64Array,
     strings: readonly string[]
   ): void
+  /** Present one native WebGPU clear into a live canvas. */
+  presentWebGpuClear?(id: number, width: number, height: number, rgba: number): void
   /** Decode one canvas image source through this renderer's native image store. */
   loadCanvasImage?(observerId: number, sourceJson: string): void
   getCanvasImageLoadState?(observerId: number): CanvasImageLoadState | null
@@ -1851,6 +1854,7 @@ export interface CanvasPublicInstance extends PublicInstance {
     contextId: "2d",
     options?: CanvasRenderingContext2DSettings
   ): CanvasRenderingContext2D
+  getContext(contextId: "webgpu", options?: unknown): GPUCanvasContext | null
   getContext(contextId: string, options?: unknown): CanvasRenderingContext2D | null
   /**
    * Never produces a data URL, and is typed for what it really returns.

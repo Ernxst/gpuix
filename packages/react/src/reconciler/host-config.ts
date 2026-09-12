@@ -41,7 +41,13 @@ import {
   diagnoseUnsupportedCanvasElementMember,
   disposeRecordingContext2D,
   getOrCreateRecordingContext2D,
+  recordingContext2D,
 } from "../canvas/context-2d.js"
+import {
+  disposeWebGpuContext,
+  getOrCreateWebGpuContext,
+  webGpuContext,
+} from "../canvas/webgpu.js"
 import { reportStyleDiagnostics } from "./renderer-diagnostics.js"
 import {
   DOCUMENT_POSITION_CONTAINED_BY,
@@ -1475,9 +1481,19 @@ export const hostConfig = {
         applyCanvasCommands: (ops: Uint32Array, operands: Float64Array, strings: readonly string[]) =>
           instance.__applyCanvasCommands(ops, operands, strings),
       }
-      instance.getContext = ((contextId: string): CanvasRenderingContext2D | null => {
-        if (contextId !== "2d") return null
-        return getOrCreateRecordingContext2D(instance, diagnosticTarget)
+      instance.getContext = ((contextId: string): CanvasRenderingContext2D | import("../canvas/webgpu.js").GPUCanvasContext | null => {
+        if (contextId === "2d") {
+          if (webGpuContext(instance)) return null
+          return getOrCreateRecordingContext2D(instance, diagnosticTarget)
+        }
+        if (contextId === "webgpu") {
+          if (recordingContext2D(instance)) return null
+          return getOrCreateWebGpuContext(instance, rootContainerInstance.native, id, () => ({
+            width: Number((instance.props as Props & { width?: number }).width ?? 300),
+            height: Number((instance.props as Props & { height?: number }).height ?? 150),
+          }))
+        }
+        return null
       }) as NonNullable<Instance["getContext"]>
       // Reports why there is no data URL and returns nothing. Under
       // `strictStyles` the diagnostic throws instead of returning.
@@ -1557,6 +1573,7 @@ export const hostConfig = {
 
   removeChildFromContainer(parent: Container, child: Instance): void {
     disposeRecordingContext2D(child)
+    disposeWebGpuContext(child)
     // A fragment root can have several top-level children, so only the one
     // `announce()` is actually attached under invalidates the id — an
     // unrelated sibling leaving must not orphan `announce()`'s regions.
@@ -1778,6 +1795,7 @@ export const hostConfig = {
 
   detachDeletedInstance(instance: Instance): void {
     disposeRecordingContext2D(instance)
+    disposeWebGpuContext(instance)
     const container = containerFor(instance)
     const destroyed = container.renderer.destroyElement(instance.id)
     for (const id of destroyed) {
