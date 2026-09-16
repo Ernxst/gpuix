@@ -712,7 +712,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     const requestFrame = host.requestFrame.bind(host)
     attachAnimationFrameSource({
       owner: host,
-      request: requestFrame,
+      request: (callback) => requestFrame(callback, performance.now()),
     })
   } else if (
     typeof browserFrameSource !== "function" ||

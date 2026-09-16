@@ -1393,6 +1393,7 @@ enum UiCommand {
     RequestFrame {
         callback: AnimationFrameCallback,
         timestamp_origin: FrameTimestampOrigin,
+        requested_timestamp_origin: FrameTimestampOriginPair,
     },
     SetMenus {
         menus: Vec<MenuSpec>,
@@ -1630,13 +1631,14 @@ async fn run_ui_commands(
             UiCommand::RequestFrame {
                 callback,
                 timestamp_origin,
-            } => window.update(cx, move |_view, window, cx| {
+                requested_timestamp_origin,
+            } => window.update(cx, move |_view, window, _cx| {
                 let origin =
-                    animation_frame_origin(&timestamp_origin, cx.background_executor().now());
-                window.on_next_frame(move |_window, cx| {
+                    animation_frame_origin(&timestamp_origin, requested_timestamp_origin);
+                window.on_next_frame(move |_window, _cx| {
                     dispatch_animation_frame_callback(
                         callback,
-                        animation_frame_timestamp_ms(origin, cx.background_executor().now()),
+                        animation_frame_timestamp_ms(origin, web_time::Instant::now()),
                     );
                 });
             }),
@@ -2473,7 +2475,24 @@ pub(crate) type AnimationFrameCallback =
     ThreadsafeFunction<f64, Unknown<'static>, f64, Status, false, false, 1>;
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-pub(crate) type FrameTimestampOrigin = Arc<Mutex<Option<web_time::Instant>>>;
+#[derive(Clone, Copy)]
+pub(crate) struct FrameTimestampOriginPair {
+    native: web_time::Instant,
+    performance_ms: f64,
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+impl FrameTimestampOriginPair {
+    pub(crate) fn new(native: web_time::Instant, performance_ms: f64) -> Self {
+        Self {
+            native,
+            performance_ms,
+        }
+    }
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) type FrameTimestampOrigin = Arc<Mutex<Option<FrameTimestampOriginPair>>>;
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 type PickerDeferred =
@@ -2579,23 +2598,56 @@ fn settle_new_path(guard: PickerPathGuard, result: anyhow::Result<Option<PathBuf
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub(crate) fn animation_frame_origin(
     timestamp_origin: &FrameTimestampOrigin,
-    now: web_time::Instant,
-) -> web_time::Instant {
+    requested_origin: FrameTimestampOriginPair,
+) -> FrameTimestampOriginPair {
     let mut timestamp_origin = timestamp_origin
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *timestamp_origin.get_or_insert(now)
+    *timestamp_origin.get_or_insert(requested_origin)
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub(crate) fn animation_frame_timestamp_ms(
-    timestamp_origin: web_time::Instant,
+    timestamp_origin: FrameTimestampOriginPair,
     frame_time: web_time::Instant,
 ) -> f64 {
-    frame_time
-        .saturating_duration_since(timestamp_origin)
-        .as_secs_f64()
-        * 1_000.0
+    timestamp_origin.performance_ms
+        + frame_time
+            .saturating_duration_since(timestamp_origin.native)
+            .as_secs_f64()
+            * 1_000.0
+}
+
+#[cfg(all(test, not(all(target_arch = "wasm32", target_os = "unknown"))))]
+mod animation_frame_timestamp_tests {
+    use super::*;
+
+    #[test]
+    fn retains_the_performance_origin_for_the_renderer_lifetime() {
+        let timestamp_origin = Arc::new(Mutex::new(None));
+        let native_origin = web_time::Instant::now();
+        let first = animation_frame_origin(
+            &timestamp_origin,
+            FrameTimestampOriginPair::new(native_origin, 1_000.0),
+        );
+        let reattached = animation_frame_origin(
+            &timestamp_origin,
+            FrameTimestampOriginPair::new(
+                native_origin + std::time::Duration::from_millis(10),
+                9_000.0,
+            ),
+        );
+
+        assert_eq!(first.performance_ms, 1_000.0);
+        assert_eq!(reattached.performance_ms, 1_000.0);
+        assert_eq!(
+            animation_frame_timestamp_ms(
+                reattached,
+                native_origin + std::time::Duration::from_millis(16),
+            ),
+            1_016.0
+        );
+    }
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -3999,17 +4051,20 @@ impl GpuixRenderer {
     pub fn request_frame(
         &self,
         #[napi(ts_arg_type = "(timestamp: number) => void")] callback: AnimationFrameCallback,
+        performance_timestamp_ms: f64,
     ) -> Result<()> {
+        let requested_timestamp_origin =
+            FrameTimestampOriginPair::new(web_time::Instant::now(), performance_timestamp_ms);
         #[cfg(target_os = "macos")]
         {
             let timestamp_origin = self.animation_frame_timestamp_origin.clone();
-            return update_window_without_view(move |window, cx| {
+            return update_window_without_view(move |window, _cx| {
                 let origin =
-                    animation_frame_origin(&timestamp_origin, cx.background_executor().now());
-                window.on_next_frame(move |_window, cx| {
+                    animation_frame_origin(&timestamp_origin, requested_timestamp_origin);
+                window.on_next_frame(move |_window, _cx| {
                     dispatch_animation_frame_callback(
                         callback,
-                        animation_frame_timestamp_ms(origin, cx.background_executor().now()),
+                        animation_frame_timestamp_ms(origin, web_time::Instant::now()),
                     );
                 });
             });
@@ -4019,6 +4074,7 @@ impl GpuixRenderer {
         return self.send_ui_command(UiCommand::RequestFrame {
             callback,
             timestamp_origin: self.animation_frame_timestamp_origin.clone(),
+            requested_timestamp_origin,
         });
 
         #[cfg(not(any(
@@ -4028,7 +4084,7 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         {
-            let _ = callback;
+            let _ = (callback, requested_timestamp_origin);
             Err(Error::from_reason(
                 "The production GPUIX renderer does not support animation frames",
             ))

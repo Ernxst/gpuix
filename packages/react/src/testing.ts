@@ -147,7 +147,7 @@ export interface AccessKitTreeSnapshot {
   nodes: Record<string, AccessKitNodeSnapshot>
 }
 
-interface NativeTestRendererApi extends NativeRenderer {
+interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
   dispose(): void
   capabilities(): RendererCapabilities
   commitMutations(): void
@@ -167,7 +167,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   flush(): void
   drawPendingFrame(): void
   advanceAsyncClock(deltaMs: number): void
-  requestFrame(): void
+  requestFrame(performanceTimestampMs: number): void
   setReducedMotion(enabled: boolean): void
   getStyleTransitionCount(): number
   getActiveAnimationCount(): number
@@ -1003,7 +1003,7 @@ export class TestRenderer implements NativeRenderer {
    *  The JS callback is only tracked once the native registration succeeds, so
    *  a native failure leaves no orphan callback behind. */
   requestFrame(callback: (timestamp: number) => void): void {
-    this.native.requestFrame()
+    this.native.requestFrame(performance.now())
     this.animationFrameRequestCount += 1
     this.animationFrameCallbacks.push(callback)
   }
