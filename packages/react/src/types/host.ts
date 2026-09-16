@@ -675,6 +675,10 @@ export interface StyleDesc {
    *  positioned, but lets the wheel reach the ancestor scroller, like HTML. */
   pointerEvents?: "auto" | "none"
 
+  /** Browser gesture policy accepted as a native no-op. GPUI has no built-in
+   *  touch gestures for this property to withhold. */
+  touchAction?: CSSProperties["touchAction"]
+
   /** "none" opts this element and its subtree out of text selection.
    *  Inherited like the CSS property, so a toolbar can disable it once. */
   userSelect?: "text" | "none" | "auto"

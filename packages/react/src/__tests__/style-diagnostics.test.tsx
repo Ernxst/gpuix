@@ -22,7 +22,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     testRoot.render(
       <div
         data-testid="map"
-        style={{ touchAction: "none", hover: { touchAction: "auto" } } as StyleDesc}
+        style={{ touchAction: "none", hover: { touchAction: "auto" } }}
       />,
     )
 
