@@ -2599,6 +2599,7 @@ equivalents:
 | `ariaLabelledBy`, `ariaDescribedBy` | Space-separated author `id`s whose text supplies the name or description; wins over `ariaLabel` / `ariaDescription` |
 | `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
 | `ariaExpanded`, `ariaSelected` | Boolean semantic states |
+| `ariaCurrent` | Global current-item state: `page`, `step`, `location`, `date`, `time`, `true`, or `false` |
 | `ariaLive` | `off`, `polite`, or `assertive` live-region politeness; announces text changes without moving focus |
 | `ariaAtomic` | Present the whole live region rather than only the part that changed |
 | `ariaValueText` | Human-readable value text |
@@ -2799,6 +2800,9 @@ the name from the flattened, non-`ariaHidden` text content. This fallback is
 limited to `<text>` hosts rather than every semantic container.
 
 Role/state combinations are validated rather than silently approximated:
+
+`ariaCurrent` is global and applies to every role. It is distinct from
+`ariaSelected`, which identifies a selected option within a widget.
 
 | Role | Role-specific properties and actions |
 |---|---|

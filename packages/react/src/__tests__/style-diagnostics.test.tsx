@@ -414,7 +414,6 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         "ariaColCount",
         "ariaColIndex",
         "ariaColSpan",
-        "ariaCurrent",
         "ariaDisabled",
         "ariaExpanded",
         "ariaLevel",
@@ -447,7 +446,11 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       const node = Object.values(testRoot.renderer.getAccessibilityTree().nodes).find(
         (candidate) => candidate.aria.label === "Unsupported state set"
       )
-      expect(node?.aria).toEqual({ role: "Image", label: "Unsupported state set" })
+      expect(node?.aria).toEqual({
+        role: "Image",
+        label: "Unsupported state set",
+        current: "Page",
+      })
     } finally {
       testRoot.unmount()
     }

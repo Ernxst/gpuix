@@ -705,7 +705,7 @@ describeNative("automation", () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
-  it("publishes every ariaCurrent token as AccessKit current-item state", () => {
+  it("publishes ariaCurrent as global AccessKit current-item state", () => {
     const values = ["page", "step", "location", "date", "time", "true", "false"] as const
     const { render, renderer } = createTestRoot({ strictStyles: true })
 
@@ -727,6 +727,10 @@ describeNative("automation", () => {
             aria-current={current}
           />,
         ])}
+        <button ariaLabel="Rotor Rise" aria-current="location" />
+        <div role="listitem" ariaLabel="Current result" ariaCurrent="true" />
+        <div role="row" ariaLabel="Current row" ariaCurrent="step" />
+        <div ariaLabel="Current generic" ariaCurrent="date" />
       </div>
     )
     renderer.flush()
@@ -739,6 +743,13 @@ describeNative("automation", () => {
       expect(byLabel(`Camel ${current}`)).toMatchObject({ role: "Link", current: expected })
       expect(byLabel(`Hyphen ${current}`)).toMatchObject({ role: "Link", current: expected })
     }
+    expect(byLabel("Rotor Rise")).toMatchObject({ role: "Button", current: "Location" })
+    expect(byLabel("Current result")).toMatchObject({ role: "ListItem", current: "True" })
+    expect(byLabel("Current row")).toMatchObject({ role: "Row", current: "Step" })
+    expect(byLabel("Current generic")).toMatchObject({
+      role: "GenericContainer",
+      current: "Date",
+    })
   })
 
   it("warns once per instance for unsupported hyphenated aria props under strict mode", () => {

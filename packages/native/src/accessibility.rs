@@ -255,12 +255,6 @@ impl AccessibilityRole {
                     | Role::TreeItem
             ),
             "ariaExpanded" => matches!(self.role, Role::Button | Role::Link),
-            "ariaCurrent" => {
-                // GPUIX currently exposes current-item state only for links.
-                // Options use ariaSelected; controls expose their checked,
-                // expanded, or value state instead.
-                matches!(self.role, Role::Link)
-            }
             "ariaSelected" => matches!(self.role, Role::ListBoxOption),
             "ariaValueText" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
                 matches!(
@@ -1971,14 +1965,6 @@ mod tests {
         let link_problem = &element_problems(&detached_tree(), &link)[0];
         assert_eq!(link_problem.problem.property, "ariaSelected");
 
-        let mut button = RetainedElement::new(10, "div".to_string(), 1);
-        button.custom_props.insert("role".into(), "button".into());
-        button
-            .custom_props
-            .insert("ariaCurrent".into(), "page".into());
-        let button_problem = &element_problems(&detached_tree(), &button)[0];
-        assert_eq!(button_problem.problem.property, "ariaCurrent");
-
         let mut malformed_current = RetainedElement::new(11, "div".to_string(), 1);
         malformed_current
             .custom_props
@@ -2152,7 +2138,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_every_aria_current_token_for_links() {
+    fn parses_every_aria_current_token_as_a_global_state() {
         for (token, expected) in [
             ("false", gpui::accesskit::AriaCurrent::False),
             ("true", gpui::accesskit::AriaCurrent::True),
@@ -2162,18 +2148,22 @@ mod tests {
             ("date", gpui::accesskit::AriaCurrent::Date),
             ("time", gpui::accesskit::AriaCurrent::Time),
         ] {
-            let mut link = RetainedElement::new(12, "div".to_string(), 1);
-            link.custom_props.insert("role".into(), "link".into());
-            link.custom_props.insert("ariaCurrent".into(), token.into());
+            for role in ["link", "button", "listitem", "row", "generic"] {
+                let mut element = RetainedElement::new(12, "div".to_string(), 1);
+                element.custom_props.insert("role".into(), role.into());
+                element
+                    .custom_props
+                    .insert("ariaCurrent".into(), token.into());
 
-            assert_eq!(
-                AccessibilityProps::from_element(&detached_tree(), &link).current,
-                Some(expected)
-            );
-            assert!(
-                element_problems(&detached_tree(), &link).is_empty(),
-                "{token}"
-            );
+                assert_eq!(
+                    AccessibilityProps::from_element(&detached_tree(), &element).current,
+                    Some(expected)
+                );
+                assert!(
+                    element_problems(&detached_tree(), &element).is_empty(),
+                    "{role} {token}"
+                );
+            }
         }
     }
 
