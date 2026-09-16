@@ -531,6 +531,11 @@ export declare class TestGpuixRenderer {
    * scroll ancestors.
    */
   focusElement(id: number, preventScroll?: boolean | undefined | null): void
+  /**
+   * Queue focus without scheduling a draw, matching the browser startup
+   * handoff before its GPUI window exists.
+   */
+  queueFocusElement(id: number, preventScroll?: boolean | undefined | null): void
   /** The focused host element id, analogous to `document.activeElement`, or null. */
   getActiveElement(): number | null
   /** Read the live interaction state for one retained element. */

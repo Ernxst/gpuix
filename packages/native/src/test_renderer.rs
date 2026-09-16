@@ -1610,6 +1610,19 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Queue focus without scheduling a draw, matching the browser startup
+    /// handoff before its GPUI window exists.
+    #[napi]
+    pub fn queue_focus_element(&self, id: f64, prevent_scroll: Option<bool>) -> Result<()> {
+        let id = to_element_id(id)?;
+        let reveal = !prevent_scroll.unwrap_or(false);
+
+        with_test_state(self.state_id, |cx, _window, view| {
+            view.update(cx, |view, _cx| view.queue_focus_element(id, reveal));
+            Ok(())
+        })
+    }
+
     /// The focused host element id, analogous to `document.activeElement`, or null.
     #[napi]
     pub fn get_active_element(&self) -> Result<Option<f64>> {

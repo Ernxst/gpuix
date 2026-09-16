@@ -180,6 +180,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   hasMainMenu(): boolean
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number, preventScroll?: boolean): void
+  queueFocusElement(elementId: number, preventScroll?: boolean): void
   getActiveElement(): number | null
   blur(): void
   focusNext(): void
@@ -1646,6 +1647,12 @@ export class TestRenderer implements NativeRenderer {
    *  React work is not committed before focus moves. */
   focusElementWithoutDrawing(elementId: number, preventScroll?: boolean): void {
     this.native.focusElement(elementId, preventScroll)
+  }
+
+  /** Queue focus for the next frame as browser startup does before its GPUI
+   *  window exists. Intended for startup-ordering regressions. */
+  queueFocusElement(elementId: number, preventScroll?: boolean): void {
+    this.native.queueFocusElement(elementId, preventScroll)
   }
 
   getActiveElement(): number | null {

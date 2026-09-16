@@ -8074,6 +8074,10 @@ impl GpuixView {
         cx.notify();
     }
 
+    pub(crate) fn queue_focus_element(&mut self, id: u64, reveal: bool) {
+        self.pending_focus_element = Some((id, reveal));
+    }
+
     /// Whether `element_id` or any ancestor (including itself) currently
     /// resolves `display` to `none` from its interaction state.
     ///
@@ -9971,9 +9975,14 @@ impl gpui::Render for GpuixView {
         // Sync focus handles before building elements.
         self.sync_focus_handles(&tree, &callback, window, cx);
 
+        // Replaying queued focus can inspect the retained tree and reveal the
+        // target, both of which take this mutex. Release it after the handles
+        // exist, then reacquire it for the rest of the render.
+        drop(tree);
         if let Some((id, reveal)) = self.pending_focus_element.take() {
             self.focus_element(id, reveal, window, cx);
         }
+        let tree = tree_arc.lock().unwrap();
 
         if self.focus_lost_subscription.is_none() {
             self.focus_lost_subscription = Some(cx.on_focus_lost(window, |view, window, cx| {
