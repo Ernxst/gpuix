@@ -827,6 +827,7 @@ pub struct StyleDesc {
     pub min_height: Option<DimensionValue>,
     pub max_width: Option<DimensionValue>,
     pub max_height: Option<DimensionValue>,
+    pub aspect_ratio: Option<f64>,
 
     pub padding: Option<f64>,
     pub padding_top: Option<f64>,
@@ -2649,6 +2650,32 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         dimension_field!(key, value, "minHeight", min_height);
         dimension_field!(key, value, "maxWidth", max_width);
         dimension_field!(key, value, "maxHeight", max_height);
+        if key == "aspectRatio" {
+            let property = property!("aspectRatio");
+            let ratio = match value {
+                serde_json::Value::Number(value) => value.as_f64(),
+                serde_json::Value::String(value) => {
+                    value.split_once('/').and_then(|(width, height)| {
+                        Some(
+                            width.trim().parse::<f64>().ok()?
+                                / height.trim().parse::<f64>().ok()?,
+                        )
+                    })
+                }
+                _ => None,
+            };
+            if let Some(ratio) = ratio.filter(|ratio| ratio.is_finite() && *ratio > 0.0) {
+                parsed.style.aspect_ratio = Some(ratio);
+            } else {
+                reject(
+                    &mut parsed.problems,
+                    property,
+                    value,
+                    "expected a positive number or a CSS ratio such as \"16 / 9\"",
+                );
+            }
+            continue;
+        }
 
         number_field!(key, value, "padding", padding);
         number_field!(key, value, "paddingTop", padding_top);
@@ -3574,6 +3601,50 @@ mod tests {
         assert_eq!(parsed.problems.len(), 1);
         assert_eq!(parsed.problems[0].property, "unsupportedProperty");
         assert_eq!(parsed.problems[0].reason, "unsupported style property");
+    }
+
+    #[test]
+    fn parses_numeric_and_css_aspect_ratios_in_base_and_state_styles() {
+        let parsed = parse_style_value(&json!({
+            "aspectRatio": 1,
+            "hover": { "aspectRatio": "16 / 9" }
+        }));
+
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(parsed.style.aspect_ratio, Some(1.0));
+        assert_eq!(
+            parsed
+                .style
+                .hover
+                .as_deref()
+                .and_then(|style| style.aspect_ratio),
+            Some(16.0 / 9.0)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_aspect_ratios_without_dropping_siblings() {
+        for value in [
+            json!(0),
+            json!(-1),
+            json!("16 / 0"),
+            json!("wide"),
+            json!(true),
+        ] {
+            let parsed = parse_style_value(&json!({
+                "aspectRatio": value,
+                "width": 120
+            }));
+
+            assert_eq!(parsed.style.aspect_ratio, None, "{value}");
+            assert_eq!(
+                parsed.style.width,
+                Some(DimensionValue::Pixels(120.0)),
+                "{value}"
+            );
+            assert_eq!(parsed.problems.len(), 1, "{value}: {:?}", parsed.problems);
+            assert_eq!(parsed.problems[0].property, "aspectRatio");
+        }
     }
 
     #[test]

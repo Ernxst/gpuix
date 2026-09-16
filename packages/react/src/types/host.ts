@@ -557,6 +557,7 @@ export interface StyleDesc {
   minHeight?: DimensionValue
   maxWidth?: DimensionValue
   maxHeight?: DimensionValue
+  aspectRatio?: number | string
 
   padding?: number
   paddingTop?: number

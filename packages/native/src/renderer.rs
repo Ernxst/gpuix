@@ -14769,6 +14769,9 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(ref h) = style.height {
         el = apply_height(el, h);
     }
+    if let Some(ratio) = style.aspect_ratio {
+        el = el.aspect_ratio(ratio as f32);
+    }
     if let Some(ref min_w) = style.min_width {
         el.style().min_size.width = Some(dimension_to_length(min_w));
     }

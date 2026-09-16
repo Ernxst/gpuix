@@ -684,6 +684,26 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     comparePixels("flex-basis", boxes(false), boxes(true))
   })
 
+  it("derives a flex item's width from its height and aspect ratio", () => {
+    const root = createTestRoot({ width: 700, height: 400 })
+    const layout = (aspectRatio: number | string) => (
+      <div style={{ display: "flex", width: "100%", height: "100%" }}>
+        <div data-testid="map" style={{ height: "100%", aspectRatio }} />
+        <div data-testid="sidebar" style={{ flexGrow: 1 }} />
+      </div>
+    )
+
+    root.render(layout(1))
+
+    expect(boundsFor(root.renderer, "map")).toMatchObject({ width: 400, height: 400 })
+    expect(boundsFor(root.renderer, "sidebar")).toMatchObject({ width: 300, height: 400 })
+
+    root.render(layout("3 / 2"))
+
+    expect(boundsFor(root.renderer, "map")).toMatchObject({ width: 600, height: 400 })
+    expect(boundsFor(root.renderer, "sidebar")).toMatchObject({ width: 100, height: 400 })
+  })
+
   it("applies alignContent to wrapped rows", () => {
     const boxes = [0, 1, 2, 3].map((i) => (
       <div key={i} style={{ width: 120, height: 60, backgroundColor: "#7c86ff" }} />
