@@ -4513,7 +4513,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn blur(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(move |_view, window, _cx| window.blur());
+        return update_window(move |_view, window, cx| window.blur(cx));
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::Blur);
@@ -6351,7 +6351,7 @@ impl WebGpuixRenderer {
     }
 
     pub fn blur(&self) -> Result<(), wasm_bindgen::JsValue> {
-        update_web_window(|window, _cx| window.blur())
+        update_web_window(|window, cx| window.blur(cx))
     }
 
     // The web build's own consumer already has the real `navigator.clipboard`
@@ -9399,7 +9399,7 @@ impl GpuixView {
             .find_map(|(&id, handle)| handle.is_focused(window).then_some(id))
         {
             if self.display_none_in_ancestry(tree, focused_id, window) {
-                window.blur();
+                window.blur(cx);
             }
         }
 
