@@ -47,6 +47,12 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
           ariaSelected
         />
         <div data-testid="unsupported-selected" role="button" ariaLabel="Save" ariaSelected />
+        <div
+          data-testid="unsupported-pressed"
+          role={validRoleAdded ? "button" : "link"}
+          ariaLabel="Pin"
+          ariaPressed
+        />
         <div data-testid="mixed-switch" role="switch" ariaLabel="Mode" ariaChecked="mixed" />
         <div
           data-testid="double-disabled"
@@ -99,6 +105,12 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
           ariaLabel="Malformed checked"
           ariaChecked={"yes" as unknown as boolean}
         />
+        <div
+          data-testid="malformed-pressed"
+          role="button"
+          ariaLabel="Malformed pressed"
+          ariaPressed={"yes" as unknown as boolean}
+        />
       </div>
     )
 
@@ -106,7 +118,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       testRoot.render(cases(false, true))
 
       const diagnostics = testRoot.renderer.drainStyleDiagnostics()
-      expect(diagnostics).toHaveLength(12)
+      expect(diagnostics).toHaveLength(14)
       const byTestId = (testId: string) => {
         const diagnostic = diagnostics.find((candidate) => candidate.dataTestId === testId)
         expect(diagnostic, testId).toBeDefined()
@@ -160,6 +172,14 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         "true",
         "ignored",
         "role=Button does not support ariaSelected, so it is omitted from the accessibility tree"
+      )
+      expectDiagnostic(
+        "unsupported-pressed",
+        "div",
+        "ariaPressed",
+        "true",
+        "ignored",
+        "role=Link does not support ariaPressed, so it is omitted from the accessibility tree"
       )
       expectDiagnostic(
         "mixed-switch",
@@ -239,6 +259,14 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         "rejected",
         'expected a boolean or "mixed"'
       )
+      expectDiagnostic(
+        "malformed-pressed",
+        "div",
+        "ariaPressed",
+        '"yes"',
+        "rejected",
+        'expected a boolean or "mixed"'
+      )
 
       const nodes = Object.values(testRoot.renderer.getAccessibilityTree().nodes)
       const ariaByLabel = (label: string) =>
@@ -251,6 +279,8 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       expect(nodes.some((node) => node.aria.role === "ListBoxOption")).toBe(false)
       expect(ariaByLabel("Save")).toMatchObject({ role: "Button" })
       expect(ariaByLabel("Save")?.selected).toBeUndefined()
+      expect(ariaByLabel("Pin")).toMatchObject({ role: "Link" })
+      expect(ariaByLabel("Pin")?.toggled).toBeUndefined()
       expect(ariaByLabel("Mode")).toMatchObject({ role: "Switch", toggled: "False" })
       expect(ariaByLabel("Double disabled")).toMatchObject({ role: "Button", disabled: true })
       expect(ariaByLabel("Hidden focus")).toBeUndefined()
@@ -262,6 +292,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       expect(ariaByLabel("Malformed level")?.level).toBeUndefined()
       expect(ariaByLabel("Malformed value")?.numeric_value).toBeUndefined()
       expect(ariaByLabel("Malformed checked")?.toggled).toBeUndefined()
+      expect(ariaByLabel("Malformed pressed")?.toggled).toBeUndefined()
 
       testRoot.render(cases(true, false))
       expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])

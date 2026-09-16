@@ -752,6 +752,84 @@ describeNative("automation", () => {
     })
   })
 
+  it("publishes ariaPressed as button toggle state for both prop spellings", () => {
+    const { render, renderer } = createTestRoot({ strictStyles: true })
+    const values = [true, false, "mixed"] as const
+
+    render(
+      <div>
+        {values.flatMap((pressed) => [
+          <button
+            key={`implicit-camel-${String(pressed)}`}
+            ariaLabel={`Implicit camel ${String(pressed)}`}
+            ariaPressed={pressed}
+          />,
+          <button
+            key={`implicit-hyphen-${String(pressed)}`}
+            aria-label={`Implicit hyphen ${String(pressed)}`}
+            aria-pressed={pressed}
+          />,
+          <div
+            key={`explicit-camel-${String(pressed)}`}
+            role="button"
+            ariaLabel={`Explicit camel ${String(pressed)}`}
+            ariaPressed={pressed}
+          />,
+          <div
+            key={`explicit-hyphen-${String(pressed)}`}
+            role="button"
+            aria-label={`Explicit hyphen ${String(pressed)}`}
+            aria-pressed={pressed}
+          />,
+        ])}
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    const byLabel = (label: string) => nodes.find((node) => node.aria.label === label)?.aria
+    for (const pressed of values) {
+      const expected =
+        pressed === "mixed" ? "Mixed" : pressed ? "True" : "False"
+      for (const host of ["Implicit", "Explicit"]) {
+        for (const spelling of ["camel", "hyphen"]) {
+          expect(byLabel(`${host} ${spelling} ${String(pressed)}`)).toMatchObject({
+            role: "Button",
+            toggled: expected,
+          })
+        }
+      }
+    }
+
+    render(<button ariaLabel="Dynamic pressed" ariaPressed />)
+    renderer.flush()
+    renderer.drawPendingFrame()
+    expect(
+      Object.values(renderer.getAccessibilityTree().nodes).find(
+        (node) => node.aria.label === "Dynamic pressed"
+      )?.aria.toggled
+    ).toBe("True")
+
+    render(<button ariaLabel="Dynamic pressed" ariaPressed={false} />)
+    renderer.flush()
+    renderer.drawPendingFrame()
+    expect(
+      Object.values(renderer.getAccessibilityTree().nodes).find(
+        (node) => node.aria.label === "Dynamic pressed"
+      )?.aria.toggled
+    ).toBe("False")
+
+    render(<button ariaLabel="Dynamic pressed" />)
+    renderer.flush()
+    renderer.drawPendingFrame()
+    expect(
+      Object.values(renderer.getAccessibilityTree().nodes).find(
+        (node) => node.aria.label === "Dynamic pressed"
+      )?.aria.toggled
+    ).toBeUndefined()
+  })
+
   it("warns once per instance for unsupported hyphenated aria props under strict mode", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
