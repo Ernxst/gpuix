@@ -3902,6 +3902,10 @@ The intrinsic keywords are measured on `<div>` and `<text>` once, then re-measur
 
 **Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `border`, `borderTop`, `borderRight`, `borderBottom`, `borderLeft`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `borderStyle`, `boxShadow`, `outlineColor`, `outlineWidth`, `outlineOffset`
 
+`touchAction` is accepted as a silent native no-op. Browsers use it to withhold
+built-in touch gestures, while GPUI has no corresponding gesture handling to
+disable; shared web/native style objects can therefore keep the property.
+
 Boxes are sized **border-box** — the near-universal stylesheet convention
 (`box-sizing: border-box`; the DOM's own default is `content-box`):
 `borderWidth` shrinks the content box, never the element's own box, and

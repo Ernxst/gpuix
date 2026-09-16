@@ -289,8 +289,16 @@ declare const handWrittenShared: HandWrittenSharedStyle
 const sharedAssignsToHandWritten: HandWrittenSharedStyle = exportedShared
 const handWrittenAssignsToShared: SharedStyle = handWrittenShared
 
+const sharedTouchAction: SharedStyle = { touchAction: "none" }
+const nativeTouchAction: StyleDesc = {
+  touchAction: "none",
+  hover: { touchAction: "auto" },
+}
+
 void sharedAssignsToHandWritten
 void handWrittenAssignsToShared
+void sharedTouchAction
+void nativeTouchAction
 
 const invalidSharedStyle: SharedStyle = {
   // @ts-expect-error `focusVisible` is native-only and excluded from the shared surface.

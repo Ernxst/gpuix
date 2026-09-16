@@ -3067,6 +3067,12 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             user_select,
             ["auto", "text", "none"]
         );
+        // Browsers use touch-action to decide which built-in gestures to
+        // withhold. GPUI has no corresponding gesture handling, so shared
+        // styles may declare it without affecting native rendering.
+        if key == "touchAction" {
+            continue;
+        }
         enum_field!(
             key,
             value,
@@ -3555,6 +3561,19 @@ mod tests {
 
         assert_eq!(transition.delay_ms, 0.0);
         assert_eq!(transition.easing, TransitionEasing::Name("ease".into()));
+    }
+
+    #[test]
+    fn touch_action_is_a_silent_noop() {
+        let parsed = parse_style_value(&json!({
+            "touchAction": "none",
+            "hover": { "touchAction": "auto" },
+            "unsupportedProperty": "value"
+        }));
+
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "unsupportedProperty");
+        assert_eq!(parsed.problems[0].reason, "unsupported style property");
     }
 
     #[test]
