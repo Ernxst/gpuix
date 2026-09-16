@@ -696,13 +696,14 @@ frame = requestAnimationFrame(redraw)
 // cancelAnimationFrame(frame)
 ```
 
-Callbacks are one-shot, receive a high-resolution millisecond timestamp sampled
-inside GPUI's native frame callback, and share one native frame request when
-queued together. The offscreen renderer supplies that timestamp from the same
-GPUI clock, so `advanceAsyncClock()` controls it deterministically. Requesting a
+Callbacks are one-shot, receive a high-resolution millisecond timestamp compatible
+with `performance.now()`, and share one native frame request when queued together.
+GPUIX pairs the performance time origin with its native frame clock on the first
+request. The offscreen renderer advances that same native clock, so
+`advanceAsyncClock()` controls timestamp deltas deterministically. Requesting a
 callback creates frame demand without dirtying the window; drawing still happens
-only through the normal GPUI frame path. A hot remount drops callbacks owned by
-the previous tree.
+only through the normal GPUI frame path. A hot remount drops callbacks owned by the
+previous tree.
 
 In the test renderer, one `advanceAsyncClock()` delivers every frame callback
 queued before it synchronously, before it returns. `advanceTime()` and

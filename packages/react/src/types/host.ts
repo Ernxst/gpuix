@@ -1400,7 +1400,7 @@ export interface NativeRenderer {
   /** Install a coalesced native frame source. Returns false when timers must drive ticks. */
   setFrameRequestHandler?(handler: (() => void) | null): boolean
   /** Queue one callback on GPUI's next display-paced frame without dirtying the window. */
-  requestFrame?(handler: (timestamp: number) => void): void
+  requestFrame?(handler: (timestamp: number) => void, performanceTimestampMs: number): void
   /** Pump idle platform work without releasing a pending display-link frame token. */
   tickIdle?(): boolean
   /** Internal hook used by injected renderers to deliver non-element events. */

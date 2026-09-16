@@ -1246,13 +1246,18 @@ impl TestGpuixRenderer {
     /// Queue one callback for the next manually advanced GPUI frame without
     /// dirtying or synchronously drawing the offscreen window.
     #[napi]
-    pub fn request_frame(&self) -> Result<()> {
+    pub fn request_frame(&self, performance_timestamp_ms: f64) -> Result<()> {
         let timestamp_origin = self.animation_frame_timestamp_origin.clone();
         let frame_timestamps = self.frame_timestamps.clone();
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, move |_, window, app| {
-                let origin =
-                    animation_frame_origin(&timestamp_origin, app.background_executor().now());
+                let origin = animation_frame_origin(
+                    &timestamp_origin,
+                    crate::renderer::FrameTimestampOriginPair::new(
+                        app.background_executor().now(),
+                        performance_timestamp_ms,
+                    ),
+                );
                 window.on_next_frame(move |_window, app| {
                     frame_timestamps
                         .lock()
