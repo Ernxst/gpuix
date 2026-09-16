@@ -4920,6 +4920,7 @@ mod tests {
             "flexGrow": 1,
             "flexShrink": 1,
             "flexBasis": 20,
+            "aspectRatio": 1,
             "alignItems": "baseline",
             "alignSelf": "baseline",
             "alignContent": "space-evenly",
