@@ -3613,9 +3613,11 @@ new lifecycle; completion from the replaced source is suppressed.
 `"scaleDown"`, or `"none"`. `bytes` accepts an `ArrayBuffer`, `Uint8Array`
 (including Node.js `Buffer`), or a number array. Every source is capped at
 **10 MiB** before decode. URL responses are cached by URL and revalidated with
-`ETag` or `Last-Modified`. Each renderer keeps up to 64 decoded images without
-live users in a least-recently-used cache, so reinserting an `<img>` with the
-same source and tint paints immediately. URL images revalidate after five
+`ETag` or `Last-Modified`. Each renderer keeps up to **32 MiB** and 256 decoded
+images without live users in a least-recently-used cache, so reinserting an
+`<img>` with the same source and tint paints immediately. The byte budget counts
+the decoded pixels in every animation frame; live images do not count against
+either limit. URL images revalidate after five
 minutes while the current image stays on screen; path and in-memory sources
 never revalidate. Failed loads retry with bounded backoff, and unmounting an
 image cancels its in-flight load. HTTP requests have a 15-second total deadline
