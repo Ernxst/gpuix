@@ -1479,6 +1479,8 @@ export interface NativeRenderer {
   getSelectedText?(): string | null
   /** Drop the current selection. */
   clearSelection?(): void
+  /** Enable the renderer-level selection change event for this root. */
+  setWindowSelectionChange?(enabled: boolean, eventId: number): void
 
   // ── Text editing API ───────────────────────────────────────────
   // `<input>` and `<textarea>` keep their caret outside the retained tree.
@@ -1664,6 +1666,8 @@ export interface Container {
   rootElementType: ElementType | null
   /** `announce()`'s lazily created regions, one alternating pair per politeness. */
   announcer: AnnouncerState
+  onSelectionChange?: (event: EventPayload, renderer: NativeRenderer) => void
+  windowSelectionEventId: number
 }
 
 /** Bounds in logical window coordinates, relative to the window's content origin. */

@@ -1610,6 +1610,19 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Queue focus without scheduling a draw, matching the browser startup
+    /// handoff before its GPUI window exists.
+    #[napi]
+    pub fn queue_focus_element(&self, id: f64, prevent_scroll: Option<bool>) -> Result<()> {
+        let id = to_element_id(id)?;
+        let reveal = !prevent_scroll.unwrap_or(false);
+
+        with_test_state(self.state_id, |cx, _window, view| {
+            view.update(cx, |view, _cx| view.queue_focus_element(id, reveal));
+            Ok(())
+        })
+    }
+
     /// The focused host element id, analogous to `document.activeElement`, or null.
     #[napi]
     pub fn get_active_element(&self) -> Result<Option<f64>> {
@@ -1969,6 +1982,24 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn clear_selection(&self) {
         self.selection.lock().clear();
+    }
+
+    #[napi]
+    pub fn set_window_selection_change(&self, enabled: bool, event_id: f64) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.set_selection_change_listener(enabled, event_id);
+                    cx.notify();
+                });
+                window.refresh();
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
     }
 
     // ── Text editing API ───────────────────────────────────────────────

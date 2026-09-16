@@ -4,8 +4,11 @@
 import { Spiceflow } from 'spiceflow'
 import { app as holocronApp } from '@holocron.so/vite/app'
 import chatExampleHtml from '../../examples/web.html?raw'
+import './globals.css'
 
-const chatHtml = chatExampleHtml.replace('./web-chat.tsx', '/chat-example/chat.js')
+const chatHtml = chatExampleHtml
+  .replace('./web.css', '/chat-example/web.css')
+  .replace('./web-chat.tsx', '/chat-example/chat.js')
 
 export const app = new Spiceflow()
   .get('/gh', () => {

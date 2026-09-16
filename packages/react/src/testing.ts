@@ -180,6 +180,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   hasMainMenu(): boolean
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number, preventScroll?: boolean): void
+  queueFocusElement(elementId: number, preventScroll?: boolean): void
   getActiveElement(): number | null
   blur(): void
   focusNext(): void
@@ -916,6 +917,10 @@ export class TestRenderer implements NativeRenderer {
     this.windowEventHandler = handler
   }
 
+  setWindowSelectionChange(enabled: boolean, eventId: number): void {
+    this.native.setWindowSelectionChange?.(enabled, eventId)
+  }
+
   setStrictStyles(enabled: boolean): void {
     this.native.setStrictStyles(enabled)
   }
@@ -1642,6 +1647,12 @@ export class TestRenderer implements NativeRenderer {
    *  React work is not committed before focus moves. */
   focusElementWithoutDrawing(elementId: number, preventScroll?: boolean): void {
     this.native.focusElement(elementId, preventScroll)
+  }
+
+  /** Queue focus for the next frame as browser startup does before its GPUI
+   *  window exists. Intended for startup-ordering regressions. */
+  queueFocusElement(elementId: number, preventScroll?: boolean): void {
+    this.native.queueFocusElement(elementId, preventScroll)
   }
 
   getActiveElement(): number | null {
@@ -3084,6 +3095,8 @@ export interface TestRootOptions extends TestWindowOptions {
   allowPrivateNetworkImages?: boolean
   /** Match render()'s strict diagnostic mode. Defaults to the active runtime policy. */
   strictStyles?: boolean
+  /** Window-level text selection. Fires when the selected ranges change. */
+  onSelectionChange?: (event: EventPayload, renderer: NativeRenderer) => void
 }
 
 /**
@@ -3106,7 +3119,10 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
     request: (callback) => renderer.requestFrame(callback),
   })
   renderer.setAllowPrivateNetworkImages(options.allowPrivateNetworkImages ?? false)
-  const root = createRoot(renderer, { strictStyles: options.strictStyles })
+  const root = createRoot(renderer, {
+    strictStyles: options.strictStyles,
+    onSelectionChange: options.onSelectionChange,
+  })
   const queries = getQueries(renderer, () => renderer.getRoot(), true)
   let unmounted = false
 

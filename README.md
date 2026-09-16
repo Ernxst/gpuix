@@ -19,7 +19,9 @@
 
 React bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) - Zed's GPU-accelerated UI framework.
 
-Build native GPU-accelerated desktop apps with React and TypeScript. Your components render directly to the GPU via Metal, DirectX, or Vulkan. No Electron, no web views.
+Write a React tree in TypeScript. GPUIX paints it with Metal, DirectX, or Vulkan. No Electron. No web view.
+
+`useState` and JSX still apply. Layout, text, and input go through GPUI, not the DOM.
 
 This fork's premise is that desktop and the browser should be one codebase, not two: a component
 written against `<div>`, `<text>`, refs, events, and `style` should need no renderer-specific
@@ -346,7 +348,7 @@ packed in [Quickstart](#quickstart), and run `bun install`.
 |---|---|---|
 | **todo** | `bun run dev` in [`example-app/`](https://github.com/Ernxst/gpuix/tree/main/example-app) | The starting point: one file, a `<virtual-list>`, a native `<input>`, and an animated sidebar |
 | **blurred window** | `bun run blurred-window` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
-| **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, message list, composer, `<markdown>` |
+| **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, per-thread transcripts, demo replies, composer, `<markdown>` |
 | **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
 | **mail** | `bun --hot mail.tsx` | A Superhuman-style mail client: three panes, thread list, and a Framer newsletter |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
@@ -583,6 +585,9 @@ prevented Tab or Shift+Tab keydown likewise keeps focus on the current element.
 
 - **`@gpuix/native`** — Rust bindings to GPUI. It publishes napi-rs desktop binaries and a wasm-bindgen browser build, both backed by `GpuixRenderer`, `RetainedTree`, `build_element()`, and `apply_styles()`.
 - **`@gpuix/react`** — React reconciler, event registry, and TypeScript types. Implements the `react-reconciler` host config using the mutation API.
+
+Pin `@gpuix/react` and `@gpuix/native` to the **same exact version**. GPUIX is
+still pre-1.0. Breaking changes can land before v1. Upgrade both together.
 
 ## Building
 
@@ -1103,7 +1108,6 @@ window.
 
 ```bash
 bun --hot app.tsx
-cd examples && bun --hot chat.tsx
 ```
 
 ### 3. Save the file
@@ -2482,6 +2486,10 @@ renderer.focusNext()
 renderer.focusPrevious()
 ```
 
+Browser focus requests made while WebGPU opens are queued and applied after
+the first focus handles exist. If several arrive before that render, the latest
+request wins.
+
 Use a ref for imperative focus:
 
 ```tsx
@@ -3030,6 +3038,18 @@ React's own reconciliation - still navigates where it currently sits in JSX.
 A closed Select keeps each item's `display: "none"` placeholder in the tree so
 that position stays current even while nothing paints.
 
+GPUI does not bubble clicks. Use `asChild` when a styled row paints the item
+fill, so that row becomes the real hit target:
+
+```tsx
+<SelectItem value="opus" asChild>
+  <MenuRow>Claude Opus 4.6</MenuRow>
+</SelectItem>
+```
+
+The child must forward its ref and host props. `ComboboxItem` supports the same
+pattern.
+
 ### Style Combobox and Tooltip the same way
 
 Start their local files from namespace imports too:
@@ -3126,7 +3146,8 @@ nothing behind it. It does not disable the listeners on that same element, and
 it does not inherit, so children keep their own hitboxes.
 
 A filled child of a click target (switch thumb, radio dot, check icon) needs
-**`pointerEvents: "none"`**, or it eats the parent's click.
+**`pointerEvents: "none"`**, or it eats the parent's click. For Select and
+Combobox rows, use the item primitive's `asChild` prop instead.
 
 ### Measure an element
 
@@ -3147,8 +3168,9 @@ Every text GPUIX paints is **selectable and copyable**, including text inside
 inside a fenced code block selects everything between; Cmd+C copies it joined in
 document order.
 
-There is nothing to opt into. To opt *out* — toolbars, buttons, line-number
-gutters — set `userSelect: "none"`, which inherits like the CSS property:
+There is nothing to opt into. A tap does not select. Only a drag does.
+To opt *out* — toolbars, buttons, line-number gutters — set
+`userSelect: "none"`, which inherits like the CSS property:
 
 ```tsx
 <div style={{ userSelect: 'none' }}>
@@ -3158,12 +3180,25 @@ gutters — set `userSelect: "none"`, which inherits like the CSS property:
 
 ![Text selected across markdown blocks](./docs/images/selection.png)
 
-Read the selection from the renderer:
+Read the selection from the renderer, or react when it changes:
 
 ```tsx
+render(<App />, {
+  onSelectionChange(event) {
+    setCopied(event.value ?? '')
+  },
+})
+
 renderer.getSelectedText()   // joined text, or null
 renderer.clearSelection()
 ```
+
+`onSelectionChange` is a **window-level** callback on `render()` / `createRoot()`,
+the same attachment as `onKeyDown`. Text selection is app-wide, not per element.
+It fires once when the selected ranges change, including a clear to empty
+(`value` is then omitted). An unchanged frame does not fire.
+
+The payload is a normal `EventPayload`. `value` is the joined selected text.
 
 Selection works because each painted text element registers itself into a
 per-frame registry in **paint order**, which is document order. A drag anchored
@@ -3707,6 +3742,7 @@ text imports no longer need a runtime flag.
 | Show more | `onShowMore` | `GpuixElementEvent` | `value` (hidden line count) — `<diff>` only |
 | Line click | `onLineClick` | `GpuixElementEvent` | `value`, `oldLine`, `newLine` — `<diff>` only |
 | Link click | `onLinkClick` | `GpuixElementEvent` | `value` (URL) — `<markdown>` only |
+| Selection change | `onSelectionChange` | `EventPayload` | `value` (joined selected text) — window-level on `render()` |
 
 `GpuixSyntheticEvent` is the union of every synthetic event type above
 (`onFileDrop` is the one exception, still typed with the raw `EventPayload`). A handler typed

@@ -68,7 +68,7 @@ describeNative('chat example', () => {
         // on a preceding tree locator to do so.
         expect((await app.call('getPaintedText', {})).text).toContain('hello gpuix')
         await composer.press('enter')
-        await app.getByText('hello gpuix').waitFor()
+        await app.getByText('GPUIX chat demo').waitFor()
       } finally {
         await app.close()
       }
@@ -382,16 +382,24 @@ describeNative('chat example', () => {
     try {
       await app.getByTestId('model-picker').click()
       expect(renderer.getPaintedText()).toContain('Claude Opus 4.6')
+      expect(
+        renderer.getElementBounds(renderer.findByTestId('model-opus-4.6').id).height,
+      ).toBeGreaterThanOrEqual(26)
 
       const shot = path.join(SHOTS, 'chat-model-picker.png')
       renderer.captureScreenshot(shot)
       expect(fs.statSync(shot).size).toBeGreaterThan(0)
+
+      await app.getByTestId('model-opus-4.6').click()
+      expect(renderer.getPaintedText()).toContain('Claude Opus 4.6')
+      expect(renderer.getPaintedText()).not.toContain('DeepSeek V4 Flash')
+      expect(renderer.getPaintedText()).not.toContain('GPT-5.4')
     } finally {
       await app.close()
     }
   })
 
-  it('types into the composer and clears on enter', () => {
+  it('types into the composer, clears on enter, and paints a demo reply', () => {
     const { render, renderer } = createTestRoot()
     render(<ChatApp />)
 
@@ -407,6 +415,138 @@ describeNative('chat example', () => {
     renderer.scrollToItem(transcript.id, transcript.children.length - 1)
     renderer.flush()
     expect(renderer.getPaintedText()).toContain('hello')
+    expect(
+      renderer.getPaintedText().some((line) => line.includes('GPUIX chat demo')),
+    ).toBe(true)
+    expect(renderer.getPaintedText().some((line) => line.trimStart().startsWith('. '))).toBe(false)
+    expect(
+      renderer.getPaintedText().some((line) => line.includes('No model ran') && line.startsWith(' ')),
+    ).toBe(false)
+  })
+
+  it('switches the transcript when a sidebar thread is clicked', async () => {
+    const { render, renderer } = createTestRoot()
+    render(<ChatApp />)
+
+    expect(
+      renderer.getPaintedText().some((line) => line.includes('React renderer for GPUI')),
+    ).toBe(true)
+
+    const app = await connectTest(renderer)
+    try {
+      await app.getByTestId('thread-c2').click()
+      expect(renderer.getPaintedText()).toContain('Native SDK vs GPUI comparison')
+      expect(
+        renderer.getPaintedText().some((line) => line.includes('React renderer for GPUI')),
+      ).toBe(false)
+      expect(
+        renderer.getPaintedText().some((line) => line.includes('GPUI is the renderer')),
+      ).toBe(true)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('starts a blank task from the sidebar compose action', async () => {
+    const { render, renderer } = createTestRoot()
+    render(<ChatApp />)
+
+    const app = await connectTest(renderer)
+    try {
+      const textarea = renderer.findByType('textarea')[0]
+      renderer.nativeSimulateKeystrokes(textarea.id, 'd r a f t')
+      expect(renderer.getPaintedText()).toContain('draft')
+
+      await app.getByTestId('new-task').click()
+      expect(renderer.getPaintedText()).toContain('New task')
+      expect(renderer.getPaintedText()).toContain('Do anything...')
+      expect(renderer.findByType('virtual-list')[0]?.children).toHaveLength(0)
+
+      renderer.nativeSimulateKeystrokes(textarea.id, 'p i n g')
+      renderer.nativeSimulateKeystrokes(textarea.id, 'enter')
+      const transcript = renderer.findByType('virtual-list')[0]
+      renderer.scrollToItem(transcript.id, transcript.children.length - 1)
+      renderer.flush()
+      expect(renderer.getPaintedText()).toContain('ping')
+      expect(
+        renderer.getPaintedText().some((line) => line.includes('GPUIX chat demo')),
+      ).toBe(true)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('toggles the inspector from the header', async () => {
+    const { render, renderer } = createTestRoot()
+    render(<ChatApp />)
+
+    expect(renderer.getPaintedText()).not.toContain('Inspector')
+
+    const app = await connectTest(renderer)
+    try {
+      await app.getByTestId('inspector-toggle').click()
+      expect(renderer.getPaintedText()).toContain('Inspector')
+      expect(renderer.getPaintedText()).toContain('DeepSeek V4 Flash')
+      await app.getByTestId('inspector-toggle').click()
+      expect(renderer.getPaintedText()).not.toContain('Inspector')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('closes search on an outside press and focuses the search field', async () => {
+    const { render, renderer } = createTestRoot()
+    render(<ChatApp />)
+
+    const app = await connectTest(renderer)
+    try {
+      await app.getByTestId('search').click()
+      expect(renderer.getPaintedText()).toContain('Search threads')
+      expect(renderer.getFocusedElementId()).toBe(renderer.findByTestId('search-input')?.id)
+
+      renderer.nativeSimulateClick(900, 40)
+      expect(renderer.getPaintedText()).not.toContain('Search threads')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('focuses the composer after New Task and after switching threads', async () => {
+    const { render, renderer } = createTestRoot()
+    render(<ChatApp />)
+
+    const app = await connectTest(renderer)
+    try {
+      await app.getByTestId('new-task').click()
+      const composer = renderer.findByTestId('composer')
+      expect(composer).toBeDefined()
+      expect(renderer.getFocusedElementId()).toBe(composer?.id)
+
+      await app.getByTestId('thread-c2').click()
+      expect(renderer.getFocusedElementId()).toBe(renderer.findByTestId('composer')?.id)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('walks thread history with the sidebar arrows', async () => {
+    const { render, renderer } = createTestRoot()
+    render(<ChatApp />)
+
+    const app = await connectTest(renderer)
+    try {
+      await app.getByTestId('thread-c2').click()
+      await app.getByTestId('history-back').click()
+      expect(
+        renderer.getPaintedText().some((line) => line.includes('React renderer for GPUI')),
+      ).toBe(true)
+      await app.getByTestId('history-forward').click()
+      expect(
+        renderer.getPaintedText().some((line) => line.includes('GPUI is the renderer')),
+      ).toBe(true)
+    } finally {
+      await app.close()
+    }
   })
 
   it('stays painted after render() remounts the tree', async () => {

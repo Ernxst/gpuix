@@ -53,6 +53,18 @@ describeNative("keyboard focus", () => {
     expect(testRoot.renderer.getActiveElement()).toBeNull()
   })
 
+  it("replays focus queued before a focus handle is mounted", () => {
+    const ref = React.createRef<PublicInstance>()
+
+    testRoot.render(<div ref={ref} ariaLabel="queued focus target" />)
+    const targetId = ref.current!.id
+    testRoot.renderer.queueFocusElement(targetId)
+
+    testRoot.render(<div ref={ref} tabIndex={0} ariaLabel="queued focus target" />)
+
+    expect(testRoot.renderer.getActiveElement()).toBe(targetId)
+  })
+
   it("honors focus({ preventScroll: true }) like HTMLElement.focus", () => {
     const scrollerRef = React.createRef<PublicInstance>()
     const targetRef = React.createRef<PublicInstance>()
