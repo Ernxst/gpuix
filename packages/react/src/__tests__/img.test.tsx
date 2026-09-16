@@ -296,6 +296,55 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
     slowResponseCloseCount = 0
   })
 
+  it("steps image decode and first paint separately in manual async-task mode", () => {
+    const testRoot = createImageTestRoot({ asyncTaskMode: "manual" })
+    const loadingPath = `${SHOTS_DIR}/gpuix-image-manual-loading.png`
+    const decodedPath = `${SHOTS_DIR}/gpuix-image-manual-decoded.png`
+    const loadedPath = `${SHOTS_DIR}/gpuix-image-manual-loaded.png`
+
+    testRoot.render(
+      <img
+        data-testid="manual-image"
+        src={{ kind: "path", path: FIXTURE_PATHS.get("webp")! }}
+        style={{ width: 32, height: 24 }}
+      />
+    )
+
+    const image = testRoot.renderer.findByTestId("manual-image")!
+    expect(testRoot.renderer.getImageLoadState(image.id)).toMatchObject({ status: "loading" })
+
+    testRoot.renderer.getResolvedStyle(image.id)
+    testRoot.renderer.dispatchMouseMove(1, 1)
+    testRoot.renderer.advanceTime(0)
+    expect(testRoot.renderer.getImageLoadState(image.id)).toMatchObject({ status: "loading" })
+    testRoot.renderer.captureScreenshot(loadingPath)
+
+    testRoot.renderer.advanceAsyncClock(0)
+    expect(testRoot.renderer.isWindowDirty()).toBe(true)
+    expect(testRoot.renderer.getImageLoadState(image.id)).toMatchObject({ status: "loaded" })
+    testRoot.renderer.captureScreenshot(decodedPath)
+    expectScreenshotsEqual(loadingPath, decodedPath)
+
+    testRoot.renderer.drawPendingFrame()
+    expect(testRoot.renderer.isWindowDirty()).toBe(false)
+    testRoot.renderer.captureScreenshot(loadedPath)
+    expectScreenshotsDiffer(loadingPath, loadedPath)
+  })
+
+  it("keeps eager async-task draining as the default", () => {
+    const testRoot = createImageTestRoot()
+    testRoot.render(
+      <img
+        data-testid="eager-image"
+        src={{ kind: "path", path: FIXTURE_PATHS.get("png")! }}
+        style={{ width: 32, height: 24 }}
+      />
+    )
+
+    const image = testRoot.renderer.findByTestId("eager-image")!
+    expect(testRoot.renderer.getImageLoadState(image.id)).toMatchObject({ status: "loaded" })
+  })
+
   it("serialises Buffer-backed data sources through the custom-prop pipeline", () => {
     const testRoot = createImageTestRoot()
     const source: ImageSource = {

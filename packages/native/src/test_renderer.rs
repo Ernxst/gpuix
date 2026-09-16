@@ -619,6 +619,16 @@ pub struct TestGpuixRenderer {
     /// selection after simulating a drag.
     selection: crate::text::SharedSelection,
     image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
+    /// Whether renderer operations implicitly drain GPUI's deterministic task
+    /// executor. Manual mode leaves that boundary to `advance_async_clock`.
+    auto_drain_async_tasks: AtomicBool,
+    /// Pixels from the last explicit manual-mode draw. The retained GPUI scene
+    /// can observe an asynchronously populated image handle before its repaint;
+    /// keeping the drawn pixels is what makes current-frame capture exact.
+    manual_frame: Mutex<Option<image::RgbaImage>>,
+    /// The test scheduler's clock advance primitive also runs its task queue.
+    /// Manual mode holds `advanceTime` deltas until the explicit drain boundary.
+    manual_async_clock_advance: Mutex<Duration>,
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<PendingStyleDiagnostics>,
     canvas_diagnostic_members: Mutex<HashSet<(u64, String)>>,
@@ -744,6 +754,9 @@ impl TestGpuixRenderer {
             frame_timestamps,
             selection,
             image_network_policy,
+            auto_drain_async_tasks: AtomicBool::new(true),
+            manual_frame: Mutex::new(None),
+            manual_async_clock_advance: Mutex::new(Duration::ZERO),
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(PendingStyleDiagnostics::default()),
             canvas_diagnostic_members: Mutex::new(HashSet::new()),
@@ -758,6 +771,76 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn dispose(&self) {
         dispose_test_state(self.state_id);
+    }
+
+    /// Preserve eager test-root behavior by default, while allowing callers to
+    /// make `advanceAsyncClock` the only operation that drains queued tasks.
+    #[napi]
+    pub fn set_auto_drain_async_tasks(&self, enabled: bool) {
+        self.auto_drain_async_tasks
+            .store(enabled, Ordering::Relaxed);
+        if enabled {
+            self.manual_frame.lock().unwrap().take();
+            *self.manual_async_clock_advance.lock().unwrap() = Duration::ZERO;
+        }
+    }
+
+    fn auto_drains_async_tasks(&self) -> bool {
+        self.auto_drain_async_tasks.load(Ordering::Relaxed)
+    }
+
+    fn drain_async_tasks_if_eager(&self, cx: &mut gpui::VisualTestAppContext) {
+        if self.auto_drains_async_tasks() {
+            cx.run_until_parked();
+        }
+    }
+
+    fn remember_manual_frame(
+        &self,
+        cx: &mut gpui::VisualTestAppContext,
+        window: gpui::AnyWindowHandle,
+    ) -> Result<()> {
+        if self.auto_drains_async_tasks() {
+            return Ok(());
+        }
+        let image = cx
+            .update_window(window, |_, window, _app| window.render_to_image())
+            .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))?
+            .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))?;
+        *self.manual_frame.lock().unwrap() = Some(image);
+        Ok(())
+    }
+
+    fn simulate_event<E: gpui::InputEvent>(
+        &self,
+        cx: &mut gpui::VisualTestAppContext,
+        window: gpui::AnyWindowHandle,
+        event: E,
+    ) -> Result<()> {
+        if self.auto_drains_async_tasks() {
+            cx.simulate_event(window, event);
+            return Ok(());
+        }
+        cx.update_window(window, |_, window, app| {
+            window.dispatch_event(event.to_platform_input(), app);
+        })
+        .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    fn dispatch_keystroke(
+        &self,
+        cx: &mut gpui::VisualTestAppContext,
+        window: gpui::AnyWindowHandle,
+        keystroke: gpui::Keystroke,
+    ) -> Result<()> {
+        if self.auto_drains_async_tasks() {
+            cx.dispatch_keystroke(window, keystroke);
+            return Ok(());
+        }
+        cx.update_window(window, |_, window, app| {
+            window.dispatch_keystroke(keystroke, app);
+        })
+        .map_err(|error| Error::from_reason(error.to_string()))
     }
 
     /// The same capability contract as a live renderer, scoped to this
@@ -975,7 +1058,7 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -987,7 +1070,7 @@ impl TestGpuixRenderer {
     ) -> Result<Option<CanvasImageLoadState>> {
         let observer_id = to_element_id(observer_id)?;
         with_test_state(self.state_id, |cx, _window, view| {
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             let state = view.read_with(cx, |view, _cx| {
                 view.canvas_image_store.observer_state(observer_id)
             });
@@ -1056,7 +1139,7 @@ impl TestGpuixRenderer {
         with_test_state(self.state_id, |cx, _window, _view| {
             cx.update(|cx| dispatch_application_menu_action(cx, &id))
                 .map_err(Error::from_reason)?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -1097,12 +1180,15 @@ impl TestGpuixRenderer {
     /// replaced, and like it, work that dirties the window during that last
     /// park waits for the next read.
     fn settle_for_read(&self) -> Result<()> {
+        if !self.auto_drains_async_tasks() {
+            return self.surface_canvas_preparation_diagnostics();
+        }
         with_test_state(self.state_id, |cx, window, _view| {
             crate::renderer::settle_for_read(|pass| {
                 let drew = cx
                     .update_window(window, |_, window, app| pass(window, app))
                     .map_err(|error| Error::from_reason(error.to_string()))?;
-                cx.run_until_parked();
+                self.drain_async_tasks_if_eager(cx);
                 Ok(drew)
             })
         })?;
@@ -1121,7 +1207,8 @@ impl TestGpuixRenderer {
         Ok(())
     }
 
-    /// Notify the view entity and run GPUI until parked.
+    /// Notify the view entity and draw it immediately. Eager mode then drains
+    /// queued native tasks; manual mode leaves them for `advanceAsyncClock`.
     /// This triggers GpuixView::render() → build_element() → GPUI layout.
     /// Must be called after mutations and before simulating events (GPUI's
     /// hit testing requires elements to be laid out).
@@ -1131,7 +1218,8 @@ impl TestGpuixRenderer {
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, app| window.draw(app).clear(app))
                 .map_err(|e| Error::from_reason(e.to_string()))?;
-            cx.run_until_parked();
+            self.remember_manual_frame(cx, window)?;
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })?;
         self.surface_canvas_preparation_diagnostics()
@@ -1218,7 +1306,7 @@ impl TestGpuixRenderer {
                 );
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -1231,13 +1319,20 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn draw_pending_frame(&self) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.update_window(window, |_, window, app| {
-                if window.is_dirty() {
-                    window.draw(app).clear(app);
-                }
-            })
-            .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            let drew = cx
+                .update_window(window, |_, window, app| {
+                    if window.is_dirty() {
+                        window.draw(app).clear(app);
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            if drew {
+                self.remember_manual_frame(cx, window)?;
+            }
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })?;
         self.surface_canvas_preparation_diagnostics()
@@ -1276,7 +1371,8 @@ impl TestGpuixRenderer {
     /// Advance GPUI's async executor clock so tests can deterministically fire
     /// timers such as bounded image retry/revalidation deadlines. When the
     /// renderer animation clock is paused, advance that clock by the same
-    /// amount and render the resulting transition frame as well.
+    /// amount. Eager mode renders the resulting transition frame immediately;
+    /// manual mode leaves it pending for `drawPendingFrame`.
     #[napi]
     pub fn advance_async_clock(&self, delta_ms: f64) -> Result<()> {
         if !delta_ms.is_finite() || delta_ms < 0.0 {
@@ -1285,7 +1381,13 @@ impl TestGpuixRenderer {
             ));
         }
         with_test_state(self.state_id, |cx, window, view| {
-            cx.advance_clock(std::time::Duration::from_secs_f64(delta_ms / 1000.0));
+            let mut delta = Duration::from_secs_f64(delta_ms / 1000.0);
+            if !self.auto_drains_async_tasks() {
+                let mut pending = self.manual_async_clock_advance.lock().unwrap();
+                delta = delta.saturating_add(*pending);
+                *pending = Duration::ZERO;
+            }
+            cx.advance_clock(delta);
             let view = view.clone();
             cx.update_window(window, |_, window, app| {
                 window.simulate_next_frame(app);
@@ -1296,9 +1398,18 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.update_window(window, |_, window, app| window.draw(app).clear(app))
-                .map_err(|error| Error::from_reason(error.to_string()))?;
+            if self.auto_drains_async_tasks() {
+                cx.update_window(window, |_, window, app| window.draw(app).clear(app))
+                    .map_err(|error| Error::from_reason(error.to_string()))?;
+            }
             cx.run_until_parked();
+            if !self.auto_drains_async_tasks() {
+                // Manual mode separates task progress from paint: async
+                // completions and frame callbacks become visible only after an
+                // explicit `drawPendingFrame`.
+                cx.update_window(window, |_, window, _app| window.refresh())
+                    .map_err(|error| Error::from_reason(error.to_string()))?;
+            }
             Ok(())
         })
     }
@@ -1313,7 +1424,7 @@ impl TestGpuixRenderer {
                 view.update(app, |_, cx| cx.notify());
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -1413,7 +1524,7 @@ impl TestGpuixRenderer {
                 );
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -1453,7 +1564,8 @@ impl TestGpuixRenderer {
             // so a right click silently became a left click.
             let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
             let gpui_button = u32_to_mouse_button(button);
-            cx.simulate_event(
+            self.simulate_event(
+                cx,
                 window,
                 gpui::MouseDownEvent {
                     position,
@@ -1462,8 +1574,9 @@ impl TestGpuixRenderer {
                     click_count,
                     first_mouse: false,
                 },
-            );
-            cx.simulate_event(
+            )?;
+            self.simulate_event(
+                cx,
                 window,
                 gpui::MouseUpEvent {
                     position,
@@ -1471,7 +1584,7 @@ impl TestGpuixRenderer {
                     button: gpui_button,
                     click_count,
                 },
-            );
+            )?;
             Ok(())
         });
         *self.active_pointer_origin.lock().unwrap() = None;
@@ -1510,8 +1623,8 @@ impl TestGpuixRenderer {
 
             for keystroke in keystrokes {
                 // Match GPUI's simulated key-down/text-input path before releasing the key.
-                cx.dispatch_keystroke(window, keystroke.clone());
-                cx.simulate_event(window, gpui::KeyUpEvent { keystroke });
+                self.dispatch_keystroke(cx, window, keystroke.clone())?;
+                self.simulate_event(cx, window, gpui::KeyUpEvent { keystroke })?;
             }
             Ok(())
         })
@@ -1529,14 +1642,15 @@ impl TestGpuixRenderer {
                 Error::from_reason(format!("Invalid keystroke '{}': {}", keystroke, e))
             })?;
 
-            cx.simulate_event(
+            self.simulate_event(
+                cx,
                 window,
                 gpui::KeyDownEvent {
                     keystroke: parsed,
                     is_held: is_held.unwrap_or(false),
                     prefer_character_input: false,
                 },
-            );
+            )?;
 
             Ok(())
         })
@@ -1552,7 +1666,7 @@ impl TestGpuixRenderer {
                 Error::from_reason(format!("Invalid keystroke '{}': {}", keystroke, e))
             })?;
 
-            cx.simulate_event(window, gpui::KeyUpEvent { keystroke: parsed });
+            self.simulate_event(cx, window, gpui::KeyUpEvent { keystroke: parsed })?;
 
             Ok(())
         })
@@ -1574,12 +1688,15 @@ impl TestGpuixRenderer {
         with_test_state(self.state_id, |cx, window, _view| {
             let button: Option<gpui::MouseButton> = pressed_button.map(u32_to_mouse_button);
 
-            cx.simulate_mouse_move(
+            self.simulate_event(
+                cx,
                 window,
-                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-                button,
-                modifiers,
-            );
+                gpui::MouseMoveEvent {
+                    position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+                    modifiers,
+                    pressed_button: button,
+                },
+            )?;
 
             Ok(())
         })
@@ -1610,7 +1727,7 @@ impl TestGpuixRenderer {
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -1661,7 +1778,7 @@ impl TestGpuixRenderer {
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, _app| window.blur())
                 .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -1676,7 +1793,7 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -1691,7 +1808,7 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -1706,7 +1823,7 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -1721,7 +1838,7 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -1740,7 +1857,7 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -1782,7 +1899,7 @@ impl TestGpuixRenderer {
                 window.simulate_active_status_change(active, app);
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         });
         if !active {
@@ -1832,7 +1949,8 @@ impl TestGpuixRenderer {
         let result = with_test_state(self.state_id, |cx, window, _view| {
             // Not `cx.simulate_mouse_down`: that helper hard-codes
             // `click_count: 1`, so a double-click press could not be expressed.
-            cx.simulate_event(
+            self.simulate_event(
+                cx,
                 window,
                 gpui::MouseDownEvent {
                     position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
@@ -1841,7 +1959,7 @@ impl TestGpuixRenderer {
                     click_count,
                     first_mouse: false,
                 },
-            );
+            )?;
             Ok(())
         });
         if result.is_ok() {
@@ -1869,7 +1987,8 @@ impl TestGpuixRenderer {
             crate::automation::click_count(click_count).map_err(Error::from_reason)?;
         let result = with_test_state(self.state_id, |cx, window, _view| {
             // Not `cx.simulate_mouse_up`, for the same reason as the press.
-            cx.simulate_event(
+            self.simulate_event(
+                cx,
                 window,
                 gpui::MouseUpEvent {
                     position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
@@ -1877,7 +1996,7 @@ impl TestGpuixRenderer {
                     button: u32_to_mouse_button(button.unwrap_or(0)),
                     click_count,
                 },
-            );
+            )?;
             Ok(())
         });
         *self.active_pointer_origin.lock().unwrap() = None;
@@ -1898,7 +2017,7 @@ impl TestGpuixRenderer {
         with_test_state(self.state_id, |cx, window, _view| {
             let event = crate::automation::scroll_wheel_event(x, y, delta_x, delta_y, options)
                 .map_err(Error::from_reason)?;
-            cx.simulate_event(window, event);
+            self.simulate_event(cx, window, event)?;
             Ok(())
         })
     }
@@ -1910,20 +2029,10 @@ impl TestGpuixRenderer {
         self.file_drag_active.store(false, Ordering::Relaxed);
         with_test_state(self.state_id, |cx, window, _view| {
             let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
-            let paths = gpui::ExternalPaths(
-                paths
-                    .into_iter()
-                    .map(std::path::PathBuf::from)
-                    .collect(),
-            );
-            cx.simulate_event(
-                window,
-                gpui::FileDropEvent::Entered {
-                    position,
-                    paths,
-                },
-            );
-            cx.simulate_event(window, gpui::FileDropEvent::Submit { position });
+            let paths =
+                gpui::ExternalPaths(paths.into_iter().map(std::path::PathBuf::from).collect());
+            self.simulate_event(cx, window, gpui::FileDropEvent::Entered { position, paths })?;
+            self.simulate_event(cx, window, gpui::FileDropEvent::Submit { position })?;
             Ok(())
         })?;
         self.file_drag_active.store(false, Ordering::Relaxed);
@@ -1938,7 +2047,7 @@ impl TestGpuixRenderer {
     pub fn simulate_file_drop_submit(&self, x: f64, y: f64) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
             let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
-            cx.simulate_event(window, gpui::FileDropEvent::Submit { position });
+            self.simulate_event(cx, window, gpui::FileDropEvent::Submit { position })?;
             Ok(())
         })
     }
@@ -1951,15 +2060,11 @@ impl TestGpuixRenderer {
         with_test_state(self.state_id, |cx, window, _view| {
             let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
             if entered {
-                let paths = gpui::ExternalPaths(
-                    paths
-                        .into_iter()
-                        .map(std::path::PathBuf::from)
-                        .collect(),
-                );
-                cx.simulate_event(window, gpui::FileDropEvent::Entered { position, paths });
+                let paths =
+                    gpui::ExternalPaths(paths.into_iter().map(std::path::PathBuf::from).collect());
+                self.simulate_event(cx, window, gpui::FileDropEvent::Entered { position, paths })?;
             } else {
-                cx.simulate_event(window, gpui::FileDropEvent::Pending { position });
+                self.simulate_event(cx, window, gpui::FileDropEvent::Pending { position })?;
             }
             Ok(())
         })
@@ -1970,7 +2075,7 @@ impl TestGpuixRenderer {
     pub fn simulate_file_drag_exit(&self) -> Result<()> {
         self.file_drag_active.store(false, Ordering::Relaxed);
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.simulate_event(window, gpui::FileDropEvent::Exited);
+            self.simulate_event(cx, window, gpui::FileDropEvent::Exited)?;
             Ok(())
         })
     }
@@ -2002,7 +2107,7 @@ impl TestGpuixRenderer {
                 window.refresh();
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -2048,7 +2153,7 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -2074,7 +2179,7 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
@@ -2409,33 +2514,46 @@ impl TestGpuixRenderer {
     }
 
     /// Capture a screenshot of the current rendered state and save as PNG.
+    /// Eager mode first settles the latest frame. Manual mode deliberately
+    /// preserves the last explicit draw, including a pending async repaint.
     /// Supported on macOS through Metal and Windows through DirectX.
     #[napi]
     pub fn capture_screenshot(&self, path: String) -> Result<()> {
         with_test_state(self.state_id, |cx, window, view| {
-            let view = view.clone();
+            if self.auto_drains_async_tasks() {
+                let view = view.clone();
 
-            // Flush: notify view and run until parked so layout/rendering are current.
-            cx.update_window(window, |_, _window, app| {
-                view.update(app, |_, cx| {
-                    cx.notify();
-                });
-            })
-            .map_err(|e| Error::from_reason(e.to_string()))?;
+                // Flush: notify view and run until parked so layout/rendering are current.
+                cx.update_window(window, |_, _window, app| {
+                    view.update(app, |_, cx| {
+                        cx.notify();
+                    });
+                })
+                .map_err(|e| Error::from_reason(e.to_string()))?;
 
-            // Force a window refresh before capture so render_to_image reads
-            // the most recent frame scene.
-            cx.update_window(window, |_, window, _app| {
-                window.refresh();
-            })
-            .map_err(|e| Error::from_reason(e.to_string()))?;
+                // Force a window refresh before capture so render_to_image reads
+                // the most recent frame scene.
+                cx.update_window(window, |_, window, _app| {
+                    window.refresh();
+                })
+                .map_err(|e| Error::from_reason(e.to_string()))?;
 
-            cx.run_until_parked();
+                self.drain_async_tasks_if_eager(cx);
+            }
 
-            // Capture via the platform renderer's render_to_image implementation.
-            let image = cx
-                .capture_screenshot(window)
-                .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {}", e)))?;
+            // Eager capture draws the latest state. Manual capture reads the
+            // scene retained by the last explicit draw without consuming a
+            // pending repaint.
+            let image = if self.auto_drains_async_tasks() {
+                cx.capture_screenshot(window)
+                    .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))?
+            } else {
+                self.manual_frame.lock().unwrap().clone().ok_or_else(|| {
+                    Error::from_reason(
+                        "No manual-mode frame has been drawn; call flush() before captureScreenshot()",
+                    )
+                })?
+            };
 
             // Save as PNG (format inferred from file extension).
             image
@@ -2829,7 +2947,7 @@ impl TestGpuixRenderer {
                     })
                 })
                 .map_err(|e| Error::from_reason(e.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(now_ms)
         })
     }
@@ -2856,7 +2974,7 @@ impl TestGpuixRenderer {
                     })
                 })
                 .map_err(|e| Error::from_reason(e.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(now_ms)
         })
     }
@@ -2874,7 +2992,7 @@ impl TestGpuixRenderer {
                     })
                 })
                 .map_err(|e| Error::from_reason(e.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(now_ms)
         })
     }
@@ -2892,12 +3010,13 @@ impl TestGpuixRenderer {
                     })
                 })
                 .map_err(|e| Error::from_reason(e.to_string()))?;
-            cx.run_until_parked();
+            self.drain_async_tasks_if_eager(cx);
             Ok(now_ms)
         })
     }
 
-    /// Advance GPUI's deterministic test executor and run due timers.
+    /// Advance GPUI's deterministic test executor and run due timers. Manual
+    /// mode queues this delta until `advanceAsyncClock`, its explicit drain.
     #[napi]
     pub fn advance_time(&self, milliseconds: f64) -> Result<()> {
         if !milliseconds.is_finite() || milliseconds < 0.0 {
@@ -2905,9 +3024,15 @@ impl TestGpuixRenderer {
                 "advanceTime milliseconds must be finite and non-negative, got {milliseconds}"
             )));
         }
+        let delta = Duration::from_secs_f64(milliseconds / 1000.0);
+        if !self.auto_drains_async_tasks() {
+            let mut pending = self.manual_async_clock_advance.lock().unwrap();
+            *pending = pending.saturating_add(delta);
+            return Ok(());
+        }
         with_test_state(self.state_id, |cx, _window, _view| {
-            cx.advance_clock(Duration::from_secs_f64(milliseconds / 1000.0));
-            cx.run_until_parked();
+            cx.advance_clock(delta);
+            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
