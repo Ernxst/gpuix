@@ -1000,6 +1000,10 @@ export interface AccessibilityProps {
   ariaChecked?: boolean | "mixed"
   /** DOM-compatible alias for ariaChecked. */
   "aria-checked"?: boolean | "mixed"
+  /** Pressed state for toggle buttons. Distinct from checked and selected state. */
+  ariaPressed?: boolean | "mixed"
+  /** DOM-compatible alias for ariaPressed. */
+  "aria-pressed"?: boolean | "mixed"
   /** Expanded state for controls that disclose another region. */
   ariaExpanded?: Booleanish
   /** DOM-compatible alias for ariaExpanded. */

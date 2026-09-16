@@ -19,6 +19,7 @@ export const ARIA_PROP_ALIASES = {
   "aria-description": "ariaDescription",
   "aria-describedby": "ariaDescribedBy",
   "aria-checked": "ariaChecked",
+  "aria-pressed": "ariaPressed",
   "aria-expanded": "ariaExpanded",
   "aria-current": "ariaCurrent",
   "aria-live": "ariaLive",

@@ -833,6 +833,7 @@ const UNIVERSAL_PROPS = new Set([
   "ariaDescription",
   "ariaDescribedBy",
   "ariaChecked",
+  "ariaPressed",
   "ariaExpanded",
   "ariaCurrent",
   "ariaLive",

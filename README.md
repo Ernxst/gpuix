@@ -2607,6 +2607,7 @@ equivalents:
 | `ariaLabel`, `ariaDescription` | Accessible name and supplementary description; on a role-less element they project a `generic` node the platform adapters prune |
 | `ariaLabelledBy`, `ariaDescribedBy` | Space-separated author `id`s whose text supplies the name or description; wins over `ariaLabel` / `ariaDescription` |
 | `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
+| `ariaPressed` | `true`, `false`, or `"mixed"` pressed state for toggle buttons |
 | `ariaExpanded`, `ariaSelected` | Boolean semantic states |
 | `ariaCurrent` | Global current-item state: `page`, `step`, `location`, `date`, `time`, `true`, or `false` |
 | `ariaLive` | `off`, `polite`, or `assertive` live-region politeness; announces text changes without moving focus |
@@ -2811,11 +2812,13 @@ limited to `<text>` hosts rather than every semantic container.
 Role/state combinations are validated rather than silently approximated:
 
 `ariaCurrent` is global and applies to every role. It is distinct from
-`ariaSelected`, which identifies a selected option within a widget.
+`ariaSelected`, which identifies a selected option within a widget,
+`ariaChecked`, which identifies checked controls and options, and
+`ariaPressed`, which identifies a toggle button's pressed state.
 
 | Role | Role-specific properties and actions |
 |---|---|
-| `button` | `ariaExpanded`; Activate uses the ordinary `onClick` pipeline |
+| `button` | `ariaExpanded`; `ariaPressed` (`boolean` or `"mixed"`); Activate uses the ordinary `onClick` pipeline |
 | `checkbox` | `ariaChecked` (`boolean` or `"mixed"`); Activate uses `onClick` |
 | `heading` | positive `ariaLevel` |
 | `img` | accessible name and description |

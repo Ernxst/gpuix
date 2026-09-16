@@ -15,6 +15,7 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaDescription",
     "ariaDescribedBy",
     "ariaChecked",
+    "ariaPressed",
     "ariaExpanded",
     "ariaCurrent",
     "ariaLive",
@@ -254,6 +255,7 @@ impl AccessibilityRole {
                     | Role::Switch
                     | Role::TreeItem
             ),
+            "ariaPressed" => matches!(self.role, Role::Button),
             "ariaExpanded" => matches!(self.role, Role::Button | Role::Link),
             "ariaSelected" => matches!(self.role, Role::ListBoxOption),
             "ariaValueText" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
@@ -620,6 +622,7 @@ struct AccessibilityProps<'a> {
     description: Option<&'a str>,
     described_by: Option<String>,
     checked: Option<gpui::Toggled>,
+    pressed: Option<gpui::Toggled>,
     expanded: Option<bool>,
     current: Option<gpui::accesskit::AriaCurrent>,
     live: Option<gpui::Live>,
@@ -659,19 +662,14 @@ impl<'a> AccessibilityProps<'a> {
                 .custom_props
                 .get("ariaDescribedBy")
                 .and_then(|value| resolve_id_references(tree, value)),
-            checked: element.custom_props.get("ariaChecked").and_then(|value| {
-                if let Some(checked) = value.as_bool() {
-                    Some(if checked {
-                        gpui::Toggled::True
-                    } else {
-                        gpui::Toggled::False
-                    })
-                } else if value.as_str() == Some("mixed") {
-                    Some(gpui::Toggled::Mixed)
-                } else {
-                    None
-                }
-            }),
+            checked: element
+                .custom_props
+                .get("ariaChecked")
+                .and_then(parse_toggled),
+            pressed: element
+                .custom_props
+                .get("ariaPressed")
+                .and_then(parse_toggled),
             expanded: element
                 .custom_props
                 .get("ariaExpanded")
@@ -739,6 +737,15 @@ fn parse_booleanish(value: &serde_json::Value) -> Option<bool> {
             None
         }
     })
+}
+
+fn parse_toggled(value: &serde_json::Value) -> Option<gpui::Toggled> {
+    match value {
+        serde_json::Value::Bool(true) => Some(gpui::Toggled::True),
+        serde_json::Value::Bool(false) => Some(gpui::Toggled::False),
+        serde_json::Value::String(value) if value == "mixed" => Some(gpui::Toggled::Mixed),
+        _ => None,
+    }
 }
 
 fn bool_prop(element: &RetainedElement, key: &str) -> bool {
@@ -1064,7 +1071,9 @@ pub(crate) fn element_problems(
         let malformed = match property.as_str() {
             "ariaLabel" | "ariaDescription" | "ariaValueText" | "ariaLabelledBy"
             | "ariaDescribedBy" => !value.is_string(),
-            "ariaChecked" => !(value.is_boolean() || value.as_str() == Some("mixed")),
+            "ariaChecked" | "ariaPressed" => {
+                !(value.is_boolean() || value.as_str() == Some("mixed"))
+            }
             "ariaCurrent" => parse_aria_current(value).is_none(),
             "ariaLive" => parse_aria_live(value).is_none(),
             "ariaExpanded" | "ariaSelected" | "ariaAtomic" | "ariaDisabled" | "ariaHidden" => {
@@ -1083,7 +1092,7 @@ pub(crate) fn element_problems(
             let expected = match property.as_str() {
                 "ariaLabel" | "ariaDescription" | "ariaValueText" => "a string",
                 "ariaLabelledBy" | "ariaDescribedBy" => "a string of space-separated element ids",
-                "ariaChecked" => "a boolean or \"mixed\"",
+                "ariaChecked" | "ariaPressed" => "a boolean or \"mixed\"",
                 "ariaCurrent" => {
                     "one of \"page\", \"step\", \"location\", \"date\", \"time\", \"true\", or \"false\""
                 }
@@ -1142,6 +1151,7 @@ pub(crate) fn element_problems(
                 | "ariaDescription"
                 | "ariaDescribedBy"
                 | "ariaChecked"
+                | "ariaPressed"
                 | "ariaExpanded"
                 | "ariaCurrent"
                 | "ariaLive"
@@ -1342,6 +1352,9 @@ where
             checked
         };
         el = el.aria_toggled(checked);
+    }
+    if let Some(pressed) = props.pressed.filter(|_| props.supports("ariaPressed")) {
+        el = el.aria_toggled(pressed);
     }
     if let Some(expanded) = props.expanded.filter(|_| props.supports("ariaExpanded")) {
         el = el.aria_expanded(expanded);
