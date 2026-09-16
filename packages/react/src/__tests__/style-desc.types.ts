@@ -11,6 +11,7 @@ const validStyle = {
   minWidth: "auto",
   maxWidth: "clamp(240px, 70%, 960px)",
   height: "calc(100% - 4ch)",
+  aspectRatio: "16 / 9",
   lineHeight: "1.4",
   whiteSpace: "pre",
   background: "oklch(67.3% 0.182 276.935)",
@@ -37,6 +38,9 @@ const validStyle = {
     { type: "repeat", count: 2, tracks: [{ type: "auto" }] },
   ],
 } satisfies StyleDesc
+
+const numericAspectRatio = { aspectRatio: 1 } satisfies StyleDesc
+void numericAspectRatio
 
 const intrinsicAndViewportLengths = {
   width: "max-content",
