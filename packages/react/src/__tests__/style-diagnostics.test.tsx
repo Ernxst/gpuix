@@ -15,6 +15,21 @@ afterEach(() => {
 })
 
 describeNative("style diagnostics", { timeout: 12_000 }, () => {
+  it("accepts touchAction as a silent native no-op", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    testRoot.render(
+      <div
+        data-testid="map"
+        style={{ touchAction: "none", hover: { touchAction: "auto" } } as StyleDesc}
+      />,
+    )
+
+    expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it("keeps accessibility diagnostics honest about whether each value landed", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })
