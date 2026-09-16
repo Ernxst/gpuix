@@ -8,10 +8,15 @@ import type { Container, HostContext, MutationRenderer, Props } from "../types/h
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
-function recordingRenderer(): MutationRenderer & { styles: object[] } {
+function recordingRenderer(): MutationRenderer & {
+  styles: object[]
+  eventListeners: Array<[id: number, eventType: string, hasHandler: boolean]>
+} {
   const styles: object[] = []
+  const eventListeners: Array<[id: number, eventType: string, hasHandler: boolean]> = []
   return {
     styles,
+    eventListeners,
     createElement() {},
     destroyElement: () => [],
     appendChild() {},
@@ -20,24 +25,39 @@ function recordingRenderer(): MutationRenderer & { styles: object[] } {
       styles.push(style)
     },
     setText() {},
-    setEventListener() {},
+    setEventListener(id, eventType, hasHandler) {
+      eventListeners.push([id, eventType, hasHandler])
+    },
     setRoot() {},
     setCustomProp() {},
     flushMutations() {},
   }
 }
 
+function createRecordingInstance(
+  type: Parameters<typeof hostConfig.createInstance>[0],
+  props: Props
+) {
+  const renderer = recordingRenderer()
+  const container: Container = {
+    renderer,
+    ids: { nextElementId: 0 },
+    eventHandlers: new Map(),
+    windowKeyEventHandlers: {},
+    windowKeyEventId: 0,
+    windowSelectionEventId: 0,
+  }
+  const instance = hostConfig.createInstance(
+    type,
+    props,
+    container,
+    null as unknown as HostContext
+  )
+  return { container, instance, renderer }
+}
+
 describe("host config hideInstance", () => {
   it("keeps the element style when React hides the element", () => {
-    const renderer = recordingRenderer()
-    const container: Container = {
-      renderer,
-      ids: { nextElementId: 0 },
-      eventHandlers: new Map(),
-      windowKeyEventHandlers: {},
-      windowKeyEventId: 0,
-      windowSelectionEventId: 0,
-    }
     const props: Props = {
       style: {
         width: 80,
@@ -46,12 +66,7 @@ describe("host config hideInstance", () => {
         hover: { backgroundColor: "#a6e3a1" },
       },
     }
-    const instance = hostConfig.createInstance(
-      "div",
-      props,
-      container,
-      null as unknown as HostContext
-    )
+    const { instance, renderer } = createRecordingInstance("div", props)
 
     hostConfig.hideInstance(instance)
     expect(renderer.styles.at(-1)).toEqual({
@@ -63,6 +78,112 @@ describe("host config hideInstance", () => {
 
     hostConfig.unhideInstance(instance, props)
     expect(renderer.styles.at(-1)).toEqual(props.style)
+  })
+})
+
+describe("host config event listener updates", () => {
+  it("does not inspect event props during a style-only update", () => {
+    const initialProps: Props = { style: { width: 40, height: 40 } }
+    const { instance, renderer } = createRecordingInstance("img", initialProps)
+    let eventPropReads = 0
+    const observeEventReads = (props: Props): Props =>
+      new Proxy(props, {
+        get(target, key, receiver) {
+          if (typeof key === "string" && key.startsWith("on")) eventPropReads += 1
+          return Reflect.get(target, key, receiver)
+        },
+      })
+
+    hostConfig.commitUpdate(
+      instance,
+      "img",
+      observeEventReads(initialProps),
+      observeEventReads({ style: { width: 48, height: 48 } }),
+      null
+    )
+
+    expect(eventPropReads).toBe(0)
+    expect(renderer.eventListeners).toEqual([])
+  })
+
+  it("keeps null event props on the fast path", () => {
+    const initialProps: Props = { style: { width: 40 }, onClick: undefined }
+    const { instance, renderer } = createRecordingInstance("img", initialProps)
+    let eventPropReads = 0
+    const observeEventReads = (props: Props): Props =>
+      new Proxy(props, {
+        get(target, key, receiver) {
+          if (typeof key === "string" && key.startsWith("on")) eventPropReads += 1
+          return Reflect.get(target, key, receiver)
+        },
+      })
+
+    hostConfig.commitUpdate(
+      instance,
+      "img",
+      observeEventReads(initialProps),
+      observeEventReads({ style: { width: 48 }, onClick: null }),
+      null
+    )
+
+    expect(eventPropReads).toBeLessThan(10)
+    expect(renderer.eventListeners).toEqual([])
+  })
+
+  it("preserves native click listener ownership while handlers change", () => {
+    const initialProps: Props = { style: { width: 40 } }
+    const firstHandler = vi.fn()
+    const replacementHandler = vi.fn()
+    const captureHandler = vi.fn()
+    const { container, instance, renderer } = createRecordingInstance("div", initialProps)
+    const firstProps: Props = { ...initialProps, onClick: firstHandler }
+
+    hostConfig.commitUpdate(instance, "div", initialProps, firstProps, null)
+    expect(renderer.eventListeners).toEqual([[instance.id, "click", true]])
+    expect(container.eventHandlers.get(instance.id)?.get("click")).toBe(firstHandler)
+
+    renderer.eventListeners.length = 0
+    const replacementProps: Props = { ...initialProps, onClick: replacementHandler }
+    hostConfig.commitUpdate(instance, "div", firstProps, replacementProps, null)
+    expect(renderer.eventListeners).toEqual([])
+    expect(container.eventHandlers.get(instance.id)?.get("click")).toBe(replacementHandler)
+
+    const captureProps: Props = { ...replacementProps, onClickCapture: captureHandler }
+    hostConfig.commitUpdate(instance, "div", replacementProps, captureProps, null)
+    expect(renderer.eventListeners).toEqual([])
+    expect(container.eventHandlers.get(instance.id)?.get("clickCapture")).toBe(captureHandler)
+
+    hostConfig.commitUpdate(instance, "div", captureProps, replacementProps, null)
+    expect(renderer.eventListeners).toEqual([])
+    expect(container.eventHandlers.get(instance.id)?.has("clickCapture")).toBe(false)
+    expect(container.eventHandlers.get(instance.id)?.get("click")).toBe(replacementHandler)
+
+    hostConfig.commitUpdate(instance, "div", replacementProps, initialProps, null)
+    expect(renderer.eventListeners).toEqual([[instance.id, "click", false]])
+    expect(container.eventHandlers.has(instance.id)).toBe(false)
+  })
+
+  it("keeps onDrop and onFileDrop as distinct registry entries", () => {
+    const initialProps: Props = { style: { width: 40 } }
+    const onDrop = vi.fn()
+    const onFileDrop = vi.fn()
+    const { container, instance, renderer } = createRecordingInstance("div", initialProps)
+    const bothProps: Props = { ...initialProps, onDrop, onFileDrop }
+
+    hostConfig.commitUpdate(instance, "div", initialProps, bothProps, null)
+    expect(renderer.eventListeners).toEqual([
+      [instance.id, "drop", true],
+      [instance.id, "fileDrop", true],
+    ])
+    expect(container.eventHandlers.get(instance.id)?.get("drop")).toBe(onDrop)
+    expect(container.eventHandlers.get(instance.id)?.get("fileDrop")).toBe(onFileDrop)
+
+    renderer.eventListeners.length = 0
+    const legacyOnlyProps: Props = { ...initialProps, onFileDrop }
+    hostConfig.commitUpdate(instance, "div", bothProps, legacyOnlyProps, null)
+    expect(renderer.eventListeners).toEqual([[instance.id, "drop", false]])
+    expect(container.eventHandlers.get(instance.id)?.has("drop")).toBe(false)
+    expect(container.eventHandlers.get(instance.id)?.get("fileDrop")).toBe(onFileDrop)
   })
 })
 

@@ -397,6 +397,13 @@ function hasEventListener(props: Props, eventType: string): boolean {
   )
 }
 
+function hasAnyEventListener(props: Props): boolean {
+  const eventProps = props as Record<string, unknown>
+  return Object.keys(props).some(
+    (propName) => EVENT_PROP_NAMES.has(propName) && eventProps[propName] != null
+  )
+}
+
 function syncEventListeners(container: Container, id: number, props: Props): void {
   const eventProps = props as EventProps
   for (const [propName, eventType, phase, override] of EVENT_PROPS) {
@@ -1747,7 +1754,9 @@ export const hostConfig = {
     // Always resend style — per-element JSON is small, and this avoids
     // bugs from same-reference mutations or style removal.
     container.renderer.setStyle(instance.id, styleForRenderer(instance, container, newProps) ?? {})
-    diffEventListeners(container, instance.id, oldProps, newProps)
+    if (hasAnyEventListener(oldProps) || hasAnyEventListener(newProps)) {
+      diffEventListeners(container, instance.id, oldProps, newProps)
+    }
     // Custom prop diff (for non-div/text elements)
     instance.props = newProps
     diffCustomProps(container.renderer, instance, oldProps, newProps)
