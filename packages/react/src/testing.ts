@@ -916,6 +916,10 @@ export class TestRenderer implements NativeRenderer {
     this.windowEventHandler = handler
   }
 
+  setWindowSelectionChange(enabled: boolean, eventId: number): void {
+    this.native.setWindowSelectionChange?.(enabled, eventId)
+  }
+
   setStrictStyles(enabled: boolean): void {
     this.native.setStrictStyles(enabled)
   }
@@ -3084,6 +3088,8 @@ export interface TestRootOptions extends TestWindowOptions {
   allowPrivateNetworkImages?: boolean
   /** Match render()'s strict diagnostic mode. Defaults to the active runtime policy. */
   strictStyles?: boolean
+  /** Window-level text selection. Fires when the selected ranges change. */
+  onSelectionChange?: (event: EventPayload, renderer: NativeRenderer) => void
 }
 
 /**
@@ -3106,7 +3112,10 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
     request: (callback) => renderer.requestFrame(callback),
   })
   renderer.setAllowPrivateNetworkImages(options.allowPrivateNetworkImages ?? false)
-  const root = createRoot(renderer, { strictStyles: options.strictStyles })
+  const root = createRoot(renderer, {
+    strictStyles: options.strictStyles,
+    onSelectionChange: options.onSelectionChange,
+  })
   const queries = getQueries(renderer, () => renderer.getRoot(), true)
   let unmounted = false
 

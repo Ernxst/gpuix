@@ -203,6 +203,8 @@ export declare class GpuixRenderer {
   writeClipboardText(text: string): void
   /** Read plain text from the platform clipboard, or null if it holds none. */
   readClipboardText(): string | null
+  /** Enable the window selectionChange event requested by the React renderer. */
+  setWindowSelectionChange(enabled: boolean, eventId: number): void
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
   /** Drop the current selection and request a repaint. */
@@ -595,6 +597,7 @@ export declare class TestGpuixRenderer {
   getSelectedText(): string | null
   /** Drop the current selection. */
   clearSelection(): void
+  setWindowSelectionChange(enabled: boolean, eventId: number): void
   /** One `<input>`/`<textarea>`'s API value, or null for any other element. */
   getInputValue(elementId: number): string | null
   /** `[selectionStart, selectionEnd, backward]` in UTF-16 code units, or null. */
@@ -958,7 +961,8 @@ export interface EventPayload {
    * Element-defined string payload.
    * Populated for: `<diff>` toggleFile (the file path), showMore (the
    * hidden line count), and lineClick (the line text); `<markdown>`
-   * linkClick (the URL).
+   * linkClick (the URL); `selectionChange` (joined selected text, or
+   * absent when the selection is empty).
    */
   value?: string
   /** Line number on the pre-change side. Populated for: `<diff>` lineClick. */

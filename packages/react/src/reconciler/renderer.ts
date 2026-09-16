@@ -270,6 +270,8 @@ function renderSlot(): RenderSlot {
 
 export interface RenderOptions extends WindowOptions {
   onEvent?: (event: EventPayload) => void
+  /** Window-level text selection. Fires when the selected ranges change. */
+  onSelectionChange?: (event: EventPayload, renderer: NativeRenderer) => void
   onMenuAction?: (event: MenuActionEvent) => void
   /** Runs once after menu Quit, explicit quit, last-window close, or an owned renderer's fatal error. */
   onTerminated?: () => void | Promise<void>
@@ -455,12 +457,7 @@ function thrownToError(thrown: unknown): Error | string {
   }
 }
 
-const OVERLAY_MONO =
-  process.platform === "win32"
-    ? "Consolas"
-    : process.platform === "darwin"
-      ? "Menlo"
-      : "DejaVu Sans Mono"
+const OVERLAY_MONO = "ui-monospace, SFMono-Regular, Consolas, monospace"
 
 function overlayStackLines(error: { message: string; stack: string }): string[] {
   const lines = error.stack.length === 0 ? [error.message] : error.stack.split("\n")
@@ -666,6 +663,7 @@ function installProcessTerminationGuards(slot: RenderSlot): void {
 export function render(node: ReactNode, options: RenderOptions = {}): Root {
   const {
     onEvent,
+    onSelectionChange,
     onMenuAction,
     onTerminated,
     renderer: injected,
@@ -749,6 +747,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
   let root!: Root
   root = createRoot(host, {
     strictStyles,
+    onSelectionChange,
     onUncaughtError: ({ error, componentStack }) => {
       // Injected renderers are embedder-owned lifecycles: the failed root and
       // renderer diagnostic are the recovery signal, and the embedder decides

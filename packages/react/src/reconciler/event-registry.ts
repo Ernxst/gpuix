@@ -439,6 +439,13 @@ function dispatchGpuixEvent(
     return dispatchHoverTransition(container, payload, renderer)
   }
 
+  if (payload.eventType === "selectionChange") {
+    if (payload.elementId === container.windowSelectionEventId) {
+      container.onSelectionChange?.({ ...payload, elementId: 0 }, renderer)
+    }
+    return { defaultPrevented: false, propagationStopped: false }
+  }
+
   if (shouldSuppressKeyboardClick(container, payload)) {
     return { defaultPrevented: true, propagationStopped: false }
   }

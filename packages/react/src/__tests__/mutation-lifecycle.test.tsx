@@ -36,6 +36,7 @@ describe("host config hideInstance", () => {
       eventHandlers: new Map(),
       windowKeyEventHandlers: {},
       windowKeyEventId: 0,
+      windowSelectionEventId: 0,
     }
     const props: Props = {
       style: {

@@ -117,6 +117,7 @@ async function buildProduction(): Promise<void> {
     for (const message of bundle.logs) console.error(message)
     throw new Error("browser bundle failed")
   }
+  fs.copyFileSync(path.join(ROOT, "examples", "web.css"), path.join(PRODUCTION_OUTPUT, "web.css"))
 }
 
 async function main() {

@@ -960,6 +960,11 @@ thread_local! {
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     static PENDING_DEBUG_OVERLAY: RefCell<Option<gpui::DebugFrameOverlayMode>> =
         const { RefCell::new(None) };
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    static PENDING_WINDOW_SELECTION_CHANGE: RefCell<Option<(bool, u64)>> =
+        const { RefCell::new(None) };
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    static PENDING_FOCUS_ELEMENT: RefCell<Option<(u64, bool)>> = const { RefCell::new(None) };
     /// Shared scroll handles — GpuixView writes here during render(),
     /// platform-local handlers read from here for programmatic scroll control.
     /// ScrollHandle is Rc<RefCell<...>> so its methods (set_offset, offset,
@@ -1407,6 +1412,10 @@ enum UiCommand {
     },
     ActivateWindow,
     SetWindowTitle(String),
+    SetWindowSelectionChange {
+        enabled: bool,
+        event_id: u64,
+    },
     GetWindowSize {
         response: SyncSender<WindowSize>,
     },
@@ -1665,6 +1674,13 @@ async fn run_ui_commands(
                 cx.notify();
                 window.refresh();
             }),
+            UiCommand::SetWindowSelectionChange { enabled, event_id } => {
+                window.update(cx, move |view, window, cx| {
+                    view.set_selection_change_listener(enabled, event_id);
+                    cx.notify();
+                    window.refresh();
+                })
+            }
             UiCommand::GetWindowSize { response } => {
                 window.update(cx, move |_view, window, _cx| {
                     response.send(window_size(window)).ok();
@@ -4579,6 +4595,29 @@ impl GpuixRenderer {
 
     // ── Selection API ────────────────────────────────────────────────
 
+    /// Enable the window selectionChange event requested by the React renderer.
+    #[napi]
+    pub fn set_window_selection_change(&self, enabled: bool, event_id: f64) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.set_selection_change_listener(enabled, event_id);
+            cx.notify();
+            window.refresh();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetWindowSelectionChange { enabled, event_id });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// The current text selection joined in document order, or null.
     #[napi]
     pub fn get_selected_text(&self) -> Option<String> {
@@ -5847,7 +5886,7 @@ fn start_web_app(
                 window.set_debug_frame_overlay_mode(mode);
             }
             cx.new(|view_cx| {
-                GpuixView::new(
+                let mut view = GpuixView::new(
                     tree,
                     canvas_display_lists,
                     Some(event_callback),
@@ -5856,7 +5895,15 @@ fn start_web_app(
                     selection,
                     crate::custom_elements::img::ImageNetworkPolicy::default(),
                     view_cx,
-                )
+                );
+                if let Some((enabled, event_id)) =
+                    PENDING_WINDOW_SELECTION_CHANGE.with(|pending| pending.borrow_mut().take())
+                {
+                    view.set_selection_change_listener(enabled, event_id);
+                }
+                view.pending_focus_element =
+                    PENDING_FOCUS_ELEMENT.with(|pending| pending.borrow_mut().take());
+                view
             })
         });
         match window {
@@ -6282,6 +6329,10 @@ impl WebGpuixRenderer {
     ) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
         let reveal = !prevent_scroll.unwrap_or(false);
+        if WEB_WINDOW.with(|window| window.borrow().is_none()) {
+            PENDING_FOCUS_ELEMENT.with(|pending| *pending.borrow_mut() = Some((id, reveal)));
+            return Ok(());
+        }
         update_web_view(move |view, window, cx| {
             view.focus_element(id, reveal, window, cx);
         })
@@ -6379,6 +6430,25 @@ impl WebGpuixRenderer {
             .map_or(wasm_bindgen::JsValue::NULL, |value| {
                 wasm_bindgen::JsValue::from_str(&value)
             })
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowSelectionChange)]
+    pub fn set_window_selection_change(
+        &self,
+        enabled: bool,
+        event_id: f64,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let event_id = web_element_id(event_id)?;
+        if WEB_WINDOW.with(|window| window.borrow().is_none()) {
+            PENDING_WINDOW_SELECTION_CHANGE.with(|pending| {
+                *pending.borrow_mut() = Some((enabled, event_id));
+            });
+            return Ok(());
+        }
+        update_web_view(move |view, _window, cx| {
+            view.set_selection_change_listener(enabled, event_id);
+            cx.notify();
+        })
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = clearSelection)]
@@ -6910,6 +6980,8 @@ pub(crate) struct GpuixView {
     /// Created lazily for elements with keyboard or focus/blur listeners.
     /// Handles persist across renders so GPUI maintains focus state.
     pub(crate) focus_handles: HashMap<u64, gpui::FocusHandle>,
+    /// Latest explicit focus request waiting for its retained focus handle.
+    pending_focus_element: Option<(u64, bool)>,
     /// Autofocus targets whose reveal waits for their first layout pass.
     pending_autofocus_reveals: Vec<u64>,
     /// Tab defaults wait for the matching React keydown dispatch. Serializing
@@ -6978,6 +7050,9 @@ pub(crate) struct GpuixView {
     pub(crate) style_transition_frame_requests: u32,
     /// Live text selection, shared with the paint closures and the napi methods.
     pub(crate) selection: SharedSelection,
+    window_selection_change: bool,
+    window_selection_event_id: u64,
+    reported_selection: Option<u64>,
     pub(crate) image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     /// Retained owner and pressed-button lifetime for mouse pointer capture.
     pointer_router: crate::pointer::SharedPointerRouter,
@@ -7209,6 +7284,7 @@ impl GpuixView {
             root_focus_handle: cx.focus_handle().tab_stop(false),
             focus_lost_subscription: None,
             focus_handles: HashMap::new(),
+            pending_focus_element: None,
             pending_autofocus_reveals: Vec::new(),
             pending_tab_key_down: None,
             queued_tab_key_downs: VecDeque::new(),
@@ -7237,6 +7313,9 @@ impl GpuixView {
             transition_states: HashMap::new(),
             style_transition_frame_requests: 0,
             selection,
+            window_selection_change: false,
+            window_selection_event_id: 0,
+            reported_selection: None,
             image_network_policy,
             pointer_router: Default::default(),
             window_activation_subscription: None,
@@ -7263,6 +7342,34 @@ impl GpuixView {
 
     pub(crate) fn unobserve_resize(&mut self, id: u64) {
         self.observed_resizes.remove(&id);
+    }
+
+    pub(crate) fn set_selection_change_listener(&mut self, enabled: bool, event_id: u64) {
+        self.window_selection_change = enabled;
+        self.window_selection_event_id = event_id;
+        self.reported_selection = None;
+    }
+
+    fn emit_selection_change(&mut self) {
+        if !self.window_selection_change {
+            return;
+        }
+        let selection = self.selection.lock();
+        let identity = selection.identity();
+        if self.reported_selection == Some(identity)
+            || (identity == 0 && self.reported_selection.is_none())
+        {
+            return;
+        }
+        let value = selection.selected_text();
+        drop(selection);
+        self.reported_selection = Some(identity);
+        emit_event_full(
+            &self.event_callback,
+            self.window_selection_event_id,
+            "selectionChange",
+            |payload| payload.value = value,
+        );
     }
 
     fn emit_resize_observations(&mut self, scale_factor: f64) {
@@ -7946,7 +8053,8 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        if let Some(handle) = self.focus_handles.get(&id) {
+        if let Some(handle) = self.focus_handles.get(&id).cloned() {
+            self.pending_focus_element = None;
             let hidden = {
                 let tree = self.tree.lock().unwrap();
                 self.display_none_in_ancestry(&tree, id, window)
@@ -7960,6 +8068,8 @@ impl GpuixView {
                     self.scroll_focused_element_into_view(id, cx);
                 }
             }
+        } else {
+            self.pending_focus_element = Some((id, reveal));
         }
         cx.notify();
     }
@@ -9861,6 +9971,10 @@ impl gpui::Render for GpuixView {
         // Sync focus handles before building elements.
         self.sync_focus_handles(&tree, &callback, window, cx);
 
+        if let Some((id, reveal)) = self.pending_focus_element.take() {
+            self.focus_element(id, reveal, window, cx);
+        }
+
         if self.focus_lost_subscription.is_none() {
             self.focus_lost_subscription = Some(cx.on_focus_lost(window, |view, window, cx| {
                 if window.focused(cx).is_none() {
@@ -9970,6 +10084,7 @@ impl gpui::Render for GpuixView {
         // Flushed after the root build so a `setState` in the handler cannot
         // re-enter this build.
         emit_highlight_events(&callback, &highlight_events);
+        self.emit_selection_change();
 
         // The frame reset must paint BEFORE any text, so it is the first child of
         // the root wrapper. Without it the selection registry accumulates stale
@@ -10004,14 +10119,22 @@ impl gpui::Render for GpuixView {
                 .child(selection_frame_reset(
                     self.selection.clone(),
                     move |position, app| {
-                        drag_move_view
-                            .update(app, |view, cx| view.on_selection_mouse_move(position, cx))
-                            .ok();
+                        // AppKit dispatches with GpuixView leased. Defer until
+                        // that lease returns or a nested update panics.
+                        let drag_move_view = drag_move_view.clone();
+                        app.defer(move |app| {
+                            drag_move_view
+                                .update(app, |view, cx| view.on_selection_mouse_move(position, cx))
+                                .ok();
+                        });
                     },
                     move |app| {
-                        drag_end_view
-                            .update(app, |view, _cx| view.stop_selection_scroll())
-                            .ok();
+                        let drag_end_view = drag_end_view.clone();
+                        app.defer(move |app| {
+                            drag_end_view
+                                .update(app, |view, _cx| view.stop_selection_scroll())
+                                .ok();
+                        });
                     },
                 ))
                 .child(crate::automation::bounds_frame_reset())

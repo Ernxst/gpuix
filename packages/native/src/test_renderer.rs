@@ -1971,6 +1971,24 @@ impl TestGpuixRenderer {
         self.selection.lock().clear();
     }
 
+    #[napi]
+    pub fn set_window_selection_change(&self, enabled: bool, event_id: f64) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.set_selection_change_listener(enabled, event_id);
+                    cx.notify();
+                });
+                window.refresh();
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
     // ── Text editing API ───────────────────────────────────────────────
     // Each of these draws the committed tree first, as `getElementBounds`
     // does. A React commit only reaches the editor when a frame syncs the

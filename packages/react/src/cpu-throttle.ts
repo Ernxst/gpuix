@@ -12,6 +12,7 @@ function isMacCpuThrottle(value: string): value is MacCpuThrottle {
 }
 
 export function readMacCpuThrottle(): MacCpuThrottle | null {
+  if (typeof process === "undefined") return null
   const raw = (process.env.THROTTLE ?? "").trim().toLowerCase()
   if (!raw) return null
   if (!isMacCpuThrottle(raw)) {
