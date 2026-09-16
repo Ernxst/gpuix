@@ -52,7 +52,7 @@ describe("@gpuix/react/globals — navigator.clipboard edge cases", () => {
     expect(typeof Object.getOwnPropertyDescriptor(nav, "clipboard")?.get).toBe("function")
   })
 
-  it("does not abort when navigator's getter throws, and the other four globals still install", async () => {
+  it("does not abort when navigator's getter throws, and the other globals still install", async () => {
     Object.defineProperty(globalThis, "navigator", {
       configurable: true,
       get() {

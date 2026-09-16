@@ -4597,7 +4597,7 @@ real platform and a native clipboard call would hit it.
 
 `import "@gpuix/react/globals"` is an opt-in, side-effect-only entry for code
 that assumes a browser: it installs exactly `requestAnimationFrame`,
-`cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, and
+`cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`, and
 `navigator.clipboard` on
 `globalThis`, and nothing else — no `document`. Each name is installed only if
 it is not already present, so a real browser, Vitest's `jsdom`/`happy-dom`
@@ -4611,6 +4611,11 @@ above — defined on a pre-existing `navigator` that lacks a `clipboard` of its
 own, or as part of a newly defined `navigator` when none exists at all
 (Node has had a global `navigator` since v21, so the common case on the
 server is the former).
+
+`Image` is the native-compatible constructor exported by `@gpuix/react`; its
+instances load through the most recently attached GPUIX root and support
+`src`, `decode()`, `naturalWidth`, and `naturalHeight` for Canvas 2D image
+sources.
 
 ### ResizeObserver
 

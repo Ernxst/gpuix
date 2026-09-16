@@ -13,6 +13,7 @@ describe("@gpuix/react (root entry)", () => {
     expect(Reflect.has(globalThis, "requestAnimationFrame")).toBe(false)
     expect(Reflect.has(globalThis, "cancelAnimationFrame")).toBe(false)
     expect(Reflect.has(globalThis, "scrollTo")).toBe(false)
+    expect(Reflect.has(globalThis, "Image")).toBe(false)
     // Node has had a global `navigator` since v21, so assert on `clipboard`
     // rather than on `navigator` itself.
     expect(globalThis.navigator?.clipboard).toBeUndefined()
