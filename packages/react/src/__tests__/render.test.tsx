@@ -650,6 +650,428 @@ render(React.createElement("text", null, "injected native menu smoke"), {
 setTimeout(() => renderer.simulateMenuAction("mark"), 50)
 `
 
+const PRODUCTION_WEBGPU_PROGRAM = `
+import { readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import React from "react"
+import ${JSON.stringify(join(srcDir, "globals.ts"))}
+import { flushSync, render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
+import { decodePng } from ${JSON.stringify(join(srcDir, "testing-png.ts"))}
+
+let renderer
+let redCanvas
+let blueCanvas
+
+function Scene({ showBlue = true, redWidth = 64 }) {
+  renderer = useGpuixRequired()
+  return React.createElement(
+    "div",
+    { style: { width: 160, height: 120, position: "relative", backgroundColor: "#101010" } },
+    React.createElement("canvas", {
+      ref: (canvas) => { redCanvas = canvas },
+      width: redWidth,
+      height: 40,
+      style: { position: "absolute", left: 8, top: 8 },
+    }),
+    showBlue ? React.createElement("canvas", {
+      ref: (canvas) => { blueCanvas = canvas },
+      width: 64,
+      height: 40,
+      style: { position: "absolute", left: 40, top: 24 },
+    }) : null,
+  )
+}
+
+async function configure(canvas, existingDevice) {
+  const adapter = existingDevice ? null : await navigator.gpu.requestAdapter()
+  const device = existingDevice ?? await adapter.requestDevice()
+  const context = canvas.getContext("webgpu")
+  if (!context) throw new Error("production canvas.getContext('webgpu') returned null")
+  context.configure({ device, format: "bgra8unorm" })
+  return { context, device }
+}
+
+function clear(target, color) {
+  const texture = target.context.getCurrentTexture()
+  const encoder = target.device.createCommandEncoder()
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{ view: texture.createView(), clearValue: color }],
+  })
+  pass.end()
+  target.device.queue.submit([encoder.finish()])
+}
+
+function clearTogether(first, second) {
+  const target = first
+  const texture = target.context.getCurrentTexture()
+  if (target.context.getCurrentTexture() !== texture) {
+    throw new Error("getCurrentTexture did not preserve the current canvas texture")
+  }
+  const view = texture.createView()
+  const encoder = target.device.createCommandEncoder()
+  for (const clearValue of [{ r: 1, a: 1 }, { g: 1, a: 1 }]) {
+    const pass = encoder.beginRenderPass({ colorAttachments: [{ view, clearValue }] })
+    pass.end()
+  }
+  const otherEncoder = second.device.createCommandEncoder()
+  const otherPass = otherEncoder.beginRenderPass({
+    colorAttachments: [{
+      view: second.context.getCurrentTexture().createView(),
+      clearValue: { b: 1, a: 1 },
+    }],
+  })
+  otherPass.end()
+  target.device.queue.submit([encoder.finish(), otherEncoder.finish()])
+}
+
+function pixel(image, x, y, scale) {
+  const offset = (Math.floor(y * scale) * image.width + Math.floor(x * scale)) * 4
+  return Array.from(image.data.slice(offset, offset + 4))
+}
+
+const screenshot = join(tmpdir(), "gpuix-production-webgpu-" + process.pid + ".png")
+const timeout = setTimeout(() => {
+  console.error("PRODUCTION_WEBGPU_TIMEOUT")
+  process.exitCode = 1
+  renderer?.quit()
+}, 5_000)
+const root = render(React.createElement(Scene), {
+  title: "GPUIX production WebGPU smoke",
+  width: 160,
+  height: 120,
+  menus: [],
+  focus: false,
+  show: false,
+})
+
+setTimeout(async () => {
+  try {
+    const red = await configure(redCanvas)
+    const blue = await configure(blueCanvas, red.device)
+    red.device.pushErrorScope("validation")
+    const invalidModule = red.device.createShaderModule({ code: "this is not WGSL" })
+    red.device.createRenderPipeline({
+      layout: "auto",
+      vertex: { module: invalidModule },
+      fragment: { module: invalidModule, targets: [{ format: "bgra8unorm" }] },
+    })
+    const validationError = await red.device.popErrorScope()
+    if (validationError?.name !== "GPUValidationError") {
+      throw new Error("invalid WGSL was not attributed to its logical device")
+    }
+    clearTogether(red, blue)
+
+    renderer.captureScreenshot(screenshot)
+    let image = decodePng(readFileSync(screenshot), screenshot)
+    const scale = renderer.getWindowSize().scaleFactor
+    if (String(pixel(image, 16, 16, scale)) !== "0,255,0,255") {
+      throw new Error("first production WebGPU canvas did not present its second frame")
+    }
+    if (String(pixel(image, 48, 32, scale)) !== "0,0,255,255") {
+      throw new Error("second production WebGPU canvas did not composite above the first")
+    }
+
+    clear(red, { r: 1, a: 0 })
+    renderer.captureScreenshot(screenshot)
+    image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 16, 16, scale)) !== "255,0,0,255") {
+      throw new Error("default WebGPU alpha mode did not composite as opaque")
+    }
+
+    const module = red.device.createShaderModule({ code:
+      "@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {" +
+      "let p = array(vec2f(-1, -1), vec2f(3, -1), vec2f(-1, 3));" +
+      "return vec4f(p[i], 0, 1);}" +
+      "@fragment fn fs() -> @location(0) vec4f { return vec4f(1, 0, 0, 1); }"
+    })
+    const maskedPipeline = red.device.createRenderPipeline({
+      layout: "auto",
+      vertex: { module, entryPoint: "vs" },
+      fragment: { module, entryPoint: "fs", targets: [{ format: "bgra8unorm" }] },
+      multisample: { mask: 0 },
+    })
+    const maskedEncoder = red.device.createCommandEncoder()
+    const maskedPass = maskedEncoder.beginRenderPass({
+      colorAttachments: [{
+        view: red.context.getCurrentTexture().createView(),
+        clearValue: { g: 1, a: 1 },
+      }],
+    })
+    maskedPass.setPipeline(maskedPipeline)
+    maskedPass.draw(3)
+    maskedPass.end()
+    red.device.queue.submit([maskedEncoder.finish()])
+    renderer.captureScreenshot(screenshot)
+    image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 16, 16, scale)) !== "0,255,0,255") {
+      throw new Error("zero multisample mask did not suppress fragment writes")
+    }
+
+    red.device.pushErrorScope("validation")
+    red.device.createRenderPipeline({
+      layout: "auto",
+      vertex: { module, entryPoint: "missing_vertex_entry" },
+      fragment: { module, entryPoint: "fs", targets: [{ format: "bgra8unorm" }] },
+    })
+    if ((await red.device.popErrorScope())?.name !== "GPUValidationError") {
+      throw new Error("invalid pipeline was not contained by its logical device")
+    }
+
+    red.device.pushErrorScope("validation")
+    red.device.createBuffer({ size: Number.MAX_SAFE_INTEGER, usage: GPUBufferUsage.COPY_DST })
+    if ((await red.device.popErrorScope())?.name !== "GPUValidationError") {
+      throw new Error("invalid buffer limits were not contained by its logical device")
+    }
+
+    const drawPipeline = red.device.createRenderPipeline({
+      layout: "auto",
+      vertex: { module, entryPoint: "vs" },
+      fragment: { module, entryPoint: "fs", targets: [{ format: "bgra8unorm" }] },
+    })
+    const shortIndices = red.device.createBuffer({
+      size: 4,
+      usage: GPUBufferUsage.INDEX,
+      mappedAtCreation: true,
+    })
+    new Uint16Array(shortIndices.getMappedRange()).set([0, 1])
+    shortIndices.unmap()
+    red.device.pushErrorScope("validation")
+    const invalidDrawEncoder = red.device.createCommandEncoder()
+    const invalidDrawPass = invalidDrawEncoder.beginRenderPass({
+      colorAttachments: [{ view: red.context.getCurrentTexture().createView() }],
+    })
+    invalidDrawPass.setPipeline(drawPipeline)
+    invalidDrawPass.setIndexBuffer(shortIndices, "uint16")
+    invalidDrawPass.drawIndexed(3)
+    invalidDrawPass.end()
+    red.device.queue.submit([invalidDrawEncoder.finish()])
+    if ((await red.device.popErrorScope())?.name !== "GPUValidationError") {
+      throw new Error("invalid draw range was not contained by its logical device")
+    }
+    renderer.captureScreenshot(screenshot)
+    image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 16, 16, scale)) !== "0,255,0,255") {
+      throw new Error("invalid submission replaced the last complete canvas frame")
+    }
+
+    clear(blue, { b: 1, a: 1 })
+
+    flushSync(() => root.render(React.createElement(Scene, { showBlue: false, redWidth: 80 })))
+    clear(red, { r: 1, g: 1, a: 1 })
+    renderer.captureScreenshot(screenshot)
+    image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 48, 32, scale)) !== "255,255,0,255") {
+      throw new Error("resized production WebGPU canvas did not replace its presentation")
+    }
+
+    console.log("PRODUCTION_WEBGPU_OK")
+  } catch (error) {
+    console.error(error)
+    process.exitCode = 1
+  } finally {
+    clearTimeout(timeout)
+    try { rmSync(screenshot) } catch {}
+    renderer.quit()
+  }
+}, 50)
+`
+
+const INDEXED_GEOMETRY_WGSL = `
+struct VertexInput {
+  @location(0) position: vec2f,
+  @location(1) color: vec3f,
+}
+
+struct VertexOutput {
+  @builtin(position) position: vec4f,
+  @location(0) color: vec3f,
+}
+
+@vertex
+fn vertex_main(input: VertexInput) -> VertexOutput {
+  var output: VertexOutput;
+  output.position = vec4f(input.position, 0.0, 1.0);
+  output.color = input.color;
+  return output;
+}
+
+@fragment
+fn fragment_main(input: VertexOutput) -> @location(0) vec4f {
+  return vec4f(input.color, 1.0);
+}
+`
+
+const PRODUCTION_WEBGPU_INDEXED_PROGRAM = `
+import { readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import React from "react"
+import ${JSON.stringify(join(srcDir, "globals.ts"))}
+import { flushSync, render, useGpuixRequired } from ${JSON.stringify(join(srcDir, "index.ts"))}
+import { decodePng } from ${JSON.stringify(join(srcDir, "testing-png.ts"))}
+
+let renderer
+let canvas = null
+
+function Scene({ canvasKey, width }) {
+  renderer = useGpuixRequired()
+  return React.createElement("canvas", {
+    key: canvasKey,
+    ref: (value) => { canvas = value },
+    width,
+    height: 72,
+    style: { width, height: 72 },
+  })
+}
+
+function pixel(image, x, y, scale) {
+  const offset = (Math.floor(y * scale) * image.width + Math.floor(x * scale)) * 4
+  return Array.from(image.data.slice(offset, offset + 4))
+}
+
+function vertices(left, right, red, green) {
+  return new Float32Array([
+    left, -0.3, red, green, 0,
+    right, -0.3, red, green, 0,
+    left, 0.3, red, green, 0,
+    right, 0.3, red, green, 0,
+  ])
+}
+
+function draw(target, pipeline, vertexBuffer, indexBuffer) {
+  const encoder = target.device.createCommandEncoder()
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: target.context.getCurrentTexture().createView(),
+      clearValue: { r: 0, g: 0, b: 0, a: 1 },
+      loadOp: "clear",
+      storeOp: "store",
+    }],
+  })
+  pass.setPipeline(pipeline)
+  pass.setVertexBuffer(0, vertexBuffer)
+  pass.setIndexBuffer(indexBuffer, "uint16")
+  pass.drawIndexed(6)
+  pass.end()
+  target.device.queue.submit([encoder.finish()])
+}
+
+const screenshot = join(tmpdir(), "gpuix-production-webgpu-indexed-" + process.pid + ".png")
+const timeout = setTimeout(() => {
+  console.error("PRODUCTION_WEBGPU_INDEXED_TIMEOUT")
+  process.exitCode = 1
+  renderer?.quit()
+}, 5_000)
+
+const root = render(React.createElement(Scene, { canvasKey: "initial", width: 96 }), {
+  title: "GPUIX production WebGPU indexed geometry smoke",
+  width: 96,
+  height: 72,
+  menus: [],
+  focus: false,
+  show: false,
+})
+
+setTimeout(async () => {
+  let device
+  try {
+    const adapter = await navigator.gpu.requestAdapter()
+    device = await adapter.requestDevice()
+    const context = canvas.getContext("webgpu")
+    if (!context) throw new Error("production canvas.getContext('webgpu') returned null")
+    context.configure({ device, format: "bgra8unorm" })
+    const module = device.createShaderModule({
+      label: "indexed geometry shader",
+      code: ${JSON.stringify(INDEXED_GEOMETRY_WGSL)},
+    })
+    const pipeline = device.createRenderPipeline({
+      label: "indexed geometry pipeline",
+      layout: "auto",
+      vertex: {
+        module,
+        entryPoint: "vertex_main",
+        buffers: [{
+          arrayStride: 20,
+          attributes: [
+            { shaderLocation: 0, offset: 0, format: "float32x2" },
+            { shaderLocation: 1, offset: 8, format: "float32x3" },
+          ],
+        }],
+      },
+      fragment: {
+        module,
+        entryPoint: "fragment_main",
+        targets: [{ format: "bgra8unorm" }],
+      },
+    })
+    const initialVertices = vertices(-0.75, -0.15, 1, 0)
+    const vertexBuffer = device.createBuffer({
+      label: "dynamic quad vertices",
+      size: initialVertices.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      mappedAtCreation: true,
+    })
+    new Float32Array(vertexBuffer.getMappedRange()).set(initialVertices)
+    vertexBuffer.unmap()
+    const indexBuffer = device.createBuffer({
+      label: "quad indices",
+      size: 12,
+      usage: GPUBufferUsage.INDEX,
+      mappedAtCreation: true,
+    })
+    new Uint16Array(indexBuffer.getMappedRange()).set([0, 1, 2, 2, 1, 3])
+    indexBuffer.unmap()
+    const target = { context, device }
+    const scale = renderer.getWindowSize().scaleFactor
+
+    draw(target, pipeline, vertexBuffer, indexBuffer)
+    renderer.captureScreenshot(screenshot)
+    let image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 26, 36, scale)) !== "255,0,0,255") {
+      throw new Error("mapped vertex and index buffers did not render the red quad")
+    }
+    if (String(pixel(image, 70, 36, scale)) !== "0,0,0,255") {
+      throw new Error("first indexed frame did not clear the future quad position")
+    }
+
+    device.queue.writeBuffer(vertexBuffer, 0, vertices(0.15, 0.75, 0, 1))
+    draw(target, pipeline, vertexBuffer, indexBuffer)
+    renderer.captureScreenshot(screenshot)
+    image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 26, 36, scale)) !== "0,0,0,255") {
+      throw new Error("writeBuffer frame did not clear the previous quad position")
+    }
+    if (String(pixel(image, 70, 36, scale)) !== "0,255,0,255") {
+      throw new Error("writeBuffer did not move and recolor the indexed quad")
+    }
+
+    flushSync(() => root.render(
+      React.createElement(Scene, { canvasKey: "remounted", width: 80 })
+    ))
+    const remountedContext = canvas.getContext("webgpu")
+    if (!remountedContext) throw new Error("remounted canvas lost its WebGPU context")
+    remountedContext.configure({ device, format: "bgra8unorm" })
+    draw({ context: remountedContext, device }, pipeline, vertexBuffer, indexBuffer)
+    renderer.captureScreenshot(screenshot)
+    image = decodePng(readFileSync(screenshot), screenshot)
+    if (String(pixel(image, 58, 36, scale)) !== "0,255,0,255") {
+      throw new Error("indexed resources did not survive canvas resize and remount")
+    }
+
+    console.log("PRODUCTION_WEBGPU_INDEXED_OK")
+  } catch (error) {
+    console.error(error)
+    process.exitCode = 1
+  } finally {
+    clearTimeout(timeout)
+    device?.destroy()
+    try { rmSync(screenshot) } catch {}
+    renderer.quit()
+  }
+}, 50)
+`
+
 const ESM_TESTING_PROGRAM = `
 import {
   TestRenderer,
@@ -746,6 +1168,7 @@ console.log("LAZY_NATIVE_TEST_RENDERER_OK")
 `
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+const itMac = process.platform === "darwin" ? it : it.skip
 
 describe("native test renderer diagnostics", () => {
   it("loads and constructs the native renderer only on first use", async () => {
@@ -1414,4 +1837,41 @@ describeNative("render()", () => {
       } catch {}
     }
   }, 10_000)
+
+  itMac("presents successive WebGPU frames through the production macOS renderer", async () => {
+    const file = join(srcDir, "__tests__", "production-webgpu.tmp.tsx")
+    writeFileSync(file, PRODUCTION_WEBGPU_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file], 8_000)
+      expect(result.code, result.output).toBe(0)
+      expect(result.signal).toBeNull()
+      expect(result.output).not.toContain("PRODUCTION_WEBGPU_TIMEOUT")
+      expect(result.output.match(/^PRODUCTION_WEBGPU_OK$/gm), result.output).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 15_000)
+
+  itMac("renders updated indexed geometry through production WebGPU resize and remount", async () => {
+    const file = join(srcDir, "__tests__", "production-webgpu-indexed.tmp.tsx")
+    writeFileSync(file, PRODUCTION_WEBGPU_INDEXED_PROGRAM)
+
+    try {
+      const result = await runChildWithStatus("bun", [file], 8_000)
+      expect(result.code, result.output).toBe(0)
+      expect(result.signal).toBeNull()
+      expect(result.output).not.toContain("PRODUCTION_WEBGPU_INDEXED_TIMEOUT")
+      expect(
+        result.output.match(/^PRODUCTION_WEBGPU_INDEXED_OK$/gm),
+        result.output
+      ).toHaveLength(1)
+    } finally {
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 15_000)
 })

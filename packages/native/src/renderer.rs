@@ -2691,6 +2691,8 @@ pub struct GpuixRenderer {
     window_event_callback: WindowEventCallback,
     tree: Arc<Mutex<RetainedTree>>,
     canvas_display_lists: SharedDisplayLists,
+    #[cfg(target_os = "macos")]
+    web_gpu_canvases: crate::webgpu_canvas::WebGpuCanvasStore,
     lifecycle: Arc<Mutex<RendererLifecycle>>,
     animation_frame_timestamp_origin: FrameTimestampOrigin,
     #[cfg(target_os = "macos")]
@@ -2879,6 +2881,8 @@ impl GpuixRenderer {
             window_event_callback: Arc::new(Mutex::new(None)),
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             canvas_display_lists: SharedDisplayLists::default(),
+            #[cfg(target_os = "macos")]
+            web_gpu_canvases: crate::webgpu_canvas::WebGpuCanvasStore::default(),
             lifecycle: Arc::new(Mutex::new(RendererLifecycle::Uninitialized)),
             animation_frame_timestamp_origin: Arc::new(Mutex::new(None)),
             #[cfg(target_os = "macos")]
@@ -3460,6 +3464,173 @@ impl GpuixRenderer {
         Ok(())
     }
 
+    /// Present one GPU-produced clear through the real macOS window renderer.
+    /// The producer signals GPUI with a Metal event and never reads pixels back.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn present_web_gpu_clear(&self, id: f64, width: u32, height: u32, rgba: u32) -> Result<()> {
+        let id = to_element_id(id)?;
+        validate_canvas_target(&self.tree.lock().unwrap(), id).map_err(Error::from_reason)?;
+        let source = self
+            .web_gpu_canvases
+            .present(id, width, height, rgba)
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+        self.canvas_display_lists.install_presentation(id, source);
+        self.request_invalidate()
+    }
+
+    /// Create one renderer-owned logical WebGPU device over the shared wgpu device.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn create_web_gpu_device(&self) -> Result<f64> {
+        self.web_gpu_canvases
+            .create_device()
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Destroy a logical WebGPU device and every native resource it owns.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn destroy_web_gpu_device(&self, device_id: f64) -> Result<()> {
+        self.web_gpu_canvases
+            .destroy_device(device_id)
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Compile one WGSL shader module for a logical WebGPU device.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn create_web_gpu_shader_module(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        code: String,
+    ) -> Result<f64> {
+        self.web_gpu_canvases
+            .create_shader_module(device_id, label, code)
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Create one logical-device-owned WebGPU buffer.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn create_web_gpu_buffer(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        size: f64,
+        usage: u32,
+        initial_data: Uint8Array,
+    ) -> Result<f64> {
+        self.web_gpu_canvases
+            .create_buffer(device_id, label, size, usage, initial_data.as_ref())
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Destroy one logical-device-owned WebGPU buffer.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn destroy_web_gpu_buffer(&self, device_id: f64, buffer_id: f64) -> Result<()> {
+        self.web_gpu_canvases
+            .destroy_buffer(device_id, buffer_id)
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn destroy_web_gpu_shader_module(
+        &self,
+        device_id: f64,
+        shader_module_id: f64,
+    ) -> Result<()> {
+        self.web_gpu_canvases
+            .destroy_shader_module(device_id, shader_module_id)
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn destroy_web_gpu_render_pipeline(
+        &self,
+        device_id: f64,
+        render_pipeline_id: f64,
+    ) -> Result<()> {
+        self.web_gpu_canvases
+            .destroy_render_pipeline(device_id, render_pipeline_id)
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Queue one copy into a logical-device-owned WebGPU buffer.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn write_web_gpu_buffer(
+        &self,
+        device_id: f64,
+        buffer_id: f64,
+        offset: f64,
+        data: Uint8Array,
+    ) -> Result<()> {
+        self.web_gpu_canvases
+            .write_buffer(device_id, buffer_id, offset, data.as_ref())
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Create a triangle-list WebGPU render pipeline with optional vertex layouts.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn create_web_gpu_render_pipeline(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        vertex_module_id: f64,
+        vertex_entry_point: Option<String>,
+        fragment_module_id: f64,
+        fragment_entry_point: Option<String>,
+        vertex_buffers_json: String,
+        sample_mask: u32,
+    ) -> Result<f64> {
+        self.web_gpu_canvases
+            .create_render_pipeline(
+                device_id,
+                label,
+                vertex_module_id,
+                vertex_entry_point,
+                fragment_module_id,
+                fragment_entry_point,
+                vertex_buffers_json,
+                sample_mask,
+            )
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Submit ordered WebGPU command buffers, then install every completed canvas frame.
+    #[cfg(target_os = "macos")]
+    #[napi]
+    pub fn submit_web_gpu_commands(
+        &self,
+        device_id: f64,
+        submission_json: String,
+        ops: Uint32Array,
+        operands: Float64Array,
+    ) -> Result<()> {
+        let canvas_ids = crate::webgpu_canvas::submission_canvas_ids(&submission_json)
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+        {
+            let tree = self.tree.lock().unwrap();
+            for id in &canvas_ids {
+                validate_canvas_target(&tree, *id).map_err(Error::from_reason)?;
+            }
+        }
+        let sources = self
+            .web_gpu_canvases
+            .submit_commands(device_id, submission_json, ops.as_ref(), operands.as_ref())
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+        for (id, source) in sources {
+            self.canvas_display_lists.install_presentation(id, source);
+        }
+        self.request_invalidate()
+    }
+
     /// Start or join one renderer-local canvas image load. The observer keeps
     /// the decoded entry alive until JavaScript changes or releases the source.
     #[napi]
@@ -3585,6 +3756,8 @@ impl GpuixRenderer {
         let destroyed_canvas_ids: Vec<u64> =
             outcome.destroyed_ids.iter().map(|id| *id as u64).collect();
         crate::canvas::remove_display_lists(&self.canvas_display_lists, &destroyed_canvas_ids);
+        #[cfg(target_os = "macos")]
+        self.web_gpu_canvases.remove(&destroyed_canvas_ids);
         forget_canvas_diagnostics(&self.canvas_diagnostic_members, &destroyed_canvas_ids);
         self.request_invalidate()?;
         Ok(outcome.destroyed_ids)

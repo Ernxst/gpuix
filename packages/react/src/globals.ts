@@ -1,11 +1,11 @@
 /**
  * Opt-in `globalThis` shims for code written against the browser DOM.
  *
- * `import "@gpuix/react/globals"` installs exactly six names —
- * `requestAnimationFrame`, `cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, and
- * `navigator.clipboard` — and nothing else. Nobody is required to import
- * this: the root `@gpuix/react` entry installs no global, so a consumer who
- * never touches the DOM never gets one either.
+ * `import "@gpuix/react/globals"` installs the browser conveniences used by
+ * GPU-IX applications: animation frames, `window`, `scrollTo`,
+ * `ResizeObserver`, clipboard access, and the incremental native WebGPU API.
+ * Nobody is required to import this: the root `@gpuix/react` entry installs no
+ * global, so a consumer who never touches the DOM never gets one either.
  *
  * Each name is installed only if absent, so a real browser's globals (or an
  * earlier import of this module) always win. `requestAnimationFrame` and
@@ -63,6 +63,6 @@ if (Reflect.has(globalThis, "navigator")) {
   defineGlobalIfAbsent("navigator", { clipboard })
 }
 
-// A browser's navigator.gpu always wins. Desktop installs only the narrow
-// clear-and-present proof API; it does not manufacture a document.
+// A browser's navigator.gpu always wins. Desktop installs the experimental
+// native WebGPU subset; it does not manufacture a document.
 installWebGpuGlobal()

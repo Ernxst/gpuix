@@ -59,6 +59,29 @@ export declare class GpuixRenderer {
    */
   applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
   /**
+   * Present one GPU-produced clear through the real macOS window renderer.
+   * The producer signals GPUI with a Metal event and never reads pixels back.
+   */
+  presentWebGpuClear(id: number, width: number, height: number, rgba: number): void
+  /** Create one renderer-owned logical WebGPU device over the shared wgpu device. */
+  createWebGpuDevice(): number
+  /** Destroy a logical WebGPU device and every native resource it owns. */
+  destroyWebGpuDevice(deviceId: number): void
+  /** Compile one WGSL shader module for a logical WebGPU device. */
+  createWebGpuShaderModule(deviceId: number, label: string | undefined | null, code: string): number
+  /** Create one logical-device-owned WebGPU buffer. */
+  createWebGpuBuffer(deviceId: number, label: string | undefined | null, size: number, usage: number, initialData: Uint8Array): number
+  /** Destroy one logical-device-owned WebGPU buffer. */
+  destroyWebGpuBuffer(deviceId: number, bufferId: number): void
+  destroyWebGpuShaderModule(deviceId: number, shaderModuleId: number): void
+  destroyWebGpuRenderPipeline(deviceId: number, renderPipelineId: number): void
+  /** Queue one copy into a logical-device-owned WebGPU buffer. */
+  writeWebGpuBuffer(deviceId: number, bufferId: number, offset: number, data: Uint8Array): void
+  /** Create a triangle-list WebGPU render pipeline with optional vertex layouts. */
+  createWebGpuRenderPipeline(deviceId: number, label: string | undefined | null, vertexModuleId: number, vertexEntryPoint: string | undefined | null, fragmentModuleId: number, fragmentEntryPoint: string | undefined | null, vertexBuffersJson: string, sampleMask: number): number
+  /** Submit ordered WebGPU command buffers, then install every completed canvas frame. */
+  submitWebGpuCommands(deviceId: number, submissionJson: string, ops: Uint32Array, operands: Float64Array): void
+  /**
    * Start or join one renderer-local canvas image load. The observer keeps
    * the decoded entry alive until JavaScript changes or releases the source.
    */
@@ -406,8 +429,7 @@ export declare class TestGpuixRenderer {
   applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
   /**
    * Install a GPU-only test texture into one live `<canvas>` presentation.
-   * This exists solely to exercise the retained Metal surface path before a
-   * browser WebGPU API is exposed.
+   * This exercises the same retained Metal surface path as production.
    */
   installTestGpuCanvas(id: number, width: number, height: number, rgba: number): void
   /**
@@ -417,6 +439,24 @@ export declare class TestGpuixRenderer {
   advanceTestGpuCanvas(id: number, rgba: number): void
   /** Test-only lifetime counters for the retained GPU presentation seam. */
   getTestGpuCanvasState(): TestGpuCanvasState
+  /** Create one renderer-owned logical WebGPU device over the shared test producer. */
+  createWebGpuDevice(): number
+  /** Destroy a logical WebGPU device and every native resource it owns. */
+  destroyWebGpuDevice(deviceId: number): void
+  /** Compile one WGSL shader module for a logical WebGPU device. */
+  createWebGpuShaderModule(deviceId: number, label: string | undefined | null, code: string): number
+  /** Create one logical-device-owned WebGPU buffer. */
+  createWebGpuBuffer(deviceId: number, label: string | undefined | null, size: number, usage: number, initialData: Uint8Array): number
+  /** Destroy one logical-device-owned WebGPU buffer. */
+  destroyWebGpuBuffer(deviceId: number, bufferId: number): void
+  destroyWebGpuShaderModule(deviceId: number, shaderModuleId: number): void
+  destroyWebGpuRenderPipeline(deviceId: number, renderPipelineId: number): void
+  /** Queue one copy into a logical-device-owned WebGPU buffer. */
+  writeWebGpuBuffer(deviceId: number, bufferId: number, offset: number, data: Uint8Array): void
+  /** Create a triangle-list WebGPU render pipeline with optional vertex layouts. */
+  createWebGpuRenderPipeline(deviceId: number, label: string | undefined | null, vertexModuleId: number, vertexEntryPoint: string | undefined | null, fragmentModuleId: number, fragmentEntryPoint: string | undefined | null, vertexBuffersJson: string, sampleMask: number): number
+  /** Submit ordered WebGPU command buffers, then install every completed canvas frame. */
+  submitWebGpuCommands(deviceId: number, submissionJson: string, ops: Uint32Array, operands: Float64Array): void
   loadCanvasImage(observerId: number, sourceJson: string): void
   getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
   releaseCanvasImage(observerId: number): void

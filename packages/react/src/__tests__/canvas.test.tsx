@@ -195,6 +195,45 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     }
   })
 
+  it("uses imperative canvas bitmap dimensions and expires the prior WebGPU texture", async () => {
+    const testRoot = createTestRoot({ width: 160, height: 120 })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(<canvas ref={canvasRef} width={64} height={48} />)
+      const canvas = canvasRef.current!
+      const context = canvas.getContext("webgpu")!
+      await import("../globals.js")
+      const adapter = await (
+        globalThis.navigator as Navigator & {
+          gpu: { requestAdapter(): Promise<GPUAdapter> }
+        }
+      ).gpu.requestAdapter()
+      const device = await adapter.requestDevice()
+      context.configure({ device, format: "bgra8unorm" })
+      const previousTexture = context.getCurrentTexture()
+
+      canvas.width = 128
+      canvas.height = 96
+
+      expect({ width: canvas.width, height: canvas.height }).toEqual({ width: 128, height: 96 })
+      expect(() => previousTexture.createView()).toThrow(/stale/)
+      const encoder = device.createCommandEncoder()
+      encoder
+        .beginRenderPass({
+          colorAttachments: [
+            { view: context.getCurrentTexture().createView(), clearValue: [0, 1, 0, 1] },
+          ],
+        })
+        .end()
+      device.queue.submit([encoder.finish()])
+
+      flushSync(() => testRoot.render(<canvas ref={canvasRef} width={80} height={60} />))
+      expect({ width: canvas.width, height: canvas.height }).toEqual({ width: 80, height: 60 })
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
   it("rejects command encoders from a different logical WebGPU device", async () => {
     const testRoot = createTestRoot({ width: 120, height: 80 })
     const canvasRef = createRef<CanvasPublicInstance>()

@@ -31,6 +31,8 @@ pub mod style;
 mod syntax;
 mod text;
 mod theme;
+#[cfg(target_os = "macos")]
+mod webgpu_canvas;
 // Desktop only. HTTP goes through reqwest_client, not crates.io reqwest.
 #[cfg(not(target_family = "wasm"))]
 mod updater;
