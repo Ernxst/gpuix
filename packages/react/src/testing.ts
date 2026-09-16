@@ -285,6 +285,7 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
   setInputSelection(elementId: number, start: number, end: number, backward: boolean): void
   setStrictStyles(enabled: boolean): void
   setAllowPrivateNetworkImages(enabled: boolean): void
+  setAutoDrainAsyncTasks(enabled: boolean): void
   drainStyleDiagnostics(): StyleDiagnostic[]
   takeStyleDiagnosticsForReporting(): StyleDiagnostic[]
   captureScreenshot(path: string): void
@@ -306,6 +307,14 @@ export interface TestWindowOptions {
   height?: number
   /** Virtual display scale factor. An invalid request throws. */
   scaleFactor?: number
+}
+
+export interface TestRendererOptions extends TestWindowOptions {
+  /**
+   * `eager` drains native async tasks after renderer operations. `manual` leaves
+   * them queued until `advanceAsyncClock()` so tests can inspect intermediate frames.
+   */
+  asyncTaskMode?: "eager" | "manual"
 }
 
 let testWindowDefaults: TestWindowOptions = {}
@@ -761,6 +770,7 @@ export class TestRenderer implements NativeRenderer {
   private pickerResults: Array<string[] | string | null> = []
   private pickerRequestLog: PickerRequest[] = []
   private webGpuCanvasIds = new Set<number>()
+  private readonly asyncTaskMode: "eager" | "manual"
 
   get pickerRequests(): ReadonlyArray<PickerRequest> {
     return this.pickerRequestLog
@@ -769,7 +779,7 @@ export class TestRenderer implements NativeRenderer {
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
 
-  constructor(options: TestWindowOptions = {}) {
+  constructor(options: TestRendererOptions = {}) {
     const NativeTestRendererConstructor = initializeNativeTestRenderer()
     if (!NativeTestRendererConstructor) {
       throw new Error(
@@ -784,6 +794,8 @@ export class TestRenderer implements NativeRenderer {
       probedNativeTestRenderer ??
       new NativeTestRendererConstructor(geometry.width, geometry.height, geometry.scaleFactor)
     probedNativeTestRenderer = null
+    this.asyncTaskMode = options.asyncTaskMode ?? "eager"
+    this.native.setAutoDrainAsyncTasks(this.asyncTaskMode === "eager")
   }
 
   /** Release this renderer's offscreen window and native GPUI context. */
@@ -951,6 +963,9 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** Advance GPUI timers and synchronously deliver pending native frame callbacks.
+   *
+   *  In manual async-task mode, this drains queued work and leaves its repaint
+   *  pending for `drawPendingFrame()`.
    *
    *  A callback that throws does not stop the remaining callbacks from running,
    *  and `dispatchNativeEvents()` still runs after delivery either way — the
@@ -1622,7 +1637,8 @@ export class TestRenderer implements NativeRenderer {
 
   /** Advance GPUI's timer clock only; this does not simulate a frame.
    *  This is not `clockFastForward`. That moves the motion clock only.
-   *  Use this for caret blink, input drag autoscroll, and list edge scroll. */
+   *  Use this for caret blink, input drag autoscroll, and list edge scroll.
+   *  Manual async-task mode holds the delta until `advanceAsyncClock()`. */
   advanceTime(milliseconds: number): void {
     this.native.advanceTime(milliseconds)
     this.dispatchNativeEvents()
@@ -1868,7 +1884,7 @@ export class TestRenderer implements NativeRenderer {
 
   /** Capture the current Metal or DirectX frame and save it as a PNG. */
   captureScreenshot(path: string): void {
-    this.native.flush()
+    if (this.asyncTaskMode === "eager") this.native.flush()
     this.native.captureScreenshot(path)
   }
 
@@ -3090,7 +3106,7 @@ export function act<T>(scope: () => T | Promise<T>): Promise<T> | T {
   )
 }
 
-export interface TestRootOptions extends TestWindowOptions {
+export interface TestRootOptions extends TestRendererOptions {
   /** Opt in to loopback/private URL images for local fixture servers. */
   allowPrivateNetworkImages?: boolean
   /** Match render()'s strict diagnostic mode. Defaults to the active runtime policy. */
@@ -3309,6 +3325,7 @@ function sameTestRootOptions(a: TestRootOptions, b: TestRootOptions): boolean {
     a.width === b.width &&
     a.height === b.height &&
     a.scaleFactor === b.scaleFactor &&
+    a.asyncTaskMode === b.asyncTaskMode &&
     a.allowPrivateNetworkImages === b.allowPrivateNetworkImages &&
     a.strictStyles === b.strictStyles
   )
@@ -3484,6 +3501,7 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
         width: request.width,
         height: request.height,
         scaleFactor: request.scaleFactor,
+        asyncTaskMode: request.asyncTaskMode,
         allowPrivateNetworkImages: request.allowPrivateNetworkImages,
         strictStyles: request.strictStyles,
       },

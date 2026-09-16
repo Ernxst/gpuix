@@ -358,6 +358,11 @@ export declare class TestGpuixRenderer {
    */
   dispose(): void
   /**
+   * Preserve eager test-root behavior by default, while allowing callers to
+   * make `advanceAsyncClock` the only operation that drains queued tasks.
+   */
+  setAutoDrainAsyncTasks(enabled: boolean): void
+  /**
    * The same capability contract as a live renderer, scoped to this
    * offscreen GPU-backed window.
    */
@@ -433,7 +438,8 @@ export declare class TestGpuixRenderer {
   /** Whether GPUI reports a currently installed application menu bar. */
   hasMainMenu(): boolean
   /**
-   * Notify the view entity and run GPUI until parked.
+   * Notify the view entity and draw it immediately. Eager mode then drains
+   * queued native tasks; manual mode leaves them for `advanceAsyncClock`.
    * This triggers GpuixView::render() → build_element() → GPUI layout.
    * Must be called after mutations and before simulating events (GPUI's
    * hit testing requires elements to be laid out).
@@ -460,7 +466,8 @@ export declare class TestGpuixRenderer {
    * Advance GPUI's async executor clock so tests can deterministically fire
    * timers such as bounded image retry/revalidation deadlines. When the
    * renderer animation clock is paused, advance that clock by the same
-   * amount and render the resulting transition frame as well.
+   * amount. Eager mode renders the resulting transition frame immediately;
+   * manual mode leaves it pending for `drawPendingFrame`.
    */
   advanceAsyncClock(deltaMs: number): void
   /** Override GPUI's reduced-motion policy for deterministic tests. */
@@ -702,6 +709,8 @@ export declare class TestGpuixRenderer {
   scrollElementIntoView(elementId: number, alignToTop?: boolean | undefined | null): void
   /**
    * Capture a screenshot of the current rendered state and save as PNG.
+   * Eager mode first settles the latest frame. Manual mode deliberately
+   * preserves the last explicit draw, including a pending async repaint.
    * Supported on macOS through Metal and Windows through DirectX.
    */
   captureScreenshot(path: string): void
@@ -766,7 +775,10 @@ export declare class TestGpuixRenderer {
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
   clockResume(): number
-  /** Advance GPUI's deterministic test executor and run due timers. */
+  /**
+   * Advance GPUI's deterministic test executor and run due timers. Manual
+   * mode queues this delta until `advanceAsyncClock`, its explicit drain.
+   */
   advanceTime(milliseconds: number): void
   /** Get the root element ID, or null if no root is set. */
   getRootId(): number | null

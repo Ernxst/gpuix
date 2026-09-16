@@ -5013,10 +5013,10 @@ defaults in the cleanup its `beforeAll` returns, so each file still starts
 fresh — see **Automatic cleanup, and where vitest enters**, below.
 
 **`options` decide reuse.** `options` is `TestRootOptions` — `width`, `height`,
-`scaleFactor`, `allowPrivateNetworkImages`, `strictStyles` — and every one of
-them is fixed when the window is constructed. A call whose options match the
-live window's reuses it; a call whose options differ tears that window down and
-opens a fresh one.
+`scaleFactor`, `asyncTaskMode`, `allowPrivateNetworkImages`, `strictStyles` —
+and every one of them is fixed when the window is constructed. A call whose
+options match the live window's reuses it; a call whose options differ tears
+that window down and opens a fresh one.
 
 The comparison is field by field, and the two halves of `TestRootOptions` are
 compared differently. `width`, `height`, and `scaleFactor` are compared *after*
@@ -5027,8 +5027,9 @@ one window. A value equal to a *built-in* default is still a different request
 from omitting the field, because nothing fills it in before the comparison:
 `render(node)` and `render(node, { width: 1280 })` rebuild the window every time
 they alternate,
-even though the window is identical. `allowPrivateNetworkImages` and
-`strictStyles` are compared as passed, with no defaults applied.
+even though the window is identical. `asyncTaskMode`,
+`allowPrivateNetworkImages`, and `strictStyles` are compared as passed, with no
+defaults applied.
 
 Keep the options object identical across a file — or omit it everywhere — to
 keep the window.
@@ -5611,6 +5612,37 @@ active, advances its animation clock, and captures once the tracks settle.
 `captureScreenshot()` remains a raw current-frame capture for tests that need
 to inspect an in-flight transition. An infinite animation can exhaust the
 10,000ms budget; the matcher warns and captures the frame at that budget.
+
+**Async native work is eager by default.** `flush()`, reads, event helpers, and
+screenshots drain queued native tasks before returning, preserving the existing
+test-root behavior. Use `createTestRoot({ asyncTaskMode: 'manual' })` (or the
+same option on `new TestRenderer`) when a test needs to observe the frames
+around image decode or other background work:
+
+```tsx
+const screen = createTestRoot({ asyncTaskMode: 'manual' })
+screen.render(<img data-testid="avatar" src={avatarPath} />)
+
+const image = screen.getByTestId('avatar')
+expect(screen.renderer.getImageLoadState(image.id)?.status).toBe('loading')
+screen.renderer.captureScreenshot('/tmp/loading.png')
+
+screen.renderer.advanceAsyncClock(0) // drain currently runnable async work
+expect(screen.renderer.getImageLoadState(image.id)?.status).toBe('loaded')
+screen.renderer.captureScreenshot('/tmp/still-loading.png')
+
+screen.renderer.drawPendingFrame()
+screen.renderer.captureScreenshot('/tmp/loaded.png')
+```
+
+In manual mode, `advanceAsyncClock()` is the only public operation that drains
+the native task queue, and `advanceAsyncClock(0)` drains work that is already
+runnable. It schedules the resulting repaint without drawing it;
+`drawPendingFrame()` crosses that frame boundary. Reads and event helpers do
+not drain the queue. `advanceTime()` queues its timer-clock delta for the next
+`advanceAsyncClock()` rather than running newly due work itself, and
+`captureScreenshot()` saves the pixels from the last explicit draw. Disposal
+still drains pending work so native entities are released safely.
 
 **One comparator, and it is the native one.** `comparatorName`, custom
 comparators, `screenshotOptions` (masking, `fullPage`, caret handling), and
