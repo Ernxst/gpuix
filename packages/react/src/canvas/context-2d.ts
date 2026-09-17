@@ -9,7 +9,7 @@ export interface CanvasRecorderTarget {
   /** Re-read on every diagnostic so prop updates keep the element identity current. */
   describeElement(): string
   strict: boolean
-  applyCanvasCommands(
+  applyCanvasCommandDelta(
     ops: Uint32Array,
     operands: Float64Array,
     strings: readonly string[]
@@ -354,6 +354,8 @@ class Uint32CommandStream {
     return this.values.slice(0, this.length)
   }
 
+  reset(): void { this.length = 0 }
+
   private ensureCapacity(required: number): void {
     if (required <= this.values.length) return
     let capacity = this.values.length
@@ -377,6 +379,8 @@ class Float64OperandStream {
   snapshot(): Float64Array {
     return this.values.slice(0, this.length)
   }
+
+  reset(): void { this.length = 0 }
 
   private ensureCapacity(required: number): void {
     if (required <= this.values.length) return
@@ -708,12 +712,16 @@ class RecordingContext2D {
   flush(): void {
     this.flushScheduled = false
     if (this.disposed || !this.dirty) return
-    this.dirty = false
-    this.target.applyCanvasCommands(
+    this.target.applyCanvasCommandDelta(
       this.ops.snapshot(),
       this.operands.snapshot(),
       this.strings.slice()
     )
+    this.ops.reset()
+    this.ops.push(CANVAS_STREAM_MAGIC, CANVAS_STREAM_VERSION)
+    this.operands.reset()
+    this.strings.length = 0
+    this.dirty = false
   }
 
   save(): void {
@@ -730,6 +738,17 @@ class RecordingContext2D {
 
   dispose(): void {
     this.disposed = true
+    this.dirty = false
+    this.flushScheduled = false
+  }
+
+  reset(): void {
+    this.state = initialDrawingState()
+    this.stack.length = 0
+    this.ops.reset()
+    this.ops.push(CANVAS_STREAM_MAGIC, CANVAS_STREAM_VERSION)
+    this.operands.reset()
+    this.strings.length = 0
     this.dirty = false
     this.flushScheduled = false
   }
@@ -1231,6 +1250,11 @@ export function disposeRecordingContext2D(owner: object): void {
   if (context) recordersByContext.delete(context)
   contextsByOwner.delete(owner)
   recordersByOwner.delete(owner)
+}
+
+/** Reset bitmap-coupled state while preserving the context object identity. */
+export function resetRecordingContext2D(owner: object): void {
+  recorderRegistry().recordersByOwner.get(owner)?.reset()
 }
 
 /** Whether this canvas has already locked itself to a 2D context. */

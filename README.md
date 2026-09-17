@@ -725,6 +725,11 @@ path without a renderer check, however. DPR-scaled bitmap dimensions paired
 with the matching `context.scale(dpr, dpr)` map back to the same GPUIX layout
 geometry, while GPUIX still rasterizes at the layout box's physical resolution.
 
+Changing or removing either bitmap dimension clears the retained bitmap and resets the existing
+2D context's drawing state, save stack, transform, and current path. Recorded redraws are
+transported incrementally between flushes, so repeated clear-and-redraw frames keep a bounded
+command stream while stateful Canvas 2D semantics continue across ordinary flushes.
+
 ### Canvas pixel readback
 
 There is none. `HTMLCanvasElement.toDataURL()` encodes the canvas **bitmap**,

@@ -977,6 +977,12 @@ impl TestGpuixRenderer {
         Ok(())
     }
 
+    #[napi]
+    pub fn apply_canvas_command_delta(&self,id:f64,ops:Uint32Array,operands:Float64Array,strings:Vec<String>)->Result<()>{self.surface_canvas_preparation_diagnostics()?;let id=to_element_id(id)?;let tree=self.tree.lock().unwrap();validate_canvas_target(&tree,id).map_err(Error::from_reason)?;let decoded=crate::canvas::decode_delta(&self.canvas_display_lists,id,ops.as_ref(),operands.as_ref(),&strings,canvas_size(&tree,id)).map_err(|e|Error::from_reason(format!("<canvas> element {id}: {e}")))?;let strict=self.strict_styles.load(Ordering::Relaxed);if strict&&!decoded.diagnostics.is_empty(){return Err(Error::from_reason(first_canvas_diagnostic_message(&tree,id,&decoded.diagnostics).unwrap()));}let outcome=crate::canvas::install_decoded_delta(&self.canvas_display_lists,id,decoded);drop(tree);if !strict{self.style_diagnostics.lock().unwrap().extend(fresh_canvas_diagnostics(id,outcome.diagnostics,&self.canvas_diagnostic_members));}if outcome.invalidates{self.request_invalidate()?;}Ok(())}
+
+    #[napi]
+    pub fn reset_canvas(&self,id:f64)->Result<()>{let id=to_element_id(id)?;let tree=self.tree.lock().unwrap();validate_canvas_target(&tree,id).map_err(Error::from_reason)?;drop(tree);crate::canvas::reset_canvas(&self.canvas_display_lists,id);self.request_invalidate()}
+
     /// Install a GPU-only test texture into one live `<canvas>` presentation.
     /// This exists solely to exercise the retained Metal surface path before a
     /// browser WebGPU API is exposed.

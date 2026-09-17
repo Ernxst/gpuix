@@ -8,6 +8,7 @@ use std::sync::{Arc, LockResult, Mutex, MutexGuard};
 use rustc_hash::FxHashMap;
 
 type DisplayLists = FxHashMap<u64, Arc<DisplayList>>;
+type ReplayStates = FxHashMap<u64, ReplayContext>;
 
 #[derive(Clone, Debug)]
 pub(crate) struct CanvasPreparationDiagnostic {
@@ -22,6 +23,7 @@ pub(crate) struct CanvasPreparationDiagnostic {
 #[derive(Clone, Default)]
 pub struct SharedDisplayLists {
     lists: Arc<Mutex<DisplayLists>>,
+    replay_states: Arc<Mutex<ReplayStates>>,
     #[cfg(target_os = "macos")]
     presentations: Arc<Mutex<FxHashMap<u64, gpui::SurfaceSource>>>,
     last_revisions: Arc<Mutex<FxHashMap<u64, u64>>>,
@@ -293,6 +295,7 @@ pub(crate) struct DecodedDisplayList {
     pub(crate) diagnostics: Vec<CanvasDiagnostic>,
     invalidates: bool,
     ignored_empty_restore: bool,
+    replay: ReplayContext,
 }
 
 #[derive(Debug)]
@@ -312,6 +315,39 @@ struct ReplayState {
     miter_limit: f64,
     line_dash: Vec<f64>,
     transform: CanvasTransform,
+}
+
+#[derive(Clone)]
+struct ReplayContext {
+    state: ReplayState,
+    stack: Vec<ReplayState>,
+    current_path: Vec<PathCommand>,
+    current_point: Option<CanvasPoint>,
+    subpath_start: Option<CanvasPoint>,
+    items: Arc<Vec<DisplayItem>>,
+}
+
+impl Default for ReplayContext {
+    fn default() -> Self {
+        Self {
+            state: ReplayState {
+                fill_style: crate::color::parse_color_rgba("#000000").expect("black is valid"),
+                stroke_style: crate::color::parse_color_rgba("#000000").expect("black is valid"),
+                line_width: 1.0,
+                global_alpha: 1.0,
+                line_cap: CanvasLineCap::Butt,
+                line_join: CanvasLineJoin::Miter,
+                miter_limit: 10.0,
+                line_dash: Vec::new(),
+                transform: CanvasTransform::IDENTITY,
+            },
+            stack: Vec::new(),
+            current_path: Vec::new(),
+            current_point: None,
+            subpath_start: None,
+            items: Arc::new(Vec::new()),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -931,6 +967,16 @@ pub(crate) fn decode(
     strings: &[String],
     canvas_size: CanvasSize,
 ) -> Result<DecodedDisplayList, DecodeError> {
+    decode_from(ops, operands, strings, canvas_size, ReplayContext::default())
+}
+
+fn decode_from(
+    ops: &[u32],
+    operands: &[f64],
+    strings: &[String],
+    canvas_size: CanvasSize,
+    replay: ReplayContext,
+) -> Result<DecodedDisplayList, DecodeError> {
     if ops.len() < 2 {
         return Err(DecodeError {
             op_index: None,
@@ -957,22 +1003,14 @@ pub(crate) fn decode(
     let mut op_cursor = 2usize;
     let mut operand_cursor = 0usize;
     let mut op_index = 0usize;
-    let mut state = ReplayState {
-        fill_style: crate::color::parse_color_rgba("#000000").expect("black is valid"),
-        stroke_style: crate::color::parse_color_rgba("#000000").expect("black is valid"),
-        line_width: 1.0,
-        global_alpha: 1.0,
-        line_cap: CanvasLineCap::Butt,
-        line_join: CanvasLineJoin::Miter,
-        miter_limit: 10.0,
-        line_dash: Vec::new(),
-        transform: CanvasTransform::IDENTITY,
-    };
-    let mut stack = Vec::new();
-    let mut current_path = Vec::new();
-    let mut current_point = None;
-    let mut subpath_start = None;
-    let mut items = Vec::new();
+    let ReplayContext {
+        mut state,
+        mut stack,
+        mut current_path,
+        mut current_point,
+        mut subpath_start,
+        mut items,
+    } = replay;
     let mut diagnostics = Vec::new();
     let mut invalidates = false;
     let mut ignored_empty_restore = false;
@@ -1221,7 +1259,7 @@ pub(crate) fn decode(
                             reason: reason.to_string(),
                         });
                     } else {
-                        items.push(DisplayItem::FillRect(FillRect {
+                        Arc::make_mut(&mut items).push(DisplayItem::FillRect(FillRect {
                             points,
                             color: state.fill_style.opacity(state.global_alpha as f32),
                             op_index,
@@ -1264,7 +1302,7 @@ pub(crate) fn decode(
                             reason: reason.to_string(),
                         });
                     } else {
-                        items.push(DisplayItem::StrokeRect(StrokeRect {
+                        Arc::make_mut(&mut items).push(DisplayItem::StrokeRect(StrokeRect {
                             x,
                             y,
                             width,
@@ -1314,11 +1352,11 @@ pub(crate) fn decode(
                         );
                         if quads_intersect(&clear, &canvas) {
                             if quad_covers_canvas(&clear, canvas_size) {
-                                items.clear();
+                                items = Arc::new(Vec::new());
                                 invalidates = true;
                             } else {
                                 let mut intersects_prior_content = false;
-                                for item in &mut items {
+                                for item in Arc::make_mut(&mut items) {
                                     if item.intersects_quad(&clear) {
                                         item.clear_regions_mut().push(clear);
                                         intersects_prior_content = true;
@@ -1581,7 +1619,7 @@ pub(crate) fn decode(
                             reason,
                         });
                     } else {
-                        items.push(DisplayItem::FillPath(FillPath {
+                        Arc::make_mut(&mut items).push(DisplayItem::FillPath(FillPath {
                             commands: current_path.clone(),
                             color: state.fill_style.opacity(state.global_alpha as f32),
                             fill_rule,
@@ -1601,7 +1639,7 @@ pub(crate) fn decode(
                             reason,
                         });
                     } else {
-                        items.push(DisplayItem::StrokePath(StrokePath {
+                        Arc::make_mut(&mut items).push(DisplayItem::StrokePath(StrokePath {
                             commands: current_path.clone(),
                             style: StrokePathStyle {
                                 color: state.stroke_style.opacity(state.global_alpha as f32),
@@ -1703,7 +1741,7 @@ pub(crate) fn decode(
                     op_index += 1;
                     continue;
                 }
-                items.push(DisplayItem::DrawImage(DrawImage {
+                Arc::make_mut(&mut items).push(DisplayItem::DrawImage(DrawImage {
                     source: crate::custom_elements::img::CanvasImageSource {
                         key: source_wire.clone(),
                         source,
@@ -1739,10 +1777,18 @@ pub(crate) fn decode(
     }
 
     Ok(DecodedDisplayList {
-        items,
+        items: items.as_ref().clone(),
         diagnostics,
         invalidates,
         ignored_empty_restore,
+        replay: ReplayContext {
+            state,
+            stack,
+            current_path,
+            current_point,
+            subpath_start,
+            items,
+        },
     })
 }
 
@@ -1756,7 +1802,9 @@ pub(crate) fn install_decoded_display_list(
         diagnostics,
         invalidates,
         ignored_empty_restore,
+        replay: _,
     } = decoded;
+    display_lists.replay_states.lock().unwrap().remove(&element_id);
     if !invalidates {
         return CanvasApplyOutcome {
             diagnostics,
@@ -1792,6 +1840,59 @@ pub(crate) fn install_decoded_display_list(
         diagnostics,
         invalidates: true,
     }
+}
+
+pub(crate) fn decode_delta(
+    display_lists: &SharedDisplayLists,
+    element_id: u64,
+    ops: &[u32],
+    operands: &[f64],
+    strings: &[String],
+    canvas_size: CanvasSize,
+) -> Result<DecodedDisplayList, DecodeError> {
+    let replay = display_lists
+        .replay_states
+        .lock()
+        .unwrap()
+        .get(&element_id)
+        .cloned()
+        .unwrap_or_default();
+    decode_from(ops, operands, strings, canvas_size, replay)
+}
+
+pub(crate) fn install_decoded_delta(
+    display_lists: &SharedDisplayLists,
+    element_id: u64,
+    decoded: DecodedDisplayList,
+) -> CanvasApplyOutcome {
+    let DecodedDisplayList { items, diagnostics, invalidates, ignored_empty_restore: _, replay } = decoded;
+    display_lists.replay_states.lock().unwrap().insert(element_id, replay);
+    if !invalidates {
+        return CanvasApplyOutcome { diagnostics, invalidates: false };
+    }
+    let mut lists = display_lists.lock().unwrap();
+    if items.is_empty() {
+        let removed = lists.remove(&element_id).is_some();
+        return CanvasApplyOutcome { diagnostics, invalidates: removed };
+    }
+    let revision = {
+        let mut revisions = display_lists.last_revisions.lock().unwrap();
+        let revision = revisions.entry(element_id).or_default();
+        *revision = revision.saturating_add(1);
+        *revision
+    };
+    lists.insert(element_id, Arc::new(DisplayList { revision, items }));
+    CanvasApplyOutcome { diagnostics, invalidates: true }
+}
+
+pub(crate) fn reset_canvas(display_lists: &SharedDisplayLists, element_id: u64) -> bool {
+    display_lists.replay_states.lock().unwrap().remove(&element_id);
+    display_lists
+        .preparation_diagnostics
+        .lock()
+        .unwrap()
+        .retain(|diagnostic| diagnostic.element_id != element_id);
+    display_lists.lock().unwrap().remove(&element_id).is_some()
 }
 
 #[cfg(test)]
@@ -1837,6 +1938,12 @@ pub fn remove_display_lists(display_lists: &SharedDisplayLists, element_ids: &[u
         lists.remove(id);
     }
     drop(lists);
+    {
+        let mut replay_states = display_lists.replay_states.lock().unwrap();
+        for id in element_ids {
+            replay_states.remove(id);
+        }
+    }
     #[cfg(target_os = "macos")]
     {
         let mut presentations = display_lists.presentations.lock().unwrap();
@@ -1881,6 +1988,20 @@ mod tests {
             operands.extend_from_slice(values);
         }
         (ops, operands)
+    }
+
+    fn apply_delta(store: &SharedDisplayLists,id:u64,commands:&[(u32,&[f64])],strings:&[String])->Result<CanvasApplyOutcome,DecodeError>{let(ops,operands)=stream(commands);let decoded=decode_delta(store,id,&ops,&operands,strings,CanvasSize{width:100.0,height:80.0})?;Ok(install_decoded_delta(store,id,decoded))}
+
+    #[test]
+    fn deltas_preserve_state_stack_path_and_support_atomic_reset() {
+        let store=SharedDisplayLists::default();
+        apply_delta(&store,7,&[(opcodes::FILL_STYLE,&[0.0]),(opcodes::SAVE,&[]),(opcodes::TRANSLATE,&[10.0,20.0]),(opcodes::BEGIN_PATH,&[]),(opcodes::MOVE_TO,&[1.0,2.0])],&["#2563eb".into()]).unwrap();
+        apply_delta(&store,7,&[(opcodes::LINE_TO,&[3.0,4.0]),(opcodes::STROKE,&[]),(opcodes::RESTORE,&[]),(opcodes::FILL_RECT,&[0.0,0.0,2.0,2.0])],&[]).unwrap();
+        let list=store.lock().unwrap().get(&7).unwrap().clone(); let DisplayItem::StrokePath(path)=&list.items[0] else{panic!("path")}; assert_point(match path.commands[0]{PathCommand::MoveTo(p)=>p,_=>panic!()},(11.0,22.0)); assert_point(fill_rect(&list.items[1]).points[0],(0.0,0.0));
+        let (ops,operands)=stream(&[(opcodes::FILL_STYLE,&[0.0])]); let rejected=decode_delta(&store,7,&ops,&operands,&["not-a-color".into()],CanvasSize{width:100.0,height:80.0}).unwrap(); assert!(!rejected.diagnostics.is_empty());
+        store.report_preparation_diagnostics(7, &[CanvasDiagnostic { op_index: 0, op_name: "fill".into(), reason: "stale preparation failure".into() }]);
+        assert!(reset_canvas(&store,7)); apply_delta(&store,7,&[(opcodes::FILL_RECT,&[0.0,0.0,1.0,1.0])],&[]).unwrap(); let list=store.lock().unwrap().get(&7).unwrap().clone(); assert_eq!(u32::from(fill_rect(&list.items[0]).color),u32::from(crate::color::parse_color_rgba("#000000").unwrap())); remove_display_lists(&store,&[7]); assert!(!store.replay_states.lock().unwrap().contains_key(&7));
+        assert!(store.take_preparation_diagnostics().is_empty());
     }
 
     #[test]

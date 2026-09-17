@@ -42,6 +42,7 @@ import {
   disposeRecordingContext2D,
   getOrCreateRecordingContext2D,
   recordingContext2D,
+  resetRecordingContext2D,
 } from "../canvas/context-2d.js"
 import {
   disposeWebGpuContext,
@@ -1529,6 +1530,13 @@ export const hostConfig = {
         apply.call(rootContainerInstance.native, id, ops, operands, strings)
         reportStyleDiagnostics(rootContainerInstance.native)
       },
+      __applyCanvasCommandDelta: (ops, operands, strings) => {
+        if (instance.type !== "canvas") throw new TypeError(`Canvas commands can only target <canvas>, received <${instance.type}>`)
+        const apply = rootContainerInstance.native.applyCanvasCommandDelta
+        if (!apply) throw new Error("This GPUIX renderer does not support incremental canvas commands")
+        apply.call(rootContainerInstance.native, id, ops, operands, strings)
+        reportStyleDiagnostics(rootContainerInstance.native)
+      },
       parentId: null,
       compareDocumentPosition(other: PublicInstance): number {
         return compareDocumentPosition(instance, other as unknown as HostNode)
@@ -1546,8 +1554,8 @@ export const hostConfig = {
       const diagnosticTarget = {
         describeElement: () => describeCanvas(instance),
         strict: rootContainerInstance.strictStyles,
-        applyCanvasCommands: (ops: Uint32Array, operands: Float64Array, strings: readonly string[]) =>
-          instance.__applyCanvasCommands(ops, operands, strings),
+        applyCanvasCommandDelta: (ops: Uint32Array, operands: Float64Array, strings: readonly string[]) =>
+          instance.__applyCanvasCommandDelta(ops, operands, strings),
       }
       instance.getContext = ((contextId: string): CanvasRenderingContext2D | import("../canvas/webgpu.js").GPUCanvasContext | null => {
         if (contextId === "2d") {
@@ -1747,6 +1755,12 @@ export const hostConfig = {
     _internalInstanceHandle: unknown
   ): void {
     const container = containerFor(instance)
+    const oldCanvasProps = oldProps as Props & { width?: number; height?: number }
+    const newCanvasProps = newProps as Props & { width?: number; height?: number }
+    if (instance.type === "canvas" && (oldCanvasProps.width !== newCanvasProps.width || oldCanvasProps.height !== newCanvasProps.height)) {
+      resetRecordingContext2D(instance)
+      container.native.resetCanvas?.(instance.id)
+    }
     diagnoseUnsupportedStyleTransition(instance, container, newProps)
     diagnoseUnsupportedClassNameProp(instance, container, newProps)
     diagnoseUnsupportedAccessibilityRoleProp(instance, container, newProps)
