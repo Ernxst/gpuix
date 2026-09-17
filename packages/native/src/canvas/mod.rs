@@ -1887,6 +1887,11 @@ pub(crate) fn install_decoded_delta(
 
 pub(crate) fn reset_canvas(display_lists: &SharedDisplayLists, element_id: u64) -> bool {
     display_lists.replay_states.lock().unwrap().remove(&element_id);
+    display_lists
+        .preparation_diagnostics
+        .lock()
+        .unwrap()
+        .retain(|diagnostic| diagnostic.element_id != element_id);
     display_lists.lock().unwrap().remove(&element_id).is_some()
 }
 
@@ -1994,7 +1999,9 @@ mod tests {
         apply_delta(&store,7,&[(opcodes::LINE_TO,&[3.0,4.0]),(opcodes::STROKE,&[]),(opcodes::RESTORE,&[]),(opcodes::FILL_RECT,&[0.0,0.0,2.0,2.0])],&[]).unwrap();
         let list=store.lock().unwrap().get(&7).unwrap().clone(); let DisplayItem::StrokePath(path)=&list.items[0] else{panic!("path")}; assert_point(match path.commands[0]{PathCommand::MoveTo(p)=>p,_=>panic!()},(11.0,22.0)); assert_point(fill_rect(&list.items[1]).points[0],(0.0,0.0));
         let (ops,operands)=stream(&[(opcodes::FILL_STYLE,&[0.0])]); let rejected=decode_delta(&store,7,&ops,&operands,&["not-a-color".into()],CanvasSize{width:100.0,height:80.0}).unwrap(); assert!(!rejected.diagnostics.is_empty());
+        store.report_preparation_diagnostics(7, &[CanvasDiagnostic { op_index: 0, op_name: "fill".into(), reason: "stale preparation failure".into() }]);
         assert!(reset_canvas(&store,7)); apply_delta(&store,7,&[(opcodes::FILL_RECT,&[0.0,0.0,1.0,1.0])],&[]).unwrap(); let list=store.lock().unwrap().get(&7).unwrap().clone(); assert_eq!(u32::from(fill_rect(&list.items[0]).color),u32::from(crate::color::parse_color_rgba("#000000").unwrap())); remove_display_lists(&store,&[7]); assert!(!store.replay_states.lock().unwrap().contains_key(&7));
+        assert!(store.take_preparation_diagnostics().is_empty());
     }
 
     #[test]
