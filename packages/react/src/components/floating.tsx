@@ -181,6 +181,13 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingContentProps>(
 
     return (
       <anchored
+        style={{
+          borderRadius: props.style?.borderRadius,
+          borderTopLeftRadius: props.style?.borderTopLeftRadius,
+          borderTopRightRadius: props.style?.borderTopRightRadius,
+          borderBottomRightRadius: props.style?.borderBottomRightRadius,
+          borderBottomLeftRadius: props.style?.borderBottomLeftRadius,
+        }}
         side={side}
         align={align}
         gap={sideOffset}

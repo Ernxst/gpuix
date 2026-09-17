@@ -3181,6 +3181,10 @@ Give every overlay an **opaque** fill (`#232323`, not `#23232399`).
 color, or a solid hover color. A `#00000000` child on a blurred window punches
 through Metal to the desktop.
 
+`FloatingLayer` copies uniform and per-corner border radii to its anchored
+surface, so rounded Select, Combobox, and Tooltip content does not show square
+corners behind it.
+
 A `div` that paints a fill, or that is positioned, blocks clicks and hovers
 behind it. The **wheel still passes**, so a pannable canvas can place its items
 absolutely and keep panning.

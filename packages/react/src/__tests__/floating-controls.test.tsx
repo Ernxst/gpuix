@@ -4,6 +4,7 @@
 import React, { useState } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
 import * as ComboboxPrimitive from "../components/combobox"
+import { FloatingLayer } from "../components/floating"
 import * as SelectPrimitive from "../components/select"
 import * as TooltipPrimitive from "../components/tooltip"
 import {
@@ -59,6 +60,36 @@ describeNative("floating controls", () => {
 
   beforeEach(() => {
     testRoot = createTestRoot()
+  })
+
+  it("forwards borderRadius to the anchored floating surface", () => {
+    testRoot.render(
+      <div style={{ width: 400, height: 300 }}>
+        <FloatingLayer
+          style={{
+            width: 120,
+            height: 60,
+            borderRadius: 16,
+            borderTopLeftRadius: 4,
+            borderTopRightRadius: 8,
+            borderBottomRightRadius: 12,
+            borderBottomLeftRadius: 20,
+          }}
+        >
+          <text>Rounded layer</text>
+        </FloatingLayer>
+      </div>,
+    )
+
+    expect(testRoot.renderer.findByType("anchored")[0].style).toMatchInlineSnapshot(`
+      {
+        "borderBottomLeftRadius": 20,
+        "borderBottomRightRadius": 12,
+        "borderRadius": 16,
+        "borderTopLeftRadius": 4,
+        "borderTopRightRadius": 8,
+      }
+    `)
   })
 
   it("composes a headless Select and supports keyboard selection", () => {
