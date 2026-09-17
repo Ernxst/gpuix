@@ -2519,6 +2519,12 @@ prop parks the caret at the end of the new text when the next frame applies it.
 Every read and write above draws the committed tree first, as `getBounds()`
 does, so the caret you write is the one that survives.
 
+When the clipboard has no text, `Cmd+V` or `Ctrl+V` continues to `onKeyDown`
+instead of disappearing inside the editor. Applications can then handle an
+image-only or file-only clipboard themselves. Copied files also propagate even
+when the operating system includes their paths as fallback text. Mixed text and
+image clipboard content still pastes its text.
+
 **`fontSize` and `lineHeight`** in `style` size each row. Without `lineHeight`,
 the row uses GPUI's default leading, so a larger `fontSize` grows the box.
 Pass `lineHeight` as `"Npx"` to set the row in pixels. `minRows` and `maxRows`

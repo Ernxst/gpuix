@@ -872,6 +872,41 @@ describeNative("native text editors", () => {
     expect(heightOf("input")).toBe(45)
   })
 
+  it("propagates paste when the clipboard has no text", () => {
+    const elementKeys: string[] = []
+    const windowKeys: string[] = []
+
+    for (const readOnly of [false, true]) {
+      testRoot = createTestRoot({
+        onKeyDown: (event) => windowKeys.push(event.key ?? ""),
+      })
+      testRoot.render(
+        <input
+          autoFocus
+          readOnly={readOnly}
+          value=""
+          style={{ width: 300, height: 40 }}
+          onKeyDown={(event) => elementKeys.push(event.key ?? "")}
+        />,
+      )
+      const input = testRoot.renderer.findByType("input")[0]
+      testRoot.renderer.nativeSimulateKeyDown(input.id, "cmd-v")
+    }
+
+    expect({ elementKeys, windowKeys }).toMatchInlineSnapshot(`
+      {
+        "elementKeys": [
+          "v",
+          "v",
+        ],
+        "windowKeys": [
+          "v",
+          "v",
+        ],
+      }
+    `)
+  })
+
   function editorBounds(type: "input" | "textarea") {
     const node = testRoot.renderer.findByType(type)[0]
     expect(node).toBeDefined()

@@ -3,6 +3,6 @@
 '@gpuix/react': patch
 ---
 
-Draw the `<input>` and `<textarea>` caret at the full `fontSize` instead of 75% of it.
+Draw the `<input>` and `<textarea>` caret at **line height**, like Chrome.
 
-The bar still sits inside the line box, so extra `lineHeight` does not stretch it past the glyphs.
+A composer with `fontSize: 14` and `lineHeight: 20` now paints a 20px bar instead of a 14px em-square bar. Extra leading stretches the caret with the row.
