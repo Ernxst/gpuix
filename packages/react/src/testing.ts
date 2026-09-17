@@ -157,6 +157,8 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
     operands: Float64Array,
     strings: readonly string[]
   ): void
+  applyCanvasCommandDelta(id: number, ops: Uint32Array, operands: Float64Array, strings: readonly string[]): void
+  resetCanvas(id: number): void
   installTestGpuCanvas(id: number, width: number, height: number, rgba: number): void
   advanceTestGpuCanvas(id: number, rgba: number): void
   getTestGpuCanvasState(): { installed: number; presentations: number; released: number }
@@ -724,7 +726,7 @@ export function recordCanvasCommands(
   const context = getOrCreateRecordingContext2D(owner, {
     strict: true,
     describeElement: () => '<canvas data-testid="recorded-frame">',
-    applyCanvasCommands: (ops, operands, strings) => {
+    applyCanvasCommandDelta: (ops, operands, strings) => {
       recorded = { ops, operands, strings }
     },
   })
@@ -833,6 +835,12 @@ export class TestRenderer implements NativeRenderer {
   ): void {
     this.native.applyCanvasCommands(id, ops, operands, strings)
   }
+
+  applyCanvasCommandDelta(id: number, ops: Uint32Array, operands: Float64Array, strings: readonly string[]): void {
+    this.native.applyCanvasCommandDelta(id, ops, operands, strings)
+  }
+
+  resetCanvas(id: number): void { this.native.resetCanvas(id) }
 
   /** Internal macOS visual-test seam; it is not a browser WebGPU API. */
   installTestGpuCanvas(id: number, width: number, height: number, rgba: number): void {

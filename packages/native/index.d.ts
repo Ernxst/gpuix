@@ -58,6 +58,8 @@ export declare class GpuixRenderer {
    * requiring a React commit.
    */
   applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  applyCanvasCommandDelta(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  resetCanvas(id: number): void
   /**
    * Start or join one renderer-local canvas image load. The observer keeps
    * the decoded entry alive until JavaScript changes or releases the source.
@@ -409,6 +411,8 @@ export declare class TestGpuixRenderer {
    * offscreen view without requiring a React commit.
    */
   applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  applyCanvasCommandDelta(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  resetCanvas(id: number): void
   /**
    * Install a GPU-only test texture into one live `<canvas>` presentation.
    * This exists solely to exercise the retained Metal surface path before a

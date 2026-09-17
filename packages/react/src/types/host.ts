@@ -1377,6 +1377,10 @@ export interface NativeRenderer {
     operands: Float64Array,
     strings: readonly string[]
   ): void
+  applyCanvasCommandDelta?(
+    id: number, ops: Uint32Array, operands: Float64Array, strings: readonly string[]
+  ): void
+  resetCanvas?(id: number): void
   /** Present one native WebGPU clear into a live canvas. */
   presentWebGpuClear?(id: number, width: number, height: number, rgba: number): void
   /** Decode one canvas image source through this renderer's native image store. */
@@ -1923,6 +1927,9 @@ export interface Instance extends PublicInstance {
     ops: Uint32Array,
     operands: Float64Array,
     strings: readonly string[]
+  ): void
+  __applyCanvasCommandDelta(
+    ops: Uint32Array, operands: Float64Array, strings: readonly string[]
   ): void
 }
 

@@ -3460,6 +3460,25 @@ impl GpuixRenderer {
         Ok(())
     }
 
+    #[napi]
+    pub fn apply_canvas_command_delta(&self, id: f64, ops: Uint32Array, operands: Float64Array, strings: Vec<String>) -> Result<()> {
+        self.surface_canvas_preparation_diagnostics()?;
+        let id = to_element_id(id)?; let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
+        let decoded = crate::canvas::decode_delta(&self.canvas_display_lists, id, ops.as_ref(), operands.as_ref(), &strings, canvas_size(&tree, id)).map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
+        let strict = self.strict_styles.load(Ordering::Relaxed);
+        if strict && !decoded.diagnostics.is_empty() { let message = first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics).unwrap(); return Err(Error::from_reason(message)); }
+        let outcome = crate::canvas::install_decoded_delta(&self.canvas_display_lists, id, decoded); drop(tree);
+        if !strict { self.style_diagnostics.lock().unwrap().extend(fresh_canvas_diagnostics(id, outcome.diagnostics, &self.canvas_diagnostic_members)); }
+        if outcome.invalidates { self.request_invalidate()?; } Ok(())
+    }
+
+    #[napi]
+    pub fn reset_canvas(&self, id: f64) -> Result<()> {
+        let id = to_element_id(id)?; let tree = self.tree.lock().unwrap(); validate_canvas_target(&tree, id).map_err(Error::from_reason)?; drop(tree);
+        crate::canvas::reset_canvas(&self.canvas_display_lists, id); self.request_invalidate()
+    }
+
     /// Start or join one renderer-local canvas image load. The observer keeps
     /// the decoded entry alive until JavaScript changes or releases the source.
     #[napi]
@@ -6338,6 +6357,19 @@ impl WebGpuixRenderer {
         }
         Ok(())
     }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = applyCanvasCommandDelta)]
+    pub fn apply_canvas_command_delta_web(&self, id: f64, ops: js_sys::Uint32Array, operands: js_sys::Float64Array, strings: js_sys::Array) -> Result<(), wasm_bindgen::JsValue> {
+        self.surface_canvas_preparation_diagnostics()?; let id = web_element_id(id)?; let tree = self.tree.lock().unwrap(); validate_canvas_target(&tree, id).map_err(|e| wasm_bindgen::JsValue::from_str(&e))?;
+        let mut op_values=vec![0;ops.length() as usize]; ops.copy_to(&mut op_values); let mut operand_values=vec![0.0;operands.length() as usize]; operands.copy_to(&mut operand_values);
+        let strings=strings.iter().enumerate().map(|(i,v)|v.as_string().ok_or_else(||wasm_bindgen::JsValue::from_str(&format!("<canvas> element {id}: side-table entry {i} is not a string")))).collect::<Result<Vec<_>,_>>()?;
+        let decoded=crate::canvas::decode_delta(&self.canvas_display_lists,id,&op_values,&operand_values,&strings,canvas_size(&tree,id)).map_err(|e|wasm_bindgen::JsValue::from_str(&format!("<canvas> element {id}: {e}")))?;
+        let strict=self.strict_styles.load(Ordering::Relaxed); if strict&&!decoded.diagnostics.is_empty(){return Err(wasm_bindgen::JsValue::from_str(&first_canvas_diagnostic_message(&tree,id,&decoded.diagnostics).unwrap()));}
+        let outcome=crate::canvas::install_decoded_delta(&self.canvas_display_lists,id,decoded); if !strict { for diagnostic in fresh_canvas_diagnostics(id,outcome.diagnostics,&self.canvas_diagnostic_members){web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&style_diagnostic_context(&diagnostic,&tree).0));} } drop(tree); if outcome.invalidates{notify_web();} Ok(())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = resetCanvas)]
+    pub fn reset_canvas_web(&self,id:f64)->Result<(),wasm_bindgen::JsValue>{let id=web_element_id(id)?;let tree=self.tree.lock().unwrap();validate_canvas_target(&tree,id).map_err(|e|wasm_bindgen::JsValue::from_str(&e))?;drop(tree);crate::canvas::reset_canvas(&self.canvas_display_lists,id);notify_web();Ok(())}
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = isInitialized)]
     pub fn is_initialized(&self) -> bool {
