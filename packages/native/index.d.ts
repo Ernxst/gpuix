@@ -163,6 +163,12 @@ export declare class GpuixRenderer {
   resetDebugFrameOverlayStats(): void
   /** Same numbers as the on-screen overlay: current, p90, p99, max, frames. */
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
+  /** Minimize the native window. */
+  minimizeWindow(): void
+  /** Run the native zoom or maximize operation. */
+  zoomWindow(): void
+  /** Enter or exit native fullscreen. */
+  toggleFullscreen(): void
   setWindowTitle(title: string): void
   /**
    * Move focus to an element. `preventScroll` mirrors the `FocusOptions`

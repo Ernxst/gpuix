@@ -950,6 +950,29 @@ foreground-activation lock that can refuse a background process; on Linux the
 compositor decides — a client cannot raise itself without the compositor's
 own consent, and GPUI already makes the platform's normal request.
 
+### Window controls
+
+The desktop renderer exposes GPUI's native minimize, zoom, and fullscreen
+operations. Reach them through `useGpuixRequired()` or the renderer returned by
+`createRenderer()`.
+
+```tsx
+function WindowControls() {
+  const renderer = useGpuixRequired()
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      <div onClick={() => renderer.minimizeWindow?.()}>Minimize</div>
+      <div onClick={() => renderer.zoomWindow?.()}>Zoom</div>
+      <div onClick={() => renderer.toggleFullscreen?.()}>Fullscreen</div>
+    </div>
+  )
+}
+```
+
+`minimizeWindow()`, `zoomWindow()`, and `toggleFullscreen()` work on macOS,
+Windows, Linux, and FreeBSD. `zoomWindow()` uses the platform's native zoom or
+maximize operation. These methods are not available in the browser renderer.
+
 | Platform | `focus: false` | `show: false` |
 |---|---|---|
 | macOS | window orders in front without becoming key, like `open -g` | honored |
@@ -5911,6 +5934,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Native `hover` and `active` styles
 - [x] Native focus styles, paint-only outlines, and keyboard activation
 - [x] Window title (`setWindowTitle`)
+- [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Application menus, standard macOS shortcuts (`appName`), Cmd+Q, explicit quit, and graceful React termination
 - [x] Background launch (`focus`, `show`, `activateWindow`)
