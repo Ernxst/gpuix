@@ -180,6 +180,27 @@ describe("TestGpuixRenderer availability", () => {
       )
     }
   })
+
+  it("exports desktop window controls through the production renderer", () => {
+    const native = createRequire(import.meta.url)("@gpuix/native") as {
+      GpuixRenderer: new () => {
+        minimizeWindow(): void
+        zoomWindow(): void
+        toggleFullscreen(): void
+      }
+    }
+    const renderer = new native.GpuixRenderer()
+
+    for (const control of [
+      renderer.minimizeWindow,
+      renderer.zoomWindow,
+      renderer.toggleFullscreen,
+    ]) {
+      expect(() => control.call(renderer)).toThrow(
+        /GPUI (window|application) is not initialized/
+      )
+    }
+  })
 })
 
 function runChild(command: string, args: string[]): Promise<string> {
