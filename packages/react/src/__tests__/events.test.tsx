@@ -3504,11 +3504,13 @@ describeNative("events", () => {
     it("dispatches pointer presses from a custom-element hit through ancestors", () => {
       const down = vi.fn()
       const up = vi.fn()
+      const move = vi.fn()
       testRoot.render(
         <div
           style={{ width: 240, height: 100 }}
           onPointerDown={down}
           onPointerUp={up}
+          onPointerMove={move}
         >
           <canvas
             data-testid="pointer-custom-child"
@@ -3521,12 +3523,15 @@ describeNative("events", () => {
       const child = testRoot.renderer.findByTestId("pointer-custom-child")!
       const { x, y, width, height } = testRoot.renderer.getElementBounds(child.id)!
       testRoot.renderer.nativeSimulateMouseDown(x + width / 2, y + height / 2)
+      testRoot.renderer.nativeSimulateMouseMove(x + width + 40, y + height / 2)
       testRoot.renderer.nativeSimulateMouseUp(x + width / 2, y + height / 2)
 
       expect(down).toHaveBeenCalledOnce()
       expect(up).toHaveBeenCalledOnce()
+      expect(move).toHaveBeenCalledOnce()
       expect(down.mock.calls[0]![0].target.id).toBe(child.id)
       expect(up.mock.calls[0]![0].target.id).toBe(child.id)
+      expect(move.mock.calls[0]![0].target.id).toBe(child.id)
     })
 
     it("honours pointer propagation controls at the target", () => {

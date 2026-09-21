@@ -212,6 +212,8 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
     let tracks_mouse_up = ctx.events.contains("mouseUp");
     let tracks_pointer_up =
         crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerUp");
+    let tracks_pointer_move =
+        crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerMove");
     // `doubleClick` and `contextMenu` are synthesized in React from the click
     // and mouse-down payloads, so they ride those listeners rather than owning
     // one. The flag keeps an element that declares both `click` and
@@ -327,7 +329,7 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
         cx,
     );
     let el = if (tracks_mouse_down && ctx.events.contains("mouseMove"))
-        || (tracks_pointer_down && ctx.events.contains("pointerMove"))
+        || (tracks_pointer_down && tracks_pointer_move)
     {
         el.capture_pointer()
     } else {
