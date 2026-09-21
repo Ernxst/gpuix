@@ -1,6 +1,6 @@
 import React from "react"
 import type { AccessibilityRole } from "@gpuix/react"
-import type { Props } from "../types/host.js"
+import type { InputProps, Props } from "../types/host.js"
 
 declare module "@gpuix/react" {
   interface AccessibilityRoleRegistry {
@@ -37,6 +37,9 @@ const aliases = [
     aria-disabled
     aria-hidden={false}
     aria-controls="settings-panel"
+    aria-haspopup="menu"
+    aria-roledescription="Settings button"
+    aria-relevant="additions text"
     hidden
   />,
   <section hidden={false} ariaControls="panel-a panel-b" />,
@@ -74,6 +77,9 @@ const aliasProps: Props = {
   "aria-disabled": true,
   "aria-hidden": false,
   "aria-controls": "settings-panel",
+  "aria-haspopup": "dialog",
+  "aria-roledescription": "Number field",
+  "aria-relevant": "all",
   hidden: false,
 }
 const currentTokens: Props[] = [
@@ -149,6 +155,47 @@ const invalidInvalid: Props = { ariaInvalid: "format" }
 const invalidLive: Props = { ariaLive: "rude" }
 // @ts-expect-error disabled is an HTML boolean attribute, not an ARIA Booleanish attribute.
 const invalidDisabled: Props = { disabled: "false" }
+const popupTokens: Props[] = [
+  { ariaHasPopup: true },
+  { ariaHasPopup: false },
+  { ariaHasPopup: "true" },
+  { ariaHasPopup: "false" },
+  { ariaHasPopup: "menu" },
+  { ariaHasPopup: "listbox" },
+  { ariaHasPopup: "tree" },
+  { ariaHasPopup: "grid" },
+  { "aria-haspopup": "dialog" },
+]
+const roleDescriptions: Props[] = [
+  { ariaRoleDescription: "Number field" },
+  { "aria-roledescription": "slide" },
+]
+const relevantTokens: Props[] = [
+  { ariaRelevant: "additions" },
+  { ariaRelevant: "removals" },
+  { ariaRelevant: "text" },
+  { ariaRelevant: "all" },
+  { ariaRelevant: "additions removals" },
+  { "aria-relevant": "text removals" },
+]
+// @ts-expect-error ariaHasPopup accepts only the ARIA popup token set.
+const invalidHasPopup: Props = { ariaHasPopup: "popover" }
+// @ts-expect-error aria-haspopup accepts only the ARIA popup token set.
+const invalidHasPopupAlias: Props = { "aria-haspopup": "sheet" }
+// @ts-expect-error ariaRoleDescription is a string.
+const invalidRoleDescription: Props = { ariaRoleDescription: 3 }
+// @ts-expect-error ariaRelevant accepts only DOM-compatible token combinations.
+const invalidRelevant: Props = { ariaRelevant: "everything" }
+// @ts-expect-error aria-relevant accepts only DOM-compatible token combinations.
+const invalidRelevantAlias: Props = { "aria-relevant": "additions additions" }
+const rangeInput: InputProps = {
+  type: "range",
+  min: 0,
+  max: "100",
+  step: "any",
+  value: "40",
+  "aria-orientation": "horizontal",
+}
 const visuallyHidden: Props = { visuallyHidden: true }
 // @ts-expect-error visuallyHidden is true-only until a focus-revealed mode is implemented.
 const falseVisuallyHidden: Props = { visuallyHidden: false }
@@ -169,6 +216,15 @@ void invalidOrientation
 void invalidInvalid
 void invalidLive
 void invalidDisabled
+void popupTokens
+void roleDescriptions
+void relevantTokens
+void invalidHasPopup
+void invalidHasPopupAlias
+void invalidRoleDescription
+void invalidRelevant
+void invalidRelevantAlias
+void rangeInput
 void visuallyHidden
 void falseVisuallyHidden
 void futureVisuallyHidden

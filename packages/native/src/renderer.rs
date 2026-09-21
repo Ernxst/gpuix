@@ -9341,8 +9341,9 @@ impl GpuixView {
             return false;
         }
 
-        // Space activates a checkbox or radio, and a radio's arrow keys move
-        // its selection; neither scrolls.
+        // Space activates a checkbox or radio, a radio's arrow keys move its
+        // selection, and a range's arrow, page, Home and End keys step it;
+        // none of those scrolls.
         let consumed = match kind {
             crate::custom_elements::choice_input::InputKind::Checkbox => {
                 event.keystroke.key == "space"
@@ -9350,6 +9351,9 @@ impl GpuixView {
             crate::custom_elements::choice_input::InputKind::Radio => {
                 event.keystroke.key == "space"
                     || matches!(action, KeyboardScrollAction::Line { .. })
+            }
+            crate::custom_elements::choice_input::InputKind::Range => {
+                event.keystroke.key != "space"
             }
             _ => false,
         };

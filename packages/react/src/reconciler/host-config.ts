@@ -36,20 +36,25 @@ import {
   commitWriter,
   formOwner,
   inputKind,
+  isRangeInput,
   mountChoice,
+  mountRange,
   readChecked,
   readDefaultChecked,
   readIndeterminate,
+  readRangeValue,
   requestSubmit,
   resetForm,
   setCustomValidity,
   updateChoice,
+  updateRange,
   validationMessage,
   validityOf,
   willValidate,
   writeChecked,
   writeDefaultChecked,
   writeIndeterminate,
+  writeRangeValue,
 } from "./form-controls.js"
 import {
   ARIA_PROP_ALIASES,
@@ -507,7 +512,8 @@ function hasEventListener(props: Props, eventType: string): boolean {
  * Whether native must report this event for this element. Labels, checkboxes,
  * radios, and submit and reset buttons need their clicks without a listener,
  * since their activation behaviour runs in JS; a radio needs its key presses
- * for arrow navigation.
+ * for arrow navigation, and a range its key presses and assistive-technology
+ * actions for stepping.
  */
 function hasNativeEventListener(type: ElementType, props: Props, eventType: string): boolean {
   if (hasEventListener(props, eventType)) return true
@@ -520,7 +526,8 @@ function hasNativeEventListener(type: ElementType, props: Props, eventType: stri
   const kind = inputKind(props)
   return (
     (eventType === "click" && (kind === "checkbox" || kind === "radio")) ||
-    (eventType === "keyDown" && kind === "radio")
+    (eventType === "keyDown" && (kind === "radio" || kind === "range")) ||
+    (eventType === "accessibilityAction" && kind === "range")
   )
 }
 
@@ -1015,6 +1022,8 @@ const UNIVERSAL_PROPS = new Set([
   "ariaColSpan",
   "ariaDisabled",
   "ariaHidden",
+  "ariaHasPopup",
+  "ariaRoleDescription",
   "visuallyHidden",
   "disabled",
   // `highlight` is scoped by where it sits in the tree, so it has to reach a
@@ -1295,8 +1304,9 @@ function resyncContextDependentRoles(container: Container, instance: Instance): 
  * A checkbox or radio input takes its role from `type`. A text input's
  * `textbox` role is implicit in Rust, and a hidden input renders nothing.
  */
-function nativeInputRole(props: Props): "checkbox" | "radio" | undefined {
+function nativeInputRole(props: Props): "checkbox" | "radio" | "slider" | undefined {
   const kind = inputKind(props)
+  if (kind === "range") return "slider"
   return kind === "checkbox" || kind === "radio" ? kind : undefined
 }
 
@@ -1338,6 +1348,7 @@ function nativeImageLabel(type: string, props: Props): string | undefined {
 
 /** Authored `<input>` props that feed choice state instead of being forwarded. */
 const CHOICE_STATE_PROPS = new Set(["checked", "defaultChecked", "indeterminate"])
+const RANGE_STATE_PROPS = new Set(["value", "defaultValue"])
 
 function customPropEntries(
   instance: Instance,
@@ -1351,6 +1362,8 @@ function customPropEntries(
     // A choice input's state reaches Rust as the internal `checked` and
     // `indeterminate` props `form-controls.ts` writes, never as authored.
     if (type === "input" && CHOICE_STATE_PROPS.has(key)) return []
+    // So does a range's sanitized value, as the internal `value` prop.
+    if (type === "input" && RANGE_STATE_PROPS.has(key) && inputKind(props) === "range") return []
     const alias = ARIA_PROP_ALIASES[key as keyof typeof ARIA_PROP_ALIASES]
     if (alias === undefined) return [[key, value]]
     if (Object.prototype.hasOwnProperty.call(props, alias)) return []
@@ -1490,6 +1503,10 @@ function installTextEditingMembers(
     value: nativeAccessor({
       get: readValue,
       set: (value: unknown) => {
+        if (isRangeInput(instance)) {
+          writeRangeValue(container, instance, value == null ? "" : String(value))
+          return
+        }
         // A checkbox, radio, or hidden input's value is its `value` prop.
         if (!isTextEditingInstance(instance)) return
         container.native.setInputValue?.(id, value == null ? "" : String(value))
@@ -1560,6 +1577,13 @@ function installFormMembers(instance: Instance, container: Container): void {
         get: () => readIndeterminate(instance),
         set: (value: unknown) => writeIndeterminate(container, instance, Boolean(value)),
       }),
+      // Implemented for a range only, the one numeric type this renderer has.
+      valueAsNumber: accessor({
+        get: () => (isRangeInput(instance) ? readRangeValue(instance) : undefined),
+        set: (value: unknown) => {
+          if (isRangeInput(instance)) writeRangeValue(container, instance, Number(value))
+        },
+      }),
     })
   }
   if (type === "input" || type === "textarea" || type === "button") {
@@ -1606,6 +1630,7 @@ function materialize(node: HostNode): HostNodeState {
     syncEventListeners(state.container, node.id, node.type, node.props)
     syncCustomProps(renderer, node, node.props)
     mountChoice(state.container, node, commitWriter(state.container))
+    mountRange(node, commitWriter(state.container))
   } else {
     // Native hit testing reports the deepest painted retained node. A raw React
     // text node has no public host instance of its own, so route that source to
@@ -2062,6 +2087,7 @@ export const hostConfig = {
     instance.props = newProps
     diffCustomProps(container.renderer, instance, oldProps, newProps)
     updateChoice(container, instance, oldProps, commitWriter(container))
+    updateRange(instance, commitWriter(container))
     // After the new props are installed, so the descendants' ancestor walk
     // reads the role this update just applied.
     if (

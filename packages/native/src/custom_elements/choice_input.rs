@@ -25,6 +25,7 @@ pub(crate) enum InputKind {
     Checkbox,
     Radio,
     Hidden,
+    Range,
 }
 
 impl InputKind {
@@ -37,6 +38,7 @@ impl InputKind {
             Some("checkbox") => Self::Checkbox,
             Some("radio") => Self::Radio,
             Some("hidden") => Self::Hidden,
+            Some("range") => Self::Range,
             _ => Self::Text,
         }
     }
@@ -493,6 +495,7 @@ mod tests {
         assert_eq!(kind("CheckBox".into()), InputKind::Checkbox);
         assert_eq!(kind("radio".into()), InputKind::Radio);
         assert_eq!(kind("hidden".into()), InputKind::Hidden);
+        assert_eq!(kind("Range".into()), InputKind::Range);
         assert_eq!(kind("email".into()), InputKind::Text);
         assert_eq!(InputKind::from_type(None), InputKind::Text);
     }

@@ -43,6 +43,9 @@ export const ARIA_PROP_ALIASES = {
   "aria-disabled": "ariaDisabled",
   "aria-hidden": "ariaHidden",
   "aria-controls": "ariaControls",
+  "aria-haspopup": "ariaHasPopup",
+  "aria-roledescription": "ariaRoleDescription",
+  "aria-relevant": "ariaRelevant",
 } as const
 
 /** DOM attribute names whose prop spelling differs outside the ARIA table. */
@@ -107,12 +110,13 @@ export const AUTHORED_HOST_TYPE_PROP = "authoredHostType"
 /**
  * ARIA attributes kept for the author with no accessibility projection.
  *
- * `aria-controls` names a DOM relationship that AccessKit has no field for, so
- * the retained tree records it for `getAttribute` and the attribute matchers
- * and the native side never reads it. The same rule as `HTML_ATTRIBUTE_PROPS`
- * applies: a name belongs here only while no Rust code interprets it.
+ * `aria-controls` names a DOM relationship, and `aria-relevant` a live-region
+ * filter, that AccessKit has no field for, so the retained tree records them
+ * for `getAttribute` and the attribute matchers and the native side never
+ * reads them. The same rule as `HTML_ATTRIBUTE_PROPS` applies: a name belongs
+ * here only while no Rust code interprets it.
  */
-export const RETAINED_ARIA_PROPS = new Set(["ariaControls"])
+export const RETAINED_ARIA_PROPS = new Set(["ariaControls", "ariaRelevant"])
 
 /** Props the retained tree keeps for the author, whatever the element type. */
 export function isAuthorVisibleProp(name: string): boolean {

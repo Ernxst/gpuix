@@ -2718,8 +2718,9 @@ Tab stop or an arrow-key target. Enter does not
 activate a checkbox or radio.
 
 `<input type="hidden">` renders nothing and cannot take focus; it only
-submits its `value`. Every other `type` is a text editor. The ref's `type` is
-the element type, `"input"`, not the input type: read `ref.current.props.type`.
+submits its `value`. `<input type="range">` is a slider, described below. Every
+other `type` is a text editor. The ref's `type` is the element type,
+`"input"`, not the input type: read `ref.current.props.type`.
 
 The default control is a 13px box or circle drawn with the shared theme's
 `border`, `bg`, and `accent` colours. Author styles such as `width`, `height`,
@@ -2749,6 +2750,41 @@ submitting button its `name` and `value`. There is no navigation, so
 `preventDefault()` on `onSubmit` changes nothing. `onReset` can be prevented;
 otherwise every checkbox and radio returns to its default and every text
 control to its `defaultValue` (a controlled one to its `value`).
+
+**Ranges.** `<input type="range">` is a native slider with the implicit
+`slider` role. It takes `min` (default 0), `max` (default 100, never below
+`min`), `step` (default 1, or `"any"`), `value` for a controlled range and
+`defaultValue` for an uncontrolled one, as numbers or numeric strings. The
+value is sanitized as HTML does it: an unparsable value becomes the midpoint,
+and the rest is clamped and rounded to the nearest step counted from `min`.
+
+```tsx
+<input
+  type="range"
+  aria-label="Volume"
+  min={0}
+  max={100}
+  value={String(volume)}
+  onChange={(event) => setVolume(Number(event.value))}
+/>
+```
+
+Arrow keys move the value one step, Up and Right increasing it; Page Up and
+Page Down move a tenth of the range, and Home and End jump to the ends. Screen
+readers' Increment and Decrement actions step it too. Each change fires
+`onChange` with the new value as `event.value`, a `preventDefault()` on `onKeyDown` or `onAccessibilityAction`
+stops it, and a controlled range returns to its `value` prop unless the
+handler sets state. The ref carries `value`, a string, and `valueAsNumber`;
+writing either fires no `onChange`. A range submits its value and resets to
+its `defaultValue`. The accessibility node carries the value, bounds and step;
+an authored `ariaValueNow`, `ariaValueMin` or `ariaValueMax` wins over them, as
+in Chromium.
+
+The default control is a 129×16 track and thumb in the theme's `border` and
+`accent` colours, which author styles replace, as they do for Base UI's
+visually hidden `Slider.Thumb` input. Pointer dragging on the track, vertical
+painting, and right-to-left key direction are not implemented: Base UI's
+Slider handles its own pointer input and key direction.
 
 `required` is the one constraint checked: a required checkbox that is
 unchecked, a radio group with a required member and nothing checked, or a
@@ -2783,6 +2819,7 @@ add semantics and focus behavior, but no visual defaults.
 | `<section>` | `region` |
 | `<form>` | `form`, only when it has an accessible name |
 | `<input type="checkbox">`, `<input type="radio">` | `checkbox`, `radio`, with their checked or mixed state |
+| `<input type="range">` | `slider`, with its value, bounds and step |
 | `<address>` | `group` |
 | `<abbr>` | platform `abbr` role |
 | `<blockquote>` | `blockquote` |
@@ -2865,7 +2902,10 @@ equivalents:
 | `ariaDisabled` | Unavailable and non-activating, but retained in tab order |
 | `ariaHidden` | Excludes the element and its complete subtree from AccessKit |
 | `visuallyHidden` | Keeps the roled node and its name in AccessKit while painting nothing and reserving no layout space |
+| `ariaHasPopup` | The popup the element opens: `"menu"` (or `true`), `"listbox"`, `"tree"`, `"grid"` or `"dialog"`; `false` declares none. Projected on the roles WAI-ARIA allows it on: `button`, `combobox`, `gridcell`, `link`, `menuitem` and its checkbox and radio variants, `slider`, `tab`, `textbox`, `searchbox`, `treeitem` and `application` |
+| `ariaRoleDescription` | A localized name for the role, such as Base UI NumberField's `"Number field"`; not projected on a generic node or when empty |
 | `ariaControls` | Space-separated `id`s of the elements this one controls; retained for `getAttribute` and `toHaveAttribute`, not projected, since AccessKit has no field for it |
+| `ariaRelevant` | Which live-region changes are announced; retained for `getAttribute` and `toHaveAttribute`, not projected, since AccessKit has no field for it, so every change is announced |
 
 `ariaLabelledBy` and `ariaDescribedBy` take space-separated author `id`s and are
 resolved against the retained tree each time it is built, so the name follows
@@ -2999,8 +3039,10 @@ mutation record, which produces four differences from the browser worth knowing:
 - **A live region scrolled out of a clipping ancestor stops announcing**, since
   it leaves the accessibility tree along with the rest of the clipped content.
 
-`aria-busy` and `aria-relevant` have no AccessKit equivalent and are not
-supported. Live regions are verified on macOS with VoiceOver
+`aria-busy` has no AccessKit equivalent and is not supported. `aria-relevant`
+has none either; it is kept on the element for `getAttribute` and the
+attribute matchers, as Base UI's Toast viewport sets it, but every change is
+announced whatever it says. Live regions are verified on macOS with VoiceOver
 ([docs/accessibility-smoke.md](./docs/accessibility-smoke.md)); Windows and
 Linux use the same AccessKit properties but have not been checked against a
 screen reader here.
@@ -3073,7 +3115,7 @@ Role/state combinations are validated rather than silently approximated:
 | `link` | `ariaExpanded`; Activate uses `onClick` |
 | `meter`, `progressbar` | value text/range; read-only, so no Increment or Decrement action; omit `ariaValueNow` on `progressbar` for indeterminate progress |
 | `option`, `tab` | `ariaSelected` |
-| `slider`, `spinbutton` | value text/range; Increment and Decrement use `onAccessibilityAction` |
+| `slider`, `spinbutton` | value text/range; Increment and Decrement use `onAccessibilityAction`, and step an `<input type="range">` by default |
 | `separator`, `tablist`, `toolbar` | `ariaOrientation` (`"horizontal"` or `"vertical"`) |
 | `switch` | boolean `ariaChecked` only; `"mixed"` is computed as `false` with a normalization diagnostic; Activate uses `onClick` |
 | `textbox` | accessible name and description; `ariaReadOnly`; `ariaRequired`; implicit on `<input>` and `<textarea>`, named by `ariaLabelledBy`, `ariaLabel`, then `placeholder` |

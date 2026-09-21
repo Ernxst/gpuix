@@ -38,6 +38,8 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaColSpan",
     "ariaDisabled",
     "ariaHidden",
+    "ariaHasPopup",
+    "ariaRoleDescription",
     "visuallyHidden",
     "disabled",
 ];
@@ -335,6 +337,27 @@ impl AccessibilityRole {
             ),
             "disabled" | "ariaDisabled" => !matches!(self.role, Role::Heading | Role::Image),
             "ariaLive" | "ariaAtomic" => self.role != Role::GenericContainer,
+            // The roles WAI-ARIA 1.2 allows `aria-haspopup` on.
+            "ariaHasPopup" => matches!(
+                self.role,
+                Role::Application
+                    | Role::Button
+                    | Role::ComboBox
+                    | Role::GridCell
+                    | Role::Link
+                    | Role::MenuItem
+                    | Role::MenuItemCheckBox
+                    | Role::MenuItemRadio
+                    | Role::Slider
+                    | Role::Tab
+                    | Role::TextInput
+                    | Role::MultilineTextInput
+                    | Role::SearchInput
+                    | Role::TreeItem
+            ),
+            // WAI-ARIA: user agents do not expose a role description on a
+            // generic element, which has no role for it to describe.
+            "ariaRoleDescription" => self.role != Role::GenericContainer,
             _ => true,
         }
     }
@@ -350,7 +373,8 @@ fn resolved_role(element: &RetainedElement) -> Option<AccessibilityRole> {
 
     let implicit = match element.element_type.as_str() {
         // A hidden input renders nothing and has no role. The reconciler writes
-        // a checkbox's or radio's role as `role`, which is handled above.
+        // a checkbox's, radio's or range's role as `role`, which is handled
+        // above.
         "input"
             if crate::custom_elements::choice_input::InputKind::of(element)
                 == crate::custom_elements::choice_input::InputKind::Hidden =>
@@ -411,6 +435,27 @@ fn parse_aria_live(value: &serde_json::Value) -> Option<gpui::Live> {
         "off" => Some(gpui::Live::Off),
         "polite" => Some(gpui::Live::Polite),
         "assertive" => Some(gpui::Live::Assertive),
+        _ => None,
+    }
+}
+
+/// `aria-haspopup`: `Some(None)` for `false`, which declares no popup, and
+/// `None` for a malformed value. `true` means a menu, as it does in WAI-ARIA.
+fn parse_has_popup(value: &serde_json::Value) -> Option<Option<gpui::accesskit::HasPopup>> {
+    use gpui::accesskit::HasPopup;
+
+    match value {
+        serde_json::Value::Bool(false) => Some(None),
+        serde_json::Value::Bool(true) => Some(Some(HasPopup::Menu)),
+        serde_json::Value::String(value) => match value.as_str() {
+            "false" => Some(None),
+            "true" | "menu" => Some(Some(HasPopup::Menu)),
+            "listbox" => Some(Some(HasPopup::Listbox)),
+            "tree" => Some(Some(HasPopup::Tree)),
+            "grid" => Some(Some(HasPopup::Grid)),
+            "dialog" => Some(Some(HasPopup::Dialog)),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -790,6 +835,11 @@ struct AccessibilityProps<'a> {
     value_min: Option<f64>,
     value_max: Option<f64>,
     value_now: Option<f64>,
+    /// A range input's step; no ARIA attribute declares one.
+    value_step: Option<f64>,
+    has_popup: Option<gpui::accesskit::HasPopup>,
+    /// Non-empty: WAI-ARIA forbids exposing an empty role description.
+    role_description: Option<&'a str>,
     level: Option<usize>,
     row_index: Option<usize>,
     column_index: Option<usize>,
@@ -802,6 +852,10 @@ struct AccessibilityProps<'a> {
 
 impl<'a> AccessibilityProps<'a> {
     fn from_element(tree: &RetainedTree, element: &'a RetainedElement) -> Self {
+        // A range input's own value and bounds stand in for undeclared ARIA
+        // ones, as HTML-AAM maps them; an authored ARIA value still wins, as it
+        // does in Chromium.
+        let range = crate::custom_elements::range_input::range_values(element);
         Self {
             role: resolved_role(element),
             label: element
@@ -877,9 +931,23 @@ impl<'a> AccessibilityProps<'a> {
                 .custom_props
                 .get("ariaValueText")
                 .and_then(serde_json::Value::as_str),
-            value_min: finite_number(element.custom_props.get("ariaValueMin")),
-            value_max: finite_number(element.custom_props.get("ariaValueMax")),
-            value_now: finite_number(element.custom_props.get("ariaValueNow")),
+            value_min: finite_number(element.custom_props.get("ariaValueMin"))
+                .or(range.map(|range| range.min)),
+            value_max: finite_number(element.custom_props.get("ariaValueMax"))
+                .or(range.map(|range| range.max)),
+            value_now: finite_number(element.custom_props.get("ariaValueNow"))
+                .or(range.map(|range| range.value)),
+            value_step: range.and_then(|range| range.step),
+            has_popup: element
+                .custom_props
+                .get("ariaHasPopup")
+                .and_then(parse_has_popup)
+                .flatten(),
+            role_description: element
+                .custom_props
+                .get("ariaRoleDescription")
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.trim().is_empty()),
             level: positive_integer(element.custom_props.get("ariaLevel")),
             row_index: positive_integer(element.custom_props.get("ariaRowIndex")),
             column_index: positive_integer(element.custom_props.get("ariaColIndex")),
@@ -1276,8 +1344,13 @@ pub(crate) fn element_problems(
 
     for (property, value) in &element.custom_props {
         let malformed = match property.as_str() {
-            "ariaLabel" | "ariaDescription" | "ariaValueText" | "ariaLabelledBy"
-            | "ariaDescribedBy" => !value.is_string(),
+            "ariaLabel"
+            | "ariaDescription"
+            | "ariaValueText"
+            | "ariaLabelledBy"
+            | "ariaDescribedBy"
+            | "ariaRoleDescription" => !value.is_string(),
+            "ariaHasPopup" => parse_has_popup(value).is_none(),
             "ariaChecked" | "ariaPressed" => {
                 !(value.is_boolean() || value.as_str() == Some("mixed"))
             }
@@ -1304,7 +1377,12 @@ pub(crate) fn element_problems(
         };
         if malformed {
             let expected = match property.as_str() {
-                "ariaLabel" | "ariaDescription" | "ariaValueText" => "a string",
+                "ariaLabel" | "ariaDescription" | "ariaValueText" | "ariaRoleDescription" => {
+                    "a string"
+                }
+                "ariaHasPopup" => {
+                    "a boolean or one of \"true\", \"false\", \"menu\", \"listbox\", \"tree\", \"grid\", or \"dialog\""
+                }
                 "ariaLabelledBy" | "ariaDescribedBy" => "a string of space-separated element ids",
                 "ariaChecked" | "ariaPressed" => "a boolean or \"mixed\"",
                 "ariaOrientation" => "one of \"horizontal\" or \"vertical\"",
@@ -1362,6 +1440,17 @@ pub(crate) fn element_problems(
             continue;
         }
 
+        if property == "ariaRoleDescription"
+            && value.as_str().is_some_and(|value| value.trim().is_empty())
+        {
+            problems.push(ignored_problem(
+                property,
+                value,
+                "an empty role description is not exposed, so it is omitted from the accessibility tree",
+            ));
+            continue;
+        }
+
         if matches!(
             property.as_str(),
             "ariaLabel"
@@ -1392,6 +1481,8 @@ pub(crate) fn element_problems(
                 | "ariaColSpan"
                 | "disabled"
                 | "ariaDisabled"
+                | "ariaHasPopup"
+                | "ariaRoleDescription"
         ) {
             match role {
                 // A generic node — implied by a name, or declared as `generic`, `none`
@@ -1639,6 +1730,18 @@ where
     }
     if let Some(value_now) = props.value_now.filter(|_| props.supports("ariaValueNow")) {
         el = el.aria_numeric_value(value_now);
+    }
+    if let Some(step) = props.value_step.filter(|_| props.supports("ariaValueNow")) {
+        el = el.aria_numeric_value_step(step);
+    }
+    if let Some(has_popup) = props.has_popup.filter(|_| props.supports("ariaHasPopup")) {
+        el = el.aria_has_popup(has_popup);
+    }
+    if let Some(role_description) = props
+        .role_description
+        .filter(|_| props.supports("ariaRoleDescription"))
+    {
+        el = el.aria_role_description(role_description.to_owned());
     }
     if let Some(level) = props.level.filter(|_| props.supports("ariaLevel")) {
         el = el.aria_level(level);
@@ -2770,5 +2873,173 @@ mod tests {
                 "<{element_type}>"
             );
         }
+    }
+
+    fn with_role(id: u64, role: &str) -> RetainedElement {
+        let mut element = RetainedElement::new(id, "div".to_string(), 1);
+        element.custom_props.insert("role".into(), role.into());
+        element
+    }
+
+    #[test]
+    fn parses_every_has_popup_token_and_rejects_the_rest() {
+        use gpui::accesskit::HasPopup;
+
+        for (value, expected) in [
+            (serde_json::json!(true), Some(Some(HasPopup::Menu))),
+            (serde_json::json!("true"), Some(Some(HasPopup::Menu))),
+            (serde_json::json!("menu"), Some(Some(HasPopup::Menu))),
+            (serde_json::json!("listbox"), Some(Some(HasPopup::Listbox))),
+            (serde_json::json!("tree"), Some(Some(HasPopup::Tree))),
+            (serde_json::json!("grid"), Some(Some(HasPopup::Grid))),
+            (serde_json::json!("dialog"), Some(Some(HasPopup::Dialog))),
+            (serde_json::json!(false), Some(None)),
+            (serde_json::json!("false"), Some(None)),
+            (serde_json::json!("popover"), None),
+            (serde_json::json!("Menu"), None),
+            (serde_json::json!(1), None),
+        ] {
+            assert_eq!(parse_has_popup(&value), expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn projects_has_popup_on_the_roles_that_allow_it() {
+        for role in ["button", "combobox", "menuitem", "tab", "textbox", "slider"] {
+            let mut element = with_role(1, role);
+            element
+                .custom_props
+                .insert("ariaHasPopup".into(), "dialog".into());
+            let props = AccessibilityProps::from_element(&detached_tree(), &element);
+            assert!(props.supports("ariaHasPopup"), "{role}");
+            assert_eq!(
+                props.has_popup,
+                Some(gpui::accesskit::HasPopup::Dialog),
+                "{role}"
+            );
+            assert!(
+                element_problems(&detached_tree(), &element).is_empty(),
+                "{role}"
+            );
+        }
+
+        // `false` declares no popup, which is valid and projects nothing.
+        let mut closed = with_role(2, "button");
+        closed
+            .custom_props
+            .insert("ariaHasPopup".into(), false.into());
+        assert_eq!(
+            AccessibilityProps::from_element(&detached_tree(), &closed).has_popup,
+            None
+        );
+        assert!(element_problems(&detached_tree(), &closed).is_empty());
+    }
+
+    #[test]
+    fn reports_has_popup_on_a_role_without_it_and_a_malformed_token() {
+        let mut heading = with_role(1, "heading");
+        heading
+            .custom_props
+            .insert("ariaHasPopup".into(), "menu".into());
+        let problems = element_problems(&detached_tree(), &heading);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems[0].problem.property, "ariaHasPopup");
+        assert_eq!(problems[0].effect, AccessibilityProblemEffect::Ignored);
+
+        let mut button = with_role(2, "button");
+        button
+            .custom_props
+            .insert("ariaHasPopup".into(), "popover".into());
+        let problems = element_problems(&detached_tree(), &button);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems[0].effect, AccessibilityProblemEffect::Rejected);
+        assert!(problems[0].problem.reason.contains("\"dialog\""));
+    }
+
+    #[test]
+    fn projects_a_role_description_on_a_non_generic_role_only() {
+        let mut field = RetainedElement::new(1, "input".to_string(), 1);
+        field
+            .custom_props
+            .insert("ariaRoleDescription".into(), "Number field".into());
+        let props = AccessibilityProps::from_element(&detached_tree(), &field);
+        assert_eq!(props.role_description, Some("Number field"));
+        assert!(props.supports("ariaRoleDescription"));
+        assert!(element_problems(&detached_tree(), &field).is_empty());
+
+        // A named `<div>` resolves to a generic node, which has no role to
+        // describe.
+        let mut generic = RetainedElement::new(2, "div".to_string(), 1);
+        generic
+            .custom_props
+            .insert("ariaLabel".into(), "Card".into());
+        generic
+            .custom_props
+            .insert("ariaRoleDescription".into(), "Card".into());
+        assert!(
+            !AccessibilityProps::from_element(&detached_tree(), &generic)
+                .supports("ariaRoleDescription")
+        );
+        let problems = element_problems(&detached_tree(), &generic);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems[0].problem.property, "ariaRoleDescription");
+        assert_eq!(problems[0].effect, AccessibilityProblemEffect::Ignored);
+    }
+
+    #[test]
+    fn omits_an_empty_role_description_and_rejects_a_non_string() {
+        let mut blank = with_role(1, "button");
+        blank
+            .custom_props
+            .insert("ariaRoleDescription".into(), "  ".into());
+        assert_eq!(
+            AccessibilityProps::from_element(&detached_tree(), &blank).role_description,
+            None
+        );
+        let problems = element_problems(&detached_tree(), &blank);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems[0].effect, AccessibilityProblemEffect::Ignored);
+
+        let mut numeric = with_role(2, "button");
+        numeric
+            .custom_props
+            .insert("ariaRoleDescription".into(), 3.into());
+        let problems = element_problems(&detached_tree(), &numeric);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems[0].effect, AccessibilityProblemEffect::Rejected);
+    }
+
+    #[test]
+    fn a_range_input_supplies_its_own_value_bounds_and_step() {
+        let mut range = RetainedElement::new(1, "input".to_string(), 1);
+        for (key, value) in [
+            ("type", serde_json::json!("range")),
+            ("role", serde_json::json!("slider")),
+            ("min", serde_json::json!(10)),
+            ("max", serde_json::json!("20")),
+            ("step", serde_json::json!(2)),
+            ("value", serde_json::json!(14)),
+        ] {
+            range.custom_props.insert(key.into(), value);
+        }
+        let props = AccessibilityProps::from_element(&detached_tree(), &range);
+        assert_eq!(props.role.map(|role| role.role), Some(gpui::Role::Slider));
+        assert_eq!(
+            (
+                props.value_min,
+                props.value_max,
+                props.value_now,
+                props.value_step
+            ),
+            (Some(10.0), Some(20.0), Some(14.0), Some(2.0))
+        );
+        assert!(element_problems(&detached_tree(), &range).is_empty());
+
+        // An authored ARIA value wins over the native one, as in Chromium.
+        range.custom_props.insert("ariaValueNow".into(), 16.into());
+        assert_eq!(
+            AccessibilityProps::from_element(&detached_tree(), &range).value_now,
+            Some(16.0)
+        );
     }
 }
