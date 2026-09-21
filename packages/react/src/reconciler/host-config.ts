@@ -10,8 +10,11 @@ import { DefaultEventPriority } from "react-reconciler/constants.js"
 const NoEventPriority = 0
 import type {
   Container,
+  ElementBounds,
+  ElementRect,
   ElementType,
   FormProps,
+  FormPublicInstance,
   HostContext,
   Instance,
   MutationRenderer,
@@ -1462,160 +1465,506 @@ function selectionOffset(value: number): number {
 }
 
 /**
- * Install the text-editing members of `HTMLInputElement` on an `<input>` or
- * `<textarea>` ref. They are accessors, not plain fields, because every read
- * has to reach the native editor: the caret moves on keystrokes and pointer
- * drags that React never sees.
+ * Shared prototype for every host instance `createInstance` produces. All
+ * per-element state — id, type, props, and the container that owns the
+ * native element — lives in instance fields; the members that read and write
+ * through them are defined once here and reached through the prototype
+ * chain, the way `Element.prototype` backs every DOM element instead of each
+ * node carrying its own copy.
+ *
+ * `#container` stays a private field rather than an own enumerable property:
+ * nothing outside this hierarchy needs it, and `Object.keys()` / a spread
+ * over a ref must not walk into it. Subclasses reach it only through the
+ * module-scoped `containerOf`, which is what lets element kinds with extra
+ * members (canvas, text-editing, form controls) extend this class instead of
+ * re-closing over the same state. A getter would put a `container` member on
+ * every ref, which DOM elements do not have.
  */
-function installTextEditingMembers(
-  instance: Instance,
-  container: Container,
-  id: number
-): void {
-  // Before the first frame builds an editor the native side has no state to
-  // report, so fall back to the `value` prop with the caret at its end — where
-  // the editor puts the caret when it is finally created.
-  const readValue = (): string => {
-    if (!isTextEditingInstance(instance)) return attributeInputValue(instance)
-    const native = container.native
-    const value = native.getInputValue ? native.getInputValue(id) : null
-    if (typeof value === "string") return value
-    const editorProps = instance.props as Props & { value?: unknown; defaultValue?: unknown }
-    return editorPropText(editorProps.value ?? editorProps.defaultValue) ?? ""
-  }
-  const readSelection = (): readonly number[] => {
-    const native = container.native
-    const range = native.getInputSelection ? native.getInputSelection(id) : null
-    if (range) return range
-    const end = readValue().length
-    return [end, end, 0]
-  }
-  const setSelection = (start: number, end: number, backward: boolean): void => {
-    container.native.setInputSelection?.(id, start, end, backward)
+let containerOf: (element: HostElement) => Container
+
+class HostElement implements Instance {
+  readonly id: number
+  readonly type: ElementType
+  props: Props
+  parentId: number | null = null
+  readonly tagName: string
+  readonly localName: string
+  readonly nodeName: string
+  readonly #container: Container
+
+  constructor(id: number, type: ElementType, props: Props, container: Container) {
+    this.id = id
+    this.type = type
+    this.props = props
+    this.tagName = type.toUpperCase()
+    this.localName = type
+    this.nodeName = type.toUpperCase()
+    this.#container = container
   }
 
-  // Non-enumerable and configurable, matching the prototype accessors these
-  // mirror on a real `HTMLInputElement`. Every read crosses to native and
-  // forces a draw, so an enumerable own property would make an incidental
-  // spread, `Object.keys()`, or deep-equal over a ref cost four of them.
-  const nativeAccessor = (
-    descriptor: PropertyDescriptor
-  ): PropertyDescriptor & ThisType<undefined> => ({
-    enumerable: false,
-    configurable: true,
-    ...descriptor,
-  })
-
-  Object.defineProperties(instance, {
-    value: nativeAccessor({
-      get: readValue,
-      set: (value: unknown) => {
-        if (isRangeInput(instance)) {
-          writeRangeValue(container, instance, value == null ? "" : String(value))
-          return
-        }
-        // A checkbox, radio, or hidden input's value is its `value` prop.
-        if (!isTextEditingInstance(instance)) return
-        container.native.setInputValue?.(id, value == null ? "" : String(value))
-      },
-    }),
-    selectionStart: nativeAccessor({
-      get: () => readSelection()[0]!,
-      // The DOM's setter drags `selectionEnd` along rather than letting the
-      // start overtake it. One read covers both the end and the direction.
-      set: (value: number) => {
-        const start = selectionOffset(value)
-        const current = readSelection()
-        setSelection(start, Math.max(current[1]!, start), current[2] === 1)
-      },
-    }),
-    selectionEnd: nativeAccessor({
-      get: () => readSelection()[1]!,
-      set: (value: number) => {
-        const current = readSelection()
-        setSelection(current[0]!, selectionOffset(value), current[2] === 1)
-      },
-    }),
-    selectionDirection: nativeAccessor({
-      get: (): "forward" | "backward" =>
-        readSelection()[2] === 1 ? "backward" : "forward",
-    }),
-  })
-
-  instance.setSelectionRange = (
-    start: number,
-    end: number,
-    direction?: SelectionDirection
-  ): void => {
-    setSelection(selectionOffset(start), selectionOffset(end), direction === "backward")
+  static {
+    containerOf = (element) => element.#container
   }
-  // `select()` is "set the selection range with 0 and infinity", which lands on
-  // the end of the value once the native side clamps it.
-  instance.select = (): void => setSelection(0, readValue().length, false)
+
+  // [scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight].
+  // An element that is not a scroll container still has a viewport in the DOM,
+  // and content that cannot scroll makes its scroll extent equal to that viewport.
+  #scrollMetrics(): readonly number[] {
+    const native = this.#container.native
+    const getScrollMetrics = native.getScrollMetrics
+    const metrics = getScrollMetrics ? getScrollMetrics.call(native, this.id) : null
+    if (metrics) return metrics
+    const getElementBounds = native.getElementBounds
+    const bounds = getElementBounds ? getElementBounds.call(native, this.id) : null
+    const width = bounds?.width ?? 0
+    const height = bounds?.height ?? 0
+    return [0, 0, width, height, width, height]
+  }
+
+  // gpui stores how far the content moved up/left; the DOM reports how far
+  // the viewport moved down/right. Subtracting rather than negating keeps a
+  // reset at 0 instead of -0. Clamping stays native.
+  #scrollToOffset(left: number, top: number): void {
+    this.#container.native.scrollTo?.(this.id, 0 - left, 0 - top)
+  }
+
+  get parentElement(): Instance | null {
+    return parentElement(this)
+  }
+
+  get ownerDocument() {
+    return ownerDocument()
+  }
+
+  focus(options?: FocusOptions): void {
+    // A disabled form control cannot take focus, as in the DOM.
+    const formControl = this.type === "input" || this.type === "textarea" || this.type === "button"
+    const { disabled } = this.props
+    if (formControl && (disabled === true || typeof disabled === "string")) return
+    this.#container.native.focusElement?.(this.id, options?.preventScroll === true)
+  }
+
+  blur(): void {
+    // Only this element's own focus is ours to drop. A renderer that cannot
+    // report the active element cannot prove that, so it does nothing
+    // rather than blurring whatever happens to be focused.
+    const native = this.#container.native
+    if (!native.getActiveElement || native.getActiveElement() !== this.id) return
+    native.blur?.()
+  }
+
+  setPointerCapture(): void {
+    this.#container.native.setPointerCapture?.(this.id)
+  }
+
+  releasePointerCapture(): void {
+    this.#container.native.releasePointerCapture?.(this.id)
+  }
+
+  click(): void {
+    clickElement(this.#container, this)
+  }
+
+  dispatchEvent(event: GpuixDispatchableEvent): boolean {
+    return dispatchElementEvent(this.#container, this, event)
+  }
+
+  get scrollLeft(): number {
+    return this.#scrollMetrics()[0]!
+  }
+
+  set scrollLeft(value: number) {
+    this.#scrollToOffset(value, this.#scrollMetrics()[1]!)
+  }
+
+  get scrollTop(): number {
+    return this.#scrollMetrics()[1]!
+  }
+
+  set scrollTop(value: number) {
+    this.#scrollToOffset(this.#scrollMetrics()[0]!, value)
+  }
+
+  get scrollWidth(): number {
+    return this.#scrollMetrics()[2]!
+  }
+
+  get scrollHeight(): number {
+    return this.#scrollMetrics()[3]!
+  }
+
+  get clientWidth(): number {
+    return this.#scrollMetrics()[4]!
+  }
+
+  get clientHeight(): number {
+    return this.#scrollMetrics()[5]!
+  }
+
+  scrollTo(optionsOrX?: ScrollToOptions | number, y?: number): void {
+    const metrics = this.#scrollMetrics()
+    const left = typeof optionsOrX === "number" ? optionsOrX : (optionsOrX?.left ?? metrics[0]!)
+    const top =
+      typeof optionsOrX === "number" ? (y ?? metrics[1]!) : (optionsOrX?.top ?? metrics[1]!)
+    this.#scrollToOffset(left, top)
+  }
+
+  scrollIntoView(options?: boolean | ScrollIntoViewOptions): void {
+    this.#container.native.scrollElementIntoView?.(
+      this.id,
+      scrollIntoViewAlignsToTop(this, this.#container, this.props, options)
+    )
+  }
+
+  getBounds(): ElementBounds | null {
+    const getElementBounds = this.#container.native.getElementBounds
+    if (!getElementBounds) {
+      throw new Error("This GPUIX renderer does not support element measurement")
+    }
+    const bounds = getElementBounds.call(this.#container.native, this.id)
+    if (!bounds) return null
+    return bounds
+  }
+
+  getBoundingClientRect(): ElementRect {
+    // The DOM reports an all-zero rect for an element with no boxes rather
+    // than nothing at all, so an unpainted element does the same here.
+    const bounds = this.getBounds() ?? { x: 0, y: 0, width: 0, height: 0 }
+    return {
+      ...bounds,
+      top: bounds.y,
+      right: bounds.x + bounds.width,
+      bottom: bounds.y + bounds.height,
+      left: bounds.x,
+    }
+  }
+
+  matches(selector: string): boolean {
+    const normalized = selector.trim()
+    if (
+      normalized !== ":focus" &&
+      normalized !== ":focus-visible" &&
+      normalized !== ":hover" &&
+      normalized !== ":active"
+    ) {
+      throw new SyntaxError(
+        `Failed to execute 'matches' on 'Element': '${selector}' is not a supported selector. ` +
+          "Supported: :focus, :focus-visible, :hover, :active."
+      )
+    }
+
+    const state = this.#container.native.getElementInteractionState?.(this.id)
+    if (!state) return false
+    if (normalized === ":focus") return state.focused
+    if (normalized === ":focus-visible") return state.focusVisible
+    if (normalized === ":hover") return state.hovered
+    return state.active
+  }
+
+  __applyCanvasCommands(
+    ops: Uint32Array,
+    operands: Float64Array,
+    strings: readonly string[]
+  ): void {
+    if (this.type !== "canvas") {
+      throw new TypeError(`Canvas commands can only target <canvas>, received <${this.type}>`)
+    }
+    const apply = this.#container.native.applyCanvasCommands
+    if (!apply) {
+      throw new Error("This GPUIX renderer does not support retained canvas commands")
+    }
+    apply.call(this.#container.native, this.id, ops, operands, strings)
+    reportStyleDiagnostics(this.#container.native)
+  }
+
+  __applyCanvasCommandDelta(
+    ops: Uint32Array,
+    operands: Float64Array,
+    strings: readonly string[]
+  ): void {
+    if (this.type !== "canvas") {
+      throw new TypeError(`Canvas commands can only target <canvas>, received <${this.type}>`)
+    }
+    const apply = this.#container.native.applyCanvasCommandDelta
+    if (!apply) {
+      throw new Error("This GPUIX renderer does not support incremental canvas commands")
+    }
+    apply.call(this.#container.native, this.id, ops, operands, strings)
+    reportStyleDiagnostics(this.#container.native)
+  }
+
+  compareDocumentPosition(other: PublicInstance): number {
+    return compareDocumentPosition(this, other as unknown as HostNode)
+  }
+
+  contains(other: PublicInstance | null): boolean {
+    return contains(this, other)
+  }
+
+  getAttribute(name: string): string | null {
+    const lowered = name.toLowerCase()
+    const authored = attributeProp(this.props, name)
+    const value = lowered === "hidden" ? hiddenAttribute(authored) : authored
+    if (value == null || typeof value === "function") return null
+    if (lowered.startsWith("aria-") || lowered.startsWith("data-")) return String(value)
+    if (value === false) return null
+    if (value === true) return ""
+    return typeof value === "string" || typeof value === "number" ? String(value) : null
+  }
+
+  hasAttribute(name: string): boolean {
+    return this.getAttribute(name) !== null
+  }
 }
 
 /**
- * Install the form members of `HTMLInputElement`, `HTMLTextAreaElement`,
- * `HTMLButtonElement`, and `HTMLFormElement`. Like the text-editing members
- * they are non-enumerable accessors, because the state they read changes
- * without a React commit.
+ * `<canvas>` refs. `getContext` and `toDataURL` only make sense for this one
+ * element kind, so they live on a subclass rather than every host instance.
  */
-function installFormMembers(instance: Instance, container: Container): void {
-  const accessor = (
-    descriptor: PropertyDescriptor
-  ): PropertyDescriptor & ThisType<undefined> => ({
-    enumerable: false,
-    configurable: true,
-    ...descriptor,
-  })
-  const { type } = instance
-
-  if (type === "input") {
-    Object.defineProperties(instance, {
-      checked: accessor({
-        get: () => readChecked(instance),
-        set: (value: unknown) => writeChecked(container, instance, Boolean(value)),
-      }),
-      defaultChecked: accessor({
-        get: () => readDefaultChecked(instance),
-        set: (value: unknown) => writeDefaultChecked(container, instance, Boolean(value)),
-      }),
-      indeterminate: accessor({
-        get: () => readIndeterminate(instance),
-        set: (value: unknown) => writeIndeterminate(container, instance, Boolean(value)),
-      }),
-      // Implemented for a range only, the one numeric type this renderer has.
-      valueAsNumber: accessor({
-        get: () => (isRangeInput(instance) ? readRangeValue(instance) : undefined),
-        set: (value: unknown) => {
-          if (isRangeInput(instance)) writeRangeValue(container, instance, Number(value))
-        },
-      }),
-    })
-  }
-  if (type === "input" || type === "textarea" || type === "button") {
-    Object.defineProperty(
-      instance,
-      "form",
-      accessor({ get: () => formOwner(container, instance) })
-    )
-  }
-  if (type === "input" || type === "textarea") {
-    Object.defineProperties(instance, {
-      validity: accessor({ get: () => validityOf(container, instance) }),
-      validationMessage: accessor({ get: () => validationMessage(container, instance) }),
-      willValidate: accessor({ get: () => willValidate(instance) }),
-    })
-    instance.checkValidity = () => validityOf(container, instance).valid
-    instance.setCustomValidity = (message: string) =>
-      setCustomValidity(instance, String(message))
-  }
-  if (type === "form") {
-    instance.requestSubmit = (submitter?: PublicInstance | null) => {
-      requestSubmit(container, instance, (submitter as Instance | null | undefined) ?? null)
+class CanvasHostElement extends HostElement {
+  #diagnosticTarget() {
+    return {
+      describeElement: () => describeCanvas(this),
+      strict: containerOf(this).strictStyles,
+      applyCanvasCommandDelta: (
+        ops: Uint32Array,
+        operands: Float64Array,
+        strings: readonly string[]
+      ) => this.__applyCanvasCommandDelta(ops, operands, strings),
     }
-    instance.reset = () => resetForm(container, instance)
-    instance.checkValidity = () => checkFormValidity(container, instance)
+  }
+
+  getContext(
+    contextId: "2d",
+    options?: CanvasRenderingContext2DSettings
+  ): CanvasRenderingContext2D
+  getContext(
+    contextId: "webgpu",
+    options?: unknown
+  ): import("../canvas/webgpu.js").GPUCanvasContext | null
+  getContext(contextId: string, options?: unknown): CanvasRenderingContext2D | null
+  getContext(
+    contextId: string
+  ): CanvasRenderingContext2D | import("../canvas/webgpu.js").GPUCanvasContext | null {
+    if (contextId === "2d") {
+      if (webGpuContext(this)) return null
+      return getOrCreateRecordingContext2D(this, this.#diagnosticTarget())
+    }
+    if (contextId === "webgpu") {
+      if (recordingContext2D(this)) return null
+      return getOrCreateWebGpuContext(this, containerOf(this).native, this.id, () => ({
+        width: Number((this.props as Props & { width?: number }).width ?? 300),
+        height: Number((this.props as Props & { height?: number }).height ?? 150),
+      }))
+    }
+    return null
+  }
+
+  // Reports why there is no data URL and returns nothing. Under
+  // `strictStyles` the diagnostic throws instead of returning.
+  toDataURL(): undefined {
+    diagnoseUnsupportedCanvasElementMember(this, this.#diagnosticTarget(), "toDataURL")
+    return undefined
+  }
+}
+
+/**
+ * The text-editing members of `HTMLInputElement`, shared by `<input>` and
+ * `<textarea>` refs. They are accessors, not plain fields, because every read
+ * has to reach the native editor: the caret moves on keystrokes and pointer
+ * drags that React never sees.
+ */
+class TextEditingHostElement extends HostElement {
+  // Before the first frame builds an editor the native side has no state to
+  // report, so fall back to the `value` prop with the caret at its end — where
+  // the editor puts the caret when it is finally created.
+  #readValue(): string {
+    if (!isTextEditingInstance(this)) return attributeInputValue(this)
+    const native = containerOf(this).native
+    const value = native.getInputValue ? native.getInputValue(this.id) : null
+    if (typeof value === "string") return value
+    const editorProps = this.props as Props & { value?: unknown; defaultValue?: unknown }
+    return editorPropText(editorProps.value ?? editorProps.defaultValue) ?? ""
+  }
+
+  #readSelection(): readonly number[] {
+    const native = containerOf(this).native
+    const range = native.getInputSelection ? native.getInputSelection(this.id) : null
+    if (range) return range
+    const end = this.#readValue().length
+    return [end, end, 0]
+  }
+
+  #setSelection(start: number, end: number, backward: boolean): void {
+    containerOf(this).native.setInputSelection?.(this.id, start, end, backward)
+  }
+
+  get value(): string {
+    return this.#readValue()
+  }
+
+  set value(value: unknown) {
+    if (isRangeInput(this)) {
+      writeRangeValue(containerOf(this), this, value == null ? "" : String(value))
+      return
+    }
+    // A checkbox, radio, or hidden input's value is its `value` prop.
+    if (!isTextEditingInstance(this)) return
+    containerOf(this).native.setInputValue?.(this.id, value == null ? "" : String(value))
+  }
+
+  get selectionStart(): number {
+    return this.#readSelection()[0]!
+  }
+
+  // The DOM's setter drags `selectionEnd` along rather than letting the
+  // start overtake it. One read covers both the end and the direction.
+  set selectionStart(value: number) {
+    const start = selectionOffset(value)
+    const current = this.#readSelection()
+    this.#setSelection(start, Math.max(current[1]!, start), current[2] === 1)
+  }
+
+  get selectionEnd(): number {
+    return this.#readSelection()[1]!
+  }
+
+  set selectionEnd(value: number) {
+    const current = this.#readSelection()
+    this.#setSelection(current[0]!, selectionOffset(value), current[2] === 1)
+  }
+
+  get selectionDirection(): "forward" | "backward" {
+    return this.#readSelection()[2] === 1 ? "backward" : "forward"
+  }
+
+  setSelectionRange(start: number, end: number, direction?: SelectionDirection): void {
+    this.#setSelection(selectionOffset(start), selectionOffset(end), direction === "backward")
+  }
+
+  // `select()` is "set the selection range with 0 and infinity", which lands on
+  // the end of the value once the native side clamps it.
+  select(): void {
+    this.#setSelection(0, this.#readValue().length, false)
+  }
+}
+
+/**
+ * The form-membership and validation members `<input>` and `<textarea>` share
+ * — `HTMLInputElement.form`, `.validity`, `.validationMessage`,
+ * `.willValidate`, `.checkValidity()`, and `.setCustomValidity()`. Like the
+ * text-editing members they read state that changes without a React commit.
+ */
+class ValidatableTextEditingHostElement extends TextEditingHostElement {
+  get form(): FormPublicInstance | null {
+    return formOwner(containerOf(this), this) as FormPublicInstance | null
+  }
+
+  get validity(): ValidityState {
+    return validityOf(containerOf(this), this)
+  }
+
+  get validationMessage(): string {
+    return validationMessage(containerOf(this), this)
+  }
+
+  get willValidate(): boolean {
+    return willValidate(this)
+  }
+
+  checkValidity(): boolean {
+    return validityOf(containerOf(this), this).valid
+  }
+
+  setCustomValidity(message: string): void {
+    setCustomValidity(this, String(message))
+  }
+}
+
+/** `<input>` refs, adding the checkedness and range-value members on top of
+ *  the text-editing and validation members every text-entry control shares. */
+class InputHostElement extends ValidatableTextEditingHostElement {
+  get checked(): boolean {
+    return readChecked(this)
+  }
+
+  set checked(value: unknown) {
+    writeChecked(containerOf(this), this, Boolean(value))
+  }
+
+  get defaultChecked(): boolean {
+    return readDefaultChecked(this)
+  }
+
+  set defaultChecked(value: unknown) {
+    writeDefaultChecked(containerOf(this), this, Boolean(value))
+  }
+
+  get indeterminate(): boolean {
+    return readIndeterminate(this)
+  }
+
+  set indeterminate(value: unknown) {
+    writeIndeterminate(containerOf(this), this, Boolean(value))
+  }
+
+  // Implemented for a range only, the one numeric type this renderer has.
+  get valueAsNumber(): number | undefined {
+    return isRangeInput(this) ? readRangeValue(this) : undefined
+  }
+
+  set valueAsNumber(value: unknown) {
+    if (isRangeInput(this)) writeRangeValue(containerOf(this), this, Number(value))
+  }
+}
+
+/** `<button>` refs, which carry only `HTMLButtonElement.form` beyond the
+ *  members every host element has. */
+class ButtonHostElement extends HostElement {
+  get form(): FormPublicInstance | null {
+    return formOwner(containerOf(this), this) as FormPublicInstance | null
+  }
+}
+
+/** `<form>` refs, carrying the submission members of `HTMLFormElement`. */
+class FormHostElement extends HostElement {
+  requestSubmit(submitter?: PublicInstance | null): void {
+    requestSubmit(containerOf(this), this, (submitter as Instance | null | undefined) ?? null)
+  }
+
+  reset(): void {
+    resetForm(containerOf(this), this)
+  }
+
+  checkValidity(): boolean {
+    return checkFormValidity(containerOf(this), this)
+  }
+}
+
+/**
+ * Pick the prototype for a host instance's authored type. One instance gets
+ * exactly one of these — the union of members a `<textarea>` and a `<button>`
+ * would both need never has to exist on either.
+ */
+function instantiateHostElement(
+  id: number,
+  type: ElementType,
+  props: Props,
+  container: Container
+): Instance {
+  switch (type) {
+    case "canvas":
+      return new CanvasHostElement(id, type, props, container)
+    case "input":
+      return new InputHostElement(id, type, props, container)
+    case "textarea":
+      return new ValidatableTextEditingHostElement(id, type, props, container)
+    case "button":
+      return new ButtonHostElement(id, type, props, container)
+    case "form":
+      return new FormHostElement(id, type, props, container)
+    default:
+      return new HostElement(id, type, props, container)
   }
 }
 
@@ -1680,218 +2029,7 @@ export const hostConfig = {
       )
     }
     const id = nextId(rootContainerInstance)
-    // [scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight].
-    // An element that is not a scroll container still has a viewport in the DOM,
-    // and content that cannot scroll makes its scroll extent equal to that viewport.
-    const scrollMetrics = (): readonly number[] => {
-      const native = rootContainerInstance.native
-      const getScrollMetrics = native.getScrollMetrics
-      const metrics = getScrollMetrics ? getScrollMetrics.call(native, id) : null
-      if (metrics) return metrics
-      const getElementBounds = native.getElementBounds
-      const bounds = getElementBounds ? getElementBounds.call(native, id) : null
-      const width = bounds?.width ?? 0
-      const height = bounds?.height ?? 0
-      return [0, 0, width, height, width, height]
-    }
-    const scrollToOffset = (left: number, top: number): void => {
-      // gpui stores how far the content moved up/left; the DOM reports how far
-      // the viewport moved down/right. Subtracting rather than negating keeps a
-      // reset at 0 instead of -0. Clamping stays native.
-      rootContainerInstance.native.scrollTo?.(id, 0 - left, 0 - top)
-    }
-    const instance = {
-      id,
-      type,
-      props,
-      focus: (options?: FocusOptions) => {
-        // A disabled form control cannot take focus, as in the DOM.
-        const formControl = type === "input" || type === "textarea" || type === "button"
-        const { disabled } = instance.props
-        if (formControl && (disabled === true || typeof disabled === "string")) return
-        rootContainerInstance.native.focusElement?.(id, options?.preventScroll === true)
-      },
-      blur: () => {
-        // Only this element's own focus is ours to drop. A renderer that cannot
-        // report the active element cannot prove that, so it does nothing
-        // rather than blurring whatever happens to be focused.
-        const native = rootContainerInstance.native
-        if (!native.getActiveElement || native.getActiveElement() !== id) return
-        native.blur?.()
-      },
-      setPointerCapture: () => rootContainerInstance.native.setPointerCapture?.(id),
-      releasePointerCapture: () =>
-        rootContainerInstance.native.releasePointerCapture?.(id),
-      click: () => clickElement(rootContainerInstance, instance),
-      dispatchEvent: (event: GpuixDispatchableEvent) =>
-        dispatchElementEvent(rootContainerInstance, instance, event),
-      get scrollLeft(): number {
-        return scrollMetrics()[0]!
-      },
-      set scrollLeft(value: number) {
-        scrollToOffset(value, scrollMetrics()[1]!)
-      },
-      get scrollTop(): number {
-        return scrollMetrics()[1]!
-      },
-      set scrollTop(value: number) {
-        scrollToOffset(scrollMetrics()[0]!, value)
-      },
-      get scrollWidth(): number {
-        return scrollMetrics()[2]!
-      },
-      get scrollHeight(): number {
-        return scrollMetrics()[3]!
-      },
-      get clientWidth(): number {
-        return scrollMetrics()[4]!
-      },
-      get clientHeight(): number {
-        return scrollMetrics()[5]!
-      },
-      scrollTo: (optionsOrX?: ScrollToOptions | number, y?: number) => {
-        const metrics = scrollMetrics()
-        const left =
-          typeof optionsOrX === "number" ? optionsOrX : (optionsOrX?.left ?? metrics[0]!)
-        const top =
-          typeof optionsOrX === "number" ? (y ?? metrics[1]!) : (optionsOrX?.top ?? metrics[1]!)
-        scrollToOffset(left, top)
-      },
-      scrollIntoView: (options?: boolean | ScrollIntoViewOptions) =>
-        rootContainerInstance.native.scrollElementIntoView?.(
-          id,
-          scrollIntoViewAlignsToTop(instance, rootContainerInstance, props, options)
-        ),
-      getBounds: () => {
-        const getElementBounds = rootContainerInstance.native.getElementBounds
-        if (!getElementBounds) {
-          throw new Error("This GPUIX renderer does not support element measurement")
-        }
-        const bounds = getElementBounds.call(rootContainerInstance.native, id)
-        if (!bounds) return null
-        return bounds
-      },
-      getBoundingClientRect: () => {
-        // The DOM reports an all-zero rect for an element with no boxes rather
-        // than nothing at all, so an unpainted element does the same here.
-        const bounds = instance.getBounds() ?? { x: 0, y: 0, width: 0, height: 0 }
-        return {
-          ...bounds,
-          top: bounds.y,
-          right: bounds.x + bounds.width,
-          bottom: bounds.y + bounds.height,
-          left: bounds.x,
-        }
-      },
-      matches: (selector: string): boolean => {
-        const normalized = selector.trim()
-        if (
-          normalized !== ":focus" &&
-          normalized !== ":focus-visible" &&
-          normalized !== ":hover" &&
-          normalized !== ":active"
-        ) {
-          throw new SyntaxError(
-            `Failed to execute 'matches' on 'Element': '${selector}' is not a supported selector. ` +
-              "Supported: :focus, :focus-visible, :hover, :active."
-          )
-        }
-
-        const state = rootContainerInstance.native.getElementInteractionState?.(id)
-        if (!state) return false
-        if (normalized === ":focus") return state.focused
-        if (normalized === ":focus-visible") return state.focusVisible
-        if (normalized === ":hover") return state.hovered
-        return state.active
-      },
-      __applyCanvasCommands: (ops, operands, strings) => {
-        if (instance.type !== "canvas") {
-          throw new TypeError(
-            `Canvas commands can only target <canvas>, received <${instance.type}>`
-          )
-        }
-        const apply = rootContainerInstance.native.applyCanvasCommands
-        if (!apply) {
-          throw new Error("This GPUIX renderer does not support retained canvas commands")
-        }
-        apply.call(rootContainerInstance.native, id, ops, operands, strings)
-        reportStyleDiagnostics(rootContainerInstance.native)
-      },
-      __applyCanvasCommandDelta: (ops, operands, strings) => {
-        if (instance.type !== "canvas") throw new TypeError(`Canvas commands can only target <canvas>, received <${instance.type}>`)
-        const apply = rootContainerInstance.native.applyCanvasCommandDelta
-        if (!apply) throw new Error("This GPUIX renderer does not support incremental canvas commands")
-        apply.call(rootContainerInstance.native, id, ops, operands, strings)
-        reportStyleDiagnostics(rootContainerInstance.native)
-      },
-      parentId: null,
-      tagName: type.toUpperCase(),
-      localName: type,
-      nodeName: type.toUpperCase(),
-      compareDocumentPosition(other: PublicInstance): number {
-        return compareDocumentPosition(instance, other as unknown as HostNode)
-      },
-      contains(other: PublicInstance | null): boolean {
-        return contains(instance, other)
-      },
-      getAttribute(name): string | null {
-        const lowered = name.toLowerCase()
-        const authored = attributeProp(instance.props, name)
-        const value = lowered === "hidden" ? hiddenAttribute(authored) : authored
-        if (value == null || typeof value === "function") return null
-        if (lowered.startsWith("aria-") || lowered.startsWith("data-")) return String(value)
-        if (value === false) return null
-        if (value === true) return ""
-        return typeof value === "string" || typeof value === "number" ? String(value) : null
-      },
-      hasAttribute(name): boolean {
-        return instance.getAttribute(name) !== null
-      },
-    } satisfies Omit<Instance, "parentElement" | "ownerDocument"> as Instance
-    // Non-enumerable, like the prototype accessors they mirror, so spreading or
-    // deep-comparing a ref does not walk up into its ancestors or the document.
-    Object.defineProperty(instance, "parentElement", {
-      configurable: true,
-      enumerable: false,
-      get: (): Instance | null => parentElement(instance),
-    })
-    Object.defineProperty(instance, "ownerDocument", {
-      configurable: true,
-      enumerable: false,
-      get: ownerDocument,
-    })
-    if (type === "canvas") {
-      const diagnosticTarget = {
-        describeElement: () => describeCanvas(instance),
-        strict: rootContainerInstance.strictStyles,
-        applyCanvasCommandDelta: (ops: Uint32Array, operands: Float64Array, strings: readonly string[]) =>
-          instance.__applyCanvasCommandDelta(ops, operands, strings),
-      }
-      instance.getContext = ((contextId: string): CanvasRenderingContext2D | import("../canvas/webgpu.js").GPUCanvasContext | null => {
-        if (contextId === "2d") {
-          if (webGpuContext(instance)) return null
-          return getOrCreateRecordingContext2D(instance, diagnosticTarget)
-        }
-        if (contextId === "webgpu") {
-          if (recordingContext2D(instance)) return null
-          return getOrCreateWebGpuContext(instance, rootContainerInstance.native, id, () => ({
-            width: Number((instance.props as Props & { width?: number }).width ?? 300),
-            height: Number((instance.props as Props & { height?: number }).height ?? 150),
-          }))
-        }
-        return null
-      }) as NonNullable<Instance["getContext"]>
-      // Reports why there is no data URL and returns nothing. Under
-      // `strictStyles` the diagnostic throws instead of returning.
-      instance.toDataURL = (): undefined => {
-        diagnoseUnsupportedCanvasElementMember(instance, diagnosticTarget, "toDataURL")
-        return undefined
-      }
-    }
-    if (TEXT_EDITING_TYPES.has(type)) {
-      installTextEditingMembers(instance, rootContainerInstance, id)
-    }
-    installFormMembers(instance, rootContainerInstance)
+    const instance = instantiateHostElement(id, type, props, rootContainerInstance)
     hostNodeStates.set(instance, {
       container: rootContainerInstance,
       children: [],
