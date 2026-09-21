@@ -7407,6 +7407,22 @@ struct HighlightCacheEntry {
     reported: Option<u64>,
 }
 
+fn emit_motion_settled(
+    callback: &Option<EventCallback>,
+    tree: &crate::retained_tree::RetainedTree,
+    ids: &[u64],
+) {
+    for &id in ids {
+        if tree
+            .elements
+            .get(&id)
+            .is_some_and(|element| element.events.contains("motionComplete"))
+        {
+            emit_event_full(callback, id, "motionComplete", |_| {});
+        }
+    }
+}
+
 fn emit_highlight_events(callback: &Option<EventCallback>, events: &[(u64, usize)]) {
     for &(id, total) in events {
         emit_event_full(callback, id, "highlight", |payload| {
@@ -8069,6 +8085,7 @@ impl GpuixView {
         let now = self.clock.now();
         let mut animation_active = false;
         let mut style_transition_active = false;
+        let mut motion_settled = Vec::new();
         let reduce_motion = cx.reduce_motion();
         let mut highlight_events = Vec::new();
 
@@ -8132,6 +8149,7 @@ impl GpuixView {
             now,
             animation_active: &mut animation_active,
             style_transition_active: &mut style_transition_active,
+            motion_settled: &mut motion_settled,
             reduce_motion,
             selection: self.selection.clone(),
             image_network_policy: &self.image_network_policy,
@@ -8145,6 +8163,7 @@ impl GpuixView {
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
+        emit_motion_settled(&callback, &tree, &motion_settled);
         if style_transition_active {
             self.style_transition_frame_requests =
                 self.style_transition_frame_requests.saturating_add(1);
@@ -8398,6 +8417,7 @@ pub(crate) struct BuildCtx<'a> {
     pub now: web_time::Instant,
     pub animation_active: &'a mut bool,
     pub style_transition_active: &'a mut bool,
+    pub motion_settled: &'a mut Vec<u64>,
     pub reduce_motion: bool,
     pub selection: SharedSelection,
     pub image_network_policy: &'a crate::custom_elements::img::ImageNetworkPolicy,
@@ -10458,6 +10478,7 @@ impl gpui::Render for GpuixView {
         let now = self.clock.now();
         let mut animation_active = false;
         let mut style_transition_active = false;
+        let mut motion_settled = Vec::new();
         let reduce_motion = cx.reduce_motion();
         // Pruned by DECLARATION, not existence: an element that drops its
         // `highlight` prop keeps living, and its cached group list holds a copy
@@ -10499,6 +10520,7 @@ impl gpui::Render for GpuixView {
                     now,
                     animation_active: &mut animation_active,
                     style_transition_active: &mut style_transition_active,
+                    motion_settled: &mut motion_settled,
                     reduce_motion,
                     selection: self.selection.clone(),
                     image_network_policy: &self.image_network_policy,
@@ -10517,6 +10539,7 @@ impl gpui::Render for GpuixView {
         // Flushed after the root build so a `setState` in the handler cannot
         // re-enter this build.
         emit_highlight_events(&callback, &highlight_events);
+        emit_motion_settled(&callback, &tree, &motion_settled);
         self.emit_selection_change();
 
         // The frame reset must paint BEFORE any text, so it is the first child of
@@ -11066,6 +11089,9 @@ fn build_element_with_parent_layout(
         state.is_valid().then(|| {
             let frame = state.frame(ctx.now, ctx.reduce_motion);
             *ctx.animation_active |= frame.active;
+            if frame.just_settled {
+                ctx.motion_settled.push(id);
+            }
             // `Arc<StyleDesc>` is shared, so the animated frame is applied to a
             // copy. Mutating through the pointer would restyle every element
             // that declared the same style.

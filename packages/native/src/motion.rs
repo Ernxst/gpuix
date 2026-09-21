@@ -1642,6 +1642,7 @@ struct MotionDescription {
 pub(crate) struct MotionFrame {
     pub style: MotionStyle,
     pub active: bool,
+    pub just_settled: bool,
 }
 
 pub(crate) struct MotionState {
@@ -1652,6 +1653,7 @@ pub(crate) struct MotionState {
     transition: MotionTransition,
     started: Instant,
     valid: bool,
+    needs_settle: bool,
 }
 
 impl MotionState {
@@ -1681,6 +1683,7 @@ impl MotionState {
             transition: description.transition,
             started: now,
             valid: true,
+            needs_settle: from != description.animate,
         })
     }
 
@@ -1693,6 +1696,7 @@ impl MotionState {
             transition: MotionTransition::default(),
             started: now,
             valid: false,
+            needs_settle: false,
         }
     }
 
@@ -1744,6 +1748,7 @@ impl MotionState {
                         Some(MotionInitial::Disabled(true)) => unreachable!("validated above"),
                     },
                     active: false,
+                    just_settled: false,
                 },
                 MotionVelocity::default(),
             )
@@ -1764,6 +1769,7 @@ impl MotionState {
         self.started = now;
         self.source = source.clone();
         self.valid = true;
+        self.needs_settle = self.from != self.target;
         if reduce_motion {
             self.from = self.target;
             self.velocity = MotionVelocity::default();
@@ -1771,8 +1777,16 @@ impl MotionState {
         Ok(())
     }
 
-    pub(crate) fn frame(&self, now: Instant, reduce_motion: bool) -> MotionFrame {
-        self.frame_with_velocity(now, reduce_motion).0
+    pub(crate) fn frame(&mut self, now: Instant, reduce_motion: bool) -> MotionFrame {
+        let (mut frame, _) = self.frame_with_velocity(now, reduce_motion);
+        if frame.active {
+            self.needs_settle = true;
+        }
+        frame.just_settled = self.needs_settle && !frame.active;
+        if frame.just_settled {
+            self.needs_settle = false;
+        }
+        frame
     }
 
     fn frame_with_velocity(
@@ -1785,6 +1799,7 @@ impl MotionState {
                 MotionFrame {
                     style: self.target,
                     active: false,
+                    just_settled: false,
                 },
                 MotionVelocity::default(),
             );
@@ -1798,6 +1813,7 @@ impl MotionState {
                     MotionFrame {
                         style: self.target,
                         active: false,
+                        just_settled: false,
                     },
                     MotionVelocity::default(),
                 );
@@ -1809,7 +1825,14 @@ impl MotionState {
             let (style, velocity, active) =
                 self.from
                     .spring_sample(self.target, self.velocity, spring_elapsed, spring);
-            return (MotionFrame { style, active }, velocity);
+            return (
+                MotionFrame {
+                    style,
+                    active,
+                    just_settled: false,
+                },
+                velocity,
+            );
         }
 
         let duration = seconds(self.transition.duration);
@@ -1841,6 +1864,7 @@ impl MotionState {
             MotionFrame {
                 style: self.from.interpolate(self.target, progress),
                 active,
+                just_settled: false,
             },
             MotionVelocity::default(),
         )

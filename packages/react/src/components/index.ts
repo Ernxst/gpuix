@@ -1,8 +1,17 @@
 // GPUIX component definitions and native motion wrappers.
 
-import { createElement, forwardRef } from "react"
+import { createElement, forwardRef, useContext, useLayoutEffect } from "react"
 import type { ReactElement, ReactNode } from "react"
 import type { MotionProps, Props, PublicInstance, StyleDesc } from "../types/host.js"
+import { PresenceContext, usePresence } from "./animate-presence.js"
+
+export {
+  AnimatePresence,
+  PresenceContext,
+  useIsPresent,
+  usePresence,
+} from "./animate-presence.js"
+export type { AnimatePresenceProps } from "./animate-presence.js"
 
 export const gpuixComponents = {
   div: "div",
@@ -37,21 +46,37 @@ export interface MotionDivProps extends MotionProps {
   onScroll?: Props["onScroll"]
   onWheel?: Props["onWheel"]
   onFileDrop?: Props["onFileDrop"]
+  onMotionComplete?: Props["onMotionComplete"]
   autoFocus?: boolean
 }
 
 const MotionDiv = forwardRef<PublicInstance, MotionDivProps>(function MotionDiv(
-  { initial, animate, transition, ...props },
+  { initial, animate, exit, transition, onMotionComplete, ...props },
   ref
 ): ReactElement {
+  const presence = useContext(PresenceContext)
+  const [isPresent, safeToRemove] = usePresence()
+  const resolvedInitial = presence?.initial === false ? false : initial
+  const resolvedAnimate = !isPresent && exit ? exit : animate
+
+  useLayoutEffect(() => {
+    if (!isPresent && !exit) safeToRemove?.()
+  }, [exit, isPresent, safeToRemove])
+
   const hostProps: Props = {
     ...props,
     ref,
     motion: {
-      ...(initial === undefined ? {} : { initial }),
-      animate,
-      ...(transition === undefined ? {} : { transition }),
+      initial: resolvedInitial,
+      animate: resolvedAnimate,
+      transition,
     },
+  }
+  if (!isPresent || onMotionComplete) {
+    hostProps.onMotionComplete = (event) => {
+      onMotionComplete?.(event)
+      if (!isPresent) safeToRemove?.()
+    }
   }
   return createElement("div", hostProps)
 })

@@ -1691,7 +1691,7 @@ The **transition** uses seconds, like Motion for React:
 
 `duration` is ignored when `ease.type` is `"spring"`; settling derives the end
 time. Keyframes, variants, exit transitions, and shared layout animations are
-not available yet.
+not available yet. **Exit** uses `AnimatePresence`, like Motion for React.
 
 ### Browser mirror: sampled springs with CSS `linear()`
 
@@ -1758,6 +1758,38 @@ function SidebarFrame({
 
 The **chat example** uses this pattern. The sidebar remains mounted while its
 outer width moves between `253` and `0` pixels.
+
+### Animate unmount
+
+A `motion.div` with **`exit`** only leaves after that target finishes, and only
+when it is a child of **`AnimatePresence`**. Without `AnimatePresence`, React
+destroys the node on the same commit.
+
+```tsx
+import { AnimatePresence, motion } from '@gpuix/react'
+
+function Toast({ show }: { show: boolean }) {
+  return (
+    <AnimatePresence>
+      {show ? (
+        <motion.div
+          key="toast"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
+        >
+          <text>Saved</text>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  )
+}
+```
+
+Give every child a **unique `key`** when more than one child can leave. Set
+**`initial={false}`** on `AnimatePresence` to skip enter on the first paint.
+A child with no `exit` is removed without a tween.
 
 ### Capture exact frames
 
@@ -6400,6 +6432,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [ ] React Refresh during `bun --hot` (needs a Bun runtime transform)
 - [ ] Hot reload of the native `.node` addon. `bun run dev` rebuilds and restarts. Native modules cannot unload.
 - [x] Native `motion.div` transitions with deterministic frame capture
+- [x] `AnimatePresence` exit transitions for `motion.div`
 
 ## Documentation
 
