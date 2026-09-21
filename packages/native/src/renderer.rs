@@ -3095,9 +3095,17 @@ impl GpuixRenderer {
             init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
             init_application_menu_support(cx, Some(application_callback.clone()));
-            if let Err(error) = install_application_menus(cx, &app_name, menus) {
-                *startup_error_for_app.borrow_mut() = Some(error);
-                return;
+            // Default menus (`menus: None`) load WritingToolsUI and, with it,
+            // SwiftUI, WebKit and about a hundred other frameworks; deferred
+            // below until after the second frame so it does not delay the
+            // first present. Caller-supplied menus are cheap and installed
+            // now so `open_window` observes any invalid spec immediately.
+            let defer_default_menus = menus.is_none();
+            if !defer_default_menus {
+                if let Err(error) = install_application_menus(cx, &app_name, menus) {
+                    *startup_error_for_app.borrow_mut() = Some(error);
+                    return;
+                }
             }
             let window_size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
             #[cfg(feature = "display-discovery-fault-injection")]
@@ -3138,6 +3146,19 @@ impl GpuixRenderer {
                                 })
                                 .ok();
                         }
+                    }
+                    if defer_default_menus {
+                        let app_name = app_name.clone();
+                        window_handle
+                            .update(cx, |_view, window, _cx| {
+                                window.on_next_frame(move |window, _cx| {
+                                    window.on_next_frame(move |_window, cx| {
+                                        // The default-menu path cannot fail.
+                                        let _ = install_application_menus(cx, &app_name, None);
+                                    });
+                                });
+                            })
+                            .ok();
                     }
                 }
                 Err(error) => {
