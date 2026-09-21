@@ -925,6 +925,17 @@ export interface EventPayload {
    */
   pressedButton?: number
   /**
+   * Stable id for a platform pointer. Desktop mouse input uses 1.
+   * Populated for: pointerDown, pointerUp, pointerMove, pointerCancel.
+   */
+  pointerId?: number
+  /** Platform pointer kind, for example "mouse", "touch", or "pen". */
+  pointerType?: string
+  /** Whether this is the platform's primary pointer of its kind. */
+  isPrimary?: boolean
+  /** DOM PointerEvent buttons bitfield: left=1, right=2, middle=4. */
+  buttons?: number
+  /**
    * Key name, e.g. "a", "enter", "escape", "down", "left", "f1".
    * Populated for: keyDown, keyUp.
    */

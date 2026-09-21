@@ -62,6 +62,17 @@ pub struct EventPayload {
     /// Populated for: mouseMove.
     pub pressed_button: Option<u32>,
 
+    // ── Pointer ──────────────────────────────────────────────────────
+    /// Stable id for a platform pointer. Desktop mouse input uses 1.
+    /// Populated for: pointerDown, pointerUp, pointerMove, pointerCancel.
+    pub pointer_id: Option<u32>,
+    /// Platform pointer kind, for example "mouse", "touch", or "pen".
+    pub pointer_type: Option<String>,
+    /// Whether this is the platform's primary pointer of its kind.
+    pub is_primary: Option<bool>,
+    /// DOM PointerEvent buttons bitfield: left=1, right=2, middle=4.
+    pub buttons: Option<u32>,
+
     // ── Keyboard ─────────────────────────────────────────────────────
     /// Key name, e.g. "a", "enter", "escape", "down", "left", "f1".
     /// Populated for: keyDown, keyUp.
@@ -170,6 +181,10 @@ impl Default for EventPayload {
             is_right_click: None,
             input_source: None,
             pressed_button: None,
+            pointer_id: None,
+            pointer_type: None,
+            is_primary: None,
+            buttons: None,
             key: None,
             key_char: None,
             is_held: None,
@@ -323,6 +338,10 @@ mod tests {
             element_id: 42.0,
             event_type: "click".to_string(),
             button: Some(0),
+            pointer_id: Some(1),
+            pointer_type: Some("mouse".to_string()),
+            is_primary: Some(true),
+            buttons: Some(1),
             input_source: Some("keyboard".to_string()),
             modifiers: Some(EventModifiers {
                 shift: true,
@@ -335,6 +354,10 @@ mod tests {
         assert_eq!(value["elementId"], 42.0);
         assert_eq!(value["eventType"], "click");
         assert_eq!(value["button"], 0);
+        assert_eq!(value["pointerId"], 1);
+        assert_eq!(value["pointerType"], "mouse");
+        assert_eq!(value["isPrimary"], true);
+        assert_eq!(value["buttons"], 1);
         assert_eq!(value["inputSource"], "keyboard");
         assert_eq!(value["modifiers"]["shift"], true);
     }

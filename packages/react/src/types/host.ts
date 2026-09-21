@@ -13,6 +13,7 @@ import type {
   GpuixKeyboardEvent,
   GpuixLoadEvent,
   GpuixMouseEvent,
+  GpuixPointerEvent,
   GpuixScrollEvent,
   GpuixSyntheticEvent,
   GpuixWheelEvent,
@@ -1145,6 +1146,19 @@ export interface Props extends AccessibilityProps {
   /** Fires when user clicks OUTSIDE this element. Use for "click outside to close". */
   onMouseDownOutside?: (event: GpuixMouseEvent) => void
 
+  // ── Pointer events ─────────────────────────────────────────────
+  onPointerDown?: (event: GpuixPointerEvent) => void
+  onPointerDownCapture?: (event: GpuixPointerEvent) => void
+  onPointerUp?: (event: GpuixPointerEvent) => void
+  onPointerUpCapture?: (event: GpuixPointerEvent) => void
+  onPointerMove?: (event: GpuixPointerEvent) => void
+  onPointerMoveCapture?: (event: GpuixPointerEvent) => void
+  onPointerCancel?: (event: GpuixPointerEvent) => void
+  onPointerCancelCapture?: (event: GpuixPointerEvent) => void
+  /** React exposes these transition events without capture variants. */
+  onPointerEnter?: (event: GpuixPointerEvent) => void
+  onPointerLeave?: (event: GpuixPointerEvent) => void
+
   // ── OS file drag events ────────────────────────────────────────
   onDragEnter?: (event: GpuixDragEvent) => void
   onDragEnterCapture?: (event: GpuixDragEvent) => void
@@ -1758,8 +1772,8 @@ export interface PublicInstance {
   focus(options?: FocusOptions): void
   /** Removes focus when this host element currently owns it. */
   blur(): void
-  setPointerCapture(): void
-  releasePointerCapture(): void
+  setPointerCapture(pointerId?: number): void
+  releasePointerCapture(pointerId?: number): void
   /**
    * Pixels this element's content is scrolled down, matching
    * `Element.scrollTop`: 0 at the top, growing positive as content scrolls up

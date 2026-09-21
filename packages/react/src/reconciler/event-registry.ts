@@ -292,9 +292,11 @@ function dispatchHoverTransition(
   container.hoverPath = nextPath
 
   for (const target of leaving) {
+    dispatchHoverEvent(container, payload, target, "pointerLeave", renderer, nextTarget ?? null)
     dispatchHoverEvent(container, payload, target, "mouseLeave", renderer, nextTarget ?? null)
   }
   for (const target of entering) {
+    dispatchHoverEvent(container, payload, target, "pointerEnter", renderer, previousTarget)
     dispatchHoverEvent(container, payload, target, "mouseEnter", renderer, previousTarget)
   }
 
@@ -305,7 +307,7 @@ function dispatchHoverEvent(
   container: Container,
   payload: EventPayload,
   target: Instance,
-  eventType: "mouseEnter" | "mouseLeave",
+  eventType: "mouseEnter" | "mouseLeave" | "pointerEnter" | "pointerLeave",
   renderer: NativeRenderer,
   relatedTarget: Instance | null
 ): void {
@@ -313,7 +315,12 @@ function dispatchHoverEvent(
   if (!handler) return
 
   const controller = createGpuixSyntheticEvent(
-    { ...payload, elementId: target.id, eventType, hovered: eventType === "mouseEnter" },
+    {
+      ...payload,
+      elementId: target.id,
+      eventType,
+      hovered: eventType === "mouseEnter" || eventType === "pointerEnter",
+    },
     target,
     renderer,
     relatedTarget

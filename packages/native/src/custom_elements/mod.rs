@@ -199,6 +199,21 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
     cx: &mut gpui::Context<crate::renderer::GpuixView>,
 ) -> E {
     let id = ctx.id;
+    let tracks_mouse_down = ctx.events.contains("mouseDown");
+    // Custom elements receive only the events declared on themselves in
+    // `ctx.events`, but React dispatches pointer events through the retained
+    // ancestor path. Install the native source when an ancestor owns one of
+    // these handlers so a custom-element hit remains the React target.
+    let tracks_pointer_down =
+        crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerDown");
+    let tracks_pointer_cancel =
+        crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerCancel");
+    let tracks_context_menu = ctx.events.contains("contextMenu");
+    let tracks_mouse_up = ctx.events.contains("mouseUp");
+    let tracks_pointer_up =
+        crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerUp");
+    let tracks_pointer_move =
+        crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerMove");
     // `doubleClick` and `contextMenu` are synthesized in React from the click
     // and mouse-down payloads, so they ride those listeners rather than owning
     // one. The flag keeps an element that declares both `click` and
@@ -237,23 +252,7 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
                     });
                 });
             }
-            "contextMenu" => {
-                el = el.on_mouse_down(gpui::MouseButton::Right, move |event, _window, cx| {
-                    crate::renderer::emit_event_full(&callback, id, "mouseDown", |p| {
-                        let (x, y) = crate::renderer::point_to_xy(event.position);
-                        p.x = Some(x);
-                        p.y = Some(y);
-                        p.button = Some(crate::renderer::mouse_button_to_u32(event.button));
-                        p.click_count = Some(event.click_count as u32);
-                        p.modifiers = Some(event.modifiers.into());
-                    });
-                    // The div and canvas paths stop here too. Without it an
-                    // ancestor's own GPUI listener also fires and React
-                    // dispatches its `onMouseDown` twice: once bubbling from
-                    // this element, once at the ancestor.
-                    cx.stop_propagation();
-                });
-            }
+            "mouseDown" | "pointerDown" | "contextMenu" | "mouseUp" | "pointerUp" => {}
             "wheel" => {
                 el = el.on_scroll_wheel(move |scroll, _window, _cx| {
                     crate::renderer::emit_event_full(&callback, id, "wheel", |p| {
@@ -271,6 +270,57 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
             _ => {}
         }
     }
+    if tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel || tracks_context_menu {
+        for &button in crate::renderer::mouse_down_button_set(
+            tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel,
+        ) {
+            let callback = ctx.event_callback.clone();
+            el = el.on_mouse_down(
+                button,
+                cx.listener(move |view, event, _window, cx| {
+                    view.record_pointer_down(id, event);
+                    if tracks_pointer_down {
+                        crate::renderer::emit_pointer_down(&callback, id, event);
+                    }
+                    if tracks_mouse_down || tracks_context_menu {
+                        crate::renderer::emit_event_full(&callback, id, "mouseDown", |p| {
+                            let (x, y) = crate::renderer::point_to_xy(event.position);
+                            p.x = Some(x);
+                            p.y = Some(y);
+                            p.button = Some(crate::renderer::mouse_button_to_u32(event.button));
+                            p.click_count = Some(event.click_count as u32);
+                            p.modifiers = Some(event.modifiers.into());
+                        });
+                    }
+                    // The div and canvas paths stop here too. Without it an
+                    // ancestor's own GPUI listener also fires and React
+                    // dispatches its `onMouseDown` twice: once bubbling from
+                    // this element, once at the ancestor.
+                    cx.stop_propagation();
+                }),
+            );
+        }
+    }
+    if tracks_mouse_up || tracks_pointer_up {
+        for &button in &[
+            gpui::MouseButton::Left,
+            gpui::MouseButton::Middle,
+            gpui::MouseButton::Right,
+        ] {
+            let callback = ctx.event_callback.clone();
+            el = el.on_mouse_up(button, move |event, _window, cx| {
+                if tracks_pointer_up {
+                    crate::renderer::emit_pointer_up(&callback, id, event);
+                }
+                if tracks_mouse_up {
+                    crate::renderer::emit_event_full(&callback, id, "mouseUp", |p| {
+                        crate::renderer::populate_mouse_up_payload(p, event);
+                    });
+                }
+                cx.stop_propagation();
+            });
+        }
+    }
     let el = crate::renderer::wire_external_drag_events(
         el,
         ctx.retained_element,
@@ -278,6 +328,13 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
         ctx.event_callback,
         cx,
     );
+    let el = if (tracks_mouse_down && ctx.events.contains("mouseMove"))
+        || (tracks_pointer_down && tracks_pointer_move)
+    {
+        el.capture_pointer()
+    } else {
+        el
+    };
     wire_hover_and_style_transition_events(el, ctx, cx)
 }
 

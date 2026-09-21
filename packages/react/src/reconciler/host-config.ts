@@ -381,6 +381,18 @@ const EVENT_PROPS = [
   ["onMouseMoveCapture", "mouseMove", "capture"],
   ["onMouseMove", "mouseMove", "bubble"],
   ["onMouseDownOutside", "mouseDownOutside", "bubble"],
+  // Pointer events. Pointer enter/leave follow React's direct transition
+  // handlers and deliberately have no capture variants.
+  ["onPointerDownCapture", "pointerDown", "capture"],
+  ["onPointerDown", "pointerDown", "bubble"],
+  ["onPointerUpCapture", "pointerUp", "capture"],
+  ["onPointerUp", "pointerUp", "bubble"],
+  ["onPointerMoveCapture", "pointerMove", "capture"],
+  ["onPointerMove", "pointerMove", "bubble"],
+  ["onPointerCancelCapture", "pointerCancel", "capture"],
+  ["onPointerCancel", "pointerCancel", "bubble"],
+  ["onPointerEnter", "pointerEnter", "bubble"],
+  ["onPointerLeave", "pointerLeave", "bubble"],
   // OS file drag events. Native `fileDrop` fans out to the legacy raw
   // handler and the synthetic bubbling `drop` handler, so their registry keys
   // must remain distinct.

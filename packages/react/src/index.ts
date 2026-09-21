@@ -322,6 +322,8 @@ export type {
   GpuixLoadEvent,
   GpuixMouseEvent,
   GpuixMouseEventType,
+  GpuixPointerEvent,
+  GpuixPointerEventType,
   GpuixFile,
   GpuixFileList,
   GpuixScrollEvent,
