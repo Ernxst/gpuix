@@ -180,6 +180,10 @@ The binary carries the renderer, so it runs with no Bun and no Node install.
 Keep `--production`: without it the binary bundles React's development build,
 which in the chat example costs about 20 MB of memory.
 
+This embeds `@gpuix/native`'s `.node` addon in the executable, which a
+single-file binary you hand someone should keep — see the next step for a
+`.app`, which has room to avoid the embedding cost instead.
+
 ### 5. Wrap it in an app with an icon
 
 A raw Mach-O has no Dock icon. Use
@@ -237,7 +241,62 @@ open "bundle/My App.app"
 | Windows | `"nsis"` | setup `.exe` |
 | Linux | `"appimage"` | `.AppImage` |
 
-On this machine the Bun chat `.app` is **82 MB**.
+On this machine the Bun chat `.app` packed this way is **82 MB**, with the
+addon embedded in `dist/app` as in step 4. That embedding costs a macOS
+`.app` more than it costs a single-file binary: `bun build --compile`
+extracts the addon to `$TMPDIR` on first launch, `dlopen`s it from there, and
+pays a Gatekeeper scan on that extracted copy; the extraction is purged
+periodically, so a later launch re-pays it. A `.app` has room to avoid this
+by shipping the addon as a real file next to the executable instead — the
+addon is then scanned once, when the app is installed, not each time
+`$TMPDIR` is purged.
+
+**Keep the addon out of the executable.** Compile with `--external '*.node'`
+so Bun leaves the addon's `require()` call alone instead of embedding the
+file it points to, then ship the addon at `Contents/Frameworks/<addon>.node`
+and point `@gpuix/native`'s loader at it before your entry file's first
+import of `@gpuix/react` runs. The loader — napi-rs's generated `index.js` —
+checks `NAPI_RS_NATIVE_LIBRARY_PATH` before anything else, so setting that
+env var is enough; no GPUIX-internal API needed:
+
+```ts
+// app-entry.ts — compile this instead of app.tsx directly
+import path from 'node:path'
+
+// Contents/MacOS/app -> ../Frameworks/<addon>.node
+process.env.NAPI_RS_NATIVE_LIBRARY_PATH ??= path.join(
+  path.dirname(process.execPath),
+  '..',
+  'Frameworks',
+  '<addon-file-name>.node', // e.g. gpuix-native.darwin-arm64.node
+)
+
+await import('./app.tsx')
+```
+
+```bash
+bun build --compile --production --external '*.node' app-entry.ts --outfile dist/app
+```
+
+`cargo packager`'s `binaries` config wraps a binary as-is; it does not know
+about the addon. After packing, copy the addon your platform loads (the file
+under `packages/native/*.node`, or `node_modules/@gpuix/native/` in an
+installed app) into the bundle yourself, then ad-hoc sign both — there is no
+Developer ID certificate in most CI environments, and cargo-packager may
+already have signed the app once, before the addon was added to it:
+
+```bash
+mkdir -p "bundle/My App.app/Contents/Frameworks"
+cp node_modules/@gpuix/native/gpuix-native.darwin-arm64.node \
+  "bundle/My App.app/Contents/Frameworks/"
+codesign --force --sign - "bundle/My App.app/Contents/Frameworks/gpuix-native.darwin-arm64.node"
+codesign --force --deep --sign - "bundle/My App.app"
+```
+
+This also shrinks the executable: about 30 MB smaller for the chat example,
+whose addon is about 29 MB. `examples/compile-chat.ts` does all of this for
+the chat example without cargo-packager, wrapping `dist/chat` by hand; read
+it for the same steps end to end.
 
 ### 6. Auto-update
 
