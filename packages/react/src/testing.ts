@@ -116,6 +116,10 @@ export interface AccessKitNodeSnapshot {
     live_atomic?: true
     expanded?: boolean
     toggled?: "False" | "True" | "Mixed"
+    orientation?: "Horizontal" | "Vertical"
+    read_only?: true
+    required?: true
+    invalid?: "True" | "Grammar" | "Spelling"
     disabled?: true
     numeric_value?: number
     min_numeric_value?: number

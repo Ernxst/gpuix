@@ -1004,6 +1004,22 @@ export interface AccessibilityProps {
   ariaPressed?: boolean | "mixed"
   /** DOM-compatible alias for ariaPressed. */
   "aria-pressed"?: boolean | "mixed"
+  /** Whether a widget is arranged horizontally or vertically. */
+  ariaOrientation?: "horizontal" | "vertical"
+  /** DOM-compatible alias for ariaOrientation. */
+  "aria-orientation"?: "horizontal" | "vertical"
+  /** Whether a form control is operable but not editable. */
+  ariaReadOnly?: Booleanish
+  /** DOM-compatible alias for ariaReadOnly. */
+  "aria-readonly"?: Booleanish
+  /** Whether user input is required before submission. */
+  ariaRequired?: Booleanish
+  /** DOM-compatible alias for ariaRequired. */
+  "aria-required"?: Booleanish
+  /** Whether entered input is invalid, including grammar and spelling errors. */
+  ariaInvalid?: Booleanish | "grammar" | "spelling"
+  /** DOM-compatible alias for ariaInvalid. */
+  "aria-invalid"?: Booleanish | "grammar" | "spelling"
   /** Expanded state for controls that disclose another region. */
   ariaExpanded?: Booleanish
   /** DOM-compatible alias for ariaExpanded. */

@@ -16,6 +16,10 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaDescribedBy",
     "ariaChecked",
     "ariaPressed",
+    "ariaOrientation",
+    "ariaReadOnly",
+    "ariaRequired",
+    "ariaInvalid",
     "ariaExpanded",
     "ariaCurrent",
     "ariaLive",
@@ -256,6 +260,55 @@ impl AccessibilityRole {
                     | Role::TreeItem
             ),
             "ariaPressed" => matches!(self.role, Role::Button),
+            "ariaOrientation" => matches!(
+                self.role,
+                Role::ScrollBar
+                    | Role::ListBox
+                    | Role::Menu
+                    | Role::MenuBar
+                    | Role::RadioGroup
+                    | Role::Splitter
+                    | Role::Slider
+                    | Role::TabList
+                    | Role::Toolbar
+                    | Role::Tree
+                    | Role::TreeGrid
+            ),
+            "ariaReadOnly" => matches!(
+                self.role,
+                Role::CheckBox
+                    | Role::ComboBox
+                    | Role::Grid
+                    | Role::GridCell
+                    | Role::ListBox
+                    | Role::RadioGroup
+                    | Role::Slider
+                    | Role::SpinButton
+                    | Role::TextInput
+                    | Role::MultilineTextInput
+                    | Role::ColumnHeader
+                    | Role::RowHeader
+                    | Role::SearchInput
+                    | Role::Switch
+                    | Role::TreeGrid
+            ),
+            "ariaRequired" => matches!(
+                self.role,
+                Role::CheckBox
+                    | Role::ComboBox
+                    | Role::GridCell
+                    | Role::ListBox
+                    | Role::RadioGroup
+                    | Role::SpinButton
+                    | Role::TextInput
+                    | Role::MultilineTextInput
+                    | Role::Tree
+                    | Role::ColumnHeader
+                    | Role::RowHeader
+                    | Role::SearchInput
+                    | Role::Switch
+                    | Role::TreeGrid
+            ),
             "ariaExpanded" => matches!(self.role, Role::Button | Role::Link),
             "ariaSelected" => matches!(self.role, Role::ListBoxOption),
             "ariaValueText" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
@@ -623,6 +676,10 @@ struct AccessibilityProps<'a> {
     described_by: Option<String>,
     checked: Option<gpui::Toggled>,
     pressed: Option<gpui::Toggled>,
+    orientation: Option<gpui::accesskit::Orientation>,
+    read_only: Option<bool>,
+    required: Option<bool>,
+    invalid: Option<gpui::accesskit::Invalid>,
     expanded: Option<bool>,
     current: Option<gpui::accesskit::AriaCurrent>,
     live: Option<gpui::Live>,
@@ -670,6 +727,22 @@ impl<'a> AccessibilityProps<'a> {
                 .custom_props
                 .get("ariaPressed")
                 .and_then(parse_toggled),
+            orientation: element
+                .custom_props
+                .get("ariaOrientation")
+                .and_then(parse_orientation),
+            read_only: element
+                .custom_props
+                .get("ariaReadOnly")
+                .and_then(parse_booleanish),
+            required: element
+                .custom_props
+                .get("ariaRequired")
+                .and_then(parse_booleanish),
+            invalid: element
+                .custom_props
+                .get("ariaInvalid")
+                .and_then(parse_invalid),
             expanded: element
                 .custom_props
                 .get("ariaExpanded")
@@ -744,6 +817,30 @@ fn parse_toggled(value: &serde_json::Value) -> Option<gpui::Toggled> {
         serde_json::Value::Bool(true) => Some(gpui::Toggled::True),
         serde_json::Value::Bool(false) => Some(gpui::Toggled::False),
         serde_json::Value::String(value) if value == "mixed" => Some(gpui::Toggled::Mixed),
+        _ => None,
+    }
+}
+
+fn parse_orientation(value: &serde_json::Value) -> Option<gpui::accesskit::Orientation> {
+    match value.as_str()? {
+        "horizontal" => Some(gpui::accesskit::Orientation::Horizontal),
+        "vertical" => Some(gpui::accesskit::Orientation::Vertical),
+        _ => None,
+    }
+}
+
+fn parse_invalid(value: &serde_json::Value) -> Option<gpui::accesskit::Invalid> {
+    match value {
+        serde_json::Value::Bool(true) => Some(gpui::accesskit::Invalid::True),
+        serde_json::Value::Bool(false) => None,
+        serde_json::Value::String(value) if value == "true" => Some(gpui::accesskit::Invalid::True),
+        serde_json::Value::String(value) if value == "false" => None,
+        serde_json::Value::String(value) if value == "grammar" => {
+            Some(gpui::accesskit::Invalid::Grammar)
+        }
+        serde_json::Value::String(value) if value == "spelling" => {
+            Some(gpui::accesskit::Invalid::Spelling)
+        }
         _ => None,
     }
 }
@@ -1074,11 +1171,18 @@ pub(crate) fn element_problems(
             "ariaChecked" | "ariaPressed" => {
                 !(value.is_boolean() || value.as_str() == Some("mixed"))
             }
+            "ariaOrientation" => parse_orientation(value).is_none(),
+            "ariaInvalid" => {
+                !(value.is_boolean()
+                    || matches!(
+                        value.as_str(),
+                        Some("true" | "false" | "grammar" | "spelling")
+                    ))
+            }
             "ariaCurrent" => parse_aria_current(value).is_none(),
             "ariaLive" => parse_aria_live(value).is_none(),
-            "ariaExpanded" | "ariaSelected" | "ariaAtomic" | "ariaDisabled" | "ariaHidden" => {
-                parse_booleanish(value).is_none()
-            }
+            "ariaExpanded" | "ariaSelected" | "ariaAtomic" | "ariaDisabled" | "ariaHidden"
+            | "ariaReadOnly" | "ariaRequired" => parse_booleanish(value).is_none(),
             "visuallyHidden" => VisuallyHiddenMode::parse(value).is_none(),
             "disabled" => !(value.is_boolean() || value.is_string()),
             "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
@@ -1093,6 +1197,10 @@ pub(crate) fn element_problems(
                 "ariaLabel" | "ariaDescription" | "ariaValueText" => "a string",
                 "ariaLabelledBy" | "ariaDescribedBy" => "a string of space-separated element ids",
                 "ariaChecked" | "ariaPressed" => "a boolean or \"mixed\"",
+                "ariaOrientation" => "one of \"horizontal\" or \"vertical\"",
+                "ariaInvalid" => {
+                    "a boolean or one of \"true\", \"false\", \"grammar\", or \"spelling\""
+                }
                 "ariaCurrent" => {
                     "one of \"page\", \"step\", \"location\", \"date\", \"time\", \"true\", or \"false\""
                 }
@@ -1152,6 +1260,10 @@ pub(crate) fn element_problems(
                 | "ariaDescribedBy"
                 | "ariaChecked"
                 | "ariaPressed"
+                | "ariaOrientation"
+                | "ariaReadOnly"
+                | "ariaRequired"
+                | "ariaInvalid"
                 | "ariaExpanded"
                 | "ariaCurrent"
                 | "ariaLive"
@@ -1355,6 +1467,21 @@ where
     }
     if let Some(pressed) = props.pressed.filter(|_| props.supports("ariaPressed")) {
         el = el.aria_toggled(pressed);
+    }
+    if let Some(orientation) = props
+        .orientation
+        .filter(|_| props.supports("ariaOrientation"))
+    {
+        el = el.aria_orientation(orientation);
+    }
+    if let Some(read_only) = props.read_only.filter(|_| props.supports("ariaReadOnly")) {
+        el = el.aria_read_only(read_only);
+    }
+    if let Some(required) = props.required.filter(|_| props.supports("ariaRequired")) {
+        el = el.aria_required(required);
+    }
+    if let Some(invalid) = props.invalid.filter(|_| props.supports("ariaInvalid")) {
+        el = el.aria_invalid(invalid);
     }
     if let Some(expanded) = props.expanded.filter(|_| props.supports("ariaExpanded")) {
         el = el.aria_expanded(expanded);
@@ -1782,6 +1909,93 @@ mod tests {
                 AccessibilityRole::parse(&serde_json::Value::String((*name).to_string())).is_some(),
                 "{name}"
             );
+        }
+    }
+
+    #[test]
+    fn parses_and_validates_remaining_base_ui_aria_states() {
+        let mut separator = RetainedElement::new(1, "div".to_string(), 1);
+        separator
+            .custom_props
+            .insert("role".into(), "separator".into());
+        separator
+            .custom_props
+            .insert("ariaOrientation".into(), "horizontal".into());
+        let separator_props = AccessibilityProps::from_element(&detached_tree(), &separator);
+        assert_eq!(
+            separator_props.orientation,
+            Some(gpui::accesskit::Orientation::Horizontal)
+        );
+        assert!(element_problems(&detached_tree(), &separator).is_empty());
+
+        let mut textbox = RetainedElement::new(2, "input".to_string(), 1);
+        textbox
+            .custom_props
+            .insert("ariaReadOnly".into(), true.into());
+        textbox
+            .custom_props
+            .insert("ariaRequired".into(), "true".into());
+        textbox
+            .custom_props
+            .insert("ariaInvalid".into(), "spelling".into());
+        let textbox_props = AccessibilityProps::from_element(&detached_tree(), &textbox);
+        assert_eq!(textbox_props.read_only, Some(true));
+        assert_eq!(textbox_props.required, Some(true));
+        assert_eq!(
+            textbox_props.invalid,
+            Some(gpui::accesskit::Invalid::Spelling)
+        );
+        assert!(element_problems(&detached_tree(), &textbox).is_empty());
+
+        textbox
+            .custom_props
+            .insert("ariaReadOnly".into(), false.into());
+        textbox
+            .custom_props
+            .insert("ariaRequired".into(), "false".into());
+        textbox
+            .custom_props
+            .insert("ariaInvalid".into(), false.into());
+        let cleared = AccessibilityProps::from_element(&detached_tree(), &textbox);
+        assert_eq!(cleared.read_only, Some(false));
+        assert_eq!(cleared.required, Some(false));
+        assert_eq!(cleared.invalid, None);
+        assert!(element_problems(&detached_tree(), &textbox).is_empty());
+
+        for (property, value, expected) in [
+            (
+                "ariaOrientation",
+                serde_json::json!("diagonal"),
+                "one of \"horizontal\" or \"vertical\"",
+            ),
+            ("ariaReadOnly", serde_json::json!("yes"), "a boolean"),
+            ("ariaRequired", serde_json::json!("yes"), "a boolean"),
+            (
+                "ariaInvalid",
+                serde_json::json!("format"),
+                "a boolean or one of \"true\", \"false\", \"grammar\", or \"spelling\"",
+            ),
+        ] {
+            let mut malformed = RetainedElement::new(3, "input".to_string(), 1);
+            malformed.custom_props.insert(property.into(), value);
+            let problems = element_problems(&detached_tree(), &malformed);
+            assert_eq!(problems.len(), 1, "{property}");
+            assert_eq!(problems[0].problem.reason, format!("expected {expected}"));
+        }
+
+        for (property, value) in [
+            ("ariaOrientation", serde_json::json!("vertical")),
+            ("ariaReadOnly", serde_json::json!(true)),
+            ("ariaRequired", serde_json::json!(true)),
+        ] {
+            let mut unsupported = RetainedElement::new(4, "div".to_string(), 1);
+            unsupported
+                .custom_props
+                .insert("role".into(), "button".into());
+            unsupported.custom_props.insert(property.into(), value);
+            let problems = element_problems(&detached_tree(), &unsupported);
+            assert_eq!(problems.len(), 1, "{property}");
+            assert_eq!(problems[0].effect, AccessibilityProblemEffect::Ignored);
         }
     }
 
