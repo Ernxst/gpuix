@@ -9253,48 +9253,119 @@ impl GpuixView {
         self.dispatch_next_scroll_key_down(window, cx);
     }
 
+    /// The focused element's key event when the element does not emit it
+    /// itself. A key event targets the focused element whether or not it
+    /// listens — a checkbox inside a keyboard-handling group, a row inside a
+    /// listbox — and the ancestors hear it through React's capture and bubble
+    /// path. Element-level listeners emit only for their own, focused element,
+    /// so this is the one other source and a key press is emitted once.
+    ///
+    /// An editor that emits Enter or a navigation key without a listener of its
+    /// own also stops propagation, so those keys never arrive here.
+    fn dispatch_focused_key_event(
+        &self,
+        event_type: &str,
+        keystroke: &gpui::Keystroke,
+        is_held: Option<bool>,
+        window: &gpui::Window,
+    ) {
+        let Some(target_id) = self.active_element_id(window) else {
+            return;
+        };
+        let tree = self.tree.lock().unwrap();
+        let Some(target) = tree.elements.get(&target_id) else {
+            return;
+        };
+        if self.emits_own_event(target, event_type)
+            || !listens_in_ancestry(&tree, target_id, event_type)
+        {
+            return;
+        }
+        drop(tree);
+        emit_event_full(&self.event_callback, target_id, event_type, |payload| {
+            payload.key = Some(keystroke.key.clone());
+            payload.key_char = keystroke.key_char.clone();
+            payload.is_held = is_held;
+            payload.modifiers = Some(keystroke.modifiers.into());
+        });
+    }
+
+    fn emits_own_event(
+        &self,
+        element: &crate::retained_tree::RetainedElement,
+        event_type: &str,
+    ) -> bool {
+        // A text editor also emits the keys an ancestor listens for; see
+        // `TextEditorElement::render`.
+        is_text_editor(element)
+            || element.events.contains(event_type)
+                && self.custom_registry.emits_event(element.id, event_type)
+    }
+
+    /// Queues a scroll key's default behind its keydown, and returns whether
+    /// the key took this path. The keydown is emitted here when its target
+    /// does not emit it itself.
     fn handle_scroll_key_down(
         &mut self,
         event: &gpui::KeyDownEvent,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
-    ) {
+    ) -> bool {
         let Some(action) = keyboard_scroll_action(&event.keystroke) else {
-            return;
+            return false;
         };
-        let target_id = self
-            .active_element_id(window)
-            .or_else(|| self.tree.lock().unwrap().root_id);
+        let active_id = self.active_element_id(window);
+        let target_id = active_id.or_else(|| self.tree.lock().unwrap().root_id);
         let Some(target_id) = target_id else {
-            return;
+            return false;
         };
 
         let tree = self.tree.lock().unwrap();
         let Some(target) = tree.elements.get(&target_id) else {
-            return;
+            return false;
         };
-        let is_editor = matches!(target.element_type.as_str(), "input" | "textarea");
-        let event_emitted = target.events.contains("keyDown");
+        let kind = crate::custom_elements::choice_input::InputKind::of(target);
+        let is_editor = is_text_editor(target);
+        // With nothing focused, the root's own key event came from the
+        // unfocused fallback.
+        let event_emitted = match active_id {
+            Some(_) => self.emits_own_event(target, "keyDown"),
+            None => target.events.contains("keyDown"),
+        };
         drop(tree);
 
         if is_editor {
             // A focused editor never enters the ancestor scroll-default chain:
             // its navigation keys resolve through the editor's own deferred
             // default, and its page and space keys are simply not scrolled.
-            return;
+            return false;
         }
+
+        // Space activates a checkbox or radio, and a radio's arrow keys move
+        // its selection; neither scrolls.
+        let consumed = match kind {
+            crate::custom_elements::choice_input::InputKind::Checkbox => {
+                event.keystroke.key == "space"
+            }
+            crate::custom_elements::choice_input::InputKind::Radio => {
+                event.keystroke.key == "space"
+                    || matches!(action, KeyboardScrollAction::Line { .. })
+            }
+            _ => false,
+        };
 
         self.enqueue_scroll_key_down(
             PendingScrollKeyDown {
                 target_id,
                 keystroke: event.keystroke.clone(),
                 is_held: event.is_held,
-                action,
+                action: (!consumed).then_some(action),
                 event_emitted,
             },
             window,
             cx,
         );
+        true
     }
 
     fn apply_keyboard_scroll(
@@ -9303,13 +9374,16 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        let Some(action) = request.action else {
+            return;
+        };
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
         let mut current = request.target_id;
 
         loop {
             if let Some(candidate) = keyboard_scroll_candidate(&tree, current) {
-                if self.apply_keyboard_scroll_candidate(&tree, candidate, request.action) {
+                if self.apply_keyboard_scroll_candidate(&tree, candidate, action) {
                     cx.notify();
                     window.refresh();
                     return;
@@ -10377,11 +10451,19 @@ impl gpui::Render for GpuixView {
                             Some(event.is_held),
                             window,
                         );
-                        view.handle_scroll_key_down(event, window, cx);
+                        if !view.handle_scroll_key_down(event, window, cx) {
+                            view.dispatch_focused_key_event(
+                                "keyDown",
+                                &event.keystroke,
+                                Some(event.is_held),
+                                window,
+                            );
+                        }
                     }),
                 )
                 .on_key_up(cx.listener(|view, event: &gpui::KeyUpEvent, window, _cx| {
                     view.dispatch_unfocused_key_event("keyUp", &event.keystroke, None, window);
+                    view.dispatch_focused_key_event("keyUp", &event.keystroke, None, window);
                 }));
             with_window_menu_actions(root)
                 .child(selection_frame_reset(
@@ -12630,7 +12712,8 @@ struct PendingScrollKeyDown {
     target_id: u64,
     keystroke: gpui::Keystroke,
     is_held: bool,
-    action: KeyboardScrollAction,
+    /// `None` when the focused control consumes the key instead of scrolling.
+    action: Option<KeyboardScrollAction>,
     event_emitted: bool,
 }
 
@@ -12909,6 +12992,27 @@ fn scrolls_horizontally(element: &crate::retained_tree::RetainedElement) -> bool
             .or(style.overflow.as_deref())
             .is_some_and(overflow_scrolls)
     })
+}
+
+fn is_text_editor(element: &crate::retained_tree::RetainedElement) -> bool {
+    matches!(element.element_type.as_str(), "input" | "textarea")
+        && crate::custom_elements::choice_input::InputKind::of(element)
+            == crate::custom_elements::choice_input::InputKind::Text
+}
+
+/// Whether the element or one of its ancestors listens for `event_type`.
+pub(crate) fn listens_in_ancestry(tree: &RetainedTree, element_id: u64, event_type: &str) -> bool {
+    let mut current = Some(element_id);
+    while let Some(id) = current {
+        let Some(element) = tree.elements.get(&id) else {
+            return false;
+        };
+        if element.events.contains(event_type) {
+            return true;
+        }
+        current = element.parent;
+    }
+    false
 }
 
 fn nearest_scroll_ancestor(tree: &RetainedTree, element_id: u64) -> Option<ScrollAncestor> {
@@ -13924,21 +14028,16 @@ pub(crate) fn build_host_container(
             }
 
             // ── Key down ─────────────────────────────────────────
-            // Requires .focusable() (set above). Element must be focused
-            // (clicked or tabbed to) for these to fire.
+            // Requires .focusable() (set above). GPUI invokes every key
+            // listener on the focus path, but a key event has one target: the
+            // focused element. Only that element emits it here, and React
+            // carries it through the ancestors' capture and bubble listeners.
+            // A focused element without a listener of its own is emitted for
+            // by the root (`dispatch_focused_key_event`).
             "keyDown" => {
                 let focus_handle = ctx.focus_handles.get(&id).cloned();
                 el = el.on_key_down(move |key_event, window, _cx| {
-                    // GPUI invokes every key listener on the focus path. A
-                    // classified scroll key is emitted by its focused target
-                    // (or by the scroll path when the target has no listener),
-                    // so ancestor native listeners must not create a second,
-                    // ancestor-targeted event.
-                    if keyboard_scroll_action(&key_event.keystroke).is_some()
-                        && !focus_handle
-                            .as_ref()
-                            .is_some_and(|handle| handle.is_focused(window))
-                    {
+                    if !is_focused(focus_handle.as_ref(), window) {
                         return;
                     }
                     emit_event_full(&callback, id, "keyDown", |p| {
@@ -13952,7 +14051,11 @@ pub(crate) fn build_host_container(
 
             // ── Key up ───────────────────────────────────────────
             "keyUp" => {
-                el = el.on_key_up(move |key_event, _window, _cx| {
+                let focus_handle = ctx.focus_handles.get(&id).cloned();
+                el = el.on_key_up(move |key_event, window, _cx| {
+                    if !is_focused(focus_handle.as_ref(), window) {
+                        return;
+                    }
                     emit_event_full(&callback, id, "keyUp", |p| {
                         p.key = Some(key_event.keystroke.key.clone());
                         p.key_char = key_event.keystroke.key_char.clone();
@@ -15534,6 +15637,12 @@ mod mouse_down_button_set_tests {
 /// caller customize it via a closure, then sends it through the callback.
 /// Production: queues on Node.js event loop via ThreadsafeFunction.
 /// Tests: pushes to a synchronous Vec for drainEvents().
+/// Whether an element's key listener is hearing its own key event rather than
+/// a focused descendant's, which the descendant already emits.
+pub(crate) fn is_focused(handle: Option<&gpui::FocusHandle>, window: &gpui::Window) -> bool {
+    handle.is_some_and(|handle| handle.is_focused(window))
+}
+
 pub(crate) fn emit_event_full(
     callback: &Option<EventCallback>,
     element_id: u64,

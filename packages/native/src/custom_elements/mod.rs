@@ -684,6 +684,15 @@ impl CustomElementRegistry {
         }
     }
 
+    /// Whether the element emits `event_type` itself while it listens for it.
+    /// The renderer wires every event on an element without an adapter; an
+    /// adapter emits only the events in its `supported_events`.
+    pub(crate) fn emits_event(&self, id: u64, event_type: &str) -> bool {
+        self.instances
+            .get(&id)
+            .is_none_or(|entry| entry.element.supported_events().contains(&event_type))
+    }
+
     /// Synchronize one retained frame into an adapter and render it.
     pub fn render(
         &mut self,

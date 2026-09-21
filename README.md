@@ -2540,6 +2540,14 @@ a `div` when it should receive keyboard focus:
 bubble phases. `onKeyUp` follows the same path when the key is released. Adding
 either callback creates the element's native focus handle.
 
+Each key press is one event with the focused element as `event.target`, whether
+or not that element has a key callback of its own. A `<div onKeyDown>` around a
+toolbar, a radio group or a set of focusable rows hears each key once, through
+its capture and bubble listeners, and `stopPropagation()` and
+`preventDefault()` apply to that one event. This includes a focused checkbox or
+radio: `preventDefault()` on Space cancels its activation, and on a radio's
+arrow key it keeps the selection where it is.
+
 ```tsx
 <div
   autoFocus
@@ -2574,7 +2582,8 @@ phase to keep focus on the current element, matching the browser:
 A focused scroll container responds to the arrow, Page, Space, and Home/End
 keys using Chromium's step sizes, and chains each key to the nearest ancestor
 scroll container that can still move. Calling `preventDefault()` in
-`onKeyDown` cancels the keyboard scroll.
+`onKeyDown` cancels the keyboard scroll. Space on a focused checkbox or radio,
+and the arrow keys on a radio, activate the control instead of scrolling.
 
 ### Keys with nothing focused
 
@@ -2601,20 +2610,11 @@ run at `AT_TARGET`, as they do for any DOM event whose target is the listener.
 `Tab` is unaffected: it still traverses, and `preventDefault()` still cancels
 the traversal.
 
-**A root listener is not only the no-focus path.** An element that listens for
-keys is told about every key event that passes through it, including the ones
-travelling up from a focused descendant, and it is told with **its own id as
-`event.target`** — so a root handler also runs for each character typed into a
-focused `<input>`. When that focused descendant listens for keys too, the root
-handler runs **twice for the one keypress**: once as the ordinary DOM bubble,
-carrying the descendant as `event.target` at phase `3`, and once as the
-ancestor's own delivery, carrying the root as `event.target` at phase `2`.
-
-So `event.target` is not uniformly wrong on a key event — it is inconsistent.
-A root listener sees both shapes for the same physical key, which is why
-filtering on `event.target` (or on `eventPhase`) cannot separate "nothing is
-focused" from "the user is typing". The no-focus fallback adds no delivery to
-any of this; the focus read is what answers the question:
+**A root listener also hears focused elements' keys.** A key pressed while an
+element has focus reaches the root through the bubble phase, so a root handler
+also runs for each character typed into a focused `<input>`, with the input as
+`event.target`. Compare `event.target` with the root to keep a shortcut to the
+no-focus case, the way a `document` listener compares it with `document.body`:
 
 ```tsx
 const rootRef = useRef<PublicInstance>(null)
@@ -2622,20 +2622,12 @@ const rootRef = useRef<PublicInstance>(null)
 <div
   ref={rootRef}
   onKeyDown={(event) => {
-    // Ignore keys that belong to a focused element, the way a `document`
-    // listener would read `event.target`. Compare against the root's own id:
-    // when the root is itself focusable and focused, the shortcut should fire,
-    // and a bare `!== null` check would swallow it.
-    const active = renderer.getActiveElement()
-    if (active !== null && active !== rootRef.current?.id) return
+    // Nothing is focused, or the root itself is.
+    if (event.target.id !== rootRef.current?.id) return
     if (event.key === '/') openSearch()
   }}
 >
 ```
-
-The inconsistent target is in ancestor key delivery generally, not in this
-fallback, and it is why the guard reads focus rather than the event. Until it is
-fixed, `getActiveElement()` is the reliable answer to "what has focus".
 
 Do not also call `focusNext` from an element `onKeyDown`. Both move focus, and
 the window listener cannot stop the native event, so Tab would jump twice.

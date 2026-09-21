@@ -467,8 +467,12 @@ impl CustomElement for TextEditorElement {
             .cloned()
             .unwrap_or_else(|| cx.focus_handle());
         let emits_change = ctx.events.contains("change");
-        let emits_key_down = ctx.events.contains("keyDown");
-        let emits_key_up = ctx.events.contains("keyUp");
+        // The editor emits its own key events whenever it or an ancestor
+        // listens, so every keydown JS answers has its place in the editor's
+        // deferred-default queue. The renderer's root listener leaves a
+        // focused editor's keys to it.
+        let emits_key_down = crate::renderer::listens_in_ancestry(ctx.tree, ctx.id, "keyDown");
+        let emits_key_up = crate::renderer::listens_in_ancestry(ctx.tree, ctx.id, "keyUp");
         let callback = ctx.event_callback.clone();
         let deferred_bindings = deferred_text_editor_bindings(
             if self.multiline {
