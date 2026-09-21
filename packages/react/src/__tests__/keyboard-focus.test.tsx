@@ -776,10 +776,9 @@ describeNative("keyboard focus", () => {
       ])
     })
 
-    // Counts, not targets. A root listener is told about the keys of a focused
-    // descendant too, with its own id as `event.target` — pre-existing in
-    // ancestor key delivery, so the assertion here is that the no-focus
-    // fallback adds no delivery on top of it.
+    // A root listener hears a focused descendant's keys through the bubble
+    // path; the assertion here is that the no-focus fallback adds no delivery
+    // on top of it.
     it("adds no delivery once something is focused, and resumes when focus is dropped", () => {
       let deliveries = 0
       const rootRef = React.createRef<PublicInstance>()
@@ -839,6 +838,178 @@ describeNative("keyboard focus", () => {
       // focused; the no-focus fallback must not deliver it a second time.
       expect(keys).toEqual(["Tab"])
       expect(focusedLabel()).toBeNull()
+    })
+  })
+
+  describe("keys with focus inside a listening ancestor", () => {
+    type Delivery = [listener: string, key: string, target: number, eventPhase: number]
+
+    function Nested({
+      log,
+      innerListens = true,
+      stopAtInner = false,
+      preventAtInner = false,
+      innerRef,
+      outerRef,
+    }: {
+      log: Delivery[]
+      innerListens?: boolean
+      stopAtInner?: boolean
+      preventAtInner?: boolean
+      innerRef: React.RefObject<PublicInstance | null>
+      outerRef: React.RefObject<PublicInstance | null>
+    }) {
+      const record = (listener: string) => (event: GpuixSyntheticEvent) =>
+        log.push([listener, event.key!, event.target.id, event.eventPhase])
+      return (
+        <div
+          ref={outerRef}
+          tabIndex={0}
+          ariaLabel="outer"
+          onKeyDownCapture={record("outer capture")}
+          onKeyDown={(event) => {
+            record(`outer bubble${event.defaultPrevented ? " prevented" : ""}`)(event)
+          }}
+          onKeyUp={record("outer up")}
+        >
+          <div
+            ref={innerRef}
+            tabIndex={0}
+            ariaLabel="inner"
+            onKeyDown={
+              innerListens
+                ? (event) => {
+                    record("inner")(event)
+                    if (stopAtInner) event.stopPropagation()
+                    if (preventAtInner) event.preventDefault()
+                  }
+                : undefined
+            }
+            style={{ width: 100, height: 40 }}
+          >
+            <text>Inner</text>
+          </div>
+        </div>
+      )
+    }
+
+    it("delivers one capture, target, and bubble sequence for nested focusable elements", () => {
+      const log: Delivery[] = []
+      const innerRef = React.createRef<PublicInstance>()
+      const outerRef = React.createRef<PublicInstance>()
+      testRoot.render(<Nested log={log} innerRef={innerRef} outerRef={outerRef} />)
+      innerRef.current!.focus()
+      testRoot.renderer.flush()
+
+      testRoot.renderer.simulateKeystrokes("k")
+
+      const inner = innerRef.current!.id
+      expect(log).toEqual([
+        ["outer capture", "k", inner, 1],
+        ["inner", "k", inner, 2],
+        ["outer bubble", "k", inner, 3],
+        ["outer up", "k", inner, 3],
+      ])
+    })
+
+    it("targets a focused descendant that has no listener of its own", () => {
+      const log: Delivery[] = []
+      const innerRef = React.createRef<PublicInstance>()
+      const outerRef = React.createRef<PublicInstance>()
+      testRoot.render(
+        <Nested log={log} innerListens={false} innerRef={innerRef} outerRef={outerRef} />
+      )
+      innerRef.current!.focus()
+      testRoot.renderer.flush()
+
+      testRoot.renderer.simulateKeystrokes("k")
+
+      const inner = innerRef.current!.id
+      expect(log).toEqual([
+        ["outer capture", "k", inner, 1],
+        ["outer bubble", "k", inner, 3],
+        ["outer up", "k", inner, 3],
+      ])
+    })
+
+    it("applies stopPropagation and preventDefault to the one sequence", () => {
+      const log: Delivery[] = []
+      const innerRef = React.createRef<PublicInstance>()
+      const outerRef = React.createRef<PublicInstance>()
+      testRoot.render(<Nested log={log} stopAtInner innerRef={innerRef} outerRef={outerRef} />)
+      innerRef.current!.focus()
+      testRoot.renderer.flush()
+
+      testRoot.renderer.simulateKeystrokes("k")
+      expect(log.map(([listener]) => listener)).toEqual(["outer capture", "inner", "outer up"])
+
+      log.length = 0
+      testRoot.render(<Nested log={log} preventAtInner innerRef={innerRef} outerRef={outerRef} />)
+      innerRef.current!.focus()
+      testRoot.renderer.flush()
+
+      testRoot.renderer.simulateKeystrokes("k")
+      expect(log.map(([listener]) => listener)).toEqual([
+        "outer capture",
+        "inner",
+        "outer bubble prevented",
+        "outer up",
+      ])
+    })
+
+    it("delivers a focused outer element's own key once", () => {
+      const log: Delivery[] = []
+      const innerRef = React.createRef<PublicInstance>()
+      const outerRef = React.createRef<PublicInstance>()
+      testRoot.render(<Nested log={log} innerRef={innerRef} outerRef={outerRef} />)
+      outerRef.current!.focus()
+      testRoot.renderer.flush()
+
+      testRoot.renderer.simulateKeystrokes("k")
+
+      const outer = outerRef.current!.id
+      expect(log).toEqual([
+        ["outer capture", "k", outer, 2],
+        ["outer bubble", "k", outer, 2],
+        ["outer up", "k", outer, 2],
+      ])
+    })
+
+    it("delivers a text editor's keys to its ancestor once, targeting the editor", () => {
+      const keys: Array<[string, number]> = []
+      const own: string[] = []
+      const inputRef = React.createRef<PublicInstance>()
+      const render = (listens: boolean) =>
+        testRoot.render(
+          <div onKeyDown={(event) => keys.push([event.key!, event.target.id])}>
+            <input
+              ref={inputRef}
+              ariaLabel="editor"
+              onKeyDown={listens ? (event) => own.push(event.key!) : undefined}
+              style={{ width: 200, height: 24 }}
+            />
+          </div>
+        )
+
+      render(false)
+      inputRef.current!.focus()
+      testRoot.renderer.flush()
+      testRoot.renderer.simulateKeystrokes("a space left")
+      const input = inputRef.current!.id
+      expect(keys).toEqual([
+        ["a", input],
+        [" ", input],
+        ["ArrowLeft", input],
+      ])
+
+      keys.length = 0
+      render(true)
+      testRoot.renderer.simulateKeystrokes("b space")
+      expect(own).toEqual(["b", " "])
+      expect(keys).toEqual([
+        ["b", input],
+        [" ", input],
+      ])
     })
   })
 })

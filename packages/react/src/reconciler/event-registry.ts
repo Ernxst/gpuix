@@ -209,6 +209,11 @@ function runClick(
   renderer: NativeRenderer,
   dispatched?: GpuixDispatchableEvent
 ): GpuixEventDispatchResult {
+  // A prevented Space or Enter keydown means no click, so a checkbox or radio
+  // must not flip, or report a change, before the dispatch would drop it.
+  if (shouldSuppressKeyboardClick(container, payload)) {
+    return { defaultPrevented: true, propagationStopped: false }
+  }
   const target = container.eventTargets.get(payload.elementId)
   const result =
     target !== undefined && isChoiceInput(target)

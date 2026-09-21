@@ -280,10 +280,12 @@ describeNative("native checkbox inputs", () => {
 
   it("toggles on Space but not Enter, and honours a prevented Space", async () => {
     let preventSpace = false
+    const change = vi.fn()
     screen.render(
       <input
         type="checkbox"
         ariaLabel="Keyboard"
+        onChange={change}
         onKeyDown={(event) => {
           if (preventSpace && event.key === " ") event.preventDefault()
         }}
@@ -296,9 +298,12 @@ describeNative("native checkbox inputs", () => {
     await screen.userEvent.keyboard(checkbox, "enter")
     expect(checkbox).toBeChecked()
 
+    expect(change).toHaveBeenCalledTimes(1)
+
     preventSpace = true
     await screen.userEvent.keyboard(checkbox, "space")
     expect(checkbox).toBeChecked()
+    expect(change).toHaveBeenCalledTimes(1)
   })
 
   it("activates from an explicit label and from a wrapping label, once each", async () => {
@@ -569,6 +574,184 @@ describeNative("native radio inputs", () => {
     await screen.userEvent.click(radio("two"))
     expect(radio("two")).toBeChecked()
     expect(radio("one")).not.toBeChecked()
+  })
+})
+
+describeNative("keyboard events from choice inputs", () => {
+  let screen: TestRoot
+
+  beforeEach(() => {
+    screen = createTestRoot({ width: 480, height: 320 })
+  })
+
+  afterEach(() => {
+    screen.renderer.dispose()
+  })
+
+  type Delivery = [phase: string, key: string, target: number, eventPhase: number]
+
+  function Ancestor({
+    log,
+    prevent = [],
+    children,
+  }: {
+    log: Delivery[]
+    prevent?: string[]
+    children: React.ReactNode
+  }) {
+    return (
+      <div
+        data-testid="ancestor"
+        style={{ padding: 20, gap: 8 }}
+        onKeyDownCapture={(event) =>
+          log.push(["capture", event.key!, event.target.id, event.eventPhase])
+        }
+        onKeyDown={(event) => {
+          log.push(["bubble", event.key!, event.target.id, event.eventPhase])
+          if (prevent.includes(event.key!)) event.preventDefault()
+        }}
+      >
+        {children}
+      </div>
+    )
+  }
+
+  it("bubbles one Space, arrow, and Home keydown from a checkbox to its ancestor", async () => {
+    const log: Delivery[] = []
+    screen.render(
+      <Ancestor log={log}>
+        <input type="checkbox" ariaLabel="Bubbling" style={BOX} />
+      </Ancestor>
+    )
+    const checkbox = screen.getByRole("checkbox", { name: "Bubbling" })
+
+    for (const key of ["space", "right", "home"]) {
+      await screen.userEvent.keyboard(checkbox, key)
+    }
+
+    expect(log).toEqual([
+      ["capture", " ", checkbox.id, 1],
+      ["bubble", " ", checkbox.id, 3],
+      ["capture", "ArrowRight", checkbox.id, 1],
+      ["bubble", "ArrowRight", checkbox.id, 3],
+      ["capture", "Home", checkbox.id, 1],
+      ["bubble", "Home", checkbox.id, 3],
+    ])
+    expect(checkbox).toBeChecked()
+  })
+
+  it("lets an ancestor prevent a checkbox's Space activation", async () => {
+    const log: Delivery[] = []
+    const change = vi.fn()
+    screen.render(
+      <Ancestor log={log} prevent={[" "]}>
+        <input type="checkbox" ariaLabel="Guarded" onChange={change} style={BOX} />
+      </Ancestor>
+    )
+    const checkbox = screen.getByRole("checkbox", { name: "Guarded" })
+
+    await screen.userEvent.keyboard(checkbox, "space")
+
+    expect(log.filter(([phase]) => phase === "bubble")).toEqual([
+      ["bubble", " ", checkbox.id, 3],
+    ])
+    expect(checkbox).not.toBeChecked()
+    expect(change).not.toHaveBeenCalled()
+  })
+
+  it("delivers a radio's keys to its ancestor once and moves the selection once", async () => {
+    const log: Delivery[] = []
+    const changes: string[] = []
+    screen.render(
+      <Ancestor log={log}>
+        <div
+          style={{ flexDirection: "row", gap: 8 }}
+          onChange={(event) => changes.push((event.target.props as { value?: string }).value!)}
+        >
+          {["a", "b", "c"].map((value) => (
+            <input
+              key={value}
+              type="radio"
+              name="bubble"
+              value={value}
+              ariaLabel={`bubble ${value}`}
+              defaultChecked={value === "c"}
+              style={BOX}
+            />
+          ))}
+        </div>
+      </Ancestor>
+    )
+    const radio = (value: string) => screen.getByRole("radio", { name: `bubble ${value}` })
+
+    await screen.userEvent.keyboard(radio("c"), "k")
+    await screen.userEvent.keyboard(radio("c"), "down")
+
+    expect(log).toEqual([
+      ["capture", "k", radio("c").id, 1],
+      ["bubble", "k", radio("c").id, 3],
+      ["capture", "ArrowDown", radio("c").id, 1],
+      ["bubble", "ArrowDown", radio("c").id, 3],
+    ])
+    expect(radio("a")).toBeChecked()
+    expect(screen.renderer.getActiveElement()).toBe(radio("a").id)
+    expect(changes).toEqual(["a"])
+
+    log.length = 0
+    await screen.userEvent.keyboard(radio("a"), "home")
+    expect(log.map(([phase, key]) => [phase, key])).toEqual([
+      ["capture", "Home"],
+      ["bubble", "Home"],
+    ])
+    expect(radio("a")).toBeChecked()
+  })
+
+  it("lets an ancestor prevent a radio's arrow-key selection", async () => {
+    const log: Delivery[] = []
+    screen.render(
+      <Ancestor log={log} prevent={["ArrowRight"]}>
+        <div style={{ flexDirection: "row", gap: 8 }}>
+          {["x", "y"].map((value) => (
+            <input
+              key={value}
+              type="radio"
+              name="guarded"
+              ariaLabel={`guarded ${value}`}
+              defaultChecked={value === "x"}
+              style={BOX}
+            />
+          ))}
+        </div>
+      </Ancestor>
+    )
+    const first = screen.getByRole("radio", { name: "guarded x" })
+
+    await screen.userEvent.keyboard(first, "right")
+
+    expect(log.filter(([phase]) => phase === "bubble")).toHaveLength(1)
+    expect(first).toBeChecked()
+    expect(screen.renderer.getActiveElement()).toBe(first.id)
+  })
+
+  it("scrolls for a checkbox's arrow key but not for Space or a radio's arrow key", async () => {
+    screen.render(
+      <div data-testid="scroller" style={{ width: 200, height: 100, overflowY: "scroll" }}>
+        <input type="checkbox" ariaLabel="scrolling box" style={{ ...BOX, flexShrink: 0 }} />
+        <input type="radio" name="scrolling" ariaLabel="scrolling one" style={{ ...BOX, flexShrink: 0 }} />
+        <input type="radio" name="scrolling" ariaLabel="scrolling two" style={{ ...BOX, flexShrink: 0 }} />
+        <div style={{ height: 400, flexShrink: 0 }} />
+      </div>
+    )
+    const scroller = screen.getByTestId("scroller")
+    const scrollTop = () => screen.renderer.getScrollOffset(scroller.id)![1]
+
+    await screen.userEvent.keyboard(screen.getByRole("checkbox", { name: "scrolling box" }), "space")
+    expect(scrollTop()).toBe(0)
+    await screen.userEvent.keyboard(screen.getByRole("radio", { name: "scrolling one" }), "down")
+    expect(screen.getByRole("radio", { name: "scrolling two" })).toBeChecked()
+    expect(scrollTop()).toBe(0)
+    await screen.userEvent.keyboard(screen.getByRole("checkbox", { name: "scrolling box" }), "down")
+    expect(scrollTop()).toBe(-40)
   })
 })
 
