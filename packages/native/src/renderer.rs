@@ -15829,6 +15829,34 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
 /// included — degrades to the empty style with a recorded problem rather than
 /// rejecting the batch. It still runs before the apply loop and borrows only
 /// the style table, so the interned styles line up with the ops that use them.
+fn canonical_style_value(value: &serde_json::Value) -> Option<serde_json::Value> {
+    let object = value.as_object()?;
+    let mut changed = false;
+    let mut canonical = serde_json::Map::with_capacity(object.len());
+
+    for (key, value) in object {
+        if key.starts_with("--") {
+            changed = true;
+            continue;
+        }
+
+        if matches!(
+            key.as_str(),
+            "hover" | "hoverWithin" | "active" | "focus" | "focusVisible"
+        ) {
+            if let Some(nested) = canonical_style_value(value) {
+                canonical.insert(key.clone(), nested);
+                changed = true;
+                continue;
+            }
+        }
+
+        canonical.insert(key.clone(), value.clone());
+    }
+
+    changed.then_some(serde_json::Value::Object(canonical))
+}
+
 fn resolve_styles(
     styles: &mut StyleTable,
     ops: &[BatchOp<'_>],
@@ -15841,8 +15869,14 @@ fn resolve_styles(
             let raw = style.get().trim().as_bytes();
             let value: serde_json::Value =
                 serde_json::from_slice(raw).expect("a RawValue payload is always valid JSON");
-            let parsed = crate::style::parse_style_value(&value);
-            let shared = styles.intern_parsed(raw, parsed.style);
+            let canonical = canonical_style_value(&value);
+            let canonical_value = canonical.as_ref().unwrap_or(&value);
+            let canonical_bytes = canonical
+                .as_ref()
+                .map(|value| serde_json::to_vec(value).expect("style values are serializable"));
+            let interned_raw = canonical_bytes.as_deref().unwrap_or(raw);
+            let parsed = crate::style::parse_style_value(canonical_value);
+            let shared = styles.intern_parsed(interned_raw, parsed.style);
             let problems = if collect_diagnostics {
                 parsed.problems
             } else {
@@ -15857,7 +15891,7 @@ fn resolve_styles(
 #[cfg(test)]
 mod resolve_styles_tests {
     use super::*;
-    use crate::style::TransitionEasing;
+    use crate::style::{DimensionValue, TransitionEasing};
     use serde_json::json;
 
     fn resolve(
@@ -15904,6 +15938,47 @@ mod resolve_styles_tests {
         assert_eq!(transition[0].easing, TransitionEasing::Name("ease".into()));
         assert_eq!(strict_diagnostics.len(), 2);
         assert!(non_strict_diagnostics.is_empty());
+    }
+
+    #[test]
+    fn inert_custom_property_variants_share_one_retained_style() {
+        let mut tree = RetainedTree::new();
+        let batches = [
+            json!([
+                ["createElement", 1, "div"],
+                [
+                    "setStyle",
+                    1,
+                    {
+                        "width": 120,
+                        "--collapsible-panel-height": "40px",
+                        "hover": { "opacity": 0.5, "--collapsible-panel-width": "120px" }
+                    }
+                ],
+                ["setRoot", 1]
+            ]),
+            json!([[
+                "setStyle",
+                1,
+                {
+                    "width": 120,
+                    "--collapsible-panel-height": "80px",
+                    "hover": { "opacity": 0.5, "--collapsible-panel-width": "240px" }
+                }
+            ]]),
+            json!([["setStyle", 1, { "width": 120, "hover": { "opacity": 0.5 } }]]),
+        ];
+
+        for batch in batches {
+            let bytes = serde_json::to_vec(&batch).unwrap();
+            let outcome = apply_batch_to_tree_with_diagnostics(&mut tree, &bytes, true).unwrap();
+            assert!(outcome.diagnostics.is_empty());
+            assert_eq!(tree.styles.len(), 1);
+            assert_eq!(
+                tree.elements[&1].style.as_deref().unwrap().width,
+                Some(DimensionValue::Pixels(120.0))
+            );
+        }
     }
 }
 
