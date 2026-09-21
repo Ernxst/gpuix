@@ -335,7 +335,8 @@ export function sanitizeRangeValue(bounds: RangeBounds, value: unknown): number 
   const { min, max, step, stepBase } = bounds
   let number = parseRangeNumber(value) ?? min + (max - min) / 2
   number = Math.min(max, Math.max(min, number))
-  if (step === null) return number
+  // Remove the binary noise fractional arithmetic leaves, so `0.1 * 3` reads as 0.3.
+  if (step === null) return Number(number.toPrecision(15))
   const snapped = stepBase + Math.round((number - stepBase) / step) * step
   let result = snapped
   if (result > max) result -= step
@@ -343,7 +344,6 @@ export function sanitizeRangeValue(bounds: RangeBounds, value: unknown): number 
   // A range narrower than one step has no step inside it: HTML keeps the
   // clamped value.
   if (result < min || result > max) return number
-  // Remove the binary noise a fractional step leaves, so `0.1 * 3` reads as 0.3.
   return Number(result.toPrecision(15))
 }
 
@@ -411,10 +411,10 @@ export function writeRangeValue(container: Container, instance: Instance, value:
 }
 
 /**
- * The value a range's keyboard or assistive-technology default moves to, or
- * `undefined` when the key has no default. Arrow keys and increment and
- * decrement move one step; Page Up and Page Down a tenth of the range, as
- * Chromium does; Home and End jump to the ends.
+ * The value a range's keyboard or assistive-technology default moves to.
+ * Arrow keys and increment and decrement move one step, or a hundredth of the
+ * range under `step="any"`; Page Up and Page Down a tenth of the range, and at
+ * least one step, as Chromium does; Home and End jump to the ends.
  */
 export function rangeStepTarget(
   instance: Instance,
@@ -422,7 +422,7 @@ export function rangeStepTarget(
 ): number {
   const bounds = rangeBounds(instance.props)
   const value = rangeStateOf(instance).value
-  const step = bounds.step ?? 1
+  const step = bounds.step ?? (bounds.max - bounds.min) / 100
   const page = Math.max(step, (bounds.max - bounds.min) / 10)
   switch (action) {
     case "increment":

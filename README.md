@@ -2769,8 +2769,9 @@ and the rest is clamped and rounded to the nearest step counted from `min`.
 />
 ```
 
-Arrow keys move the value one step, Up and Right increasing it; Page Up and
-Page Down move a tenth of the range, and Home and End jump to the ends. Screen
+Arrow keys move the value one step, or a hundredth of the range under
+`step="any"`, Up and Right increasing it; Page Up and Page Down move a tenth of
+the range, and Home and End jump to the ends. Screen
 readers' Increment and Decrement actions step it too. Each change fires
 `onChange` with the new value as `event.value`, a `preventDefault()` on `onKeyDown` or `onAccessibilityAction`
 stops it, and a controlled range returns to its `value` prop unless the

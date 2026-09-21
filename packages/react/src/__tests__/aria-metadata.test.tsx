@@ -363,6 +363,39 @@ describeNative("native range inputs", () => {
     expect(nodeFor(screen, slider.id).aria.numeric_value).toBe(0)
   })
 
+  it("steps a hundredth of the range under step=any", async () => {
+    const values: string[] = []
+    const ref = React.createRef<InputPublicInstance>()
+    screen.render(
+      <input
+        ref={ref}
+        type="range"
+        aria-label="Opacity"
+        min="0"
+        max="1"
+        step="any"
+        defaultValue="0.37"
+        onChange={(event: GpuixChangeEvent) => values.push(event.value!)}
+      />
+    )
+    const slider = screen.getByRole("slider", { name: "Opacity" })
+
+    await screen.userEvent.keyboard(slider, "right")
+    expect(ref.current!.valueAsNumber).toBe(0.38)
+    await screen.userEvent.keyboard(slider, "pageup")
+    expect(ref.current!.valueAsNumber).toBe(0.48)
+
+    screen.renderer.nativeSimulateAccessibilityAction(
+      nodeFor(screen, slider.id).accesskit_id,
+      "decrement"
+    )
+    screen.renderer.flush()
+    expect(ref.current!.valueAsNumber).toBe(0.47)
+    expect(values).toEqual(["0.38", "0.48", "0.47"])
+    expect(nodeFor(screen, slider.id).aria).toMatchObject({ numeric_value: 0.47 })
+    expect(nodeFor(screen, slider.id).aria).not.toHaveProperty("numeric_value_step")
+  })
+
   it("leaves a prevented key and a disabled range alone", async () => {
     const onChange = vi.fn()
     screen.render(
