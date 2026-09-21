@@ -128,6 +128,10 @@ pub struct EventPayload {
     /// absent when the selection is empty).
     pub value: Option<String>,
 
+    /// The Input Events `inputType` of a text-editor `change`: `insertText`,
+    /// `deleteContentBackward`, `insertFromPaste`, `historyUndo`, and so on.
+    pub input_type: Option<String>,
+
     /// Line number on the pre-change side. Populated for: `<diff>` lineClick.
     pub old_line: Option<f64>,
 
@@ -196,6 +200,7 @@ impl Default for EventPayload {
             touch_phase: None,
             hovered: None,
             value: None,
+            input_type: None,
             old_line: None,
             new_line: None,
             start_index: None,

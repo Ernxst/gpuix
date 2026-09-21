@@ -1003,6 +1003,11 @@ export interface EventPayload {
    * absent when the selection is empty).
    */
   value?: string
+  /**
+   * The Input Events `inputType` of a text-editor `change`: `insertText`,
+   * `deleteContentBackward`, `insertFromPaste`, `historyUndo`, and so on.
+   */
+  inputType?: string
   /** Line number on the pre-change side. Populated for: `<diff>` lineClick. */
   oldLine?: number
   /** Line number on the post-change side. Populated for: `<diff>` lineClick. */

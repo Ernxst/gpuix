@@ -2361,6 +2361,12 @@ present, `value` wins and the editor remains controlled.
 Both props take numbers as React DOM's do: `value={5}` is the text `"5"`, and
 `ref.value` reads `"5"`.
 
+Each text `onChange` carries `inputType`, the Input Events name of the edit
+(`insertText`, `deleteContentBackward`, `insertFromPaste`, `historyUndo` and so
+on), on the event and on `event.nativeEvent`. Code that tells typing from
+autofill by it, as Base UI's Autocomplete does before opening its list, sees a
+typed edit.
+
 Use a `<label>` for a visible control name and a larger activation target. A
 label with `htmlFor` labels the control with that `id`; a label without one
 labels the first `<input>`, `<textarea>`, or `<button>` inside it. Clicking the
