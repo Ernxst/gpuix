@@ -189,6 +189,7 @@ export function AnimatePresence({
           if (!isExitComplete) isEveryExitComplete = false
         })
         if (!isEveryExitComplete) return
+        exitComplete.clear()
         setRenderedChildren(presentChildren)
         onExitComplete?.()
       }
