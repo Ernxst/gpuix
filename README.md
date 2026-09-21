@@ -1775,7 +1775,7 @@ ref.current.localName                             // "div"
 ref.current.hasAttribute("data-state")           // agrees with getAttribute()
 ref.current.contains(otherRef.current)            // retained-tree containment
 ref.current.parentElement                         // live retained parent, or null
-ref.current.ownerDocument                         // the window's document facade; see Globals
+ref.current.ownerDocument                         // the host document, or the GPUIX facade; see Globals
 ref.current.dispatchEvent(event)                  // a PointerEvent; see Globals
 
 // "Am I at the bottom?" — the standard DOM test
@@ -1819,8 +1819,9 @@ mounted. Where the DOM keeps parent links inside a removed subtree, every node o
 an unmounted subtree here reports `null`, in line with `contains()`. Refs have no
 `parentNode`, `children`, or other traversal members.
 
-`ownerDocument` is the same single-window document facade for every ref,
-mounted or not; see [document](#document).
+`ownerDocument` is the host's document when one exists, and otherwise the
+single-window GPUIX document facade, for every ref, mounted or not; see
+[document](#document).
 
 Only `overflow: "scroll"` / `"auto"` elements and `<virtual-list>` are scroll
 containers here. Everything else — **including `overflow: "hidden"`, which the web does
@@ -4823,7 +4824,7 @@ sources.
 
 The entry installs `document` as a facade over the mounted GPUIX tree, so
 code written against the DOM finds the parts of a document GPUIX can answer.
-Every ref's `ownerDocument` is the same object:
+When the entry installed it, every ref's `ownerDocument` is the same object:
 
 ```tsx
 import "@gpuix/react/globals"
@@ -4832,7 +4833,7 @@ document.getElementById("email")         // first mounted element with that id p
 document.activeElement                   // the focused host element, or body when nothing has focus
 document.body                            // the root host element of the mounted tree
 document.defaultView                     // the global window
-ref.current.ownerDocument === document   // true
+ref.current.ownerDocument === document   // true when GPUIX installed document
 ```
 
 `getElementById()` searches the mounted retained tree in tree order, so an
@@ -4847,9 +4848,11 @@ example, Base UI's Tabs select through `click()` and Enter, but a pointer
 press on a tab throws where Base UI adds a `pointerup` listener to the document.
 
 A host document wins, as for every name here: in a browser or a
-`jsdom`/`happy-dom` environment `document` stays the host's. Refs still report
-the GPUIX facade as their `ownerDocument`, because the host document cannot find
-GPUIX elements.
+`jsdom`/`happy-dom` environment `document` stays the host's, and refs report
+that host document as their `ownerDocument`, so code that registers listeners
+on `ownerDocument(element)` keeps reaching it. The host document cannot find
+GPUIX elements: its `getElementById()` and `activeElement` do not see the GPUIX
+tree.
 
 GPUIX mounts one root per renderer and one renderer per native window, so
 there is one document. It reads the most recently mounted root that has

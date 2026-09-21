@@ -1,7 +1,7 @@
 /**
- * The single-window `document` facade behind `PublicInstance.ownerDocument`,
- * which `@gpuix/react/globals` also installs as `globalThis.document` when the
- * host has none.
+ * The single-window `document` facade that `@gpuix/react/globals` installs as
+ * `globalThis.document`, and that `PublicInstance.ownerDocument` returns, when
+ * the host has no document of its own.
  *
  * It answers four questions from the retained tree and nothing else:
  * `getElementById()`, `activeElement`, `body`, and `defaultView`. It is not a
@@ -69,4 +69,13 @@ export function gpuixDocument(): GpuixDocument {
 export function hasBrowserDocument(): boolean {
   if (typeof document === "undefined") return false
   return (document as unknown) !== Reflect.get(globalThis, GPUIX_DOCUMENT_KEY)
+}
+
+/**
+ * `PublicInstance.ownerDocument`: the host's own document when there is one,
+ * so browser code keeps reaching the document it registers listeners on, and
+ * the facade otherwise.
+ */
+export function ownerDocument(): GpuixDocument | Document {
+  return hasBrowserDocument() ? document : gpuixDocument()
 }

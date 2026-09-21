@@ -84,7 +84,7 @@ import {
   DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC,
   DOCUMENT_POSITION_PRECEDING,
 } from "../dom-position.js"
-import { gpuixDocument } from "../document.js"
+import { ownerDocument } from "../document.js"
 
 let currentUpdatePriority = NoEventPriority
 
@@ -1826,7 +1826,7 @@ export const hostConfig = {
     Object.defineProperty(instance, "ownerDocument", {
       configurable: true,
       enumerable: false,
-      get: gpuixDocument,
+      get: ownerDocument,
     })
     if (type === "canvas") {
       const diagnosticTarget = {

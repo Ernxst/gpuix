@@ -1868,11 +1868,12 @@ export interface PublicInstance {
    */
   readonly parentElement: PublicInstance | null
   /**
-   * The window's {@link GpuixDocument}, matching `Node.ownerDocument`. The same
-   * object for every element, mounted or not, and the one
-   * `@gpuix/react/globals` installs as `globalThis.document`.
+   * The document this element belongs to, matching `Node.ownerDocument`, for
+   * every element, mounted or not. A host document (a browser, jsdom, or
+   * happy-dom) is returned as is; otherwise it is the {@link GpuixDocument}
+   * facade, the one `@gpuix/react/globals` installs as `globalThis.document`.
    */
-  readonly ownerDocument: GpuixDocument
+  readonly ownerDocument: GpuixDocument | Document
   /**
    * Moves focus to this host element, matching `HTMLElement.focus()`, and
    * reveals it inside its scroll ancestors unless `preventScroll` is set.
