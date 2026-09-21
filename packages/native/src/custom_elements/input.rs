@@ -361,12 +361,13 @@ impl CustomElementFactory for TextareaFactory {
 
 struct TextEditorElement {
     multiline: bool,
-    value: String,
+    value: Option<String>,
+    default_value: String,
     placeholder: String,
     read_only: bool,
     min_rows: usize,
     max_rows: usize,
-    last_prop_value: Option<String>,
+    last_prop_value: Option<Option<String>>,
     theme: Theme,
     state: Option<Entity<TextEditorState>>,
 }
@@ -375,7 +376,8 @@ impl TextEditorElement {
     fn new(multiline: bool) -> Self {
         Self {
             multiline,
-            value: String::new(),
+            value: None,
+            default_value: String::new(),
             placeholder: String::new(),
             read_only: false,
             min_rows: 1,
@@ -392,7 +394,10 @@ impl TextEditorElement {
     fn editing_state(&self, cx: &App) -> TextEditingState {
         match &self.state {
             Some(state) => state.read(cx).editing_state(),
-            None => pending_editing_state(&self.value, self.multiline),
+            None => pending_editing_state(
+                self.value.as_deref().unwrap_or(&self.default_value),
+                self.multiline,
+            ),
         }
     }
 
@@ -459,7 +464,10 @@ impl CustomElement for TextEditorElement {
         let state = self
             .state
             .get_or_insert_with(|| {
-                let value = self.value.clone();
+                let value = self
+                    .value
+                    .clone()
+                    .unwrap_or_else(|| self.default_value.clone());
                 let placeholder = self.placeholder.clone();
                 let multiline = self.multiline;
                 let read_only = self.read_only;
@@ -536,7 +544,9 @@ impl CustomElement for TextEditorElement {
                 cx.notify();
             }
             if prop_changed {
-                state.sync_prop_value(self.value.clone(), cx);
+                if let Some(value) = &self.value {
+                    state.sync_prop_value(value.clone(), cx);
+                }
             }
         });
         self.last_prop_value = Some(self.value.clone());
@@ -622,7 +632,8 @@ impl CustomElement for TextEditorElement {
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
         match key {
-            "value" => self.value = value.as_str().unwrap_or_default().to_string(),
+            "value" => self.value = value.as_str().map(str::to_string),
+            "defaultValue" => self.default_value = value.as_str().unwrap_or_default().to_string(),
             "placeholder" => self.placeholder = value.as_str().unwrap_or_default().to_string(),
             "readOnly" => self.read_only = value.as_bool().unwrap_or(false),
             "minRows" => self.min_rows = value.as_u64().unwrap_or(1) as usize,
@@ -640,6 +651,7 @@ impl CustomElement for TextEditorElement {
     fn supported_props(&self) -> &'static [&'static str] {
         &[
             "value",
+            "defaultValue",
             "placeholder",
             "readOnly",
             "minRows",

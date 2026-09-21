@@ -2229,7 +2229,16 @@ keeps the characters it accepted and rewinds the rest:
 ```
 
 Leave `value` off — or pass `undefined` — for an uncontrolled editor: the text
-is the editor's own, nothing rewinds it, and `onChange` is a notification.
+is the editor's own, nothing rewinds it, and `onChange` is a notification. Use
+`defaultValue` to seed that text once when the editor mounts:
+
+```tsx
+<input defaultValue="Ada" onChange={(event) => saveDraft(event.value ?? '')} />
+```
+
+Changing `defaultValue` after mount does not replace user edits. An actual
+unmount and remount applies the current default again. When both props are
+present, `value` wins and the editor remains controlled.
 
 The focused caret stays solid during edits and then blinks every 500ms while
 idle. It stops scheduling repaint frames on blur or while the window is

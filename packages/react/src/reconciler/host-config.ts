@@ -1309,7 +1309,8 @@ function installTextEditingMembers(
     const native = container.native
     const value = native.getInputValue ? native.getInputValue(id) : null
     if (typeof value === "string") return value
-    const prop = (instance.props as Props & { value?: unknown }).value
+    const editorProps = instance.props as Props & { value?: unknown; defaultValue?: unknown }
+    const prop = editorProps.value ?? editorProps.defaultValue
     return typeof prop === "string" ? prop : ""
   }
   const readSelection = (): readonly number[] => {

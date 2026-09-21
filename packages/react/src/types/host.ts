@@ -1205,6 +1205,8 @@ export interface InputProps extends Props {
   ref?: React.Ref<InputPublicInstance>
   /** External editor value. Native edits apply immediately and report through onChange. */
   value?: string
+  /** Initial value for an uncontrolled editor. Later changes do not replace user edits. */
+  defaultValue?: string
   placeholder?: string
   readOnly?: boolean
   theme?: GpuixTheme
