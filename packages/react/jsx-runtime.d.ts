@@ -12,6 +12,7 @@ import type {
   DiffProps,
   ImgProps,
   InputProps,
+  LabelProps,
   MarkdownProps,
   Props,
   SvgProps,
@@ -78,6 +79,7 @@ export namespace JSX {
     time: Props
     u: Props
     var: Props
+    label: LabelProps
     img: ImgProps
     svg: SvgProps
     canvas: CanvasProps

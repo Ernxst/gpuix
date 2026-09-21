@@ -780,6 +780,7 @@ export type ElementType =
   | "time"
   | "u"
   | "var"
+  | "label"
   | "img"
   | "svg"
   | "canvas"
@@ -1215,6 +1216,10 @@ export interface InputProps extends Props {
 export interface TextareaProps extends InputProps {
   minRows?: number
   maxRows?: number
+}
+
+export interface LabelProps extends Props {
+  htmlFor?: string
 }
 
 /** A variable-height list that builds only rows near its viewport. */

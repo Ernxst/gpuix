@@ -3,6 +3,7 @@ import type {
   Container,
   Instance,
   NativeRenderer,
+  Props,
 } from "../types/host.js"
 import {
   createGpuixSyntheticEvent,
@@ -111,6 +112,49 @@ function restoreControlledEditor(
   const value = String(declared)
   if (value === payload.value) return
   renderer.setInputValue?.(payload.elementId, value)
+}
+
+const LABELABLE_TYPES = new Set(["input", "textarea", "button"])
+
+function isActionDisabled(instance: Instance): boolean {
+  const props = instance.props as Props & Record<string, unknown>
+  const ariaDisabled = props.ariaDisabled ?? props["aria-disabled"]
+  return (
+    props.disabled === true ||
+    typeof props.disabled === "string" ||
+    ariaDisabled === true ||
+    (typeof ariaDisabled === "string" && ariaDisabled.toLowerCase() === "true")
+  )
+}
+
+function associatedControl(container: Container, label: Instance): Instance | undefined {
+  const htmlFor = (label.props as Props & { htmlFor?: unknown }).htmlFor
+  if (typeof htmlFor !== "string" || htmlFor === "") return undefined
+
+  let match: Instance | undefined
+  for (const candidate of container.eventTargets.values()) {
+    if (!LABELABLE_TYPES.has(candidate.type) || candidate.props.id !== htmlFor) continue
+    if (match === undefined || candidate.id < match.id) match = candidate
+  }
+  return match
+}
+
+function runLabelClickDefault(
+  container: Container,
+  payload: EventPayload,
+  renderer: NativeRenderer,
+  defaultPrevented: boolean
+): void {
+  if (payload.eventType !== "click" || defaultPrevented) return
+  const label = container.eventTargets.get(payload.elementId)
+  if (label?.type !== "label") return
+
+  const control = associatedControl(container, label)
+  if (!control || isActionDisabled(control)) return
+  if (control.type === "input" || control.type === "textarea") {
+    renderer.focusElement?.(control.id)
+  }
+  dispatchGpuixEvent({ ...payload, elementId: control.id, clickCount: 1 }, renderer)
 }
 
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
@@ -372,6 +416,8 @@ export function handleGpuixEvent(
     const result = editor
       ? flushSync(() => dispatchGpuixEvent(payload, renderer))
       : dispatchGpuixEvent(payload, renderer)
+
+    if (container) runLabelClickDefault(container, payload, renderer, result.defaultPrevented)
 
     if (container && payload.eventType === "dragOver") {
       rememberDragOverPrevention(container, payload, result.defaultPrevented)

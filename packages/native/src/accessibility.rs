@@ -545,6 +545,55 @@ fn referenced_text(
     flattened_text(tree, element, NameSubject::Reference { follow_references })
 }
 
+fn collect_explicit_label_text(
+    tree: &RetainedTree,
+    element: &RetainedElement,
+    control_id: &str,
+    parts: &mut Vec<String>,
+) {
+    let is_label = element
+        .custom_props
+        .get("authoredHostType")
+        .and_then(serde_json::Value::as_str)
+        == Some("label");
+    let labels_control = element
+        .custom_props
+        .get("htmlFor")
+        .and_then(serde_json::Value::as_str)
+        == Some(control_id);
+    if is_label && labels_control {
+        let text = referenced_text(tree, element, true);
+        if !text.is_empty() {
+            parts.push(text);
+        }
+    }
+
+    for child in element
+        .children
+        .iter()
+        .filter_map(|id| tree.elements.get(id))
+    {
+        collect_explicit_label_text(tree, child, control_id, parts);
+    }
+}
+
+fn explicit_label_text(tree: &RetainedTree, element: &RetainedElement) -> Option<String> {
+    let labelable = matches!(element.element_type.as_str(), "input" | "textarea")
+        || element
+            .custom_props
+            .get("authoredHostType")
+            .and_then(serde_json::Value::as_str)
+            == Some("button");
+    if !labelable {
+        return None;
+    }
+    let control_id = element.author_id.as_deref()?;
+    let root = tree.root_id.and_then(|id| tree.elements.get(&id))?;
+    let mut parts = Vec::new();
+    collect_explicit_label_text(tree, root, control_id, &mut parts);
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
 /// The subtree flattened to the string a role that names itself from its
 /// contents reads, or `None` when the subtree holds no text.
 ///
@@ -1282,6 +1331,7 @@ where
     // ariaChecked="mixed" becoming false on a switch. It needs the tree because
     // `ariaLabelledBy` and `ariaDescribedBy` name other elements by id.
     let props = AccessibilityProps::from_element(tree, element);
+    let explicit_label = explicit_label_text(tree, element);
 
     if let Some(role) = props.role {
         el = el.role(role.role);
@@ -1314,8 +1364,8 @@ where
         .name_from_contents
         .filter(|_| live.is_some_and(|live| live != gpui::Live::Off));
     // accname order: the referenced text wins over `ariaLabel`, which wins over
-    // the name the contents would compute, then the input placeholder and the
-    // live projection fallback.
+    // an explicit HTML label, the name the contents would compute, then the
+    // input placeholder and live projection fallback.
     if let Some(label) = props
         .labelled_by
         .clone()
@@ -1324,10 +1374,11 @@ where
             props
                 .label
                 .filter(|_| props.supports("ariaLabel"))
-                .or(text.name_from_contents)
-                .or(text.placeholder)
-                .or(live_projection_name)
                 .map(str::to_owned)
+                .or(explicit_label)
+                .or_else(|| text.name_from_contents.map(str::to_owned))
+                .or_else(|| text.placeholder.map(str::to_owned))
+                .or_else(|| live_projection_name.map(str::to_owned))
         })
     {
         el = el.aria_label(label);

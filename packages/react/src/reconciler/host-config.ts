@@ -31,6 +31,7 @@ import { TEXT_EDITING_TYPES } from "./text-editing.js"
 import {
   ARIA_PROP_ALIASES,
   ATTRIBUTE_PROP_ALIASES,
+  AUTHORED_HOST_TYPE_PROP,
   AUTHORED_ROLE_PROP,
   isAuthorVisibleProp,
 } from "./aria-props.js"
@@ -433,6 +434,10 @@ function hasEventListener(props: Props, eventType: string): boolean {
   )
 }
 
+function hasNativeEventListener(type: ElementType, props: Props, eventType: string): boolean {
+  return hasEventListener(props, eventType) || (type === "label" && eventType === "click")
+}
+
 function hasAnyEventListener(props: Props): boolean {
   const eventProps = props as Record<string, unknown>
   return Object.keys(props).some(
@@ -440,7 +445,12 @@ function hasAnyEventListener(props: Props): boolean {
   )
 }
 
-function syncEventListeners(container: Container, id: number, props: Props): void {
+function syncEventListeners(
+  container: Container,
+  id: number,
+  type: ElementType,
+  props: Props
+): void {
   const eventProps = props as EventProps
   for (const [propName, eventType, phase, override] of EVENT_PROPS) {
     const handler = eventProps[propName]
@@ -459,7 +469,7 @@ function syncEventListeners(container: Container, id: number, props: Props): voi
     }
   }
   for (const eventType of NATIVE_EVENT_TYPES) {
-    if (hasEventListener(props, eventType)) {
+    if (hasNativeEventListener(type, props, eventType)) {
       container.renderer.setEventListener(id, eventType, true)
     }
   }
@@ -468,6 +478,7 @@ function syncEventListeners(container: Container, id: number, props: Props): voi
 function diffEventListeners(
   container: Container,
   id: number,
+  type: ElementType,
   oldProps: Props,
   newProps: Props
 ): void {
@@ -491,8 +502,8 @@ function diffEventListeners(
   }
 
   for (const eventType of NATIVE_EVENT_TYPES) {
-    const hadListener = hasEventListener(oldProps, eventType)
-    const hasListener = hasEventListener(newProps, eventType)
+    const hadListener = hasNativeEventListener(type, oldProps, eventType)
+    const hasListener = hasNativeEventListener(type, newProps, eventType)
     if (hadListener !== hasListener) {
       container.renderer.setEventListener(id, eventType, hasListener)
     }
@@ -559,6 +570,7 @@ const DIV_ALIASES = new Set([
   "time",
   "u",
   "var",
+  "label",
 ])
 
 // Built-in element types that don't use custom props.
@@ -860,6 +872,7 @@ function diagnoseUnsupportedStyleTransition(
 // Custom props are otherwise skipped for built-ins.
 const UNIVERSAL_PROPS = new Set([
   "activationKind",
+  AUTHORED_HOST_TYPE_PROP,
   "autoFocus",
   "tabIndex",
   "motion",
@@ -1221,6 +1234,7 @@ function customPropEntries(
   // that, so the authored role is retained beside it, and it is the one a query
   // for the `role` attribute answers with.
   if (typeof props.role === "string") entries.push([AUTHORED_ROLE_PROP, props.role])
+  if (type === "label" || type === "button") entries.push([AUTHORED_HOST_TYPE_PROP, type])
   const headingLevel = nativeHeadingLevel(type, props)
   if (headingLevel !== undefined) entries.push(["ariaLevel", headingLevel])
   const imageLabel = nativeImageLabel(type, props)
@@ -1393,7 +1407,7 @@ function materialize(node: HostNode): HostNodeState {
     validateVirtualListRowContract(node, state)
     renderer.createElement(node.id, DIV_ALIASES.has(node.type) ? "div" : node.type)
     sendStyle(state.container, node)
-    syncEventListeners(state.container, node.id, node.props)
+    syncEventListeners(state.container, node.id, node.type, node.props)
     syncCustomProps(renderer, node, node.props)
   } else {
     // Native hit testing reports the deepest painted retained node. A raw React
@@ -1818,7 +1832,7 @@ export const hostConfig = {
     // bugs from same-reference mutations or style removal.
     container.renderer.setStyle(instance.id, styleForRenderer(instance, container, newProps) ?? {})
     if (hasAnyEventListener(oldProps) || hasAnyEventListener(newProps)) {
-      diffEventListeners(container, instance.id, oldProps, newProps)
+      diffEventListeners(container, instance.id, instance.type, oldProps, newProps)
     }
     // Custom prop diff (for non-div/text elements)
     instance.props = newProps

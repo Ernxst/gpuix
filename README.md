@@ -2240,6 +2240,22 @@ Changing `defaultValue` after mount does not replace user edits. An actual
 unmount and remount applies the current default again. When both props are
 present, `value` wins and the editor remains controlled.
 
+Use an explicit `<label htmlFor>` association for a visible control name and a
+larger activation target. Clicking the label focuses and clicks an enabled
+`<input>` or `<textarea>`; it activates an enabled `<button>`. The label text is
+also the control's accessible name unless `ariaLabelledBy` or `ariaLabel` wins:
+
+```tsx
+<label htmlFor="email">Email address</label>
+<input id="email" />
+```
+
+Changing either `htmlFor` or the control's `id` takes effect on the next click.
+`preventDefault()` on the label click cancels association activation, and
+`disabled` / `ariaDisabled` controls receive neither focus nor a click. Implicit
+wrapping labels and form controls other than `input`, `textarea`, and `button`
+remain unsupported.
+
 The focused caret stays solid during edits and then blinks every 500ms while
 idle. It stops scheduling repaint frames on blur or while the window is
 inactive. Override its colour through the shared native theme:
@@ -3543,6 +3559,7 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `markdown`      | GitHub-flavoured markdown                        |
 | `input`         | Native single-line text editor                   |
 | `textarea`      | Native multiline, auto-growing text editor       |
+| `label`         | Explicit `htmlFor` label for supported controls  |
 | `virtual-list`  | Long collections; only visible rows are built    |
 | `img`           | Raster or full-colour SVG images from paths, URLs, or bytes |
 | `svg`           | Tintable monochrome SVG icons from source or disk |
