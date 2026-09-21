@@ -34,6 +34,28 @@ describeNative("explicit label association", () => {
     expect(click).toHaveBeenCalledOnce()
   })
 
+  it("activates through nested painted label content", async () => {
+    const click = vi.fn()
+    screen.render(
+      <div style={{ padding: 20 }}>
+        <label htmlFor="nested" style={{ width: 180, height: 44 }}>
+          <span
+            data-testid="nested-label-content"
+            style={{ width: 160, height: 40, backgroundColor: "#273449" }}
+          >
+            Nested label
+          </span>
+        </label>
+        <input id="nested" onClick={click} style={{ width: 260, height: 40 }} />
+      </div>
+    )
+
+    await screen.userEvent.click(screen.getByTestId("nested-label-content"))
+    const input = screen.getByRole("textbox", { name: "Nested label" })
+    expect(screen.renderer.getActiveElement()).toBe(input.id)
+    expect(click).toHaveBeenCalledOnce()
+  })
+
   it("resolves the current id and htmlFor after rerenders", async () => {
     const firstClick = vi.fn()
     const secondClick = vi.fn()
@@ -98,13 +120,13 @@ describeNative("explicit label association", () => {
           style={{ width: 160, height: 40 }}
           onClick={(event) => event.preventDefault()}
         >
-          Prevented
+          <span data-testid="prevented-label-content">Prevented</span>
         </label>
         <input id="prevented" onClick={click} style={{ width: 220, height: 40 }} />
       </div>
     )
 
-    await screen.userEvent.click(screen.getByTestId("prevented-label"))
+    await screen.userEvent.click(screen.getByTestId("prevented-label-content"))
     expect(click).not.toHaveBeenCalled()
     expect(screen.renderer.getActiveElement()).toBeNull()
   })

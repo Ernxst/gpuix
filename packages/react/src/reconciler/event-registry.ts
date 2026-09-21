@@ -146,8 +146,11 @@ function runLabelClickDefault(
   defaultPrevented: boolean
 ): void {
   if (payload.eventType !== "click" || defaultPrevented) return
-  const label = container.eventTargets.get(payload.elementId)
-  if (label?.type !== "label") return
+  const target = container.eventTargets.get(payload.elementId)
+  if (!target) return
+  const path = eventPath(container, target)
+  const label = path.find((instance) => instance.type === "label")
+  if (!label) return
 
   const control = associatedControl(container, label)
   if (!control || isActionDisabled(control)) return
