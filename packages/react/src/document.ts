@@ -3,19 +3,32 @@
  * `globalThis.document`, and that `PublicInstance.ownerDocument` returns, when
  * the host has no document of its own.
  *
- * It answers four questions from the retained tree and nothing else:
- * `getElementById()`, `activeElement`, `body`, and `defaultView`. It is not a
- * DOM `Document`: it has no `createElement`, `querySelector`, event listeners,
- * or style computation, and nothing here pretends otherwise.
+ * It answers four questions from the retained tree: `getElementById()`,
+ * `activeElement`, `body`, and `defaultView`. It also takes `pointerup` and
+ * `pointercancel` function listeners, which run when a press in the window
+ * ends or is cancelled; see `./document-listeners.js`. It is not a DOM
+ * `Document` or `EventTarget`: it has no `createElement`, `querySelector`,
+ * other event types, or style computation, and nothing here pretends
+ * otherwise.
  *
  * GPU-IX mounts one root per renderer and one renderer per native window, so
  * the facade reads the root `announce()` targets: the most recently attached
  * one that has rendered. Separate documents for several simultaneous windows
  * are not supported.
  */
+import {
+  addDocumentListener,
+  removeDocumentListener,
+  type DocumentPointerEventType,
+} from "./document-listeners.js"
 import { latestAttachedContainer } from "./reconciler/event-registry.js"
 import { elementById } from "./reconciler/form-controls.js"
-import type { Container, GpuixDocument, PublicInstance } from "./types/host.js"
+import type {
+  Container,
+  GpuixDocument,
+  GpuixDocumentListenerOptions,
+  PublicInstance,
+} from "./types/host.js"
 
 const GPUIX_DOCUMENT_KEY = "__gpuixDocument"
 
@@ -24,8 +37,69 @@ function body(container: Container | undefined): PublicInstance | null {
   return container.eventTargets.get(container.rootElementId) ?? null
 }
 
+const LISTENER_TYPES: ReadonlySet<string> = new Set<DocumentPointerEventType>([
+  "pointerup",
+  "pointercancel",
+])
+
+const warned = new Set<string>()
+
+function warnOnce(message: string): void {
+  if (warned.has(message)) return
+  warned.add(message)
+  console.warn(message)
+}
+
+function captureFlag(options: GpuixDocumentListenerOptions | undefined): boolean {
+  return typeof options === "boolean" ? options : options?.capture === true
+}
+
 function createGpuixDocument(): GpuixDocument {
   return {
+    addEventListener(type, listener, options): void {
+      // The DOM ignores a null listener without complaint.
+      if (listener == null) return
+      const eventType = String(type)
+      if (!LISTENER_TYPES.has(eventType)) {
+        warnOnce(
+          `GPUIX document.addEventListener("${eventType}") was ignored: the document facade delivers only "pointerup" and "pointercancel".`
+        )
+        return
+      }
+      if (typeof listener !== "function") {
+        warnOnce(
+          "GPUIX document.addEventListener() was ignored: the document facade accepts only function listeners, not handleEvent objects."
+        )
+        return
+      }
+      if (
+        typeof options === "object" &&
+        options !== null &&
+        ("once" in options || "signal" in options)
+      ) {
+        warnOnce(
+          "GPUIX document.addEventListener() was ignored: the document facade does not support the once or signal options."
+        )
+        return
+      }
+      const container = latestAttachedContainer()
+      if (!container) {
+        warnOnce(
+          `GPUIX document.addEventListener("${eventType}") was ignored: no GPUIX root is mounted.`
+        )
+        return
+      }
+      addDocumentListener(
+        container,
+        eventType as DocumentPointerEventType,
+        listener,
+        captureFlag(options)
+      )
+    },
+    removeEventListener(type, listener, options): void {
+      if (listener == null) return
+      removeDocumentListener(String(type), listener, captureFlag(options))
+    },
     get defaultView(): typeof globalThis | null {
       return (Reflect.get(globalThis, "window") as typeof globalThis | undefined) ?? null
     },

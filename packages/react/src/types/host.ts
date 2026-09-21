@@ -22,7 +22,10 @@ import type {
 } from "../reconciler/synthetic-event.js"
 import type { AccessibilityRole } from "../index.js"
 import type { GPUCanvasContext } from "../canvas/webgpu.js"
-import type { GpuixDispatchableEvent } from "../pointer-event.js"
+import type {
+  GpuixDispatchableEvent,
+  PointerEvent as DocumentPointerEvent,
+} from "../pointer-event.js"
 
 /**
  * CSS-compatible lengths accepted by the native layout parser. The grammar is
@@ -1836,12 +1839,34 @@ export interface ElementRect extends ElementBounds {
   left: number
 }
 
+/** Options `GpuixDocument.addEventListener` accepts: only the capture flag. */
+export type GpuixDocumentListenerOptions = boolean | { capture?: boolean; passive?: boolean }
+
 /**
  * The part of `Document` GPU-IX can answer from its retained tree, for the one
  * root of the one native window. It is not a DOM `Document`: there is no
- * `createElement`, `querySelector`, or event-listener surface.
+ * `createElement` or `querySelector`, and it is not an `EventTarget`; it
+ * accepts only function listeners for `pointerup` and `pointercancel`.
  */
 export interface GpuixDocument {
+  /**
+   * Adds a function listener for `pointerup` or `pointercancel`, which run
+   * when a press anywhere in the window ends or is cancelled. The listener
+   * belongs to the current root and is dropped when that root unmounts. Any
+   * other type, a `handleEvent` object, or the `once` or `signal` option is
+   * ignored with one `console.warn`.
+   */
+  addEventListener(
+    type: string,
+    listener: ((event: DocumentPointerEvent) => void) | null,
+    options?: GpuixDocumentListenerOptions
+  ): void
+  /** Removes a listener added with the same type, function, and capture flag. */
+  removeEventListener(
+    type: string,
+    listener: ((event: DocumentPointerEvent) => void) | null,
+    options?: GpuixDocumentListenerOptions
+  ): void
   /** The global `window`, or null when none is installed. */
   readonly defaultView: typeof globalThis | null
   /** The root host element of the mounted tree, or null before a mount. */

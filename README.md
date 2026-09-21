@@ -4941,6 +4941,10 @@ document.activeElement                   // the focused host element, or body wh
 document.body                            // the root host element of the mounted tree
 document.defaultView                     // the global window
 ref.current.ownerDocument === document   // true when GPUIX installed document
+
+document.addEventListener("pointerup", onEnd)       // runs when a press anywhere in the window ends
+document.addEventListener("pointercancel", onEnd)   // runs when the platform cancels a press
+document.removeEventListener("pointerup", onEnd)
 ```
 
 `getElementById()` searches the mounted retained tree in tree order, so an
@@ -4948,11 +4952,25 @@ element whose subtree was removed is no longer found. `activeElement` follows
 the renderer's focus, as `getActiveElement()` does. Before a mount and after an
 unmount, `body` and `activeElement` are `null`.
 
-The facade is not a DOM `Document`. It has no `createElement()`,
-`querySelector()`, `addEventListener()`, or style computation, so code that
-needs them fails with a `TypeError` instead of running against a stand-in. For
-example, Base UI's Tabs select through `click()` and Enter, but a pointer
-press on a tab throws where Base UI adds a `pointerup` listener to the document.
+The listener methods cover code that listens on `ownerDocument(element)` for
+the end of a press it started, as Base UI's Tabs do. A `pointerup` listener
+runs on every mouse release in the window, over any element or none, and a
+`pointercancel` listener runs when the window deactivates during a press. Each
+receives a `PointerEvent` with the release position, button, and modifier
+keys. It runs before the released element's own `onPointerUp` and `onClick`;
+in the DOM the element's `onPointerUp` runs first, so a handler there cannot
+stop the document listener. A listener belongs to the root mounted when it
+was added and is dropped when that root unmounts. As in the DOM, adding the
+same function, type, and capture flag twice registers it once, and removing it
+needs the same three. Capture listeners run first.
+
+The facade is not a DOM `Document` or `EventTarget`. It has no
+`createElement()`, `querySelector()`, or style computation, so code that needs
+them fails with a `TypeError` instead of running against a stand-in. Its
+listener methods take no other event type, no `handleEvent` object, and
+neither the `once` nor the `signal` option: such a call registers nothing and
+logs one `console.warn`. There is no `dispatchEvent()` on the document, and
+element events do not bubble to it.
 
 A host document wins, as for every name here: in a browser or a
 `jsdom`/`happy-dom` environment `document` stays the host's, and refs report
