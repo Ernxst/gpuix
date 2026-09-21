@@ -74,6 +74,9 @@ function floatingSurfaceStateStyle(style?: InteractiveStyle): InteractiveStyle |
 
 function floatingSurfaceStyle(style?: StyleDesc): StyleDesc {
   const surface: StyleDesc = floatingSurfaceStateStyle(style) ?? {}
+  // The content ignores the mouse under `pointerEvents: "none"`, so its hover
+  // and active states never match. The surface must not match them either.
+  if (style?.pointerEvents === "none") return surface
   const hover = floatingSurfaceStateStyle(style?.hover)
   const active = floatingSurfaceStateStyle(style?.active)
   if (hover) surface.hover = hover

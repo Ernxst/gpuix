@@ -62,7 +62,7 @@ describeNative("floating controls", () => {
     testRoot = createTestRoot()
   })
 
-  it("forwards outer surface styles without multiplying opacity", () => {
+  function renderSurfaceLayer(pointerEvents?: "none") {
     testRoot.render(
       <div style={{ width: 400, height: 300 }}>
         <FloatingLayer
@@ -71,7 +71,7 @@ describeNative("floating controls", () => {
             height: 60,
             visibility: "hidden",
             opacity: 0.5,
-            pointerEvents: "none",
+            pointerEvents,
             borderRadius: 16,
             borderTopLeftRadius: 4,
             borderTopRightRadius: 8,
@@ -92,9 +92,12 @@ describeNative("floating controls", () => {
         </FloatingLayer>
       </div>,
     )
-
     const anchored = testRoot.renderer.findByType("anchored")[0]
-    const content = testRoot.renderer.getElement(anchored.children[0])
+    return { anchored, content: anchored.children[0] }
+  }
+
+  it("forwards outer surface styles without multiplying opacity", () => {
+    const { anchored, content } = renderSurfaceLayer()
     const surfaceHover = anchored.style.hover as Record<string, unknown>
     const surfaceActive = anchored.style.active as Record<string, unknown>
 
@@ -132,14 +135,33 @@ describeNative("floating controls", () => {
           "borderTopLeftRadius": 24,
           "opacity": 0.75,
         },
-        "occlude": false,
+        "occlude": true,
         "opacity": 0.5,
         "visibility": "hidden",
       }
     `)
-    expect(content?.style.opacity).toBeUndefined()
-    expect((content?.style.hover as Record<string, unknown>).opacity).toBeNull()
-    expect((content?.style.hover as Record<string, unknown>).backgroundColor).toBe("#222222")
+    expect(content.style.opacity).toBeUndefined()
+    expect((content.style.hover as Record<string, unknown>).opacity).toBeNull()
+    expect((content.style.hover as Record<string, unknown>).backgroundColor).toBe("#222222")
+  })
+
+  it("keeps a pointerEvents none surface out of hover and active", () => {
+    const { anchored, content } = renderSurfaceLayer("none")
+
+    expect({
+      opacity: anchored.style.opacity,
+      hover: anchored.style.hover,
+      active: anchored.style.active,
+      occlude: anchored.customProps?.occlude,
+    }).toMatchInlineSnapshot(`
+      {
+        "active": undefined,
+        "hover": undefined,
+        "occlude": false,
+        "opacity": 0.5,
+      }
+    `)
+    expect(content.style.opacity).toBeUndefined()
   })
 
   it("composes a headless Select and supports keyboard selection", () => {
