@@ -11,6 +11,7 @@ const NoEventPriority = 0
 import type {
   Container,
   ElementType,
+  FormProps,
   HostContext,
   Instance,
   MutationRenderer,
@@ -27,7 +28,29 @@ import {
   unregisterEventHandlers,
 } from "./event-handlers.js"
 import type { GpuixSyntheticEvent } from "./synthetic-event.js"
-import { TEXT_EDITING_TYPES } from "./text-editing.js"
+import { isTextEditingInstance, TEXT_EDITING_TYPES } from "./text-editing.js"
+import { clickElement } from "./event-registry.js"
+import {
+  attributeInputValue,
+  checkFormValidity,
+  commitWriter,
+  formOwner,
+  inputKind,
+  mountChoice,
+  readChecked,
+  readDefaultChecked,
+  readIndeterminate,
+  requestSubmit,
+  resetForm,
+  setCustomValidity,
+  updateChoice,
+  validationMessage,
+  validityOf,
+  willValidate,
+  writeChecked,
+  writeDefaultChecked,
+  writeIndeterminate,
+} from "./form-controls.js"
 import {
   ARIA_PROP_ALIASES,
   ATTRIBUTE_PROP_ALIASES,
@@ -383,6 +406,11 @@ const EVENT_PROPS = [
   ["onError", "error", "bubble"],
   ["onChangeCapture", "change", "capture"],
   ["onChange", "change", "bubble"],
+  // Form events, synthesized in JS by `requestSubmit()` and `reset()`
+  ["onSubmitCapture", "submit", "capture"],
+  ["onSubmit", "submit", "bubble"],
+  ["onResetCapture", "reset", "capture"],
+  ["onReset", "reset", "bubble"],
   // Mouse events
   ["onClickCapture", "click", "capture"],
   ["onClick", "click", "bubble"],
@@ -444,8 +472,15 @@ const EVENT_PROPS = [
 ] as const
 
 const EVENT_PROP_NAMES = new Set<string>(EVENT_PROPS.map(([name]) => name))
-const NATIVE_EVENT_TYPES = new Set(EVENT_PROPS.map(([, eventType]) => eventType))
-type EventProps = Props
+/** Events that never come from native, so no native listener is registered for them. */
+const JS_ONLY_EVENT_TYPES = new Set<string>(["submit", "reset"])
+const NATIVE_EVENT_TYPES = new Set<string>(
+  EVENT_PROPS.map(([, eventType]) => eventType).filter(
+    (eventType) => !JS_ONLY_EVENT_TYPES.has(eventType)
+  )
+)
+type EventProps = Props &
+  Pick<FormProps, "onSubmit" | "onSubmitCapture" | "onReset" | "onResetCapture">
 
 function eventHandlerKey(eventType: string, phase: "capture" | "bubble"): string {
   return phase === "capture" ? `${eventType}Capture` : eventType
@@ -466,8 +501,25 @@ function hasEventListener(props: Props, eventType: string): boolean {
   )
 }
 
+/**
+ * Whether native must report this event for this element. Labels, checkboxes,
+ * radios, and submit and reset buttons need their clicks without a listener,
+ * since their activation behaviour runs in JS; a radio needs its key presses
+ * for arrow navigation.
+ */
 function hasNativeEventListener(type: ElementType, props: Props, eventType: string): boolean {
-  return hasEventListener(props, eventType) || (type === "label" && eventType === "click")
+  if (hasEventListener(props, eventType)) return true
+  if (type === "label") return eventType === "click"
+  if (type === "button") {
+    const buttonType = (props as Props & { type?: unknown }).type
+    return eventType === "click" && !(typeof buttonType === "string" && buttonType.toLowerCase() === "button")
+  }
+  if (type !== "input") return false
+  const kind = inputKind(props)
+  return (
+    (eventType === "click" && (kind === "checkbox" || kind === "radio")) ||
+    (eventType === "keyDown" && kind === "radio")
+  )
 }
 
 function hasAnyEventListener(props: Props): boolean {
@@ -603,6 +655,7 @@ const DIV_ALIASES = new Set([
   "u",
   "var",
   "label",
+  "form",
 ])
 
 // Built-in element types that don't use custom props.
@@ -1164,6 +1217,9 @@ function nativeRole(
   // nothing conditions it away, and these arms are the conditions.
   if (type === "a") return nativeAnchorRole(props)
   if (type === "img") return nativeImageRole(props)
+  if (type === "input") return nativeInputRole(props)
+  // HTML-AAM maps `<form>` to the `form` landmark only when it has a name.
+  if (type === "form") return hasAuthoredName(props) ? "form" : undefined
   // `<section>` is a region landmark only when it has an accessible name;
   // an unnamed one is generic, so it contributes no node of its own.
   if (type === "section") return hasAuthoredName(props) ? "region" : undefined
@@ -1233,6 +1289,15 @@ function resyncContextDependentRoles(container: Container, instance: Instance): 
   }
 }
 
+/**
+ * A checkbox or radio input takes its role from `type`. A text input's
+ * `textbox` role is implicit in Rust, and a hidden input renders nothing.
+ */
+function nativeInputRole(props: Props): "checkbox" | "radio" | undefined {
+  const kind = inputKind(props)
+  return kind === "checkbox" || kind === "radio" ? kind : undefined
+}
+
 /** `<a href>` is a link; `<a>` alone is generic, which needs no role at all. */
 function nativeAnchorRole(props: Props): "link" | undefined {
   const { href } = props as Props & { href?: unknown }
@@ -1269,6 +1334,9 @@ function nativeImageLabel(type: string, props: Props): string | undefined {
   return authoredAriaLabel(props) === undefined ? alt : undefined
 }
 
+/** Authored `<input>` props that feed choice state instead of being forwarded. */
+const CHOICE_STATE_PROPS = new Set(["checked", "defaultChecked", "indeterminate"])
+
 function customPropEntries(
   instance: Instance,
   props: Props
@@ -1278,6 +1346,9 @@ function customPropEntries(
   const entries = propEntries.flatMap(([key, value]): Array<[string, CustomPropInput]> => {
     if (key === "activationKind" || key === "role" || key === "tabIndex") return []
     if (key === "hidden") return [[key, hiddenAttribute(value)]]
+    // A choice input's state reaches Rust as the internal `checked` and
+    // `indeterminate` props `form-controls.ts` writes, never as authored.
+    if (type === "input" && CHOICE_STATE_PROPS.has(key)) return []
     const alias = ARIA_PROP_ALIASES[key as keyof typeof ARIA_PROP_ALIASES]
     if (alias === undefined) return [[key, value]]
     if (Object.prototype.hasOwnProperty.call(props, alias)) return []
@@ -1294,7 +1365,9 @@ function customPropEntries(
   // that, so the authored role is retained beside it, and it is the one a query
   // for the `role` attribute answers with.
   if (typeof props.role === "string") entries.push([AUTHORED_ROLE_PROP, props.role])
-  if (type === "label" || type === "button") entries.push([AUTHORED_HOST_TYPE_PROP, type])
+  if (type === "label" || type === "button" || type === "form") {
+    entries.push([AUTHORED_HOST_TYPE_PROP, type])
+  }
   const headingLevel = nativeHeadingLevel(type, props)
   if (headingLevel !== undefined) entries.push(["ariaLevel", headingLevel])
   const imageLabel = nativeImageLabel(type, props)
@@ -1380,6 +1453,7 @@ function installTextEditingMembers(
   // report, so fall back to the `value` prop with the caret at its end — where
   // the editor puts the caret when it is finally created.
   const readValue = (): string => {
+    if (!isTextEditingInstance(instance)) return attributeInputValue(instance)
     const native = container.native
     const value = native.getInputValue ? native.getInputValue(id) : null
     if (typeof value === "string") return value
@@ -1414,6 +1488,8 @@ function installTextEditingMembers(
     value: nativeAccessor({
       get: readValue,
       set: (value: unknown) => {
+        // A checkbox, radio, or hidden input's value is its `value` prop.
+        if (!isTextEditingInstance(instance)) return
         container.native.setInputValue?.(id, value == null ? "" : String(value))
       },
     }),
@@ -1453,6 +1529,64 @@ function installTextEditingMembers(
 }
 
 /**
+ * Install the form members of `HTMLInputElement`, `HTMLTextAreaElement`,
+ * `HTMLButtonElement`, and `HTMLFormElement`. Like the text-editing members
+ * they are non-enumerable accessors, because the state they read changes
+ * without a React commit.
+ */
+function installFormMembers(instance: Instance, container: Container): void {
+  const accessor = (
+    descriptor: PropertyDescriptor
+  ): PropertyDescriptor & ThisType<undefined> => ({
+    enumerable: false,
+    configurable: true,
+    ...descriptor,
+  })
+  const { type } = instance
+
+  if (type === "input") {
+    Object.defineProperties(instance, {
+      checked: accessor({
+        get: () => readChecked(instance),
+        set: (value: unknown) => writeChecked(container, instance, Boolean(value)),
+      }),
+      defaultChecked: accessor({
+        get: () => readDefaultChecked(instance),
+        set: (value: unknown) => writeDefaultChecked(container, instance, Boolean(value)),
+      }),
+      indeterminate: accessor({
+        get: () => readIndeterminate(instance),
+        set: (value: unknown) => writeIndeterminate(container, instance, Boolean(value)),
+      }),
+    })
+  }
+  if (type === "input" || type === "textarea" || type === "button") {
+    Object.defineProperty(
+      instance,
+      "form",
+      accessor({ get: () => formOwner(container, instance) })
+    )
+  }
+  if (type === "input" || type === "textarea") {
+    Object.defineProperties(instance, {
+      validity: accessor({ get: () => validityOf(container, instance) }),
+      validationMessage: accessor({ get: () => validationMessage(container, instance) }),
+      willValidate: accessor({ get: () => willValidate(instance) }),
+    })
+    instance.checkValidity = () => validityOf(container, instance).valid
+    instance.setCustomValidity = (message: string) =>
+      setCustomValidity(instance, String(message))
+  }
+  if (type === "form") {
+    instance.requestSubmit = (submitter?: PublicInstance | null) => {
+      requestSubmit(container, instance, (submitter as Instance | null | undefined) ?? null)
+    }
+    instance.reset = () => resetForm(container, instance)
+    instance.checkValidity = () => checkFormValidity(container, instance)
+  }
+}
+
+/**
  * Materialize a render-phase host node only after React places its subtree in
  * the commit phase. Abandoned concurrent renders stay as collectable JS
  * objects and never enter the native mutation queue.
@@ -1469,6 +1603,7 @@ function materialize(node: HostNode): HostNodeState {
     sendStyle(state.container, node)
     syncEventListeners(state.container, node.id, node.type, node.props)
     syncCustomProps(renderer, node, node.props)
+    mountChoice(state.container, node, commitWriter(state.container))
   } else {
     // Native hit testing reports the deepest painted retained node. A raw React
     // text node has no public host instance of its own, so route that source to
@@ -1535,8 +1670,13 @@ export const hostConfig = {
       id,
       type,
       props,
-      focus: (options?: FocusOptions) =>
-        rootContainerInstance.native.focusElement?.(id, options?.preventScroll === true),
+      focus: (options?: FocusOptions) => {
+        // A disabled form control cannot take focus, as in the DOM.
+        const formControl = type === "input" || type === "textarea" || type === "button"
+        const { disabled } = instance.props
+        if (formControl && (disabled === true || typeof disabled === "string")) return
+        rootContainerInstance.native.focusElement?.(id, options?.preventScroll === true)
+      },
       blur: () => {
         // Only this element's own focus is ours to drop. A renderer that cannot
         // report the active element cannot prove that, so it does nothing
@@ -1548,6 +1688,7 @@ export const hostConfig = {
       setPointerCapture: () => rootContainerInstance.native.setPointerCapture?.(id),
       releasePointerCapture: () =>
         rootContainerInstance.native.releasePointerCapture?.(id),
+      click: () => clickElement(rootContainerInstance, instance),
       get scrollLeft(): number {
         return scrollMetrics()[0]!
       },
@@ -1709,6 +1850,7 @@ export const hostConfig = {
     if (TEXT_EDITING_TYPES.has(type)) {
       installTextEditingMembers(instance, rootContainerInstance, id)
     }
+    installFormMembers(instance, rootContainerInstance)
     hostNodeStates.set(instance, {
       container: rootContainerInstance,
       children: [],
@@ -1899,12 +2041,18 @@ export const hostConfig = {
     // Always resend style — per-element JSON is small, and this avoids
     // bugs from same-reference mutations or style removal.
     container.renderer.setStyle(instance.id, styleForRenderer(instance, container, newProps) ?? {})
-    if (hasAnyEventListener(oldProps) || hasAnyEventListener(newProps)) {
+    if (
+      hasAnyEventListener(oldProps) ||
+      hasAnyEventListener(newProps) ||
+      ((instance.type === "input" || instance.type === "button") &&
+        (oldProps as { type?: unknown }).type !== (newProps as { type?: unknown }).type)
+    ) {
       diffEventListeners(container, instance.id, instance.type, oldProps, newProps)
     }
     // Custom prop diff (for non-div/text elements)
     instance.props = newProps
     diffCustomProps(container.renderer, instance, oldProps, newProps)
+    updateChoice(container, instance, oldProps, commitWriter(container))
     // After the new props are installed, so the descendants' ancestor walk
     // reads the role this update just applied.
     if (

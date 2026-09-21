@@ -15,6 +15,7 @@ use crate::renderer::EventCallback;
 
 pub mod anchored;
 pub mod canvas;
+pub mod choice_input;
 pub mod code;
 pub mod diff;
 pub mod img;
@@ -556,6 +557,19 @@ pub trait CustomElementFactory: 'static {
 
     /// Create a new element instance.
     fn create(&self, id: u64) -> Box<dyn CustomElement>;
+
+    /// Which adapter this declaration needs, for an element type served by
+    /// several — `<input>` is a text editor, a choice control, or a hidden
+    /// input according to its `type`. A change recreates the adapter, which
+    /// then receives every prop afresh.
+    fn variant(&self, _props: &HashMap<String, serde_json::Value>) -> &'static str {
+        ""
+    }
+
+    /// Create the adapter for a variant `variant` returned.
+    fn create_variant(&self, id: u64, _variant: &'static str) -> Box<dyn CustomElement> {
+        self.create(id)
+    }
 }
 
 // ── Registry ─────────────────────────────────────────────────────────
@@ -563,6 +577,7 @@ pub trait CustomElementFactory: 'static {
 /// Stores one custom adapter together with the state already synchronized into it.
 struct CustomElementEntry {
     element_type: String,
+    variant: &'static str,
     element: Box<dyn CustomElement>,
     applied_props: HashMap<String, serde_json::Value>,
 }
@@ -635,12 +650,22 @@ impl CustomElementRegistry {
     }
 
     /// Get an existing adapter or create one via the registered factory.
-    /// Reusing an ID for another type destroys the old adapter first.
-    fn get_or_create(&mut self, id: u64, element_type: &str) -> Option<&mut CustomElementEntry> {
+    /// Reusing an ID for another type, or a declaration switching variant,
+    /// destroys the old adapter first.
+    fn get_or_create(
+        &mut self,
+        id: u64,
+        element_type: &str,
+        props: &HashMap<String, serde_json::Value>,
+    ) -> Option<&mut CustomElementEntry> {
+        let variant = self
+            .factories
+            .get(element_type)
+            .map_or("", |factory| factory.variant(props));
         if self
             .instances
             .get(&id)
-            .is_some_and(|entry| entry.element_type != element_type)
+            .is_some_and(|entry| entry.element_type != element_type || entry.variant != variant)
         {
             self.destroy(id);
         }
@@ -651,7 +676,8 @@ impl CustomElementRegistry {
                 let factory = self.factories.get(element_type)?;
                 Some(entry.insert(CustomElementEntry {
                     element_type: element_type.to_string(),
-                    element: factory.create(id),
+                    variant,
+                    element: factory.create_variant(id, variant),
                     applied_props: HashMap::new(),
                 }))
             }
@@ -669,7 +695,7 @@ impl CustomElementRegistry {
     ) -> gpui::AnyElement {
         use gpui::IntoElement;
 
-        let Some(entry) = self.get_or_create(ctx.id, element_type) else {
+        let Some(entry) = self.get_or_create(ctx.id, element_type, props) else {
             log::warn!("Unknown element type: {element_type}");
             return gpui::Empty.into_any_element();
         };
@@ -849,6 +875,7 @@ mod tests {
         let destroyed = Rc::new(Cell::new(0));
         let mut entry = CustomElementEntry {
             element_type: "recording".to_string(),
+            variant: "",
             element: Box::new(RecordingElement {
                 updates: updates.clone(),
                 destroyed,
@@ -896,8 +923,8 @@ mod tests {
             }));
         }
 
-        assert!(registry.get_or_create(42, "first").is_some());
-        assert!(registry.get_or_create(42, "second").is_some());
+        assert!(registry.get_or_create(42, "first", &HashMap::new()).is_some());
+        assert!(registry.get_or_create(42, "second", &HashMap::new()).is_some());
         assert_eq!(destroyed.get(), 1);
     }
 }

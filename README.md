@@ -2251,21 +2251,29 @@ Changing `defaultValue` after mount does not replace user edits. An actual
 unmount and remount applies the current default again. When both props are
 present, `value` wins and the editor remains controlled.
 
-Use an explicit `<label htmlFor>` association for a visible control name and a
-larger activation target. Clicking the label focuses and clicks an enabled
-`<input>` or `<textarea>`; it activates an enabled `<button>`. The label text is
-also the control's accessible name unless `ariaLabelledBy` or `ariaLabel` wins:
+Use a `<label>` for a visible control name and a larger activation target. A
+label with `htmlFor` labels the control with that `id`; a label without one
+labels the first `<input>`, `<textarea>`, or `<button>` inside it. Clicking the
+label focuses and clicks an enabled `<input>` or `<textarea>` — which toggles a
+checkbox — and activates an enabled `<button>`. The label text is also the
+control's accessible name unless `ariaLabelledBy` or `ariaLabel` wins:
 
 ```tsx
 <label htmlFor="email">Email address</label>
 <input id="email" />
+
+<label>
+  <input type="checkbox" name="updates" />
+  Send me updates
+</label>
 ```
 
 Changing either `htmlFor` or the control's `id` takes effect on the next click.
 `preventDefault()` on the label click cancels association activation, and
-`disabled` / `ariaDisabled` controls receive neither focus nor a click. Implicit
-wrapping labels and form controls other than `input`, `textarea`, and `button`
-remain unsupported.
+`disabled` / `ariaDisabled` controls receive neither focus nor a click. A click
+on a control or link inside a label belongs to that element, so a checkbox
+clicked inside its own label toggles once. Form controls other than `input`,
+`textarea`, and `button` remain unsupported.
 
 The focused caret stays solid during edits and then blinks every 500ms while
 idle. It stops scheduling repaint frames on blur or while the window is
@@ -2570,6 +2578,83 @@ Adding `onKeyDown`, `onKeyUp`, `onFocus`, or `onBlur` creates a persistent focus
 handle. Add `tabIndex` as well when the element must be reachable with Tab.
 Removing `tabIndex` removes the element from the tab order.
 
+## Checkboxes, radios, and forms
+
+`<input type="checkbox">` and `<input type="radio">` are native choice
+controls, not text editors. They take the DOM props: `checked` for a controlled
+control, `defaultChecked` for an uncontrolled one, checkbox `indeterminate`,
+`name`, `value`, `form`, `required`, and `disabled`. `onChange` fires when a
+click, Space, a label, or `ref.click()` changes the state, and carries the new
+state as `event.checked`:
+
+```tsx
+<label>
+  <input type="checkbox" checked={agreed} onChange={(event) => setAgreed(event.checked === true)} />
+  I agree
+</label>
+```
+
+State follows HTML and React DOM:
+
+- The state flips before `onClick` runs, so the handler reads the new
+  `checked`; `preventDefault()` there puts it back and skips `onChange`.
+- A controlled control shows its `checked` prop again after every change, as
+  React DOM's `restoreControlledState` does, so an `onChange` that sets no
+  state leaves it as it was. A controlled `indeterminate` prop is restored the
+  same way. Activation clears `indeterminate`.
+- `readOnly` has no effect on checkboxes and radios, as in HTML. `disabled`
+  blocks clicks, focus, and `ref.click()`.
+- The ref carries `checked`, `defaultChecked`, `indeterminate`, `form`,
+  `click()`, and `checkValidity()`. Writing `checked` fires no `onChange`.
+
+Radios with the same non-empty `name` and the same form owner form a group,
+and checking one unchecks the rest. The group is one Tab stop: its checked
+radio, or with nothing checked its first radio going forward and its last going
+backward. Arrow keys check and focus the next or previous enabled radio,
+wrapping at either end, and Space checks the focused one. Enter does not
+activate a checkbox or radio.
+
+`<input type="hidden">` renders nothing and cannot take focus; it only
+submits its `value`. Every other `type` is a text editor. The ref's `type` is
+the element type, `"input"`, not the input type: read `ref.current.props.type`.
+
+The default control is a 13px box or circle drawn with the shared theme's
+`border`, `bg`, and `accent` colours. Author styles such as `width`, `height`,
+and `border` replace it, which is also how a visually hidden input, like the
+one Base UI's `Checkbox.Root` and `Switch.Root` render beside their root,
+shrinks to nothing.
+
+**Forms.** `<form>` owns the controls inside it, and a control's `form` prop
+names another form by `id`. A `<button>` in a form submits it unless its
+`type` is `button`; `type="reset"` resets it. `ref.requestSubmit(submitter?)`
+and `ref.reset()` do the same from code. `onSubmit` receives the submission's
+entries as `event.formData` and the submitting button as `event.submitter`:
+
+```tsx
+<form onSubmit={(event) => save(Object.fromEntries(event.formData))}>
+  <input type="checkbox" name="alerts" defaultChecked />
+  <input type="radio" name="size" value="s" />
+  <input type="radio" name="size" value="l" defaultChecked />
+  <button name="action" value="save">Save</button>
+</form>
+```
+
+Submission follows HTML's entry list: a checked checkbox or radio submits its
+`value`, or `"on"` without one; unchecked, disabled, and unnamed controls are
+left out; a hidden input submits its `value`, a text control its text, and the
+submitting button its `name` and `value`. There is no navigation, so
+`preventDefault()` on `onSubmit` changes nothing. `onReset` can be prevented;
+otherwise every checkbox and radio returns to its default and every text
+control to its `defaultValue` (a controlled one to its `value`).
+
+`required` is the one constraint checked: a required checkbox that is
+unchecked, a radio group with a required member and nothing checked, or a
+required text control that is empty blocks submission, unless the form has
+`noValidate` or the submitter `formNoValidate`. A blocked submission fires no
+event; there is no `invalid` event or validation message. `required` also sets
+the control's accessible required state. Enter in a form control does not
+submit the form.
+
 ## Native accessibility
 
 Semantic host elements feed GPUI's AccessKit tree directly. Every JSX alias
@@ -2593,6 +2678,8 @@ add semantics and focus behavior, but no visual defaults.
 | `<header>` | `banner` |
 | `<footer>` | `contentinfo` |
 | `<section>` | `region` |
+| `<form>` | `form`, only when it has an accessible name |
+| `<input type="checkbox">`, `<input type="radio">` | `checkbox`, `radio`, with their checked or mixed state |
 | `<address>` | `group` |
 | `<abbr>` | platform `abbr` role |
 | `<blockquote>` | `blockquote` |
@@ -3580,9 +3667,10 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `code`          | Syntax-highlighted code block                    |
 | `diff`          | Unified diff viewer. Flows by default            |
 | `markdown`      | GitHub-flavoured markdown                        |
-| `input`         | Native single-line text editor                   |
+| `input`         | Native single-line text editor; checkbox, radio, or hidden input by `type` |
 | `textarea`      | Native multiline, auto-growing text editor       |
-| `label`         | Explicit `htmlFor` label for supported controls  |
+| `label`         | Label for supported controls, by `htmlFor` or by wrapping |
+| `form`          | Form owner for submission and reset              |
 | `virtual-list`  | Long collections; only visible rows are built    |
 | `img`           | Raster or full-colour SVG images from paths, URLs, or bytes |
 | `svg`           | Tintable monochrome SVG icons from source or disk |
@@ -3813,7 +3901,9 @@ text imports no longer need a runtime flag.
 | Drag leave | `onDragLeave` | `GpuixDragEvent` | `x`, `y`, `dataTransfer` |
 | Drop | `onDrop` | `GpuixDragEvent` | `x`, `y`, `dataTransfer.files` — `GpuixFile` objects with `name`, `path`, `size`, `lastModified`, and `type` |
 | File drop (legacy) | `onFileDrop` | `EventPayload` | `paths`, `x`, `y` — desktop-namespace alias for `onDrop` |
-| Change | `onChange` | `GpuixChangeEvent` | `value` — `<input>` and `<textarea>` only |
+| Change | `onChange` | `GpuixChangeEvent` | `value` for a text edit, `checked` for a checkbox or radio — `<input>` and `<textarea>` only |
+| Submit | `onSubmit` | `GpuixSubmitEvent` | `formData`, `submitter` — `<form>` only |
+| Reset | `onReset` | `GpuixFormEvent` | — `<form>` only; cancelable |
 | Toggle file | `onToggleFile` | `GpuixElementEvent` | `value` (file path) — `<diff>` only |
 | Show more | `onShowMore` | `GpuixElementEvent` | `value` (hidden line count) — `<diff>` only |
 | Line click | `onLineClick` | `GpuixElementEvent` | `value`, `oldLine`, `newLine` — `<diff>` only |

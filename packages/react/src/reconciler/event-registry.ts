@@ -10,12 +10,36 @@ import {
   type GpuixEventDispatchResult,
   type GpuixSyntheticEvent,
 } from "./synthetic-event.js"
-// A cycle on paper — `reconciler.js` imports this module for `attachRoot` —
-// and harmless in practice: neither module touches the other's bindings while
-// they evaluate, only later, from inside a dispatch.
-import { flushSync } from "./reconciler.js"
-import { TEXT_EDITING_TYPES } from "./text-editing.js"
+import { isTextEditingInstance } from "./text-editing.js"
+import {
+  beginChoiceActivation,
+  buttonType,
+  formOwner,
+  isChoiceInput,
+  isLabelable,
+  labeledControl,
+  radioGroup,
+  readChecked,
+  requestSubmit,
+  resetForm,
+  restoreControlledChoices,
+} from "./form-controls.js"
 import { dispatchResizeObservation } from "../resize-observer.js"
+
+/**
+ * React's `flushSync`, installed by `reconciler.ts` once the reconciler exists.
+ *
+ * Importing it from there would close a cycle that breaks on load order:
+ * `host-config.ts` imports this module for `click()`, and `reconciler.ts`
+ * builds the reconciler from `hostConfig` as it evaluates, so a graph entered
+ * through `host-config.ts` would reach `reconciler.ts` before `hostConfig`
+ * exists.
+ */
+let flushSync: <R>(fn: () => R) => R = (fn) => fn()
+
+export function installFlushSync(implementation: <R>(fn: () => R) => R): void {
+  flushSync = implementation
+}
 
 const EVENT_REGISTRY_KEY = "__gpuixEventRegistry"
 
@@ -73,7 +97,7 @@ function textEditorTarget(
   if (payload.eventType !== "change") return undefined
   const container = eventRegistrySlot().containersByRenderer.get(renderer)
   const target = container?.eventTargets.get(payload.elementId)
-  return target !== undefined && TEXT_EDITING_TYPES.has(target.type) ? target : undefined
+  return target !== undefined && isTextEditingInstance(target) ? target : undefined
 }
 
 /**
@@ -114,50 +138,192 @@ function restoreControlledEditor(
   renderer.setInputValue?.(payload.elementId, value)
 }
 
-const LABELABLE_TYPES = new Set(["input", "textarea", "button"])
-
 function isActionDisabled(instance: Instance): boolean {
   const props = instance.props as Props & Record<string, unknown>
   const ariaDisabled = props.ariaDisabled ?? props["aria-disabled"]
   return (
-    props.disabled === true ||
-    typeof props.disabled === "string" ||
+    isNativelyDisabled(instance) ||
     ariaDisabled === true ||
     (typeof ariaDisabled === "string" && ariaDisabled.toLowerCase() === "true")
   )
 }
 
-function associatedControl(container: Container, label: Instance): Instance | undefined {
-  const htmlFor = (label.props as Props & { htmlFor?: unknown }).htmlFor
-  if (typeof htmlFor !== "string" || htmlFor === "") return undefined
-
-  let match: Instance | undefined
-  for (const candidate of container.eventTargets.values()) {
-    if (!LABELABLE_TYPES.has(candidate.type) || candidate.props.id !== htmlFor) continue
-    if (match === undefined || candidate.id < match.id) match = candidate
-  }
-  return match
+function isNativelyDisabled(instance: Instance): boolean {
+  const { disabled } = instance.props
+  return disabled === true || typeof disabled === "string"
 }
 
-function runLabelClickDefault(
+/**
+ * A click on a checkbox or radio: HTML's legacy-pre-activation flips the state
+ * before the click is dispatched, a prevented click puts it back, and an
+ * accepted one that changed the state fires `change`.
+ *
+ * The dispatch runs under `flushSync` for the same reason a text edit's does:
+ * restoring a controlled input has to tell a change React accepted from one it
+ * refused, and it can only do that once React's answer has committed.
+ */
+function runChoiceClick(
+  container: Container,
+  target: Instance,
+  payload: EventPayload,
+  renderer: NativeRenderer
+): GpuixEventDispatchResult {
+  const activation = beginChoiceActivation(container, target)
+  if (activation === undefined) return dispatchGpuixEvent(payload, renderer)
+
+  let result: GpuixEventDispatchResult = { defaultPrevented: false, propagationStopped: false }
+  flushSync(() => {
+    result = dispatchGpuixEvent(payload, renderer)
+    if (result.defaultPrevented) {
+      activation.cancel()
+    } else if (activation.changed) {
+      dispatchGpuixEvent(
+        {
+          elementId: target.id,
+          eventType: "change",
+          checked: readChecked(target),
+        } as EventPayload,
+        renderer
+      )
+    }
+  })
+  restoreControlledChoices(container, target)
+  return result
+}
+
+/** A click and the activation behaviour that follows it when it is not prevented. */
+function runClick(
   container: Container,
   payload: EventPayload,
-  renderer: NativeRenderer,
-  defaultPrevented: boolean
+  renderer: NativeRenderer
+): GpuixEventDispatchResult {
+  const target = container.eventTargets.get(payload.elementId)
+  const result =
+    target !== undefined && isChoiceInput(target)
+      ? runChoiceClick(container, target, payload, renderer)
+      : dispatchGpuixEvent(payload, renderer)
+  if (!result.defaultPrevented) runClickDefault(container, payload, renderer)
+  return result
+}
+
+function isInteractiveContent(instance: Instance): boolean {
+  if (isLabelable(instance)) return true
+  return instance.type === "a" && typeof (instance.props as { href?: unknown }).href === "string"
+}
+
+/**
+ * The activation behaviour of the nearest activatable element on the click's
+ * path. Interactive content inside a `<label>` keeps the click for itself, so
+ * clicking a control inside its own label activates it once, not twice.
+ */
+function runClickDefault(
+  container: Container,
+  payload: EventPayload,
+  renderer: NativeRenderer
 ): void {
-  if (payload.eventType !== "click" || defaultPrevented) return
   const target = container.eventTargets.get(payload.elementId)
   if (!target) return
-  const path = eventPath(container, target)
-  const label = path.find((instance) => instance.type === "label")
-  if (!label) return
+  for (const instance of eventPath(container, target)) {
+    if (instance.type === "button") {
+      runButtonDefault(container, instance)
+      return
+    }
+    if (isInteractiveContent(instance)) return
+    if (instance.type === "label") {
+      runLabelDefault(container, instance, payload, renderer)
+      return
+    }
+  }
+}
 
-  const control = associatedControl(container, label)
+function runLabelDefault(
+  container: Container,
+  label: Instance,
+  payload: EventPayload,
+  renderer: NativeRenderer
+): void {
+  const control = labeledControl(container, label)
   if (!control || isActionDisabled(control)) return
   if (control.type === "input" || control.type === "textarea") {
     renderer.focusElement?.(control.id)
   }
-  dispatchGpuixEvent({ ...payload, elementId: control.id, clickCount: 1 }, renderer)
+  runClick(container, { ...payload, elementId: control.id, clickCount: 1 }, renderer)
+}
+
+/** A submit or reset button's activation behaviour on its form owner. */
+function runButtonDefault(container: Container, button: Instance): void {
+  if (isNativelyDisabled(button)) return
+  const type = buttonType(button)
+  if (type === "button") return
+  const form = formOwner(container, button)
+  if (form === null) return
+  if (type === "reset") resetForm(container, form)
+  else requestSubmit(container, form, button)
+}
+
+const RADIO_ARROW_STEPS: Readonly<Record<string, number>> = {
+  down: 1,
+  right: 1,
+  up: -1,
+  left: -1,
+}
+
+/**
+ * Arrow keys on a radio check the next or previous enabled member of its
+ * group, wrapping at either end, and move focus with the selection. The newly
+ * checked radio receives the click, and the `change`, that a browser fires.
+ */
+function runRadioKeyDefault(
+  container: Container,
+  payload: EventPayload,
+  renderer: NativeRenderer
+): void {
+  if (payload.modifiers?.alt || payload.modifiers?.ctrl || payload.modifiers?.cmd) return
+  if (payload.modifiers?.shift) return
+  const step = RADIO_ARROW_STEPS[payload.key?.toLowerCase() ?? ""]
+  if (step === undefined) return
+  const target = container.eventTargets.get(payload.elementId)
+  if (!target || !isChoiceInput(target) || isNativelyDisabled(target)) return
+  const group = radioGroup(container, target).filter(
+    (member) => member === target || !isNativelyDisabled(member)
+  )
+  if (group.length < 2) return
+  const index = group.indexOf(target)
+  const next = group[(index + step + group.length) % group.length]!
+  renderer.focusElement?.(next.id)
+  runClick(container, { elementId: next.id, eventType: "click", clickCount: 0 } as EventPayload, renderer)
+}
+
+/**
+ * `HTMLElement.click()`: a click through the usual capture and bubble path,
+ * followed by its activation behaviour. A disabled form control ignores it.
+ */
+export function clickElement(container: Container, instance: Instance): void {
+  const formControl =
+    instance.type === "input" || instance.type === "textarea" || instance.type === "button"
+  if (formControl && isNativelyDisabled(instance)) return
+  runClick(
+    container,
+    { elementId: instance.id, eventType: "click", clickCount: 0 } as EventPayload,
+    container.native
+  )
+}
+
+/**
+ * Dispatch an event this renderer synthesizes in JS, such as `submit` and
+ * `reset`, through the normal capture and bubble path. `extra` lands on the
+ * event object, as every payload field does.
+ */
+export function dispatchSyntheticEvent(
+  container: Container,
+  target: Instance,
+  eventType: string,
+  extra: Record<string, unknown>
+): GpuixEventDispatchResult {
+  return dispatchGpuixEvent(
+    { elementId: target.id, eventType, ...extra } as EventPayload,
+    container.native
+  )
 }
 
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
@@ -425,9 +591,13 @@ export function handleGpuixEvent(
   try {
     const result = editor
       ? flushSync(() => dispatchGpuixEvent(payload, renderer))
-      : dispatchGpuixEvent(payload, renderer)
+      : container && payload.eventType === "click"
+        ? runClick(container, payload, renderer)
+        : dispatchGpuixEvent(payload, renderer)
 
-    if (container) runLabelClickDefault(container, payload, renderer, result.defaultPrevented)
+    if (container && payload.eventType === "keyDown" && !result.defaultPrevented) {
+      runRadioKeyDefault(container, payload, renderer)
+    }
 
     if (container && payload.eventType === "dragOver") {
       rememberDragOverPrevention(container, payload, result.defaultPrevented)

@@ -317,10 +317,27 @@ export interface GpuixScrollEvent extends GpuixEvent {
   readonly type: "scroll"
 }
 
-/** An `<input>` or `<textarea>` edit. */
+/** An `<input>` or `<textarea>` edit, or a checkbox or radio changing state. */
 export interface GpuixChangeEvent extends GpuixEvent {
   readonly type: "change"
+  /** A text editor's new text. */
   readonly value?: string
+  /** A checkbox's or radio's new checkedness. */
+  readonly checked?: boolean
+}
+
+/** A `<form>` submission from a submit button or `requestSubmit()`. */
+export interface GpuixSubmitEvent extends GpuixEvent {
+  readonly type: "submit"
+  /** The entries the form submits: its named, enabled controls' values. */
+  readonly formData: FormData
+  /** The submit button that submitted the form, or null for `requestSubmit()` without one. */
+  readonly submitter: PublicInstance | null
+}
+
+/** A `<form>` reset from a reset button or `reset()`. */
+export interface GpuixFormEvent extends GpuixEvent {
+  readonly type: "reset"
 }
 
 /** An `<img>` source reached a terminal load or decode state. */
@@ -380,6 +397,8 @@ export type GpuixSyntheticEvent =
   | GpuixFocusEvent
   | GpuixScrollEvent
   | GpuixChangeEvent
+  | GpuixSubmitEvent
+  | GpuixFormEvent
   | GpuixLoadEvent
   | GpuixElementEvent
 
