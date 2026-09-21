@@ -5,6 +5,8 @@ import type { ImageSource, ImgProps, MotionTransition, Props, StyleDesc } from "
 import type { SharedStyle } from "../index.js"
 
 const validStyle = {
+  "--collapsible-panel-height": "40px",
+  "--accordion-panel-width": 240,
   display: "grid",
   alignItems: "baseline",
   width: "50%",
@@ -38,6 +40,12 @@ const validStyle = {
     { type: "repeat", count: 2, tracks: [{ type: "auto" }] },
   ],
 } satisfies StyleDesc
+
+const validNestedCustomProperty = {
+  hover: { "--collapsible-panel-width": "120px" },
+} satisfies StyleDesc
+
+void validNestedCustomProperty
 
 const numericAspectRatio = { aspectRatio: 1 } satisfies StyleDesc
 void numericAspectRatio

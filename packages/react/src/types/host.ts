@@ -525,6 +525,13 @@ export type NativeStateStyle = Omit<
  * spread the shared style and add the native state at the GPUIX call site.
  */
 export interface StyleDesc {
+  /**
+   * CSS custom properties are accepted for compatibility with consumers that
+   * measure layout for CSS animations. GPU-IX ignores them; it does not
+   * resolve `var()`, inherit custom properties, or expose computed values.
+   */
+  [customProperty: `--${string}`]: string | number | undefined
+
   display?: Display
   visibility?: Visibility
   flexDirection?: FlexDirection

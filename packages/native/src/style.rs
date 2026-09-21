@@ -2444,6 +2444,11 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
     let mut border_width_expansion: Option<[f64; 4]> = None;
 
     'fields: for (key, value) in object {
+        // CSS custom properties are accepted as inert compatibility keys. They
+        // must never enter StyleDesc: GPU-IX does not implement CSS variables.
+        if key.starts_with("--") {
+            continue;
+        }
         if key == "transition" {
             if prefix.is_empty() {
                 parsed.style.transition = parse_transition(value, &mut parsed.problems);
@@ -3673,6 +3678,32 @@ mod tests {
         assert_eq!(parsed.problems.len(), 1);
         assert_eq!(parsed.problems[0].property, "unsupportedProperty");
         assert_eq!(parsed.problems[0].reason, "unsupported style property");
+    }
+
+    #[test]
+    fn css_custom_properties_are_inert_but_unknown_properties_are_diagnosed() {
+        let parsed = parse_style_value(&json!({
+            "--collapsible-panel-height": "40px",
+            "--accordion-panel-width": 240,
+            "width": 120,
+            "hover": {
+                "--collapsible-panel-width": "120px",
+                "opacity": 0.5
+            },
+            "notAStyleProperty": true
+        }));
+
+        assert_eq!(parsed.style.width, Some(DimensionValue::Pixels(120.0)));
+        assert_eq!(parsed.style.hover.as_deref().and_then(|style| style.opacity), Some(0.5));
+        assert_eq!(parsed.problems.len(), 1);
+        assert_eq!(parsed.problems[0].property, "notAStyleProperty");
+        assert_eq!(parsed.problems[0].reason, "unsupported style property");
+
+        let without_custom_properties = parse_style_value(&json!({
+            "width": 120,
+            "hover": { "opacity": 0.5 }
+        }));
+        assert_eq!(parsed.style, without_custom_properties.style);
     }
 
     #[test]
