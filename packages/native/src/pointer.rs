@@ -5,6 +5,9 @@ use gpui::{
     canvas, px, DispatchPhase, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, Styled,
 };
 use crate::element_tree::EventModifiers;
+use crate::renderer::{
+    emit_event_full, populate_mouse_up_payload, populate_pointer_metadata, EventCallback,
+};
 
 #[derive(Clone)]
 pub(crate) struct CancelledPointer {
@@ -60,6 +63,10 @@ impl PointerRouter {
         true
     }
 
+    pub(crate) fn is_pressed(&self) -> bool {
+        self.pressed_button.is_some()
+    }
+
     pub(crate) fn record_target(&mut self, target: u64) {
         if self.pressed_button.is_some() {
             self.pressed_target = Some(target);
@@ -99,7 +106,15 @@ pub(crate) type SharedPointerRouter = Rc<RefCell<PointerRouter>>;
 /// Installs one frame's pressed-sequence bookkeeping before element listeners.
 /// The actual captured hitbox remains GPUI's responsibility; this state keeps
 /// the retained element owner and sequence lifetime coherent across redraws.
-pub(crate) fn pointer_router_frame(router: SharedPointerRouter) -> impl IntoElement {
+///
+/// Every mouse up in the window also emits `windowPointerUp` with element id 0,
+/// wherever it lands and whether or not an element listens, so React can run
+/// the `pointerup` listeners on its `document` facade. It is emitted in the
+/// capture phase, ahead of the element's own `pointerUp` and `click`.
+pub(crate) fn pointer_router_frame(
+    router: SharedPointerRouter,
+    event_callback: Option<EventCallback>,
+) -> impl IntoElement {
     canvas(
         |_, _, _| (),
         move |_, _, window, _| {
@@ -116,6 +131,10 @@ pub(crate) fn pointer_router_frame(router: SharedPointerRouter) -> impl IntoElem
             window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, _cx| {
                 if phase == DispatchPhase::Capture {
                     up_router.borrow_mut().finish(event.button);
+                    emit_event_full(&event_callback, 0, "windowPointerUp", |payload| {
+                        populate_mouse_up_payload(payload, event);
+                        populate_pointer_metadata(payload, 0);
+                    });
                 }
             });
         },

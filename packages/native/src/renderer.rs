@@ -7900,6 +7900,7 @@ impl GpuixView {
     }
 
     fn cancel_pointer_sequence(&mut self, window: &mut gpui::Window) -> bool {
+        let was_pressed = self.pointer_router.borrow().is_pressed();
         if let Some(cancelled) = self.pointer_router.borrow_mut().cancel() {
             emit_event_full(&self.event_callback, cancelled.target, "pointerCancel", |payload| {
                 payload.x = cancelled.x;
@@ -7908,6 +7909,13 @@ impl GpuixView {
                 populate_pointer_metadata(payload, 0);
             });
             window.release_pointer();
+        }
+        // After the element's `pointerCancel`, as a DOM `pointercancel` reaches
+        // the document after its target; see `pointer_router_frame`.
+        if was_pressed {
+            emit_event_full(&self.event_callback, 0, "windowPointerCancel", |payload| {
+                populate_pointer_metadata(payload, 0);
+            });
         }
         let interactive_changed = self
             .interactive_style_states
@@ -10490,6 +10498,7 @@ impl gpui::Render for GpuixView {
                 .child(crate::automation::bounds_frame_reset())
                 .child(crate::pointer::pointer_router_frame(
                     self.pointer_router.clone(),
+                    self.event_callback.clone(),
                 ))
                 .child(result)
                 .child(crate::automation::resize_observation_frame(

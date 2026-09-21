@@ -27,6 +27,11 @@ import {
 } from "./form-controls.js"
 import { dispatchResizeObservation } from "../resize-observer.js"
 import { finishEventDispatch, type GpuixDispatchableEvent } from "../pointer-event.js"
+import {
+  dispatchDocumentPointerEvent,
+  dropDocumentListeners,
+  isDocumentPointerEvent,
+} from "../document-listeners.js"
 
 /**
  * React's `flushSync`, installed by `reconciler.ts` once the reconciler exists.
@@ -454,6 +459,7 @@ export function detachRoot(renderer: NativeRenderer, container: Container): void
   if (slot.containersByRenderer.get(renderer) === container) {
     slot.containersByRenderer.delete(renderer)
   }
+  dropDocumentListeners(container)
   slot.attachOrder = slot.attachOrder.filter((ref) => {
     const target = ref.deref()
     return target !== undefined && target !== container
@@ -674,6 +680,13 @@ export function handleGpuixEvent(
   payload: EventPayload,
   renderer: NativeRenderer
 ): GpuixEventDispatchResult {
+  const container = eventRegistrySlot().containersByRenderer.get(renderer)
+  // A window pointer event has no element target; it exists only for the
+  // listeners on the document facade.
+  if (isDocumentPointerEvent(payload.eventType)) {
+    if (container) dispatchDocumentPointerEvent(container, payload)
+    return { defaultPrevented: false, propagationStopped: false }
+  }
   // A change on a text editor is a **discrete** event, as `input` and `change`
   // are in the DOM, and the only kind GPUIX treats that way. The host config
   // reports `DefaultEventPriority` for everything, so a handler's `setState`
@@ -684,7 +697,6 @@ export function handleGpuixEvent(
   // discrete event does, committing before it returns. Every other event keeps
   // the priority it had.
   const editor = textEditorTarget(payload, renderer)
-  const container = eventRegistrySlot().containersByRenderer.get(renderer)
   if (container && payload.eventType === "dragOver") {
     // A new move replaces the one acceptance path, even if native retargeting
     // did not deliver an intermediate dragLeave.

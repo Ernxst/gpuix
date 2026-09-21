@@ -2,11 +2,14 @@
 /// Like `globals.test.tsx`, this file relies on vitest's forks pool isolating
 /// its `globalThis`.
 
+import type { EventPayload } from "@gpuix/native"
 import React, { createRef, useRef, useState, type Ref } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import "../globals.js"
 import { hasBrowserDocument } from "../document.js"
+import type { PointerEvent } from "../pointer-event.js"
+import { handleGpuixEvent } from "../reconciler/event-registry.js"
 import { createRoot, flushSync } from "../reconciler/reconciler.js"
 import { act, createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
 import type { GpuixDocument, NativeRenderer, PublicInstance } from "../types/host.js"
@@ -116,6 +119,100 @@ describe("@gpuix/react/globals document", () => {
     expect(doc.getElementById("older")).not.toBeNull()
   })
 })
+
+describe("@gpuix/react/globals document listeners", () => {
+  function windowPointer(renderer: NativeRenderer, eventType: string): void {
+    handleGpuixEvent({ elementId: 0, eventType, x: 4, y: 8, button: 0 } as EventPayload, renderer)
+  }
+
+  it("runs a function once per registration of type, function, and capture flag", () => {
+    const renderer = createMockRenderer()
+    mount(<div />, renderer)
+    const doc = globalThis.document as unknown as GpuixDocument
+    const calls: string[] = []
+    const onUp = (event: PointerEvent) => calls.push(`${event.type}:${event.clientX},${event.clientY}`)
+    const onCancel = () => calls.push("cancel")
+
+    doc.addEventListener("pointerup", onUp)
+    doc.addEventListener("pointerup", onUp)
+    doc.addEventListener("pointerup", onUp, { capture: true })
+    doc.addEventListener("pointercancel", onCancel)
+    windowPointer(renderer, "windowPointerUp")
+    expect(calls).toEqual(["pointerup:4,8", "pointerup:4,8"])
+
+    // Removal matches the capture flag, as in the DOM.
+    doc.removeEventListener("pointerup", onUp, true)
+    windowPointer(renderer, "windowPointerUp")
+    windowPointer(renderer, "windowPointerCancel")
+    expect(calls).toEqual(["pointerup:4,8", "pointerup:4,8", "pointerup:4,8", "cancel"])
+
+    doc.removeEventListener("pointerup", onUp)
+    doc.removeEventListener("pointercancel", onCancel)
+    windowPointer(renderer, "windowPointerUp")
+    windowPointer(renderer, "windowPointerCancel")
+    expect(calls).toHaveLength(4)
+  })
+
+  it("skips listeners removed during the dispatch and not those added during it", () => {
+    const renderer = createMockRenderer()
+    mount(<div />, renderer)
+    const doc = globalThis.document as unknown as GpuixDocument
+    const calls: string[] = []
+    const late = () => calls.push("late")
+    const second = () => calls.push("second")
+    doc.addEventListener("pointerup", () => {
+      calls.push("first")
+      doc.removeEventListener("pointerup", second)
+      doc.addEventListener("pointerup", late)
+    })
+    doc.addEventListener("pointerup", second)
+
+    windowPointer(renderer, "windowPointerUp")
+    expect(calls).toEqual(["first"])
+    windowPointer(renderer, "windowPointerUp")
+    expect(calls).toEqual(["first", "first", "late"])
+  })
+
+  it("drops a root's listeners when it unmounts", () => {
+    const renderer = createMockRenderer()
+    const app = mount(<div />, renderer)
+    const doc = globalThis.document as unknown as GpuixDocument
+    const onUp = vi.fn()
+    doc.addEventListener("pointerup", onUp)
+    app.unmount()
+
+    mount(<div />, renderer)
+    windowPointer(renderer, "windowPointerUp")
+    expect(onUp).not.toHaveBeenCalled()
+  })
+
+  it("ignores other event types and listener forms with one warning each", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const doc = globalThis.document as unknown as GpuixDocument
+    const listener = vi.fn()
+    doc.addEventListener("pointerup", listener)
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining("no GPUIX root is mounted"))
+
+    const renderer = createMockRenderer()
+    mount(<div />, renderer)
+    doc.addEventListener("pointerdown", listener)
+    doc.addEventListener("pointerdown", listener)
+    doc.addEventListener("pointerup", { handleEvent: listener } as unknown as () => void)
+    doc.addEventListener("pointerup", listener, { once: true } as { capture?: boolean })
+    doc.addEventListener("pointerup", null)
+    windowPointer(renderer, "windowPointerUp")
+
+    expect(listener).not.toHaveBeenCalled()
+    expect(warn.mock.calls.map(([message]) => message)).toEqual([
+      expect.stringContaining("no GPUIX root is mounted"),
+      expect.stringContaining('addEventListener("pointerdown") was ignored'),
+      expect.stringContaining("only function listeners"),
+      expect.stringContaining("once or signal"),
+    ])
+    warn.mockRestore()
+  })
+})
+
 
 describeNative("document with a live window", () => {
   it("finds mounted elements by id in tree order and forgets removed ones", () => {
@@ -259,5 +356,120 @@ describeNative("document with a live window", () => {
     expect(doc.getElementById("tab-b")!.getAttribute("aria-selected")).toBe("true")
     expect(doc.getElementById("panel-a")!.hasAttribute("hidden")).toBe(true)
     expect(doc.getElementById("panel-b")!.hasAttribute("hidden")).toBe(false)
+  })
+
+  describe("pointerup and pointercancel listeners", () => {
+    /**
+     * Base UI's `Tabs.Tab` press handling: `onPointerDown` adds `pointerup`
+     * and `pointercancel` listeners to `ownerDocument(event.currentTarget)`,
+     * and the first of them to run removes both.
+     */
+    function PressTabs({ log }: { log: string[] }) {
+      const [selected, setSelected] = useState("a")
+      const pressing = useRef(false)
+      return (
+        <div>
+          <div role="tablist" style={{ flexDirection: "row" }}>
+            {["a", "b"].map((value) => (
+              <button
+                key={value}
+                id={`tab-${value}`}
+                role="tab"
+                data-testid={`tab-${value}`}
+                aria-selected={selected === value}
+                style={{ width: 60, height: 30 }}
+                onPointerDown={(event) => {
+                  pressing.current = true
+                  log.push(`pointerdown:${value}`)
+                  const doc = ownerDocument(event.currentTarget)
+                  function handlePointerEnd(end: PointerEvent) {
+                    pressing.current = false
+                    log.push(`document:${end.type}`)
+                    doc.removeEventListener("pointerup", handlePointerEnd)
+                    doc.removeEventListener("pointercancel", handlePointerEnd)
+                  }
+                  doc.addEventListener("pointerup", handlePointerEnd)
+                  doc.addEventListener("pointercancel", handlePointerEnd)
+                }}
+                onClick={() => {
+                  log.push(`click:${value}:pressing=${pressing.current}`)
+                  setSelected(value)
+                }}
+              />
+            ))}
+          </div>
+          <div data-testid="outside" style={{ width: 200, height: 40 }} />
+        </div>
+      )
+    }
+
+    function center(testId: string): [number, number] {
+      const bounds = screen!.renderer.getElementBounds(screen!.getByTestId(testId).id)!
+      return [bounds.x! + bounds.width! / 2, bounds.y! + bounds.height! / 2]
+    }
+
+    it("ends a press wherever it is released, before the click, and drops the listeners", async () => {
+      screen = createTestRoot({ width: 320, height: 120 })
+      const log: string[] = []
+      screen.render(<PressTabs log={log} />)
+
+      await screen.userEvent.click(screen.getByTestId("tab-b"))
+      await screen.userEvent.click(screen.getByTestId("tab-a"))
+      expect(log).toEqual([
+        "pointerdown:b",
+        "document:pointerup",
+        "click:b:pressing=false",
+        "pointerdown:a",
+        "document:pointerup",
+        "click:a:pressing=false",
+      ])
+      expect(document.getElementById("tab-a")!.getAttribute("aria-selected")).toBe("true")
+
+      // Base UI listens for every button, so a secondary press ends as well.
+      log.length = 0
+      screen.renderer.nativeSimulateMouseDown(...center("tab-b"), 2)
+      screen.renderer.nativeSimulateMouseUp(...center("tab-b"), 2)
+      expect(log).toEqual(["pointerdown:b", "document:pointerup"])
+
+      // Released over an element with no handlers: no click, but the press ends.
+      log.length = 0
+      screen.renderer.nativeSimulateMouseDown(...center("tab-b"))
+      screen.renderer.nativeSimulateMouseUp(...center("outside"))
+      expect(log).toEqual(["pointerdown:b", "document:pointerup"])
+      expect(document.getElementById("tab-a")!.getAttribute("aria-selected")).toBe("true")
+
+      // Every listener removed itself, so a later press elsewhere reaches none.
+      log.length = 0
+      await screen.userEvent.click(screen.getByTestId("outside"))
+      expect(log).toEqual([])
+    })
+
+    it("cancels a press when the window deactivates and leaves no listener behind", () => {
+      screen = createTestRoot({ width: 320, height: 120 })
+      const log: string[] = []
+      screen.render(<PressTabs log={log} />)
+
+      screen.renderer.nativeSimulateMouseDown(...center("tab-b"))
+      screen.renderer.nativeSimulateWindowDeactivation()
+      expect(log).toEqual(["pointerdown:b", "document:pointercancel"])
+
+      screen.renderer.nativeSimulateWindowActivation(true)
+      screen.renderer.nativeSimulateMouseUp(...center("outside"))
+      expect(log).toEqual(["pointerdown:b", "document:pointercancel"])
+    })
+
+    it("drops the listeners of a root unmounted mid-press", () => {
+      screen = createTestRoot({ width: 320, height: 120 })
+      const log: string[] = []
+      screen.render(<PressTabs log={log} />)
+      screen.renderer.nativeSimulateMouseDown(...center("tab-b"))
+      screen.unmount()
+
+      screen = createTestRoot({ width: 320, height: 120 })
+      screen.render(<PressTabs log={[]} />)
+      screen.renderer.nativeSimulateMouseDown(...center("outside"))
+      screen.renderer.nativeSimulateMouseUp(...center("outside"))
+      expect(log).toEqual(["pointerdown:b"])
+    })
   })
 })
