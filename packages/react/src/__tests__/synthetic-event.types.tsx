@@ -6,6 +6,7 @@ import type {
   GpuixPointerEvent,
   GpuixSyntheticEvent,
 } from "../reconciler/synthetic-event.js"
+import type { GpuixKeyboardEvent as PublicGpuixKeyboardEvent } from "../index.js"
 
 // `key` is a plain required string on the keyboard kind.
 const key: string = {} as GpuixKeyboardEvent["key"]
@@ -15,6 +16,12 @@ void key
 // the raw `modifiers` object.
 const keyboardShiftKey: boolean = {} as GpuixKeyboardEvent["shiftKey"]
 void keyboardShiftKey
+
+// Keyboard handlers can use the UI Events modifier query that Base UI's
+// roving-focus controls expect.
+const getKeyboardModifierState: (keyArg: string) => boolean =
+  {} as PublicGpuixKeyboardEvent["getModifierState"]
+void getKeyboardModifierState
 
 // Reading a kind-specific member off the wrong kind is a type error, not just
 // an absent runtime value: the per-kind types are disjoint on purpose.

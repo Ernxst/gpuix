@@ -573,7 +573,9 @@ Beyond that, members live only on the kind that delivers them:
   `buttons` bitfield. Desktop mouse input is the primary `"mouse"` pointer with
   id `1`; the native payload keeps these fields ready for other platform pointer
   sources
-- `GpuixKeyboardEvent` adds `key`, `repeat`, and the raw `modifiers` object
+- `GpuixKeyboardEvent` adds `key`, `repeat`, flattened modifier values, and
+  `getModifierState()` for `"Alt"`, `"Control"`, `"Meta"`, and `"Shift"`, as
+  well as the raw `modifiers` object; unavailable names report `false`
 - `GpuixFocusEvent`'s `relatedTarget` is always `null`: GPUI's focus
   subscriptions report only the element whose own focus changed, never the
   other side of the transition, so this renderer genuinely does not know it
@@ -3894,8 +3896,8 @@ text imports no longer need a runtime flag.
 | Pointer cancel | `onPointerCancel`, `onPointerCancelCapture` | `GpuixPointerEvent` | Same fields; dispatched when the active native window deactivates |
 | Pointer enter | `onPointerEnter` | `GpuixPointerEvent` | `relatedTarget`, pointer metadata; no capture variant in React |
 | Pointer leave | `onPointerLeave` | `GpuixPointerEvent` | `relatedTarget`, pointer metadata; no capture variant in React |
-| Key down | `onKeyDown` | `GpuixKeyboardEvent` | `key`, `keyChar`, `isHeld`, `modifiers` |
-| Key up | `onKeyUp` | `GpuixKeyboardEvent` | `key`, `keyChar`, `modifiers` |
+| Key down | `onKeyDown` | `GpuixKeyboardEvent` | `key`, `keyChar`, `isHeld`, modifier values, `getModifierState()`, `modifiers` |
+| Key up | `onKeyUp` | `GpuixKeyboardEvent` | `key`, `keyChar`, modifier values, `getModifierState()`, `modifiers` |
 | Focus | `onFocus` | `GpuixFocusEvent` | — |
 | Blur | `onBlur` | `GpuixFocusEvent` | — |
 | Wheel | `onWheel` | `GpuixWheelEvent` | `x`, `y`, `deltaX`, `deltaY`, `deltaZ`, `deltaMode`, `precise`, `touchPhase`, `modifiers` |
