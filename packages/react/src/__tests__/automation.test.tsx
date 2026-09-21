@@ -830,6 +830,81 @@ describeNative("automation", () => {
     ).toBeUndefined()
   })
 
+  it("publishes and clears the remaining Base UI ARIA states", () => {
+    const { render, renderer } = createTestRoot({ strictStyles: true })
+    const draw = () => {
+      renderer.flush()
+      renderer.drawPendingFrame()
+    }
+    const byLabel = (label: string) =>
+      Object.values(renderer.getAccessibilityTree().nodes).find(
+        (node) => node.aria.label === label
+      )?.aria
+
+    render(
+      <div>
+        <div role="separator" ariaLabel="Camel separator" ariaOrientation="horizontal" />
+        <div role="separator" aria-label="Hyphen separator" aria-orientation="vertical" />
+        <input ariaLabel="Camel field" ariaReadOnly ariaRequired ariaInvalid="grammar" />
+        <input
+          aria-label="Hyphen field"
+          aria-readonly="true"
+          aria-required="true"
+          aria-invalid="spelling"
+        />
+      </div>
+    )
+    draw()
+
+    expect(byLabel("Camel separator")).toMatchObject({
+      role: "Splitter",
+      orientation: "Horizontal",
+    })
+    expect(byLabel("Hyphen separator")).toMatchObject({
+      role: "Splitter",
+      orientation: "Vertical",
+    })
+    expect(byLabel("Camel field")).toMatchObject({
+      role: "TextInput",
+      read_only: true,
+      required: true,
+      invalid: "Grammar",
+    })
+    expect(byLabel("Hyphen field")).toMatchObject({
+      role: "TextInput",
+      read_only: true,
+      required: true,
+      invalid: "Spelling",
+    })
+
+    render(<input ariaLabel="Dynamic field" ariaReadOnly ariaRequired ariaInvalid />)
+    draw()
+    expect(byLabel("Dynamic field")).toMatchObject({
+      read_only: true,
+      required: true,
+      invalid: "True",
+    })
+
+    render(
+      <input
+        ariaLabel="Dynamic field"
+        ariaReadOnly={false}
+        ariaRequired="false"
+        ariaInvalid={false}
+      />
+    )
+    draw()
+    expect(byLabel("Dynamic field")).not.toHaveProperty("read_only")
+    expect(byLabel("Dynamic field")).not.toHaveProperty("required")
+    expect(byLabel("Dynamic field")).not.toHaveProperty("invalid")
+
+    render(<input ariaLabel="Dynamic field" />)
+    draw()
+    expect(byLabel("Dynamic field")).not.toHaveProperty("read_only")
+    expect(byLabel("Dynamic field")).not.toHaveProperty("required")
+    expect(byLabel("Dynamic field")).not.toHaveProperty("invalid")
+  })
+
   it("warns once per instance for unsupported hyphenated aria props under strict mode", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})

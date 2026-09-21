@@ -2613,6 +2613,10 @@ equivalents:
 | `ariaLabelledBy`, `ariaDescribedBy` | Space-separated author `id`s whose text supplies the name or description; wins over `ariaLabel` / `ariaDescription` |
 | `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
 | `ariaPressed` | `true`, `false`, or `"mixed"` pressed state for toggle buttons |
+| `ariaOrientation` | `"horizontal"` or `"vertical"` orientation for composite widgets and separators |
+| `ariaReadOnly` | Operable but non-editable form-control state |
+| `ariaRequired` | Required-input state for form controls |
+| `ariaInvalid` | `true`, `false`, `"grammar"`, or `"spelling"` input-validity state |
 | `ariaExpanded`, `ariaSelected` | Boolean semantic states |
 | `ariaCurrent` | Global current-item state: `page`, `step`, `location`, `date`, `time`, `true`, or `false` |
 | `ariaLive` | `off`, `polite`, or `assertive` live-region politeness; announces text changes without moving focus |
@@ -2825,14 +2829,16 @@ Role/state combinations are validated rather than silently approximated:
 |---|---|
 | `button` | `ariaExpanded`; `ariaPressed` (`boolean` or `"mixed"`); Activate uses the ordinary `onClick` pipeline |
 | `checkbox` | `ariaChecked` (`boolean` or `"mixed"`); Activate uses `onClick` |
+| `combobox`, `listbox`, `radiogroup` | `ariaReadOnly`; `ariaRequired`; `ariaOrientation` where the role supports it |
 | `heading` | positive `ariaLevel` |
 | `img` | accessible name and description |
 | `link` | `ariaExpanded`; Activate uses `onClick` |
 | `meter`, `progressbar` | value text/range; read-only, so no Increment or Decrement action; omit `ariaValueNow` on `progressbar` for indeterminate progress |
 | `option` | `ariaSelected` |
 | `slider`, `spinbutton` | value text/range; Increment and Decrement use `onAccessibilityAction` |
+| `separator`, `tablist`, `toolbar` | `ariaOrientation` (`"horizontal"` or `"vertical"`) |
 | `switch` | boolean `ariaChecked` only; `"mixed"` is computed as `false` with a normalization diagnostic; Activate uses `onClick` |
-| `textbox` | accessible name and description; implicit on `<input>` and `<textarea>`, named by `ariaLabelledBy`, `ariaLabel`, then `placeholder` |
+| `textbox` | accessible name and description; `ariaReadOnly`; `ariaRequired`; implicit on `<input>` and `<textarea>`, named by `ariaLabelledBy`, `ariaLabel`, then `placeholder` |
 
 `<input>` and `<textarea>` carry the editor's current text as the node value and
 the placeholder as its placeholder.
@@ -2842,6 +2848,10 @@ property that its role does not support remains in the retained declaration but
 is omitted from the computed accessibility tree; its diagnostic says that it
 was ignored. Role-defined fallbacks are applied to the computed tree and name
 the normalized value in the diagnostic.
+
+`ariaInvalid` is global. `false` and omission clear the AccessKit invalid state.
+For the flag-backed `ariaReadOnly` and `ariaRequired` states, `false` likewise
+clears the state. Each property also accepts its standard hyphenated spelling.
 
 `disabled` and `ariaDisabled` are accepted on control roles. Do not combine
 them. `onAccessibilityAction` reports specialised `increment`, `decrement`, or

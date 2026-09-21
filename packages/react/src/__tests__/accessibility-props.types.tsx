@@ -14,6 +14,10 @@ const aliases = [
     aria-description="Opens application settings"
     aria-checked
     aria-pressed="mixed"
+    aria-orientation="horizontal"
+    aria-readonly
+    aria-required="true"
+    aria-invalid="grammar"
     aria-expanded
     aria-current="page"
     aria-live="polite"
@@ -44,6 +48,10 @@ const aliasProps: Props = {
   "aria-description": "Opens application settings",
   "aria-checked": true,
   "aria-pressed": "mixed",
+  "aria-orientation": "vertical",
+  "aria-readonly": true,
+  "aria-required": "false",
+  "aria-invalid": "spelling",
   "aria-expanded": true,
   "aria-current": "page",
   "aria-live": "polite",
@@ -79,6 +87,17 @@ const pressedStates: Props[] = [
   { "aria-pressed": true },
   { "aria-pressed": false },
   { "aria-pressed": "mixed" },
+]
+const remainingBaseUiStates: Props[] = [
+  { ariaOrientation: "horizontal", ariaReadOnly: true, ariaRequired: "true", ariaInvalid: true },
+  {
+    "aria-orientation": "vertical",
+    "aria-readonly": "false",
+    "aria-required": false,
+    "aria-invalid": "grammar",
+  },
+  { ariaInvalid: "spelling" },
+  { ariaInvalid: "false" },
 ]
 const liveTokens: Props[] = [
   { ariaLive: "off" },
@@ -117,6 +136,10 @@ const unsupportedProps: Props = { "aria-busy": true }
 const invalidCurrent: Props = { ariaCurrent: "chapter" }
 // @ts-expect-error ariaPressed accepts only the ARIA tri-state value set.
 const invalidPressed: Props = { ariaPressed: "yes" }
+// @ts-expect-error ariaOrientation accepts only physical axis tokens.
+const invalidOrientation: Props = { ariaOrientation: "diagonal" }
+// @ts-expect-error ariaInvalid accepts only the DOM-compatible validity tokens.
+const invalidInvalid: Props = { ariaInvalid: "format" }
 // @ts-expect-error ariaLive accepts only the ARIA live-region politeness tokens.
 const invalidLive: Props = { ariaLive: "rude" }
 // @ts-expect-error disabled is an HTML boolean attribute, not an ARIA Booleanish attribute.
@@ -131,11 +154,14 @@ void aliases
 void aliasProps
 void currentTokens
 void pressedStates
+void remainingBaseUiStates
 void liveTokens
 void roleVocabulary
 void unsupportedProps
 void invalidCurrent
 void invalidPressed
+void invalidOrientation
+void invalidInvalid
 void invalidLive
 void invalidDisabled
 void visuallyHidden
