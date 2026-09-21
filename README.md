@@ -1775,6 +1775,7 @@ ref.current.localName                             // "div"
 ref.current.hasAttribute("data-state")           // agrees with getAttribute()
 ref.current.contains(otherRef.current)            // retained-tree containment
 ref.current.parentElement                         // live retained parent, or null
+ref.current.dispatchEvent(event)                  // a PointerEvent; see Globals
 
 // "Am I at the bottom?" — the standard DOM test
 const atBottom =
@@ -4794,10 +4795,11 @@ real platform and a native clipboard call would hit it.
 `import "@gpuix/react/globals"` is an opt-in, side-effect-only entry for code
 that assumes a browser: it installs exactly `requestAnimationFrame`,
 `cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`,
-`navigator.clipboard`, `navigator.gpu`, and the element constructors below on
-`globalThis`, and nothing else — no `document`. Each name is installed only if
-it is not already present, so a real browser, Vitest's `jsdom`/`happy-dom`
-environment, or an earlier import of this module all win over the shim.
+`navigator.clipboard`, `navigator.gpu`, `PointerEvent`, and the element
+constructors below on `globalThis`, and nothing else — no `document`. Each
+name is installed only if it is not already present, so a real browser,
+Vitest's `jsdom`/`happy-dom` environment, or an earlier import of this module
+all win over the shim.
 `window` is `globalThis` itself, not a constructed DOM `Window`; GPUIX has no
 scroll position to move, so `scrollTo` is a no-op returning `undefined`.
 TanStack Router, for example, reads `window?.origin` and calls `scrollTo()`
@@ -4840,6 +4842,43 @@ members remain the ones its `PublicInstance` type lists. Like every name here,
 each is installed only when absent. In a real browser or a `jsdom`/`happy-dom`
 environment the existing constructors stay, and GPUIX refs are not instances of
 them.
+
+### PointerEvent
+
+`PointerEvent` lets browser-oriented code construct a pointer event and
+dispatch it at a GPUIX ref, as Base UI's checkbox, switch, and radio do to
+forward a root click to their hidden input:
+
+```tsx
+import "@gpuix/react/globals"
+
+const notCanceled = ref.current.dispatchEvent(
+  new PointerEvent("click", { bubbles: true, cancelable: true, shiftKey: event.shiftKey })
+)
+```
+
+The constructor takes a `PointerEventInit` and applies the DOM's defaults. The
+event carries its members, `preventDefault()`, and `defaultPrevented`; it is not
+an `EventTarget` and belongs to no document. `ref.dispatchEvent()` accepts it,
+the host's own `PointerEvent`, or any object with the same members.
+
+`dispatchEvent()` runs the handlers for `click`, `pointerdown`, `pointerup`,
+`pointermove`, `pointercancel`, `pointerenter`, and `pointerleave` through the
+usual capture, target, and bubble path. Handlers see the event's own `bubbles`,
+`cancelable`, modifier keys, `button`, `buttons`, `detail`, position, and
+pointer members. Calling `preventDefault()`, `stopPropagation()`, or
+`stopImmediatePropagation()` on the synthetic event applies to the dispatched
+one too, and an event whose propagation was stopped before `dispatchEvent()`
+reaches no handler. A handler's `event.nativeEvent` is GPUIX's native payload,
+as for any other GPUIX event, not the dispatched `PointerEvent`; close over the
+dispatched event to read it. A dispatched click then runs the same activation
+behaviour as `ref.click()`, unless a handler prevented it: a checkbox toggles,
+a radio checks, a submit button submits. Like `ref.click()`, a click
+dispatched at a disabled `<button>`, `<input>`, or `<textarea>` runs no
+handler and no activation. `pointerenter` and `pointerleave` run on the
+target only. Dispatching a pointer event fires no compatibility mouse event,
+and other event types reach no handler. The return value follows the DOM:
+`false` when the event was canceled, `true` otherwise.
 
 ### ResizeObserver
 

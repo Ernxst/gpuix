@@ -29,7 +29,7 @@ import {
 } from "./event-handlers.js"
 import type { GpuixSyntheticEvent } from "./synthetic-event.js"
 import { isTextEditingInstance, TEXT_EDITING_TYPES } from "./text-editing.js"
-import { clickElement } from "./event-registry.js"
+import { clickElement, dispatchElementEvent } from "./event-registry.js"
 import {
   attributeInputValue,
   checkFormValidity,
@@ -75,6 +75,7 @@ import {
   webGpuContext,
 } from "../canvas/webgpu.js"
 import { reportStyleDiagnostics } from "./renderer-diagnostics.js"
+import type { GpuixDispatchableEvent } from "../pointer-event.js"
 import {
   DOCUMENT_POSITION_CONTAINED_BY,
   DOCUMENT_POSITION_CONTAINS,
@@ -1689,6 +1690,8 @@ export const hostConfig = {
       releasePointerCapture: () =>
         rootContainerInstance.native.releasePointerCapture?.(id),
       click: () => clickElement(rootContainerInstance, instance),
+      dispatchEvent: (event: GpuixDispatchableEvent) =>
+        dispatchElementEvent(rootContainerInstance, instance, event),
       get scrollLeft(): number {
         return scrollMetrics()[0]!
       },

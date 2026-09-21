@@ -2,15 +2,20 @@
 
 import React, { useState } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import "../globals.js"
 import {
   createTestRoot,
   isNativeTestRendererAvailable,
   type TestElement,
   type TestRoot,
 } from "../testing.js"
-import type { GpuixChangeEvent, GpuixSubmitEvent } from "../reconciler/synthetic-event.js"
+import type {
+  GpuixChangeEvent,
+  GpuixMouseEvent,
+  GpuixSubmitEvent,
+} from "../reconciler/synthetic-event.js"
 import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
-import type { FormPublicInstance, InputPublicInstance } from "../types/host.js"
+import type { FormPublicInstance, InputPublicInstance, PublicInstance } from "../types/host.js"
 
 expect.extend(gpuixMatchers)
 
@@ -739,10 +744,11 @@ describeNative("form submission and reset", () => {
 
 // ── Base UI-shaped fixture ───────────────────────────────────────────
 //
-// Base UI's `Checkbox.Root` and `Switch.Root` render a semantic `<span>` with
-// the role and `aria-checked`, plus a visually hidden native checkbox. The root
-// forwards its click to the hidden input, whose `onChange` owns the state. This
-// mirrors that structure without Base UI's DOM-only dispatch helpers.
+// Base UI's `Checkbox.Root`, `Switch.Root`, and `Radio.Root` render a semantic
+// `<span>` with the role and `aria-checked`, plus a visually hidden native
+// input. The root prevents its own click and forwards it to the hidden input
+// with `dispatchClickWithModifiers`; the input's `onChange` owns the state and
+// ignores a change whose click was prevented.
 
 const visuallyHiddenInput = {
   clipPath: "inset(50%)",
@@ -754,6 +760,29 @@ const visuallyHiddenInput = {
   margin: -1,
   position: "absolute",
 } as const
+
+/** What each forwarded click's `dispatchEvent()` returned. */
+const forwardedClickResults: boolean[] = []
+
+/** Base UI 1.8.0's `dispatchClickWithModifiers`, with `ownerWindow` resolving to `window`. */
+function dispatchClickWithModifiers(
+  target: PublicInstance,
+  sourceEvent: { shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean },
+  { detail = 0 } = {}
+): boolean {
+  return target.dispatchEvent(
+    new window.PointerEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      detail,
+      shiftKey: sourceEvent.shiftKey,
+      ctrlKey: sourceEvent.ctrlKey,
+      altKey: sourceEvent.altKey,
+      metaKey: sourceEvent.metaKey,
+    })
+  )
+}
 
 function BaseChoiceRoot({
   role,
@@ -792,7 +821,9 @@ function BaseChoiceRoot({
         style={{ width: 36, height: 20, backgroundColor: checked ? "#2563eb" : "#334155" }}
         onClick={(event) => {
           event.preventDefault()
-          inputRef.current?.click()
+          if (inputRef.current) {
+            forwardedClickResults.push(dispatchClickWithModifiers(inputRef.current, event))
+          }
         }}
       />
       {!checked && name && uncheckedValue !== undefined && (
@@ -898,3 +929,196 @@ describeNative("Base UI-shaped checkbox and switch", () => {
     expect(submitted).toEqual([[["alerts", "off"]], [["alerts", "on"]]])
   })
 })
+
+/**
+ * Base UI's `RadioGroup` and `Radio.Root`: the root skips a click an earlier
+ * handler prevented, otherwise prevents it and forwards it to the hidden radio.
+ */
+function BaseRadioGroup({
+  name,
+  values,
+  onValueChange,
+  onRootClick,
+}: {
+  name: string
+  values: string[]
+  onValueChange: (value: string) => void
+  onRootClick: (event: GpuixMouseEvent) => void
+}) {
+  const [checkedValue, setCheckedValue] = useState<string | null>(null)
+  return (
+    <div role="radiogroup" style={{ gap: 8 }}>
+      {values.map((value) => (
+        <BaseRadioRoot
+          key={value}
+          name={name}
+          value={value}
+          checked={checkedValue === value}
+          onRootClick={onRootClick}
+          onChecked={() => {
+            onValueChange(value)
+            setCheckedValue(value)
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
+function BaseRadioRoot({
+  name,
+  value,
+  checked,
+  onRootClick,
+  onChecked,
+}: {
+  name: string
+  value: string
+  checked: boolean
+  onRootClick: (event: GpuixMouseEvent) => void
+  onChecked: () => void
+}) {
+  const inputRef = React.useRef<InputPublicInstance>(null)
+  return (
+    <>
+      <span
+        role="radio"
+        ariaLabel={value}
+        ariaChecked={checked}
+        tabIndex={checked ? 0 : -1}
+        style={{ width: 20, height: 20, backgroundColor: checked ? "#2563eb" : "#334155" }}
+        onClick={(event) => {
+          onRootClick(event)
+          if (event.defaultPrevented) return
+          event.preventDefault()
+          if (inputRef.current) {
+            forwardedClickResults.push(dispatchClickWithModifiers(inputRef.current, event))
+          }
+        }}
+      />
+      <input
+        ref={inputRef}
+        type="radio"
+        name={name}
+        value={value}
+        checked={checked}
+        tabIndex={-1}
+        aria-hidden
+        style={visuallyHiddenInput}
+        onChange={(event) => {
+          if ((event.nativeEvent as { defaultPrevented?: boolean }).defaultPrevented) return
+          onChecked()
+        }}
+        onClick={(event) => event.stopPropagation()}
+      />
+    </>
+  )
+}
+
+describeNative("Base UI-shaped dispatched clicks", () => {
+  let screen: TestRoot
+
+  beforeEach(() => {
+    screen = createTestRoot({ width: 480, height: 240 })
+    forwardedClickResults.length = 0
+  })
+
+  afterEach(() => {
+    screen.renderer.dispose()
+  })
+
+  it("toggles the checkbox and switch once per dispatched click", async () => {
+    const changes: string[] = []
+    screen.render(
+      <div style={{ padding: 20, gap: 12 }}>
+        <BaseChoiceRoot role="checkbox" label="Accept" onCheckedChange={(c) => changes.push(`accept:${c}`)} />
+        <BaseChoiceRoot role="switch" label="Wi-Fi" onCheckedChange={(c) => changes.push(`wifi:${c}`)} />
+      </div>
+    )
+    const checkbox = screen.getByRole("checkbox", { name: "Accept" })
+    const toggle = screen.getByRole("switch", { name: "Wi-Fi" })
+
+    await screen.userEvent.click(checkbox)
+    await screen.userEvent.click(toggle)
+    await screen.userEvent.click(checkbox)
+    expect(checkbox).not.toBeChecked()
+    expect(toggle).toBeChecked()
+    expect(changes).toEqual(["accept:true", "wifi:true", "accept:false"])
+    expect(forwardedClickResults).toEqual([true, true, true])
+  })
+
+  it("leaves the checkbox and switch unchanged when the forwarded click is prevented", async () => {
+    const changes: boolean[] = []
+    function Fixture() {
+      return (
+        <div
+          style={{ padding: 20, gap: 12 }}
+          onClickCapture={(event) => {
+            // Prevent only the click Base UI forwards to the hidden input.
+            if ((event.target as PublicInstance).type === "input") event.preventDefault()
+          }}
+        >
+          <BaseChoiceRoot role="checkbox" label="Accept" onCheckedChange={(c) => changes.push(c)} />
+          <BaseChoiceRoot role="switch" label="Wi-Fi" onCheckedChange={(c) => changes.push(c)} />
+        </div>
+      )
+    }
+    screen.render(<Fixture />)
+    await screen.userEvent.click(screen.getByRole("checkbox", { name: "Accept" }))
+    await screen.userEvent.click(screen.getByRole("switch", { name: "Wi-Fi" }))
+    expect(screen.getByRole("checkbox", { name: "Accept" })).not.toBeChecked()
+    expect(screen.getByRole("switch", { name: "Wi-Fi" })).not.toBeChecked()
+    expect(changes).toEqual([])
+    expect(forwardedClickResults).toEqual([false, false])
+  })
+
+  it("checks a radio once and respects a prevented root or forwarded click", async () => {
+    const changes: string[] = []
+    let preventRoot = false
+    let preventForwarded = false
+    screen.render(
+      <div
+        style={{ padding: 20, gap: 12 }}
+        onClickCapture={(event) => {
+          if (preventForwarded && (event.target as PublicInstance).type === "input") {
+            event.preventDefault()
+          }
+        }}
+      >
+        <BaseRadioGroup
+          name="size"
+          values={["small", "large"]}
+          onValueChange={(value) => changes.push(value)}
+          onRootClick={(event) => {
+            if (preventRoot) event.preventDefault()
+          }}
+        />
+      </div>
+    )
+    const small = screen.getByRole("radio", { name: "small" })
+    const large = screen.getByRole("radio", { name: "large" })
+
+    await screen.userEvent.click(large)
+    expect(large).toBeChecked()
+    expect(small).not.toBeChecked()
+    // Clicking the checked radio again changes nothing.
+    await screen.userEvent.click(large)
+    expect(changes).toEqual(["large"])
+
+    preventRoot = true
+    await screen.userEvent.click(small)
+    preventRoot = false
+    preventForwarded = true
+    await screen.userEvent.click(small)
+    expect(small).not.toBeChecked()
+    expect(large).toBeChecked()
+    expect(changes).toEqual(["large"])
+
+    preventForwarded = false
+    await screen.userEvent.click(small)
+    expect(small).toBeChecked()
+    expect(large).not.toBeChecked()
+    expect(changes).toEqual(["large", "small"])
+  })
+})
+
