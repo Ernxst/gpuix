@@ -21,9 +21,6 @@ other mixed-export modules remount the app on the same native window.
 | `bun run web:dev` | Bundle for the browser and serve on `:4173` |
 | `bun run screenshot` | Drive the app with the automation client and write a PNG |
 
-`dev` runs only Vite under Bun. The Vitest script keeps Node's Vite runtime for
-the automation suite.
-
 The browser renderer ships inside `@gpuix/native`, so `web:dev` needs no Rust.
 Inside the GPUIX repository `packages/native/wasm/` is gitignored; build it once
 with `bun run build:web` in `packages/native`.
