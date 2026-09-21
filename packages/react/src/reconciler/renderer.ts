@@ -186,7 +186,10 @@ export function startFrameLoop(
   }
 
   if (nativeFrameSource) {
-    scheduleTimer(() => drive("idle"), frameMs)
+    // Pump AppKit immediately rather than waiting `frameMs`: the first idle
+    // tick is what runs the post-show occlusion pump, and delaying it here
+    // only adds to the time before the window is reported visible.
+    drive("idle")
   } else {
     drive("timer")
   }
