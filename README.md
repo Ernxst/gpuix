@@ -172,11 +172,13 @@ window instead of opening a second one.
 ### 4. Ship a binary
 
 ```bash
-bun build --compile app.tsx --outfile dist/app
+bun build --compile --production app.tsx --outfile dist/app
 ./dist/app
 ```
 
 The binary carries the renderer, so it runs with no Bun and no Node install.
+Keep `--production`: without it the binary bundles React's development build,
+which in the chat example costs about 20 MB of memory.
 
 ### 5. Wrap it in an app with an icon
 
@@ -303,7 +305,7 @@ replaces an asset if CI retries. Do **not** upload a feed JSON.
 
 ```bash
 # macOS
-bun build --compile app.tsx --outfile dist/app
+bun build --compile --production app.tsx --outfile dist/app
 cargo packager --release --config packager.json
 gh release upload v0.1.0 \
   "bundle/My App.app.tar.gz" \
@@ -311,7 +313,7 @@ gh release upload v0.1.0 \
   --clobber
 
 # Linux
-bun build --compile app.tsx --outfile dist/app
+bun build --compile --production app.tsx --outfile dist/app
 cargo packager --release --config packager.json
 gh release upload v0.1.0 \
   bundle/app_0.1.0_x86_64.AppImage \
@@ -319,7 +321,7 @@ gh release upload v0.1.0 \
   --clobber
 
 # Windows
-bun build --compile app.tsx --outfile dist/app.exe
+bun build --compile --production app.tsx --outfile dist/app.exe
 cargo packager --release --config packager.json
 gh release upload v0.1.0 \
   bundle/app_0.1.0_x64-setup.exe \
