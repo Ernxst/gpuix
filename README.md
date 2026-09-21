@@ -4038,6 +4038,12 @@ CSS-like styling via the `style` prop:
 </div>
 ```
 
+GPU-IX accepts CSS custom-property keys such as `--collapsible-panel-height`
+and `--accordion-panel-width` for compatibility with components that measure
+panels for CSS animations. It ignores these keys: GPU-IX does not implement
+`var()` resolution, custom-property inheritance, CSS selectors, or computed
+custom-property values.
+
 **Layout:** `display` (`"none"` | `"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridAutoFlow`, `gridAutoRows`, `gridAutoColumns`, `justifyItems`, `justifySelf`, `gridColumn`, `gridRow`, `gridColumnStart`, `gridColumnEnd`, `gridRowStart`, `gridRowEnd`, `gridArea`
 
 `display: "none"` removes the element and its subtree from layout, painting, hit

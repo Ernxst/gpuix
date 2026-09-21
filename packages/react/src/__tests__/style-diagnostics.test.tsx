@@ -1,4 +1,4 @@
-import React from "react"
+import React, { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   createTestRoot,
@@ -671,6 +671,134 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
       testRoot.render(<div data-testid="visually-hidden-base" style={{}} />)
       expect(testRoot.renderer.getResolvedStyle(element.id)).not.toHaveProperty("borderWidth")
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("ignores Base UI custom properties across updates and removal", () => {
+    const testRoot = createTestRoot({ strictStyles: true, width: 400, height: 200 })
+
+    try {
+      testRoot.render(
+        <div
+          data-testid="custom-property-panel"
+          style={{
+            width: 120,
+            height: 40,
+            "--collapsible-panel-height": "40px",
+            "--accordion-panel-height": "40px",
+          }}
+        />,
+      )
+
+      const element = testRoot.getByTestId("custom-property-panel")
+      const initialBounds = testRoot.renderer.getElementBounds(element.id)
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(element.style).not.toHaveProperty("--collapsible-panel-height")
+      expect(element.style).not.toHaveProperty("--accordion-panel-height")
+
+      testRoot.render(
+        <div
+          data-testid="custom-property-panel"
+          style={{
+            width: 120,
+            height: 40,
+            "--collapsible-panel-height": "80px",
+            "--accordion-panel-width": "240px",
+          }}
+        />,
+      )
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(testRoot.renderer.getElementBounds(element.id)).toEqual(initialBounds)
+      expect(element.style).not.toHaveProperty("--collapsible-panel-height")
+      expect(element.style).not.toHaveProperty("--accordion-panel-width")
+
+      testRoot.render(
+        <div data-testid="custom-property-panel" style={{ width: 120, height: 40 }} />,
+      )
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(testRoot.renderer.getElementBounds(element.id)).toEqual(initialBounds)
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("mounts Base UI-shaped Collapsible and Accordion styles without diagnostics", () => {
+    const testRoot = createTestRoot({ strictStyles: true, width: 400, height: 200 })
+
+    function Collapsible() {
+      const [open, setOpen] = useState(true)
+      return (
+        <div>
+          <button
+            data-testid="collapsible-trigger"
+            aria-controls="collapsible-panel"
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
+            <text>Collapsible</text>
+          </button>
+          <div
+            id="collapsible-panel"
+            hidden={!open}
+            role="region"
+            ariaLabel="Collapsible panel"
+            style={{ "--collapsible-panel-height": "40px", height: 40 }}
+          >
+            <text>Collapsible body</text>
+          </div>
+        </div>
+      )
+    }
+
+    function Accordion() {
+      const [open, setOpen] = useState(false)
+      return (
+        <div>
+          <button
+            data-testid="accordion-trigger"
+            aria-controls="accordion-panel"
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
+            <text>Accordion</text>
+          </button>
+          <div
+            id="accordion-panel"
+            hidden={!open}
+            role="region"
+            ariaLabel="Accordion panel"
+            style={{
+              "--accordion-panel-height": "40px",
+              "--accordion-panel-width": "120px",
+              height: 40,
+            }}
+          >
+            <text>Accordion body</text>
+          </div>
+        </div>
+      )
+    }
+
+    try {
+      testRoot.render(
+        <>
+          <Collapsible />
+          <Accordion />
+        </>,
+      )
+
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(testRoot.getByRole("region", { name: "Collapsible panel" })).toBeTruthy()
+      expect(testRoot.queryByRole("region", { name: "Accordion panel" })).toBeNull()
+
+      testRoot.renderer.nativeSimulateClick(10, 10)
+      expect(testRoot.queryByRole("region", { name: "Collapsible panel" })).toBeNull()
+      expect(testRoot.getByTestId("collapsible-trigger")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      )
     } finally {
       testRoot.unmount()
     }
