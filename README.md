@@ -1147,15 +1147,7 @@ Add the packed plugin and Vite as development dependencies:
 }
 ```
 
-Tell Bun to run Node-shebang tools such as Vite in Bun:
-
-```toml
-# bunfig.toml
-[run]
-bun = true
-```
-
-Then configure Vite and keep the app entry ending with `render()`:
+Configure Vite and keep the app entry ending with `render()`:
 
 ```ts
 // vite.config.ts
@@ -1169,7 +1161,7 @@ export default defineConfig({
 ```
 
 ```json
-{ "scripts": { "dev": "vite" } }
+{ "scripts": { "dev": "bun run --bun vite" } }
 ```
 
 Run `bun run dev`. Component-only edits keep React state. A mixed module such
@@ -1210,8 +1202,8 @@ export default defineConfig(({ mode }) => {
 }
 ```
 
-`bunfig.toml` is still appropriate for both commands. It makes Bun run Vite;
-it does not change the browser bundle or select a renderer.
+The scoped `--bun` flag runs only Vite under Bun. It does not change the browser
+bundle, select a renderer, or alter Node-based tools such as Vitest.
 
 ### 3. Start the app with `bun --hot`
 

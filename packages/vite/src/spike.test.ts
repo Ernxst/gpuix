@@ -4,6 +4,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { createServer, type ViteDevServer } from "vite"
 import { gpuix } from "./index.ts"
+import { transformReactRefresh } from "./refresh.ts"
 
 let server: ViteDevServer | undefined
 let fixture: string | undefined
@@ -78,6 +79,17 @@ afterEach(async () => {
   server = undefined
   if (fixture) await rm(fixture, { recursive: true, force: true })
   fixture = undefined
+})
+
+test("offsets source maps for the injected Refresh preamble", () => {
+  const result = transformReactRefresh(
+    'export function Counter() { return <text style={{ color: "#fff" }}>counter</text> }',
+    "/fixture/counter.tsx",
+  )
+
+  expect(result).toBeDefined()
+  expect(result?.map).not.toBeNull()
+  expect(result?.map?.mappings.startsWith(";".repeat(11))).toBe(true)
 })
 
 test("Vite refreshes a native component and remounts an invalidated route", async () => {

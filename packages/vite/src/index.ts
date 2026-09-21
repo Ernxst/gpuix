@@ -22,7 +22,7 @@ export function gpuix({ entry }: GpuixOptions): Plugin {
 
   return {
     name: "gpuix",
-    apply: "serve",
+    apply: (_config, { command }) => command === "serve" && process.env.VITEST === undefined,
     enforce: "pre",
     config() {
       return {
@@ -65,7 +65,7 @@ await import(${JSON.stringify(entryId)})
     configureServer(server) {
       if (process.versions.bun === undefined) {
         throw new Error(
-          "[gpuix] Vite must run under Bun. Add `[run] bun = true` to bunfig.toml, then start it with `bun run dev`.",
+          "[gpuix] Vite must run under Bun. Start it with `bun run --bun vite`.",
         )
       }
 

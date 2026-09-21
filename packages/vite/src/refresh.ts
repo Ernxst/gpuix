@@ -8,6 +8,19 @@ export const reactRefreshRuntimePath = require.resolve("react-refresh/runtime")
 
 const REFRESH_RUNTIME = "react-refresh/runtime"
 const REACT_SOURCE = /\.[cm]?[jt]sx?$/
+const REFRESH_PREAMBLE = `import * as RefreshRuntime from ${JSON.stringify(REFRESH_RUNTIME)}
+
+if (!globalThis.$RefreshReg$) {
+  throw new Error("[gpuix] React Refresh was not initialised before the native entry")
+}
+
+const prevRefreshReg = globalThis.$RefreshReg$
+const prevRefreshSig = globalThis.$RefreshSig$
+globalThis.$RefreshReg$ = (type, name) => RefreshRuntime.register(type, __MODULE_ID__ + " " + name)
+globalThis.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform
+
+`
+const REFRESH_PREAMBLE_LINES = REFRESH_PREAMBLE.split("\n").length - 1
 
 /**
  * Add React Refresh registration and boundary handling to a source module.
@@ -33,19 +46,10 @@ export function transformReactRefresh(code: string, id: string) {
     return undefined
   }
 
+  const map = result?.map
+
   return {
-    code: `import * as RefreshRuntime from ${JSON.stringify(REFRESH_RUNTIME)}
-
-if (!globalThis.$RefreshReg$) {
-  throw new Error("[gpuix] React Refresh was not initialised before the native entry")
-}
-
-const prevRefreshReg = globalThis.$RefreshReg$
-const prevRefreshSig = globalThis.$RefreshSig$
-globalThis.$RefreshReg$ = (type, name) => RefreshRuntime.register(type, ${JSON.stringify(id)} + " " + name)
-globalThis.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform
-
-${transformed}
+    code: `${REFRESH_PREAMBLE.replace("__MODULE_ID__", JSON.stringify(id))}${transformed}
 
 globalThis.$RefreshReg$ = prevRefreshReg
 globalThis.$RefreshSig$ = prevRefreshSig
@@ -67,6 +71,8 @@ if (import.meta.hot) {
   })
 }
 `,
-    map: result?.map ?? null,
+    map: map === null || map === undefined
+      ? null
+      : { ...map, mappings: `${";".repeat(REFRESH_PREAMBLE_LINES)}${map.mappings}` },
   }
 }
