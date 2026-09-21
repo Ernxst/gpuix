@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run --bun vite",
-    "build": "bun build --compile app.tsx --outfile dist/todo",
+    "build": "bun build --compile --production app.tsx --outfile dist/todo",
     "web:dev": "bun web.ts",
     "screenshot": "bun screenshot.ts",
     "test": "vitest run",
