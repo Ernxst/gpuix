@@ -2744,7 +2744,12 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             || key == "borderLeft"
         {
             let property = property!(key.as_str());
-            if let Some(raw) = decode::<String>(&property, value, &mut parsed.problems) {
+            let raw = if value.as_f64().is_some_and(|number| number == 0.0) {
+                Some("0".to_string())
+            } else {
+                decode::<String>(&property, value, &mut parsed.problems)
+            };
+            if let Some(raw) = raw {
                 if let Some(shorthand) =
                     parse_border_shorthand(&property, &raw, value, &mut parsed.problems)
                 {
@@ -5324,6 +5329,38 @@ mod tests {
                 Some("#333333"),
                 "{key}"
             );
+        }
+    }
+
+    #[test]
+    fn border_shorthands_accept_numeric_zero_but_not_other_numbers() {
+        let cases: [(&str, fn(&StyleDesc) -> Option<f64>); 5] = [
+            ("border", |style| style.border_width),
+            ("borderTop", |style| style.border_top_width),
+            ("borderRight", |style| style.border_right_width),
+            ("borderBottom", |style| style.border_bottom_width),
+            ("borderLeft", |style| style.border_left_width),
+        ];
+
+        for (property, width_of) in cases {
+            for value in [json!(0), json!("0")] {
+                let parsed = parse_style_value(&json!({ property: value }));
+                assert!(
+                    parsed.problems.is_empty(),
+                    "{property}: {:?}",
+                    parsed.problems
+                );
+                assert_eq!(width_of(&parsed.style), Some(0.0), "{property}");
+            }
+
+            let parsed = parse_style_value(&json!({ property: 1 }));
+            assert_eq!(
+                parsed.problems.len(),
+                1,
+                "{property}: {:?}",
+                parsed.problems
+            );
+            assert_eq!(parsed.problems[0].property, property);
         }
     }
 

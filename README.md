@@ -4023,9 +4023,11 @@ CSS would keep it hidden. A border still paints when only `borderWidth` and
 the way a stylesheet does. `border`, `borderTop`, `borderRight`,
 `borderBottom`, and `borderLeft` accept the CSS border shorthand grammar: a
 string of up to three whitespace-separated components — a width (`<n>px` or
-`0`), a `borderStyle` value, and a color — in any order, each optional.
-`border` sets `borderWidth`; the four per-side shorthands each set their own
-per-side width field. `borderWidth` itself additionally accepts a
+`0`), a `borderStyle` value, and a color — in any order, each optional. Each
+shorthand also accepts numeric `0` as a width-only reset. Other numeric
+shorthand values are rejected; use a string with a `px` unit for a non-zero
+width. `border` sets `borderWidth`; the four per-side shorthands each set their
+own per-side width field. `borderWidth` itself additionally accepts a
 whitespace-separated string of 1 to 4 widths, expanded CSS-style (1 value for
 all sides; 2 for top/bottom then left/right; 3 for top, left/right, bottom; 4
 for top, right, bottom, left) into the four per-side width fields; a
