@@ -19,7 +19,12 @@ import {
   enqueueRendererDiagnostic,
   installRendererDiagnosticChannel,
 } from "./renderer-diagnostics.js"
-import { attachRoot, containerForRenderer, detachRoot } from "./event-registry.js"
+import {
+  attachRoot,
+  containerForRenderer,
+  detachRoot,
+  installFlushSync,
+} from "./event-registry.js"
 import { hostConfig } from "./host-config.js"
 
 // Cast to any because @types/react-reconciler is out of date with react-reconciler 0.33.0
@@ -57,6 +62,7 @@ const _r = reconciler as typeof reconciler & {
   flushSyncFromReconciler?: typeof reconciler.flushSync
 }
 export const flushSync = _r.flushSyncFromReconciler ?? _r.flushSync
+installFlushSync(flushSync)
 
 /** Run the passive effects (`useEffect`) the last commit queued instead of
  *  leaving them to the scheduler's next task. Returns whether any ran. */

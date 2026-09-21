@@ -8,6 +8,8 @@ import type {
 import type {
   GpuixChangeEvent,
   GpuixDragEvent,
+  GpuixFormEvent,
+  GpuixSubmitEvent,
   GpuixElementEvent,
   GpuixFocusEvent,
   GpuixKeyboardEvent,
@@ -784,6 +786,7 @@ export type ElementType =
   | "u"
   | "var"
   | "label"
+  | "form"
   | "img"
   | "svg"
   | "canvas"
@@ -1246,16 +1249,50 @@ export interface Props extends AccessibilityProps {
   motion?: MotionProps
 }
 
-// Props for native text editor elements.
+/**
+ * The `<input>` types this renderer implements. `checkbox` and `radio` are
+ * choice controls, `hidden` renders nothing and only submits its value, and
+ * every other type is a text editor, as an unknown type is a text input in
+ * HTML.
+ */
+export type InputType = "checkbox" | "radio" | "hidden" | "text" | (string & {})
+
+// Props for native text editor and choice elements.
 export interface InputProps extends Props {
   ref?: React.Ref<InputPublicInstance>
-  /** External editor value. Native edits apply immediately and report through onChange. */
+  /** Selects the control; see {@link InputType}. `textarea` ignores it. */
+  type?: InputType
+  /**
+   * A text editor's external value; native edits apply immediately and report
+   * through onChange. For a checkbox, radio, or hidden input, the value it
+   * submits with its `name` (`"on"` when a checked choice omits it).
+   */
   value?: string
   /** Initial value for an uncontrolled editor. Later changes do not replace user edits. */
   defaultValue?: string
   placeholder?: string
+  /** Makes a text editor read-only. HTML ignores it on checkboxes and radios, and so does this renderer. */
   readOnly?: boolean
   theme?: GpuixTheme
+  /**
+   * A checkbox's or radio's checked state, controlled. React props win after
+   * every change, as in ReactDOM: an `onChange` that sets no state leaves the
+   * control as it was.
+   */
+  checked?: boolean
+  /** The initial and reset checked state of an uncontrolled checkbox or radio. */
+  defaultChecked?: boolean
+  /**
+   * A checkbox's mixed state. Activation clears it; a controlled value is
+   * restored after the change, as `checked` is.
+   */
+  indeterminate?: boolean
+  /** The name the control submits under, and a radio's group. */
+  name?: string
+  /** The `id` of the `<form>` that owns this control, instead of its ancestor form. */
+  form?: string
+  /** Submission is blocked while a required control has no value. */
+  required?: boolean
 }
 
 export interface TextareaProps extends InputProps {
@@ -1265,6 +1302,30 @@ export interface TextareaProps extends InputProps {
 
 export interface LabelProps extends Props {
   htmlFor?: string
+}
+
+export interface ButtonProps extends Props {
+  /** `submit` (the default) submits the button's form owner, `reset` resets it. */
+  type?: "button" | "submit" | "reset"
+  /** Submitted with {@link value} when this button submits its form. */
+  name?: string
+  value?: string
+  /** The `id` of the `<form>` that owns this button, instead of its ancestor form. */
+  form?: string
+  /** Submit without checking the form's validity. */
+  formNoValidate?: boolean
+}
+
+export interface FormProps extends Props {
+  ref?: React.Ref<FormPublicInstance>
+  /** Submit without checking `required` controls. */
+  noValidate?: boolean
+  /** A submit button or `requestSubmit()` submitted this form. There is no navigation to prevent. */
+  onSubmit?: (event: GpuixSubmitEvent) => void
+  onSubmitCapture?: (event: GpuixSubmitEvent) => void
+  /** Fires before the form's controls reset; `preventDefault()` keeps their state. */
+  onReset?: (event: GpuixFormEvent) => void
+  onResetCapture?: (event: GpuixFormEvent) => void
 }
 
 /** A variable-height list that builds only rows near its viewport. */
@@ -1797,6 +1858,13 @@ export interface PublicInstance {
   setPointerCapture(pointerId?: number): void
   releasePointerCapture(pointerId?: number): void
   /**
+   * Clicks this element, matching `HTMLElement.click()`: a click event runs
+   * through the capture and bubble path, then the element's activation
+   * behaviour — a checkbox toggles, a radio checks, a label activates its
+   * control, a submit button submits. A disabled form control ignores it.
+   */
+  click(): void
+  /**
    * Pixels this element's content is scrolled down, matching
    * `Element.scrollTop`: 0 at the top, growing positive as content scrolls up
    * out of view. Assigning scrolls the element and is clamped natively.
@@ -1953,6 +2021,46 @@ export interface InputPublicInstance extends PublicInstance {
   setSelectionRange(start: number, end: number, direction?: SelectionDirection): void
   /** Select all of the editor's text, matching `HTMLInputElement.select()`. */
   select(): void
+  /**
+   * A checkbox's or radio's checkedness, matching `HTMLInputElement.checked`.
+   * Assigning fires no `onChange` and unchecks the rest of a radio's group.
+   * A controlled `checked` prop replaces it at the next commit.
+   */
+  checked: boolean
+  /** The state a form reset restores, matching `HTMLInputElement.defaultChecked`. */
+  defaultChecked: boolean
+  /** A checkbox's mixed state, matching `HTMLInputElement.indeterminate`. */
+  indeterminate: boolean
+  /** The form that owns this control, or null. */
+  readonly form: FormPublicInstance | null
+  /** False while the control is invalid; see {@link validity}. */
+  checkValidity(): boolean
+  /**
+   * `HTMLInputElement.validity`. Only `valueMissing` (a `required` control
+   * without a value) and `customError` are computed; the other flags are false.
+   */
+  readonly validity: ValidityState
+  /** The custom message, a generic one for a missing value, or empty when valid. */
+  readonly validationMessage: string
+  /** False for a control constraint validation skips: disabled, read-only text, or hidden. */
+  readonly willValidate: boolean
+  /** Mark the control invalid with a message; an empty string clears it. */
+  setCustomValidity(message: string): void
+}
+
+/** `<form>` refs, carrying the submission members of `HTMLFormElement`. */
+export interface FormPublicInstance extends PublicInstance {
+  type: "form"
+  /**
+   * Submit the form, matching `HTMLFormElement.requestSubmit()`: unless the
+   * form or submitter opts out of validation, a missing required value stops
+   * it, and otherwise `onSubmit` receives the form's `FormData`.
+   */
+  requestSubmit(submitter?: PublicInstance | null): void
+  /** Reset every control to its default, matching `HTMLFormElement.reset()`. */
+  reset(): void
+  /** False while any owned control is `required` and has no value. */
+  checkValidity(): boolean
 }
 
 
@@ -1992,6 +2100,17 @@ export interface Instance extends PublicInstance {
   readonly selectionDirection?: InputPublicInstance["selectionDirection"]
   setSelectionRange?: InputPublicInstance["setSelectionRange"]
   select?: InputPublicInstance["select"]
+  checked?: boolean
+  defaultChecked?: boolean
+  indeterminate?: boolean
+  readonly form?: FormPublicInstance | null
+  checkValidity?: () => boolean
+  setCustomValidity?: (message: string) => void
+  readonly validity?: ValidityState
+  readonly validationMessage?: string
+  readonly willValidate?: boolean
+  requestSubmit?: FormPublicInstance["requestSubmit"]
+  reset?: FormPublicInstance["reset"]
   __applyCanvasCommands(
     ops: Uint32Array,
     operands: Float64Array,

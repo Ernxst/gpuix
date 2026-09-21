@@ -349,6 +349,14 @@ fn resolved_role(element: &RetainedElement) -> Option<AccessibilityRole> {
     }
 
     let implicit = match element.element_type.as_str() {
+        // A hidden input renders nothing and has no role. The reconciler writes
+        // a checkbox's or radio's role as `role`, which is handled above.
+        "input"
+            if crate::custom_elements::choice_input::InputKind::of(element)
+                == crate::custom_elements::choice_input::InputKind::Hidden =>
+        {
+            None
+        }
         "input" => Some(AccessibilityRole {
             role: gpui::Role::TextInput,
             name_from_contents: false,
@@ -630,20 +638,64 @@ fn collect_explicit_label_text(
     }
 }
 
+fn is_labelable(element: &RetainedElement) -> bool {
+    crate::custom_elements::choice_input::is_default_focusable_control(element)
+        || authored_host_type(element) == Some("button")
+}
+
+fn authored_host_type(element: &RetainedElement) -> Option<&str> {
+    element
+        .custom_props
+        .get("authoredHostType")
+        .and_then(serde_json::Value::as_str)
+}
+
+/// The first labelable element under `element` in tree order.
+fn first_labelable_descendant(tree: &RetainedTree, element: &RetainedElement) -> Option<u64> {
+    let mut stack: Vec<u64> = element.children.iter().rev().copied().collect();
+    while let Some(id) = stack.pop() {
+        let child = tree.elements.get(&id)?;
+        if is_labelable(child) {
+            return Some(id);
+        }
+        stack.extend(child.children.iter().rev().copied());
+    }
+    None
+}
+
+/// The `<label>` that wraps this control without an `htmlFor`, when the
+/// control is the first labelable element inside it.
+fn implicit_label<'a>(tree: &'a RetainedTree, element: &RetainedElement) -> Option<&'a RetainedElement> {
+    let mut current = element.parent;
+    while let Some(id) = current {
+        let ancestor = tree.elements.get(&id)?;
+        if authored_host_type(ancestor) == Some("label") {
+            let labels_this = !ancestor.custom_props.contains_key("htmlFor")
+                && first_labelable_descendant(tree, ancestor) == Some(element.id);
+            return labels_this.then_some(ancestor);
+        }
+        current = ancestor.parent;
+    }
+    None
+}
+
 fn explicit_label_text(tree: &RetainedTree, element: &RetainedElement) -> Option<String> {
-    let labelable = matches!(element.element_type.as_str(), "input" | "textarea")
-        || element
-            .custom_props
-            .get("authoredHostType")
-            .and_then(serde_json::Value::as_str)
-            == Some("button");
-    if !labelable {
+    if !is_labelable(element) {
         return None;
     }
-    let control_id = element.author_id.as_deref()?;
-    let root = tree.root_id.and_then(|id| tree.elements.get(&id))?;
     let mut parts = Vec::new();
-    collect_explicit_label_text(tree, root, control_id, &mut parts);
+    if let (Some(control_id), Some(root)) = (
+        element.author_id.as_deref(),
+        tree.root_id.and_then(|id| tree.elements.get(&id)),
+    ) {
+        collect_explicit_label_text(tree, root, control_id, &mut parts);
+    }
+    if let Some(label) = implicit_label(tree, element) {
+        let text = referenced_text(tree, label, true);
+        if !text.is_empty() {
+            parts.push(text);
+        }
+    }
     (!parts.is_empty()).then(|| parts.join(" "))
 }
 
@@ -768,10 +820,13 @@ impl<'a> AccessibilityProps<'a> {
                 .custom_props
                 .get("ariaDescribedBy")
                 .and_then(|value| resolve_id_references(tree, value)),
-            checked: element
-                .custom_props
-                .get("ariaChecked")
-                .and_then(parse_toggled),
+            // HTML-AAM: a checkbox's or radio's own state wins over `ariaChecked`.
+            checked: crate::custom_elements::choice_input::choice_state(element).or_else(|| {
+                element
+                    .custom_props
+                    .get("ariaChecked")
+                    .and_then(parse_toggled)
+            }),
             pressed: element
                 .custom_props
                 .get("ariaPressed")
@@ -784,10 +839,16 @@ impl<'a> AccessibilityProps<'a> {
                 .custom_props
                 .get("ariaReadOnly")
                 .and_then(parse_booleanish),
-            required: element
-                .custom_props
-                .get("ariaRequired")
-                .and_then(parse_booleanish),
+            // HTML-AAM: `required` on a control maps to `aria-required="true"`.
+            required: (matches!(element.element_type.as_str(), "input" | "textarea")
+                && html_boolean_prop(element, "required"))
+            .then_some(true)
+            .or_else(|| {
+                element
+                    .custom_props
+                    .get("ariaRequired")
+                    .and_then(parse_booleanish)
+            }),
             invalid: element
                 .custom_props
                 .get("ariaInvalid")
@@ -1066,7 +1127,7 @@ pub(crate) fn is_visually_hidden(tree: &RetainedTree, element: &RetainedElement)
 /// interaction. Focus is not derived from the accessibility role, so this reads
 /// the same declaration the focus handles are built from.
 fn is_focusable(element: &RetainedElement) -> bool {
-    matches!(element.element_type.as_str(), "input" | "textarea")
+    crate::custom_elements::choice_input::is_default_focusable_control(element)
         || element
             .custom_props
             .get("tabIndex")
@@ -1386,7 +1447,16 @@ pub(crate) fn element_problems(
         ));
     }
 
-    if is_hidden(element) {
+    // A negative `tabIndex` takes the control out of sequential navigation,
+    // which is how a visually hidden form input stays aria-hidden legitimately
+    // (Base UI's Checkbox, Switch, and Radio render one), and axe's
+    // aria-hidden-focus rule exempts it for the same reason.
+    let removed_from_tab_order = element
+        .custom_props
+        .get("tabIndex")
+        .and_then(serde_json::Value::as_i64)
+        .is_some_and(|index| index < 0);
+    if is_hidden(element) && !removed_from_tab_order {
         if is_focusable(element) {
             problems.push(applied_problem(
                 "ariaHidden",

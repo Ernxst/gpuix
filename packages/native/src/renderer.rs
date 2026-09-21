@@ -9383,11 +9383,89 @@ impl GpuixView {
         if self.focus_unrendered_virtual_target(direction, window, cx) {
             return;
         }
+        self.leave_radio_group(direction, window, cx);
         match direction {
             FocusDirection::Next => window.focus_next(cx),
             FocusDirection::Previous => window.focus_prev(cx),
         }
+        self.enter_radio_group_backwards(direction, window, cx);
         self.scroll_current_focus_into_view(window, cx);
+    }
+
+    /// Radio groups over the radios Tab can reach: not under `display: none`
+    /// or `ariaHidden`.
+    fn reachable_radio_groups(
+        &self,
+        window: &gpui::Window,
+    ) -> crate::custom_elements::choice_input::RadioGroups {
+        let tree_arc = self.tree.clone();
+        let tree = tree_arc.lock().unwrap();
+        crate::custom_elements::choice_input::RadioGroups::collect(&tree, |id| {
+            self.display_none_in_ancestry(&tree, id, window)
+                || accessibility_hidden_in_ancestry(&tree, id)
+        })
+    }
+
+    fn focused_element_id(&self, window: &gpui::Window) -> Option<u64> {
+        self.focus_handles
+            .iter()
+            .find_map(|(id, handle)| handle.is_focused(window).then_some(*id))
+    }
+
+    /// Tab leaves a radio group from whichever member has focus. Traversal
+    /// continues from the group's last member going forwards and its first
+    /// going backwards, so no other member is visited on the way out.
+    fn leave_radio_group(
+        &mut self,
+        direction: FocusDirection,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(focused) = self.focused_element_id(window) else {
+            return;
+        };
+        let groups = self.reachable_radio_groups(window);
+        let Some(members) = groups.members(focused) else {
+            return;
+        };
+        let edge = match direction {
+            FocusDirection::Next => members.last(),
+            FocusDirection::Previous => members.first(),
+        };
+        if let Some(handle) = edge.and_then(|(id, _)| self.focus_handles.get(id)).cloned() {
+            handle.focus(window, cx);
+        }
+    }
+
+    /// Shift+Tab into a group with nothing checked lands on its last member,
+    /// as it does in a browser. The group's only tab stop is its first member,
+    /// which is right for Tab and wrong for Shift+Tab.
+    fn enter_radio_group_backwards(
+        &mut self,
+        direction: FocusDirection,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !matches!(direction, FocusDirection::Previous) {
+            return;
+        }
+        let Some(focused) = self.focused_element_id(window) else {
+            return;
+        };
+        let groups = self.reachable_radio_groups(window);
+        let Some(members) = groups.members(focused) else {
+            return;
+        };
+        if members.iter().any(|(_, checked)| *checked) {
+            return;
+        }
+        if let Some(handle) = members
+            .last()
+            .and_then(|(id, _)| self.focus_handles.get(id))
+            .cloned()
+        {
+            handle.focus(window, cx);
+        }
     }
 
     fn scroll_current_focus_into_view(
@@ -9647,15 +9725,23 @@ impl GpuixView {
                 return None;
             }
             tab_index(element).or_else(|| {
-                matches!(element.element_type.as_str(), "input" | "textarea").then_some(0)
+                crate::custom_elements::choice_input::is_default_focusable_control(element)
+                    .then_some(0)
             })
         };
+        // A radio group is one tab stop; its other members are reached with
+        // the arrow keys.
+        let radio_tab_skips = crate::custom_elements::choice_input::RadioGroups::collect(tree, |id| {
+            self.display_none_in_ancestry(tree, id, window)
+                || accessibility_hidden_in_ancestry(tree, id)
+        })
+        .tab_skips();
         let is_focus_anchor = |element: &crate::retained_tree::RetainedElement| {
             focused_id == Some(element.id)
                 && !sequential_tab_index(element).is_some_and(|index| index >= 0)
         };
         let needs_focus = |element: &crate::retained_tree::RetainedElement| {
-            matches!(element.element_type.as_str(), "input" | "textarea")
+            crate::custom_elements::choice_input::is_default_focusable_control(element)
                 || tab_index(element).is_some()
                 || element.events.contains("accessibilityAction")
                 || element.events.contains("keyDown")
@@ -9670,7 +9756,9 @@ impl GpuixView {
             let tab_index = sequential_tab_index(element);
             let focus_anchor = is_focus_anchor(element);
             let traversal_tab_index = focus_anchor.then_some(0).or(tab_index);
-            let tab_stop = !focus_anchor && tab_index.is_some_and(|index| index >= 0);
+            let tab_stop = !focus_anchor
+                && tab_index.is_some_and(|index| index >= 0)
+                && !radio_tab_skips.contains(&id);
 
             let native_disabled = crate::accessibility::is_native_disabled(element)
                 || accessibility_hidden_in_ancestry(tree, id);

@@ -22,6 +22,7 @@ use gpui::{
 use unicode_segmentation::UnicodeSegmentation;
 use web_time::Instant;
 
+use super::choice_input::{ChoiceInputElement, HiddenInputElement, InputKind};
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use crate::renderer::{emit_event_full, EventCallback};
 use crate::theme::Theme;
@@ -344,6 +345,24 @@ impl CustomElementFactory for InputFactory {
 
     fn create(&self, _id: u64) -> Box<dyn CustomElement> {
         Box::new(TextEditorElement::new(false))
+    }
+
+    fn variant(&self, props: &std::collections::HashMap<String, serde_json::Value>) -> &'static str {
+        match InputKind::from_type(props.get("type")) {
+            InputKind::Text => "",
+            InputKind::Checkbox => "checkbox",
+            InputKind::Radio => "radio",
+            InputKind::Hidden => "hidden",
+        }
+    }
+
+    fn create_variant(&self, id: u64, variant: &'static str) -> Box<dyn CustomElement> {
+        match variant {
+            "checkbox" => Box::new(ChoiceInputElement::new(InputKind::Checkbox)),
+            "radio" => Box::new(ChoiceInputElement::new(InputKind::Radio)),
+            "hidden" => Box::new(HiddenInputElement),
+            _ => self.create(id),
+        }
     }
 }
 
