@@ -6,6 +6,12 @@ import { createServer, type ViteDevServer } from "vite"
 import { gpuix } from "./index.ts"
 import { transformReactRefresh } from "./refresh.ts"
 
+// The native fixture renders through TestRenderer, which only macOS and
+// Windows builds include. Checking the platform rather than importing
+// @gpuix/react/testing keeps the test process from loading GPUIX before Vite.
+const nativeTest =
+  process.platform === "darwin" || process.platform === "win32" ? test : test.skip
+
 let server: ViteDevServer | undefined
 let fixture: string | undefined
 
@@ -92,7 +98,7 @@ test("offsets source maps for the injected Refresh preamble", () => {
   expect(result?.map?.mappings.startsWith(";".repeat(11))).toBe(true)
 })
 
-test("Vite refreshes a native component and remounts an invalidated route", async () => {
+nativeTest("Vite refreshes a native component and remounts an invalidated route", async () => {
   fixture = await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)), ".vite-spike-"))
   await writeFile(path.join(fixture, "main.tsx"), entry)
   await writeFile(path.join(fixture, "counter.tsx"), component("before"))
