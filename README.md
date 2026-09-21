@@ -1772,6 +1772,7 @@ ref.current.tagName                               // "DIV" (aliases keep their a
 ref.current.localName                             // "div"
 ref.current.hasAttribute("data-state")           // agrees with getAttribute()
 ref.current.contains(otherRef.current)            // retained-tree containment
+ref.current.parentElement                         // live retained parent, or null
 
 // "Am I at the bottom?" — the standard DOM test
 const atBottom =
@@ -1798,16 +1799,21 @@ deliberately supports only these state pseudo-classes.
 `_CONTAINS`/`_CONTAINED_BY` alongside `_PRECEDING`/`_FOLLOWING`; unrelated
 trees set `_DISCONNECTED` plus `_IMPLEMENTATION_SPECIFIC` and a pick between
 them that stays consistent for the life of the process, as the DOM guarantees.
-There is no `Node` global on either GPUIX target — the browser mirror runs
-this same implementation on gpuix instances too, not real DOM nodes — so this
-method, not `instanceof Node`, is how code shared with the web compares two
-refs' tree positions.
+Refs are not real DOM nodes on either GPUIX target — the browser mirror runs
+this same implementation on gpuix instances too — so this method is how code
+shared with the web compares two refs' tree positions.
 
-Refs also expose `tagName`, `localName`, `nodeName`, `hasAttribute()`, and
-`contains()`. Identity uses the authored element name, so an `<article>` rendered
-through the native div adapter still reports `ARTICLE` / `article`. Containment
-includes the element itself and mounted descendants; foreign, detached, and
-unmounted instances return `false`.
+Refs also expose `tagName`, `localName`, `nodeName`, `hasAttribute()`,
+`contains()`, and `parentElement`. Identity uses the authored element name, so an
+`<article>` rendered through the native div adapter still reports `ARTICLE` /
+`article`. Containment includes the element itself and mounted descendants;
+foreign, detached, and unmounted instances return `false`.
+
+`parentElement` reads the retained tree on every access, so it follows appends,
+moves, and removals. It is `null` for a root and for a node that is not
+mounted. Where the DOM keeps parent links inside a removed subtree, every node of
+an unmounted subtree here reports `null`, in line with `contains()`. Refs have no
+`parentNode`, `children`, or other traversal members.
 
 Only `overflow: "scroll"` / `"auto"` elements and `<virtual-list>` are scroll
 containers here. Everything else — **including `overflow: "hidden"`, which the web does
@@ -4685,8 +4691,8 @@ real platform and a native clipboard call would hit it.
 
 `import "@gpuix/react/globals"` is an opt-in, side-effect-only entry for code
 that assumes a browser: it installs exactly `requestAnimationFrame`,
-`cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`, and
-`navigator.clipboard` on
+`cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`,
+`navigator.clipboard`, `navigator.gpu`, and the element constructors below on
 `globalThis`, and nothing else — no `document`. Each name is installed only if
 it is not already present, so a real browser, Vitest's `jsdom`/`happy-dom`
 environment, or an earlier import of this module all win over the shim.
@@ -4704,6 +4710,34 @@ server is the former).
 instances load through the most recently attached GPUIX root and support
 `src`, `decode()`, `naturalWidth`, and `naturalHeight` for Canvas 2D image
 sources.
+
+### Element constructors
+
+The entry also installs `Node`, `Element`, `HTMLElement`, `HTMLDivElement`,
+`HTMLButtonElement`, `HTMLInputElement`, and `HTMLTextAreaElement`, so
+browser-oriented guards such as `value instanceof HTMLElement` work on GPUIX
+refs:
+
+```tsx
+import "@gpuix/react/globals"
+
+ref.current instanceof HTMLElement        // true for every host element except <svg>
+ref.current instanceof HTMLButtonElement  // true only for an authored <button>
+```
+
+`instanceof` matches the authored host type. A `<button>` is an
+`HTMLButtonElement` and never an `HTMLDivElement`, even though the native
+renderer paints it through a GPUI `div`; `<section>` and the other div aliases
+are `HTMLElement`s only. `<svg>` is an `Element` but not an `HTMLElement`, as in
+the DOM. Only instances the reconciler created match, so a plain object with a
+`type` field does not.
+
+These constructors are identity only. Their prototypes carry no DOM members,
+`new HTMLElement()` throws `TypeError` as it does in a browser, and a ref's
+members remain the ones its `PublicInstance` type lists. Like every name here,
+each is installed only when absent. In a real browser or a `jsdom`/`happy-dom`
+environment the existing constructors stay, and GPUIX refs are not instances of
+them.
 
 ### ResizeObserver
 

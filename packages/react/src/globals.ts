@@ -1,9 +1,12 @@
 /**
  * Opt-in `globalThis` shims for code written against the browser DOM.
  *
- * `import "@gpuix/react/globals"` installs exactly seven names —
- * `requestAnimationFrame`, `cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`,
- * `Image`, and `navigator.clipboard` — and nothing else. Nobody is required to import
+ * `import "@gpuix/react/globals"` installs `requestAnimationFrame`,
+ * `cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`,
+ * `navigator.clipboard`, `navigator.gpu`, and the element constructors `Node`,
+ * `Element`, `HTMLElement`, `HTMLDivElement`, `HTMLButtonElement`,
+ * `HTMLInputElement`, and `HTMLTextAreaElement` — and nothing else, in
+ * particular no `document`. Nobody is required to import
  * this: the root `@gpuix/react` entry installs no global, so a consumer who
  * never touches the DOM never gets one either.
  *
@@ -19,6 +22,15 @@ import {
   requestNativeAnimationFrame,
 } from "./frame-clock.js"
 import { ResizeObserver } from "./resize-observer.js"
+import {
+  Element,
+  HTMLButtonElement,
+  HTMLDivElement,
+  HTMLElement,
+  HTMLInputElement,
+  HTMLTextAreaElement,
+  Node,
+} from "./element-constructors.js"
 import { Image } from "./canvas/image.js"
 import { installWebGpuGlobal } from "./canvas/webgpu.js"
 
@@ -37,6 +49,13 @@ defineGlobalIfAbsent("window", globalThis)
 defineGlobalIfAbsent("scrollTo", () => undefined)
 defineGlobalIfAbsent("ResizeObserver", ResizeObserver)
 defineGlobalIfAbsent("Image", Image)
+defineGlobalIfAbsent("Node", Node)
+defineGlobalIfAbsent("Element", Element)
+defineGlobalIfAbsent("HTMLElement", HTMLElement)
+defineGlobalIfAbsent("HTMLDivElement", HTMLDivElement)
+defineGlobalIfAbsent("HTMLButtonElement", HTMLButtonElement)
+defineGlobalIfAbsent("HTMLInputElement", HTMLInputElement)
+defineGlobalIfAbsent("HTMLTextAreaElement", HTMLTextAreaElement)
 
 // `navigator.clipboard` needs its own path rather than `defineGlobalIfAbsent`:
 // Node has had a global `navigator` since v21, so the common case is not "no

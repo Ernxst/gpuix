@@ -84,6 +84,95 @@ describe("DOM identity and containment", () => {
     }
   })
 
+  it("reports the live retained parent as parentElement, and null for a root", () => {
+    const outer = React.createRef<PublicInstance>()
+    const first = React.createRef<PublicInstance>()
+    const second = React.createRef<PublicInstance>()
+    const moved = React.createRef<PublicInstance>()
+    const late = React.createRef<PublicInstance>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+
+    function Tree({ inFirst, showLate }: { inFirst: boolean; showLate: boolean }) {
+      return (
+        <div ref={outer}>
+          <div ref={first}>{inFirst && <span ref={moved} />}</div>
+          <div ref={second}>{!inFirst && <span ref={moved} />}</div>
+          {showLate && <button ref={late} />}
+        </div>
+      )
+    }
+
+    try {
+      flushSync(() => root.render(<Tree inFirst showLate={false} />))
+      expect(outer.current!.parentElement).toBeNull()
+      expect(first.current!.parentElement).toBe(outer.current)
+      expect(moved.current!.parentElement).toBe(first.current)
+      // A getter, not an own enumerable value: spreading a ref must not copy its ancestry.
+      expect(Object.keys(moved.current!)).not.toContain("parentElement")
+
+      // React moves a node between parents by removing it and creating a new one.
+      const original = moved.current!
+      flushSync(() => root.render(<Tree inFirst={false} showLate />))
+      expect(original.parentElement).toBeNull()
+      expect(moved.current).not.toBe(original)
+      expect(moved.current!.parentElement).toBe(second.current)
+      expect(late.current!.parentElement).toBe(outer.current)
+
+      const appended = late.current!
+      flushSync(() => root.render(<Tree inFirst={false} showLate={false} />))
+      expect(appended.parentElement).toBeNull()
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("keeps parentElement on a reordered keyed child", () => {
+    const list = React.createRef<PublicInstance>()
+    const refs = new Map<string, PublicInstance | null>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+    const render = (order: string[]) =>
+      flushSync(() =>
+        root.render(
+          <div ref={list}>
+            {order.map((key) => (
+              <span key={key} ref={(instance) => void refs.set(key, instance)} />
+            ))}
+          </div>
+        )
+      )
+
+    try {
+      render(["a", "b", "c"])
+      const moved = refs.get("c")!
+      render(["c", "a", "b"])
+      expect(refs.get("c")).toBe(moved)
+      expect(moved.parentElement).toBe(list.current)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("reports null parentElement for every node of an unmounted tree", () => {
+    const parent = React.createRef<PublicInstance>()
+    const child = React.createRef<PublicInstance>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+
+    flushSync(() =>
+      root.render(
+        <div ref={parent}>
+          <span ref={child} />
+        </div>
+      )
+    )
+    const parentInstance = parent.current!
+    const childInstance = child.current!
+    expect(childInstance.parentElement).toBe(parentInstance)
+
+    root.unmount()
+    expect(parentInstance.parentElement).toBeNull()
+    expect(childInstance.parentElement).toBeNull()
+  })
+
   it("contains self and descendants, but not siblings or foreign instances", () => {
     const parent = React.createRef<PublicInstance>()
     const child = React.createRef<PublicInstance>()
