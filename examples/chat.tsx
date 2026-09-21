@@ -16,6 +16,7 @@ import {
   applyMacCpuThrottleFromEnv,
   motion,
   render,
+  requestAnimationFrame,
   Select,
   SelectContent,
   SelectItem,
@@ -2233,6 +2234,20 @@ export function ChatApp({
     if (id == null || !renderer?.scrollToItem) return
     renderer.scrollToItem(id, Math.max(0, rowCount - 1))
   }, [renderer, rowCount, tailTick])
+
+  // scripts/app-bench.ts opt-in marker. Off by default so this fixture's
+  // normal behaviour never changes; see examples/bench/README.md.
+  useEffect(() => {
+    if (process.env.GPUIX_BENCH !== '1') return
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const marker = { event: 'ready', readyAtEpochMs: performance.timeOrigin + performance.now() }
+        console.log(`GPUIX_BENCH ${JSON.stringify(marker)}`)
+      })
+    })
+    // Runs once, after the first commit — a mount marker, not a per-update one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div

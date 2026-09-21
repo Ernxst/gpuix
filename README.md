@@ -923,6 +923,10 @@ typing in keeps the caret and the active titlebar. `show: false` goes further
 and opens no window at all, so the process runs with a live React tree and
 nothing on screen.
 
+On macOS an unfocused window opens behind the active app's windows. While it
+is fully covered, `requestAnimationFrame` callbacks pause, as they do in a
+browser window that is covered, and they resume once any part of it shows.
+
 ```tsx
 render(<App />, { title: 'Notes', focus: false })
 ```
