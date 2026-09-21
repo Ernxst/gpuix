@@ -96,6 +96,22 @@ export function domKeyName(
   return printableKeyChar(keyChar) ?? key
 }
 
+/** The supported UI Events modifier names for the native four-bit payload. */
+function keyboardModifierState(modifiers: EventModifiers | undefined, keyArg: string): boolean {
+  switch (keyArg) {
+    case "Alt":
+      return modifiers?.alt ?? false
+    case "Control":
+      return modifiers?.ctrl ?? false
+    case "Meta":
+      return modifiers?.cmd ?? false
+    case "Shift":
+      return modifiers?.shift ?? false
+    default:
+      return false
+  }
+}
+
 /**
  * The kind-agnostic members every GPUIX synthetic event carries, regardless
  * of which native payload produced it.
@@ -293,6 +309,8 @@ export interface GpuixKeyboardEvent extends GpuixEvent {
   readonly metaKey: boolean
   readonly shiftKey: boolean
   readonly modifiers?: EventModifiers
+  /** Reports the supported UI Events modifier state, or `false` when unavailable. */
+  getModifierState(keyArg: string): boolean
   /** The UI Events `key` value. See {@link domKeyName}. */
   readonly key: string
   /** Whether this is a key-repeat event (key held down). */
@@ -459,6 +477,13 @@ export function createGpuixSyntheticEvent(
     ctrlKey: modifiers?.ctrl ?? false,
     metaKey: modifiers?.cmd ?? false,
     shiftKey: modifiers?.shift ?? false,
+    ...(nativeEvent.eventType === "keyDown" || nativeEvent.eventType === "keyUp"
+      ? {
+          getModifierState(keyArg: string): boolean {
+            return keyboardModifierState(modifiers, keyArg)
+          },
+        }
+      : {}),
     button: nativeEvent.button ?? (nativeEvent.eventType === "pointerMove" ? -1 : 0),
     detail: nativeEvent.eventType === "contextMenu" ? 0 : (nativeEvent.clickCount ?? 0),
     pointerId: nativeEvent.pointerId ?? 1,

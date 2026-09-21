@@ -1639,6 +1639,108 @@ describeNative("events", () => {
       expect(repeats).toEqual([false, true])
     })
 
+    it("exposes UI Events modifier state on keyDown and keyUp", () => {
+      const observed: Array<{ type: string; states: boolean[] }> = []
+      const modifierNames = ["Alt", "Control", "Meta", "Shift", "Unavailable"]
+      const record = (event: { type: string; getModifierState(keyArg: string): boolean }) => {
+        observed.push({
+          type: event.type,
+          states: modifierNames.map((name) => event.getModifierState(name)),
+        })
+      }
+
+      testRoot.render(
+        <div tabIndex={0} onKeyDown={record} onKeyUp={record} />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown") && element.events.has("keyUp"))!
+
+      handleGpuixEvent(
+        {
+          elementId: target.id,
+          eventType: "keyDown",
+          key: "right",
+          modifiers: { alt: true, ctrl: false, cmd: true, shift: false },
+        },
+        testRoot.renderer
+      )
+      handleGpuixEvent(
+        {
+          elementId: target.id,
+          eventType: "keyUp",
+          key: "right",
+          modifiers: { alt: false, ctrl: true, cmd: false, shift: true },
+        },
+        testRoot.renderer
+      )
+      handleGpuixEvent(
+        { elementId: target.id, eventType: "keyDown", key: "right" },
+        testRoot.renderer
+      )
+
+      expect(observed).toEqual([
+        { type: "keyDown", states: [true, false, true, false, false] },
+        { type: "keyUp", states: [false, true, false, true, false] },
+        { type: "keyDown", states: [false, false, false, false, false] },
+      ])
+    })
+
+    it("lets Base UI-shaped ToggleGroup and Toolbar fixtures complete Arrow-key roving focus", () => {
+      function RovingFocus({ label }: { label: string }) {
+        const firstRef = useRef<PublicInstance>(null)
+        const secondRef = useRef<PublicInstance>(null)
+
+        return (
+          <div ariaLabel={label} style={{ flexDirection: "row", gap: 8 }}>
+            <button
+              ref={firstRef}
+              data-testid={`${label}-first`}
+              type="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight" && !event.getModifierState("Alt")) {
+                  secondRef.current!.focus()
+                }
+              }}
+              style={{ width: 100, height: 40 }}
+            >
+              <text>First</text>
+            </button>
+            <button
+              ref={secondRef}
+              data-testid={`${label}-second`}
+              type="button"
+              tabIndex={-1}
+              style={{ width: 100, height: 40 }}
+            >
+              <text>Second</text>
+            </button>
+          </div>
+        )
+      }
+
+      testRoot.render(
+        <div>
+          <RovingFocus label="toggle-group" />
+          <RovingFocus label="toolbar" />
+        </div>
+      )
+
+      for (const label of ["toggle-group", "toolbar"]) {
+        const first = testRoot.renderer.findByTestId(`${label}-first`)!
+        const second = testRoot.renderer.findByTestId(`${label}-second`)!
+        testRoot.renderer.focusElement(first.id)
+
+        handleGpuixEvent(
+          { elementId: first.id, eventType: "keyDown", key: "right" },
+          testRoot.renderer
+        )
+
+        expect(testRoot.renderer.getActiveElement()).toBe(second.id)
+      }
+    })
+
     it("should handle onKeyDown and update state", () => {
       function KeyTracker() {
         const [lastKey, setLastKey] = useState("none")
