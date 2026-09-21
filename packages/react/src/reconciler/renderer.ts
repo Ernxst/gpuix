@@ -10,14 +10,7 @@ import {
   detachAnimationFrameSource,
   requestNativeAnimationFrame,
 } from "../frame-clock.js"
-import {
-  App as AutomationApp,
-  browserRendererAsTest,
-  InProcessBackend,
-  liveRendererAsTest,
-  serveAutomationStdio,
-  type LiveAutomationRenderer,
-} from "../automation/client.js"
+import type { App as AutomationApp, LiveAutomationRenderer } from "../automation/client.js"
 
 export { createRoot, flushSync, reconciler } from "./reconciler.js"
 export type { Root } from "./reconciler.js"
@@ -42,7 +35,7 @@ export function createRenderer(
     const init = renderer.init.bind(renderer)
     renderer.init = (options) => {
       init(options)
-      enableAutomation(renderer)
+      void enableAutomation(renderer)
     }
   }
   return renderer
@@ -84,7 +77,10 @@ export interface FrameLoopOptions {
  * `tick()` returning false means the last window closed. The loop stops and
  * `onTerminated` runs. `render()` uses that to unmount React and finish cleanup.
  */
-export function enableAutomation(renderer: LiveAutomationRenderer): void {
+export async function enableAutomation(renderer: LiveAutomationRenderer): Promise<void> {
+  const { InProcessBackend, liveRendererAsTest, serveAutomationStdio } = await import(
+    "../automation/client.js"
+  )
   serveAutomationStdio(new InProcessBackend(liveRendererAsTest(renderer)))
 }
 
@@ -205,15 +201,16 @@ declare global {
   var gpuix: AutomationApp | undefined
 }
 
-export function installBrowserAutomation(
+export async function installBrowserAutomation(
   renderer: LiveAutomationRenderer
-): AutomationApp {
+): Promise<AutomationApp> {
   const existing = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
-  if (existing instanceof AutomationApp) return existing
-
-  const automation = new AutomationApp(
-    new InProcessBackend(browserRendererAsTest(renderer))
+  const { App, browserRendererAsTest, InProcessBackend } = await import(
+    "../automation/client.js"
   )
+  if (existing instanceof App) return existing as AutomationApp
+
+  const automation = new App(new InProcessBackend(browserRendererAsTest(renderer)))
   Reflect.set(globalThis, BROWSER_AUTOMATION_KEY, automation)
   return automation
 }
@@ -736,7 +733,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     host instanceof GpuixRenderer &&
     !Reflect.has(globalThis, BROWSER_AUTOMATION_KEY)
   ) {
-    installBrowserAutomation(host)
+    void installBrowserAutomation(host)
   }
   if (debugFrameOverlay) {
     host.setDebugFrameOverlay?.(debugFrameOverlay)

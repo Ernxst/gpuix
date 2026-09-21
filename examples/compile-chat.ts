@@ -153,6 +153,7 @@ async function compileBinary(): Promise<void> {
     entrypoints: [path.join(ROOT, 'chat.tsx')],
     compile,
     minify: true,
+    define: { 'process.env.NODE_ENV': JSON.stringify('production') },
   })
   if (!result.success) {
     for (const message of result.logs) console.error(message)
