@@ -49,6 +49,54 @@ export function floatingRootStyle(style?: StyleDesc): StyleDesc {
   }
 }
 
+type InteractiveStyle = Omit<StyleDesc, "hover" | "active">
+
+function floatingSurfaceStateStyle(style?: InteractiveStyle): InteractiveStyle | undefined {
+  if (!style) return undefined
+  const surface: InteractiveStyle = {}
+  if (style.visibility !== undefined) surface.visibility = style.visibility
+  if (style.opacity !== undefined) surface.opacity = style.opacity
+  if (style.borderRadius !== undefined) surface.borderRadius = style.borderRadius
+  if (style.borderTopLeftRadius !== undefined) {
+    surface.borderTopLeftRadius = style.borderTopLeftRadius
+  }
+  if (style.borderTopRightRadius !== undefined) {
+    surface.borderTopRightRadius = style.borderTopRightRadius
+  }
+  if (style.borderBottomRightRadius !== undefined) {
+    surface.borderBottomRightRadius = style.borderBottomRightRadius
+  }
+  if (style.borderBottomLeftRadius !== undefined) {
+    surface.borderBottomLeftRadius = style.borderBottomLeftRadius
+  }
+  return Object.keys(surface).length > 0 ? surface : undefined
+}
+
+function floatingSurfaceStyle(style?: StyleDesc): StyleDesc {
+  const surface: StyleDesc = floatingSurfaceStateStyle(style) ?? {}
+  const hover = floatingSurfaceStateStyle(style?.hover)
+  const active = floatingSurfaceStateStyle(style?.active)
+  if (hover) surface.hover = hover
+  if (active) surface.active = active
+  return surface
+}
+
+function withoutOpacity(style?: InteractiveStyle): InteractiveStyle | undefined {
+  if (!style) return undefined
+  const { opacity: _opacity, ...rest } = style
+  return rest
+}
+
+function floatingContentStyle(style?: StyleDesc): StyleDesc | undefined {
+  if (!style) return undefined
+  const { opacity: _opacity, hover, active, ...rest } = style
+  return {
+    ...rest,
+    hover: withoutOpacity(hover),
+    active: withoutOpacity(active),
+  }
+}
+
 export function useControllableState<Value>({
   value,
   defaultValue,
@@ -181,13 +229,7 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingContentProps>(
 
     return (
       <anchored
-        style={{
-          borderRadius: props.style?.borderRadius,
-          borderTopLeftRadius: props.style?.borderTopLeftRadius,
-          borderTopRightRadius: props.style?.borderTopRightRadius,
-          borderBottomRightRadius: props.style?.borderBottomRightRadius,
-          borderBottomLeftRadius: props.style?.borderBottomLeftRadius,
-        }}
+        style={floatingSurfaceStyle(props.style)}
         side={side}
         align={align}
         gap={sideOffset}
@@ -196,12 +238,15 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingContentProps>(
         snapMargin={collisionPadding}
         deferred
         priority={1}
-        occlude
+        occlude={props.style?.pointerEvents !== "none"}
       >
         <div
           {...props}
           ref={ref}
-          style={mergeStyles({ backgroundColor: "#1A1A1A" }, props.style)}
+          style={mergeStyles(
+            { backgroundColor: "#1A1A1A" },
+            floatingContentStyle(props.style)
+          )}
         >
           {children}
         </div>
