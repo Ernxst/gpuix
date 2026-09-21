@@ -42,6 +42,24 @@ const validStyle = {
 const numericAspectRatio = { aspectRatio: 1 } satisfies StyleDesc
 void numericAspectRatio
 
+const numericZeroBorderShorthands = {
+  border: 0,
+  borderTop: 0,
+  borderRight: 0,
+  borderBottom: 0,
+  borderLeft: 0,
+} satisfies StyleDesc
+void numericZeroBorderShorthands
+
+const invalidNumericBorderShorthand: StyleDesc = {
+  // @ts-expect-error Border shorthands accept numeric zero, not arbitrary numbers.
+  border: 1,
+}
+void invalidNumericBorderShorthand
+
+const insetClipPath = { clipPath: "inset(50%)" } satisfies StyleDesc
+void insetClipPath
+
 const intrinsicAndViewportLengths = {
   width: "max-content",
   minWidth: "min-content",

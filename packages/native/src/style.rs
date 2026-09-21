@@ -891,6 +891,7 @@ pub struct StyleDesc {
     pub overflow: Option<String>,
     pub overflow_x: Option<String>,
     pub overflow_y: Option<String>,
+    pub clip_path: Option<gpui::ClipPath>,
 
     pub cursor: Option<String>,
     pub pointer_events: Option<String>,
@@ -2129,6 +2130,61 @@ fn parse_border_width_token(token: &str) -> Option<f64> {
     (magnitude.is_finite() && magnitude >= 0.0).then_some(magnitude)
 }
 
+fn parse_clip_path(value: &str) -> Result<gpui::ClipPath, String> {
+    let body = value
+        .strip_prefix("inset(")
+        .and_then(|value| value.strip_suffix(')'))
+        .ok_or_else(|| {
+            "expected inset() with one to four non-negative px, %, or zero insets".to_string()
+        })?;
+    let tokens: Vec<_> = body.split_whitespace().collect();
+    if !(1..=4).contains(&tokens.len()) {
+        return Err(
+            "expected inset() with one to four non-negative px, %, or zero insets".to_string(),
+        );
+    }
+
+    let parse_inset = |token: &str| -> Option<gpui::DefiniteLength> {
+        if token == "0" {
+            return Some(gpui::px(0.0).into());
+        }
+        let (magnitude, percentage) = token
+            .strip_suffix("px")
+            .map(|value| (value, false))
+            .or_else(|| token.strip_suffix('%').map(|value| (value, true)))?;
+        let magnitude: f32 = magnitude.parse().ok()?;
+        if !magnitude.is_finite() || magnitude < 0.0 {
+            return None;
+        }
+        Some(if percentage {
+            gpui::DefiniteLength::Fraction(magnitude / 100.0)
+        } else {
+            gpui::px(magnitude).into()
+        })
+    };
+    let values: Vec<_> = tokens
+        .iter()
+        .map(|token| parse_inset(token))
+        .collect::<Option<_>>()
+        .ok_or_else(|| {
+            "expected inset() with one to four non-negative px, %, or zero insets".to_string()
+        })?;
+    let (top, right, bottom, left) = match values.as_slice() {
+        [all] => (*all, *all, *all, *all),
+        [vertical, horizontal] => (*vertical, *horizontal, *vertical, *horizontal),
+        [top, horizontal, bottom] => (*top, *horizontal, *bottom, *horizontal),
+        [top, right, bottom, left] => (*top, *right, *bottom, *left),
+        _ => unreachable!("validated inset count"),
+    };
+
+    Ok(gpui::ClipPath::Inset(gpui::ClipPathInsets {
+        top,
+        right,
+        bottom,
+        left,
+    }))
+}
+
 enum BorderToken {
     Width(f64),
     Style(String),
@@ -2737,6 +2793,17 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         }
         number_field!(key, value, "opacity", opacity);
 
+        if key == "clipPath" {
+            let property = property!("clipPath");
+            if let Some(text) = decode::<String>(&property, value, &mut parsed.problems) {
+                match parse_clip_path(&text) {
+                    Ok(clip_path) => parsed.style.clip_path = Some(clip_path),
+                    Err(reason) => reject(&mut parsed.problems, property, value, reason),
+                }
+            }
+            continue;
+        }
+
         if key == "border"
             || key == "borderTop"
             || key == "borderRight"
@@ -2744,7 +2811,12 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             || key == "borderLeft"
         {
             let property = property!(key.as_str());
-            if let Some(raw) = decode::<String>(&property, value, &mut parsed.problems) {
+            let raw = if value.as_f64().is_some_and(|number| number == 0.0) {
+                Some("0".to_string())
+            } else {
+                decode::<String>(&property, value, &mut parsed.problems)
+            };
+            if let Some(raw) = raw {
                 if let Some(shorthand) =
                     parse_border_shorthand(&property, &raw, value, &mut parsed.problems)
                 {
@@ -5018,6 +5090,7 @@ mod tests {
             "overflow": "visible",
             "overflowX": "hidden",
             "overflowY": "scroll",
+            "clipPath": "inset(50%)",
             "cursor": "pointer",
             "pointerEvents": "auto",
             "userSelect": "text",
@@ -5328,6 +5401,38 @@ mod tests {
     }
 
     #[test]
+    fn border_shorthands_accept_numeric_zero_but_not_other_numbers() {
+        let cases: [(&str, fn(&StyleDesc) -> Option<f64>); 5] = [
+            ("border", |style| style.border_width),
+            ("borderTop", |style| style.border_top_width),
+            ("borderRight", |style| style.border_right_width),
+            ("borderBottom", |style| style.border_bottom_width),
+            ("borderLeft", |style| style.border_left_width),
+        ];
+
+        for (property, width_of) in cases {
+            for value in [json!(0), json!("0")] {
+                let parsed = parse_style_value(&json!({ property: value }));
+                assert!(
+                    parsed.problems.is_empty(),
+                    "{property}: {:?}",
+                    parsed.problems
+                );
+                assert_eq!(width_of(&parsed.style), Some(0.0), "{property}");
+            }
+
+            let parsed = parse_style_value(&json!({ property: 1 }));
+            assert_eq!(
+                parsed.problems.len(),
+                1,
+                "{property}: {:?}",
+                parsed.problems
+            );
+            assert_eq!(parsed.problems[0].property, property);
+        }
+    }
+
+    #[test]
     fn border_width_string_expands_css_style_by_count() {
         let one = parse_style_value(&json!({ "borderWidth": "4px" }));
         assert!(one.problems.is_empty(), "{:?}", one.problems);
@@ -5364,6 +5469,32 @@ mod tests {
         let parsed = parse_style_value(&json!({ "borderWidth": 4 }));
         assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
         assert_eq!(parsed.style.border_width, Some(4.0));
+    }
+
+    #[test]
+    fn clip_path_accepts_inset_lengths_and_rejects_unsupported_forms() {
+        for value in [
+            "inset(50%)",
+            "inset(1px 25%)",
+            "inset(0 1px 2px)",
+            "inset(1px 2px 3px 4px)",
+        ] {
+            let parsed = parse_style_value(&json!({ "clipPath": value }));
+            assert!(parsed.problems.is_empty(), "{value}: {:?}", parsed.problems);
+            assert!(parsed.style.clip_path.is_some(), "{value}");
+        }
+
+        for value in [
+            "circle(50%)",
+            "inset(50% round 4px)",
+            "inset(-1px)",
+            "inset(1em)",
+        ] {
+            let parsed = parse_style_value(&json!({ "clipPath": value }));
+            assert_eq!(parsed.style.clip_path, None, "{value}");
+            assert_eq!(parsed.problems.len(), 1, "{value}: {:?}", parsed.problems);
+            assert_eq!(parsed.problems[0].property, "clipPath");
+        }
     }
 
     // A multi-value `borderWidth` string only fills in sides an explicit

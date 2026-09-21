@@ -14665,6 +14665,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("visible") => el = el.visible(),
         _ => {}
     }
+    el.style().clip_path.clone_from(&style.clip_path);
     match style.display.as_deref() {
         Some("none") => el = el.hidden(),
         Some("flex") => el = el.flex(),

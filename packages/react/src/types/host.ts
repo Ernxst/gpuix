@@ -584,22 +584,22 @@ export interface StyleDesc {
 
   /**
    * CSS `border` shorthand: up to three whitespace-separated components, in
-   * any order, each optional — a width (`<n>px` or `0`), a `borderStyle`
-   * value, and a color. Sets `borderWidth`. GPUI paints one border color and
+   * any order, each optional — a width (`<n>px` or string/numeric `0`), a
+   * `borderStyle` value, and a color. Sets `borderWidth`. GPUI paints one border color and
    * one border style for all four sides, so when this and a sibling shorthand
    * (`border` / `borderTop` / `borderRight` / `borderBottom` / `borderLeft`)
    * disagree on color or style, one of them is rejected with a diagnostic
    * naming both (per-side color and style is not yet supported).
    */
-  border?: string
+  border?: string | 0
   /** `border` shorthand grammar, restricted to the top edge. Sets `borderTopWidth`. */
-  borderTop?: string
+  borderTop?: string | 0
   /** `border` shorthand grammar, restricted to the right edge. Sets `borderRightWidth`. */
-  borderRight?: string
+  borderRight?: string | 0
   /** `border` shorthand grammar, restricted to the bottom edge. Sets `borderBottomWidth`. */
-  borderBottom?: string
+  borderBottom?: string | 0
   /** `border` shorthand grammar, restricted to the left edge. Sets `borderLeftWidth`. */
-  borderLeft?: string
+  borderLeft?: string | 0
   /**
    * A single width, or a CSS-style string of 1 to 4 widths (`"<n>px" | "0"`,
    * whitespace-separated) applied like the `border-width` shorthand: one
@@ -669,6 +669,8 @@ export interface StyleDesc {
   overflow?: Overflow
   overflowX?: Overflow
   overflowY?: Overflow
+  /** CSS `clip-path`, limited to `inset()` with non-negative px, %, or zero insets. */
+  clipPath?: string
 
   cursor?: CursorValue
   /** `"auto"` blocks hits behind this element **and its wheel**. `"none"` never

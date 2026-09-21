@@ -631,6 +631,51 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     }
   })
 
+  it("accepts Base UI's numeric-zero border reset and removes it on a later empty style", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    try {
+      testRoot.render(
+        <div
+          data-testid="visually-hidden-base"
+          style={{
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+            border: "4px solid #333333",
+            padding: 0,
+            width: 1,
+            height: 1,
+            margin: -1,
+          }}
+        />
+      )
+      const element = testRoot.renderer.findByTestId("visually-hidden-base")!
+      expect(testRoot.renderer.getResolvedStyle(element.id)?.borderWidth).toBe(4)
+
+      testRoot.render(
+        <div
+          data-testid="visually-hidden-base"
+          style={{
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+            border: 0,
+            padding: 0,
+            width: 1,
+            height: 1,
+            margin: -1,
+          }}
+        />
+      )
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(testRoot.renderer.getResolvedStyle(element.id)?.borderWidth).toBe(0)
+
+      testRoot.render(<div data-testid="visually-hidden-base" style={{}} />)
+      expect(testRoot.renderer.getResolvedStyle(element.id)).not.toHaveProperty("borderWidth")
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
   it("drains an ignored accessibility diagnostic with assertion metadata", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })

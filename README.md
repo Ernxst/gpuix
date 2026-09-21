@@ -3997,7 +3997,12 @@ The intrinsic keywords are measured on `<div>` and `<text>` once, then re-measur
 
 **Position:** `position` (`"relative"` | `"absolute"` | `"fixed"`), `top`, `right`, `bottom`, `left` — `"fixed"` lays out like `"absolute"`, because GPUI has no scrolling document to be fixed against
 
-**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `border`, `borderTop`, `borderRight`, `borderBottom`, `borderLeft`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `borderStyle`, `boxShadow`, `outlineColor`, `outlineWidth`, `outlineOffset`
+**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `clipPath`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `border`, `borderTop`, `borderRight`, `borderBottom`, `borderLeft`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `borderStyle`, `boxShadow`, `outlineColor`, `outlineWidth`, `outlineOffset`
+
+`clipPath` accepts `inset()` with one to four non-negative pixel, percentage,
+or unitless-zero insets. It clips painting and pointer hit testing without
+changing layout, focusability, or accessibility semantics. Other clip-path
+functions and the `round` extension are rejected rather than approximated.
 
 `touchAction` is accepted as a silent native no-op. Browsers use it to withhold
 built-in touch gestures, while GPUI has no corresponding gesture handling to
@@ -4023,9 +4028,11 @@ CSS would keep it hidden. A border still paints when only `borderWidth` and
 the way a stylesheet does. `border`, `borderTop`, `borderRight`,
 `borderBottom`, and `borderLeft` accept the CSS border shorthand grammar: a
 string of up to three whitespace-separated components — a width (`<n>px` or
-`0`), a `borderStyle` value, and a color — in any order, each optional.
-`border` sets `borderWidth`; the four per-side shorthands each set their own
-per-side width field. `borderWidth` itself additionally accepts a
+`0`), a `borderStyle` value, and a color — in any order, each optional. Each
+shorthand also accepts numeric `0` as a width-only reset. Other numeric
+shorthand values are rejected; use a string with a `px` unit for a non-zero
+width. `border` sets `borderWidth`; the four per-side shorthands each set their
+own per-side width field. `borderWidth` itself additionally accepts a
 whitespace-separated string of 1 to 4 widths, expanded CSS-style (1 value for
 all sides; 2 for top/bottom then left/right; 3 for top, left/right, bottom; 4
 for top, right, bottom, left) into the four per-side width fields; a
