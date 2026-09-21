@@ -36,7 +36,10 @@ const aliases = [
     aria-colspan={2}
     aria-disabled
     aria-hidden={false}
+    aria-controls="settings-panel"
+    hidden
   />,
+  <section hidden="until-found" ariaControls="panel-a panel-b" />,
   <img aria-label="Preview" aria-hidden />,
   <div role="row" aria-rowindex={2} />,
   <div role="consumer-web-only-role" />,
@@ -70,6 +73,8 @@ const aliasProps: Props = {
   "aria-colspan": 2,
   "aria-disabled": true,
   "aria-hidden": false,
+  "aria-controls": "settings-panel",
+  hidden: false,
 }
 const currentTokens: Props[] = [
   { ariaCurrent: "page" },

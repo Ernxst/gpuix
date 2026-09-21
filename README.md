@@ -2652,7 +2652,8 @@ equivalents:
 | `ariaReadOnly` | Operable but non-editable form-control state |
 | `ariaRequired` | Required-input state for form controls |
 | `ariaInvalid` | `true`, `false`, `"grammar"`, or `"spelling"` input-validity state |
-| `ariaExpanded`, `ariaSelected` | Boolean semantic states |
+| `ariaExpanded` | Boolean expanded state for buttons and links |
+| `ariaSelected` | Boolean selected state for `option` and `tab`; `true`, `false`, and omitted project as selected, not selected, and no selected state |
 | `ariaCurrent` | Global current-item state: `page`, `step`, `location`, `date`, `time`, `true`, or `false` |
 | `ariaLive` | `off`, `polite`, or `assertive` live-region politeness; announces text changes without moving focus |
 | `ariaAtomic` | Present the whole live region rather than only the part that changed |
@@ -2663,6 +2664,7 @@ equivalents:
 | `ariaDisabled` | Unavailable and non-activating, but retained in tab order |
 | `ariaHidden` | Excludes the element and its complete subtree from AccessKit |
 | `visuallyHidden` | Keeps the roled node and its name in AccessKit while painting nothing and reserving no layout space |
+| `ariaControls` | Space-separated `id`s of the elements this one controls; retained for `getAttribute` and `toHaveAttribute`, not projected, since AccessKit has no field for it |
 
 `ariaLabelledBy` and `ariaDescribedBy` take space-separated author `id`s and are
 resolved against the retained tree each time it is built, so the name follows
@@ -2869,7 +2871,7 @@ Role/state combinations are validated rather than silently approximated:
 | `img` | accessible name and description |
 | `link` | `ariaExpanded`; Activate uses `onClick` |
 | `meter`, `progressbar` | value text/range; read-only, so no Increment or Decrement action; omit `ariaValueNow` on `progressbar` for indeterminate progress |
-| `option` | `ariaSelected` |
+| `option`, `tab` | `ariaSelected` |
 | `slider`, `spinbutton` | value text/range; Increment and Decrement use `onAccessibilityAction` |
 | `separator`, `tablist`, `toolbar` | `ariaOrientation` (`"horizontal"` or `"vertical"`) |
 | `switch` | boolean `ariaChecked` only; `"mixed"` is computed as `false` with a normalization diagnostic; Activate uses `onClick` |
@@ -3938,6 +3940,18 @@ element stays visible.
 with a diagnostic because hiding the element removes the hit-test box that
 triggers the state. `getAllText` and accessible-name flattening read the
 declared display only.
+
+The HTML `hidden` prop is the user-agent rule `[hidden] { display: none }`: a
+`hidden` element behaves exactly as `display: "none"` above, and `hidden={false}`
+or removing the prop restores it. As in a browser, the author's own `display`
+wins, so `<div hidden style={{ display: "flex" }}>` stays displayed. `"until-found"`
+hides the element the same way; nothing searches for it, so it stays hidden until
+the prop changes. `getAttribute("hidden")` answers `""` or `"until-found"`.
+
+```tsx
+<button aria-controls="details" aria-expanded={open} onClick={toggle}>Details</button>
+<div id="details" hidden={!open}>…</div>
+```
 
 `gridTemplateColumns` and `gridTemplateRows` accept a typed CSS Grid track list.
 Each entry is an object with a `type`: `px`, `percent`, `fr`, `auto`,

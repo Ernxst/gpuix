@@ -1039,7 +1039,7 @@ export interface AccessibilityProps {
   ariaAtomic?: Booleanish
   /** DOM-compatible alias for ariaAtomic. */
   "aria-atomic"?: Booleanish
-  /** Selected state for selectable semantic nodes. */
+  /** Selected state for `option` and `tab` nodes. */
   ariaSelected?: Booleanish
   /** DOM-compatible alias for ariaSelected. */
   "aria-selected"?: Booleanish
@@ -1097,6 +1097,14 @@ export interface AccessibilityProps {
   ariaHidden?: Booleanish
   /** DOM-compatible alias for ariaHidden. */
   "aria-hidden"?: Booleanish
+  /**
+   * Space-separated `id`s of the elements this one controls, such as a tab's
+   * panel. Retained for `getAttribute` and attribute matchers; AccessKit has
+   * no field for the relationship, so it is not projected.
+   */
+  ariaControls?: string
+  /** DOM-compatible alias for ariaControls. */
+  "aria-controls"?: string
   /** Keep this semantic node accessible without painting or reserving layout space. */
   visuallyHidden?: VisuallyHidden
   /** Value or focus action requested by assistive technology. Activate uses onClick. */
@@ -1118,6 +1126,12 @@ export interface Props extends AccessibilityProps {
 
   /** Author-defined identity preserved for shared DOM/native JSX and native diagnostics. */
   id?: string
+  /**
+   * HTML `hidden`: `display: "none"` for this element unless its own style sets
+   * `display`, as the user-agent rule is outranked by author styles.
+   * `"until-found"` hides the same way; no find-in-page search reveals it.
+   */
+  hidden?: boolean | "until-found"
   /** Inert author metadata preserved for automation and event host handles. */
   [key: `data-${string}`]: string | number | boolean | undefined
 

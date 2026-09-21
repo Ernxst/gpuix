@@ -310,7 +310,7 @@ impl AccessibilityRole {
                     | Role::TreeGrid
             ),
             "ariaExpanded" => matches!(self.role, Role::Button | Role::Link),
-            "ariaSelected" => matches!(self.role, Role::ListBoxOption),
+            "ariaSelected" => matches!(self.role, Role::ListBoxOption | Role::Tab),
             "ariaValueText" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
                 matches!(
                     self.role,
@@ -2242,6 +2242,14 @@ mod tests {
         link.custom_props.insert("ariaSelected".into(), true.into());
         let link_problem = &element_problems(&detached_tree(), &link)[0];
         assert_eq!(link_problem.problem.property, "ariaSelected");
+
+        for selected in [true, false] {
+            let mut tab = RetainedElement::new(12, "div".to_string(), 1);
+            tab.custom_props.insert("role".into(), "tab".into());
+            tab.custom_props
+                .insert("ariaSelected".into(), selected.into());
+            assert!(element_problems(&detached_tree(), &tab).is_empty());
+        }
 
         let mut malformed_current = RetainedElement::new(11, "div".to_string(), 1);
         malformed_current
