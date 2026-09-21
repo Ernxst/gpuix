@@ -22,6 +22,7 @@ import type {
 } from "../reconciler/synthetic-event.js"
 import type { AccessibilityRole } from "../index.js"
 import type { GPUCanvasContext } from "../canvas/webgpu.js"
+import type { GpuixDispatchableEvent } from "../pointer-event.js"
 
 /**
  * CSS-compatible lengths accepted by the native layout parser. The grammar is
@@ -1864,6 +1865,17 @@ export interface PublicInstance {
    * control, a submit button submits. A disabled form control ignores it.
    */
   click(): void
+  /**
+   * Dispatches a JS-created event at this element, matching
+   * `EventTarget.dispatchEvent()`. A `PointerEvent` of type `click`,
+   * `pointerdown`, `pointerup`, `pointermove`, `pointercancel`,
+   * `pointerenter`, or `pointerleave` runs the matching handlers with the
+   * event's own `bubbles`, `cancelable`, modifier, button, and pointer
+   * members; a click then runs its activation behaviour, as {@link click}
+   * does, unless a handler prevented it. Returns `false` when the event was
+   * canceled and `true` otherwise. Other event types reach no handler.
+   */
+  dispatchEvent(event: GpuixDispatchableEvent): boolean
   /**
    * Pixels this element's content is scrolled down, matching
    * `Element.scrollTop`: 0 at the top, growing positive as content scrolls up

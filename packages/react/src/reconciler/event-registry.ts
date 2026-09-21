@@ -26,6 +26,7 @@ import {
   restoreControlledChoices,
 } from "./form-controls.js"
 import { dispatchResizeObservation } from "../resize-observer.js"
+import type { GpuixDispatchableEvent } from "../pointer-event.js"
 
 /**
  * React's `flushSync`, installed by `reconciler.ts` once the reconciler exists.
@@ -84,6 +85,7 @@ const NON_BUBBLING_EVENTS = new Set(["focus", "blur", "scroll", "fileDrop", "loa
 // React delegates resource events: ancestors observe `onLoad` and `onError`
 // even though the DOM event's `bubbles` property remains false.
 const REACT_DELEGATED_NON_BUBBLING_EVENTS = new Set(["load", "error"])
+const HOVER_TRANSITION_EVENTS = new Set(["pointerEnter", "pointerLeave"])
 
 /**
  * The editor a change event came from, when there is one whose state React
@@ -171,14 +173,15 @@ function runChoiceClick(
   container: Container,
   target: Instance,
   payload: EventPayload,
-  renderer: NativeRenderer
+  renderer: NativeRenderer,
+  dispatched?: GpuixDispatchableEvent
 ): GpuixEventDispatchResult {
   const activation = beginChoiceActivation(container, target)
-  if (activation === undefined) return dispatchGpuixEvent(payload, renderer)
+  if (activation === undefined) return dispatchGpuixEvent(payload, renderer, dispatched)
 
   let result: GpuixEventDispatchResult = { defaultPrevented: false, propagationStopped: false }
   flushSync(() => {
-    result = dispatchGpuixEvent(payload, renderer)
+    result = dispatchGpuixEvent(payload, renderer, dispatched)
     if (activation.changed) {
       dispatchGpuixEvent(
         {
@@ -196,17 +199,21 @@ function runChoiceClick(
   return result
 }
 
-/** A click and the activation behaviour that follows it when it is not prevented. */
+/**
+ * A click and the activation behaviour that follows it when it is not
+ * prevented. `dispatched` is the event object behind a `dispatchEvent()` call.
+ */
 function runClick(
   container: Container,
   payload: EventPayload,
-  renderer: NativeRenderer
+  renderer: NativeRenderer,
+  dispatched?: GpuixDispatchableEvent
 ): GpuixEventDispatchResult {
   const target = container.eventTargets.get(payload.elementId)
   const result =
     target !== undefined && isChoiceInput(target)
-      ? runChoiceClick(container, target, payload, renderer)
-      : dispatchGpuixEvent(payload, renderer)
+      ? runChoiceClick(container, target, payload, renderer, dispatched)
+      : dispatchGpuixEvent(payload, renderer, dispatched)
   if (!result.defaultPrevented) runClickDefault(container, payload, renderer)
   return result
 }
@@ -313,6 +320,82 @@ export function clickElement(container: Container, instance: Instance): void {
     { elementId: instance.id, eventType: "click", clickCount: 0 } as EventPayload,
     container.native
   )
+}
+
+/** DOM pointer event types and the GPUIX event each one dispatches as. */
+const DISPATCHABLE_EVENT_TYPES: Readonly<Record<string, string>> = {
+  click: "click",
+  pointerdown: "pointerDown",
+  pointerup: "pointerUp",
+  pointermove: "pointerMove",
+  pointercancel: "pointerCancel",
+  pointerenter: "pointerEnter",
+  pointerleave: "pointerLeave",
+}
+
+/** Events inside a `dispatchEvent()` call, which the DOM refuses to re-dispatch. */
+const dispatchingEvents = new WeakSet<object>()
+
+/**
+ * `EventTarget.dispatchEvent()` for a JS-created pointer event: the matching
+ * handlers run through the usual capture, target, and bubble path, and a click
+ * then runs its activation behaviour unless a handler prevented it, as an
+ * untrusted click does in a browser. The return value is the DOM's: `false`
+ * when the event was canceled, `true` otherwise.
+ *
+ * Only the types in {@link DISPATCHABLE_EVENT_TYPES} reach handlers. Any
+ * other type has no GPUIX listener to run, as a browser element has none for
+ * a type nothing listens to.
+ */
+export function dispatchElementEvent(
+  container: Container,
+  instance: Instance,
+  event: GpuixDispatchableEvent
+): boolean {
+  if (typeof event !== "object" || event === null || typeof event.type !== "string") {
+    throw new TypeError(
+      "Failed to execute 'dispatchEvent': parameter 1 is not of type 'Event'."
+    )
+  }
+  if (dispatchingEvents.has(event)) {
+    throw new DOMException(
+      "Failed to execute 'dispatchEvent': The event is already being dispatched.",
+      "InvalidStateError"
+    )
+  }
+  const eventType = DISPATCHABLE_EVENT_TYPES[event.type]
+  if (eventType === undefined || container.eventTargets.get(instance.id) !== instance) {
+    return !event.defaultPrevented
+  }
+
+  const payload = {
+    elementId: instance.id,
+    eventType,
+    clickCount: event.detail ?? 0,
+    x: event.clientX ?? 0,
+    y: event.clientY ?? 0,
+    button: event.button ?? 0,
+    buttons: event.buttons ?? 0,
+    pointerId: event.pointerId ?? 0,
+    pointerType: event.pointerType ?? "",
+    isPrimary: event.isPrimary ?? false,
+    modifiers: {
+      alt: event.altKey === true,
+      ctrl: event.ctrlKey === true,
+      shift: event.shiftKey === true,
+      cmd: event.metaKey === true,
+    },
+  } as EventPayload
+  dispatchingEvents.add(event)
+  try {
+    const result =
+      eventType === "click"
+        ? runClick(container, payload, container.native, event)
+        : dispatchGpuixEvent(payload, container.native, event)
+    return !result.defaultPrevented
+  } finally {
+    dispatchingEvents.delete(event)
+  }
 }
 
 /**
@@ -648,7 +731,8 @@ export function handleGpuixEvent(
 
 function dispatchGpuixEvent(
   payload: EventPayload,
-  renderer: NativeRenderer
+  renderer: NativeRenderer,
+  dispatched?: GpuixDispatchableEvent
 ): GpuixEventDispatchResult {
   if (payload.eventType === "resizeObservation") {
     return dispatchResizeObservation(payload, renderer)
@@ -703,7 +787,7 @@ function dispatchGpuixEvent(
   }
 
   const path = TARGET_ONLY_EVENTS.has(payload.eventType) ? [target] : eventPath(container, target)
-  const controller = createGpuixSyntheticEvent(payload, target, renderer)
+  const controller = createGpuixSyntheticEvent(payload, target, renderer, null, dispatched)
   const { event } = controller
   let keyboardDispatchFinished = false
 
@@ -743,11 +827,12 @@ function dispatchGpuixEvent(
       invoke(target, payload.eventType, 2)
     }
 
-    if (
-      !event.isPropagationStopped() &&
-      (!NON_BUBBLING_EVENTS.has(payload.eventType) ||
-        REACT_DELEGATED_NON_BUBBLING_EVENTS.has(payload.eventType))
-    ) {
+    const bubbles = dispatched
+      ? // Enter and leave run on their target alone, as React's own do.
+        dispatched.bubbles && !HOVER_TRANSITION_EVENTS.has(payload.eventType)
+      : !NON_BUBBLING_EVENTS.has(payload.eventType) ||
+        REACT_DELEGATED_NON_BUBBLING_EVENTS.has(payload.eventType)
+    if (!event.isPropagationStopped() && bubbles) {
       for (let index = 1; index < path.length; index += 1) {
         invoke(path[index]!, payload.eventType, 3)
         if (event.isPropagationStopped()) break

@@ -336,6 +336,7 @@ export type {
   GpuixSyntheticEvent,
   GpuixWheelEvent,
 } from "./reconciler/synthetic-event.js"
+export type { GpuixDispatchableEvent, GpuixPointerEventInit } from "./pointer-event.js"
 export {
   applyMacCpuThrottleFromEnv,
   MAC_CPU_THROTTLES,

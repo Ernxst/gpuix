@@ -3,10 +3,10 @@
  *
  * `import "@gpuix/react/globals"` installs `requestAnimationFrame`,
  * `cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`,
- * `navigator.clipboard`, `navigator.gpu`, and the element constructors `Node`,
- * `Element`, `HTMLElement`, `HTMLDivElement`, `HTMLButtonElement`,
- * `HTMLInputElement`, and `HTMLTextAreaElement` — and nothing else, in
- * particular no `document`. Nobody is required to import
+ * `navigator.clipboard`, `navigator.gpu`, `PointerEvent`, and the element
+ * constructors `Node`, `Element`, `HTMLElement`, `HTMLDivElement`,
+ * `HTMLButtonElement`, `HTMLInputElement`, and `HTMLTextAreaElement` — and
+ * nothing else, in particular no `document`. Nobody is required to import
  * this: the root `@gpuix/react` entry installs no global, so a consumer who
  * never touches the DOM never gets one either.
  *
@@ -32,6 +32,7 @@ import {
   Node,
 } from "./element-constructors.js"
 import { Image } from "./canvas/image.js"
+import { PointerEvent } from "./pointer-event.js"
 import { installWebGpuGlobal } from "./canvas/webgpu.js"
 
 function defineGlobalIfAbsent(name: string, value: unknown): void {
@@ -56,6 +57,7 @@ defineGlobalIfAbsent("HTMLDivElement", HTMLDivElement)
 defineGlobalIfAbsent("HTMLButtonElement", HTMLButtonElement)
 defineGlobalIfAbsent("HTMLInputElement", HTMLInputElement)
 defineGlobalIfAbsent("HTMLTextAreaElement", HTMLTextAreaElement)
+defineGlobalIfAbsent("PointerEvent", PointerEvent)
 
 // `navigator.clipboard` needs its own path rather than `defineGlobalIfAbsent`:
 // Node has had a global `navigator` since v21, so the common case is not "no

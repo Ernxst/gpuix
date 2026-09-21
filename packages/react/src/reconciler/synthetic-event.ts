@@ -1,6 +1,7 @@
 import type { EventModifiers, EventPayload } from "@gpuix/native"
 import { createGpuixDataTransfer } from "./drop-files.js"
 import type { NativeRenderer, PublicInstance } from "../types/host.js"
+import type { GpuixDispatchableEvent } from "../pointer-event.js"
 
 export type GpuixEventPhase = 1 | 2 | 3
 
@@ -415,15 +416,22 @@ interface SyntheticEventController {
   isImmediatePropagationStopped(): boolean
 }
 
+/**
+ * `dispatched` is the JS-created event behind a `dispatchEvent()` call. Its
+ * `bubbles`, `cancelable`, and cancellation replace the ones this renderer
+ * derives for a native payload of the same type, and preventing the synthetic
+ * event prevents it too, so `dispatchEvent()` can report the cancellation.
+ */
 export function createGpuixSyntheticEvent(
   nativeEvent: EventPayload,
   target: PublicInstance,
   renderer: NativeRenderer,
-  relatedTarget: PublicInstance | null = null
+  relatedTarget: PublicInstance | null = null,
+  dispatched?: GpuixDispatchableEvent
 ): SyntheticEventController {
   let currentTarget = target
   let eventPhase: GpuixEventPhase = 2
-  let defaultPrevented = false
+  let defaultPrevented = dispatched?.defaultPrevented === true
   let propagationStopped = false
   let immediatePropagationStopped = false
 
@@ -443,6 +451,7 @@ export function createGpuixSyntheticEvent(
     nativeEvent.eventType === "dragOver" ||
     nativeEvent.eventType === "dragLeave" ||
     nativeEvent.eventType === "drop"
+  const cancelable = dispatched ? dispatched.cancelable : !isNonCancelableEvent
   const event = {
     ...nativeEvent,
     nativeEvent,
@@ -453,8 +462,8 @@ export function createGpuixSyntheticEvent(
           dataTransfer: createGpuixDataTransfer(nativeEvent, nativeEvent.eventType === "drop"),
         }
       : {}),
-    bubbles: !isNonBubblingEvent,
-    cancelable: !isNonCancelableEvent,
+    bubbles: dispatched ? dispatched.bubbles : !isNonBubblingEvent,
+    cancelable,
     altKey: modifiers?.alt ?? false,
     ctrlKey: modifiers?.ctrl ?? false,
     metaKey: modifiers?.cmd ?? false,
@@ -473,7 +482,9 @@ export function createGpuixSyntheticEvent(
     pageY: nativeEvent.y ?? 0,
     relatedTarget,
     preventDefault(): void {
-      if (!isNonCancelableEvent) defaultPrevented = true
+      if (!cancelable) return
+      defaultPrevented = true
+      dispatched?.preventDefault()
     },
     stopPropagation(): void {
       propagationStopped = true
