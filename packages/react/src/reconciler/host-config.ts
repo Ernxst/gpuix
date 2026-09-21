@@ -127,6 +127,18 @@ export function containerForPublicInstance(instance: PublicInstance): Container 
   return publicInstanceContainers.get(instance)
 }
 
+/**
+ * The authored host type of a GPUIX host element, or `null` for anything the
+ * reconciler did not create. The `@gpuix/react/globals` element constructors
+ * brand `instanceof` with this. It reads the shared registry, so constructors
+ * installed by an earlier module evaluation still recognise later refs.
+ */
+export function hostElementType(value: unknown): ElementType | null {
+  if (typeof value !== "object" || value === null) return null
+  if (!hostNodeStates.has(value as HostNode) || !("type" in value)) return null
+  return (value as Instance).type
+}
+
 function rendererFor(node: HostNode): MutationRenderer {
   return containerFor(node).renderer
 }
@@ -217,6 +229,14 @@ function markUnmounted(node: HostNode): void {
   const state = stateFor(node)
   state.mounted = false
   for (const child of state.children) markUnmounted(child)
+}
+
+// A removed subtree keeps its internal parent links in the DOM. Here every node
+// of an unmounted subtree reports no parent, so `parentElement` never names an
+// element that `contains()` would deny holds it.
+function parentElement(node: Instance): Instance | null {
+  const state = stateFor(node)
+  return state.mounted ? state.parent : null
 }
 
 function contains(self: HostNode, other: unknown): boolean {
@@ -1475,7 +1495,7 @@ export const hostConfig = {
       // reset at 0 instead of -0. Clamping stays native.
       rootContainerInstance.native.scrollTo?.(id, 0 - left, 0 - top)
     }
-    const instance: Instance = {
+    const instance = {
       id,
       type,
       props,
@@ -1613,7 +1633,14 @@ export const hostConfig = {
       hasAttribute(name): boolean {
         return instance.getAttribute(name) !== null
       },
-    }
+    } satisfies Omit<Instance, "parentElement"> as Instance
+    // Non-enumerable, like the prototype accessor it mirrors, so spreading or
+    // deep-comparing a ref does not walk up into its ancestors.
+    Object.defineProperty(instance, "parentElement", {
+      configurable: true,
+      enumerable: false,
+      get: (): Instance | null => parentElement(instance),
+    })
     if (type === "canvas") {
       const diagnosticTarget = {
         describeElement: () => describeCanvas(instance),

@@ -1747,6 +1747,15 @@ export interface PublicInstance {
   /** The authored host name in uppercase, matching `Node.nodeName` for elements. */
   readonly nodeName: string
   /**
+   * The host element that currently holds this one in the retained tree,
+   * matching `Node.parentElement`. Reads the live tree, so it follows appends,
+   * moves, and removals. `null` for a root, and for a node that is not mounted:
+   * one React has not committed yet, or one whose subtree was removed. The DOM
+   * keeps a removed subtree's internal parent links; here they read `null`, in
+   * line with {@link contains}.
+   */
+  readonly parentElement: PublicInstance | null
+  /**
    * Moves focus to this host element, matching `HTMLElement.focus()`, and
    * reveals it inside its scroll ancestors unless `preventScroll` is set.
    *
@@ -1820,10 +1829,9 @@ export interface PublicInstance {
    * `Node.compareDocumentPosition()`'s bitmask: `DOCUMENT_POSITION_PRECEDING`,
    * `_FOLLOWING`, `_CONTAINS`, `_CONTAINED_BY`, `_DISCONNECTED`, and
    * `_IMPLEMENTATION_SPECIFIC`, exported from `@gpuix/react`. Same node
-   * returns 0. There is no `Node` global on either GPUIX target — the browser
-   * mirror runs this same implementation on gpuix instances too, not real DOM
-   * nodes — so this method, not `instanceof Node`, is how a ref's tree
-   * position is compared here.
+   * returns 0. Refs are not real DOM nodes on either GPUIX target — the
+   * browser mirror runs this same implementation on gpuix instances too — so
+   * this method is how a ref's tree position is compared here.
    *
    * Two top-level siblings mounted directly into the same root are the one
    * pair this cannot place relative to each other: it reports them as
