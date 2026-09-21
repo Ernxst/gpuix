@@ -7,22 +7,18 @@ bun install
 bun run dev
 ```
 
-`dev` runs Vite under Bun. Component-only edits preserve React state. Route and
-other mixed-export modules remount the app on the same native window.
+`dev` runs `bun --hot app.tsx`. A save remounts React on the same window.
 
 ## Scripts
 
 | Script | What it does |
 |---|---|
-| `bun run dev` | Start the desktop app through Vite with Fast Refresh |
+| `bun run dev` | Start the desktop app with hot remount |
 | `bun run build` | Compile a standalone binary into `dist/todo` |
 | `bun run test` | Drive the app through the GPU test renderer with Vitest |
 | `bun run typecheck` | Run `tsc --noEmit` |
 | `bun run web:dev` | Bundle for the browser and serve on `:4173` |
 | `bun run screenshot` | Drive the app with the automation client and write a PNG |
-
-`dev` runs only Vite under Bun. The Vitest script keeps Node's Vite runtime for
-the automation suite.
 
 The browser renderer ships inside `@gpuix/native`, so `web:dev` needs no Rust.
 Inside the GPUIX repository `packages/native/wasm/` is gitignored; build it once
