@@ -988,6 +988,28 @@ export type AriaCurrent =
 /** How urgently a screen reader announces a change inside a live region. */
 export type AriaLive = "off" | "polite" | "assertive"
 
+/** The popup an element opens, as `aria-haspopup` spells it. */
+export type AriaHasPopup =
+  | Booleanish
+  | "menu"
+  | "listbox"
+  | "tree"
+  | "grid"
+  | "dialog"
+
+/** Which live-region changes are announced, in the combinations React DOM types. */
+export type AriaRelevant =
+  | "additions"
+  | "additions removals"
+  | "additions text"
+  | "all"
+  | "removals"
+  | "removals additions"
+  | "removals text"
+  | "text"
+  | "text additions"
+  | "text removals"
+
 /** AccessKit actions delivered through `onAccessibilityAction`. */
 export type AccessibilityAction = "increment" | "decrement" | "focus"
 
@@ -1120,6 +1142,29 @@ export interface AccessibilityProps {
   ariaControls?: string
   /** DOM-compatible alias for ariaControls. */
   "aria-controls"?: string
+  /**
+   * The kind of popup this element opens: `true` means `menu`, and `false`
+   * means none. Projected on the roles WAI-ARIA allows it on.
+   */
+  ariaHasPopup?: AriaHasPopup
+  /** DOM-compatible alias for ariaHasPopup. */
+  "aria-haspopup"?: AriaHasPopup
+  /**
+   * A localized description of this element's role, announced in place of the
+   * role's name, such as Base UI's `"Number field"`. Not projected on a
+   * generic node or when empty.
+   */
+  ariaRoleDescription?: string
+  /** DOM-compatible alias for ariaRoleDescription. */
+  "aria-roledescription"?: string
+  /**
+   * Which changes inside a live region are announced. Retained for
+   * `getAttribute` and attribute matchers; AccessKit has no field for it, so
+   * it is not projected and every change is announced.
+   */
+  ariaRelevant?: AriaRelevant
+  /** DOM-compatible alias for ariaRelevant. */
+  "aria-relevant"?: AriaRelevant
   /** Keep this semantic node accessible without painting or reserving layout space. */
   visuallyHidden?: VisuallyHidden
   /** Value or focus action requested by assistive technology. Activate uses onClick. */
@@ -1262,11 +1307,11 @@ export interface Props extends AccessibilityProps {
 
 /**
  * The `<input>` types this renderer implements. `checkbox` and `radio` are
- * choice controls, `hidden` renders nothing and only submits its value, and
- * every other type is a text editor, as an unknown type is a text input in
- * HTML.
+ * choice controls, `range` is a slider, `hidden` renders nothing and only
+ * submits its value, and every other type is a text editor, as an unknown type
+ * is a text input in HTML.
  */
-export type InputType = "checkbox" | "radio" | "hidden" | "text" | (string & {})
+export type InputType = "checkbox" | "radio" | "range" | "hidden" | "text" | (string & {})
 
 // Props for native text editor and choice elements.
 export interface InputProps extends Props {
@@ -1276,7 +1321,9 @@ export interface InputProps extends Props {
   /**
    * A text editor's external value; native edits apply immediately and report
    * through onChange. For a checkbox, radio, or hidden input, the value it
-   * submits with its `name` (`"on"` when a checked choice omits it).
+   * submits with its `name` (`"on"` when a checked choice omits it). For a
+   * range, its number, sanitized to {@link min}, {@link max} and {@link step}
+   * as HTML does.
    */
   value?: string
   /** Initial value for an uncontrolled editor. Later changes do not replace user edits. */
@@ -1304,6 +1351,12 @@ export interface InputProps extends Props {
   form?: string
   /** Submission is blocked while a required control has no value. */
   required?: boolean
+  /** A range's lowest value; 0 when omitted or unparsable. */
+  min?: number | string
+  /** A range's highest value; 100 when omitted or unparsable, and never below `min`. */
+  max?: number | string
+  /** A range's step, counted from `min`; 1 when omitted or not positive, and `"any"` for none. */
+  step?: number | string
 }
 
 export interface TextareaProps extends InputProps {
@@ -2104,6 +2157,12 @@ export interface InputPublicInstance extends PublicInstance {
   defaultChecked: boolean
   /** A checkbox's mixed state, matching `HTMLInputElement.indeterminate`. */
   indeterminate: boolean
+  /**
+   * A range's value as a number, matching `HTMLInputElement.valueAsNumber`.
+   * Assigning sanitizes it and fires no `onChange`. The other input types this
+   * renderer implements do not have it, and read `undefined`.
+   */
+  valueAsNumber: number | undefined
   /** The form that owns this control, or null. */
   readonly form: FormPublicInstance | null
   /** False while the control is invalid; see {@link validity}. */

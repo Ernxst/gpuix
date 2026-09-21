@@ -17,13 +17,17 @@ import {
   formOwner,
   isChoiceInput,
   isLabelable,
+  isRangeInput,
   isUnreachable,
   labeledControl,
   radioGroup,
   readChecked,
   requestSubmit,
+  rangeStepTarget,
   resetForm,
   restoreControlledChoices,
+  restoreControlledRange,
+  stepRange,
 } from "./form-controls.js"
 import { dispatchResizeObservation } from "../resize-observer.js"
 import { finishEventDispatch, type GpuixDispatchableEvent } from "../pointer-event.js"
@@ -315,6 +319,72 @@ function runRadioKeyDefault(
   const next = group[(index + step + group.length) % group.length]!
   renderer.focusElement?.(next.id)
   runClick(container, { elementId: next.id, eventType: "click", clickCount: 0 } as EventPayload, renderer)
+}
+
+const RANGE_KEY_ACTIONS: Readonly<
+  Record<string, "increment" | "decrement" | "home" | "end" | "pageUp" | "pageDown">
+> = {
+  up: "increment",
+  right: "increment",
+  down: "decrement",
+  left: "decrement",
+  pageup: "pageUp",
+  pagedown: "pageDown",
+  home: "home",
+  end: "end",
+}
+
+/**
+ * A range's value change from its keyboard or assistive-technology default:
+ * the value moves and `change` follows, which is the event React's `onChange`
+ * listens for on a range. Like a choice click, it runs under `flushSync` so a
+ * controlled range can be put back once React's answer has committed.
+ */
+function runRangeChange(
+  container: Container,
+  target: Instance,
+  value: number,
+  renderer: NativeRenderer
+): void {
+  flushSync(() => {
+    if (!stepRange(container, target, value)) return
+    dispatchGpuixEvent(
+      { elementId: target.id, eventType: "change", value: String(value) } as EventPayload,
+      renderer
+    )
+  })
+  restoreControlledRange(container, target)
+}
+
+/**
+ * Arrow keys step a range, Page Up and Page Down move it a tenth of the way,
+ * and Home and End jump to its ends. Up and Right increase it whatever its
+ * orientation or direction.
+ */
+function runRangeKeyDefault(
+  container: Container,
+  payload: EventPayload,
+  renderer: NativeRenderer
+): void {
+  if (payload.modifiers?.alt || payload.modifiers?.ctrl || payload.modifiers?.cmd) return
+  const action = RANGE_KEY_ACTIONS[payload.key?.toLowerCase() ?? ""]
+  if (action === undefined) return
+  const target = container.eventTargets.get(payload.elementId)
+  if (!target || !isRangeInput(target) || isNativelyDisabled(target)) return
+  runRangeChange(container, target, rangeStepTarget(target, action), renderer)
+}
+
+/** Assistive technology's increment and decrement actions step a range, as a key press would. */
+function runRangeAccessibilityAction(
+  container: Container,
+  payload: EventPayload,
+  renderer: NativeRenderer
+): void {
+  const action = payload.accessibilityAction
+  if (action !== "increment" && action !== "decrement") return
+  const target = container.eventTargets.get(payload.elementId)
+  if (!target || !isRangeInput(target) || isNativelyDisabled(target)) return
+  runRangeChange(container, target, rangeStepTarget(target, action), renderer)
 }
 
 /**
@@ -712,6 +782,10 @@ export function handleGpuixEvent(
 
     if (container && payload.eventType === "keyDown" && !result.defaultPrevented) {
       runRadioKeyDefault(container, payload, renderer)
+      runRangeKeyDefault(container, payload, renderer)
+    }
+    if (container && payload.eventType === "accessibilityAction" && !result.defaultPrevented) {
+      runRangeAccessibilityAction(container, payload, renderer)
     }
 
     if (container && payload.eventType === "dragOver") {

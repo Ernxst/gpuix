@@ -23,6 +23,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use web_time::Instant;
 
 use super::choice_input::{ChoiceInputElement, HiddenInputElement, InputKind};
+use super::range_input::RangeInputElement;
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use crate::renderer::{emit_event_full, EventCallback};
 use crate::theme::Theme;
@@ -353,6 +354,7 @@ impl CustomElementFactory for InputFactory {
             InputKind::Checkbox => "checkbox",
             InputKind::Radio => "radio",
             InputKind::Hidden => "hidden",
+            InputKind::Range => "range",
         }
     }
 
@@ -361,6 +363,7 @@ impl CustomElementFactory for InputFactory {
             "checkbox" => Box::new(ChoiceInputElement::new(InputKind::Checkbox)),
             "radio" => Box::new(ChoiceInputElement::new(InputKind::Radio)),
             "hidden" => Box::new(HiddenInputElement),
+            "range" => Box::new(RangeInputElement::new()),
             _ => self.create(id),
         }
     }

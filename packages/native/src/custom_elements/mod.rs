@@ -21,6 +21,7 @@ pub mod diff;
 pub mod img;
 pub mod input;
 pub mod markdown;
+pub mod range_input;
 
 // ── Render context ───────────────────────────────────────────────────
 

@@ -16,11 +16,11 @@ import type { Props } from "../types/host.js"
 export const TEXT_EDITING_TYPES: ReadonlySet<string> = new Set(["input", "textarea"])
 
 /** The `<input>` types that are not text editors: see `inputKind` in `form-controls.ts`. */
-const NON_TEXT_INPUT_TYPES: ReadonlySet<string> = new Set(["checkbox", "radio", "hidden"])
+const NON_TEXT_INPUT_TYPES: ReadonlySet<string> = new Set(["checkbox", "radio", "hidden", "range"])
 
 /**
  * Whether this host edits text: a `<textarea>`, or an `<input>` whose `type`
- * leaves it a text editor rather than a checkbox, radio, or hidden input.
+ * leaves it a text editor rather than a checkbox, radio, hidden, or range input.
  */
 export function isTextEditingInstance(instance: { type: string; props: Props }): boolean {
   if (!TEXT_EDITING_TYPES.has(instance.type)) return false

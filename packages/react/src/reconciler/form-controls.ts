@@ -1,5 +1,5 @@
 /**
- * Choice inputs, form ownership, reset, and submission.
+ * Choice and range inputs, form ownership, reset, and submission.
  *
  * An `<input type="checkbox">` or `<input type="radio">` has no text for Rust
  * to own, so its state lives here, in the shape HTML gives it: a checkedness,
@@ -10,13 +10,17 @@
  * `indeterminate` props. Rust reads those for painting, the accessibility
  * tree, and radio-group tab stops; the authored `checked`, `defaultChecked`
  * and `indeterminate` props never reach it.
+ *
+ * An `<input type="range">` is the same arrangement for a number: its
+ * sanitized value lives here and reaches Rust as the internal `value` prop,
+ * in place of the authored `value` and `defaultValue`.
  */
 
 import type { Container, Instance, Props } from "../types/host.js"
 import type { GpuixEventDispatchResult } from "./synthetic-event.js"
 import { dispatchSyntheticEvent } from "./event-registry.js"
 
-export type InputKind = "text" | "checkbox" | "radio" | "hidden"
+export type InputKind = "text" | "checkbox" | "radio" | "hidden" | "range"
 
 /**
  * The input kind an `<input>`'s `type` selects. Every type this renderer does
@@ -27,7 +31,12 @@ export function inputKind(props: Props): InputKind {
   const type = (props as Props & { type?: unknown }).type
   if (typeof type !== "string") return "text"
   const lowered = type.toLowerCase()
-  return lowered === "checkbox" || lowered === "radio" || lowered === "hidden" ? lowered : "text"
+  return lowered === "checkbox" ||
+    lowered === "radio" ||
+    lowered === "hidden" ||
+    lowered === "range"
+    ? lowered
+    : "text"
 }
 
 export function isChoiceInput(instance: Instance): boolean {
@@ -59,7 +68,7 @@ interface ChoiceState {
 }
 
 /** Writes one internal prop to the retained tree; false when there was nowhere to write it. */
-export type PropWriter = (id: number, key: string, value: boolean | null) => boolean
+export type PropWriter = (id: number, key: string, value: boolean | number | null) => boolean
 
 const choiceStates = new WeakMap<Instance, ChoiceState>()
 
@@ -249,6 +258,206 @@ export function writeIndeterminate(
 ): void {
   stateOf(instance).indeterminate = value
   syncChoice(instance, immediateWriter(container))
+}
+
+// ── Range state ──────────────────────────────────────────────────────
+
+export function isRangeInput(instance: Instance): boolean {
+  return instance.type === "input" && inputKind(instance.props) === "range"
+}
+
+interface RangeState {
+  value: number
+  /** HTML's dirty value flag: once set, the default no longer drives `value`. */
+  dirty: boolean
+  /** The value last written to the retained tree; `null` means removed. */
+  sentValue: number | null
+}
+
+const rangeStates = new WeakMap<Instance, RangeState>()
+
+function rangeStateOf(instance: Instance): RangeState {
+  let state = rangeStates.get(instance)
+  if (state === undefined) {
+    state = { value: 50, dirty: false, sentValue: null }
+    rangeStates.set(instance, state)
+  }
+  return state
+}
+
+/**
+ * HTML's rules for parsing floating-point number values, for a prop that may
+ * arrive as a number or a string. Rust's `range_number` must agree.
+ */
+function parseRangeNumber(value: unknown): number | undefined {
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined
+  if (typeof value !== "string" || value.trim() !== value || value === "") return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+/** A range's bounds and step: `min` 0 and `max` 100 by default, and `max` never below `min`. */
+export interface RangeBounds {
+  min: number
+  max: number
+  /** `null` for `step="any"`. */
+  step: number | null
+  /** The value steps count from: `min`, else the `value` attribute, else 0. */
+  stepBase: number
+}
+
+export function rangeBounds(props: Props): RangeBounds {
+  const { min: rawMin, max: rawMax, step: rawStep } = props as Props & {
+    min?: unknown
+    max?: unknown
+    step?: unknown
+  }
+  const authoredMin = parseRangeNumber(rawMin)
+  const min = authoredMin ?? 0
+  const max = Math.max(min, parseRangeNumber(rawMax) ?? 100)
+  const parsedStep = parseRangeNumber(rawStep)
+  const step =
+    typeof rawStep === "string" && rawStep.toLowerCase() === "any"
+      ? null
+      : parsedStep !== undefined && parsedStep > 0
+        ? parsedStep
+        : 1
+  const stepBase = authoredMin ?? parseRangeNumber(defaultRangeAttribute(props)) ?? 0
+  return { min, max, step, stepBase }
+}
+
+/**
+ * HTML's value sanitization algorithm for a range: an unparsable value becomes
+ * the midpoint, then the value is clamped and moved to the nearest step, ties
+ * rounding up, without leaving the range.
+ */
+export function sanitizeRangeValue(bounds: RangeBounds, value: unknown): number {
+  const { min, max, step, stepBase } = bounds
+  let number = parseRangeNumber(value) ?? min + (max - min) / 2
+  number = Math.min(max, Math.max(min, number))
+  // Remove the binary noise fractional arithmetic leaves, so `0.1 * 3` reads as 0.3.
+  if (step === null) return Number(number.toPrecision(15))
+  const snapped = stepBase + Math.round((number - stepBase) / step) * step
+  let result = snapped
+  if (result > max) result -= step
+  if (result < min) result += step
+  // A range narrower than one step has no step inside it: HTML keeps the
+  // clamped value.
+  if (result < min || result > max) return number
+  return Number(result.toPrecision(15))
+}
+
+/**
+ * The `value` content attribute, which is the range's default. ReactDOM keeps
+ * it in step with a controlled `value`, as it does for every input.
+ */
+function defaultRangeAttribute(props: Props): unknown {
+  const { value, defaultValue } = props as Props & { value?: unknown; defaultValue?: unknown }
+  return value ?? defaultValue
+}
+
+function syncRange(instance: Instance, write: PropWriter): void {
+  const state = rangeStateOf(instance)
+  if (!isRangeInput(instance)) {
+    // An input that stops being a range takes its authored `value` back; the
+    // custom-prop diff has already sent it, so only a missing one is cleared.
+    if (state.sentValue === null) return
+    const { value } = instance.props as Props & { value?: unknown }
+    if (value != null || write(instance.id, "value", null)) state.sentValue = null
+    return
+  }
+  if (state.sentValue !== state.value && write(instance.id, "value", state.value)) {
+    state.sentValue = state.value
+  }
+}
+
+function setRangeValue(instance: Instance, value: unknown, dirty: boolean, write: PropWriter): void {
+  const state = rangeStateOf(instance)
+  state.value = sanitizeRangeValue(rangeBounds(instance.props), value)
+  if (dirty) state.dirty = true
+  syncRange(instance, write)
+}
+
+/** ReactDOM's `initInput` for a range: the initial value is `value ?? defaultValue`. */
+export function mountRange(instance: Instance, write: PropWriter): void {
+  if (!isRangeInput(instance)) return
+  setRangeValue(instance, defaultRangeAttribute(instance.props), false, write)
+}
+
+/**
+ * ReactDOM's `updateInput` for a range. A controlled `value` is re-asserted on
+ * every commit; otherwise a clean range follows its default. Either way the
+ * value is sanitized again, since `min`, `max` and `step` may have moved.
+ */
+export function updateRange(instance: Instance, write: PropWriter): void {
+  if (!isRangeInput(instance)) {
+    syncRange(instance, write)
+    return
+  }
+  const state = rangeStateOf(instance)
+  const { value } = instance.props as Props & { value?: unknown }
+  if (value != null) setRangeValue(instance, value, true, write)
+  else if (!state.dirty) setRangeValue(instance, defaultRangeAttribute(instance.props), false, write)
+  else setRangeValue(instance, state.value, false, write)
+}
+
+export function readRangeValue(instance: Instance): number {
+  return rangeStateOf(instance).value
+}
+
+/** `HTMLInputElement.value = value` on a range: sanitized, sets the dirty flag, and fires nothing. */
+export function writeRangeValue(container: Container, instance: Instance, value: unknown): void {
+  setRangeValue(instance, value, true, immediateWriter(container))
+}
+
+/**
+ * The value a range's keyboard or assistive-technology default moves to.
+ * Arrow keys and increment and decrement move one step, or a hundredth of the
+ * range under `step="any"`; Page Up and Page Down a tenth of the range, and at
+ * least one step, as Chromium does; Home and End jump to the ends.
+ */
+export function rangeStepTarget(
+  instance: Instance,
+  action: "increment" | "decrement" | "home" | "end" | "pageUp" | "pageDown"
+): number {
+  const bounds = rangeBounds(instance.props)
+  const value = rangeStateOf(instance).value
+  const step = bounds.step ?? (bounds.max - bounds.min) / 100
+  const page = Math.max(step, (bounds.max - bounds.min) / 10)
+  switch (action) {
+    case "increment":
+      return sanitizeRangeValue(bounds, value + step)
+    case "decrement":
+      return sanitizeRangeValue(bounds, value - step)
+    case "pageUp":
+      return sanitizeRangeValue(bounds, value + page)
+    case "pageDown":
+      return sanitizeRangeValue(bounds, value - page)
+    case "home":
+      return sanitizeRangeValue(bounds, bounds.min)
+    case "end":
+      return sanitizeRangeValue(bounds, bounds.max)
+  }
+}
+
+/**
+ * A user-driven change: the value moves, marking the range dirty. Returns
+ * whether it changed, which is what fires `change`.
+ */
+export function stepRange(container: Container, instance: Instance, value: number): boolean {
+  if (value === rangeStateOf(instance).value) return false
+  setRangeValue(instance, value, true, immediateWriter(container))
+  return true
+}
+
+/**
+ * Put a controlled range back on its `value` prop after a change React did not
+ * accept, as ReactDOM's `restoreControlledState` does.
+ */
+export function restoreControlledRange(container: Container, instance: Instance): void {
+  const { value } = instance.props as Props & { value?: unknown }
+  if (value == null || !isRangeInput(instance)) return
+  setRangeValue(instance, value, true, immediateWriter(container))
 }
 
 // ── Activation ───────────────────────────────────────────────────────
@@ -504,6 +713,7 @@ export function formControls(container: Container, form: Instance): Instance[] {
 }
 
 function textValue(container: Container, instance: Instance): string {
+  if (isRangeInput(instance)) return String(rangeStateOf(instance).value)
   const native = container.native.getInputValue?.(instance.id)
   if (typeof native === "string") return native
   const props = instance.props as Props & { value?: unknown; defaultValue?: unknown }
@@ -516,8 +726,12 @@ function attributeValue(instance: Instance, fallback: string): string {
   return value == null ? fallback : String(value)
 }
 
-/** `HTMLInputElement.value` for the kinds whose value is the `value` attribute. */
+/**
+ * `HTMLInputElement.value` for the kinds the text editor does not own: a
+ * range's sanitized value, or else the `value` attribute.
+ */
 export function attributeInputValue(instance: Instance): string {
+  if (isRangeInput(instance)) return String(rangeStateOf(instance).value)
   return attributeValue(instance, inputKind(instance.props) === "hidden" ? "" : "on")
 }
 
@@ -558,6 +772,8 @@ export function valueMissing(container: Container, instance: Instance): boolean 
       const group = radioGroup(container, instance)
       return group.some(isRequired) && !group.some((member) => stateOf(member).checked)
     }
+    // `required` does not apply to a range, which always has a value.
+    if (kind === "range") return false
   }
   return isRequired(instance) && textValue(container, instance) === ""
 }
@@ -708,6 +924,11 @@ export function resetForm(container: Container, form: Instance): void {
         continue
       }
       if (kind === "hidden") continue
+      if (kind === "range") {
+        rangeStateOf(control).dirty = false
+        setRangeValue(control, defaultRangeAttribute(control.props), false, write)
+        continue
+      }
     }
     const props = control.props as Props & { value?: unknown; defaultValue?: unknown }
     const value = props.value ?? props.defaultValue

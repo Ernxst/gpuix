@@ -339,7 +339,7 @@ export interface GpuixScrollEvent extends GpuixEvent {
 /** An `<input>` or `<textarea>` edit, or a checkbox or radio changing state. */
 export interface GpuixChangeEvent extends GpuixEvent {
   readonly type: "change"
-  /** A text editor's new text. */
+  /** A text editor's new text, or a range's new value. */
   readonly value?: string
   /** A checkbox's or radio's new checkedness. */
   readonly checked?: boolean
