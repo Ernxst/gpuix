@@ -1763,6 +1763,10 @@ ref.current.scrollIntoView({ block: "nearest" })   // smallest revealing scroll
 ref.current.getBoundingClientRect()                // DOMRect-shaped measurement
 ref.current.getBounds()                            // the same box as {x, y, width, height}
 ref.current.matches(":focus")                     // :focus, :focus-visible, :hover, or :active
+ref.current.tagName                               // "DIV" (aliases keep their authored name)
+ref.current.localName                             // "div"
+ref.current.hasAttribute("data-state")           // agrees with getAttribute()
+ref.current.contains(otherRef.current)            // retained-tree containment
 
 // "Am I at the bottom?" — the standard DOM test
 const atBottom =
@@ -1793,6 +1797,12 @@ There is no `Node` global on either GPUIX target — the browser mirror runs
 this same implementation on gpuix instances too, not real DOM nodes — so this
 method, not `instanceof Node`, is how code shared with the web compares two
 refs' tree positions.
+
+Refs also expose `tagName`, `localName`, `nodeName`, `hasAttribute()`, and
+`contains()`. Identity uses the authored element name, so an `<article>` rendered
+through the native div adapter still reports `ARTICLE` / `article`. Containment
+includes the element itself and mounted descendants; foreign, detached, and
+unmounted instances return `false`.
 
 Only `overflow: "scroll"` / `"auto"` elements and `<virtual-list>` are scroll
 containers here. Everything else — **including `overflow: "hidden"`, which the web does
@@ -2219,7 +2229,32 @@ keeps the characters it accepted and rewinds the rest:
 ```
 
 Leave `value` off — or pass `undefined` — for an uncontrolled editor: the text
-is the editor's own, nothing rewinds it, and `onChange` is a notification.
+is the editor's own, nothing rewinds it, and `onChange` is a notification. Use
+`defaultValue` to seed that text once when the editor mounts:
+
+```tsx
+<input defaultValue="Ada" onChange={(event) => saveDraft(event.value ?? '')} />
+```
+
+Changing `defaultValue` after mount does not replace user edits. An actual
+unmount and remount applies the current default again. When both props are
+present, `value` wins and the editor remains controlled.
+
+Use an explicit `<label htmlFor>` association for a visible control name and a
+larger activation target. Clicking the label focuses and clicks an enabled
+`<input>` or `<textarea>`; it activates an enabled `<button>`. The label text is
+also the control's accessible name unless `ariaLabelledBy` or `ariaLabel` wins:
+
+```tsx
+<label htmlFor="email">Email address</label>
+<input id="email" />
+```
+
+Changing either `htmlFor` or the control's `id` takes effect on the next click.
+`preventDefault()` on the label click cancels association activation, and
+`disabled` / `ariaDisabled` controls receive neither focus nor a click. Implicit
+wrapping labels and form controls other than `input`, `textarea`, and `button`
+remain unsupported.
 
 The focused caret stays solid during edits and then blinks every 500ms while
 idle. It stops scheduling repaint frames on blur or while the window is
@@ -3534,6 +3569,7 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `markdown`      | GitHub-flavoured markdown                        |
 | `input`         | Native single-line text editor                   |
 | `textarea`      | Native multiline, auto-growing text editor       |
+| `label`         | Explicit `htmlFor` label for supported controls  |
 | `virtual-list`  | Long collections; only visible rows are built    |
 | `img`           | Raster or full-colour SVG images from paths, URLs, or bytes |
 | `svg`           | Tintable monochrome SVG icons from source or disk |

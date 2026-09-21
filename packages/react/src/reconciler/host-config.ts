@@ -30,6 +30,8 @@ import type { GpuixSyntheticEvent } from "./synthetic-event.js"
 import { TEXT_EDITING_TYPES } from "./text-editing.js"
 import {
   ARIA_PROP_ALIASES,
+  ATTRIBUTE_PROP_ALIASES,
+  AUTHORED_HOST_TYPE_PROP,
   AUTHORED_ROLE_PROP,
   isAuthorVisibleProp,
 } from "./aria-props.js"
@@ -209,6 +211,40 @@ function ancestorChain(node: HostNode): HostNode[] {
     current = stateFor(current).parent
   }
   return chain
+}
+
+function markUnmounted(node: HostNode): void {
+  const state = stateFor(node)
+  state.mounted = false
+  for (const child of state.children) markUnmounted(child)
+}
+
+function contains(self: HostNode, other: unknown): boolean {
+  if (!hostNodeStates.has(other as HostNode)) return false
+
+  let current: HostNode | null = other as HostNode
+  while (current !== null) {
+    const state = stateFor(current)
+    if (!state.mounted) return false
+    if (current === self) return stateFor(self).mounted
+    current = state.parent
+  }
+  return false
+}
+
+function attributeProp(props: Props, name: string): unknown {
+  const lowered = name.toLowerCase()
+  const alias = Object.hasOwn(ARIA_PROP_ALIASES, lowered)
+    ? ARIA_PROP_ALIASES[lowered as keyof typeof ARIA_PROP_ALIASES]
+    : Object.hasOwn(ATTRIBUTE_PROP_ALIASES, lowered)
+      ? ATTRIBUTE_PROP_ALIASES[lowered as keyof typeof ATTRIBUTE_PROP_ALIASES]
+      : undefined
+  if (alias !== undefined && Object.hasOwn(props, alias)) {
+    return (props as Props & Record<string, unknown>)[alias]
+  }
+
+  const key = Object.keys(props).find((candidate) => candidate.toLowerCase() === lowered)
+  return key === undefined ? undefined : (props as Props & Record<string, unknown>)[key]
 }
 
 // Disconnected roots need a stable pick between them. Element ids are not it:
@@ -398,6 +434,10 @@ function hasEventListener(props: Props, eventType: string): boolean {
   )
 }
 
+function hasNativeEventListener(type: ElementType, props: Props, eventType: string): boolean {
+  return hasEventListener(props, eventType) || (type === "label" && eventType === "click")
+}
+
 function hasAnyEventListener(props: Props): boolean {
   const eventProps = props as Record<string, unknown>
   return Object.keys(props).some(
@@ -405,7 +445,12 @@ function hasAnyEventListener(props: Props): boolean {
   )
 }
 
-function syncEventListeners(container: Container, id: number, props: Props): void {
+function syncEventListeners(
+  container: Container,
+  id: number,
+  type: ElementType,
+  props: Props
+): void {
   const eventProps = props as EventProps
   for (const [propName, eventType, phase, override] of EVENT_PROPS) {
     const handler = eventProps[propName]
@@ -424,7 +469,7 @@ function syncEventListeners(container: Container, id: number, props: Props): voi
     }
   }
   for (const eventType of NATIVE_EVENT_TYPES) {
-    if (hasEventListener(props, eventType)) {
+    if (hasNativeEventListener(type, props, eventType)) {
       container.renderer.setEventListener(id, eventType, true)
     }
   }
@@ -433,6 +478,7 @@ function syncEventListeners(container: Container, id: number, props: Props): voi
 function diffEventListeners(
   container: Container,
   id: number,
+  type: ElementType,
   oldProps: Props,
   newProps: Props
 ): void {
@@ -456,8 +502,8 @@ function diffEventListeners(
   }
 
   for (const eventType of NATIVE_EVENT_TYPES) {
-    const hadListener = hasEventListener(oldProps, eventType)
-    const hasListener = hasEventListener(newProps, eventType)
+    const hadListener = hasNativeEventListener(type, oldProps, eventType)
+    const hasListener = hasNativeEventListener(type, newProps, eventType)
     if (hadListener !== hasListener) {
       container.renderer.setEventListener(id, eventType, hasListener)
     }
@@ -524,6 +570,7 @@ const DIV_ALIASES = new Set([
   "time",
   "u",
   "var",
+  "label",
 ])
 
 // Built-in element types that don't use custom props.
@@ -825,6 +872,7 @@ function diagnoseUnsupportedStyleTransition(
 // Custom props are otherwise skipped for built-ins.
 const UNIVERSAL_PROPS = new Set([
   "activationKind",
+  AUTHORED_HOST_TYPE_PROP,
   "autoFocus",
   "tabIndex",
   "motion",
@@ -1190,6 +1238,7 @@ function customPropEntries(
   // that, so the authored role is retained beside it, and it is the one a query
   // for the `role` attribute answers with.
   if (typeof props.role === "string") entries.push([AUTHORED_ROLE_PROP, props.role])
+  if (type === "label" || type === "button") entries.push([AUTHORED_HOST_TYPE_PROP, type])
   const headingLevel = nativeHeadingLevel(type, props)
   if (headingLevel !== undefined) entries.push(["ariaLevel", headingLevel])
   const imageLabel = nativeImageLabel(type, props)
@@ -1278,7 +1327,8 @@ function installTextEditingMembers(
     const native = container.native
     const value = native.getInputValue ? native.getInputValue(id) : null
     if (typeof value === "string") return value
-    const prop = (instance.props as Props & { value?: unknown }).value
+    const editorProps = instance.props as Props & { value?: unknown; defaultValue?: unknown }
+    const prop = editorProps.value ?? editorProps.defaultValue
     return typeof prop === "string" ? prop : ""
   }
   const readSelection = (): readonly number[] => {
@@ -1361,7 +1411,7 @@ function materialize(node: HostNode): HostNodeState {
     validateVirtualListRowContract(node, state)
     renderer.createElement(node.id, DIV_ALIASES.has(node.type) ? "div" : node.type)
     sendStyle(state.container, node)
-    syncEventListeners(state.container, node.id, node.props)
+    syncEventListeners(state.container, node.id, node.type, node.props)
     syncCustomProps(renderer, node, node.props)
   } else {
     // Native hit testing reports the deepest painted retained node. A raw React
@@ -1542,16 +1592,26 @@ export const hostConfig = {
         reportStyleDiagnostics(rootContainerInstance.native)
       },
       parentId: null,
+      tagName: type.toUpperCase(),
+      localName: type,
+      nodeName: type.toUpperCase(),
       compareDocumentPosition(other: PublicInstance): number {
         return compareDocumentPosition(instance, other as unknown as HostNode)
       },
+      contains(other: PublicInstance | null): boolean {
+        return contains(instance, other)
+      },
       getAttribute(name): string | null {
-        const value = (instance.props as Props & Record<string, unknown>)[name]
+        const value = attributeProp(instance.props, name)
         if (value == null || typeof value === "function") return null
-        if (name === "id" || name.startsWith("data-")) return String(value)
+        const lowered = name.toLowerCase()
+        if (lowered.startsWith("aria-") || lowered.startsWith("data-")) return String(value)
         if (value === false) return null
         if (value === true) return ""
         return typeof value === "string" || typeof value === "number" ? String(value) : null
+      },
+      hasAttribute(name): boolean {
+        return instance.getAttribute(name) !== null
       },
     }
     if (type === "canvas") {
@@ -1619,6 +1679,7 @@ export const hostConfig = {
   removeChild(parent: Instance, child: Instance | TextInstance): void {
     const parentState = stateFor(parent)
     removeTrackedChild(parentState, child)
+    markUnmounted(child)
     scheduleVirtualListValidation(parent, parentState)
     const destroyed = parentState.container.renderer.destroyElement(child.id)
     for (const id of destroyed) {
@@ -1661,6 +1722,7 @@ export const hostConfig = {
       parent.rootElementId = null
       parent.rootElementType = null
     }
+    markUnmounted(child)
     const destroyed = parent.renderer.destroyElement(child.id)
     for (const id of destroyed) {
       unregisterEventHandlers(parent.eventHandlers, id)
@@ -1774,7 +1836,7 @@ export const hostConfig = {
     // bugs from same-reference mutations or style removal.
     container.renderer.setStyle(instance.id, styleForRenderer(instance, container, newProps) ?? {})
     if (hasAnyEventListener(oldProps) || hasAnyEventListener(newProps)) {
-      diffEventListeners(container, instance.id, oldProps, newProps)
+      diffEventListeners(container, instance.id, instance.type, oldProps, newProps)
     }
     // Custom prop diff (for non-div/text elements)
     instance.props = newProps
@@ -1885,6 +1947,7 @@ export const hostConfig = {
     disposeRecordingContext2D(instance)
     disposeWebGpuContext(instance)
     const container = containerFor(instance)
+    markUnmounted(instance)
     const destroyed = container.renderer.destroyElement(instance.id)
     for (const id of destroyed) {
       unregisterEventHandlers(container.eventHandlers, id)

@@ -99,6 +99,9 @@ export const HTML_ATTRIBUTE_PROPS = new Set([
  */
 export const AUTHORED_ROLE_PROP = "authoredRole"
 
+/** Internal identity for an authored alias whose native retained type is `div`. */
+export const AUTHORED_HOST_TYPE_PROP = "authoredHostType"
+
 /** Props the retained tree keeps for the author, whatever the element type. */
 export function isAuthorVisibleProp(name: string): boolean {
   return (

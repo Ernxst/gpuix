@@ -780,6 +780,7 @@ export type ElementType =
   | "time"
   | "u"
   | "var"
+  | "label"
   | "img"
   | "svg"
   | "canvas"
@@ -1221,6 +1222,8 @@ export interface InputProps extends Props {
   ref?: React.Ref<InputPublicInstance>
   /** External editor value. Native edits apply immediately and report through onChange. */
   value?: string
+  /** Initial value for an uncontrolled editor. Later changes do not replace user edits. */
+  defaultValue?: string
   placeholder?: string
   readOnly?: boolean
   theme?: GpuixTheme
@@ -1229,6 +1232,10 @@ export interface InputProps extends Props {
 export interface TextareaProps extends InputProps {
   minRows?: number
   maxRows?: number
+}
+
+export interface LabelProps extends Props {
+  htmlFor?: string
 }
 
 /** A variable-height list that builds only rows near its viewport. */
@@ -1731,6 +1738,12 @@ export interface PublicInstance {
   id: number
   type: ElementType
   props: Props
+  /** The authored host name in uppercase, matching `Element.tagName`. */
+  readonly tagName: string
+  /** The authored host name in lowercase, matching `Element.localName`. */
+  readonly localName: string
+  /** The authored host name in uppercase, matching `Node.nodeName` for elements. */
+  readonly nodeName: string
   /**
    * Moves focus to this host element, matching `HTMLElement.focus()`, and
    * reveals it inside its scroll ancestors unless `preventScroll` is set.
@@ -1797,6 +1810,9 @@ export interface PublicInstance {
   scrollIntoView(options?: boolean | ScrollIntoViewOptions): void
   parentId: number | null
   getAttribute(name: string): string | null
+  hasAttribute(name: string): boolean
+  /** Whether this mounted element is or contains `other` in the retained tree. */
+  contains(other: PublicInstance | null): boolean
   /**
    * Where `other` sits relative to this node, matching
    * `Node.compareDocumentPosition()`'s bitmask: `DOCUMENT_POSITION_PRECEDING`,
