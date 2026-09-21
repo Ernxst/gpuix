@@ -42,6 +42,7 @@ export const ARIA_PROP_ALIASES = {
   "aria-colspan": "ariaColSpan",
   "aria-disabled": "ariaDisabled",
   "aria-hidden": "ariaHidden",
+  "aria-controls": "ariaControls",
 } as const
 
 /** DOM attribute names whose prop spelling differs outside the ARIA table. */
@@ -79,6 +80,7 @@ export function isIdentityProp(name: string): boolean {
 export const HTML_ATTRIBUTE_PROPS = new Set([
   "alt",
   "download",
+  "hidden",
   "href",
   "htmlFor",
   "name",
@@ -102,9 +104,22 @@ export const AUTHORED_ROLE_PROP = "authoredRole"
 /** Internal identity for an authored alias whose native retained type is `div`. */
 export const AUTHORED_HOST_TYPE_PROP = "authoredHostType"
 
+/**
+ * ARIA attributes kept for the author with no accessibility projection.
+ *
+ * `aria-controls` names a DOM relationship that AccessKit has no field for, so
+ * the retained tree records it for `getAttribute` and the attribute matchers
+ * and the native side never reads it. The same rule as `HTML_ATTRIBUTE_PROPS`
+ * applies: a name belongs here only while no Rust code interprets it.
+ */
+export const RETAINED_ARIA_PROPS = new Set(["ariaControls"])
+
 /** Props the retained tree keeps for the author, whatever the element type. */
 export function isAuthorVisibleProp(name: string): boolean {
   return (
-    isIdentityProp(name) || HTML_ATTRIBUTE_PROPS.has(name) || name === AUTHORED_ROLE_PROP
+    isIdentityProp(name) ||
+    HTML_ATTRIBUTE_PROPS.has(name) ||
+    RETAINED_ARIA_PROPS.has(name) ||
+    name === AUTHORED_ROLE_PROP
   )
 }

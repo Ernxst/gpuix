@@ -79,6 +79,26 @@ describe("host config hideInstance", () => {
     hostConfig.unhideInstance(instance, props)
     expect(renderer.styles.at(-1)).toEqual(props.style)
   })
+
+  it("keeps a hidden element display none through a Suspense hide and reveal", () => {
+    const props: Props = { hidden: true, style: { width: 80, height: 40 } }
+    const { instance, renderer } = createRecordingInstance("div", props)
+
+    hostConfig.hideInstance(instance)
+    expect(renderer.styles.at(-1)).toEqual({
+      width: 80,
+      height: 40,
+      display: "none",
+      visibility: "hidden",
+    })
+
+    hostConfig.unhideInstance(instance, props)
+    expect(renderer.styles.at(-1)).toEqual({ width: 80, height: 40, display: "none" })
+
+    const shown: Props = { hidden: false, style: { width: 80, height: 40 } }
+    hostConfig.commitUpdate(instance, "div", props, shown, null)
+    expect(renderer.styles.at(-1)).toEqual({ width: 80, height: 40 })
+  })
 })
 
 describe("host config event listener updates", () => {

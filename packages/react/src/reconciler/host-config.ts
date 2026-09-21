@@ -718,10 +718,33 @@ function isPlainStyleObject(style: unknown): style is StyleDesc {
 }
 
 /**
+ * The `hidden` attribute as React DOM writes it: a boolean attribute, present
+ * for any truthy value that is not a function or symbol.
+ */
+function hiddenAttribute(value: unknown): true | undefined {
+  if (!value || typeof value === "function" || typeof value === "symbol") return undefined
+  return true
+}
+
+/**
+ * Apply the user-agent rule `[hidden] { display: none }` beneath the author's
+ * style. Author styles outrank the user-agent stylesheet in a browser, so an
+ * element whose own style sets `display` stays displayed there and here.
+ */
+function withHiddenDisplay(style: StyleDesc | undefined, props: Props): StyleDesc | undefined {
+  if (hiddenAttribute(props.hidden) === undefined || style?.display !== undefined) return style
+  return { ...style, display: "none" }
+}
+
+/**
  * Keep malformed whole-prop inputs out of the native JSON path. Field-level
  * validation remains native because it can report the specific style property.
  */
 function styleForRenderer(instance: Instance, container: Container, props: Props): StyleDesc | undefined {
+  return withHiddenDisplay(authoredStyle(instance, container, props), props)
+}
+
+function authoredStyle(instance: Instance, container: Container, props: Props): StyleDesc | undefined {
   const { style } = props
   if (style == null || isPlainStyleObject(style)) return style
 
@@ -1234,6 +1257,7 @@ function customPropEntries(
   const propEntries = Object.entries(props) as Array<[string, CustomPropInput]>
   const entries = propEntries.flatMap(([key, value]): Array<[string, CustomPropInput]> => {
     if (key === "activationKind" || key === "role" || key === "tabIndex") return []
+    if (key === "hidden") return [[key, hiddenAttribute(value)]]
     const alias = ARIA_PROP_ALIASES[key as keyof typeof ARIA_PROP_ALIASES]
     if (alias === undefined) return [[key, value]]
     if (Object.prototype.hasOwnProperty.call(props, alias)) return []
@@ -1614,9 +1638,10 @@ export const hostConfig = {
         return contains(instance, other)
       },
       getAttribute(name): string | null {
-        const value = attributeProp(instance.props, name)
-        if (value == null || typeof value === "function") return null
         const lowered = name.toLowerCase()
+        const authored = attributeProp(instance.props, name)
+        const value = lowered === "hidden" ? hiddenAttribute(authored) : authored
+        if (value == null || typeof value === "function") return null
         if (lowered.startsWith("aria-") || lowered.startsWith("data-")) return String(value)
         if (value === false) return null
         if (value === true) return ""
@@ -1900,12 +1925,13 @@ export const hostConfig = {
     // Hover and active go, because a hidden element must stay hidden. A hover
     // style that sets `visibility` would otherwise paint an element React
     // asked to hide.
-    const { hover: _hover, active: _active, ...base } = instance.props.style ?? {}
+    const { hover: _hover, active: _active, ...base } =
+      withHiddenDisplay(instance.props.style, instance.props) ?? {}
     rendererFor(instance).setStyle(instance.id, { ...base, visibility: "hidden" })
   },
 
   unhideInstance(instance: Instance, props: Props): void {
-    rendererFor(instance).setStyle(instance.id, props.style ?? {})
+    rendererFor(instance).setStyle(instance.id, withHiddenDisplay(props.style, props) ?? {})
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},
