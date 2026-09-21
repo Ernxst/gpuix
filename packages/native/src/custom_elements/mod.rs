@@ -200,11 +200,18 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
 ) -> E {
     let id = ctx.id;
     let tracks_mouse_down = ctx.events.contains("mouseDown");
-    let tracks_pointer_down = ctx.events.contains("pointerDown");
-    let tracks_pointer_cancel = ctx.events.contains("pointerCancel");
+    // Custom elements receive only the events declared on themselves in
+    // `ctx.events`, but React dispatches pointer events through the retained
+    // ancestor path. Install the native source when an ancestor owns one of
+    // these handlers so a custom-element hit remains the React target.
+    let tracks_pointer_down =
+        crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerDown");
+    let tracks_pointer_cancel =
+        crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerCancel");
     let tracks_context_menu = ctx.events.contains("contextMenu");
     let tracks_mouse_up = ctx.events.contains("mouseUp");
-    let tracks_pointer_up = ctx.events.contains("pointerUp");
+    let tracks_pointer_up =
+        crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerUp");
     // `doubleClick` and `contextMenu` are synthesized in React from the click
     // and mouse-down payloads, so they ride those listeners rather than owning
     // one. The flag keeps an element that declares both `click` and
