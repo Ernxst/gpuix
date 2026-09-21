@@ -6,6 +6,7 @@ import {
   isValidElement,
   useCallback,
   useContext,
+  useEffect,
   useId,
   useLayoutEffect,
   useMemo,
@@ -13,8 +14,6 @@ import {
   useState,
 } from "react"
 import type { ReactElement, ReactNode } from "react"
-import { flushSync } from "../reconciler/reconciler.js"
-
 export type ComponentKey = string | number
 
 export interface PresenceContextValue {
@@ -83,36 +82,54 @@ function PresenceChild({
   initial: false | undefined
   onExitComplete?: () => void
 }) {
-  const presenceChildren = useRef(new Map<string, boolean>()).current
+  const presenceChildren = useRef(
+    new Map<string, PresenceContextValue["onExitComplete"] | null>()
+  ).current
   const id = useId()
+  const isPresentRef = useRef(isPresent)
   const onExitCompleteRef = useRef(onExitComplete)
-  onExitCompleteRef.current = onExitComplete
+
+  useLayoutEffect(() => {
+    isPresentRef.current = isPresent
+    onExitCompleteRef.current = onExitComplete
+  }, [isPresent, onExitComplete])
 
   const register = useCallback((childId: string) => {
-    presenceChildren.set(childId, false)
+    presenceChildren.set(childId, null)
     return () => {
       presenceChildren.delete(childId)
+      queueMicrotask(() => {
+        if (!isPresentRef.current && presenceChildren.size === 0) {
+          onExitCompleteRef.current?.()
+        }
+      })
     }
   }, [presenceChildren])
+
+  const completeCycle = useMemo(() => {
+    const complete: PresenceContextValue["onExitComplete"] = (childId) => {
+      if (!presenceChildren.has(childId)) return
+      presenceChildren.set(childId, complete)
+      for (const completedBy of presenceChildren.values()) {
+        if (completedBy !== complete) return
+      }
+      onExitCompleteRef.current?.()
+    }
+    return complete
+  }, [isPresent, presenceChildren])
 
   const context = useMemo(
     (): PresenceContextValue => ({
       id,
       initial,
       isPresent,
-      onExitComplete: (childId) => {
-        presenceChildren.set(childId, true)
-        for (const isComplete of presenceChildren.values()) {
-          if (!isComplete) return
-        }
-        onExitCompleteRef.current?.()
-      },
+      onExitComplete: completeCycle,
       register,
     }),
-    [id, initial, isPresent, presenceChildren, register]
+    [completeCycle, id, initial, isPresent, register]
   )
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!isPresent && presenceChildren.size === 0) onExitCompleteRef.current?.()
   }, [isPresent, presenceChildren])
 
@@ -125,46 +142,45 @@ export function AnimatePresence({
   onExitComplete,
 }: AnimatePresenceProps): ReactElement {
   const presentChildren = useMemo(() => onlyElements(children), [children])
-  const presentKeys = presentChildren.map(getChildKey)
+  const presentKeys = new Set(presentChildren.map(getChildKey))
   const isInitialRender = useRef(true)
-  const pendingPresentChildren = useRef(presentChildren)
   const exitComplete = useRef(new Map<ComponentKey, boolean>()).current
   const [renderedChildren, setRenderedChildren] = useState(presentChildren)
 
   useLayoutEffect(() => {
     isInitialRender.current = false
-    pendingPresentChildren.current = presentChildren
     for (const child of renderedChildren) {
       const key = getChildKey(child)
-      if (!presentKeys.includes(key)) {
+      if (!presentKeys.has(key)) {
         if (exitComplete.get(key) !== true) exitComplete.set(key, false)
       } else {
         exitComplete.delete(key)
       }
     }
-  }, [exitComplete, presentChildren, presentKeys, renderedChildren])
+  }, [exitComplete, presentChildren, renderedChildren])
 
   const nextChildren = [...presentChildren]
   for (let i = 0; i < renderedChildren.length; i++) {
     const child = renderedChildren[i]
     const key = getChildKey(child)
-    if (!presentKeys.includes(key)) nextChildren.splice(i, 0, child)
+    if (!presentKeys.has(key)) nextChildren.splice(i, 0, child)
   }
 
-  const nextKeyList = nextChildren.map(getChildKey).join("\0")
-  const renderedKeyList = renderedChildren.map(getChildKey).join("\0")
   useLayoutEffect(() => {
-    if (nextKeyList !== renderedKeyList) {
-      setRenderedChildren(onlyElements(nextChildren))
+    if (
+      nextChildren.length !== renderedChildren.length ||
+      nextChildren.some((child, index) => child !== renderedChildren[index])
+    ) {
+      setRenderedChildren(nextChildren)
     }
-  }, [nextKeyList, renderedKeyList])
+  }, [nextChildren, renderedChildren])
 
   return createElement(
     Fragment,
     null,
     ...nextChildren.map((child) => {
       const key = getChildKey(child)
-      const isPresent = presentKeys.includes(key)
+      const isPresent = presentKeys.has(key)
       const onExit = () => {
         if (exitComplete.get(key) === true) return
         exitComplete.set(key, true)
@@ -173,9 +189,7 @@ export function AnimatePresence({
           if (!isExitComplete) isEveryExitComplete = false
         })
         if (!isEveryExitComplete) return
-        flushSync(() => {
-          setRenderedChildren(pendingPresentChildren.current)
-        })
+        setRenderedChildren(presentChildren)
         onExitComplete?.()
       }
       return createElement(PresenceChild, {

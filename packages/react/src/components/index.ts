@@ -1,9 +1,25 @@
 // GPUIX component definitions and native motion wrappers.
 
-import { createElement, forwardRef, useContext, useLayoutEffect } from "react"
+import { createElement, forwardRef, useContext, useEffect, useMemo } from "react"
 import type { ReactElement, ReactNode } from "react"
 import type { MotionProps, Props, PublicInstance, StyleDesc } from "../types/host.js"
 import { PresenceContext, usePresence } from "./animate-presence.js"
+
+let nextMotionGeneration = 0
+
+function motionStyleKey(style: MotionProps["animate"] | false | undefined) {
+  if (!style) return style
+  return [
+    style.width,
+    style.height,
+    style.opacity,
+    style.top,
+    style.right,
+    style.bottom,
+    style.left,
+    style.borderRadius,
+  ]
+}
 
 export {
   AnimatePresence,
@@ -59,21 +75,35 @@ const MotionDiv = forwardRef<PublicInstance, MotionDivProps>(function MotionDiv(
   const resolvedInitial = presence?.initial === false ? false : initial
   const resolvedAnimate = !isPresent && exit ? exit : animate
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!isPresent && !exit) safeToRemove?.()
   }, [exit, isPresent, safeToRemove])
 
+  const motionKey = JSON.stringify([
+    isPresent,
+    motionStyleKey(resolvedInitial),
+    motionStyleKey(resolvedAnimate),
+    transition?.duration,
+    transition?.delay,
+    transition?.ease,
+  ])
+  const generation = useMemo(() => ++nextMotionGeneration, [motionKey])
+
+  const motionDescription = {
+    generation,
+    isExit: !isPresent && exit !== undefined,
+    initial: resolvedInitial,
+    animate: resolvedAnimate,
+    transition,
+  }
   const hostProps: Props = {
     ...props,
     ref,
-    motion: {
-      initial: resolvedInitial,
-      animate: resolvedAnimate,
-      transition,
-    },
+    motion: motionDescription,
   }
   if (!isPresent || onMotionComplete) {
     hostProps.onMotionComplete = (event) => {
+      if (event.motionGeneration !== generation) return
       onMotionComplete?.(event)
       if (!isPresent) safeToRemove?.()
     }
