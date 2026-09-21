@@ -1511,8 +1511,8 @@ impl CanvasElement {
             }
         }
 
-        if (ctx.events.contains("mouseDown") && ctx.events.contains("mouseMove"))
-            || (ctx.events.contains("pointerDown") && ctx.events.contains("pointerMove"))
+        if (tracks_mouse_down && tracks_mouse_move)
+            || (tracks_pointer_down && tracks_pointer_move)
         {
             element = element.capture_pointer();
         }
