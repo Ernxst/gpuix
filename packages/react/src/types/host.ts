@@ -669,6 +669,8 @@ export interface StyleDesc {
   overflow?: Overflow
   overflowX?: Overflow
   overflowY?: Overflow
+  /** CSS `clip-path`, limited to `inset()` with non-negative px, %, or zero insets. */
+  clipPath?: string
 
   cursor?: CursorValue
   /** `"auto"` blocks hits behind this element **and its wheel**. `"none"` never

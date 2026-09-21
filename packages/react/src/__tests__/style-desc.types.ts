@@ -57,6 +57,9 @@ const invalidNumericBorderShorthand: StyleDesc = {
 }
 void invalidNumericBorderShorthand
 
+const insetClipPath = { clipPath: "inset(50%)" } satisfies StyleDesc
+void insetClipPath
+
 const intrinsicAndViewportLengths = {
   width: "max-content",
   minWidth: "min-content",
