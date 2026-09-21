@@ -1,0 +1,72 @@
+import { transformSync, type PluginItem } from "@babel/core"
+import { createRequire } from "node:module"
+
+const require = createRequire(import.meta.url)
+const reactRefreshBabel = require("react-refresh/babel") as PluginItem
+
+export const reactRefreshRuntimePath = require.resolve("react-refresh/runtime")
+
+const REFRESH_RUNTIME = "react-refresh/runtime"
+const REACT_SOURCE = /\.[cm]?[jt]sx?$/
+
+/**
+ * Add React Refresh registration and boundary handling to a source module.
+ *
+ * The Babel plugin recognises component definitions. A module without one is
+ * left for Vite to propagate normally, so edits to ordinary utilities still
+ * reach their importing component.
+ */
+export function transformReactRefresh(code: string, id: string) {
+  if (!REACT_SOURCE.test(id) || id.includes("/node_modules/")) return undefined
+
+  const result = transformSync(code, {
+    babelrc: false,
+    configFile: false,
+    filename: id,
+    parserOpts: { plugins: ["jsx", "typescript"] },
+    plugins: [[reactRefreshBabel, { skipEnvCheck: true }]],
+    sourceMaps: true,
+  })
+
+  const transformed = result?.code
+  if (transformed === null || transformed === undefined || !transformed.includes("$RefreshReg$(")) {
+    return undefined
+  }
+
+  return {
+    code: `import * as RefreshRuntime from ${JSON.stringify(REFRESH_RUNTIME)}
+
+if (!globalThis.$RefreshReg$) {
+  throw new Error("[gpuix] React Refresh was not initialised before the native entry")
+}
+
+const prevRefreshReg = globalThis.$RefreshReg$
+const prevRefreshSig = globalThis.$RefreshSig$
+globalThis.$RefreshReg$ = (type, name) => RefreshRuntime.register(type, ${JSON.stringify(id)} + " " + name)
+globalThis.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform
+
+${transformed}
+
+globalThis.$RefreshReg$ = prevRefreshReg
+globalThis.$RefreshSig$ = prevRefreshSig
+
+if (import.meta.hot) {
+  import.meta.hot.accept((nextExports) => {
+    if (!nextExports) return
+
+    for (const [name, value] of Object.entries(nextExports)) {
+      if (!RefreshRuntime.isLikelyComponentType(value)) {
+        import.meta.hot.invalidate(
+          "[gpuix] Fast Refresh only preserves state for modules that export React components.",
+        )
+        return
+      }
+    }
+
+    RefreshRuntime.performReactRefresh()
+  })
+}
+`,
+    map: result?.map ?? null,
+  }
+}

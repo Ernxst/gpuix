@@ -248,6 +248,14 @@ jobs:
         run: bun run build
         working-directory: packages/react
 
+      - name: Build Vite package
+        run: bun run build
+        working-directory: packages/vite
+
+      - name: Test Vite package
+        run: bun run test
+        working-directory: packages/vite
+
       - name: Run example tests
         run: bun run test
         working-directory: examples

@@ -561,7 +561,7 @@ const isEntryPoint =
     ? Bun.isStandaloneExecutable || Bun.main === import.meta.path
     : typeof window !== 'undefined'
 
-if (isEntryPoint) {
+if (isEntryPoint || import.meta.hot !== undefined) {
   render(<TodoApp />, {
     title: 'Todo',
     width: 940,

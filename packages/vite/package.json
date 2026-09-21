@@ -1,0 +1,45 @@
+{
+  "name": "@gpuix/vite",
+  "version": "0.19.0-fork.1",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ernxst/gpuix.git"
+  },
+  "scripts": {
+    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/vite locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
+    "build": "tsc",
+    "prepack": "bun run build",
+    "test": "bun test src/spike.test.ts",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@gpuix/react": "0.19.0-fork.1",
+    "vite": "^8.2.1"
+  },
+  "dependencies": {
+    "@babel/core": "^7.29.0",
+    "react-refresh": "^0.18.0"
+  },
+  "devDependencies": {
+    "@gpuix/react": "workspace:*",
+    "@types/babel__core": "^7.20.5",
+    "react": "^19.2.4",
+    "vite": "^8.2.1"
+  }
+}
