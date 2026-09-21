@@ -18,6 +18,7 @@ Use Bun and the checked-in lockfile. In a new checkout, install with `bun instal
 - React tests: `bun run test` in `packages/react`; target the affected tests when appropriate.
 - Native build: `bun run build:native` from the repository root. This produces the release binary with `test-support`. Restart the app after rebuilding; hot reload cannot replace a loaded native binary.
 - Browser build: `bun run web:wasm` from the repository root.
+- Target directory: don't set `CARGO_TARGET_DIR` or pass `--target-dir`, including for one-off review builds. Cargo runs through mbx, which already gives each checkout its own target directory and deletes it when unused; a custom target directory bypasses mbx and is never cleaned up.
 
 Verify the target changed: TypeScript checks do not compile Rust, and native checks do not validate the browser renderer. Consult the relevant package scripts or CI job for additional checks required by the change.
 
