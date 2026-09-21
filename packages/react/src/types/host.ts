@@ -1129,9 +1129,8 @@ export interface Props extends AccessibilityProps {
   /**
    * HTML `hidden`: `display: "none"` for this element unless its own style sets
    * `display`, as the user-agent rule is outranked by author styles.
-   * `"until-found"` hides the same way; no find-in-page search reveals it.
    */
-  hidden?: boolean | "until-found"
+  hidden?: boolean
   /** Inert author metadata preserved for automation and event host handles. */
   [key: `data-${string}`]: string | number | boolean | undefined
 

@@ -39,7 +39,7 @@ const aliases = [
     aria-controls="settings-panel"
     hidden
   />,
-  <section hidden="until-found" ariaControls="panel-a panel-b" />,
+  <section hidden={false} ariaControls="panel-a panel-b" />,
   <img aria-label="Preview" aria-hidden />,
   <div role="row" aria-rowindex={2} />,
   <div role="consumer-web-only-role" />,

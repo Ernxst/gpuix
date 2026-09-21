@@ -706,11 +706,10 @@ function isPlainStyleObject(style: unknown): style is StyleDesc {
 }
 
 /**
- * The `hidden` attribute as React DOM writes it: `"until-found"` verbatim,
- * any other truthy value as a present boolean attribute, and nothing otherwise.
+ * The `hidden` attribute as React DOM writes it: a boolean attribute, present
+ * for any truthy value that is not a function or symbol.
  */
-function hiddenAttribute(value: unknown): true | "until-found" | undefined {
-  if (value === "until-found") return value
+function hiddenAttribute(value: unknown): true | undefined {
   if (!value || typeof value === "function" || typeof value === "symbol") return undefined
   return true
 }
@@ -719,7 +718,6 @@ function hiddenAttribute(value: unknown): true | "until-found" | undefined {
  * Apply the user-agent rule `[hidden] { display: none }` beneath the author's
  * style. Author styles outrank the user-agent stylesheet in a browser, so an
  * element whose own style sets `display` stays displayed there and here.
- * `"until-found"` is treated as plain `hidden`: nothing here searches for it.
  */
 function withHiddenDisplay(style: StyleDesc | undefined, props: Props): StyleDesc | undefined {
   if (hiddenAttribute(props.hidden) === undefined || style?.display !== undefined) return style

@@ -161,10 +161,10 @@ describeNative("hidden", () => {
 
   it("answers getAttribute and toHaveAttribute as the DOM does", () => {
     const ref = React.createRef<PublicInstance>()
-    let setHidden: ((hidden: boolean | "until-found") => void) | undefined
+    let setHidden: ((hidden: boolean) => void) | undefined
 
     function Panel() {
-      const [hidden, update] = useState<boolean | "until-found">(true)
+      const [hidden, update] = useState(true)
       setHidden = update
       return <section ref={ref} data-testid="panel" hidden={hidden} />
     }
@@ -174,10 +174,6 @@ describeNative("hidden", () => {
     expect(ref.current!.getAttribute("hidden")).toBe("")
     expect(panel).toHaveAttribute("hidden", "")
 
-    flushSync(() => setHidden!("until-found"))
-    testRoot.renderer.flush()
-    expect(ref.current!.getAttribute("hidden")).toBe("until-found")
-    expect(testRoot.getByTestId("panel")).toHaveAttribute("hidden", "until-found")
     expect(testRoot.renderer.getElementBounds(panel.id)).toEqual(ZERO)
 
     flushSync(() => setHidden!(false))

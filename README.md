@@ -3944,9 +3944,8 @@ declared display only.
 The HTML `hidden` prop is the user-agent rule `[hidden] { display: none }`: a
 `hidden` element behaves exactly as `display: "none"` above, and `hidden={false}`
 or removing the prop restores it. As in a browser, the author's own `display`
-wins, so `<div hidden style={{ display: "flex" }}>` stays displayed. `"until-found"`
-hides the element the same way; nothing searches for it, so it stays hidden until
-the prop changes. `getAttribute("hidden")` answers `""` or `"until-found"`.
+wins, so `<div hidden style={{ display: "flex" }}>` stays displayed.
+`getAttribute("hidden")` answers `""`, as it does under React DOM.
 
 ```tsx
 <button aria-controls="details" aria-expanded={open} onClick={toggle}>Details</button>
