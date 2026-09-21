@@ -121,8 +121,8 @@ fn form_owner(tree: &RetainedTree, element: &RetainedElement) -> Option<u64> {
     None
 }
 
-/// The enabled, named radios of the tree, grouped by form owner and name, each
-/// group in tree order.
+/// The enabled, named radios of the tree that can take focus, grouped by form
+/// owner and name, each group in tree order.
 #[derive(Debug, Default)]
 pub(crate) struct RadioGroups {
     groups: Vec<Vec<(u64, bool)>>,
@@ -130,7 +130,10 @@ pub(crate) struct RadioGroups {
 }
 
 impl RadioGroups {
-    pub(crate) fn collect(tree: &RetainedTree) -> Self {
+    /// `unreachable` reports a radio that cannot take focus even though it is
+    /// enabled — one under `display: none` or `ariaHidden`. Leaving it out keeps
+    /// a group's tab stop on a radio that can actually be focused.
+    pub(crate) fn collect(tree: &RetainedTree, unreachable: impl Fn(u64) -> bool) -> Self {
         let mut result = Self::default();
         let Some(root) = tree.root_id else {
             return result;
@@ -144,6 +147,7 @@ impl RadioGroups {
             stack.extend(element.children.iter().rev().copied());
             if InputKind::of(element) != InputKind::Radio
                 || crate::accessibility::is_native_disabled(element)
+                || unreachable(id)
             {
                 continue;
             }
@@ -517,7 +521,7 @@ mod tests {
         let (a, b, c) = (radio("size", false), radio("size", true), radio("size", false));
         let (d, e) = (radio("tone", false), radio("tone", false));
         let tree = tree_with(&[(2, &a), (3, &b), (4, &c), (5, &d), (6, &e)]);
-        let groups = RadioGroups::collect(&tree);
+        let groups = RadioGroups::collect(&tree, |_| false);
         assert_eq!(groups.tab_skips(), HashSet::from([2, 4, 6]));
         assert_eq!(groups.members(5).map(<[_]>::len), Some(2));
     }
@@ -537,8 +541,27 @@ mod tests {
             ),
             (5, &[("type", "radio".into()), ("name", "size".into())]),
         ]);
-        let groups = RadioGroups::collect(&tree);
+        let groups = RadioGroups::collect(&tree, |_| false);
         assert!(groups.tab_skips().is_empty());
         assert!(groups.members(5).is_none());
+    }
+
+    #[test]
+    fn an_unreachable_radio_is_never_the_tab_stop() {
+        let radio = |checked: bool| -> Vec<(&'static str, serde_json::Value)> {
+            vec![
+                ("type", "radio".into()),
+                ("name", "size".into()),
+                ("checked", checked.into()),
+            ]
+        };
+        // The first member would be the stop, and the checked one would win,
+        // but both are hidden.
+        let (a, b, c, d) = (radio(false), radio(true), radio(false), radio(false));
+        let tree = tree_with(&[(2, &a), (3, &b), (4, &c), (5, &d)]);
+        let groups = RadioGroups::collect(&tree, |id| id == 2 || id == 3);
+        assert_eq!(groups.tab_skips(), HashSet::from([5]));
+        assert_eq!(groups.members(4).map(<[_]>::len), Some(2));
+        assert!(groups.members(2).is_none());
     }
 }

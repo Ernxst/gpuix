@@ -8,7 +8,7 @@ import {
   type TestElement,
   type TestRoot,
 } from "../testing.js"
-import type { GpuixSubmitEvent } from "../reconciler/synthetic-event.js"
+import type { GpuixChangeEvent, GpuixSubmitEvent } from "../reconciler/synthetic-event.js"
 import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
 import type { FormPublicInstance, InputPublicInstance } from "../types/host.js"
 
@@ -117,8 +117,13 @@ describeNative("native checkbox inputs", () => {
     expect(checkbox).not.toBeChecked()
   })
 
-  it("puts the state back when the click is prevented", async () => {
-    const change = vi.fn()
+  it("puts the state back when the click is prevented, after onChange as in ReactDOM", async () => {
+    const changes: Array<{ checked?: boolean; prevented?: boolean }> = []
+    const change = (event: GpuixChangeEvent) =>
+      changes.push({
+        checked: event.checked,
+        prevented: (event.nativeEvent as { defaultPrevented?: boolean }).defaultPrevented,
+      })
     let seen: boolean | undefined
     const ref = React.createRef<InputPublicInstance>()
     screen.render(
@@ -140,7 +145,29 @@ describeNative("native checkbox inputs", () => {
     // The click handler already sees the new state, as in HTML.
     expect(seen).toBe(true)
     expect(checkbox).not.toBeChecked()
-    expect(change).not.toHaveBeenCalled()
+    // ReactDOM still delivers onChange with the flipped state; the change
+    // event's native event says the click was prevented.
+    expect(changes).toEqual([{ checked: true, prevented: true }])
+  })
+
+  it("lets a controlled checkbox accept a change from a prevented click", async () => {
+    function Controlled() {
+      const [checked, setChecked] = useState(false)
+      return (
+        <input
+          type="checkbox"
+          ariaLabel="Accepts anyway"
+          checked={checked}
+          onClick={(event) => event.preventDefault()}
+          onChange={(event) => setChecked(event.checked === true)}
+          style={BOX}
+        />
+      )
+    }
+    screen.render(<Controlled />)
+    const checkbox = screen.getByRole("checkbox", { name: "Accepts anyway" })
+    await screen.userEvent.click(checkbox)
+    expect(checkbox).toBeChecked()
   })
 
   it("shows a mixed state until activation clears it", async () => {
@@ -423,6 +450,44 @@ describeNative("native radio inputs", () => {
     await screen.userEvent.keyboard(radio("plan d"), "left")
     expect(radio("plan b")).toBeChecked()
     expect(changes).toEqual(["b", "d", "a", "d", "b"])
+  })
+
+  it("skips hidden radios with the arrow keys and Tab", async () => {
+    screen.render(
+      <div style={{ padding: 20, gap: 8 }}>
+        <div tabIndex={0} ariaLabel="start" style={{ width: 120, height: 24 }} />
+        <div style={{ flexDirection: "row", gap: 8 }}>
+          <input type="radio" name="vis" ariaLabel="gone" style={{ ...BOX, display: "none" }} />
+          <div hidden>
+            <input type="radio" name="vis" ariaLabel="collapsed" style={BOX} />
+          </div>
+          <div ariaHidden>
+            <input type="radio" name="vis" ariaLabel="silent" tabIndex={-1} style={BOX} />
+          </div>
+          <input type="radio" name="vis" ariaLabel="one" style={BOX} />
+          <input type="radio" name="vis" ariaLabel="two" style={BOX} />
+        </div>
+        <div tabIndex={0} ariaLabel="end" style={{ width: 120, height: 24 }} />
+      </div>
+    )
+    const active = () => screen.renderer.getActiveElement()
+    const byName = (name: string) => screen.getByLabelText(name)
+
+    // The first member in tree order is hidden, so the visible one is the stop.
+    screen.renderer.focusElement(byName("start").id)
+    await screen.userEvent.tab()
+    expect(active()).toBe(radio("one").id)
+    await screen.userEvent.tab()
+    expect(active()).toBe(byName("end").id)
+
+    await screen.userEvent.keyboard(radio("one"), "down")
+    expect(radio("two")).toBeChecked()
+    // Wrapping from the last visible member skips every hidden one.
+    await screen.userEvent.keyboard(radio("two"), "down")
+    expect(radio("one")).toBeChecked()
+    expect(active()).toBe(radio("one").id)
+    await screen.userEvent.keyboard(radio("one"), "up")
+    expect(radio("two")).toBeChecked()
   })
 
   it("checks a focused radio with Space", async () => {

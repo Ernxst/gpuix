@@ -9392,6 +9392,20 @@ impl GpuixView {
         self.scroll_current_focus_into_view(window, cx);
     }
 
+    /// Radio groups over the radios Tab can reach: not under `display: none`
+    /// or `ariaHidden`.
+    fn reachable_radio_groups(
+        &self,
+        window: &gpui::Window,
+    ) -> crate::custom_elements::choice_input::RadioGroups {
+        let tree_arc = self.tree.clone();
+        let tree = tree_arc.lock().unwrap();
+        crate::custom_elements::choice_input::RadioGroups::collect(&tree, |id| {
+            self.display_none_in_ancestry(&tree, id, window)
+                || accessibility_hidden_in_ancestry(&tree, id)
+        })
+    }
+
     fn focused_element_id(&self, window: &gpui::Window) -> Option<u64> {
         self.focus_handles
             .iter()
@@ -9410,9 +9424,7 @@ impl GpuixView {
         let Some(focused) = self.focused_element_id(window) else {
             return;
         };
-        let groups = crate::custom_elements::choice_input::RadioGroups::collect(
-            &self.tree.lock().unwrap(),
-        );
+        let groups = self.reachable_radio_groups(window);
         let Some(members) = groups.members(focused) else {
             return;
         };
@@ -9440,9 +9452,7 @@ impl GpuixView {
         let Some(focused) = self.focused_element_id(window) else {
             return;
         };
-        let groups = crate::custom_elements::choice_input::RadioGroups::collect(
-            &self.tree.lock().unwrap(),
-        );
+        let groups = self.reachable_radio_groups(window);
         let Some(members) = groups.members(focused) else {
             return;
         };
@@ -9721,8 +9731,11 @@ impl GpuixView {
         };
         // A radio group is one tab stop; its other members are reached with
         // the arrow keys.
-        let radio_tab_skips =
-            crate::custom_elements::choice_input::RadioGroups::collect(tree).tab_skips();
+        let radio_tab_skips = crate::custom_elements::choice_input::RadioGroups::collect(tree, |id| {
+            self.display_none_in_ancestry(tree, id, window)
+                || accessibility_hidden_in_ancestry(tree, id)
+        })
+        .tab_skips();
         let is_focus_anchor = |element: &crate::retained_tree::RetainedElement| {
             focused_id == Some(element.id)
                 && !sequential_tab_index(element).is_some_and(|index| index >= 0)

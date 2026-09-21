@@ -436,6 +436,31 @@ export function radioGroup(container: Container, instance: Instance): Instance[]
   return members.sort(documentOrder)
 }
 
+/**
+ * Whether the element or an ancestor is `display: none` — styled so, or
+ * `hidden` without an authored `display` — or `ariaHidden`. Such a radio stays
+ * in its group for checkedness but cannot take focus, so arrow keys skip it.
+ */
+export function isUnreachable(container: Container, instance: Instance): boolean {
+  const visited = new Set<number>()
+  let current: Instance | undefined = instance
+  while (current !== undefined && !visited.has(current.id)) {
+    const props = current.props as Props & { hidden?: unknown; "aria-hidden"?: unknown }
+    const display = props.style?.display
+    if (display === "none") return true
+    if (display === undefined && props.hidden && typeof props.hidden !== "function") return true
+    const ariaHidden = Object.prototype.hasOwnProperty.call(props, "ariaHidden")
+      ? props.ariaHidden
+      : props["aria-hidden"]
+    if (ariaHidden === true || (typeof ariaHidden === "string" && ariaHidden.toLowerCase() === "true")) {
+      return true
+    }
+    visited.add(current.id)
+    current = parentOf(container, current)
+  }
+  return false
+}
+
 /** The labelable controls: an `<input>` other than a hidden one, a `<textarea>`, a `<button>`. */
 export function isLabelable(instance: Instance): boolean {
   if (instance.type === "input") return inputKind(instance.props) !== "hidden"

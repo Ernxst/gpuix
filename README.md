@@ -2597,7 +2597,9 @@ state as `event.checked`:
 State follows HTML and React DOM:
 
 - The state flips before `onClick` runs, so the handler reads the new
-  `checked`; `preventDefault()` there puts it back and skips `onChange`.
+  `checked`. `preventDefault()` there puts the state back, but `onChange`
+  still fires with the flipped state first, as in React DOM; its
+  `event.nativeEvent.defaultPrevented` is `true` in that case.
 - A controlled control shows its `checked` prop again after every change, as
   React DOM's `restoreControlledState` does, so an `onChange` that sets no
   state leaves it as it was. A controlled `indeterminate` prop is restored the
@@ -2611,7 +2613,9 @@ Radios with the same non-empty `name` and the same form owner form a group,
 and checking one unchecks the rest. The group is one Tab stop: its checked
 radio, or with nothing checked its first radio going forward and its last going
 backward. Arrow keys check and focus the next or previous enabled radio,
-wrapping at either end, and Space checks the focused one. Enter does not
+wrapping at either end, and Space checks the focused one. A radio under
+`display: none`, `hidden`, or `ariaHidden` stays in its group but is never a
+Tab stop or an arrow-key target. Enter does not
 activate a checkbox or radio.
 
 `<input type="hidden">` renders nothing and cannot take focus; it only

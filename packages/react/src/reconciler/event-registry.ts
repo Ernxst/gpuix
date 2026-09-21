@@ -17,6 +17,7 @@ import {
   formOwner,
   isChoiceInput,
   isLabelable,
+  isUnreachable,
   labeledControl,
   radioGroup,
   readChecked,
@@ -155,8 +156,12 @@ function isNativelyDisabled(instance: Instance): boolean {
 
 /**
  * A click on a checkbox or radio: HTML's legacy-pre-activation flips the state
- * before the click is dispatched, a prevented click puts it back, and an
- * accepted one that changed the state fires `change`.
+ * before the click is dispatched, and a prevented click puts it back.
+ *
+ * `onChange` follows `onClick` whenever the state changed, prevented or not,
+ * as it does in ReactDOM, whose change plugin reads the flipped state before
+ * the browser reverts it. The change event's `nativeEvent.defaultPrevented`
+ * reports the prevention, which is what Base UI checks before accepting it.
  *
  * The dispatch runs under `flushSync` for the same reason a text edit's does:
  * restoring a controlled input has to tell a change React accepted from one it
@@ -174,18 +179,18 @@ function runChoiceClick(
   let result: GpuixEventDispatchResult = { defaultPrevented: false, propagationStopped: false }
   flushSync(() => {
     result = dispatchGpuixEvent(payload, renderer)
-    if (result.defaultPrevented) {
-      activation.cancel()
-    } else if (activation.changed) {
+    if (activation.changed) {
       dispatchGpuixEvent(
         {
           elementId: target.id,
           eventType: "change",
           checked: readChecked(target),
+          defaultPrevented: result.defaultPrevented,
         } as EventPayload,
         renderer
       )
     }
+    if (result.defaultPrevented) activation.cancel()
   })
   restoreControlledChoices(container, target)
   return result
@@ -285,7 +290,8 @@ function runRadioKeyDefault(
   const target = container.eventTargets.get(payload.elementId)
   if (!target || !isChoiceInput(target) || isNativelyDisabled(target)) return
   const group = radioGroup(container, target).filter(
-    (member) => member === target || !isNativelyDisabled(member)
+    (member) =>
+      member === target || (!isNativelyDisabled(member) && !isUnreachable(container, member))
   )
   if (group.length < 2) return
   const index = group.indexOf(target)
