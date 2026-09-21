@@ -37,17 +37,16 @@ const URL_FAILURE_RETRY_MAX: Duration = Duration::from_secs(30);
 pub(crate) struct ImageNetworkPolicy {
     allow_private: Arc<AtomicBool>,
     #[cfg(not(target_family = "wasm"))]
-    client: Arc<dyn gpui::http_client::HttpClient>,
+    client: Arc<OnceLock<Arc<dyn gpui::http_client::HttpClient>>>,
     request_timeout: Duration,
 }
 
 impl Default for ImageNetworkPolicy {
     fn default() -> Self {
-        let allow_private = Arc::new(AtomicBool::new(false));
         Self {
+            allow_private: Arc::new(AtomicBool::new(false)),
             #[cfg(not(target_family = "wasm"))]
-            client: restricted_image_http_client(allow_private.clone()),
-            allow_private,
+            client: Arc::new(OnceLock::new()),
             request_timeout: IMAGE_REQUEST_TIMEOUT,
         }
     }
@@ -69,7 +68,9 @@ impl ImageNetworkPolicy {
         #[cfg(not(target_family = "wasm"))]
         {
             let _ = fallback;
-            self.client.clone()
+            self.client
+                .get_or_init(|| restricted_image_http_client(self.allow_private.clone()))
+                .clone()
         }
         #[cfg(target_family = "wasm")]
         {
