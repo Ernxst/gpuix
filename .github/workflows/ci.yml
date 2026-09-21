@@ -168,6 +168,14 @@ jobs:
         shell: bash
         run: bun run build
 
+      - name: Build Vite package
+        run: bun run build
+        working-directory: packages/vite
+
+      - name: Test Vite package
+        run: bun run test
+        working-directory: packages/vite
+
       - name: Compile chat example
         working-directory: examples
         shell: bash
