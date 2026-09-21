@@ -28,7 +28,7 @@ import {
   unregisterEventHandlers,
 } from "./event-handlers.js"
 import type { GpuixSyntheticEvent } from "./synthetic-event.js"
-import { isTextEditingInstance, TEXT_EDITING_TYPES } from "./text-editing.js"
+import { editorPropText, isTextEditingInstance, TEXT_EDITING_TYPES } from "./text-editing.js"
 import { clickElement, dispatchElementEvent } from "./event-registry.js"
 import {
   attributeInputValue,
@@ -1350,6 +1350,9 @@ function nativeImageLabel(type: string, props: Props): string | undefined {
 const CHOICE_STATE_PROPS = new Set(["checked", "defaultChecked", "indeterminate"])
 const RANGE_STATE_PROPS = new Set(["value", "defaultValue"])
 
+/** Authored `<input>` and `<textarea>` props that carry the field's text. */
+const TEXT_VALUE_PROPS = new Set(["value", "defaultValue"])
+
 function customPropEntries(
   instance: Instance,
   props: Props
@@ -1364,6 +1367,11 @@ function customPropEntries(
     if (type === "input" && CHOICE_STATE_PROPS.has(key)) return []
     // So does a range's sanitized value, as the internal `value` prop.
     if (type === "input" && RANGE_STATE_PROPS.has(key) && inputKind(props) === "range") return []
+    // The native editor holds text, so it receives the text React DOM would
+    // put in the field: `value={5}` arrives as "5".
+    if (TEXT_EDITING_TYPES.has(type) && TEXT_VALUE_PROPS.has(key)) {
+      return [[key, editorPropText(value) ?? value]]
+    }
     const alias = ARIA_PROP_ALIASES[key as keyof typeof ARIA_PROP_ALIASES]
     if (alias === undefined) return [[key, value]]
     if (Object.prototype.hasOwnProperty.call(props, alias)) return []
@@ -1473,8 +1481,7 @@ function installTextEditingMembers(
     const value = native.getInputValue ? native.getInputValue(id) : null
     if (typeof value === "string") return value
     const editorProps = instance.props as Props & { value?: unknown; defaultValue?: unknown }
-    const prop = editorProps.value ?? editorProps.defaultValue
-    return typeof prop === "string" ? prop : ""
+    return editorPropText(editorProps.value ?? editorProps.defaultValue) ?? ""
   }
   const readSelection = (): readonly number[] => {
     const native = container.native

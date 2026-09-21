@@ -1324,10 +1324,13 @@ export interface InputProps extends Props {
    * submits with its `name` (`"on"` when a checked choice omits it). For a
    * range, its number, sanitized to {@link min}, {@link max} and {@link step}
    * as HTML does.
+   *
+   * A text editor stringifies a number or array as React DOM does:
+   * `value={5}` is the text `"5"`.
    */
-  value?: string
+  value?: string | number | readonly string[]
   /** Initial value for an uncontrolled editor. Later changes do not replace user edits. */
-  defaultValue?: string
+  defaultValue?: string | number | readonly string[]
   placeholder?: string
   /** Makes a text editor read-only. HTML ignores it on checkboxes and radios, and so does this renderer. */
   readOnly?: boolean

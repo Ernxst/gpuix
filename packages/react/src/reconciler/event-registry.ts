@@ -10,7 +10,7 @@ import {
   type GpuixEventDispatchResult,
   type GpuixSyntheticEvent,
 } from "./synthetic-event.js"
-import { isTextEditingInstance } from "./text-editing.js"
+import { editorPropText, isTextEditingInstance } from "./text-editing.js"
 import {
   beginChoiceActivation,
   buttonType,
@@ -140,13 +140,11 @@ function restoreControlledEditor(
   // The editor may have unmounted, or its id been reused, during the dispatch.
   const container = eventRegistrySlot().containersByRenderer.get(renderer)
   if (container?.eventTargets.get(payload.elementId) !== target) return
-  const declared = (target.props as { value?: unknown }).value
   // `value == null` is React's own test for an uncontrolled field: no prop owns
   // the text, so there is nothing to restore it to. This is what keeps typing
   // and imperative `ref.value` writes on an uncontrolled input.
-  if (declared === null || declared === undefined) return
-  const value = String(declared)
-  if (value === payload.value) return
+  const value = editorPropText((target.props as { value?: unknown }).value)
+  if (value === undefined || value === payload.value) return
   renderer.setInputValue?.(payload.elementId, value)
 }
 
