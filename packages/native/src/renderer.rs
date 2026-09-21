@@ -3080,7 +3080,6 @@ impl GpuixRenderer {
         // bun/node is not a .app. A Dock icon with no window cannot relaunch.
         // Last window close quits AppKit; tick() returns false and JS exits.
         let app = gpui::Application::with_platform(platform.clone())
-            .with_http_client(default_http_client())
             .with_quit_mode(gpui::QuitMode::LastWindowClosed);
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             let reduced_motion = effective_reduced_motion(reduced_motion_override, || {
@@ -3267,7 +3266,6 @@ impl GpuixRenderer {
                 Self::enable_per_monitor_dpi();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let app = gpui_platform::application()
-                        .with_http_client(default_http_client())
                         .with_quit_mode(gpui::QuitMode::LastWindowClosed);
                     app.run(move |cx| {
                         let reduced_motion =
