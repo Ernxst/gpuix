@@ -30,6 +30,7 @@ import type { GpuixSyntheticEvent } from "./synthetic-event.js"
 import { TEXT_EDITING_TYPES } from "./text-editing.js"
 import {
   ARIA_PROP_ALIASES,
+  ATTRIBUTE_PROP_ALIASES,
   AUTHORED_ROLE_PROP,
   isAuthorVisibleProp,
 } from "./aria-props.js"
@@ -209,6 +210,40 @@ function ancestorChain(node: HostNode): HostNode[] {
     current = stateFor(current).parent
   }
   return chain
+}
+
+function markUnmounted(node: HostNode): void {
+  const state = stateFor(node)
+  state.mounted = false
+  for (const child of state.children) markUnmounted(child)
+}
+
+function contains(self: HostNode, other: unknown): boolean {
+  if (!hostNodeStates.has(other as HostNode)) return false
+
+  let current: HostNode | null = other as HostNode
+  while (current !== null) {
+    const state = stateFor(current)
+    if (!state.mounted) return false
+    if (current === self) return stateFor(self).mounted
+    current = state.parent
+  }
+  return false
+}
+
+function attributeProp(props: Props, name: string): unknown {
+  const lowered = name.toLowerCase()
+  const alias = Object.hasOwn(ARIA_PROP_ALIASES, lowered)
+    ? ARIA_PROP_ALIASES[lowered as keyof typeof ARIA_PROP_ALIASES]
+    : Object.hasOwn(ATTRIBUTE_PROP_ALIASES, lowered)
+      ? ATTRIBUTE_PROP_ALIASES[lowered as keyof typeof ATTRIBUTE_PROP_ALIASES]
+      : undefined
+  if (alias !== undefined && Object.hasOwn(props, alias)) {
+    return (props as Props & Record<string, unknown>)[alias]
+  }
+
+  const key = Object.keys(props).find((candidate) => candidate.toLowerCase() === lowered)
+  return key === undefined ? undefined : (props as Props & Record<string, unknown>)[key]
 }
 
 // Disconnected roots need a stable pick between them. Element ids are not it:
@@ -1538,16 +1573,26 @@ export const hostConfig = {
         reportStyleDiagnostics(rootContainerInstance.native)
       },
       parentId: null,
+      tagName: type.toUpperCase(),
+      localName: type,
+      nodeName: type.toUpperCase(),
       compareDocumentPosition(other: PublicInstance): number {
         return compareDocumentPosition(instance, other as unknown as HostNode)
       },
+      contains(other: PublicInstance | null): boolean {
+        return contains(instance, other)
+      },
       getAttribute(name): string | null {
-        const value = (instance.props as Props & Record<string, unknown>)[name]
+        const value = attributeProp(instance.props, name)
         if (value == null || typeof value === "function") return null
-        if (name === "id" || name.startsWith("data-")) return String(value)
+        const lowered = name.toLowerCase()
+        if (lowered.startsWith("aria-") || lowered.startsWith("data-")) return String(value)
         if (value === false) return null
         if (value === true) return ""
         return typeof value === "string" || typeof value === "number" ? String(value) : null
+      },
+      hasAttribute(name): boolean {
+        return instance.getAttribute(name) !== null
       },
     }
     if (type === "canvas") {
@@ -1615,6 +1660,7 @@ export const hostConfig = {
   removeChild(parent: Instance, child: Instance | TextInstance): void {
     const parentState = stateFor(parent)
     removeTrackedChild(parentState, child)
+    markUnmounted(child)
     scheduleVirtualListValidation(parent, parentState)
     const destroyed = parentState.container.renderer.destroyElement(child.id)
     for (const id of destroyed) {
@@ -1657,6 +1703,7 @@ export const hostConfig = {
       parent.rootElementId = null
       parent.rootElementType = null
     }
+    markUnmounted(child)
     const destroyed = parent.renderer.destroyElement(child.id)
     for (const id of destroyed) {
       unregisterEventHandlers(parent.eventHandlers, id)
@@ -1881,6 +1928,7 @@ export const hostConfig = {
     disposeRecordingContext2D(instance)
     disposeWebGpuContext(instance)
     const container = containerFor(instance)
+    markUnmounted(instance)
     const destroyed = container.renderer.destroyElement(instance.id)
     for (const id of destroyed) {
       unregisterEventHandlers(container.eventHandlers, id)

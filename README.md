@@ -1763,6 +1763,10 @@ ref.current.scrollIntoView({ block: "nearest" })   // smallest revealing scroll
 ref.current.getBoundingClientRect()                // DOMRect-shaped measurement
 ref.current.getBounds()                            // the same box as {x, y, width, height}
 ref.current.matches(":focus")                     // :focus, :focus-visible, :hover, or :active
+ref.current.tagName                               // "DIV" (aliases keep their authored name)
+ref.current.localName                             // "div"
+ref.current.hasAttribute("data-state")           // agrees with getAttribute()
+ref.current.contains(otherRef.current)            // retained-tree containment
 
 // "Am I at the bottom?" — the standard DOM test
 const atBottom =
@@ -1793,6 +1797,12 @@ There is no `Node` global on either GPUIX target — the browser mirror runs
 this same implementation on gpuix instances too, not real DOM nodes — so this
 method, not `instanceof Node`, is how code shared with the web compares two
 refs' tree positions.
+
+Refs also expose `tagName`, `localName`, `nodeName`, `hasAttribute()`, and
+`contains()`. Identity uses the authored element name, so an `<article>` rendered
+through the native div adapter still reports `ARTICLE` / `article`. Containment
+includes the element itself and mounted descendants; foreign, detached, and
+unmounted instances return `false`.
 
 Only `overflow: "scroll"` / `"auto"` elements and `<virtual-list>` are scroll
 containers here. Everything else — **including `overflow: "hidden"`, which the web does
