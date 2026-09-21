@@ -35,6 +35,8 @@ import type { CanvasPublicInstance, PublicInstance } from "../types/host.js"
 import { SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+// Test GPU canvas presentation exists only in the macOS test-support build.
+const itMacOS = process.platform === "darwin" ? it : it.skip
 const canvasImageFixture = fileURLToPath(
   new URL("../../canvas-goldens/__fixtures__/canvas-image-source.png", import.meta.url)
 )
@@ -187,7 +189,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     } finally { actual.unmount(); expected.unmount() }
   })
 
-  it("clears successive native WebGPU canvas frames and locks the context type", async () => {
+  itMacOS("clears successive native WebGPU canvas frames and locks the context type", async () => {
     const testRoot = createTestRoot({ width: 120, height: 80 })
     const canvasRef = createRef<CanvasPublicInstance>()
     try {
