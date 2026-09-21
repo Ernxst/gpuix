@@ -5,10 +5,11 @@
  * `cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`,
  * `navigator.clipboard`, `navigator.gpu`, `PointerEvent`, and the element
  * constructors `Node`, `Element`, `HTMLElement`, `HTMLDivElement`,
- * `HTMLButtonElement`, `HTMLInputElement`, and `HTMLTextAreaElement` — and
- * nothing else, in particular no `document`. Nobody is required to import
- * this: the root `@gpuix/react` entry installs no global, so a consumer who
- * never touches the DOM never gets one either.
+ * `HTMLButtonElement`, `HTMLInputElement`, and `HTMLTextAreaElement`, and
+ * `document` as the single-window facade in `./document.js` — and nothing
+ * else. Nobody is required to import this: the root `@gpuix/react` entry
+ * installs no global, so a consumer who never touches the DOM never gets one
+ * either.
  *
  * Each name is installed only if absent, so a real browser's globals (or an
  * earlier import of this module) always win. `requestAnimationFrame` and
@@ -33,6 +34,7 @@ import {
 } from "./element-constructors.js"
 import { Image } from "./canvas/image.js"
 import { PointerEvent } from "./pointer-event.js"
+import { gpuixDocument } from "./document.js"
 import { installWebGpuGlobal } from "./canvas/webgpu.js"
 
 function defineGlobalIfAbsent(name: string, value: unknown): void {
@@ -58,6 +60,7 @@ defineGlobalIfAbsent("HTMLButtonElement", HTMLButtonElement)
 defineGlobalIfAbsent("HTMLInputElement", HTMLInputElement)
 defineGlobalIfAbsent("HTMLTextAreaElement", HTMLTextAreaElement)
 defineGlobalIfAbsent("PointerEvent", PointerEvent)
+defineGlobalIfAbsent("document", gpuixDocument())
 
 // `navigator.clipboard` needs its own path rather than `defineGlobalIfAbsent`:
 // Node has had a global `navigator` since v21, so the common case is not "no
@@ -87,5 +90,5 @@ if (Reflect.has(globalThis, "navigator")) {
 }
 
 // A browser's navigator.gpu always wins. Desktop installs only the narrow
-// clear-and-present proof API; it does not manufacture a document.
+// clear-and-present proof API.
 installWebGpuGlobal()

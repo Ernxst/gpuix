@@ -260,6 +260,7 @@ export type {
   GridTrackMinmax,
   GridTrackNonRepeat,
   GridTrackSizing,
+  GpuixDocument,
   GpuixTheme,
   ImageMimeType,
   ImageSource,

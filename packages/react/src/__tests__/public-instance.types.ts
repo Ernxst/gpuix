@@ -1,4 +1,4 @@
-import type { PublicInstance } from "../types/host.js"
+import type { GpuixDocument, PublicInstance } from "../types/host.js"
 
 declare const instance: PublicInstance
 declare const other: PublicInstance
@@ -19,6 +19,14 @@ const notCanceled: boolean = instance.dispatchEvent(
 instance.dispatchEvent("click")
 // @ts-expect-error parentElement is read-only; it reflects the retained tree.
 instance.parentElement = other
+const ownerDocument: GpuixDocument | Document = instance.ownerDocument
+// @ts-expect-error ownerDocument is read-only; it reflects the host or the facade.
+instance.ownerDocument = ownerDocument
+declare const facade: GpuixDocument
+const byId: PublicInstance | null = facade.getElementById("panel")
+const active: PublicInstance | null = facade.activeElement
+// @ts-expect-error The facade is not a DOM Document; it has no createElement.
+facade.createElement("div")
 // @ts-expect-error PublicInstance does not claim the full HTMLElement interface.
 const asHtmlElement: HTMLElement = instance
 
@@ -32,4 +40,6 @@ void [
   parent,
   notCanceled,
   asHtmlElement,
+  byId,
+  active,
 ]

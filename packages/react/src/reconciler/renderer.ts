@@ -4,6 +4,7 @@ import type { EventPayload, MenuSpec, WindowOptions } from "@gpuix/native"
 import { createRoot, flushSync, strictStylesDefault, type Root } from "./reconciler.js"
 import type { DebugFrameOverlayMode, NativeRenderer } from "../types/host.js"
 import { handleGpuixEvent } from "./event-registry.js"
+import { hasBrowserDocument } from "../document.js"
 import {
   attachAnimationFrameSource,
   detachAnimationFrameSource,
@@ -731,7 +732,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     host.setMenus(menus as MenuSpec[])
   }
   if (
-    typeof document !== "undefined" &&
+    hasBrowserDocument() &&
     host instanceof GpuixRenderer &&
     !Reflect.has(globalThis, BROWSER_AUTOMATION_KEY)
   ) {

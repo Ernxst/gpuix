@@ -377,7 +377,7 @@ function documentOrder(a: Instance, b: Instance): number {
 }
 
 /** The earliest element carrying this author `id`, as `getElementById` would find. */
-function elementById(
+export function elementById(
   container: Container,
   id: string,
   accept: (instance: Instance) => boolean
