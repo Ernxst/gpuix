@@ -1648,6 +1648,12 @@ export interface NativeRenderer {
   setWindowEventHandler?(handler: ((event: EventPayload) => void) | null): void
   getWindowInsets?(): NativeWindowInsets
   setWindowTitle?(title: string): void
+  /** Minimize the native desktop window. */
+  minimizeWindow?(): void
+  /** Run the native desktop zoom or maximize operation. */
+  zoomWindow?(): void
+  /** Enter or exit native desktop fullscreen. */
+  toggleFullscreen?(): void
   setDebugFrameOverlay?(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay?(): string
   cycleDebugFrameOverlay?(): string

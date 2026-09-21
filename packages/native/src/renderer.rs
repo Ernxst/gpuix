@@ -1412,6 +1412,9 @@ enum UiCommand {
         response: SyncSender<()>,
     },
     ActivateWindow,
+    MinimizeWindow,
+    ZoomWindow,
+    ToggleFullscreen,
     SetWindowTitle(String),
     SetWindowSelectionChange {
         enabled: bool,
@@ -1671,6 +1674,13 @@ async fn run_ui_commands(
                 window.activate_window();
                 order_window_front_regardless(window);
             }),
+            UiCommand::MinimizeWindow => {
+                window.update(cx, |_view, window, _cx| window.minimize_window())
+            }
+            UiCommand::ZoomWindow => window.update(cx, |_view, window, _cx| window.zoom_window()),
+            UiCommand::ToggleFullscreen => {
+                window.update(cx, |_view, window, _cx| window.toggle_fullscreen())
+            }
             UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
                 view.window_title = title;
                 cx.notify();
@@ -4338,6 +4348,60 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Minimize the native window.
+    #[napi]
+    pub fn minimize_window(&self, _env: Env) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.minimize_window());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::MinimizeWindow);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        unsupported_capability(_env, "window.minimize")
+    }
+
+    /// Run the native zoom or maximize operation.
+    #[napi]
+    pub fn zoom_window(&self, _env: Env) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.zoom_window());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ZoomWindow);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        unsupported_capability(_env, "window.zoom")
+    }
+
+    /// Enter or exit native fullscreen.
+    #[napi]
+    pub fn toggle_fullscreen(&self, _env: Env) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.toggle_fullscreen());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ToggleFullscreen);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        unsupported_capability(_env, "window.fullscreen")
     }
 
     #[napi]
