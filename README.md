@@ -71,7 +71,7 @@ cd examples && bun --hot mail.tsx
 
 ## Quickstart
 
-This fork ships from no registry yet, so you build the two packages from a
+This fork ships from no registry yet, so you build the native and React packages from a
 checkout once and pin the packed tarballs. That needs a Rust toolchain — see
 [Building](#building) for the prerequisites.
 
@@ -80,10 +80,12 @@ git clone --recurse-submodules https://github.com/Ernxst/gpuix
 cd gpuix && bun install && bun run build
 cd packages/native && bun pm pack
 cd ../react && bun pm pack
+cd ../vite && bun pm pack
 ```
 
-Pin the two generated `.tgz` files in your app — plus an `overrides` entry for
-`@gpuix/native`, without which the install fails — then add the types.
+Pin the generated native and React `.tgz` files in your app — plus an `overrides`
+entry for `@gpuix/native`, without which the install fails. Add the Vite tarball
+when your app uses Vite, then add the types.
 [Consuming an unpublished checkout](#consuming-an-unpublished-checkout) has the
 exact `package.json` shape and the peer-dependency rules.
 
@@ -1129,7 +1131,81 @@ render(<App />, { title: 'My App', width: 800, height: 600 })
 Do **not** call `createRenderer()` or `init()` in this file. `bun --hot` re-runs
 the whole entry on save. A second `init()` would open a second window.
 
-### 2. Start the app with `bun --hot`
+### 2. Use Vite without a GPUIX CLI
+
+Use `@gpuix/vite` when the app needs Vite's plugin pipeline. Vite and the native
+module runner stay in the Bun process, so no separate launcher is needed.
+
+Add the packed plugin and Vite as development dependencies:
+
+```json
+{
+  "devDependencies": {
+    "@gpuix/vite": "file:/absolute/path/gpuix-vite-0.19.0-fork.1.tgz",
+    "vite": "^8.2.1"
+  }
+}
+```
+
+Configure Vite and keep the app entry ending with `render()`:
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite'
+import { gpuix } from '@gpuix/vite'
+
+export default defineConfig({
+  appType: 'custom',
+  plugins: [gpuix({ entry: 'app.tsx' })],
+})
+```
+
+```json
+{ "scripts": { "dev": "bun run --bun vite" } }
+```
+
+Run `bun run dev`. Component-only edits keep React state. A mixed module such
+as a TanStack route invalidates the Refresh boundary, then Vite re-evaluates the
+entry and `render()` remounts the app on the same native window. Rust and native
+addon changes still need the Bun process restarted.
+
+#### Share a Vite config with the web target
+
+Keep the React plugin enabled for the browser target and add `gpuix()` only in
+native mode. The React plugin only installs its Refresh wrapper in Vite's client
+environment, so GPUIX remains responsible for native Refresh.
+
+```ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { gpuix } from '@gpuix/vite'
+
+export default defineConfig(({ mode }) => {
+  const native = mode === 'native'
+
+  return {
+    appType: native ? 'custom' : 'spa',
+    plugins: [
+      react({ jsxImportSource: '@gpuix/react' }),
+      native && gpuix({ entry: 'src/native.tsx' }),
+    ],
+  }
+})
+```
+
+```json
+{
+  "scripts": {
+    "dev:native": "vite --mode native",
+    "dev:web": "vite --mode web"
+  }
+}
+```
+
+The scoped `--bun` flag runs only Vite under Bun. It does not change the browser
+bundle, select a renderer, or alter Node-based tools such as Vitest.
+
+### 3. Start the app with `bun --hot`
 
 Prefer **`bun --hot`** over a plain `bun` or `tsx` run. Without `--hot`, a
 save starts a second process. With it, `render()` remounts React on the same
@@ -1139,7 +1215,7 @@ window.
 bun --hot app.tsx
 ```
 
-### 3. Save the file
+### 4. Save the file
 
 ```
 save .tsx  ►  bun re-evaluates the entry  ►  render() remounts React
