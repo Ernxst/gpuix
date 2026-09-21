@@ -6,6 +6,7 @@ import React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import "../globals.js"
+import { hasBrowserDocument } from "../document.js"
 import { createRoot, flushSync } from "../reconciler/reconciler.js"
 import type { GpuixPointerEvent, GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { NativeRenderer, PublicInstance } from "../types/host.js"
@@ -32,11 +33,11 @@ afterEach(() => {
 })
 
 describe("@gpuix/react/globals PointerEvent", () => {
-  it("installs PointerEvent without manufacturing a document", () => {
+  it("installs PointerEvent without manufacturing a browser document", () => {
     expect(typeof Reflect.get(globalThis, "PointerEvent")).toBe("function")
-    expect(Reflect.has(globalThis, "document")).toBe(false)
+    expect(hasBrowserDocument()).toBe(false)
     // Base UI reaches it as `ownerWindow(element).PointerEvent`, which is
-    // `window` when the element has no `ownerDocument`.
+    // the element's `ownerDocument.defaultView`: the global `window`.
     expect(Reflect.get(window, "PointerEvent")).toBe(PointerEvent)
   })
 

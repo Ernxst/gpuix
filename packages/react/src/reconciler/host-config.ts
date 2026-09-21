@@ -84,6 +84,7 @@ import {
   DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC,
   DOCUMENT_POSITION_PRECEDING,
 } from "../dom-position.js"
+import { gpuixDocument } from "../document.js"
 
 let currentUpdatePriority = NoEventPriority
 
@@ -1814,13 +1815,18 @@ export const hostConfig = {
       hasAttribute(name): boolean {
         return instance.getAttribute(name) !== null
       },
-    } satisfies Omit<Instance, "parentElement"> as Instance
-    // Non-enumerable, like the prototype accessor it mirrors, so spreading or
-    // deep-comparing a ref does not walk up into its ancestors.
+    } satisfies Omit<Instance, "parentElement" | "ownerDocument"> as Instance
+    // Non-enumerable, like the prototype accessors they mirror, so spreading or
+    // deep-comparing a ref does not walk up into its ancestors or the document.
     Object.defineProperty(instance, "parentElement", {
       configurable: true,
       enumerable: false,
       get: (): Instance | null => parentElement(instance),
+    })
+    Object.defineProperty(instance, "ownerDocument", {
+      configurable: true,
+      enumerable: false,
+      get: gpuixDocument,
     })
     if (type === "canvas") {
       const diagnosticTarget = {

@@ -1775,6 +1775,7 @@ ref.current.localName                             // "div"
 ref.current.hasAttribute("data-state")           // agrees with getAttribute()
 ref.current.contains(otherRef.current)            // retained-tree containment
 ref.current.parentElement                         // live retained parent, or null
+ref.current.ownerDocument                         // the window's document facade; see Globals
 ref.current.dispatchEvent(event)                  // a PointerEvent; see Globals
 
 // "Am I at the bottom?" — the standard DOM test
@@ -1817,6 +1818,9 @@ moves, and removals. It is `null` for a root and for a node that is not
 mounted. Where the DOM keeps parent links inside a removed subtree, every node of
 an unmounted subtree here reports `null`, in line with `contains()`. Refs have no
 `parentNode`, `children`, or other traversal members.
+
+`ownerDocument` is the same single-window document facade for every ref,
+mounted or not; see [document](#document).
 
 Only `overflow: "scroll"` / `"auto"` elements and `<virtual-list>` are scroll
 containers here. Everything else — **including `overflow: "hidden"`, which the web does
@@ -4796,7 +4800,7 @@ real platform and a native clipboard call would hit it.
 that assumes a browser: it installs exactly `requestAnimationFrame`,
 `cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`,
 `navigator.clipboard`, `navigator.gpu`, `PointerEvent`, and the element
-constructors below on `globalThis`, and nothing else — no `document`. Each
+constructors and `document` facade below on `globalThis`, and nothing else. Each
 name is installed only if it is not already present, so a real browser,
 Vitest's `jsdom`/`happy-dom` environment, or an earlier import of this module
 all win over the shim.
@@ -4814,6 +4818,44 @@ server is the former).
 instances load through the most recently attached GPUIX root and support
 `src`, `decode()`, `naturalWidth`, and `naturalHeight` for Canvas 2D image
 sources.
+
+### document
+
+The entry installs `document` as a facade over the mounted GPUIX tree, so
+code written against the DOM finds the parts of a document GPUIX can answer.
+Every ref's `ownerDocument` is the same object:
+
+```tsx
+import "@gpuix/react/globals"
+
+document.getElementById("email")         // first mounted element with that id prop, or null
+document.activeElement                   // the focused host element, or body when nothing has focus
+document.body                            // the root host element of the mounted tree
+document.defaultView                     // the global window
+ref.current.ownerDocument === document   // true
+```
+
+`getElementById()` searches the mounted retained tree in tree order, so an
+element whose subtree was removed is no longer found. `activeElement` follows
+the renderer's focus, as `getActiveElement()` does. Before a mount and after an
+unmount, `body` and `activeElement` are `null`.
+
+The facade is not a DOM `Document`. It has no `createElement()`,
+`querySelector()`, `addEventListener()`, or style computation, so code that
+needs them fails with a `TypeError` instead of running against a stand-in. For
+example, Base UI's Tabs select through `click()` and Enter, but a pointer
+press on a tab throws where Base UI adds a `pointerup` listener to the document.
+
+A host document wins, as for every name here: in a browser or a
+`jsdom`/`happy-dom` environment `document` stays the host's. Refs still report
+the GPUIX facade as their `ownerDocument`, because the host document cannot find
+GPUIX elements.
+
+GPUIX mounts one root per renderer and one renderer per native window, so
+there is one document. It reads the most recently mounted root that has
+rendered, the one `announce()` targets. An app with several native windows open
+at once sees only the newest through `document`; per-window documents are not
+supported.
 
 ### Element constructors
 

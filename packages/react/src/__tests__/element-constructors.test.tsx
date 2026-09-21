@@ -5,6 +5,7 @@ import React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import "../globals.js"
+import { hasBrowserDocument } from "../document.js"
 import { createRoot, flushSync } from "../reconciler/reconciler.js"
 import type { NativeRenderer, PublicInstance } from "../types/host.js"
 
@@ -30,11 +31,11 @@ afterEach(() => {
 })
 
 describe("@gpuix/react/globals element constructors", () => {
-  it("installs each constructor without manufacturing a document", () => {
+  it("installs each constructor without manufacturing a browser document", () => {
     for (const name of CONSTRUCTOR_NAMES) {
       expect(typeof Reflect.get(globalThis, name), name).toBe("function")
     }
-    expect(Reflect.has(globalThis, "document")).toBe(false)
+    expect(hasBrowserDocument()).toBe(false)
   })
 
   it("throws on direct construction, as a browser does", () => {
@@ -124,6 +125,6 @@ describe("@gpuix/react/globals element constructors", () => {
     for (const name of CONSTRUCTOR_NAMES) {
       expect(Reflect.get(globalThis, name), name).toBe(existing[name])
     }
-    expect(Reflect.has(globalThis, "document")).toBe(false)
+    expect(hasBrowserDocument()).toBe(false)
   })
 })

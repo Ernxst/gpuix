@@ -1830,6 +1830,22 @@ export interface ElementRect extends ElementBounds {
   left: number
 }
 
+/**
+ * The part of `Document` GPU-IX can answer from its retained tree, for the one
+ * root of the one native window. It is not a DOM `Document`: there is no
+ * `createElement`, `querySelector`, or event-listener surface.
+ */
+export interface GpuixDocument {
+  /** The global `window`, or null when none is installed. */
+  readonly defaultView: typeof globalThis | null
+  /** The root host element of the mounted tree, or null before a mount. */
+  readonly body: PublicInstance | null
+  /** The focused host element, or {@link body} when nothing is focused. */
+  readonly activeElement: PublicInstance | null
+  /** The first mounted element in tree order whose `id` prop matches, or null. */
+  getElementById(elementId: string): PublicInstance | null
+}
+
 // Public instance exposed via refs. Type-specific interfaces deepen this seam
 // without putting browser-only methods on every native element.
 export interface PublicInstance {
@@ -1851,6 +1867,12 @@ export interface PublicInstance {
    * line with {@link contains}.
    */
   readonly parentElement: PublicInstance | null
+  /**
+   * The window's {@link GpuixDocument}, matching `Node.ownerDocument`. The same
+   * object for every element, mounted or not, and the one
+   * `@gpuix/react/globals` installs as `globalThis.document`.
+   */
+  readonly ownerDocument: GpuixDocument
   /**
    * Moves focus to this host element, matching `HTMLElement.focus()`, and
    * reveals it inside its scroll ancestors unless `preventScroll` is set.
