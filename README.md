@@ -544,6 +544,7 @@ State update triggers re-render → reconciler sends mutations back to Rust
 Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)`. Rust only knows **whether** an element has a listener (via `setEventListener`), not the closure itself — the actual handler lives in JS.
 
 Handlers receive one of the per-kind `Gpuix*Event` types (`GpuixMouseEvent`,
+`GpuixPointerEvent`,
 `GpuixWheelEvent`, `GpuixKeyboardEvent`, `GpuixFocusEvent`, `GpuixScrollEvent`,
 `GpuixChangeEvent`, or `GpuixElementEvent` for the custom-element events), not
 the raw native payload — each prop's type is listed in the table above. Every
@@ -568,6 +569,10 @@ Beyond that, members live only on the kind that delivers them:
   differ in a browser only by the document's own scroll offset, and this
   renderer has no scrolling document); and `relatedTarget` on `mouseEnter`
   and `mouseLeave` — the element the pointer left, or the one it moved to
+- `GpuixPointerEvent` adds `pointerId`, `pointerType`, `isPrimary`, and the DOM
+  `buttons` bitfield. Desktop mouse input is the primary `"mouse"` pointer with
+  id `1`; the native payload keeps these fields ready for other platform pointer
+  sources
 - `GpuixKeyboardEvent` adds `key`, `repeat`, and the raw `modifiers` object
 - `GpuixFocusEvent`'s `relatedTarget` is always `null`: GPUI's focus
   subscriptions report only the element whose own focus changed, never the
@@ -3783,6 +3788,12 @@ text imports no longer need a runtime flag.
 | Mouse leave | `onMouseLeave` | `GpuixMouseEvent` | `hovered` |
 | Mouse move | `onMouseMove` | `GpuixMouseEvent` | `x`, `y`, `pressedButton`, `modifiers` |
 | Click outside | `onMouseDownOutside` | `GpuixMouseEvent` | `x`, `y`, `button`, `modifiers` |
+| Pointer down | `onPointerDown`, `onPointerDownCapture` | `GpuixPointerEvent` | `pointerId`, `pointerType`, `isPrimary`, `buttons`, coordinates, button, modifiers |
+| Pointer up | `onPointerUp`, `onPointerUpCapture` | `GpuixPointerEvent` | Same fields; `buttons` is `0` after the release |
+| Pointer move | `onPointerMove`, `onPointerMoveCapture` | `GpuixPointerEvent` | Same fields; `button` is `-1`, `buttons` reflects the pressed button |
+| Pointer cancel | `onPointerCancel`, `onPointerCancelCapture` | `GpuixPointerEvent` | Same fields; dispatched when the active native window deactivates |
+| Pointer enter | `onPointerEnter` | `GpuixPointerEvent` | `relatedTarget`, pointer metadata; no capture variant in React |
+| Pointer leave | `onPointerLeave` | `GpuixPointerEvent` | `relatedTarget`, pointer metadata; no capture variant in React |
 | Key down | `onKeyDown` | `GpuixKeyboardEvent` | `key`, `keyChar`, `isHeld`, `modifiers` |
 | Key up | `onKeyUp` | `GpuixKeyboardEvent` | `key`, `keyChar`, `modifiers` |
 | Focus | `onFocus` | `GpuixFocusEvent` | — |
@@ -3811,9 +3822,9 @@ scroll container's own position changed and does not bubble, as in the DOM.
 Wheel deltas use DOM signs and units: `deltaY` is positive scrolling down, and
 `deltaMode` is `0` for pixels or `1` for lines.
 
-Mouse event payloads expose pointer capture. Capture keeps move and up routed
-to the pressed element across redraws and outside its bounds until mouse up,
-explicit release, or unmount:
+Pointer and mouse event payloads expose pointer capture. Capture keeps move and
+up routed to the pressed element across redraws and outside its bounds until
+pointer up, cancellation, explicit release, or unmount:
 
 ```tsx
 <div
@@ -3825,8 +3836,14 @@ explicit release, or unmount:
 
 The host ref exposes the same `setPointerCapture()` and
 `releasePointerCapture()` methods when capture is decided outside the handler.
-Window deactivation silently resets the pressed-pointer sequence and capture;
-GPUIX does not currently synthesize `pointercancel` or `lostpointercapture`.
+Window deactivation dispatches bubbling `pointercancel` to the capture owner
+(or the pressed target when uncaptured) before resetting the sequence and
+capture. GPUIX does not currently synthesize `lostpointercapture`.
+
+For mouse input, pointer handlers run before the matching mouse handler:
+`pointerdown` → `mousedown`, `pointermove` → `mousemove`, and `pointerup` →
+`mouseup` → `click`. Both use the same retained React capture, target, and
+bubble path, so cancellation and propagation controls have their usual effect.
 
 A Finder or OS file drag dispatches bubbling, cancelable `onDragEnter`,
 `onDragOver`, and `onDragLeave` events. During those events,
@@ -5882,6 +5899,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] RetainedTree (Rust-side element storage)
 - [x] Style mapping (CSS properties → GPUI style methods)
 - [x] Mouse events (click, mouseDown, mouseUp, mouseMove, mouseEnter, mouseLeave)
+- [x] React pointer events (down, move, up, cancel, enter, leave) and pointer capture
 - [x] Pointer capture across redraws and passive decoration hit testing
 - [x] Click outside (`onMouseDownOutside`)
 - [x] Scroll wheel events with delta and touch phase

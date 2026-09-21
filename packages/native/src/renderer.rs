@@ -53,7 +53,7 @@ use wasm_bindgen::JsCast as _;
 use crate::canvas::{CanvasDiagnostic, SharedDisplayLists};
 use crate::custom_elements::input::TextEditingState;
 use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
-use crate::element_tree::EventPayload;
+use crate::element_tree::{EventModifiers, EventPayload};
 use crate::retained_tree::{RetainedTree, StyleTable};
 use crate::style::{
     parse_font_weight, GridAutoRepeatKind, GridLineValue, GridRepeatCount,
@@ -7822,8 +7822,27 @@ impl GpuixView {
         }
     }
 
+    pub(crate) fn record_pointer_down(&mut self, id: u64, event: &gpui::MouseDownEvent) {
+        let (x, y) = point_to_xy(event.position);
+        let mut router = self.pointer_router.borrow_mut();
+        router.record_target(id);
+        router.record_sample(x, y, event.modifiers.into());
+    }
+
+    pub(crate) fn record_pointer_sample(&mut self, x: f64, y: f64, modifiers: EventModifiers) {
+        self.pointer_router
+            .borrow_mut()
+            .record_sample(x, y, modifiers);
+    }
+
     fn cancel_pointer_sequence(&mut self, window: &mut gpui::Window) -> bool {
-        if self.pointer_router.borrow_mut().cancel() {
+        if let Some(cancelled) = self.pointer_router.borrow_mut().cancel() {
+            emit_event_full(&self.event_callback, cancelled.target, "pointerCancel", |payload| {
+                payload.x = cancelled.x;
+                payload.y = cancelled.y;
+                payload.modifiers = cancelled.modifiers;
+                populate_pointer_metadata(payload, 0);
+            });
             window.release_pointer();
         }
         let interactive_changed = self
@@ -12990,6 +13009,8 @@ fn tracks_mouse_hover_events(
         };
         if current_element.events.contains("mouseEnter")
             || current_element.events.contains("mouseLeave")
+            || current_element.events.contains("pointerEnter")
+            || current_element.events.contains("pointerLeave")
         {
             return true;
         }
@@ -13118,8 +13139,9 @@ where
 {
     let tracks_external_drag = tracks_external_drag_events(element, tree);
     let tracks_mouse_move = tracks_pointer_event(element, tree, "mouseMove");
+    let tracks_pointer_move = tracks_pointer_event(element, tree, "pointerMove");
 
-    if tracks_mouse_move || tracks_external_drag {
+    if tracks_mouse_move || tracks_pointer_move || tracks_external_drag {
         let callback = event_callback.clone();
         let id = element.id;
         el = el.on_mouse_move(cx.listener(
@@ -13130,6 +13152,13 @@ where
                         cx.stop_propagation();
                         return;
                     }
+                }
+                if tracks_mouse_move || tracks_pointer_move {
+                    let (x, y) = point_to_xy(mouse_event.position);
+                    view.record_pointer_sample(x, y, mouse_event.modifiers.into());
+                }
+                if tracks_pointer_move {
+                    emit_pointer_move(&callback, id, mouse_event);
                 }
                 if tracks_mouse_move {
                     emit_event_full(&callback, id, "mouseMove", |p| {
@@ -13370,6 +13399,7 @@ where
         .and_then(serde_json::Value::as_str)
         != Some("anchor");
     let tracks_mouse_up = tracks_pointer_event(element, ctx.tree, "mouseUp");
+    let tracks_pointer_up = tracks_pointer_event(element, ctx.tree, "pointerUp");
     let callback = ctx.event_callback.clone();
     let id = element.id;
     el = el.on_click(move |click_event, _window, cx| {
@@ -13383,7 +13413,13 @@ where
             return;
         }
         let stop_native_propagation = !matches!(click_event, gpui::ClickEvent::Keyboard(_));
-        emit_click_mouse_up(&callback, id, &click_event, tracks_mouse_up);
+        emit_click_mouse_up(
+            &callback,
+            id,
+            &click_event,
+            tracks_pointer_up,
+            tracks_mouse_up,
+        );
         emit_event_full(&callback, id, "click", |payload| {
             let (x, y) = point_to_xy(click_event.position());
             payload.x = Some(x);
@@ -13420,8 +13456,10 @@ fn captures_pointer_in_ancestry(
         let Some(current_element) = tree.elements.get(&id) else {
             return false;
         };
-        if current_element.events.contains("mouseDown")
-            && current_element.events.contains("mouseMove")
+        if (current_element.events.contains("mouseDown")
+            && current_element.events.contains("mouseMove"))
+            || (current_element.events.contains("pointerDown")
+                && current_element.events.contains("pointerMove"))
         {
             return true;
         }
@@ -13790,10 +13828,17 @@ pub(crate) fn build_host_container(
 
     if tracks_pointer_event(element, ctx.tree, "auxClick") {
         let tracks_mouse_up = tracks_pointer_event(element, ctx.tree, "mouseUp");
+        let tracks_pointer_up = tracks_pointer_event(element, ctx.tree, "pointerUp");
         let callback = ctx.event_callback.clone();
         let id = element.id;
         el = el.on_aux_click(move |click_event, _window, cx| {
-            emit_click_mouse_up(&callback, id, &click_event, tracks_mouse_up);
+            emit_click_mouse_up(
+                &callback,
+                id,
+                &click_event,
+                tracks_pointer_up,
+                tracks_mouse_up,
+            );
             emit_event_full(&callback, id, "auxClick", |p| {
                 let (x, y) = point_to_xy(click_event.position());
                 p.x = Some(x);
@@ -13822,26 +13867,41 @@ pub(crate) fn build_host_container(
     // on the press, so the DOM order is mousedown, contextmenu, mouseup,
     // auxclick. React synthesizes it from the right-button payload.
     let tracks_mouse_down = tracks_pointer_event(element, ctx.tree, "mouseDown");
+    let tracks_pointer_down = tracks_pointer_event(element, ctx.tree, "pointerDown");
+    let tracks_pointer_cancel = tracks_pointer_event(element, ctx.tree, "pointerCancel");
     let tracks_context_menu = tracks_pointer_event(element, ctx.tree, "contextMenu");
-    if tracks_mouse_down || tracks_context_menu {
-        for &button in mouse_down_button_set(tracks_mouse_down) {
+    if tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel || tracks_context_menu {
+        for &button in mouse_down_button_set(
+            tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel,
+        ) {
             let callback = ctx.event_callback.clone();
             let id = element.id;
-            el = el.on_mouse_down(button, move |mouse_event, _window, cx| {
-                emit_event_full(&callback, id, "mouseDown", |p| {
-                    let (x, y) = point_to_xy(mouse_event.position);
-                    p.x = Some(x);
-                    p.y = Some(y);
-                    p.button = Some(mouse_button_to_u32(mouse_event.button));
-                    p.click_count = Some(mouse_event.click_count as u32);
-                    p.modifiers = Some(mouse_event.modifiers.into());
-                });
-                cx.stop_propagation();
-            });
+            el = el.on_mouse_down(
+                button,
+                cx.listener(move |view, mouse_event, _window, cx| {
+                    view.record_pointer_down(id, mouse_event);
+                    if tracks_pointer_down {
+                        emit_pointer_down(&callback, id, mouse_event);
+                    }
+                    if tracks_mouse_down || tracks_context_menu {
+                        emit_event_full(&callback, id, "mouseDown", |p| {
+                            let (x, y) = point_to_xy(mouse_event.position);
+                            p.x = Some(x);
+                            p.y = Some(y);
+                            p.button = Some(mouse_button_to_u32(mouse_event.button));
+                            p.click_count = Some(mouse_event.click_count as u32);
+                            p.modifiers = Some(mouse_event.modifiers.into());
+                        });
+                    }
+                    cx.stop_propagation();
+                }),
+            );
         }
     }
 
-    if tracks_pointer_event(element, ctx.tree, "mouseUp") {
+    let tracks_mouse_up = tracks_pointer_event(element, ctx.tree, "mouseUp");
+    let tracks_pointer_up = tracks_pointer_event(element, ctx.tree, "pointerUp");
+    if tracks_mouse_up || tracks_pointer_up {
         for &button in &[
             gpui::MouseButton::Left,
             gpui::MouseButton::Middle,
@@ -13850,9 +13910,14 @@ pub(crate) fn build_host_container(
             let callback = ctx.event_callback.clone();
             let id = element.id;
             el = el.on_mouse_up(button, move |mouse_event, _window, cx| {
-                emit_event_full(&callback, id, "mouseUp", |p| {
-                    populate_mouse_up_payload(p, mouse_event);
-                });
+                if tracks_pointer_up {
+                    emit_pointer_up(&callback, id, mouse_event);
+                }
+                if tracks_mouse_up {
+                    emit_event_full(&callback, id, "mouseUp", |p| {
+                        populate_mouse_up_payload(p, mouse_event);
+                    });
+                }
                 cx.stop_propagation();
             });
         }
@@ -15094,24 +15159,91 @@ pub(crate) fn point_to_xy(p: gpui::Point<gpui::Pixels>) -> (f64, f64) {
     (f64::from(f32::from(p.x)), f64::from(f32::from(p.y)))
 }
 
+pub(crate) fn mouse_button_bit(button: gpui::MouseButton) -> u32 {
+    match button {
+        gpui::MouseButton::Left => 1,
+        gpui::MouseButton::Right => 2,
+        gpui::MouseButton::Middle => 4,
+        gpui::MouseButton::Navigate(_) => 8,
+    }
+}
+
+pub(crate) fn populate_pointer_metadata(payload: &mut EventPayload, buttons: u32) {
+    payload.pointer_id = Some(1);
+    payload.pointer_type = Some("mouse".to_string());
+    payload.is_primary = Some(true);
+    payload.buttons = Some(buttons);
+}
+
+pub(crate) fn emit_pointer_down(
+    callback: &Option<EventCallback>,
+    element_id: u64,
+    event: &gpui::MouseDownEvent,
+) {
+    emit_event_full(callback, element_id, "pointerDown", |payload| {
+        let (x, y) = point_to_xy(event.position);
+        payload.x = Some(x);
+        payload.y = Some(y);
+        payload.button = Some(mouse_button_to_u32(event.button));
+        payload.click_count = Some(event.click_count as u32);
+        payload.modifiers = Some(event.modifiers.into());
+        populate_pointer_metadata(payload, mouse_button_bit(event.button));
+    });
+}
+
+pub(crate) fn emit_pointer_up(
+    callback: &Option<EventCallback>,
+    element_id: u64,
+    event: &gpui::MouseUpEvent,
+) {
+    emit_event_full(callback, element_id, "pointerUp", |payload| {
+        populate_mouse_up_payload(payload, event);
+        populate_pointer_metadata(payload, 0);
+    });
+}
+
+pub(crate) fn emit_pointer_move(
+    callback: &Option<EventCallback>,
+    element_id: u64,
+    event: &gpui::MouseMoveEvent,
+) {
+    emit_event_full(callback, element_id, "pointerMove", |payload| {
+        let (x, y) = point_to_xy(event.position);
+        payload.x = Some(x);
+        payload.y = Some(y);
+        payload.modifiers = Some(event.modifiers.into());
+        payload.pressed_button = event.pressed_button.map(mouse_button_to_u32);
+        populate_pointer_metadata(
+            payload,
+            event.pressed_button.map(mouse_button_bit).unwrap_or_default(),
+        );
+    });
+}
+
 pub(crate) fn emit_click_mouse_up(
     callback: &Option<EventCallback>,
     element_id: u64,
     click_event: &gpui::ClickEvent,
+    tracks_pointer_up: bool,
     tracks_mouse_up: bool,
 ) {
-    if !tracks_mouse_up {
+    if !tracks_pointer_up && !tracks_mouse_up {
         return;
     }
     let gpui::ClickEvent::Mouse(event) = click_event else {
         return;
     };
-    emit_event_full(callback, element_id, "mouseUp", |payload| {
-        populate_mouse_up_payload(payload, &event.up);
-    });
+    if tracks_pointer_up {
+        emit_pointer_up(callback, element_id, &event.up);
+    }
+    if tracks_mouse_up {
+        emit_event_full(callback, element_id, "mouseUp", |payload| {
+            populate_mouse_up_payload(payload, &event.up);
+        });
+    }
 }
 
-fn populate_mouse_up_payload(payload: &mut EventPayload, event: &gpui::MouseUpEvent) {
+pub(crate) fn populate_mouse_up_payload(payload: &mut EventPayload, event: &gpui::MouseUpEvent) {
     let (x, y) = point_to_xy(event.position);
     payload.x = Some(x);
     payload.y = Some(y);

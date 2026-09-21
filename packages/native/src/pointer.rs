@@ -4,17 +4,32 @@ use std::rc::Rc;
 use gpui::{
     canvas, px, DispatchPhase, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, Styled,
 };
+use crate::element_tree::EventModifiers;
+
+#[derive(Clone)]
+pub(crate) struct CancelledPointer {
+    pub(crate) target: u64,
+    pub(crate) x: Option<f64>,
+    pub(crate) y: Option<f64>,
+    pub(crate) modifiers: Option<EventModifiers>,
+}
 
 #[derive(Default)]
 pub(crate) struct PointerRouter {
     pressed_button: Option<MouseButton>,
     capture_owner: Option<u64>,
+    pressed_target: Option<u64>,
+    last_position: Option<(f64, f64)>,
+    last_modifiers: Option<EventModifiers>,
 }
 
 impl PointerRouter {
     fn begin(&mut self, button: MouseButton) {
         self.pressed_button = Some(button);
         self.capture_owner = None;
+        self.pressed_target = None;
+        self.last_position = None;
+        self.last_modifiers = None;
     }
 
     pub(crate) fn capture(&mut self, owner: u64) -> bool {
@@ -39,13 +54,38 @@ impl PointerRouter {
         }
         self.pressed_button = None;
         self.capture_owner = None;
+        self.pressed_target = None;
+        self.last_position = None;
+        self.last_modifiers = None;
         true
     }
 
-    pub(crate) fn cancel(&mut self) -> bool {
-        let had_sequence = self.pressed_button.take().is_some();
-        let had_capture = self.capture_owner.take().is_some();
-        had_sequence || had_capture
+    pub(crate) fn record_target(&mut self, target: u64) {
+        if self.pressed_button.is_some() {
+            self.pressed_target = Some(target);
+        }
+    }
+
+    pub(crate) fn record_sample(&mut self, x: f64, y: f64, modifiers: EventModifiers) {
+        if self.pressed_button.is_some() {
+            self.last_position = Some((x, y));
+            self.last_modifiers = Some(modifiers);
+        }
+    }
+
+    pub(crate) fn cancel(&mut self) -> Option<CancelledPointer> {
+        let cancelled = self.capture_owner.or(self.pressed_target).map(|target| CancelledPointer {
+            target,
+            x: self.last_position.map(|position| position.0),
+            y: self.last_position.map(|position| position.1),
+            modifiers: self.last_modifiers.clone(),
+        });
+        self.pressed_button = None;
+        self.capture_owner = None;
+        self.pressed_target = None;
+        self.last_position = None;
+        self.last_modifiers = None;
+        cancelled
     }
 
     #[cfg(test)]
@@ -121,9 +161,9 @@ mod tests {
         router.begin(MouseButton::Left);
         router.capture(7);
 
-        assert!(router.cancel());
+        assert!(router.cancel().is_some());
         assert_eq!(router.owner(), None);
         assert!(!router.capture(8));
-        assert!(!router.cancel());
+        assert!(router.cancel().is_none());
     }
 }

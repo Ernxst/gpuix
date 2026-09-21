@@ -3,6 +3,7 @@ import type {
   GpuixKeyboardEvent,
   GpuixLoadEvent,
   GpuixMouseEvent,
+  GpuixPointerEvent,
   GpuixSyntheticEvent,
 } from "../reconciler/synthetic-event.js"
 
@@ -48,6 +49,34 @@ const onSharedMouseFields = (
 }
 const sharedHandlerAccepted = <div onClick={onSharedMouseFields} />
 void sharedHandlerAccepted
+
+// Pointer handlers expose the DOM fields Base UI-style press and drag code
+// needs, and support every capture variant React exposes for these events.
+const onPointer = (event: GpuixPointerEvent): void => {
+  const pointerId: number = event.pointerId
+  const pointerType: string = event.pointerType
+  const buttons: number = event.buttons
+  event.currentTarget.setPointerCapture(event.pointerId)
+  event.currentTarget.releasePointerCapture(event.pointerId)
+  void pointerId
+  void pointerType
+  void buttons
+}
+const pointerHandlersAccepted = (
+  <div
+    onPointerDownCapture={onPointer}
+    onPointerDown={onPointer}
+    onPointerMoveCapture={onPointer}
+    onPointerMove={onPointer}
+    onPointerUpCapture={onPointer}
+    onPointerUp={onPointer}
+    onPointerCancelCapture={onPointer}
+    onPointerCancel={onPointer}
+    onPointerEnter={onPointer}
+    onPointerLeave={onPointer}
+  />
+)
+void pointerHandlersAccepted
 
 // Image lifecycle handlers use the same browser-shaped synthetic-event base:
 // the event identifies its target and exposes the usual event controls without
