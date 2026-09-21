@@ -544,6 +544,7 @@ impl CustomElement for TextEditorElement {
                     blink_anchor: cx.background_executor().now(),
                     blink_task: None,
                     pending_values: VecDeque::new(),
+                    next_input_type: None,
                     deferred_defaults: VecDeque::new(),
                     queue: VecDeque::new(),
                     undo_stack: VecDeque::new(),
@@ -1034,6 +1035,9 @@ struct TextEditorState {
     blink_anchor: Instant,
     blink_task: Option<Task<()>>,
     pending_values: VecDeque<String>,
+    /// The `inputType` for the next `replace_text_in_range`, set by the editing
+    /// actions that route through it. Unset means ordinary typing.
+    next_input_type: Option<&'static str>,
     /// One entry per editor keydown emitted to JS that has not yet resolved,
     /// oldest first. `Some` owns a deferred default; `None` was sent to JS
     /// only for observation. `resolve_key_down_default` pops the front on each
@@ -1154,16 +1158,25 @@ impl TextEditorState {
         cx.notify();
     }
 
-    fn emit_change(&mut self) {
+    /// Report an edit to JS. `input_type` is the Input Events `inputType` a
+    /// browser gives the `input` event for the same edit, which React DOM
+    /// exposes as the change event's `nativeEvent.inputType`.
+    fn emit_change(&mut self, input_type: &'static str) {
         if self.emits_change {
             record_pending_echo(&mut self.pending_values, self.content.clone());
             emit_event_full(&self.callback, self.element_id, "change", |payload| {
                 payload.value = Some(self.content.clone());
+                payload.input_type = Some(input_type.to_string());
             });
         }
     }
 
-    fn restore(&mut self, snapshot: EditSnapshot, cx: &mut Context<Self>) {
+    fn restore(
+        &mut self,
+        snapshot: EditSnapshot,
+        input_type: &'static str,
+        cx: &mut Context<Self>,
+    ) {
         self.content = snapshot.content;
         self.selected_range = snapshot.selected_range;
         self.selection_reversed = snapshot.selection_reversed;
@@ -1171,7 +1184,7 @@ impl TextEditorState {
         self.follow_cursor = true;
         self.last_edit = None;
         self.reset_blink(cx);
-        self.emit_change();
+        self.emit_change(input_type);
         cx.notify();
     }
 
@@ -1298,7 +1311,7 @@ impl TextEditorState {
             }
             self.select_to(previous, cx);
         }
-        self.replace_text_in_range(None, "", window, cx);
+        self.replace_selection_as("", "deleteContentBackward", window, cx);
     }
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
@@ -1317,7 +1330,7 @@ impl TextEditorState {
             }
             self.select_to(next, cx);
         }
-        self.replace_text_in_range(None, "", window, cx);
+        self.replace_selection_as("", "deleteContentForward", window, cx);
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
@@ -1545,7 +1558,7 @@ impl TextEditorState {
         if self.selected_range.is_empty() {
             self.select_to(self.previous_word_boundary(self.cursor_offset()), cx);
         }
-        self.replace_text_in_range(None, "", window, cx);
+        self.replace_selection_as("", "deleteWordBackward", window, cx);
     }
 
     fn delete_word_right(
@@ -1565,7 +1578,7 @@ impl TextEditorState {
         if self.selected_range.is_empty() {
             self.select_to(self.next_word_boundary(self.cursor_offset()), cx);
         }
-        self.replace_text_in_range(None, "", window, cx);
+        self.replace_selection_as("", "deleteWordForward", window, cx);
     }
 
     fn delete_to_line_start(
@@ -1589,7 +1602,7 @@ impl TextEditorState {
             }
             self.select_to(start, cx);
         }
-        self.replace_text_in_range(None, "", window, cx);
+        self.replace_selection_as("", "deleteSoftLineBackward", window, cx);
     }
 
     fn delete_to_line_end(
@@ -1613,7 +1626,7 @@ impl TextEditorState {
             }
             self.select_to(end, cx);
         }
-        self.replace_text_in_range(None, "", window, cx);
+        self.replace_selection_as("", "deleteSoftLineForward", window, cx);
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
@@ -1638,7 +1651,7 @@ impl TextEditorState {
             return;
         }
         self.copy(&Copy, window, cx);
-        self.replace_text_in_range(None, "", window, cx);
+        self.replace_selection_as("", "deleteByCut", window, cx);
     }
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
@@ -1651,7 +1664,7 @@ impl TextEditorState {
             return;
         }
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            self.replace_text_in_range(None, &text, window, cx);
+            self.replace_selection_as(&text, "insertFromPaste", window, cx);
         }
     }
 
@@ -1666,7 +1679,7 @@ impl TextEditorState {
         }
         if let Some(previous) = self.undo_stack.pop_back() {
             self.redo_stack.push(self.snapshot());
-            self.restore(previous, cx);
+            self.restore(previous, "historyUndo", cx);
         }
     }
 
@@ -1682,13 +1695,26 @@ impl TextEditorState {
         if let Some(next) = self.redo_stack.pop() {
             let snapshot = self.snapshot();
             push_undo_snapshot(&mut self.undo_stack, snapshot);
-            self.restore(next, cx);
+            self.restore(next, "historyRedo", cx);
         }
+    }
+
+    /// Replace the selection on behalf of an editing action, reporting the
+    /// edit to JS with that action's `inputType`.
+    fn replace_selection_as(
+        &mut self,
+        new_text: &str,
+        input_type: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.next_input_type = Some(input_type);
+        self.replace_text_in_range(None, new_text, window, cx);
     }
 
     fn insert_newline(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.multiline && !self.read_only {
-            self.replace_text_in_range(None, "\n", window, cx);
+            self.replace_selection_as("\n", "insertLineBreak", window, cx);
         }
     }
 
@@ -2298,6 +2324,9 @@ impl EntityInputHandler for TextEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Taken before either early return, so the kind an editing action set
+        // can never label a later, unrelated edit.
+        let input_type = self.next_input_type.take().unwrap_or("insertText");
         if self.deferred_default_wait_armed() {
             self.queue.push_back(QueuedInput::ReplaceText {
                 range_utf16,
@@ -2329,7 +2358,7 @@ impl EntityInputHandler for TextEditorState {
         self.marked_range = None;
         self.follow_cursor = true;
         self.reset_blink(cx);
-        self.emit_change();
+        self.emit_change(input_type);
         cx.notify();
     }
 
@@ -2381,7 +2410,7 @@ impl EntityInputHandler for TextEditorState {
             .unwrap_or_else(|| range.start + replacement.len()..range.start + replacement.len());
         self.follow_cursor = true;
         self.reset_blink(cx);
-        self.emit_change();
+        self.emit_change("insertCompositionText");
         cx.notify();
     }
 

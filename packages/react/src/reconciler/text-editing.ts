@@ -15,6 +15,18 @@ import type { Props } from "../types/host.js"
  */
 export const TEXT_EDITING_TYPES: ReadonlySet<string> = new Set(["input", "textarea"])
 
+/**
+ * The text a `value` or `defaultValue` prop stands for, as React DOM computes
+ * it with `toString(getToStringValue(value))`: numbers, booleans and objects
+ * stringify, and a function or symbol stands for no text. `undefined` means the
+ * prop is absent, as `null` and `undefined` do in React DOM.
+ */
+export function editorPropText(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined
+  if (typeof value === "function" || typeof value === "symbol") return ""
+  return String(value)
+}
+
 /** The `<input>` types that are not text editors: see `inputKind` in `form-controls.ts`. */
 const NON_TEXT_INPUT_TYPES: ReadonlySet<string> = new Set(["checkbox", "radio", "hidden", "range"])
 

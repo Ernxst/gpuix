@@ -19,6 +19,7 @@
 import type { Container, Instance, Props } from "../types/host.js"
 import type { GpuixEventDispatchResult } from "./synthetic-event.js"
 import { dispatchSyntheticEvent } from "./event-registry.js"
+import { editorPropText } from "./text-editing.js"
 
 export type InputKind = "text" | "checkbox" | "radio" | "hidden" | "range"
 
@@ -717,8 +718,7 @@ function textValue(container: Container, instance: Instance): string {
   const native = container.native.getInputValue?.(instance.id)
   if (typeof native === "string") return native
   const props = instance.props as Props & { value?: unknown; defaultValue?: unknown }
-  const value = props.value ?? props.defaultValue
-  return value == null ? "" : String(value)
+  return editorPropText(props.value ?? props.defaultValue) ?? ""
 }
 
 function attributeValue(instance: Instance, fallback: string): string {
@@ -931,7 +931,6 @@ export function resetForm(container: Container, form: Instance): void {
       }
     }
     const props = control.props as Props & { value?: unknown; defaultValue?: unknown }
-    const value = props.value ?? props.defaultValue
-    container.native.setInputValue?.(control.id, value == null ? "" : String(value))
+    container.native.setInputValue?.(control.id, editorPropText(props.value ?? props.defaultValue) ?? "")
   }
 }

@@ -341,6 +341,12 @@ export interface GpuixChangeEvent extends GpuixEvent {
   readonly type: "change"
   /** A text editor's new text, or a range's new value. */
   readonly value?: string
+  /**
+   * The Input Events `inputType` of a text editor's edit — `insertText`,
+   * `deleteContentBackward`, `insertFromPaste`, `historyUndo` and so on — as
+   * a browser reports it on the `input` event React DOM's `onChange` wraps.
+   */
+  readonly inputType?: string
   /** A checkbox's or radio's new checkedness. */
   readonly checked?: boolean
 }
