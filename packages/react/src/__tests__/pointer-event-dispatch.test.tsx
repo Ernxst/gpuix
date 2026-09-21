@@ -200,6 +200,138 @@ describe("PublicInstance.dispatchEvent", () => {
     expect(outer).not.toHaveBeenCalled()
   })
 
+  it("stops the dispatched event when a handler stops propagation", () => {
+    const calls: string[] = []
+    const target = React.createRef<PublicInstance>()
+    const event = new PointerEvent("click", { bubbles: true })
+    render(
+      <div onClick={() => calls.push("outer")}>
+        <div
+          ref={target}
+          onClickCapture={(synthetic) => synthetic.stopPropagation()}
+          onClick={() => calls.push(`target:${event.cancelBubble}`)}
+        />
+      </div>
+    )
+
+    target.current!.dispatchEvent(event)
+    // The target's other listener still runs, and sees the flag; ancestors do not.
+    expect(calls).toEqual(["target:true"])
+    // As in the DOM, the flag is unset once the dispatch finishes.
+    expect(event.cancelBubble).toBe(false)
+  })
+
+  it("skips the target's remaining listener after stopImmediatePropagation", () => {
+    const calls: string[] = []
+    const target = React.createRef<PublicInstance>()
+    const event = new PointerEvent("click", { bubbles: true })
+    render(
+      <div onClick={() => calls.push("outer")}>
+        <div
+          ref={target}
+          onClickCapture={(synthetic) => {
+            synthetic.stopImmediatePropagation()
+            calls.push(`capture:${event.cancelBubble}`)
+          }}
+          onClick={() => calls.push("target")}
+        />
+      </div>
+    )
+
+    target.current!.dispatchEvent(event)
+    expect(calls).toEqual(["capture:true"])
+  })
+
+  it("forwards stopping to an event of the host's own shape", () => {
+    const target = React.createRef<PublicInstance>()
+    render(<div ref={target} onClick={(synthetic) => synthetic.stopPropagation()} />)
+    const event = {
+      type: "click",
+      bubbles: true,
+      cancelable: true,
+      defaultPrevented: false,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    }
+
+    expect(target.current!.dispatchEvent(event)).toBe(true)
+    expect(event.stopPropagation).toHaveBeenCalledTimes(1)
+    expect(event.preventDefault).not.toHaveBeenCalled()
+  })
+
+  it("runs no listener for an event stopped before dispatch", () => {
+    const handler = vi.fn()
+    const target = React.createRef<PublicInstance>()
+    render(
+      <div onClickCapture={handler} onClick={handler}>
+        <div ref={target} onClickCapture={handler} onClick={handler} />
+      </div>
+    )
+
+    const event = new PointerEvent("click", { bubbles: true, cancelable: true })
+    event.stopPropagation()
+    expect(target.current!.dispatchEvent(event)).toBe(true)
+    expect(handler).not.toHaveBeenCalled()
+    expect(event.cancelBubble).toBe(false)
+
+    // The same event dispatches normally once the flag is unset.
+    target.current!.dispatchEvent(event)
+    expect(handler).toHaveBeenCalledTimes(4)
+  })
+
+  it("delivers no click to a disabled form control or its ancestors", () => {
+    const handler = vi.fn()
+    const onSubmit = vi.fn()
+    const button = React.createRef<PublicInstance>()
+    const checkbox = React.createRef<PublicInstance>()
+    const textarea = React.createRef<PublicInstance>()
+    const wrapper = React.createRef<PublicInstance>()
+    render(
+      <form onSubmit={onSubmit} onClickCapture={handler} onClick={handler}>
+        <button ref={button} type="submit" disabled onClickCapture={handler} onClick={handler} />
+        <input ref={checkbox} type="checkbox" disabled onClick={handler} onChange={handler} />
+        <textarea ref={textarea} disabled onClick={handler} />
+        <div ref={wrapper} ariaDisabled onClick={handler} />
+      </form>
+    )
+
+    for (const ref of [button, checkbox, textarea]) {
+      const event = new PointerEvent("click", { bubbles: true, cancelable: true })
+      expect(ref.current!.dispatchEvent(event)).toBe(true)
+    }
+    expect(handler).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    // Pointer events still reach a disabled control, as they do in a browser.
+    const onPointerDown = vi.fn()
+    unmount?.()
+    render(<button ref={button} disabled onPointerDown={onPointerDown} />)
+    button.current!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))
+    expect(onPointerDown).toHaveBeenCalledTimes(1)
+
+    // Only native disabling blocks the click: aria-disabled does not.
+    unmount?.()
+    render(<div ref={wrapper} ariaDisabled onClick={handler} />)
+    wrapper.current!.dispatchEvent(new PointerEvent("click", { bubbles: true }))
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it("runs no handler once the ref's element has unmounted", () => {
+    const handler = vi.fn()
+    const target = React.createRef<PublicInstance>()
+    render(<div ref={(instance) => {
+      if (instance) (target as { current: PublicInstance | null }).current = instance
+    }} onClick={handler} />)
+    const detached = target.current!
+    unmount!()
+    unmount = undefined
+
+    const event = new PointerEvent("click", { bubbles: true, cancelable: true })
+    expect(detached.dispatchEvent(event)).toBe(true)
+    expect(handler).not.toHaveBeenCalled()
+  })
+
   it("carries modifiers, button, detail, and pointer members to handlers", () => {
     const target = React.createRef<PublicInstance>()
     const seen: GpuixPointerEvent[] = []

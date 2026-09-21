@@ -26,7 +26,7 @@ import {
   restoreControlledChoices,
 } from "./form-controls.js"
 import { dispatchResizeObservation } from "../resize-observer.js"
-import type { GpuixDispatchableEvent } from "../pointer-event.js"
+import { finishEventDispatch, type GpuixDispatchableEvent } from "../pointer-event.js"
 
 /**
  * React's `flushSync`, installed by `reconciler.ts` once the reconciler exists.
@@ -341,7 +341,9 @@ const dispatchingEvents = new WeakSet<object>()
  * handlers run through the usual capture, target, and bubble path, and a click
  * then runs its activation behaviour unless a handler prevented it, as an
  * untrusted click does in a browser. The return value is the DOM's: `false`
- * when the event was canceled, `true` otherwise.
+ * when the event was canceled, `true` otherwise. As with `click()`, a disabled
+ * form control takes no click at all. An event whose propagation was stopped
+ * before the call reaches no handler.
  *
  * Only the types in {@link DISPATCHABLE_EVENT_TYPES} reach handlers. Any
  * other type has no GPUIX listener to run, as a browser element has none for
@@ -364,7 +366,13 @@ export function dispatchElementEvent(
     )
   }
   const eventType = DISPATCHABLE_EVENT_TYPES[event.type]
-  if (eventType === undefined || container.eventTargets.get(instance.id) !== instance) {
+  const formControl =
+    instance.type === "input" || instance.type === "textarea" || instance.type === "button"
+  if (
+    eventType === undefined ||
+    container.eventTargets.get(instance.id) !== instance ||
+    (eventType === "click" && formControl && isNativelyDisabled(instance))
+  ) {
     return !event.defaultPrevented
   }
 
@@ -395,6 +403,7 @@ export function dispatchElementEvent(
     return !result.defaultPrevented
   } finally {
     dispatchingEvents.delete(event)
+    finishEventDispatch(event)
   }
 }
 
@@ -808,6 +817,12 @@ function dispatchGpuixEvent(
   }
 
   try {
+    // A dispatched event whose propagation was stopped before dispatch
+    // reaches no listener.
+    if (event.isPropagationStopped()) {
+      return finishDispatch({ defaultPrevented: event.defaultPrevented, propagationStopped: true })
+    }
+
     // Capture travels from the root toward, but not including, the target.
     for (let index = path.length - 1; index >= 1; index -= 1) {
       invoke(path[index]!, `${payload.eventType}Capture`, 1)

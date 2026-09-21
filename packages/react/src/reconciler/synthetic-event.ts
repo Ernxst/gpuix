@@ -418,9 +418,10 @@ interface SyntheticEventController {
 
 /**
  * `dispatched` is the JS-created event behind a `dispatchEvent()` call. Its
- * `bubbles`, `cancelable`, and cancellation replace the ones this renderer
- * derives for a native payload of the same type, and preventing the synthetic
- * event prevents it too, so `dispatchEvent()` can report the cancellation.
+ * `bubbles`, `cancelable`, cancellation, and stopped propagation replace the
+ * ones this renderer derives for a native payload of the same type. Preventing
+ * or stopping the synthetic event does the same to it, so `dispatchEvent()`
+ * can report the cancellation and the caller sees `cancelBubble`.
  */
 export function createGpuixSyntheticEvent(
   nativeEvent: EventPayload,
@@ -432,8 +433,8 @@ export function createGpuixSyntheticEvent(
   let currentTarget = target
   let eventPhase: GpuixEventPhase = 2
   let defaultPrevented = dispatched?.defaultPrevented === true
-  let propagationStopped = false
-  let immediatePropagationStopped = false
+  let propagationStopped = dispatched?.cancelBubble === true
+  let immediatePropagationStopped = propagationStopped
 
   const modifiers = nativeEvent.modifiers
   const isNonCancelableEvent =
@@ -488,10 +489,12 @@ export function createGpuixSyntheticEvent(
     },
     stopPropagation(): void {
       propagationStopped = true
+      dispatched?.stopPropagation?.()
     },
     stopImmediatePropagation(): void {
       propagationStopped = true
       immediatePropagationStopped = true
+      dispatched?.stopImmediatePropagation?.()
     },
     isDefaultPrevented(): boolean {
       return defaultPrevented

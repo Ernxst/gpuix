@@ -8,6 +8,18 @@
  * and propagation flags, and is not an `EventTarget` or tied to a document.
  */
 
+const clearPropagationFlags = Symbol("clearPropagationFlags")
+
+/**
+ * The end of `EventTarget.dispatchEvent()`: the DOM unsets an event's stop
+ * propagation flags once its dispatch finishes, so `cancelBubble` reads
+ * `false` again and the event can be dispatched afresh. Events this module did
+ * not construct keep whatever state their own class gives them.
+ */
+export function finishEventDispatch(event: object): void {
+  if (event instanceof PointerEvent) event[clearPropagationFlags]()
+}
+
 /** The members a `PointerEventInit` dictionary may set. */
 export interface GpuixPointerEventInit {
   bubbles?: boolean
@@ -54,6 +66,10 @@ export interface GpuixDispatchableEvent {
   readonly cancelable: boolean
   readonly defaultPrevented: boolean
   preventDefault(): void
+  /** Set when propagation was stopped. Absent means it was not. */
+  readonly cancelBubble?: boolean
+  stopPropagation?(): void
+  stopImmediatePropagation?(): void
   readonly detail?: number
   readonly clientX?: number
   readonly clientY?: number
@@ -199,6 +215,10 @@ export class PointerEvent implements GpuixDispatchableEvent {
 
   stopImmediatePropagation(): void {
     this.#propagationStopped = true
+  }
+
+  [clearPropagationFlags](): void {
+    this.#propagationStopped = false
   }
 
   composedPath(): never[] {
