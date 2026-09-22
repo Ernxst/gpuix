@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use anyhow::Context as _;
 
-const DRAWS: usize = 10_000;
+const DEFAULT_DRAWS: usize = 10_000;
 const WARMUP_FRAMES: usize = 50;
 const MEASURED_FRAMES: usize = 300;
 
@@ -40,6 +40,7 @@ fn frame(
     vertex_buffer: &wgpu::Buffer,
     index_buffer: &wgpu::Buffer,
     view: &wgpu::TextureView,
+    draws: usize,
 ) -> (u128, u128) {
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("direct wgpu baseline"),
@@ -63,7 +64,7 @@ fn frame(
             multiview_mask: None,
         });
         pass.set_pipeline(pipeline);
-        for _ in 0..DRAWS {
+        for _ in 0..draws {
             pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             pass.draw_indexed(0..3, 0, 0..1);
@@ -76,6 +77,13 @@ fn frame(
 }
 
 fn main() -> anyhow::Result<()> {
+    let draws = std::env::var("WEBGPU_BENCH_DRAWS")
+        .ok()
+        .map(|value| value.parse())
+        .transpose()
+        .context("WEBGPU_BENCH_DRAWS must be a positive integer")?
+        .filter(|draws: &usize| *draws > 0)
+        .unwrap_or(DEFAULT_DRAWS);
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::LowPower,
@@ -160,6 +168,7 @@ fn main() -> anyhow::Result<()> {
             &vertex_buffer,
             &index_buffer,
             &view,
+            draws,
         );
     }
     let mut recording = Vec::with_capacity(MEASURED_FRAMES);
@@ -172,6 +181,7 @@ fn main() -> anyhow::Result<()> {
             &vertex_buffer,
             &index_buffer,
             &view,
+            draws,
         );
         recording.push(record_ns);
         finish_submit.push(submit_ns);
@@ -182,9 +192,9 @@ fn main() -> anyhow::Result<()> {
     let submit_median = percentile(&mut finish_submit.clone(), 0.5);
     let submit_p95 = percentile(&mut finish_submit, 0.95);
     println!(
-        "direct_wgpu_10k record_ns_median={record_median} record_ns_p95={record_p95} finish_submit_ns_median={submit_median} finish_submit_ns_p95={submit_p95} total_ns_per_draw_median={} total_ns_per_draw_p95={}",
-        (record_median + submit_median) / DRAWS as u128,
-        (record_p95 + submit_p95) / DRAWS as u128,
+        "direct_wgpu_draws={draws} record_ns_median={record_median} record_ns_p95={record_p95} finish_submit_ns_median={submit_median} finish_submit_ns_p95={submit_p95} total_ns_per_draw_median={} total_ns_per_draw_p95={}",
+        (record_median + submit_median) / draws as u128,
+        (record_p95 + submit_p95) / draws as u128,
     );
     Ok(())
 }

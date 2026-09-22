@@ -2662,6 +2662,8 @@ dependencies = [
  "web-sys",
  "web-time",
  "wgpu",
+ "wgpu-core",
+ "wgpu-types",
  "windows 0.61.3",
  "zed-reqwest",
 ]

@@ -1,10 +1,15 @@
-const DRAW_COUNTS = (process.env.PER_DRAW_COUNTS ?? "1000,5000,10000")
+const DRAW_COUNTS = (process.env.PER_DRAW_COUNTS ?? "100,1000,10000,50000,100000")
   .split(",")
   .map((value) => Number(value))
   .filter((value) => Number.isInteger(value) && value > 0)
 if (DRAW_COUNTS.length === 0) throw new Error("PER_DRAW_COUNTS must contain positive integers")
 const WARMUP_FRAMES = 50
 const MEASURED_FRAMES = 300
+const LARGE_WORKLOAD_MEASURED_FRAMES = 100
+
+function measuredFramesFor(draws) {
+  return draws >= 50_000 ? LARGE_WORKLOAD_MEASURED_FRAMES : MEASURED_FRAMES
+}
 
 const WGSL = /* wgsl */ `
 struct VertexOutput {
@@ -38,7 +43,7 @@ function summary(samples) {
   }
 }
 
-function createResources(device) {
+export function createResources(device) {
   const shader = device.createShaderModule({ code: WGSL })
   const pipeline = device.createRenderPipeline({
     layout: "auto",
@@ -118,12 +123,12 @@ async function frame(device, resources, target, draws, measureGpuCompletion) {
  * Run the shared WebGPU calls. Providers may only differ in `target`: GPU-IX
  * acquires a canvas texture and Dawn returns an off-screen texture view.
  */
-export async function runWorkload({ provider, runtime, device, target }) {
-  const resources = createResources(device)
+export async function runWorkload({ provider, runtime, device, target, resources = createResources(device) }) {
   const supportsGpuCompletion = typeof device.queue.onSubmittedWorkDone === "function"
   const measurements = []
 
   for (const draws of DRAW_COUNTS) {
+    const measuredFrames = measuredFramesFor(draws)
     for (let frameIndex = 0; frameIndex < WARMUP_FRAMES; frameIndex++) {
       await frame(device, resources, target, draws, supportsGpuCompletion)
     }
@@ -131,7 +136,7 @@ export async function runWorkload({ provider, runtime, device, target }) {
     const encode = []
     const finishSubmit = []
     const gpuComplete = []
-    for (let frameIndex = 0; frameIndex < MEASURED_FRAMES; frameIndex++) {
+    for (let frameIndex = 0; frameIndex < measuredFrames; frameIndex++) {
       const result = await frame(device, resources, target, draws, supportsGpuCompletion)
       encode.push(result.encodeNs)
       finishSubmit.push(result.finishSubmitNs)
@@ -139,6 +144,7 @@ export async function runWorkload({ provider, runtime, device, target }) {
     }
     measurements.push({
       draws,
+      measuredFrames,
       encode: summary(encode),
       finishSubmit: summary(finishSubmit),
       gpuComplete: gpuComplete.length === 0 ? null : summary(gpuComplete),
@@ -151,7 +157,7 @@ export async function runWorkload({ provider, runtime, device, target }) {
     workload: {
       target: "256x256 bgra8unorm",
       warmupFrames: WARMUP_FRAMES,
-      measuredFrames: MEASURED_FRAMES,
+      measuredFrames: `300 through 10,000 draws; ${LARGE_WORKLOAD_MEASURED_FRAMES} at 50,000 and 100,000 draws`,
       draws: DRAW_COUNTS,
       commands: "setPipeline once; setVertexBuffer + setIndexBuffer + drawIndexed repeated",
       gpuCompleteTiming: supportsGpuCompletion

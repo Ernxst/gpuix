@@ -10,6 +10,7 @@
   "scripts": {
     "build": "bun run build:native && bun run build:react && bun run build:vite",
     "build:native": "cd packages/native && bun run build",
+    "bench:webgpu": "bun plans/evidence/native-webgpu-reuse/per-draw-benchmark/bench.mjs",
     "build:react": "cd packages/react && bun run build",
     "build:vite": "cd packages/plugins && bun run build",
     "canvas:wpt": "cd packages/react && bun run canvas:wpt",

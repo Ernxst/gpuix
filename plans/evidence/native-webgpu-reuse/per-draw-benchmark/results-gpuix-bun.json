@@ -4,49 +4,80 @@
   "workload": {
     "target": "256x256 bgra8unorm",
     "warmupFrames": 50,
-    "measuredFrames": 300,
+    "measuredFrames": "300 through 10,000 draws; 100 at 50,000 and 100,000 draws",
     "draws": [
+      100,
       1000,
-      5000,
-      10000
+      10000,
+      50000,
+      100000
     ],
     "commands": "setPipeline once; setVertexBuffer + setIndexBuffer + drawIndexed repeated",
     "gpuCompleteTiming": "unsupported by this provider"
   },
   "measurements": [
     {
-      "draws": 1000,
+      "draws": 100,
+      "measuredFrames": 300,
       "encode": {
-        "medianNs": 52958,
-        "p95Ns": 324959
+        "medianNs": 7041,
+        "p95Ns": 16125
       },
       "finishSubmit": {
-        "medianNs": 306459,
-        "p95Ns": 845625
+        "medianNs": 65625,
+        "p95Ns": 95084
       },
       "gpuComplete": null
     },
     {
-      "draws": 5000,
+      "draws": 1000,
+      "measuredFrames": 300,
       "encode": {
-        "medianNs": 277875,
-        "p95Ns": 1326292
+        "medianNs": 55125,
+        "p95Ns": 477916
       },
       "finishSubmit": {
-        "medianNs": 1899000,
-        "p95Ns": 3072792
+        "medianNs": 302417,
+        "p95Ns": 1611416
       },
       "gpuComplete": null
     },
     {
       "draws": 10000,
+      "measuredFrames": 300,
       "encode": {
-        "medianNs": 511416,
-        "p95Ns": 1688166
+        "medianNs": 477958,
+        "p95Ns": 1363125
       },
       "finishSubmit": {
-        "medianNs": 3040167,
-        "p95Ns": 4252208
+        "medianNs": 2928709,
+        "p95Ns": 3877750
+      },
+      "gpuComplete": null
+    },
+    {
+      "draws": 50000,
+      "measuredFrames": 100,
+      "encode": {
+        "medianNs": 2717125,
+        "p95Ns": 3740500
+      },
+      "finishSubmit": {
+        "medianNs": 16589000,
+        "p95Ns": 22458084
+      },
+      "gpuComplete": null
+    },
+    {
+      "draws": 100000,
+      "measuredFrames": 100,
+      "encode": {
+        "medianNs": 5507750,
+        "p95Ns": 11018416
+      },
+      "finishSubmit": {
+        "medianNs": 33398250,
+        "p95Ns": 50097959
       },
       "gpuComplete": null
     }
