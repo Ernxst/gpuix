@@ -21,9 +21,9 @@
       "id": "compositing/2d.composite.globalAlpha.canvas",
       "status": "skip",
       "gaps": [
-        "GPUIX canvas host has no width member"
+        "drawImage needs a GPUIX-imported image source"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "Canvas drawImage expects an Image or ImageBitmap imported from @gpuix/react"
     },
     {
       "id": "compositing/2d.composite.globalAlpha.canvaspattern",
@@ -31,7 +31,7 @@
       "gaps": [
         "Unsupported API: canvas patterns"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createPattern is not implementable: GPUI has no repeating-image BackgroundTag"
     },
     {
       "id": "compositing/2d.composite.globalAlpha.canvascopy",
@@ -39,7 +39,7 @@
       "gaps": [
         "Unsupported API: non-source-over compositing"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.globalCompositeOperation is not implementable: GPUI canvas primitives use a fixed source-over blend"
     },
     {
       "id": "compositing/2d.composite.operation.get",
@@ -669,7 +669,7 @@
         "Unsupported API: canvas gradients",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.overlap",
@@ -678,7 +678,7 @@
         "Unsupported API: canvas gradients",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "fill-and-stroke-styles/2d.gradient.interpolate.overlap2",
@@ -1016,7 +1016,7 @@
         "Unsupported API: canvas patterns",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "Expected InvalidStateError, got Canvas2DNotImplementedError: <canvas elementId=1> CanvasRenderingContext2D.createPattern is not implementable: GPUI has no repeating-image BackgroundTag"
     },
     {
       "id": "fill-and-stroke-styles/2d.pattern.basic.nocontext",
@@ -2911,7 +2911,7 @@
         "Unsupported API: geometry hit-testing",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.isPointInPath is not implemented: the consumer contract uses geometry-space hit testing outside the canvas"
     },
     {
       "id": "path-objects/2d.path.isPointInpath.multi.path",
@@ -2921,7 +2921,7 @@
         "Unsupported API: Path2D objects",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "Path2D is not defined"
     },
     {
       "id": "path-objects/2d.path.isPointInpath.invalid",
@@ -2931,7 +2931,7 @@
         "Unsupported API: Path2D objects",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "Path2D is not defined"
     },
     {
       "id": "path-objects/2d.path.clip.scale",
@@ -3815,9 +3815,10 @@
       "id": "the-canvas/2d.canvas.host.initial.reset.path",
       "status": "skip",
       "gaps": [
+        "Native screenshot composites the canvas over an opaque window, so alpha below 255 cannot be read back",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "1 of 1 pixel expectations need alpha < 255"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.clip",
@@ -3826,15 +3827,11 @@
         "Unsupported API: arbitrary path clipping",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.clip is not implementable: GPUI exposes rectangular and rounded content masks, not arbitrary path masks"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.transform",
-      "status": "skip",
-      "gaps": [
-        "Unsupported API: HTML canvas backing-store state"
-      ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "status": "pass"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.gradient",
@@ -3843,7 +3840,7 @@
         "Unsupported API: canvas gradients",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createLinearGradient is not implemented: gradient objects and the GPUI stop limit are not encoded by canvas stream version 1"
     },
     {
       "id": "the-canvas/2d.canvas.host.initial.reset.pattern",
@@ -3852,23 +3849,15 @@
         "Unsupported API: canvas patterns",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "<canvas elementId=1> CanvasRenderingContext2D.createPattern is not implementable: GPUI has no repeating-image BackgroundTag"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.idl.set.zero",
-      "status": "skip",
-      "gaps": [
-        "Unsupported API: HTML canvas backing-store state"
-      ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "status": "pass"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.idl",
-      "status": "skip",
-      "gaps": [
-        "Unsupported API: HTML canvas backing-store state"
-      ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "status": "pass"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.invalid.attributes.idl",
@@ -3877,7 +3866,7 @@
         "WPT canvas type OffscreenCanvas, Worker is outside the HTML canvas host",
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "Expected TypeError, got Error: GPUIX canvas host has no width member"
+      "diagnosis": "Expected TypeError, but no exception was thrown"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.invalid.attributes.idl#2",
@@ -3885,15 +3874,11 @@
       "gaps": [
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "expected 300 to be 200 // Object.is equality"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.default",
-      "status": "skip",
-      "gaps": [
-        "Unsupported API: HTML canvas backing-store state"
-      ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "status": "pass"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.removed",
@@ -3901,7 +3886,7 @@
       "gaps": [
         "Unsupported API: HTML canvas backing-store state"
       ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "diagnosis": "GPUIX canvas host has no removeAttribute member"
     },
     {
       "id": "the-canvas/2d.canvas.host.size.attributes.reflect.setidl",
@@ -3930,11 +3915,7 @@
     },
     {
       "id": "the-canvas/2d.canvas.host.size.large",
-      "status": "skip",
-      "gaps": [
-        "Unsupported API: HTML canvas backing-store state"
-      ],
-      "diagnosis": "GPUIX canvas host has no width member"
+      "status": "pass"
     },
     {
       "id": "the-canvas/2d.canvas.context.prototype",
