@@ -96,6 +96,8 @@ bun run build:native
 bun run bench:webgpu
 ```
 
+Run native and GPU tests outside the command sandbox. It denies access to the Metal system device, so `metal::Device::system_default()` returns `None` there.
+
 The check never builds the addon. It fails if the macOS addon is absent or contains debug sections. It runs five trials in one GPU-IX canvas process, reusing the one benchmark scene, then takes the median per-size result. It fails a median regression above 10% or p95 regression above 20%, except for the 100-draw p95. At that count fixed submission work dominates the sample, and repeated runs show it varies independently of the 1,000- and 10,000-draw steady-state results; its median remains checked. The limits are `REGRESSION_THRESHOLDS` in [bench.mjs](bench.mjs). `baseline.json` stores whole-frame CPU time, ns/draw, machine, macOS, Bun and build profile. Update it only after reviewing an intended change:
 
 ```sh
