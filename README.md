@@ -80,12 +80,12 @@ git clone --recurse-submodules https://github.com/Ernxst/gpuix
 cd gpuix && bun install && bun run build
 cd packages/native && bun pm pack
 cd ../react && bun pm pack
-cd ../vite && bun pm pack
+cd ../plugins && bun pm pack
 ```
 
 Pin the generated native and React `.tgz` files in your app — plus an `overrides`
-entry for `@gpuix/native`, without which the install fails. Add the Vite tarball
-when your app uses Vite, then add the types.
+entry for `@gpuix/native`, without which the install fails. Add the plugins
+tarball when the app uses Vite or Bun, then add the types.
 [Consuming an unpublished checkout](#consuming-an-unpublished-checkout) has the
 exact `package.json` shape and the peer-dependency rules.
 
@@ -1146,7 +1146,7 @@ the whole entry on save. A second `init()` would open a second window.
 
 ### 2. Use Vite without a GPUIX CLI
 
-Use `@gpuix/vite` when the app needs Vite's plugin pipeline. Vite and the native
+Use `@gpuix/plugins/vite` when the app needs Vite's plugin pipeline. Vite and the native
 module runner stay in the Bun process, so no separate launcher is needed.
 
 Add the packed plugin and Vite as development dependencies:
@@ -1154,7 +1154,7 @@ Add the packed plugin and Vite as development dependencies:
 ```json
 {
   "devDependencies": {
-    "@gpuix/vite": "file:/absolute/path/gpuix-vite-0.19.0-fork.1.tgz",
+    "@gpuix/plugins": "file:/absolute/path/gpuix-plugins-0.19.0-fork.1.tgz",
     "vite": "^8.2.1"
   }
 }
@@ -1165,7 +1165,7 @@ Configure Vite and keep the app entry ending with `render()`:
 ```ts
 // vite.config.ts
 import { defineConfig } from 'vite'
-import { gpuix } from '@gpuix/vite'
+import { gpuix } from '@gpuix/plugins/vite'
 
 export default defineConfig({
   appType: 'custom',
@@ -1176,6 +1176,9 @@ export default defineConfig({
 ```json
 { "scripts": { "dev": "bun run --bun vite" } }
 ```
+
+The Vite adapter is for native development. If a config includes `gpuix()` in
+`vite build`, it throws; use `@gpuix/plugins/bun` for native packaging.
 
 Run `bun run dev`. Component-only edits keep React state. A mixed module such
 as a TanStack route invalidates the Refresh boundary, then Vite re-evaluates the
@@ -1191,7 +1194,7 @@ environment, so GPUIX remains responsible for native Refresh.
 ```ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { gpuix } from '@gpuix/vite'
+import { gpuix } from '@gpuix/plugins/vite'
 
 export default defineConfig(({ mode }) => {
   const native = mode === 'native'
@@ -1218,7 +1221,28 @@ export default defineConfig(({ mode }) => {
 The scoped `--bun` flag runs only Vite under Bun. It does not change the browser
 bundle, select a renderer, or alter Node-based tools such as Vitest.
 
-### 3. Start the app with `bun --hot`
+### 3. Build with Bun
+
+Use `@gpuix/plugins/bun` when packaging the native app with `Bun.build`:
+
+```ts
+import { gpuix } from '@gpuix/plugins/bun'
+
+const result = await Bun.build({
+  entrypoints: ['app.tsx'],
+  outdir: 'dist',
+  plugins: [gpuix()],
+})
+
+if (!result.success) throw new Error('Bun build failed')
+```
+
+The adapter defaults to Bun as the target, ESM output, automatic JSX using
+`@gpuix/react`, and an external `@gpuix/native` import. Explicit scalar build
+options win. `external`, `define`, and `conditions` are merged. The adapter
+also converts native `*.module.css` imports into objects for the `style` prop.
+
+### 4. Start the app with `bun --hot`
 
 Prefer **`bun --hot`** over a plain `bun` or `tsx` run. Without `--hot`, a
 save starts a second process. With it, `render()` remounts React on the same
@@ -1228,7 +1252,7 @@ window.
 bun --hot app.tsx
 ```
 
-### 4. Save the file
+### 5. Save the file
 
 ```
 save .tsx  ►  bun re-evaluates the entry  ►  render() remounts React
@@ -5147,6 +5171,7 @@ consuming app:
 ```bash
 cd packages/native && bun pm pack
 cd ../react && bun pm pack
+cd ../plugins && bun pm pack
 ```
 
 Relative `file:` pins can break when the consuming project is checked out via

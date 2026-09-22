@@ -1,5 +1,5 @@
 import { defineConfig } from "vite"
-import { gpuix } from "@gpuix/vite"
+import { gpuix } from "@gpuix/plugins/vite"
 
 export default defineConfig({
   appType: "custom",
