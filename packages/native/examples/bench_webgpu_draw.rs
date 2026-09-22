@@ -81,8 +81,7 @@ fn main() -> anyhow::Result<()> {
         .ok()
         .map(|value| value.parse())
         .transpose()
-        .context("WEBGPU_BENCH_DRAWS must be a positive integer")?
-        .filter(|draws: &usize| *draws > 0)
+        .context("WEBGPU_BENCH_DRAWS must be a non-negative integer")?
         .unwrap_or(DEFAULT_DRAWS);
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -193,8 +192,8 @@ fn main() -> anyhow::Result<()> {
     let submit_p95 = percentile(&mut finish_submit, 0.95);
     println!(
         "direct_wgpu_draws={draws} record_ns_median={record_median} record_ns_p95={record_p95} finish_submit_ns_median={submit_median} finish_submit_ns_p95={submit_p95} total_ns_per_draw_median={} total_ns_per_draw_p95={}",
-        (record_median + submit_median) / draws as u128,
-        (record_p95 + submit_p95) / draws as u128,
+        if draws == 0 { 0 } else { (record_median + submit_median) / draws as u128 },
+        if draws == 0 { 0 } else { (record_p95 + submit_p95) / draws as u128 },
     );
     Ok(())
 }
