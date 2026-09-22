@@ -1735,6 +1735,39 @@ class HostElement implements Instance {
  * element kind, so they live on a subclass rather than every host instance.
  */
 class CanvasHostElement extends HostElement {
+  #width: number
+  #height: number
+
+  constructor(id: number, type: ElementType, props: Props, container: Container) {
+    super(id, type, props, container)
+    this.#width = canvasBitmapSize((props as Props & { width?: unknown }).width, 300)
+    this.#height = canvasBitmapSize((props as Props & { height?: unknown }).height, 150)
+  }
+
+  get width(): number {
+    return this.#width
+  }
+
+  set width(value: unknown) {
+    this.#width = canvasBitmapSize(value, 300)
+    resetCanvasBitmap(this)
+  }
+
+  get height(): number {
+    return this.#height
+  }
+
+  set height(value: unknown) {
+    this.#height = canvasBitmapSize(value, 150)
+    resetCanvasBitmap(this)
+  }
+
+  setBitmapDimensions(width: unknown, height: unknown): void {
+    this.#width = canvasBitmapSize(width, 300)
+    this.#height = canvasBitmapSize(height, 150)
+    resetCanvasBitmap(this)
+  }
+
   #diagnosticTarget() {
     return {
       describeElement: () => describeCanvas(this),
@@ -1766,8 +1799,8 @@ class CanvasHostElement extends HostElement {
     if (contextId === "webgpu") {
       if (recordingContext2D(this)) return null
       return getOrCreateWebGpuContext(this, containerOf(this).native, this.id, () => ({
-        width: Number((this.props as Props & { width?: number }).width ?? 300),
-        height: Number((this.props as Props & { height?: number }).height ?? 150),
+        width: this.width,
+        height: this.height,
       }))
     }
     return null
@@ -1779,6 +1812,19 @@ class CanvasHostElement extends HostElement {
     diagnoseUnsupportedCanvasElementMember(this, this.#diagnosticTarget(), "toDataURL")
     return undefined
   }
+}
+
+function resetCanvasBitmap(canvas: CanvasHostElement): void {
+  resetRecordingContext2D(canvas)
+  const container = containerFor(canvas)
+  container.native.resetCanvas?.(canvas.id)
+  webGpuContext(canvas)?.resize()
+}
+
+function canvasBitmapSize(value: unknown, fallback: number): number {
+  const number = Number(value)
+  if (!Number.isFinite(number) || number < 0) return fallback
+  return Math.min(Math.floor(number), 0xffff_ffff)
 }
 
 /**
@@ -2221,10 +2267,6 @@ export const hostConfig = {
     const container = containerFor(instance)
     const oldCanvasProps = oldProps as Props & { width?: number; height?: number }
     const newCanvasProps = newProps as Props & { width?: number; height?: number }
-    if (instance.type === "canvas" && (oldCanvasProps.width !== newCanvasProps.width || oldCanvasProps.height !== newCanvasProps.height)) {
-      resetRecordingContext2D(instance)
-      container.native.resetCanvas?.(instance.id)
-    }
     diagnoseUnsupportedStyleTransition(instance, container, newProps)
     diagnoseUnsupportedClassNameProp(instance, container, newProps)
     diagnoseUnsupportedAccessibilityRoleProp(instance, container, newProps)
@@ -2243,6 +2285,12 @@ export const hostConfig = {
     }
     // Custom prop diff (for non-div/text elements)
     instance.props = newProps
+    if (instance.type === "canvas") {
+      const canvas = instance as CanvasHostElement
+      if (oldCanvasProps.width !== newCanvasProps.width || oldCanvasProps.height !== newCanvasProps.height) {
+        canvas.setBitmapDimensions(newCanvasProps.width, newCanvasProps.height)
+      }
+    }
     diffCustomProps(container.renderer, instance, oldProps, newProps)
     updateChoice(container, instance, oldProps, commitWriter(container))
     updateRange(instance, commitWriter(container))

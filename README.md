@@ -764,6 +764,41 @@ returns `undefined`. Keep the source data you drew from and re-encode that, or
 capture through the automation screenshot path when a window image is what you
 actually want.
 
+### Native WebGPU rendering slice
+
+macOS production windows expose an experimental, deliberately narrow WebGPU
+path when `@gpuix/react/globals` is imported. It uses the ordinary browser
+shape—`navigator.gpu`, `canvas.getContext("webgpu")`, `configure()`, buffers,
+WGSL shader modules, an automatic-layout render pipeline, a render pass and
+`queue.submit()`—and composites GPU-produced Metal textures in GPUI without
+mapping or copying their pixels through the CPU.
+
+The current pipeline supports one `bgra8unorm` color target, triangle-list
+geometry, mapped-at-creation buffer initialization, `queue.writeBuffer()`,
+vertex and index layouts, `setVertexBuffer()`, `setIndexBuffer()`, `draw()`, and
+`drawIndexed()`. Command buffers may contain multiple render passes and one
+queue submission may update multiple canvases in order. Validation failures are
+contained by logical-device error scopes or `uncapturederror` delivery rather
+than aborting the process.
+
+Canvas presentation currently supports the default `opaque` alpha mode;
+`premultiplied` is rejected until that compositor path is implemented.
+Asynchronous buffer mapping, bind groups, texture uploads, depth, compute,
+multisampling above one sample and Three.js `WebGPURenderer` are not yet
+supported, so this is an incremental compatibility slice rather than WebGPU
+conformance.
+Canvas 2D and WebGPU remain mutually exclusive on one canvas. Submitted frame
+textures are retained until the compositor has finished the command buffers that sample them; frame
+submission signals the compositor on the GPU queue rather than waiting on the
+JavaScript thread.
+
+Run the two-canvas animated indexed-geometry fixture with:
+
+```sh
+cd examples
+bun run native-webgpu
+```
+
 ### Canvas image residency
 
 Decoded canvas images are shared by source within one renderer, but their GPU

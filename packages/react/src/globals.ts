@@ -6,10 +6,10 @@
  * `navigator.clipboard`, `navigator.gpu`, `PointerEvent`, and the element
  * constructors `Node`, `Element`, `HTMLElement`, `HTMLDivElement`,
  * `HTMLButtonElement`, `HTMLInputElement`, and `HTMLTextAreaElement`, and
- * `document` as the single-window facade in `./document.js` — and nothing
- * else. Nobody is required to import this: the root `@gpuix/react` entry
- * installs no global, so a consumer who never touches the DOM never gets one
- * either.
+ * `document` as the single-window facade in `./document.js`, and the
+ * incremental native WebGPU API — and nothing else. Nobody is required to
+ * import this: the root `@gpuix/react` entry installs no global, so a consumer
+ * who never touches the DOM never gets one either.
  *
  * Each name is installed only if absent, so a real browser's globals (or an
  * earlier import of this module) always win. `requestAnimationFrame` and
@@ -89,6 +89,6 @@ if (Reflect.has(globalThis, "navigator")) {
   defineGlobalIfAbsent("navigator", { clipboard })
 }
 
-// A browser's navigator.gpu always wins. Desktop installs only the narrow
-// clear-and-present proof API.
+// A browser's navigator.gpu always wins. Desktop installs the experimental
+// native WebGPU subset; it does not manufacture a document.
 installWebGpuGlobal()

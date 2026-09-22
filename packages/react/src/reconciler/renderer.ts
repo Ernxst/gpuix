@@ -4,6 +4,7 @@ import type { EventPayload, MenuSpec, WindowOptions } from "@gpuix/native"
 import { createRoot, flushSync, strictStylesDefault, type Root } from "./reconciler.js"
 import type { DebugFrameOverlayMode, NativeRenderer } from "../types/host.js"
 import { handleGpuixEvent } from "./event-registry.js"
+import { invalidateWebGpuTransport } from "../canvas/webgpu.js"
 import { hasBrowserDocument } from "../document.js"
 import {
   attachAnimationFrameSource,
@@ -302,6 +303,7 @@ export function resetRender(): void {
   if (slot?.renderer) detachAnimationFrameSource(slot.renderer)
   slot?.renderer?.setApplicationEventHandler?.(null)
   slot?.root?.unmount()
+  if (slot?.renderer) invalidateWebGpuTransport(slot.renderer)
   const automation = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
   void automation?.close()
   Reflect.deleteProperty(globalThis, BROWSER_AUTOMATION_KEY)
@@ -354,6 +356,7 @@ function terminateRenderSlot(
       console.error("[gpuix] React unmount failed during termination", error)
     }
   }
+  if (slot.renderer) invalidateWebGpuTransport(slot.renderer)
 
   if (options.quit) {
     try {

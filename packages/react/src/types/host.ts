@@ -1571,6 +1571,43 @@ export interface NativeRenderer {
   resetCanvas?(id: number): void
   /** Present one native WebGPU clear into a live canvas. */
   presentWebGpuClear?(id: number, width: number, height: number, rgba: number): void
+  /** Create one logical WebGPU device in this renderer's native resource registry. */
+  createWebGpuDevice?(): number
+  destroyWebGpuDevice?(deviceId: number): void
+  createWebGpuShaderModule?(deviceId: number, label: string | undefined, code: string): number
+  createWebGpuBuffer?(
+    deviceId: number,
+    label: string | undefined,
+    size: number,
+    usage: number,
+    initialData: Uint8Array
+  ): number
+  destroyWebGpuBuffer?(deviceId: number, bufferId: number): void
+  destroyWebGpuShaderModule?(deviceId: number, shaderModuleId: number): void
+  destroyWebGpuRenderPipeline?(deviceId: number, renderPipelineId: number): void
+  writeWebGpuBuffer?(
+    deviceId: number,
+    bufferId: number,
+    offset: number,
+    data: Uint8Array
+  ): void
+  createWebGpuRenderPipeline?(
+    deviceId: number,
+    label: string | undefined,
+    vertexModuleId: number,
+    vertexEntryPoint: string | undefined,
+    fragmentModuleId: number,
+    fragmentEntryPoint: string | undefined,
+    vertexBuffersJson: string,
+    sampleMask: number
+  ): number
+  /** Submit ordered WebGPU command buffers and install completed canvas frames atomically. */
+  submitWebGpuCommands?(
+    deviceId: number,
+    submissionJson: string,
+    ops: Uint32Array,
+    operands: Float64Array
+  ): void
   /** Decode one canvas image source through this renderer's native image store. */
   loadCanvasImage?(observerId: number, sourceJson: string): void
   getCanvasImageLoadState?(observerId: number): CanvasImageLoadState | null
@@ -2209,6 +2246,8 @@ export interface FormPublicInstance extends PublicInstance {
 
 export interface CanvasPublicInstance extends PublicInstance {
   type: "canvas"
+  width: number
+  height: number
   getContext(
     contextId: "2d",
     options?: CanvasRenderingContext2DSettings

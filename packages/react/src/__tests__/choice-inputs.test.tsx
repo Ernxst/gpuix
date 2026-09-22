@@ -347,7 +347,6 @@ describeNative("native checkbox inputs", () => {
     expect(screen.getByRole("textbox", { name: "Morph" })).toBeTruthy()
   })
 })
-
 describeNative("native radio inputs", () => {
   let screen: TestRoot
 
@@ -1304,4 +1303,3 @@ describeNative("Base UI-shaped dispatched clicks", () => {
     expect(changes).toEqual(["large", "small"])
   })
 })
-

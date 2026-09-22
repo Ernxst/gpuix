@@ -1,0 +1,63 @@
+{
+  "provider": "Dawn webgpu@0.6.1",
+  "runtime": "Node v26.5.0",
+  "workload": {
+    "target": "256x256 bgra8unorm",
+    "warmupFrames": 50,
+    "measuredFrames": 300,
+    "draws": [
+      1000,
+      5000,
+      10000
+    ],
+    "commands": "setPipeline once; setVertexBuffer + setIndexBuffer + drawIndexed repeated",
+    "gpuCompleteTiming": "submit invocation until queue.onSubmittedWorkDone() resolves; one frame is completed before the next"
+  },
+  "measurements": [
+    {
+      "draws": 1000,
+      "encode": {
+        "medianNs": 1908041,
+        "p95Ns": 3921750
+      },
+      "finishSubmit": {
+        "medianNs": 164916,
+        "p95Ns": 428583
+      },
+      "gpuComplete": {
+        "medianNs": 743208,
+        "p95Ns": 2048500
+      }
+    },
+    {
+      "draws": 5000,
+      "encode": {
+        "medianNs": 7061875,
+        "p95Ns": 17071875
+      },
+      "finishSubmit": {
+        "medianNs": 456042,
+        "p95Ns": 1129166
+      },
+      "gpuComplete": {
+        "medianNs": 1401750,
+        "p95Ns": 3028042
+      }
+    },
+    {
+      "draws": 10000,
+      "encode": {
+        "medianNs": 13592458,
+        "p95Ns": 21626750
+      },
+      "finishSubmit": {
+        "medianNs": 805792,
+        "p95Ns": 1347667
+      },
+      "gpuComplete": {
+        "medianNs": 2261167,
+        "p95Ns": 3385875
+      }
+    }
+  ]
+}

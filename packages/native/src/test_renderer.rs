@@ -39,200 +39,13 @@ use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
 
 #[cfg(all(target_os = "macos", feature = "test-support"))]
-use metal::foreign_types::ForeignType;
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-use objc::{sel, sel_impl};
-
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-struct TestGpuCanvasResource {
-    texture: Arc<wgpu::Texture>,
-    released: Arc<AtomicU64>,
-}
-
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-impl Drop for TestGpuCanvasResource {
-    fn drop(&mut self) {
-        self.released.fetch_add(1, Ordering::Relaxed);
-    }
-}
-
-/// GPU-only producer state for the narrow visual-test canvas seam. The
-/// presentation store owns the matching `SurfaceSource`; this record owns the
-/// producer queue while the element remains mounted.
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-struct TestGpuCanvas {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    metal_texture: metal::Texture,
-    resource: Arc<TestGpuCanvasResource>,
-    width: u32,
-    height: u32,
-}
-
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-impl TestGpuCanvas {
-    fn new(width: u32, height: u32, released: Arc<AtomicU64>) -> Result<Self> {
-        if width == 0 || height == 0 {
-            return Err(Error::from_reason(
-                "Test GPU canvas dimensions must be positive",
-            ));
-        }
-
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            force_fallback_adapter: false,
-            ..Default::default()
-        }))
-        .map_err(|error| {
-            Error::from_reason(format!("Test GPU canvas requires a Metal adapter: {error}"))
-        })?;
-        if adapter.get_info().device_type == wgpu::DeviceType::Cpu {
-            return Err(Error::from_reason(
-                "Test GPU canvas requires a hardware Metal adapter, not a CPU fallback",
-            ));
-        }
-        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
-            .map_err(|error| {
-                Error::from_reason(format!("Test GPU canvas device creation failed: {error}"))
-            })?;
-        let texture = Arc::new(device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("GPU-IX visual test canvas texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Bgra8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        }));
-        let texture_hal = unsafe { texture.as_hal::<wgpu::hal::api::Metal>() }
-            .ok_or_else(|| Error::from_reason("Test GPU canvas texture did not use Metal"))?;
-        let raw = texture_hal.raw_handle() as *const _ as *mut objc::runtime::Object;
-        #[allow(unexpected_cfgs)]
-        let retained: *mut objc::runtime::Object = unsafe { objc::msg_send![raw, retain] };
-        if retained.is_null() {
-            return Err(Error::from_reason(
-                "Test GPU canvas could not retain its Metal texture",
-            ));
-        }
-        let metal_texture = unsafe { metal::Texture::from_ptr(retained.cast()) };
-
-        Ok(Self {
-            device,
-            queue,
-            metal_texture,
-            resource: Arc::new(TestGpuCanvasResource { texture, released }),
-            width,
-            height,
-        })
-    }
-
-    fn present(&self, rgba: u32) -> Result<gpui::SurfaceSource> {
-        let red = ((rgba >> 24) & 0xff) as f64 / 255.0;
-        let green = ((rgba >> 16) & 0xff) as f64 / 255.0;
-        let blue = ((rgba >> 8) & 0xff) as f64 / 255.0;
-        let alpha = (rgba & 0xff) as f64 / 255.0;
-        let view = self.resource.texture.create_view(&Default::default());
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("GPU-IX visual test canvas frame"),
-            });
-        {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("clear GPU-IX visual test canvas frame"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: red,
-                            g: green,
-                            b: blue,
-                            a: alpha,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-        }
-        self.queue.submit([encoder.finish()]);
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|error| {
-                Error::from_reason(format!("Test GPU canvas producer failed: {error}"))
-            })?;
-
-        let surface = gpui_apple::metal_renderer::MetalTextureSurface::new(
-            self.metal_texture.to_owned(),
-            1,
-            self.resource.clone(),
-        );
-        surface.ready_event.set_signaled_value(1);
-        Ok(surface.surface_source(gpui::size(
-            gpui::DevicePixels(self.width as i32),
-            gpui::DevicePixels(self.height as i32),
-        )))
-    }
-}
-
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-#[derive(Default)]
-struct TestGpuCanvasStore {
-    canvases: Mutex<rustc_hash::FxHashMap<u64, TestGpuCanvas>>,
-    released: Arc<AtomicU64>,
-}
+use crate::webgpu_canvas::WebGpuCanvasStore;
 
 #[napi(object)]
 pub struct TestGpuCanvasState {
     pub installed: u32,
     pub presentations: u32,
     pub released: u32,
-}
-
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-impl TestGpuCanvasStore {
-    fn install(&self, id: u64, width: u32, height: u32, rgba: u32) -> Result<gpui::SurfaceSource> {
-        let canvas = TestGpuCanvas::new(width, height, self.released.clone())?;
-        let source = canvas.present(rgba)?;
-        self.canvases.lock().unwrap().insert(id, canvas);
-        Ok(source)
-    }
-
-    fn advance(&self, id: u64, rgba: u32) -> Result<gpui::SurfaceSource> {
-        self.canvases
-            .lock()
-            .unwrap()
-            .get(&id)
-            .ok_or_else(|| {
-                Error::from_reason(format!("No test GPU canvas is installed for element {id}"))
-            })?
-            .present(rgba)
-    }
-
-    fn remove(&self, ids: &[u64]) {
-        let mut canvases = self.canvases.lock().unwrap();
-        for id in ids {
-            canvases.remove(id);
-        }
-    }
-
-    fn state(&self, presentations: u32) -> TestGpuCanvasState {
-        TestGpuCanvasState {
-            installed: self.canvases.lock().unwrap().len() as u32,
-            presentations,
-            released: self.released.load(Ordering::Relaxed) as u32,
-        }
-    }
 }
 
 // ── Thread-local storage for !Send GPUI types ────────────────────────
@@ -612,7 +425,7 @@ pub struct TestGpuixRenderer {
     tree: Arc<Mutex<RetainedTree>>,
     canvas_display_lists: crate::canvas::SharedDisplayLists,
     #[cfg(all(target_os = "macos", feature = "test-support"))]
-    test_gpu_canvases: TestGpuCanvasStore,
+    test_gpu_canvases: WebGpuCanvasStore,
     events: Arc<Mutex<Vec<EventPayload>>>,
     frame_timestamps: Arc<Mutex<Vec<f64>>>,
     /// Same handle GpuixView paints against, so tests can assert on the live
@@ -749,7 +562,7 @@ impl TestGpuixRenderer {
             tree,
             canvas_display_lists,
             #[cfg(all(target_os = "macos", feature = "test-support"))]
-            test_gpu_canvases: TestGpuCanvasStore::default(),
+            test_gpu_canvases: WebGpuCanvasStore::default(),
             events,
             frame_timestamps,
             selection,
@@ -984,8 +797,7 @@ impl TestGpuixRenderer {
     pub fn reset_canvas(&self,id:f64)->Result<()>{let id=to_element_id(id)?;let tree=self.tree.lock().unwrap();validate_canvas_target(&tree,id).map_err(Error::from_reason)?;drop(tree);crate::canvas::reset_canvas(&self.canvas_display_lists,id);self.request_invalidate()}
 
     /// Install a GPU-only test texture into one live `<canvas>` presentation.
-    /// This exists solely to exercise the retained Metal surface path before a
-    /// browser WebGPU API is exposed.
+    /// This exercises the same retained Metal surface path as production.
     #[napi]
     pub fn install_test_gpu_canvas(
         &self,
@@ -998,7 +810,10 @@ impl TestGpuixRenderer {
         validate_canvas_target(&self.tree.lock().unwrap(), id).map_err(Error::from_reason)?;
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         {
-            let source = self.test_gpu_canvases.install(id, width, height, rgba)?;
+            let source = self
+                .test_gpu_canvases
+                .install(id, width, height, rgba)
+                .map_err(|error| Error::from_reason(error.to_string()))?;
             self.canvas_display_lists.install_presentation(id, source);
             return self.request_invalidate();
         }
@@ -1018,7 +833,10 @@ impl TestGpuixRenderer {
         let id = to_element_id(id)?;
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         {
-            let source = self.test_gpu_canvases.advance(id, rgba)?;
+            let source = self
+                .test_gpu_canvases
+                .advance(id, rgba)
+                .map_err(|error| Error::from_reason(error.to_string()))?;
             self.canvas_display_lists.install_presentation(id, source);
             return self.request_invalidate();
         }
@@ -1036,9 +854,11 @@ impl TestGpuixRenderer {
     pub fn get_test_gpu_canvas_state(&self) -> TestGpuCanvasState {
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         {
-            return self
-                .test_gpu_canvases
-                .state(self.canvas_display_lists.presentation_count());
+            return TestGpuCanvasState {
+                installed: self.test_gpu_canvases.installed_count(),
+                presentations: self.canvas_display_lists.presentation_count(),
+                released: self.test_gpu_canvases.released_count(),
+            };
         }
         #[cfg(not(all(target_os = "macos", feature = "test-support")))]
         {
@@ -1047,6 +867,263 @@ impl TestGpuixRenderer {
                 presentations: 0,
                 released: 0,
             }
+        }
+    }
+
+    /// Create one renderer-owned logical WebGPU device over the shared test producer.
+    #[napi]
+    pub fn create_web_gpu_device(&self) -> Result<f64> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .create_device()
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        Err(Error::from_reason(
+            "Native WebGPU resources require the macOS test-support build",
+        ))
+    }
+
+    /// Destroy a logical WebGPU device and every native resource it owns.
+    #[napi]
+    pub fn destroy_web_gpu_device(&self, device_id: f64) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .destroy_device(device_id)
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = device_id;
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Compile one WGSL shader module for a logical WebGPU device.
+    #[napi]
+    pub fn create_web_gpu_shader_module(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        code: String,
+    ) -> Result<f64> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .create_shader_module(device_id, label, code)
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, label, code);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Create one logical-device-owned WebGPU buffer.
+    #[napi]
+    pub fn create_web_gpu_buffer(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        size: f64,
+        usage: u32,
+        initial_data: Uint8Array,
+    ) -> Result<f64> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .create_buffer(device_id, label, size, usage, initial_data.as_ref())
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, label, size, usage, initial_data);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Destroy one logical-device-owned WebGPU buffer.
+    #[napi]
+    pub fn destroy_web_gpu_buffer(&self, device_id: f64, buffer_id: f64) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .destroy_buffer(device_id, buffer_id)
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, buffer_id);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    #[napi]
+    pub fn destroy_web_gpu_shader_module(
+        &self,
+        device_id: f64,
+        shader_module_id: f64,
+    ) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .destroy_shader_module(device_id, shader_module_id)
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, shader_module_id);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    #[napi]
+    pub fn destroy_web_gpu_render_pipeline(
+        &self,
+        device_id: f64,
+        render_pipeline_id: f64,
+    ) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .destroy_render_pipeline(device_id, render_pipeline_id)
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, render_pipeline_id);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Queue one copy into a logical-device-owned WebGPU buffer.
+    #[napi]
+    pub fn write_web_gpu_buffer(
+        &self,
+        device_id: f64,
+        buffer_id: f64,
+        offset: f64,
+        data: Uint8Array,
+    ) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .write_buffer(device_id, buffer_id, offset, data.as_ref())
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, buffer_id, offset, data);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Create a triangle-list WebGPU render pipeline with optional vertex layouts.
+    #[napi]
+    pub fn create_web_gpu_render_pipeline(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        vertex_module_id: f64,
+        vertex_entry_point: Option<String>,
+        fragment_module_id: f64,
+        fragment_entry_point: Option<String>,
+        vertex_buffers_json: String,
+        sample_mask: u32,
+    ) -> Result<f64> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .create_render_pipeline(
+                    device_id,
+                    label,
+                    vertex_module_id,
+                    vertex_entry_point,
+                    fragment_module_id,
+                    fragment_entry_point,
+                    vertex_buffers_json,
+                    sample_mask,
+                )
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (
+                device_id,
+                label,
+                vertex_module_id,
+                vertex_entry_point,
+                fragment_module_id,
+                fragment_entry_point,
+                vertex_buffers_json,
+                sample_mask,
+            );
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Submit ordered WebGPU command buffers, then install every completed canvas frame.
+    #[napi]
+    pub fn submit_web_gpu_commands(
+        &self,
+        device_id: f64,
+        submission_json: String,
+        ops: Uint32Array,
+        operands: Float64Array,
+    ) -> Result<()> {
+        let canvas_ids = crate::webgpu_canvas::submission_canvas_ids(&submission_json)
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+        {
+            let tree = self.tree.lock().unwrap();
+            for id in &canvas_ids {
+                validate_canvas_target(&tree, *id).map_err(Error::from_reason)?;
+            }
+        }
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            let sources = self
+                .test_gpu_canvases
+                .submit_commands(device_id, submission_json, ops.as_ref(), operands.as_ref())
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            for (id, source) in sources {
+                self.canvas_display_lists.install_presentation(id, source);
+            }
+            return self.request_invalidate();
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, submission_json, ops, operands);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
         }
     }
 
