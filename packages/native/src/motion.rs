@@ -2794,7 +2794,7 @@ mod tests {
             "animate": { "width": 100.0 },
             "transition": { "duration": 0.2, "ease": "linear" }
         });
-        let state = MotionState::new(&description, started).unwrap();
+        let mut state = MotionState::new(&description, started).unwrap();
         let frame = state.frame(started + Duration::from_millis(200), false);
 
         assert_eq!(frame.style.width, Some(100.0));
@@ -2845,7 +2845,7 @@ mod tests {
                 "ease": { "type": "spring" }
             }
         });
-        let state = MotionState::new(&description, started).unwrap();
+        let mut state = MotionState::new(&description, started).unwrap();
         let mut saw_width_overshoot = false;
         let mut last_active = None;
         let mut settled = None;
@@ -2892,7 +2892,7 @@ mod tests {
                 "ease": { "type": "spring", "stiffness": 100, "damping": 10, "mass": 1 }
             }
         });
-        let state = MotionState::new(&description, started).unwrap();
+        let mut state = MotionState::new(&description, started).unwrap();
 
         assert_eq!(
             state
@@ -2930,7 +2930,7 @@ mod tests {
             "animate": { "width": 0.0 },
             "transition": { "ease": { "type": "spring", "velocity": 0.0 } }
         });
-        let zero_restart = MotionState::new(&zero_restart_description, retargeted_at).unwrap();
+        let mut zero_restart = MotionState::new(&zero_restart_description, retargeted_at).unwrap();
         let sampled_at = retargeted_at + Duration::from_millis(16);
         let carried_width = carried.frame(sampled_at, false).style.width.unwrap();
         let restarted_width = zero_restart.frame(sampled_at, false).style.width.unwrap();
