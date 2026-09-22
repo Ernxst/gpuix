@@ -388,6 +388,81 @@ describeNative("announce()", () => {
     expect(afterRemount!.accesskit_id).not.toBe(beforeUnmount!.accesskit_id)
   })
 
+  it("recreates live regions when a direct root promotes", () => {
+    const treeWith = (second: boolean) => (
+      <>
+        <div>
+          <text>first</text>
+        </div>
+        {second && (
+          <div>
+            <text>second</text>
+          </div>
+        )}
+      </>
+    )
+
+    screen.render(treeWith(false))
+    const directRootId = screen.renderer.getRoot()!.id
+    announce("before promotion")
+    const beforePromotion = regionWithValue("Status", "before promotion")
+    expect(beforePromotion).toBeDefined()
+
+    screen.render(treeWith(true))
+    const wrappedRootId = screen.renderer.getRoot()!.id
+    expect(wrappedRootId).not.toBe(directRootId)
+    // The old regions belonged to the direct application root. Promotion
+    // destroys them rather than leaving the already announced value stranded
+    // beneath the first child or recreating it twice under the wrapper.
+    expect(regionWithValue("Status", "before promotion")).toBeUndefined()
+
+    announce("after promotion")
+    const afterPromotion = regionWithValue("Status", "after promotion")
+    expect(afterPromotion).toBeDefined()
+    expect(afterPromotion!.accesskit_id).not.toBe(beforePromotion!.accesskit_id)
+    expect(
+      Object.values(tree().nodes).filter(
+        (node) => node.aria.role === "Status" && node.aria.value === "after promotion"
+      )
+    ).toHaveLength(1)
+  })
+
+  it("keeps announcement ownership on the wrapper until the container empties", () => {
+    const treeWith = (second: boolean) => (
+      <>
+        <div>
+          <text>first</text>
+        </div>
+        {second && (
+          <div>
+            <text>second</text>
+          </div>
+        )}
+      </>
+    )
+
+    screen.render(treeWith(true))
+    const wrapperId = screen.renderer.getRoot()!.id
+    announce("with two children")
+    expect(regionWithValue("Status", "with two children")).toBeDefined()
+
+    screen.render(treeWith(false))
+    expect(screen.renderer.getRoot()!.id).toBe(wrapperId)
+    announce("with one child")
+    expect(regionWithValue("Status", "with one child")).toBeDefined()
+
+    screen.render(null)
+    expect(screen.renderer.getRoot()).toBeUndefined()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    expect(() => announce("after empty")).not.toThrow()
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+
+    screen.render(<div />)
+    announce("after remount")
+    expect(regionWithValue("Status", "after remount")).toBeDefined()
+  })
+
   it("clears the region it wrote to previously when alternating", () => {
     screen.render(<div />)
 
