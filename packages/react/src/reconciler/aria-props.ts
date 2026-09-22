@@ -29,6 +29,7 @@ export const ARIA_PROP_ALIASES = {
   "aria-live": "ariaLive",
   "aria-atomic": "ariaAtomic",
   "aria-selected": "ariaSelected",
+  "aria-multiselectable": "ariaMultiSelectable",
   "aria-valuetext": "ariaValueText",
   "aria-valuemin": "ariaValueMin",
   "aria-valuemax": "ariaValueMax",
@@ -116,7 +117,11 @@ export const AUTHORED_HOST_TYPE_PROP = "authoredHostType"
  * reads them. The same rule as `HTML_ATTRIBUTE_PROPS` applies: a name belongs
  * here only while no Rust code interprets it.
  */
-export const RETAINED_ARIA_PROPS = new Set(["ariaControls", "ariaRelevant"])
+export const RETAINED_ARIA_PROPS = new Set([
+  "ariaControls",
+  "ariaRelevant",
+  "ariaMultiSelectable",
+])
 
 /** Props the retained tree keeps for the author, whatever the element type. */
 export function isAuthorVisibleProp(name: string): boolean {
