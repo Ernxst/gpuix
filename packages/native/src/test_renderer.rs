@@ -1099,16 +1099,16 @@ impl TestGpuixRenderer {
         ops: Uint32Array,
         operands: Float64Array,
     ) -> Result<()> {
-        let canvas_ids = crate::webgpu_canvas::submission_canvas_ids(&submission_json)
-            .map_err(|error| Error::from_reason(error.to_string()))?;
-        {
-            let tree = self.tree.lock().unwrap();
-            for id in &canvas_ids {
-                validate_canvas_target(&tree, *id).map_err(Error::from_reason)?;
-            }
-        }
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         {
+            let canvas_ids = crate::webgpu_canvas::submission_canvas_ids(&submission_json)
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            {
+                let tree = self.tree.lock().unwrap();
+                for id in &canvas_ids {
+                    validate_canvas_target(&tree, *id).map_err(Error::from_reason)?;
+                }
+            }
             let sources = self
                 .test_gpu_canvases
                 .submit_commands(device_id, submission_json, ops.as_ref(), operands.as_ref())
