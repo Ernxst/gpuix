@@ -21,6 +21,7 @@ import {
   type TreeNode,
 } from "./protocol.js"
 import { domKeyName } from "../reconciler/synthetic-event.js"
+import { hasBrowserDocument } from "../document.js"
 import type { RendererCapabilities } from "../types/host.js"
 import {
   matches as matchesMatcher,
@@ -214,7 +215,7 @@ export class InProcessBackend extends ValidatedAutomationBackend {
       capabilities: (() => {
         const capabilities = this.renderer.capabilities?.()
         if (!capabilities) {
-          return typeof document !== "undefined"
+          return hasBrowserDocument()
             ? ["input", "clock", "tree"]
             : ["input", "screenshot", "clock", "tree"]
         }

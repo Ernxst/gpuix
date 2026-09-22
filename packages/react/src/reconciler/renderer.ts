@@ -5,19 +5,13 @@ import { createRoot, flushSync, strictStylesDefault, type Root } from "./reconci
 import type { DebugFrameOverlayMode, NativeRenderer } from "../types/host.js"
 import { handleGpuixEvent } from "./event-registry.js"
 import { invalidateWebGpuTransport } from "../canvas/webgpu.js"
+import { hasBrowserDocument } from "../document.js"
 import {
   attachAnimationFrameSource,
   detachAnimationFrameSource,
   requestNativeAnimationFrame,
 } from "../frame-clock.js"
-import {
-  App as AutomationApp,
-  browserRendererAsTest,
-  InProcessBackend,
-  liveRendererAsTest,
-  serveAutomationStdio,
-  type LiveAutomationRenderer,
-} from "../automation/client.js"
+import type { App as AutomationApp, LiveAutomationRenderer } from "../automation/client.js"
 
 export { createRoot, flushSync, reconciler } from "./reconciler.js"
 export type { Root } from "./reconciler.js"
@@ -42,7 +36,7 @@ export function createRenderer(
     const init = renderer.init.bind(renderer)
     renderer.init = (options) => {
       init(options)
-      enableAutomation(renderer)
+      void enableAutomation(renderer)
     }
   }
   return renderer
@@ -84,7 +78,10 @@ export interface FrameLoopOptions {
  * `tick()` returning false means the last window closed. The loop stops and
  * `onTerminated` runs. `render()` uses that to unmount React and finish cleanup.
  */
-export function enableAutomation(renderer: LiveAutomationRenderer): void {
+export async function enableAutomation(renderer: LiveAutomationRenderer): Promise<void> {
+  const { InProcessBackend, liveRendererAsTest, serveAutomationStdio } = await import(
+    "../automation/client.js"
+  )
   serveAutomationStdio(new InProcessBackend(liveRendererAsTest(renderer)))
 }
 
@@ -190,7 +187,10 @@ export function startFrameLoop(
   }
 
   if (nativeFrameSource) {
-    scheduleTimer(() => drive("idle"), frameMs)
+    // Pump AppKit immediately rather than waiting `frameMs`: the first idle
+    // tick is what runs the post-show occlusion pump, and delaying it here
+    // only adds to the time before the window is reported visible.
+    drive("idle")
   } else {
     drive("timer")
   }
@@ -205,15 +205,16 @@ declare global {
   var gpuix: AutomationApp | undefined
 }
 
-export function installBrowserAutomation(
+export async function installBrowserAutomation(
   renderer: LiveAutomationRenderer
-): AutomationApp {
+): Promise<AutomationApp> {
   const existing = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
-  if (existing instanceof AutomationApp) return existing
-
-  const automation = new AutomationApp(
-    new InProcessBackend(browserRendererAsTest(renderer))
+  const { App, browserRendererAsTest, InProcessBackend } = await import(
+    "../automation/client.js"
   )
+  if (existing instanceof App) return existing as AutomationApp
+
+  const automation = new App(new InProcessBackend(browserRendererAsTest(renderer)))
   Reflect.set(globalThis, BROWSER_AUTOMATION_KEY, automation)
   return automation
 }
@@ -271,6 +272,8 @@ function renderSlot(): RenderSlot {
 
 export interface RenderOptions extends WindowOptions {
   onEvent?: (event: EventPayload) => void
+  /** Window-level text selection. Fires when the selected ranges change. */
+  onSelectionChange?: (event: EventPayload, renderer: NativeRenderer) => void
   onMenuAction?: (event: MenuActionEvent) => void
   /** Runs once after menu Quit, explicit quit, last-window close, or an owned renderer's fatal error. */
   onTerminated?: () => void | Promise<void>
@@ -458,12 +461,7 @@ function thrownToError(thrown: unknown): Error | string {
   }
 }
 
-const OVERLAY_MONO =
-  process.platform === "win32"
-    ? "Consolas"
-    : process.platform === "darwin"
-      ? "Menlo"
-      : "DejaVu Sans Mono"
+const OVERLAY_MONO = "ui-monospace, SFMono-Regular, Consolas, monospace"
 
 function overlayStackLines(error: { message: string; stack: string }): string[] {
   const lines = error.stack.length === 0 ? [error.message] : error.stack.split("\n")
@@ -669,6 +667,7 @@ function installProcessTerminationGuards(slot: RenderSlot): void {
 export function render(node: ReactNode, options: RenderOptions = {}): Root {
   const {
     onEvent,
+    onSelectionChange,
     onMenuAction,
     onTerminated,
     renderer: injected,
@@ -715,7 +714,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     const requestFrame = host.requestFrame.bind(host)
     attachAnimationFrameSource({
       owner: host,
-      request: requestFrame,
+      request: (callback) => requestFrame(callback, performance.now()),
     })
   } else if (
     typeof browserFrameSource !== "function" ||
@@ -736,11 +735,11 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     host.setMenus(menus as MenuSpec[])
   }
   if (
-    typeof document !== "undefined" &&
+    hasBrowserDocument() &&
     host instanceof GpuixRenderer &&
     !Reflect.has(globalThis, BROWSER_AUTOMATION_KEY)
   ) {
-    installBrowserAutomation(host)
+    void installBrowserAutomation(host)
   }
   if (debugFrameOverlay) {
     host.setDebugFrameOverlay?.(debugFrameOverlay)
@@ -752,6 +751,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
   let root!: Root
   root = createRoot(host, {
     strictStyles,
+    onSelectionChange,
     onUncaughtError: ({ error, componentStack }) => {
       // Injected renderers are embedder-owned lifecycles: the failed root and
       // renderer diagnostic are the recovery signal, and the embedder decides

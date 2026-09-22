@@ -26,6 +26,200 @@ function createMockRenderer(): NativeRenderer {
   }
 }
 
+describe("DOM identity and containment", () => {
+  it("exposes the authored host identity, including native div aliases", () => {
+    const article = React.createRef<PublicInstance>()
+    const input = React.createRef<PublicInstance>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+
+    try {
+      flushSync(() =>
+        root.render(
+          <article ref={article}>
+            <input ref={input} />
+          </article>
+        )
+      )
+      expect([
+        article.current!.tagName,
+        article.current!.localName,
+        article.current!.nodeName,
+      ]).toEqual(["ARTICLE", "article", "ARTICLE"])
+      expect([input.current!.tagName, input.current!.localName, input.current!.nodeName]).toEqual([
+        "INPUT",
+        "input",
+        "INPUT",
+      ])
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("normalizes attribute names and makes hasAttribute agree with getAttribute", () => {
+    const ref = React.createRef<PublicInstance>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+
+    try {
+      flushSync(() =>
+        root.render(
+          <div
+            ref={ref}
+            id="field-label"
+            htmlFor="field"
+            data-state="open"
+            aria-label="Field"
+            disabled
+          />
+        )
+      )
+      expect(ref.current!.getAttribute("ID")).toBe("field-label")
+      expect(ref.current!.getAttribute("for")).toBe("field")
+      expect(ref.current!.getAttribute("aria-label")).toBe("Field")
+      expect(ref.current!.getAttribute("data-state")).toBe("open")
+      expect(ref.current!.getAttribute("disabled")).toBe("")
+      expect(ref.current!.hasAttribute("FOR")).toBe(true)
+      expect(ref.current!.hasAttribute("missing")).toBe(false)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("reports the live retained parent as parentElement, and null for a root", () => {
+    const outer = React.createRef<PublicInstance>()
+    const first = React.createRef<PublicInstance>()
+    const second = React.createRef<PublicInstance>()
+    const moved = React.createRef<PublicInstance>()
+    const late = React.createRef<PublicInstance>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+
+    function Tree({ inFirst, showLate }: { inFirst: boolean; showLate: boolean }) {
+      return (
+        <div ref={outer}>
+          <div ref={first}>{inFirst && <span ref={moved} />}</div>
+          <div ref={second}>{!inFirst && <span ref={moved} />}</div>
+          {showLate && <button ref={late} />}
+        </div>
+      )
+    }
+
+    try {
+      flushSync(() => root.render(<Tree inFirst showLate={false} />))
+      expect(outer.current!.parentElement).toBeNull()
+      expect(first.current!.parentElement).toBe(outer.current)
+      expect(moved.current!.parentElement).toBe(first.current)
+      // A getter, not an own enumerable value: spreading a ref must not copy its ancestry.
+      expect(Object.keys(moved.current!)).not.toContain("parentElement")
+
+      // React moves a node between parents by removing it and creating a new one.
+      const original = moved.current!
+      flushSync(() => root.render(<Tree inFirst={false} showLate />))
+      expect(original.parentElement).toBeNull()
+      expect(moved.current).not.toBe(original)
+      expect(moved.current!.parentElement).toBe(second.current)
+      expect(late.current!.parentElement).toBe(outer.current)
+
+      const appended = late.current!
+      flushSync(() => root.render(<Tree inFirst={false} showLate={false} />))
+      expect(appended.parentElement).toBeNull()
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("keeps parentElement on a reordered keyed child", () => {
+    const list = React.createRef<PublicInstance>()
+    const refs = new Map<string, PublicInstance | null>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+    const render = (order: string[]) =>
+      flushSync(() =>
+        root.render(
+          <div ref={list}>
+            {order.map((key) => (
+              <span key={key} ref={(instance) => void refs.set(key, instance)} />
+            ))}
+          </div>
+        )
+      )
+
+    try {
+      render(["a", "b", "c"])
+      const moved = refs.get("c")!
+      render(["c", "a", "b"])
+      expect(refs.get("c")).toBe(moved)
+      expect(moved.parentElement).toBe(list.current)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("reports null parentElement for every node of an unmounted tree", () => {
+    const parent = React.createRef<PublicInstance>()
+    const child = React.createRef<PublicInstance>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+
+    flushSync(() =>
+      root.render(
+        <div ref={parent}>
+          <span ref={child} />
+        </div>
+      )
+    )
+    const parentInstance = parent.current!
+    const childInstance = child.current!
+    expect(childInstance.parentElement).toBe(parentInstance)
+
+    root.unmount()
+    expect(parentInstance.parentElement).toBeNull()
+    expect(childInstance.parentElement).toBeNull()
+  })
+
+  it("contains self and descendants, but not siblings or foreign instances", () => {
+    const parent = React.createRef<PublicInstance>()
+    const child = React.createRef<PublicInstance>()
+    const sibling = React.createRef<PublicInstance>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+
+    try {
+      flushSync(() =>
+        root.render(
+          <div ref={parent}>
+            <span ref={child} />
+            <span ref={sibling} />
+          </div>
+        )
+      )
+      expect(parent.current!.contains(parent.current)).toBe(true)
+      expect(parent.current!.contains(child.current)).toBe(true)
+      expect(child.current!.contains(parent.current)).toBe(false)
+      expect(child.current!.contains(sibling.current)).toBe(false)
+      expect(parent.current!.contains(null)).toBe(false)
+      expect(parent.current!.contains({} as PublicInstance)).toBe(false)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("does not retain containment after an element unmounts", () => {
+    const parent = React.createRef<PublicInstance>()
+    const child = React.createRef<PublicInstance>()
+    const root = createRoot(createMockRenderer(), { strictStyles: false })
+    flushSync(() =>
+      root.render(
+        <div ref={parent}>
+          <span ref={child} />
+        </div>
+      )
+    )
+    const oldParent = parent.current!
+    const oldChild = child.current!
+
+    flushSync(() => root.render(<div />))
+    expect(oldParent.contains(oldChild)).toBe(false)
+    expect(oldChild.contains(oldChild)).toBe(false)
+    root.unmount()
+  })
+})
+
 describe("compareDocumentPosition", () => {
   it("returns 0 for the same node", () => {
     const ref = React.createRef<PublicInstance>()

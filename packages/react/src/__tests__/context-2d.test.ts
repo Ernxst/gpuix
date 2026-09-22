@@ -40,7 +40,7 @@ function recording(strict = true): {
   const target: CanvasRecorderTarget = {
     strict,
     describeElement: () => '<canvas data-testid="unit-canvas" elementId=17>',
-    applyCanvasCommands: (ops, operands, strings) => {
+    applyCanvasCommandDelta: (ops, operands, strings) => {
       applied.push({ ops, operands, strings })
     },
   }
@@ -280,7 +280,7 @@ describe("recording CanvasRenderingContext2D", () => {
     const same = getOrCreateRecordingContext2D(first.owner, {
       strict: true,
       describeElement: () => "different label",
-      applyCanvasCommands: () => {
+      applyCanvasCommandDelta: () => {
         throw new Error("memoisation replaced the original target")
       },
     })
@@ -297,13 +297,32 @@ describe("recording CanvasRenderingContext2D", () => {
     first.context.fillRect(0, 0, 40, 20)
     await Promise.resolve()
     expect(first.applied).toHaveLength(2)
-    expect(first.applied[1]!.ops.length).toBeGreaterThan(first.applied[0]!.ops.length)
+    expect(opcodeHeaders(first.applied[1]!.ops)).toEqual([[CANVAS_OPCODES.clearRect, 4], [CANVAS_OPCODES.fillRect, 4]])
 
     first.context.fillRect(4, 4, 8, 8)
     flushRecordingContext2D(first.context)
     expect(first.applied).toHaveLength(3)
     await Promise.resolve()
     expect(first.applied).toHaveLength(3)
+  })
+
+  it("keeps equivalent redraw batches bounded across the recorder lifetime", () => {
+    const { context, applied } = recording()
+    for (let frame = 0; frame < 5; frame++) {
+      context.clearRect(0, 0, 100, 100)
+      for (let index = 0; index < 50; index++) context.fillRect(index, index, 1, 1)
+      flushRecordingContext2D(context)
+    }
+    expect(applied.map(({ ops, operands, strings }) => [ops.length, operands.length, strings.length])).toEqual(Array.from({ length: 5 }, () => [104, 204, 0]))
+  })
+
+  it("does not discard a batch when the delta target throws", () => {
+    const owner = {}; const applied: AppliedCommands[] = []; let shouldThrow = true
+    const context = getOrCreateRecordingContext2D(owner, { strict: true, describeElement: () => "<canvas>", applyCanvasCommandDelta: (ops, operands, strings) => { if (shouldThrow) throw new Error("rejected"); applied.push({ ops, operands, strings }) } })
+    context.fillRect(1, 2, 3, 4)
+    expect(() => flushRecordingContext2D(context)).toThrow("rejected")
+    shouldThrow = false; flushRecordingContext2D(context)
+    expect(opcodeHeaders(applied[0]!.ops)).toEqual([[CANVAS_OPCODES.fillRect, 4]])
   })
 })
 

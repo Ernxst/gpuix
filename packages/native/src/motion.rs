@@ -1630,7 +1630,12 @@ fn default_ease() -> TransitionEasing {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 struct MotionDescription {
+    #[serde(default)]
+    generation: u64,
+    #[serde(default)]
+    is_exit: bool,
     #[serde(default)]
     initial: Option<MotionInitial>,
     animate: MotionStyle,
@@ -1642,6 +1647,8 @@ struct MotionDescription {
 pub(crate) struct MotionFrame {
     pub style: MotionStyle,
     pub active: bool,
+    pub just_settled: bool,
+    pub generation: u64,
 }
 
 pub(crate) struct MotionState {
@@ -1652,6 +1659,8 @@ pub(crate) struct MotionState {
     transition: MotionTransition,
     started: Instant,
     valid: bool,
+    needs_settle: bool,
+    generation: u64,
 }
 
 impl MotionState {
@@ -1681,6 +1690,8 @@ impl MotionState {
             transition: description.transition,
             started: now,
             valid: true,
+            needs_settle: description.is_exit || from != description.animate,
+            generation: description.generation,
         })
     }
 
@@ -1693,6 +1704,8 @@ impl MotionState {
             transition: MotionTransition::default(),
             started: now,
             valid: false,
+            needs_settle: source_is_exit(source),
+            generation: source_generation(source),
         }
     }
 
@@ -1724,11 +1737,14 @@ impl MotionState {
             return Ok(());
         }
 
+        let previous_generation = self.generation;
         let description = match parse_description(source) {
             Ok(description) => description,
             Err(error) => {
                 self.source = source.clone();
                 self.valid = false;
+                self.generation = source_generation(source);
+                self.needs_settle = source_is_exit(source) || self.generation != previous_generation;
                 return Err(error);
             }
         };
@@ -1744,6 +1760,8 @@ impl MotionState {
                         Some(MotionInitial::Disabled(true)) => unreachable!("validated above"),
                     },
                     active: false,
+                    just_settled: false,
+                    generation: previous_generation,
                 },
                 MotionVelocity::default(),
             )
@@ -1764,6 +1782,10 @@ impl MotionState {
         self.started = now;
         self.source = source.clone();
         self.valid = true;
+        self.generation = description.generation;
+        self.needs_settle = description.is_exit
+            || self.generation != previous_generation
+            || self.from != self.target;
         if reduce_motion {
             self.from = self.target;
             self.velocity = MotionVelocity::default();
@@ -1771,7 +1793,20 @@ impl MotionState {
         Ok(())
     }
 
-    pub(crate) fn frame(&self, now: Instant, reduce_motion: bool) -> MotionFrame {
+    pub(crate) fn frame(&mut self, now: Instant, reduce_motion: bool) -> MotionFrame {
+        let (mut frame, _) = self.frame_with_velocity(now, reduce_motion);
+        if frame.active {
+            self.needs_settle = true;
+        }
+        frame.just_settled = self.needs_settle && !frame.active;
+        if frame.just_settled {
+            self.needs_settle = false;
+        }
+        frame.generation = self.generation;
+        frame
+    }
+
+    pub(crate) fn sampled_frame(&self, now: Instant, reduce_motion: bool) -> MotionFrame {
         self.frame_with_velocity(now, reduce_motion).0
     }
 
@@ -1785,6 +1820,8 @@ impl MotionState {
                 MotionFrame {
                     style: self.target,
                     active: false,
+                    just_settled: false,
+                    generation: self.generation,
                 },
                 MotionVelocity::default(),
             );
@@ -1798,6 +1835,8 @@ impl MotionState {
                     MotionFrame {
                         style: self.target,
                         active: false,
+                        just_settled: false,
+                        generation: self.generation,
                     },
                     MotionVelocity::default(),
                 );
@@ -1809,7 +1848,15 @@ impl MotionState {
             let (style, velocity, active) =
                 self.from
                     .spring_sample(self.target, self.velocity, spring_elapsed, spring);
-            return (MotionFrame { style, active }, velocity);
+            return (
+                MotionFrame {
+                    style,
+                    active,
+                    just_settled: false,
+                    generation: self.generation,
+                },
+                velocity,
+            );
         }
 
         let duration = seconds(self.transition.duration);
@@ -1841,10 +1888,26 @@ impl MotionState {
             MotionFrame {
                 style: self.from.interpolate(self.target, progress),
                 active,
+                just_settled: false,
+                generation: self.generation,
             },
             MotionVelocity::default(),
         )
     }
+}
+
+fn source_generation(source: &serde_json::Value) -> u64 {
+    source
+        .get("generation")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or_default()
+}
+
+fn source_is_exit(source: &serde_json::Value) -> bool {
+    source
+        .get("isExit")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn parse_description(source: &serde_json::Value) -> Result<MotionDescription, String> {

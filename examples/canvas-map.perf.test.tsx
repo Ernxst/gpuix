@@ -205,6 +205,24 @@ async function waitForImages(
 }
 
 describeNative('canvas map scale', () => {
+  it('reports early and late flushes from one persistent recorder', async () => {
+    const root = createTestRoot({ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, strictStyles: true })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    const image = new Image(); image.src = imageFixture
+    const samples = new Map<number, number>()
+    try {
+      root.render(<canvas ref={canvasRef} width={VIEWPORT_WIDTH} height={VIEWPORT_HEIGHT} />)
+      root.renderer.flush(); const context = canvasRef.current!.getContext('2d')!
+      for (let frame = 1; frame <= 5_000; frame += 1) {
+        const started = performance.now(); context.clearRect(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT)
+        for (let draw = 0; draw < 700; draw += 1) context.drawImage(image, draw % VIEWPORT_WIDTH, draw % VIEWPORT_HEIGHT)
+        await Promise.resolve(); if (frame === 1 || frame === 5_000) samples.set(frame, performance.now() - started)
+      }
+      console.log(`[canvas-map.perf] persistent draws=700 frame1=${samples.get(1)!.toFixed(2)}ms frame5000=${samples.get(5_000)!.toFixed(2)}ms`)
+      expect(samples.get(1)).toBeGreaterThan(0); expect(samples.get(5_000)).toBeGreaterThan(0)
+    } finally { root.unmount() }
+  }, 120_000)
+
   it('measures command flush and draw with grouped and interleaved painter order', async () => {
     const root = createTestRoot({
       width: VIEWPORT_WIDTH,

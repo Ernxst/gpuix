@@ -8,17 +8,24 @@ import type {
 import type {
   GpuixChangeEvent,
   GpuixDragEvent,
+  GpuixFormEvent,
+  GpuixSubmitEvent,
   GpuixElementEvent,
   GpuixFocusEvent,
   GpuixKeyboardEvent,
   GpuixLoadEvent,
   GpuixMouseEvent,
+  GpuixPointerEvent,
   GpuixScrollEvent,
   GpuixSyntheticEvent,
   GpuixWheelEvent,
 } from "../reconciler/synthetic-event.js"
 import type { AccessibilityRole } from "../index.js"
 import type { GPUCanvasContext } from "../canvas/webgpu.js"
+import type {
+  GpuixDispatchableEvent,
+  PointerEvent as DocumentPointerEvent,
+} from "../pointer-event.js"
 
 /**
  * CSS-compatible lengths accepted by the native layout parser. The grammar is
@@ -322,6 +329,8 @@ export interface MotionTransition {
 export interface MotionProps {
   initial?: MotionStyle | false
   animate: MotionStyle
+  /** Target applied while this node is leaving `AnimatePresence`. */
+  exit?: MotionStyle
   transition?: MotionTransition
 }
 
@@ -522,6 +531,13 @@ export type NativeStateStyle = Omit<
  * spread the shared style and add the native state at the GPUIX call site.
  */
 export interface StyleDesc {
+  /**
+   * CSS custom properties are accepted for compatibility with consumers that
+   * measure layout for CSS animations. GPU-IX ignores them; it does not
+   * resolve `var()`, inherit custom properties, or expose computed values.
+   */
+  [customProperty: `--${string}`]: string | number | undefined
+
   display?: Display
   visibility?: Visibility
   flexDirection?: FlexDirection
@@ -557,6 +573,7 @@ export interface StyleDesc {
   minHeight?: DimensionValue
   maxWidth?: DimensionValue
   maxHeight?: DimensionValue
+  aspectRatio?: number | string
 
   padding?: number
   paddingTop?: number
@@ -583,22 +600,22 @@ export interface StyleDesc {
 
   /**
    * CSS `border` shorthand: up to three whitespace-separated components, in
-   * any order, each optional — a width (`<n>px` or `0`), a `borderStyle`
-   * value, and a color. Sets `borderWidth`. GPUI paints one border color and
+   * any order, each optional — a width (`<n>px` or string/numeric `0`), a
+   * `borderStyle` value, and a color. Sets `borderWidth`. GPUI paints one border color and
    * one border style for all four sides, so when this and a sibling shorthand
    * (`border` / `borderTop` / `borderRight` / `borderBottom` / `borderLeft`)
    * disagree on color or style, one of them is rejected with a diagnostic
    * naming both (per-side color and style is not yet supported).
    */
-  border?: string
+  border?: string | 0
   /** `border` shorthand grammar, restricted to the top edge. Sets `borderTopWidth`. */
-  borderTop?: string
+  borderTop?: string | 0
   /** `border` shorthand grammar, restricted to the right edge. Sets `borderRightWidth`. */
-  borderRight?: string
+  borderRight?: string | 0
   /** `border` shorthand grammar, restricted to the bottom edge. Sets `borderBottomWidth`. */
-  borderBottom?: string
+  borderBottom?: string | 0
   /** `border` shorthand grammar, restricted to the left edge. Sets `borderLeftWidth`. */
-  borderLeft?: string
+  borderLeft?: string | 0
   /**
    * A single width, or a CSS-style string of 1 to 4 widths (`"<n>px" | "0"`,
    * whitespace-separated) applied like the `border-width` shorthand: one
@@ -668,12 +685,18 @@ export interface StyleDesc {
   overflow?: Overflow
   overflowX?: Overflow
   overflowY?: Overflow
+  /** CSS `clip-path`, limited to `inset()` with non-negative px, %, or zero insets. */
+  clipPath?: string
 
   cursor?: CursorValue
   /** `"auto"` blocks hits behind this element **and its wheel**. `"none"` never
    *  blocks. Unset blocks clicks when the element paints a fill or is
    *  positioned, but lets the wheel reach the ancestor scroller, like HTML. */
   pointerEvents?: "auto" | "none"
+
+  /** Browser gesture policy accepted as a native no-op. GPUI has no built-in
+   *  touch gestures for this property to withhold. */
+  touchAction?: CSSProperties["touchAction"]
 
   /** "none" opts this element and its subtree out of text selection.
    *  Inherited like the CSS property, so a toolbar can disable it once. */
@@ -775,6 +798,8 @@ export type ElementType =
   | "time"
   | "u"
   | "var"
+  | "label"
+  | "form"
   | "img"
   | "svg"
   | "canvas"
@@ -965,6 +990,28 @@ export type AriaCurrent =
 /** How urgently a screen reader announces a change inside a live region. */
 export type AriaLive = "off" | "polite" | "assertive"
 
+/** The popup an element opens, as `aria-haspopup` spells it. */
+export type AriaHasPopup =
+  | Booleanish
+  | "menu"
+  | "listbox"
+  | "tree"
+  | "grid"
+  | "dialog"
+
+/** Which live-region changes are announced, in the combinations React DOM types. */
+export type AriaRelevant =
+  | "additions"
+  | "additions removals"
+  | "additions text"
+  | "all"
+  | "removals"
+  | "removals additions"
+  | "removals text"
+  | "text"
+  | "text additions"
+  | "text removals"
+
 /** AccessKit actions delivered through `onAccessibilityAction`. */
 export type AccessibilityAction = "increment" | "decrement" | "focus"
 
@@ -995,6 +1042,26 @@ export interface AccessibilityProps {
   ariaChecked?: boolean | "mixed"
   /** DOM-compatible alias for ariaChecked. */
   "aria-checked"?: boolean | "mixed"
+  /** Pressed state for toggle buttons. Distinct from checked and selected state. */
+  ariaPressed?: boolean | "mixed"
+  /** DOM-compatible alias for ariaPressed. */
+  "aria-pressed"?: boolean | "mixed"
+  /** Whether a widget is arranged horizontally or vertically. */
+  ariaOrientation?: "horizontal" | "vertical"
+  /** DOM-compatible alias for ariaOrientation. */
+  "aria-orientation"?: "horizontal" | "vertical"
+  /** Whether a form control is operable but not editable. */
+  ariaReadOnly?: Booleanish
+  /** DOM-compatible alias for ariaReadOnly. */
+  "aria-readonly"?: Booleanish
+  /** Whether user input is required before submission. */
+  ariaRequired?: Booleanish
+  /** DOM-compatible alias for ariaRequired. */
+  "aria-required"?: Booleanish
+  /** Whether entered input is invalid, including grammar and spelling errors. */
+  ariaInvalid?: Booleanish | "grammar" | "spelling"
+  /** DOM-compatible alias for ariaInvalid. */
+  "aria-invalid"?: Booleanish | "grammar" | "spelling"
   /** Expanded state for controls that disclose another region. */
   ariaExpanded?: Booleanish
   /** DOM-compatible alias for ariaExpanded. */
@@ -1011,10 +1078,14 @@ export interface AccessibilityProps {
   ariaAtomic?: Booleanish
   /** DOM-compatible alias for ariaAtomic. */
   "aria-atomic"?: Booleanish
-  /** Selected state for selectable semantic nodes. */
+  /** Selected state for `option` and `tab` nodes. */
   ariaSelected?: Booleanish
   /** DOM-compatible alias for ariaSelected. */
   "aria-selected"?: Booleanish
+  /** Whether a listbox permits selecting more than one option. */
+  ariaMultiSelectable?: Booleanish
+  /** DOM-compatible alias for ariaMultiSelectable. */
+  "aria-multiselectable"?: Booleanish
   /** Human-readable value text for a value control. */
   ariaValueText?: string
   /** DOM-compatible semantic alias for ariaValueText. */
@@ -1069,6 +1140,37 @@ export interface AccessibilityProps {
   ariaHidden?: Booleanish
   /** DOM-compatible alias for ariaHidden. */
   "aria-hidden"?: Booleanish
+  /**
+   * Space-separated `id`s of the elements this one controls, such as a tab's
+   * panel. Retained for `getAttribute` and attribute matchers; AccessKit has
+   * no field for the relationship, so it is not projected.
+   */
+  ariaControls?: string
+  /** DOM-compatible alias for ariaControls. */
+  "aria-controls"?: string
+  /**
+   * The kind of popup this element opens: `true` means `menu`, and `false`
+   * means none. Projected on the roles WAI-ARIA allows it on.
+   */
+  ariaHasPopup?: AriaHasPopup
+  /** DOM-compatible alias for ariaHasPopup. */
+  "aria-haspopup"?: AriaHasPopup
+  /**
+   * A localized description of this element's role, announced in place of the
+   * role's name, such as Base UI's `"Number field"`. Not projected on a
+   * generic node or when empty.
+   */
+  ariaRoleDescription?: string
+  /** DOM-compatible alias for ariaRoleDescription. */
+  "aria-roledescription"?: string
+  /**
+   * Which changes inside a live region are announced. Retained for
+   * `getAttribute` and attribute matchers; AccessKit has no field for it, so
+   * it is not projected and every change is announced.
+   */
+  ariaRelevant?: AriaRelevant
+  /** DOM-compatible alias for ariaRelevant. */
+  "aria-relevant"?: AriaRelevant
   /** Keep this semantic node accessible without painting or reserving layout space. */
   visuallyHidden?: VisuallyHidden
   /** Value or focus action requested by assistive technology. Activate uses onClick. */
@@ -1090,6 +1192,11 @@ export interface Props extends AccessibilityProps {
 
   /** Author-defined identity preserved for shared DOM/native JSX and native diagnostics. */
   id?: string
+  /**
+   * HTML `hidden`: `display: "none"` for this element unless its own style sets
+   * `display`, as the user-agent rule is outranked by author styles.
+   */
+  hidden?: boolean
   /** Inert author metadata preserved for automation and event host handles. */
   [key: `data-${string}`]: string | number | boolean | undefined
 
@@ -1116,6 +1223,19 @@ export interface Props extends AccessibilityProps {
   onMouseMoveCapture?: (event: GpuixMouseEvent) => void
   /** Fires when user clicks OUTSIDE this element. Use for "click outside to close". */
   onMouseDownOutside?: (event: GpuixMouseEvent) => void
+
+  // ── Pointer events ─────────────────────────────────────────────
+  onPointerDown?: (event: GpuixPointerEvent) => void
+  onPointerDownCapture?: (event: GpuixPointerEvent) => void
+  onPointerUp?: (event: GpuixPointerEvent) => void
+  onPointerUpCapture?: (event: GpuixPointerEvent) => void
+  onPointerMove?: (event: GpuixPointerEvent) => void
+  onPointerMoveCapture?: (event: GpuixPointerEvent) => void
+  onPointerCancel?: (event: GpuixPointerEvent) => void
+  onPointerCancelCapture?: (event: GpuixPointerEvent) => void
+  /** React exposes these transition events without capture variants. */
+  onPointerEnter?: (event: GpuixPointerEvent) => void
+  onPointerLeave?: (event: GpuixPointerEvent) => void
 
   // ── OS file drag events ────────────────────────────────────────
   onDragEnter?: (event: GpuixDragEvent) => void
@@ -1167,6 +1287,8 @@ export interface Props extends AccessibilityProps {
   onVisibleRange?: (event: GpuixElementEvent) => void
   /** Match count changed for this element's `highlight`. See `matchCount`. */
   onHighlight?: (event: GpuixElementEvent) => void
+  /** A native `motion` track reached its current target. */
+  onMotionComplete?: (event: GpuixElementEvent) => void
 
   // ── Highlight ──────────────────────────────────────────────────
   /**
@@ -1191,19 +1313,94 @@ export interface Props extends AccessibilityProps {
   motion?: MotionProps
 }
 
-// Props for native text editor elements.
+/**
+ * The `<input>` types this renderer implements. `checkbox` and `radio` are
+ * choice controls, `range` is a slider, `hidden` renders nothing and only
+ * submits its value, and every other type is a text editor, as an unknown type
+ * is a text input in HTML.
+ */
+export type InputType = "checkbox" | "radio" | "range" | "hidden" | "text" | (string & {})
+
+// Props for native text editor and choice elements.
 export interface InputProps extends Props {
   ref?: React.Ref<InputPublicInstance>
-  /** External editor value. Native edits apply immediately and report through onChange. */
-  value?: string
+  /** Selects the control; see {@link InputType}. `textarea` ignores it. */
+  type?: InputType
+  /**
+   * A text editor's external value; native edits apply immediately and report
+   * through onChange. For a checkbox, radio, or hidden input, the value it
+   * submits with its `name` (`"on"` when a checked choice omits it). For a
+   * range, its number, sanitized to {@link min}, {@link max} and {@link step}
+   * as HTML does.
+   *
+   * A text editor stringifies a number or array as React DOM does:
+   * `value={5}` is the text `"5"`.
+   */
+  value?: string | number | readonly string[]
+  /** Initial value for an uncontrolled editor. Later changes do not replace user edits. */
+  defaultValue?: string | number | readonly string[]
   placeholder?: string
+  /** Makes a text editor read-only. HTML ignores it on checkboxes and radios, and so does this renderer. */
   readOnly?: boolean
   theme?: GpuixTheme
+  /**
+   * A checkbox's or radio's checked state, controlled. React props win after
+   * every change, as in ReactDOM: an `onChange` that sets no state leaves the
+   * control as it was.
+   */
+  checked?: boolean
+  /** The initial and reset checked state of an uncontrolled checkbox or radio. */
+  defaultChecked?: boolean
+  /**
+   * A checkbox's mixed state. Activation clears it; a controlled value is
+   * restored after the change, as `checked` is.
+   */
+  indeterminate?: boolean
+  /** The name the control submits under, and a radio's group. */
+  name?: string
+  /** The `id` of the `<form>` that owns this control, instead of its ancestor form. */
+  form?: string
+  /** Submission is blocked while a required control has no value. */
+  required?: boolean
+  /** A range's lowest value; 0 when omitted or unparsable. */
+  min?: number | string
+  /** A range's highest value; 100 when omitted or unparsable, and never below `min`. */
+  max?: number | string
+  /** A range's step, counted from `min`; 1 when omitted or not positive, and `"any"` for none. */
+  step?: number | string
 }
 
 export interface TextareaProps extends InputProps {
   minRows?: number
   maxRows?: number
+}
+
+export interface LabelProps extends Props {
+  htmlFor?: string
+}
+
+export interface ButtonProps extends Props {
+  /** `submit` (the default) submits the button's form owner, `reset` resets it. */
+  type?: "button" | "submit" | "reset"
+  /** Submitted with {@link value} when this button submits its form. */
+  name?: string
+  value?: string
+  /** The `id` of the `<form>` that owns this button, instead of its ancestor form. */
+  form?: string
+  /** Submit without checking the form's validity. */
+  formNoValidate?: boolean
+}
+
+export interface FormProps extends Props {
+  ref?: React.Ref<FormPublicInstance>
+  /** Submit without checking `required` controls. */
+  noValidate?: boolean
+  /** A submit button or `requestSubmit()` submitted this form. There is no navigation to prevent. */
+  onSubmit?: (event: GpuixSubmitEvent) => void
+  onSubmitCapture?: (event: GpuixSubmitEvent) => void
+  /** Fires before the form's controls reset; `preventDefault()` keeps their state. */
+  onReset?: (event: GpuixFormEvent) => void
+  onResetCapture?: (event: GpuixFormEvent) => void
 }
 
 /** A variable-height list that builds only rows near its viewport. */
@@ -1368,6 +1565,10 @@ export interface NativeRenderer {
     operands: Float64Array,
     strings: readonly string[]
   ): void
+  applyCanvasCommandDelta?(
+    id: number, ops: Uint32Array, operands: Float64Array, strings: readonly string[]
+  ): void
+  resetCanvas?(id: number): void
   /** Present one native WebGPU clear into a live canvas. */
   presentWebGpuClear?(id: number, width: number, height: number, rgba: number): void
   /** Create one logical WebGPU device in this renderer's native resource registry. */
@@ -1433,7 +1634,7 @@ export interface NativeRenderer {
   /** Install a coalesced native frame source. Returns false when timers must drive ticks. */
   setFrameRequestHandler?(handler: (() => void) | null): boolean
   /** Queue one callback on GPUI's next display-paced frame without dirtying the window. */
-  requestFrame?(handler: (timestamp: number) => void): void
+  requestFrame?(handler: (timestamp: number) => void, performanceTimestampMs: number): void
   /** Pump idle platform work without releasing a pending display-link frame token. */
   tickIdle?(): boolean
   /** Internal hook used by injected renderers to deliver non-element events. */
@@ -1512,6 +1713,8 @@ export interface NativeRenderer {
   getSelectedText?(): string | null
   /** Drop the current selection. */
   clearSelection?(): void
+  /** Enable the renderer-level selection change event for this root. */
+  setWindowSelectionChange?(enabled: boolean, eventId: number): void
 
   // ── Text editing API ───────────────────────────────────────────
   // `<input>` and `<textarea>` keep their caret outside the retained tree.
@@ -1549,6 +1752,12 @@ export interface NativeRenderer {
   setWindowEventHandler?(handler: ((event: EventPayload) => void) | null): void
   getWindowInsets?(): NativeWindowInsets
   setWindowTitle?(title: string): void
+  /** Minimize the native desktop window. */
+  minimizeWindow?(): void
+  /** Run the native desktop zoom or maximize operation. */
+  zoomWindow?(): void
+  /** Enter or exit native desktop fullscreen. */
+  toggleFullscreen?(): void
   setDebugFrameOverlay?(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay?(): string
   cycleDebugFrameOverlay?(): string
@@ -1697,6 +1906,8 @@ export interface Container {
   rootElementType: ElementType | null
   /** `announce()`'s lazily created regions, one alternating pair per politeness. */
   announcer: AnnouncerState
+  onSelectionChange?: (event: EventPayload, renderer: NativeRenderer) => void
+  windowSelectionEventId: number
 }
 
 /** Bounds in logical window coordinates, relative to the window's content origin. */
@@ -1729,12 +1940,72 @@ export interface ElementRect extends ElementBounds {
   left: number
 }
 
+/** Options `GpuixDocument.addEventListener` accepts: only the capture flag. */
+export type GpuixDocumentListenerOptions = boolean | { capture?: boolean; passive?: boolean }
+
+/**
+ * The part of `Document` GPU-IX can answer from its retained tree, for the one
+ * root of the one native window. It is not a DOM `Document`: there is no
+ * `createElement` or `querySelector`, and it is not an `EventTarget`; it
+ * accepts only function listeners for `pointerup` and `pointercancel`.
+ */
+export interface GpuixDocument {
+  /**
+   * Adds a function listener for `pointerup` or `pointercancel`, which run
+   * when a press anywhere in the window ends or is cancelled. The listener
+   * belongs to the current root and is dropped when that root unmounts. Any
+   * other type, a `handleEvent` object, or the `once` or `signal` option is
+   * ignored with one `console.warn`.
+   */
+  addEventListener(
+    type: string,
+    listener: ((event: DocumentPointerEvent) => void) | null,
+    options?: GpuixDocumentListenerOptions
+  ): void
+  /** Removes a listener added with the same type, function, and capture flag. */
+  removeEventListener(
+    type: string,
+    listener: ((event: DocumentPointerEvent) => void) | null,
+    options?: GpuixDocumentListenerOptions
+  ): void
+  /** The global `window`, or null when none is installed. */
+  readonly defaultView: typeof globalThis | null
+  /** The root host element of the mounted tree, or null before a mount. */
+  readonly body: PublicInstance | null
+  /** The focused host element, or {@link body} when nothing is focused. */
+  readonly activeElement: PublicInstance | null
+  /** The first mounted element in tree order whose `id` prop matches, or null. */
+  getElementById(elementId: string): PublicInstance | null
+}
+
 // Public instance exposed via refs. Type-specific interfaces deepen this seam
 // without putting browser-only methods on every native element.
 export interface PublicInstance {
   id: number
   type: ElementType
   props: Props
+  /** The authored host name in uppercase, matching `Element.tagName`. */
+  readonly tagName: string
+  /** The authored host name in lowercase, matching `Element.localName`. */
+  readonly localName: string
+  /** The authored host name in uppercase, matching `Node.nodeName` for elements. */
+  readonly nodeName: string
+  /**
+   * The host element that currently holds this one in the retained tree,
+   * matching `Node.parentElement`. Reads the live tree, so it follows appends,
+   * moves, and removals. `null` for a root, and for a node that is not mounted:
+   * one React has not committed yet, or one whose subtree was removed. The DOM
+   * keeps a removed subtree's internal parent links; here they read `null`, in
+   * line with {@link contains}.
+   */
+  readonly parentElement: PublicInstance | null
+  /**
+   * The document this element belongs to, matching `Node.ownerDocument`, for
+   * every element, mounted or not. A host document (a browser, jsdom, or
+   * happy-dom) is returned as is; otherwise it is the {@link GpuixDocument}
+   * facade, the one `@gpuix/react/globals` installs as `globalThis.document`.
+   */
+  readonly ownerDocument: GpuixDocument | Document
   /**
    * Moves focus to this host element, matching `HTMLElement.focus()`, and
    * reveals it inside its scroll ancestors unless `preventScroll` is set.
@@ -1747,8 +2018,26 @@ export interface PublicInstance {
   focus(options?: FocusOptions): void
   /** Removes focus when this host element currently owns it. */
   blur(): void
-  setPointerCapture(): void
-  releasePointerCapture(): void
+  setPointerCapture(pointerId?: number): void
+  releasePointerCapture(pointerId?: number): void
+  /**
+   * Clicks this element, matching `HTMLElement.click()`: a click event runs
+   * through the capture and bubble path, then the element's activation
+   * behaviour — a checkbox toggles, a radio checks, a label activates its
+   * control, a submit button submits. A disabled form control ignores it.
+   */
+  click(): void
+  /**
+   * Dispatches a JS-created event at this element, matching
+   * `EventTarget.dispatchEvent()`. A `PointerEvent` of type `click`,
+   * `pointerdown`, `pointerup`, `pointermove`, `pointercancel`,
+   * `pointerenter`, or `pointerleave` runs the matching handlers with the
+   * event's own `bubbles`, `cancelable`, modifier, button, and pointer
+   * members; a click then runs its activation behaviour, as {@link click}
+   * does, unless a handler prevented it. Returns `false` when the event was
+   * canceled and `true` otherwise. Other event types reach no handler.
+   */
+  dispatchEvent(event: GpuixDispatchableEvent): boolean
   /**
    * Pixels this element's content is scrolled down, matching
    * `Element.scrollTop`: 0 at the top, growing positive as content scrolls up
@@ -1801,15 +2090,17 @@ export interface PublicInstance {
   scrollIntoView(options?: boolean | ScrollIntoViewOptions): void
   parentId: number | null
   getAttribute(name: string): string | null
+  hasAttribute(name: string): boolean
+  /** Whether this mounted element is or contains `other` in the retained tree. */
+  contains(other: PublicInstance | null): boolean
   /**
    * Where `other` sits relative to this node, matching
    * `Node.compareDocumentPosition()`'s bitmask: `DOCUMENT_POSITION_PRECEDING`,
    * `_FOLLOWING`, `_CONTAINS`, `_CONTAINED_BY`, `_DISCONNECTED`, and
    * `_IMPLEMENTATION_SPECIFIC`, exported from `@gpuix/react`. Same node
-   * returns 0. There is no `Node` global on either GPUIX target — the browser
-   * mirror runs this same implementation on gpuix instances too, not real DOM
-   * nodes — so this method, not `instanceof Node`, is how a ref's tree
-   * position is compared here.
+   * returns 0. Refs are not real DOM nodes on either GPUIX target — the
+   * browser mirror runs this same implementation on gpuix instances too — so
+   * this method is how a ref's tree position is compared here.
    *
    * Two top-level siblings mounted directly into the same root are the one
    * pair this cannot place relative to each other: it reports them as
@@ -1904,6 +2195,52 @@ export interface InputPublicInstance extends PublicInstance {
   setSelectionRange(start: number, end: number, direction?: SelectionDirection): void
   /** Select all of the editor's text, matching `HTMLInputElement.select()`. */
   select(): void
+  /**
+   * A checkbox's or radio's checkedness, matching `HTMLInputElement.checked`.
+   * Assigning fires no `onChange` and unchecks the rest of a radio's group.
+   * A controlled `checked` prop replaces it at the next commit.
+   */
+  checked: boolean
+  /** The state a form reset restores, matching `HTMLInputElement.defaultChecked`. */
+  defaultChecked: boolean
+  /** A checkbox's mixed state, matching `HTMLInputElement.indeterminate`. */
+  indeterminate: boolean
+  /**
+   * A range's value as a number, matching `HTMLInputElement.valueAsNumber`.
+   * Assigning sanitizes it and fires no `onChange`. The other input types this
+   * renderer implements do not have it, and read `undefined`.
+   */
+  valueAsNumber: number | undefined
+  /** The form that owns this control, or null. */
+  readonly form: FormPublicInstance | null
+  /** False while the control is invalid; see {@link validity}. */
+  checkValidity(): boolean
+  /**
+   * `HTMLInputElement.validity`. Only `valueMissing` (a `required` control
+   * without a value) and `customError` are computed; the other flags are false.
+   */
+  readonly validity: ValidityState
+  /** The custom message, a generic one for a missing value, or empty when valid. */
+  readonly validationMessage: string
+  /** False for a control constraint validation skips: disabled, read-only text, or hidden. */
+  readonly willValidate: boolean
+  /** Mark the control invalid with a message; an empty string clears it. */
+  setCustomValidity(message: string): void
+}
+
+/** `<form>` refs, carrying the submission members of `HTMLFormElement`. */
+export interface FormPublicInstance extends PublicInstance {
+  type: "form"
+  /**
+   * Submit the form, matching `HTMLFormElement.requestSubmit()`: unless the
+   * form or submitter opts out of validation, a missing required value stops
+   * it, and otherwise `onSubmit` receives the form's `FormData`.
+   */
+  requestSubmit(submitter?: PublicInstance | null): void
+  /** Reset every control to its default, matching `HTMLFormElement.reset()`. */
+  reset(): void
+  /** False while any owned control is `required` and has no value. */
+  checkValidity(): boolean
 }
 
 
@@ -1945,10 +2282,24 @@ export interface Instance extends PublicInstance {
   readonly selectionDirection?: InputPublicInstance["selectionDirection"]
   setSelectionRange?: InputPublicInstance["setSelectionRange"]
   select?: InputPublicInstance["select"]
+  checked?: boolean
+  defaultChecked?: boolean
+  indeterminate?: boolean
+  readonly form?: FormPublicInstance | null
+  checkValidity?: () => boolean
+  setCustomValidity?: (message: string) => void
+  readonly validity?: ValidityState
+  readonly validationMessage?: string
+  readonly willValidate?: boolean
+  requestSubmit?: FormPublicInstance["requestSubmit"]
+  reset?: FormPublicInstance["reset"]
   __applyCanvasCommands(
     ops: Uint32Array,
     operands: Float64Array,
     strings: readonly string[]
+  ): void
+  __applyCanvasCommandDelta(
+    ops: Uint32Array, operands: Float64Array, strings: readonly string[]
   ): void
 }
 

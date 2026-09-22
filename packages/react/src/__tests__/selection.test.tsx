@@ -174,6 +174,18 @@ describe("text selection", () => {
     expect(renderer.dragSelect(40, 30, 40, 30)).toBeNull()
   })
 
+  it("survives a click that leases the root view", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
+        <text style={{ fontSize: 20 }}>just a click</text>
+      </div>
+    )
+
+    renderer.nativeSimulateClick(40, 30)
+    expect(renderer.getSelectedText()).toBeNull()
+  })
+
   it("applies lineHeight to wrapped text", () => {
     const a = createTestRoot()
     a.render(
@@ -211,5 +223,31 @@ describe("text selection", () => {
     )
 
     expect(renderer.dragSelect(21, 30, 900, 30)).toBe("plain div text")
+  })
+
+  it("fires onSelectionChange once per real change, including clear", () => {
+    const values: Array<string | null> = []
+    const { render, renderer } = createTestRoot({
+      onSelectionChange: (event) => {
+        values.push(event.value ?? null)
+      },
+    })
+    render(
+      <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
+        <text style={{ fontSize: 20 }}>hello world</text>
+      </div>
+    )
+
+    expect(renderer.dragSelect(21, 30, 900, 30)).toBe("hello world")
+    renderer.dispatchNativeEvents()
+    expect(values).toEqual(["hello world"])
+
+    renderer.flush()
+    renderer.dispatchNativeEvents()
+    expect(values).toEqual(["hello world"])
+
+    renderer.clearSelection()
+    renderer.dispatchNativeEvents()
+    expect(values).toEqual(["hello world", null])
   })
 })

@@ -19,7 +19,9 @@
 
 React bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) - Zed's GPU-accelerated UI framework.
 
-Build native GPU-accelerated desktop apps with React and TypeScript. Your components render directly to the GPU via Metal, DirectX, or Vulkan. No Electron, no web views.
+Write a React tree in TypeScript. GPUIX paints it with Metal, DirectX, or Vulkan. No Electron. No web view.
+
+`useState` and JSX still apply. Layout, text, and input go through GPUI, not the DOM.
 
 This fork's premise is that desktop and the browser should be one codebase, not two: a component
 written against `<div>`, `<text>`, refs, events, and `style` should need no renderer-specific
@@ -69,7 +71,7 @@ cd examples && bun --hot mail.tsx
 
 ## Quickstart
 
-This fork ships from no registry yet, so you build the two packages from a
+This fork ships from no registry yet, so you build the native and React packages from a
 checkout once and pin the packed tarballs. That needs a Rust toolchain — see
 [Building](#building) for the prerequisites.
 
@@ -78,10 +80,12 @@ git clone --recurse-submodules https://github.com/Ernxst/gpuix
 cd gpuix && bun install && bun run build
 cd packages/native && bun pm pack
 cd ../react && bun pm pack
+cd ../plugins && bun pm pack
 ```
 
-Pin the two generated `.tgz` files in your app — plus an `overrides` entry for
-`@gpuix/native`, without which the install fails — then add the types.
+Pin the generated native and React `.tgz` files in your app — plus an `overrides`
+entry for `@gpuix/native`, without which the install fails. Add the plugins
+tarball when the app uses Vite or Bun, then add the types.
 [Consuming an unpublished checkout](#consuming-an-unpublished-checkout) has the
 exact `package.json` shape and the peer-dependency rules.
 
@@ -168,11 +172,13 @@ window instead of opening a second one.
 ### 4. Ship a binary
 
 ```bash
-bun build --compile app.tsx --outfile dist/app
+bun build --compile --production app.tsx --outfile dist/app
 ./dist/app
 ```
 
 The binary carries the renderer, so it runs with no Bun and no Node install.
+Keep `--production`: without it the binary bundles React's development build,
+which in the chat example costs about 20 MB of memory.
 
 ### 5. Wrap it in an app with an icon
 
@@ -299,7 +305,7 @@ replaces an asset if CI retries. Do **not** upload a feed JSON.
 
 ```bash
 # macOS
-bun build --compile app.tsx --outfile dist/app
+bun build --compile --production app.tsx --outfile dist/app
 cargo packager --release --config packager.json
 gh release upload v0.1.0 \
   "bundle/My App.app.tar.gz" \
@@ -307,7 +313,7 @@ gh release upload v0.1.0 \
   --clobber
 
 # Linux
-bun build --compile app.tsx --outfile dist/app
+bun build --compile --production app.tsx --outfile dist/app
 cargo packager --release --config packager.json
 gh release upload v0.1.0 \
   bundle/app_0.1.0_x86_64.AppImage \
@@ -315,7 +321,7 @@ gh release upload v0.1.0 \
   --clobber
 
 # Windows
-bun build --compile app.tsx --outfile dist/app.exe
+bun build --compile --production app.tsx --outfile dist/app.exe
 cargo packager --release --config packager.json
 gh release upload v0.1.0 \
   bundle/app_0.1.0_x64-setup.exe \
@@ -346,7 +352,7 @@ packed in [Quickstart](#quickstart), and run `bun install`.
 |---|---|---|
 | **todo** | `bun run dev` in [`example-app/`](https://github.com/Ernxst/gpuix/tree/main/example-app) | The starting point: one file, a `<virtual-list>`, a native `<input>`, and an animated sidebar |
 | **blurred window** | `bun run blurred-window` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
-| **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, message list, composer, `<markdown>` |
+| **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, per-thread transcripts, demo replies, composer, `<markdown>` |
 | **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
 | **mail** | `bun --hot mail.tsx` | A Superhuman-style mail client: three panes, thread list, and a Framer newsletter |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
@@ -542,6 +548,7 @@ State update triggers re-render → reconciler sends mutations back to Rust
 Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)`. Rust only knows **whether** an element has a listener (via `setEventListener`), not the closure itself — the actual handler lives in JS.
 
 Handlers receive one of the per-kind `Gpuix*Event` types (`GpuixMouseEvent`,
+`GpuixPointerEvent`,
 `GpuixWheelEvent`, `GpuixKeyboardEvent`, `GpuixFocusEvent`, `GpuixScrollEvent`,
 `GpuixChangeEvent`, or `GpuixElementEvent` for the custom-element events), not
 the raw native payload — each prop's type is listed in the table above. Every
@@ -566,7 +573,13 @@ Beyond that, members live only on the kind that delivers them:
   differ in a browser only by the document's own scroll offset, and this
   renderer has no scrolling document); and `relatedTarget` on `mouseEnter`
   and `mouseLeave` — the element the pointer left, or the one it moved to
-- `GpuixKeyboardEvent` adds `key`, `repeat`, and the raw `modifiers` object
+- `GpuixPointerEvent` adds `pointerId`, `pointerType`, `isPrimary`, and the DOM
+  `buttons` bitfield. Desktop mouse input is the primary `"mouse"` pointer with
+  id `1`; the native payload keeps these fields ready for other platform pointer
+  sources
+- `GpuixKeyboardEvent` adds `key`, `repeat`, flattened modifier values, and
+  `getModifierState()` for `"Alt"`, `"Control"`, `"Meta"`, and `"Shift"`, as
+  well as the raw `modifiers` object; unavailable names report `false`
 - `GpuixFocusEvent`'s `relatedTarget` is always `null`: GPUI's focus
   subscriptions report only the element whose own focus changed, never the
   other side of the transition, so this renderer genuinely does not know it
@@ -583,6 +596,9 @@ prevented Tab or Shift+Tab keydown likewise keeps focus on the current element.
 
 - **`@gpuix/native`** — Rust bindings to GPUI. It publishes napi-rs desktop binaries and a wasm-bindgen browser build, both backed by `GpuixRenderer`, `RetainedTree`, `build_element()`, and `apply_styles()`.
 - **`@gpuix/react`** — React reconciler, event registry, and TypeScript types. Implements the `react-reconciler` host config using the mutation API.
+
+Pin `@gpuix/react` and `@gpuix/native` to the **same exact version**. GPUIX is
+still pre-1.0. Breaking changes can land before v1. Upgrade both together.
 
 ## Building
 
@@ -691,13 +707,14 @@ frame = requestAnimationFrame(redraw)
 // cancelAnimationFrame(frame)
 ```
 
-Callbacks are one-shot, receive a high-resolution millisecond timestamp sampled
-inside GPUI's native frame callback, and share one native frame request when
-queued together. The offscreen renderer supplies that timestamp from the same
-GPUI clock, so `advanceAsyncClock()` controls it deterministically. Requesting a
+Callbacks are one-shot, receive a high-resolution millisecond timestamp compatible
+with `performance.now()`, and share one native frame request when queued together.
+GPUIX pairs the performance time origin with its native frame clock on the first
+request. The offscreen renderer advances that same native clock, so
+`advanceAsyncClock()` controls timestamp deltas deterministically. Requesting a
 callback creates frame demand without dirtying the window; drawing still happens
-only through the normal GPUI frame path. A hot remount drops callbacks owned by
-the previous tree.
+only through the normal GPUI frame path. A hot remount drops callbacks owned by the
+previous tree.
 
 In the test renderer, one `advanceAsyncClock()` delivers every frame callback
 queued before it synchronously, before it returns. `advanceTime()` and
@@ -718,6 +735,11 @@ GPUIX drawing sharp. A component shared with the browser can keep its one DOM
 path without a renderer check, however. DPR-scaled bitmap dimensions paired
 with the matching `context.scale(dpr, dpr)` map back to the same GPUIX layout
 geometry, while GPUIX still rasterizes at the layout box's physical resolution.
+
+Changing or removing either bitmap dimension clears the retained bitmap and resets the existing
+2D context's drawing state, save stack, transform, and current path. Recorded redraws are
+transported incrementally between flushes, so repeated clear-and-redraw frames keep a bounded
+command stream while stateful Canvas 2D semantics continue across ordinary flushes.
 
 ### Canvas pixel readback
 
@@ -938,6 +960,10 @@ typing in keeps the caret and the active titlebar. `show: false` goes further
 and opens no window at all, so the process runs with a live React tree and
 nothing on screen.
 
+On macOS an unfocused window opens behind the active app's windows. While it
+is fully covered, `requestAnimationFrame` callbacks pause, as they do in a
+browser window that is covered, and they resume once any part of it shows.
+
 ```tsx
 render(<App />, { title: 'Notes', focus: false })
 ```
@@ -973,6 +999,29 @@ focus, since raising a window's z-order is a separate privilege from the
 foreground-activation lock that can refuse a background process; on Linux the
 compositor decides — a client cannot raise itself without the compositor's
 own consent, and GPUI already makes the platform's normal request.
+
+### Window controls
+
+The desktop renderer exposes GPUI's native minimize, zoom, and fullscreen
+operations. Reach them through `useGpuixRequired()` or the renderer returned by
+`createRenderer()`.
+
+```tsx
+function WindowControls() {
+  const renderer = useGpuixRequired()
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      <div onClick={() => renderer.minimizeWindow?.()}>Minimize</div>
+      <div onClick={() => renderer.zoomWindow?.()}>Zoom</div>
+      <div onClick={() => renderer.toggleFullscreen?.()}>Fullscreen</div>
+    </div>
+  )
+}
+```
+
+`minimizeWindow()`, `zoomWindow()`, and `toggleFullscreen()` work on macOS,
+Windows, Linux, and FreeBSD. `zoomWindow()` uses the platform's native zoom or
+maximize operation. These methods are not available in the browser renderer.
 
 | Platform | `focus: false` | `show: false` |
 |---|---|---|
@@ -1130,7 +1179,105 @@ render(<App />, { title: 'My App', width: 800, height: 600 })
 Do **not** call `createRenderer()` or `init()` in this file. `bun --hot` re-runs
 the whole entry on save. A second `init()` would open a second window.
 
-### 2. Start the app with `bun --hot`
+### 2. Use Vite without a GPUIX CLI
+
+Use `@gpuix/plugins/vite` when the app needs Vite's plugin pipeline. Vite and the native
+module runner stay in the Bun process, so no separate launcher is needed.
+
+Add the packed plugin and Vite as development dependencies:
+
+```json
+{
+  "devDependencies": {
+    "@gpuix/plugins": "file:/absolute/path/gpuix-plugins-0.21.0-fork.1.tgz",
+    "vite": "^8.2.1"
+  }
+}
+```
+
+Configure Vite and keep the app entry ending with `render()`:
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite'
+import { gpuix } from '@gpuix/plugins/vite'
+
+export default defineConfig({
+  appType: 'custom',
+  plugins: [gpuix({ entry: 'app.tsx' })],
+})
+```
+
+```json
+{ "scripts": { "dev": "bun run --bun vite" } }
+```
+
+The Vite adapter is for native development. If a config includes `gpuix()` in
+`vite build`, it throws; use `@gpuix/plugins/bun` for native packaging.
+
+Run `bun run dev`. Component-only edits keep React state. A mixed module such
+as a TanStack route invalidates the Refresh boundary, then Vite re-evaluates the
+entry and `render()` remounts the app on the same native window. Rust and native
+addon changes still need the Bun process restarted.
+
+#### Share a Vite config with the web target
+
+Keep the React plugin enabled for the browser target and add `gpuix()` only in
+native mode. The React plugin only installs its Refresh wrapper in Vite's client
+environment, so GPUIX remains responsible for native Refresh.
+
+```ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { gpuix } from '@gpuix/plugins/vite'
+
+export default defineConfig(({ mode }) => {
+  const native = mode === 'native'
+
+  return {
+    appType: native ? 'custom' : 'spa',
+    plugins: [
+      react({ jsxImportSource: '@gpuix/react' }),
+      native && gpuix({ entry: 'src/native.tsx' }),
+    ],
+  }
+})
+```
+
+```json
+{
+  "scripts": {
+    "dev:native": "vite --mode native",
+    "dev:web": "vite --mode web"
+  }
+}
+```
+
+The scoped `--bun` flag runs only Vite under Bun. It does not change the browser
+bundle, select a renderer, or alter Node-based tools such as Vitest.
+
+### 3. Build with Bun
+
+Use `@gpuix/plugins/bun` when packaging the native app with `Bun.build`:
+
+```ts
+import { gpuix } from '@gpuix/plugins/bun'
+
+const result = await Bun.build({
+  entrypoints: ['app.tsx'],
+  outdir: 'dist',
+  plugins: [gpuix()],
+})
+
+if (!result.success) throw new Error('Bun build failed')
+```
+
+The adapter defaults to Bun as the target, ESM output, automatic JSX using
+`@gpuix/react`, and an external `@gpuix/native` import. Explicit scalar build
+options win. `external`, `define`, and `conditions` are merged. The adapter
+also converts native `*.module.css` imports into objects for the `style` prop.
+
+### 4. Start the app with `bun --hot`
 
 Prefer **`bun --hot`** over a plain `bun` or `tsx` run. Without `--hot`, a
 save starts a second process. With it, `render()` remounts React on the same
@@ -1138,10 +1285,36 @@ window.
 
 ```bash
 bun --hot app.tsx
-cd examples && bun --hot chat.tsx
 ```
 
-### 3. Save the file
+To use native `*.module.css` imports with `bun --hot`, register the development
+plugin from a preload before the app entry is imported:
+
+```ts
+// gpuix.preload.ts
+import { gpuixDev } from '@gpuix/plugins/bun'
+
+Bun.plugin(gpuixDev())
+```
+
+```toml
+# bunfig.toml
+preload = ['./gpuix.preload.ts']
+```
+
+Opt into the matching TypeScript declaration from a project `.d.ts` file:
+
+```ts
+// gpuix-css-modules.d.ts
+import '@gpuix/plugins/css-modules'
+```
+
+Keep that declaration opt-in when the project also imports browser CSS modules;
+browser modules export class-name strings while native modules export style
+objects. Bun's runtime watcher does not currently re-run files handled by
+custom `onLoad` plugins, so restart the process after changing a CSS module.
+
+### 5. Save the file
 
 ```
 save .tsx  ►  bun re-evaluates the entry  ►  render() remounts React
@@ -1553,7 +1726,7 @@ The **transition** uses seconds, like Motion for React:
 
 `duration` is ignored when `ease.type` is `"spring"`; settling derives the end
 time. Keyframes, variants, exit transitions, and shared layout animations are
-not available yet.
+not available yet. **Exit** uses `AnimatePresence`, like Motion for React.
 
 ### Browser mirror: sampled springs with CSS `linear()`
 
@@ -1620,6 +1793,38 @@ function SidebarFrame({
 
 The **chat example** uses this pattern. The sidebar remains mounted while its
 outer width moves between `253` and `0` pixels.
+
+### Animate unmount
+
+A `motion.div` with **`exit`** only leaves after that target finishes, and only
+when it is a child of **`AnimatePresence`**. Without `AnimatePresence`, React
+destroys the node on the same commit.
+
+```tsx
+import { AnimatePresence, motion } from '@gpuix/react'
+
+function Toast({ show }: { show: boolean }) {
+  return (
+    <AnimatePresence>
+      {show ? (
+        <motion.div
+          key="toast"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
+        >
+          <text>Saved</text>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  )
+}
+```
+
+Give every child a **unique `key`** when more than one child can leave. Set
+**`initial={false}`** on `AnimatePresence` to skip enter on the first paint.
+A child with no `exit` is removed without a tween.
 
 ### Capture exact frames
 
@@ -1788,6 +1993,13 @@ ref.current.scrollIntoView({ block: "nearest" })   // smallest revealing scroll
 ref.current.getBoundingClientRect()                // DOMRect-shaped measurement
 ref.current.getBounds()                            // the same box as {x, y, width, height}
 ref.current.matches(":focus")                     // :focus, :focus-visible, :hover, or :active
+ref.current.tagName                               // "DIV" (aliases keep their authored name)
+ref.current.localName                             // "div"
+ref.current.hasAttribute("data-state")           // agrees with getAttribute()
+ref.current.contains(otherRef.current)            // retained-tree containment
+ref.current.parentElement                         // live retained parent, or null
+ref.current.ownerDocument                         // the host document, or the GPUIX facade; see Globals
+ref.current.dispatchEvent(event)                  // a PointerEvent; see Globals
 
 // "Am I at the bottom?" — the standard DOM test
 const atBottom =
@@ -1814,10 +2026,25 @@ deliberately supports only these state pseudo-classes.
 `_CONTAINS`/`_CONTAINED_BY` alongside `_PRECEDING`/`_FOLLOWING`; unrelated
 trees set `_DISCONNECTED` plus `_IMPLEMENTATION_SPECIFIC` and a pick between
 them that stays consistent for the life of the process, as the DOM guarantees.
-There is no `Node` global on either GPUIX target — the browser mirror runs
-this same implementation on gpuix instances too, not real DOM nodes — so this
-method, not `instanceof Node`, is how code shared with the web compares two
-refs' tree positions.
+Refs are not real DOM nodes on either GPUIX target — the browser mirror runs
+this same implementation on gpuix instances too — so this method is how code
+shared with the web compares two refs' tree positions.
+
+Refs also expose `tagName`, `localName`, `nodeName`, `hasAttribute()`,
+`contains()`, and `parentElement`. Identity uses the authored element name, so an
+`<article>` rendered through the native div adapter still reports `ARTICLE` /
+`article`. Containment includes the element itself and mounted descendants;
+foreign, detached, and unmounted instances return `false`.
+
+`parentElement` reads the retained tree on every access, so it follows appends,
+moves, and removals. It is `null` for a root and for a node that is not
+mounted. Where the DOM keeps parent links inside a removed subtree, every node of
+an unmounted subtree here reports `null`, in line with `contains()`. Refs have no
+`parentNode`, `children`, or other traversal members.
+
+`ownerDocument` is the host's document when one exists, and otherwise the
+single-window GPUIX document facade, for every ref, mounted or not; see
+[document](#document).
 
 Only `overflow: "scroll"` / `"auto"` elements and `<virtual-list>` are scroll
 containers here. Everything else — **including `overflow: "hidden"`, which the web does
@@ -2244,7 +2471,49 @@ keeps the characters it accepted and rewinds the rest:
 ```
 
 Leave `value` off — or pass `undefined` — for an uncontrolled editor: the text
-is the editor's own, nothing rewinds it, and `onChange` is a notification.
+is the editor's own, nothing rewinds it, and `onChange` is a notification. Use
+`defaultValue` to seed that text once when the editor mounts:
+
+```tsx
+<input defaultValue="Ada" onChange={(event) => saveDraft(event.value ?? '')} />
+```
+
+Changing `defaultValue` after mount does not replace user edits. An actual
+unmount and remount applies the current default again. When both props are
+present, `value` wins and the editor remains controlled.
+
+Both props take numbers as React DOM's do: `value={5}` is the text `"5"`, and
+`ref.value` reads `"5"`.
+
+Each text `onChange` carries `inputType`, the Input Events name of the edit
+(`insertText`, `deleteContentBackward`, `insertFromPaste`, `historyUndo` and so
+on), on the event and on `event.nativeEvent`. Code that tells typing from
+autofill by it, as Base UI's Autocomplete does before opening its list, sees a
+typed edit.
+
+Use a `<label>` for a visible control name and a larger activation target. A
+label with `htmlFor` labels the control with that `id`; a label without one
+labels the first `<input>`, `<textarea>`, or `<button>` inside it. Clicking the
+label focuses and clicks an enabled `<input>` or `<textarea>` — which toggles a
+checkbox — and activates an enabled `<button>`. The label text is also the
+control's accessible name unless `ariaLabelledBy` or `ariaLabel` wins:
+
+```tsx
+<label htmlFor="email">Email address</label>
+<input id="email" />
+
+<label>
+  <input type="checkbox" name="updates" />
+  Send me updates
+</label>
+```
+
+Changing either `htmlFor` or the control's `id` takes effect on the next click.
+`preventDefault()` on the label click cancels association activation, and
+`disabled` / `ariaDisabled` controls receive neither focus nor a click. A click
+on a control or link inside a label belongs to that element, so a checkbox
+clicked inside its own label toggles once. Form controls other than `input`,
+`textarea`, and `button` remain unsupported.
 
 The focused caret stays solid during edits and then blinks every 500ms while
 idle. It stops scheduling repaint frames on blur or while the window is
@@ -2316,6 +2585,12 @@ The restore has to run in an effect, not inside `onChange`: a changed `value`
 prop parks the caret at the end of the new text when the next frame applies it.
 Every read and write above draws the committed tree first, as `getBounds()`
 does, so the caret you write is the one that survives.
+
+When the clipboard has no text, `Cmd+V` or `Ctrl+V` continues to `onKeyDown`
+instead of disappearing inside the editor. Applications can then handle an
+image-only or file-only clipboard themselves. Copied files also propagate even
+when the operating system includes their paths as fallback text. Mixed text and
+image clipboard content still pastes its text.
 
 **`fontSize` and `lineHeight`** in `style` size each row. Without `lineHeight`,
 the row uses GPUI's default leading, so a larger `fontSize` grows the box.
@@ -2404,6 +2679,14 @@ a `div` when it should receive keyboard focus:
 bubble phases. `onKeyUp` follows the same path when the key is released. Adding
 either callback creates the element's native focus handle.
 
+Each key press is one event with the focused element as `event.target`, whether
+or not that element has a key callback of its own. A `<div onKeyDown>` around a
+toolbar, a radio group or a set of focusable rows hears each key once, through
+its capture and bubble listeners, and `stopPropagation()` and
+`preventDefault()` apply to that one event. This includes a focused checkbox or
+radio: `preventDefault()` on Space cancels its activation, and on a radio's
+arrow key it keeps the selection where it is.
+
 ```tsx
 <div
   autoFocus
@@ -2438,7 +2721,8 @@ phase to keep focus on the current element, matching the browser:
 A focused scroll container responds to the arrow, Page, Space, and Home/End
 keys using Chromium's step sizes, and chains each key to the nearest ancestor
 scroll container that can still move. Calling `preventDefault()` in
-`onKeyDown` cancels the keyboard scroll.
+`onKeyDown` cancels the keyboard scroll. Space on a focused checkbox or radio,
+and the arrow keys on a radio, activate the control instead of scrolling.
 
 ### Keys with nothing focused
 
@@ -2465,20 +2749,11 @@ run at `AT_TARGET`, as they do for any DOM event whose target is the listener.
 `Tab` is unaffected: it still traverses, and `preventDefault()` still cancels
 the traversal.
 
-**A root listener is not only the no-focus path.** An element that listens for
-keys is told about every key event that passes through it, including the ones
-travelling up from a focused descendant, and it is told with **its own id as
-`event.target`** — so a root handler also runs for each character typed into a
-focused `<input>`. When that focused descendant listens for keys too, the root
-handler runs **twice for the one keypress**: once as the ordinary DOM bubble,
-carrying the descendant as `event.target` at phase `3`, and once as the
-ancestor's own delivery, carrying the root as `event.target` at phase `2`.
-
-So `event.target` is not uniformly wrong on a key event — it is inconsistent.
-A root listener sees both shapes for the same physical key, which is why
-filtering on `event.target` (or on `eventPhase`) cannot separate "nothing is
-focused" from "the user is typing". The no-focus fallback adds no delivery to
-any of this; the focus read is what answers the question:
+**A root listener also hears focused elements' keys.** A key pressed while an
+element has focus reaches the root through the bubble phase, so a root handler
+also runs for each character typed into a focused `<input>`, with the input as
+`event.target`. Compare `event.target` with the root to keep a shortcut to the
+no-focus case, the way a `document` listener compares it with `document.body`:
 
 ```tsx
 const rootRef = useRef<PublicInstance>(null)
@@ -2486,20 +2761,12 @@ const rootRef = useRef<PublicInstance>(null)
 <div
   ref={rootRef}
   onKeyDown={(event) => {
-    // Ignore keys that belong to a focused element, the way a `document`
-    // listener would read `event.target`. Compare against the root's own id:
-    // when the root is itself focusable and focused, the shortcut should fire,
-    // and a bare `!== null` check would swallow it.
-    const active = renderer.getActiveElement()
-    if (active !== null && active !== rootRef.current?.id) return
+    // Nothing is focused, or the root itself is.
+    if (event.target.id !== rootRef.current?.id) return
     if (event.key === '/') openSearch()
   }}
 >
 ```
-
-The inconsistent target is in ancestor key delivery generally, not in this
-fallback, and it is why the guard reads focus rather than the event. Until it is
-fixed, `getActiveElement()` is the reliable answer to "what has focus".
 
 Do not also call `focusNext` from an element `onKeyDown`. Both move focus, and
 the window listener cannot stop the native event, so Tab would jump twice.
@@ -2516,6 +2783,10 @@ do not dispatch a `keydown`, so a `preventDefault()` handler cannot cancel them.
 renderer.focusNext()
 renderer.focusPrevious()
 ```
+
+Browser focus requests made while WebGPU opens are queued and applied after
+the first focus handles exist. If several arrive before that render, the latest
+request wins.
 
 Use a ref for imperative focus:
 
@@ -2545,6 +2816,124 @@ Adding `onKeyDown`, `onKeyUp`, `onFocus`, or `onBlur` creates a persistent focus
 handle. Add `tabIndex` as well when the element must be reachable with Tab.
 Removing `tabIndex` removes the element from the tab order.
 
+## Checkboxes, radios, and forms
+
+`<input type="checkbox">` and `<input type="radio">` are native choice
+controls, not text editors. They take the DOM props: `checked` for a controlled
+control, `defaultChecked` for an uncontrolled one, checkbox `indeterminate`,
+`name`, `value`, `form`, `required`, and `disabled`. `onChange` fires when a
+click, Space, a label, or `ref.click()` changes the state, and carries the new
+state as `event.checked`:
+
+```tsx
+<label>
+  <input type="checkbox" checked={agreed} onChange={(event) => setAgreed(event.checked === true)} />
+  I agree
+</label>
+```
+
+State follows HTML and React DOM:
+
+- The state flips before `onClick` runs, so the handler reads the new
+  `checked`. `preventDefault()` there puts the state back, but `onChange`
+  still fires with the flipped state first, as in React DOM; its
+  `event.nativeEvent.defaultPrevented` is `true` in that case.
+- A controlled control shows its `checked` prop again after every change, as
+  React DOM's `restoreControlledState` does, so an `onChange` that sets no
+  state leaves it as it was. A controlled `indeterminate` prop is restored the
+  same way. Activation clears `indeterminate`.
+- `readOnly` has no effect on checkboxes and radios, as in HTML. `disabled`
+  blocks clicks, focus, and `ref.click()`.
+- The ref carries `checked`, `defaultChecked`, `indeterminate`, `form`,
+  `click()`, and `checkValidity()`. Writing `checked` fires no `onChange`.
+
+Radios with the same non-empty `name` and the same form owner form a group,
+and checking one unchecks the rest. The group is one Tab stop: its checked
+radio, or with nothing checked its first radio going forward and its last going
+backward. Arrow keys check and focus the next or previous enabled radio,
+wrapping at either end, and Space checks the focused one. A radio under
+`display: none`, `hidden`, or `ariaHidden` stays in its group but is never a
+Tab stop or an arrow-key target. Enter does not
+activate a checkbox or radio.
+
+`<input type="hidden">` renders nothing and cannot take focus; it only
+submits its `value`. `<input type="range">` is a slider, described below. Every
+other `type` is a text editor. The ref's `type` is the element type,
+`"input"`, not the input type: read `ref.current.props.type`.
+
+The default control is a 13px box or circle drawn with the shared theme's
+`border`, `bg`, and `accent` colours. Author styles such as `width`, `height`,
+and `border` replace it, which is also how a visually hidden input, like the
+one Base UI's `Checkbox.Root` and `Switch.Root` render beside their root,
+shrinks to nothing.
+
+**Forms.** `<form>` owns the controls inside it, and a control's `form` prop
+names another form by `id`. A `<button>` in a form submits it unless its
+`type` is `button`; `type="reset"` resets it. `ref.requestSubmit(submitter?)`
+and `ref.reset()` do the same from code. `onSubmit` receives the submission's
+entries as `event.formData` and the submitting button as `event.submitter`:
+
+```tsx
+<form onSubmit={(event) => save(Object.fromEntries(event.formData))}>
+  <input type="checkbox" name="alerts" defaultChecked />
+  <input type="radio" name="size" value="s" />
+  <input type="radio" name="size" value="l" defaultChecked />
+  <button name="action" value="save">Save</button>
+</form>
+```
+
+Submission follows HTML's entry list: a checked checkbox or radio submits its
+`value`, or `"on"` without one; unchecked, disabled, and unnamed controls are
+left out; a hidden input submits its `value`, a text control its text, and the
+submitting button its `name` and `value`. There is no navigation, so
+`preventDefault()` on `onSubmit` changes nothing. `onReset` can be prevented;
+otherwise every checkbox and radio returns to its default and every text
+control to its `defaultValue` (a controlled one to its `value`).
+
+**Ranges.** `<input type="range">` is a native slider with the implicit
+`slider` role. It takes `min` (default 0), `max` (default 100, never below
+`min`), `step` (default 1, or `"any"`), `value` for a controlled range and
+`defaultValue` for an uncontrolled one, as numbers or numeric strings. The
+value is sanitized as HTML does it: an unparsable value becomes the midpoint,
+and the rest is clamped and rounded to the nearest step counted from `min`.
+
+```tsx
+<input
+  type="range"
+  aria-label="Volume"
+  min={0}
+  max={100}
+  value={String(volume)}
+  onChange={(event) => setVolume(Number(event.value))}
+/>
+```
+
+Arrow keys move the value one step, or a hundredth of the range under
+`step="any"`, Up and Right increasing it; Page Up and Page Down move a tenth of
+the range, and Home and End jump to the ends. Screen
+readers' Increment and Decrement actions step it too. Each change fires
+`onChange` with the new value as `event.value`, a `preventDefault()` on `onKeyDown` or `onAccessibilityAction`
+stops it, and a controlled range returns to its `value` prop unless the
+handler sets state. The ref carries `value`, a string, and `valueAsNumber`;
+writing either fires no `onChange`. A range submits its value and resets to
+its `defaultValue`. The accessibility node carries the value, bounds and step;
+an authored `ariaValueNow`, `ariaValueMin` or `ariaValueMax` wins over them, as
+in Chromium.
+
+The default control is a 129×16 track and thumb in the theme's `border` and
+`accent` colours, which author styles replace, as they do for Base UI's
+visually hidden `Slider.Thumb` input. Pointer dragging on the track, vertical
+painting, and right-to-left key direction are not implemented: Base UI's
+Slider handles its own pointer input and key direction.
+
+`required` is the one constraint checked: a required checkbox that is
+unchecked, a radio group with a required member and nothing checked, or a
+required text control that is empty blocks submission, unless the form has
+`noValidate` or the submitter `formNoValidate`. A blocked submission fires no
+event; there is no `invalid` event or validation message. `required` also sets
+the control's accessible required state. Enter in a form control does not
+submit the form.
+
 ## Native accessibility
 
 Semantic host elements feed GPUI's AccessKit tree directly. Every JSX alias
@@ -2568,6 +2957,9 @@ add semantics and focus behavior, but no visual defaults.
 | `<header>` | `banner` |
 | `<footer>` | `contentinfo` |
 | `<section>` | `region` |
+| `<form>` | `form`, only when it has an accessible name |
+| `<input type="checkbox">`, `<input type="radio">` | `checkbox`, `radio`, with their checked or mixed state |
+| `<input type="range">` | `slider`, with its value, bounds and step |
 | `<address>` | `group` |
 | `<abbr>` | platform `abbr` role |
 | `<blockquote>` | `blockquote` |
@@ -2633,7 +3025,14 @@ equivalents:
 | `ariaLabel`, `ariaDescription` | Accessible name and supplementary description; on a role-less element they project a `generic` node the platform adapters prune |
 | `ariaLabelledBy`, `ariaDescribedBy` | Space-separated author `id`s whose text supplies the name or description; wins over `ariaLabel` / `ariaDescription` |
 | `ariaChecked` | `true`, `false`, or `"mixed"` toggle state |
-| `ariaExpanded`, `ariaSelected` | Boolean semantic states |
+| `ariaPressed` | `true`, `false`, or `"mixed"` pressed state for toggle buttons |
+| `ariaOrientation` | `"horizontal"` or `"vertical"` orientation for composite widgets and separators |
+| `ariaReadOnly` | Operable but non-editable form-control state |
+| `ariaRequired` | Required-input state for form controls |
+| `ariaInvalid` | `true`, `false`, `"grammar"`, or `"spelling"` input-validity state |
+| `ariaExpanded` | Boolean expanded state for buttons and links |
+| `ariaSelected` | Boolean selected state for `option` and `tab`; `true`, `false`, and omitted project as selected, not selected, and no selected state |
+| `ariaCurrent` | Global current-item state: `page`, `step`, `location`, `date`, `time`, `true`, or `false` |
 | `ariaLive` | `off`, `polite`, or `assertive` live-region politeness; announces text changes without moving focus |
 | `ariaAtomic` | Present the whole live region rather than only the part that changed |
 | `ariaValueText` | Human-readable value text |
@@ -2643,6 +3042,10 @@ equivalents:
 | `ariaDisabled` | Unavailable and non-activating, but retained in tab order |
 | `ariaHidden` | Excludes the element and its complete subtree from AccessKit |
 | `visuallyHidden` | Keeps the roled node and its name in AccessKit while painting nothing and reserving no layout space |
+| `ariaHasPopup` | The popup the element opens: `"menu"` (or `true`), `"listbox"`, `"tree"`, `"grid"` or `"dialog"`; `false` declares none. Projected on the roles WAI-ARIA allows it on: `button`, `combobox`, `gridcell`, `link`, `menuitem` and its checkbox and radio variants, `slider`, `tab`, `textbox`, `searchbox`, `treeitem` and `application` |
+| `ariaRoleDescription` | A localized name for the role, such as Base UI NumberField's `"Number field"`; not projected on a generic node or when empty |
+| `ariaControls` | Space-separated `id`s of the elements this one controls; retained for `getAttribute` and `toHaveAttribute`, not projected, since AccessKit has no field for it |
+| `ariaRelevant` | Which live-region changes are announced; retained for `getAttribute` and `toHaveAttribute`, not projected, since AccessKit has no field for it, so every change is announced |
 
 `ariaLabelledBy` and `ariaDescribedBy` take space-separated author `id`s and are
 resolved against the retained tree each time it is built, so the name follows
@@ -2776,8 +3179,10 @@ mutation record, which produces four differences from the browser worth knowing:
 - **A live region scrolled out of a clipping ancestor stops announcing**, since
   it leaves the accessibility tree along with the rest of the clipped content.
 
-`aria-busy` and `aria-relevant` have no AccessKit equivalent and are not
-supported. Live regions are verified on macOS with VoiceOver
+`aria-busy` has no AccessKit equivalent and is not supported. `aria-relevant`
+has none either; it is kept on the element for `getAttribute` and the
+attribute matchers, as Base UI's Toast viewport sets it, but every change is
+announced whatever it says. Live regions are verified on macOS with VoiceOver
 ([docs/accessibility-smoke.md](./docs/accessibility-smoke.md)); Windows and
 Linux use the same AccessKit properties but have not been checked against a
 screen reader here.
@@ -2835,18 +3240,25 @@ limited to `<text>` hosts rather than every semantic container.
 
 Role/state combinations are validated rather than silently approximated:
 
+`ariaCurrent` is global and applies to every role. It is distinct from
+`ariaSelected`, which identifies a selected option within a widget,
+`ariaChecked`, which identifies checked controls and options, and
+`ariaPressed`, which identifies a toggle button's pressed state.
+
 | Role | Role-specific properties and actions |
 |---|---|
-| `button` | `ariaExpanded`; Activate uses the ordinary `onClick` pipeline |
+| `button` | `ariaExpanded`; `ariaPressed` (`boolean` or `"mixed"`); Activate uses the ordinary `onClick` pipeline |
 | `checkbox` | `ariaChecked` (`boolean` or `"mixed"`); Activate uses `onClick` |
+| `combobox`, `listbox`, `radiogroup` | `ariaReadOnly`; `ariaRequired`; `ariaOrientation` where the role supports it |
 | `heading` | positive `ariaLevel` |
 | `img` | accessible name and description |
 | `link` | `ariaExpanded`; Activate uses `onClick` |
 | `meter`, `progressbar` | value text/range; read-only, so no Increment or Decrement action; omit `ariaValueNow` on `progressbar` for indeterminate progress |
-| `option` | `ariaSelected` |
-| `slider`, `spinbutton` | value text/range; Increment and Decrement use `onAccessibilityAction` |
+| `option`, `tab` | `ariaSelected` |
+| `slider`, `spinbutton` | value text/range; Increment and Decrement use `onAccessibilityAction`, and step an `<input type="range">` by default |
+| `separator`, `tablist`, `toolbar` | `ariaOrientation` (`"horizontal"` or `"vertical"`) |
 | `switch` | boolean `ariaChecked` only; `"mixed"` is computed as `false` with a normalization diagnostic; Activate uses `onClick` |
-| `textbox` | accessible name and description; implicit on `<input>` and `<textarea>`, named by `ariaLabelledBy`, `ariaLabel`, then `placeholder` |
+| `textbox` | accessible name and description; `ariaReadOnly`; `ariaRequired`; implicit on `<input>` and `<textarea>`, named by `ariaLabelledBy`, `ariaLabel`, then `placeholder` |
 
 `<input>` and `<textarea>` carry the editor's current text as the node value and
 the placeholder as its placeholder.
@@ -2856,6 +3268,10 @@ property that its role does not support remains in the retained declaration but
 is omitted from the computed accessibility tree; its diagnostic says that it
 was ignored. Role-defined fallbacks are applied to the computed tree and name
 the normalized value in the diagnostic.
+
+`ariaInvalid` is global. `false` and omission clear the AccessKit invalid state.
+For the flag-backed `ariaReadOnly` and `ariaRequired` states, `false` likewise
+clears the state. Each property also accepts its standard hyphenated spelling.
 
 `disabled` and `ariaDisabled` are accepted on control roles. Do not combine
 them. `onAccessibilityAction` reports specialised `increment`, `decrement`, or
@@ -2932,7 +3348,7 @@ Each primitive has a dedicated namespace entry point:
 
 | Import | Main parts |
 |---|---|
-| `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Content`, `Item` |
+| `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Icon`, `Content`, `List`, `Item`, `ItemText`, `ItemIndicator` |
 | `@gpuix/react/combobox` | `Root`, `Input`, `Content`, `List`, `Item`, `Empty` |
 | `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Content` |
 | `@gpuix/react/floating` | `FloatingLayer`, `renderSlot` |
@@ -2949,6 +3365,10 @@ import * as SelectPrimitive from '@gpuix/react/select'
 export const Select = SelectPrimitive.Root
 export const SelectValue = SelectPrimitive.Value
 export const SelectGroup = SelectPrimitive.Group
+export const SelectIcon = SelectPrimitive.Icon
+export const SelectList = SelectPrimitive.List
+export const SelectItemText = SelectPrimitive.ItemText
+export const SelectItemIndicator = SelectPrimitive.ItemIndicator
 
 export const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
@@ -3049,6 +3469,34 @@ The trigger participates in normal tab navigation. Opening the Select focuses
 its content. `Up`, `Down`, `Ctrl+P`, `Ctrl+N`, `Enter`, and `Escape` control the
 menu. Closing it restores focus to the trigger. Disabled items are skipped.
 
+Set `multiple` on `Select` to keep the popup open while items are toggled. The
+controlled and uncontrolled values are string arrays, and `onValueChange`
+receives the complete selected array after each toggle:
+
+```tsx
+<Select multiple value={values} onValueChange={setValues}>
+  <SelectTrigger>
+    <SelectValue>{(selected) => Array.isArray(selected) && selected.length > 0 ? selected.join(', ') : 'Select resources'}</SelectValue>
+    <SelectIcon>⌄</SelectIcon>
+  </SelectTrigger>
+  <SelectContent>
+    <SelectList>
+      {resources.map((resource) => (
+        <SelectItem key={resource.value} value={resource.value}>
+          <SelectItemIndicator>✓</SelectItemIndicator>
+          <SelectItemText>{resource.label}</SelectItemText>
+        </SelectItem>
+      ))}
+    </SelectList>
+  </SelectContent>
+</Select>
+```
+
+`List` exposes a `listbox` with `aria-multiselectable` in multiple mode. Each
+`Item` exposes an `option` with its current `aria-selected` state. `Icon`,
+`ItemText`, and `ItemIndicator` are presentational parts that can be styled or
+replaced with application components.
+
 `Select` discovers items by registration at mount time rather than by walking
 its element tree, so wrapping `Item` in your own component (for a shared label
 layout, for example) still works. Content stays mounted while the Select is
@@ -3060,6 +3508,18 @@ registration time, so an item mounted later than its siblings - or moved by
 React's own reconciliation - still navigates where it currently sits in JSX.
 A closed Select keeps each item's `display: "none"` placeholder in the tree so
 that position stays current even while nothing paints.
+
+GPUI does not bubble clicks. Use `asChild` when a styled row paints the item
+fill, so that row becomes the real hit target:
+
+```tsx
+<SelectItem value="opus" asChild>
+  <MenuRow>Claude Opus 4.6</MenuRow>
+</SelectItem>
+```
+
+The child must forward its ref and host props. `ComboboxItem` supports the same
+pattern.
 
 ### Style Combobox and Tooltip the same way
 
@@ -3138,6 +3598,14 @@ Give every overlay an **opaque** fill (`#232323`, not `#23232399`).
 color, or a solid hover color. A `#00000000` child on a blurred window punches
 through Metal to the desktop.
 
+`FloatingLayer` copies uniform and per-corner border radii to its anchored
+surface, so rounded Select, Combobox, and Tooltip content does not show square
+corners behind it. It also puts `visibility` and `opacity` on that outer surface
+so the fallback fill follows them without multiplying nested opacity.
+`pointerEvents: "none"` disables the anchored occluder. Backgrounds, borders,
+shadows, overflow, and layout remain on the inner content to avoid double paint
+or changed popup geometry.
+
 A `div` that paints a fill, or that is positioned, blocks clicks and hovers
 behind it. The **wheel still passes**, so a pannable canvas can place its items
 absolutely and keep panning.
@@ -3157,7 +3625,8 @@ nothing behind it. It does not disable the listeners on that same element, and
 it does not inherit, so children keep their own hitboxes.
 
 A filled child of a click target (switch thumb, radio dot, check icon) needs
-**`pointerEvents: "none"`**, or it eats the parent's click.
+**`pointerEvents: "none"`**, or it eats the parent's click. For Select and
+Combobox rows, use the item primitive's `asChild` prop instead.
 
 ### Measure an element
 
@@ -3178,8 +3647,9 @@ Every text GPUIX paints is **selectable and copyable**, including text inside
 inside a fenced code block selects everything between; Cmd+C copies it joined in
 document order.
 
-There is nothing to opt into. To opt *out* — toolbars, buttons, line-number
-gutters — set `userSelect: "none"`, which inherits like the CSS property:
+There is nothing to opt into. A tap does not select. Only a drag does.
+To opt *out* — toolbars, buttons, line-number gutters — set
+`userSelect: "none"`, which inherits like the CSS property:
 
 ```tsx
 <div style={{ userSelect: 'none' }}>
@@ -3189,12 +3659,25 @@ gutters — set `userSelect: "none"`, which inherits like the CSS property:
 
 ![Text selected across markdown blocks](./docs/images/selection.png)
 
-Read the selection from the renderer:
+Read the selection from the renderer, or react when it changes:
 
 ```tsx
+render(<App />, {
+  onSelectionChange(event) {
+    setCopied(event.value ?? '')
+  },
+})
+
 renderer.getSelectedText()   // joined text, or null
 renderer.clearSelection()
 ```
+
+`onSelectionChange` is a **window-level** callback on `render()` / `createRoot()`,
+the same attachment as `onKeyDown`. Text selection is app-wide, not per element.
+It fires once when the selected ranges change, including a clear to empty
+(`value` is then omitted). An unchanged frame does not fire.
+
+The payload is a normal `EventPayload`. `value` is the joined selected text.
 
 Selection works because each painted text element registers itself into a
 per-frame registry in **paint order**, which is document order. A drag anchored
@@ -3509,8 +3992,10 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `code`          | Syntax-highlighted code block                    |
 | `diff`          | Unified diff viewer. Flows by default            |
 | `markdown`      | GitHub-flavoured markdown                        |
-| `input`         | Native single-line text editor                   |
+| `input`         | Native single-line text editor; checkbox, radio, or hidden input by `type` |
 | `textarea`      | Native multiline, auto-growing text editor       |
+| `label`         | Label for supported controls, by `htmlFor` or by wrapping |
+| `form`          | Form owner for submission and reset              |
 | `virtual-list`  | Long collections; only visible rows are built    |
 | `img`           | Raster or full-colour SVG images from paths, URLs, or bytes |
 | `svg`           | Tintable monochrome SVG icons from source or disk |
@@ -3605,9 +4090,11 @@ new lifecycle; completion from the replaced source is suppressed.
 `"scaleDown"`, or `"none"`. `bytes` accepts an `ArrayBuffer`, `Uint8Array`
 (including Node.js `Buffer`), or a number array. Every source is capped at
 **10 MiB** before decode. URL responses are cached by URL and revalidated with
-`ETag` or `Last-Modified`. Each renderer keeps up to 64 decoded images without
-live users in a least-recently-used cache, so reinserting an `<img>` with the
-same source and tint paints immediately. URL images revalidate after five
+`ETag` or `Last-Modified`. Each renderer keeps up to **32 MiB** and 256 decoded
+images without live users in a least-recently-used cache, so reinserting an
+`<img>` with the same source and tint paints immediately. The byte budget counts
+the decoded pixels in every animation frame; live images do not count against
+either limit. URL images revalidate after five
 minutes while the current image stays on screen; path and in-memory sources
 never revalidate. Failed loads retry with bounded backoff, and unmounting an
 image cancels its in-flight load. HTTP requests have a 15-second total deadline
@@ -3722,8 +4209,14 @@ text imports no longer need a runtime flag.
 | Mouse leave | `onMouseLeave` | `GpuixMouseEvent` | `hovered` |
 | Mouse move | `onMouseMove` | `GpuixMouseEvent` | `x`, `y`, `pressedButton`, `modifiers` |
 | Click outside | `onMouseDownOutside` | `GpuixMouseEvent` | `x`, `y`, `button`, `modifiers` |
-| Key down | `onKeyDown` | `GpuixKeyboardEvent` | `key`, `keyChar`, `isHeld`, `modifiers` |
-| Key up | `onKeyUp` | `GpuixKeyboardEvent` | `key`, `keyChar`, `modifiers` |
+| Pointer down | `onPointerDown`, `onPointerDownCapture` | `GpuixPointerEvent` | `pointerId`, `pointerType`, `isPrimary`, `buttons`, coordinates, button, modifiers |
+| Pointer up | `onPointerUp`, `onPointerUpCapture` | `GpuixPointerEvent` | Same fields; `buttons` is `0` after the release |
+| Pointer move | `onPointerMove`, `onPointerMoveCapture` | `GpuixPointerEvent` | Same fields; `button` is `-1`, `buttons` reflects the pressed button |
+| Pointer cancel | `onPointerCancel`, `onPointerCancelCapture` | `GpuixPointerEvent` | Same fields; dispatched when the active native window deactivates |
+| Pointer enter | `onPointerEnter` | `GpuixPointerEvent` | `relatedTarget`, pointer metadata; no capture variant in React |
+| Pointer leave | `onPointerLeave` | `GpuixPointerEvent` | `relatedTarget`, pointer metadata; no capture variant in React |
+| Key down | `onKeyDown` | `GpuixKeyboardEvent` | `key`, `keyChar`, `isHeld`, modifier values, `getModifierState()`, `modifiers` |
+| Key up | `onKeyUp` | `GpuixKeyboardEvent` | `key`, `keyChar`, modifier values, `getModifierState()`, `modifiers` |
 | Focus | `onFocus` | `GpuixFocusEvent` | — |
 | Blur | `onBlur` | `GpuixFocusEvent` | — |
 | Wheel | `onWheel` | `GpuixWheelEvent` | `x`, `y`, `deltaX`, `deltaY`, `deltaZ`, `deltaMode`, `precise`, `touchPhase`, `modifiers` |
@@ -3733,11 +4226,14 @@ text imports no longer need a runtime flag.
 | Drag leave | `onDragLeave` | `GpuixDragEvent` | `x`, `y`, `dataTransfer` |
 | Drop | `onDrop` | `GpuixDragEvent` | `x`, `y`, `dataTransfer.files` — `GpuixFile` objects with `name`, `path`, `size`, `lastModified`, and `type` |
 | File drop (legacy) | `onFileDrop` | `EventPayload` | `paths`, `x`, `y` — desktop-namespace alias for `onDrop` |
-| Change | `onChange` | `GpuixChangeEvent` | `value` — `<input>` and `<textarea>` only |
+| Change | `onChange` | `GpuixChangeEvent` | `value` for a text edit, `checked` for a checkbox or radio — `<input>` and `<textarea>` only |
+| Submit | `onSubmit` | `GpuixSubmitEvent` | `formData`, `submitter` — `<form>` only |
+| Reset | `onReset` | `GpuixFormEvent` | — `<form>` only; cancelable |
 | Toggle file | `onToggleFile` | `GpuixElementEvent` | `value` (file path) — `<diff>` only |
 | Show more | `onShowMore` | `GpuixElementEvent` | `value` (hidden line count) — `<diff>` only |
 | Line click | `onLineClick` | `GpuixElementEvent` | `value`, `oldLine`, `newLine` — `<diff>` only |
 | Link click | `onLinkClick` | `GpuixElementEvent` | `value` (URL) — `<markdown>` only |
+| Selection change | `onSelectionChange` | `EventPayload` | `value` (joined selected text) — window-level on `render()` |
 
 `GpuixSyntheticEvent` is the union of every synthetic event type above
 (`onFileDrop` is the one exception, still typed with the raw `EventPayload`). A handler typed
@@ -3749,9 +4245,9 @@ scroll container's own position changed and does not bubble, as in the DOM.
 Wheel deltas use DOM signs and units: `deltaY` is positive scrolling down, and
 `deltaMode` is `0` for pixels or `1` for lines.
 
-Mouse event payloads expose pointer capture. Capture keeps move and up routed
-to the pressed element across redraws and outside its bounds until mouse up,
-explicit release, or unmount:
+Pointer and mouse event payloads expose pointer capture. Capture keeps move and
+up routed to the pressed element across redraws and outside its bounds until
+pointer up, cancellation, explicit release, or unmount:
 
 ```tsx
 <div
@@ -3763,8 +4259,14 @@ explicit release, or unmount:
 
 The host ref exposes the same `setPointerCapture()` and
 `releasePointerCapture()` methods when capture is decided outside the handler.
-Window deactivation silently resets the pressed-pointer sequence and capture;
-GPUIX does not currently synthesize `pointercancel` or `lostpointercapture`.
+Window deactivation dispatches bubbling `pointercancel` to the capture owner
+(or the pressed target when uncaptured) before resetting the sequence and
+capture. GPUIX does not currently synthesize `lostpointercapture`.
+
+For mouse input, pointer handlers run before the matching mouse handler:
+`pointerdown` → `mousedown`, `pointermove` → `mousemove`, and `pointerup` →
+`mouseup` → `click`. Both use the same retained React capture, target, and
+bubble path, so cancellation and propagation controls have their usual effect.
 
 A Finder or OS file drag dispatches bubbling, cancelable `onDragEnter`,
 `onDragOver`, and `onDragLeave` events. During those events,
@@ -3855,6 +4357,12 @@ CSS-like styling via the `style` prop:
 </div>
 ```
 
+GPU-IX accepts CSS custom-property keys such as `--collapsible-panel-height`
+and `--accordion-panel-width` for compatibility with components that measure
+panels for CSS animations. It ignores these keys: GPU-IX does not implement
+`var()` resolution, custom-property inheritance, CSS selectors, or computed
+custom-property values.
+
 **Layout:** `display` (`"none"` | `"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridAutoFlow`, `gridAutoRows`, `gridAutoColumns`, `justifyItems`, `justifySelf`, `gridColumn`, `gridRow`, `gridColumnStart`, `gridColumnEnd`, `gridRowStart`, `gridRowEnd`, `gridArea`
 
 `display: "none"` removes the element and its subtree from layout, painting, hit
@@ -3876,6 +4384,17 @@ element stays visible.
 with a diagnostic because hiding the element removes the hit-test box that
 triggers the state. `getAllText` and accessible-name flattening read the
 declared display only.
+
+The HTML `hidden` prop is the user-agent rule `[hidden] { display: none }`: a
+`hidden` element behaves exactly as `display: "none"` above, and `hidden={false}`
+or removing the prop restores it. As in a browser, the author's own `display`
+wins, so `<div hidden style={{ display: "flex" }}>` stays displayed.
+`getAttribute("hidden")` answers `""`, as it does under React DOM.
+
+```tsx
+<button aria-controls="details" aria-expanded={open} onClick={toggle}>Details</button>
+<div id="details" hidden={!open}>…</div>
+```
 
 `gridTemplateColumns` and `gridTemplateRows` accept a typed CSS Grid track list.
 Each entry is an object with a `type`: `px`, `percent`, `fr`, `auto`,
@@ -3925,7 +4444,7 @@ longhand wins for its slot.
 }} />
 ```
 
-**Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accept pixels, percentages, `ch`, `vw` / `vh`, `calc()` / `clamp()` expressions, and the CSS intrinsic sizing keywords `min-content`, `max-content`, and `fit-content`. `ch` uses the shaped advance of `0` in the resolved font; `vw` / `vh` resolve against the window's viewport, as in a browser.
+**Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accept pixels, percentages, `ch`, `vw` / `vh`, `calc()` / `clamp()` expressions, and the CSS intrinsic sizing keywords `min-content`, `max-content`, and `fit-content`. `aspectRatio` accepts a positive number or a CSS ratio string such as `"16 / 9"`. `ch` uses the shaped advance of `0` in the resolved font; `vw` / `vh` resolve against the window's viewport, as in a browser.
 
 The intrinsic keywords are measured on `<div>` and `<text>` once, then re-measured only when the element's subtree, effective interaction state, viewport, scale, inherited font, or (for a height keyword) painted width changes (a custom element cannot be re-entered to measure, so a keyword there behaves as `auto`). Each measured axis builds the element's subtree once more and lays it out as its own root. A keyword in a state refinement is measured at that state's effective style. `min-content` of text is its longest word measured together with the space that follows it (a browser hangs that space, so the fork measures up to one space advance wider when the longest word is not last); a label sized with it wraps to that word. `fit-content` resolves to its CSS definition `clamp(min-content, stretch, max-content)`, with `stretch` expressed as `100%` of the containing block; on `minWidth` / `maxWidth` that same clamp is the substituted value. On the block (height) axis all three keywords resolve to the content's laid-out height, matching browser behavior there. The functional form `fit-content(<limit>)` is accepted and resolves as `min(max-content, max(min-content, <limit>))`; its limit accepts the same units as any length here.
 
@@ -3935,7 +4454,16 @@ The intrinsic keywords are measured on `<div>` and `<text>` once, then re-measur
 
 **Position:** `position` (`"relative"` | `"absolute"` | `"fixed"`), `top`, `right`, `bottom`, `left` — `"fixed"` lays out like `"absolute"`, because GPUI has no scrolling document to be fixed against
 
-**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `border`, `borderTop`, `borderRight`, `borderBottom`, `borderLeft`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `borderStyle`, `boxShadow`, `outlineColor`, `outlineWidth`, `outlineOffset`
+**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `clipPath`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `border`, `borderTop`, `borderRight`, `borderBottom`, `borderLeft`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `borderStyle`, `boxShadow`, `outlineColor`, `outlineWidth`, `outlineOffset`
+
+`clipPath` accepts `inset()` with one to four non-negative pixel, percentage,
+or unitless-zero insets. It clips painting and pointer hit testing without
+changing layout, focusability, or accessibility semantics. Other clip-path
+functions and the `round` extension are rejected rather than approximated.
+
+`touchAction` is accepted as a silent native no-op. Browsers use it to withhold
+built-in touch gestures, while GPUI has no corresponding gesture handling to
+disable; shared web/native style objects can therefore keep the property.
 
 Boxes are sized **border-box** — the near-universal stylesheet convention
 (`box-sizing: border-box`; the DOM's own default is `content-box`):
@@ -3957,9 +4485,11 @@ CSS would keep it hidden. A border still paints when only `borderWidth` and
 the way a stylesheet does. `border`, `borderTop`, `borderRight`,
 `borderBottom`, and `borderLeft` accept the CSS border shorthand grammar: a
 string of up to three whitespace-separated components — a width (`<n>px` or
-`0`), a `borderStyle` value, and a color — in any order, each optional.
-`border` sets `borderWidth`; the four per-side shorthands each set their own
-per-side width field. `borderWidth` itself additionally accepts a
+`0`), a `borderStyle` value, and a color — in any order, each optional. Each
+shorthand also accepts numeric `0` as a width-only reset. Other numeric
+shorthand values are rejected; use a string with a `px` unit for a non-zero
+width. `border` sets `borderWidth`; the four per-side shorthands each set their
+own per-side width field. `borderWidth` itself additionally accepts a
 whitespace-separated string of 1 to 4 widths, expanded CSS-style (1 value for
 all sides; 2 for top/bottom then left/right; 3 for top, left/right, bottom; 4
 for top, right, bottom, left) into the four per-side width fields; a
@@ -4582,11 +5112,12 @@ real platform and a native clipboard call would hit it.
 
 `import "@gpuix/react/globals"` is an opt-in, side-effect-only entry for code
 that assumes a browser: it installs exactly `requestAnimationFrame`,
-`cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, and
-`navigator.clipboard` on
-`globalThis`, and nothing else — no `document`. Each name is installed only if
-it is not already present, so a real browser, Vitest's `jsdom`/`happy-dom`
-environment, or an earlier import of this module all win over the shim.
+`cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`,
+`navigator.clipboard`, `navigator.gpu`, `PointerEvent`, and the element
+constructors and `document` facade below on `globalThis`, and nothing else. Each
+name is installed only if it is not already present, so a real browser,
+Vitest's `jsdom`/`happy-dom` environment, or an earlier import of this module
+all win over the shim.
 `window` is `globalThis` itself, not a constructed DOM `Window`; GPUIX has no
 scroll position to move, so `scrollTo` is a no-op returning `undefined`.
 TanStack Router, for example, reads `window?.origin` and calls `scrollTo()`
@@ -4596,6 +5127,134 @@ above — defined on a pre-existing `navigator` that lacks a `clipboard` of its
 own, or as part of a newly defined `navigator` when none exists at all
 (Node has had a global `navigator` since v21, so the common case on the
 server is the former).
+
+`Image` is the native-compatible constructor exported by `@gpuix/react`; its
+instances load through the most recently attached GPUIX root and support
+`src`, `decode()`, `naturalWidth`, and `naturalHeight` for Canvas 2D image
+sources.
+
+### document
+
+The entry installs `document` as a facade over the mounted GPUIX tree, so
+code written against the DOM finds the parts of a document GPUIX can answer.
+When the entry installed it, every ref's `ownerDocument` is the same object:
+
+```tsx
+import "@gpuix/react/globals"
+
+document.getElementById("email")         // first mounted element with that id prop, or null
+document.activeElement                   // the focused host element, or body when nothing has focus
+document.body                            // the root host element of the mounted tree
+document.defaultView                     // the global window
+ref.current.ownerDocument === document   // true when GPUIX installed document
+
+document.addEventListener("pointerup", onEnd)       // runs when a press anywhere in the window ends
+document.addEventListener("pointercancel", onEnd)   // runs when the platform cancels a press
+document.removeEventListener("pointerup", onEnd)
+```
+
+`getElementById()` searches the mounted retained tree in tree order, so an
+element whose subtree was removed is no longer found. `activeElement` follows
+the renderer's focus, as `getActiveElement()` does. Before a mount and after an
+unmount, `body` and `activeElement` are `null`.
+
+The listener methods cover code that listens on `ownerDocument(element)` for
+the end of a press it started, as Base UI's Tabs do. A `pointerup` listener
+runs on every mouse release in the window, over any element or none, and a
+`pointercancel` listener runs when the window deactivates during a press. Each
+receives a `PointerEvent` with the release position, button, and modifier
+keys. It runs before the released element's own `onPointerUp` and `onClick`;
+in the DOM the element's `onPointerUp` runs first, so a handler there cannot
+stop the document listener. A listener belongs to the root mounted when it
+was added and is dropped when that root unmounts. As in the DOM, adding the
+same function, type, and capture flag twice registers it once, and removing it
+needs the same three. Capture listeners run first.
+
+The facade is not a DOM `Document` or `EventTarget`. It has no
+`createElement()`, `querySelector()`, or style computation, so code that needs
+them fails with a `TypeError` instead of running against a stand-in. Its
+listener methods take no other event type, no `handleEvent` object, and
+neither the `once` nor the `signal` option: such a call registers nothing and
+logs one `console.warn`. There is no `dispatchEvent()` on the document, and
+element events do not bubble to it.
+
+A host document wins, as for every name here: in a browser or a
+`jsdom`/`happy-dom` environment `document` stays the host's, and refs report
+that host document as their `ownerDocument`, so code that registers listeners
+on `ownerDocument(element)` keeps reaching it. The host document cannot find
+GPUIX elements: its `getElementById()` and `activeElement` do not see the GPUIX
+tree.
+
+GPUIX mounts one root per renderer and one renderer per native window, so
+there is one document. It reads the most recently mounted root that has
+rendered, the one `announce()` targets. An app with several native windows open
+at once sees only the newest through `document`; per-window documents are not
+supported.
+
+### Element constructors
+
+The entry also installs `Node`, `Element`, `HTMLElement`, `HTMLDivElement`,
+`HTMLButtonElement`, `HTMLInputElement`, and `HTMLTextAreaElement`, so
+browser-oriented guards such as `value instanceof HTMLElement` work on GPUIX
+refs:
+
+```tsx
+import "@gpuix/react/globals"
+
+ref.current instanceof HTMLElement        // true for every host element except <svg>
+ref.current instanceof HTMLButtonElement  // true only for an authored <button>
+```
+
+`instanceof` matches the authored host type. A `<button>` is an
+`HTMLButtonElement` and never an `HTMLDivElement`, even though the native
+renderer paints it through a GPUI `div`; `<section>` and the other div aliases
+are `HTMLElement`s only. `<svg>` is an `Element` but not an `HTMLElement`, as in
+the DOM. Only instances the reconciler created match, so a plain object with a
+`type` field does not.
+
+These constructors are identity only. Their prototypes carry no DOM members,
+`new HTMLElement()` throws `TypeError` as it does in a browser, and a ref's
+members remain the ones its `PublicInstance` type lists. Like every name here,
+each is installed only when absent. In a real browser or a `jsdom`/`happy-dom`
+environment the existing constructors stay, and GPUIX refs are not instances of
+them.
+
+### PointerEvent
+
+`PointerEvent` lets browser-oriented code construct a pointer event and
+dispatch it at a GPUIX ref, as Base UI's checkbox, switch, and radio do to
+forward a root click to their hidden input:
+
+```tsx
+import "@gpuix/react/globals"
+
+const notCanceled = ref.current.dispatchEvent(
+  new PointerEvent("click", { bubbles: true, cancelable: true, shiftKey: event.shiftKey })
+)
+```
+
+The constructor takes a `PointerEventInit` and applies the DOM's defaults. The
+event carries its members, `preventDefault()`, and `defaultPrevented`; it is not
+an `EventTarget` and belongs to no document. `ref.dispatchEvent()` accepts it,
+the host's own `PointerEvent`, or any object with the same members.
+
+`dispatchEvent()` runs the handlers for `click`, `pointerdown`, `pointerup`,
+`pointermove`, `pointercancel`, `pointerenter`, and `pointerleave` through the
+usual capture, target, and bubble path. Handlers see the event's own `bubbles`,
+`cancelable`, modifier keys, `button`, `buttons`, `detail`, position, and
+pointer members. Calling `preventDefault()`, `stopPropagation()`, or
+`stopImmediatePropagation()` on the synthetic event applies to the dispatched
+one too, and an event whose propagation was stopped before `dispatchEvent()`
+reaches no handler. A handler's `event.nativeEvent` is GPUIX's native payload,
+as for any other GPUIX event, not the dispatched `PointerEvent`; close over the
+dispatched event to read it. A dispatched click then runs the same activation
+behaviour as `ref.click()`, unless a handler prevented it: a checkbox toggles,
+a radio checks, a submit button submits. Like `ref.click()`, a click
+dispatched at a disabled `<button>`, `<input>`, or `<textarea>` runs no
+handler and no activation. `pointerenter` and `pointerleave` run on the
+target only. Dispatching a pointer event fires no compatibility mouse event,
+and other event types reach no handler. The return value follows the DOM:
+`false` when the event was canceled, `true` otherwise.
 
 ### ResizeObserver
 
@@ -4644,6 +5303,7 @@ consuming app:
 ```bash
 cd packages/native && bun pm pack
 cd ../react && bun pm pack
+cd ../plugins && bun pm pack
 ```
 
 Relative `file:` pins can break when the consuming project is checked out via
@@ -4998,10 +5658,10 @@ defaults in the cleanup its `beforeAll` returns, so each file still starts
 fresh — see **Automatic cleanup, and where vitest enters**, below.
 
 **`options` decide reuse.** `options` is `TestRootOptions` — `width`, `height`,
-`scaleFactor`, `allowPrivateNetworkImages`, `strictStyles` — and every one of
-them is fixed when the window is constructed. A call whose options match the
-live window's reuses it; a call whose options differ tears that window down and
-opens a fresh one.
+`scaleFactor`, `asyncTaskMode`, `allowPrivateNetworkImages`, `strictStyles` —
+and every one of them is fixed when the window is constructed. A call whose
+options match the live window's reuses it; a call whose options differ tears
+that window down and opens a fresh one.
 
 The comparison is field by field, and the two halves of `TestRootOptions` are
 compared differently. `width`, `height`, and `scaleFactor` are compared *after*
@@ -5012,8 +5672,9 @@ one window. A value equal to a *built-in* default is still a different request
 from omitting the field, because nothing fills it in before the comparison:
 `render(node)` and `render(node, { width: 1280 })` rebuild the window every time
 they alternate,
-even though the window is identical. `allowPrivateNetworkImages` and
-`strictStyles` are compared as passed, with no defaults applied.
+even though the window is identical. `asyncTaskMode`,
+`allowPrivateNetworkImages`, and `strictStyles` are compared as passed, with no
+defaults applied.
 
 Keep the options object identical across a file — or omit it everywhere — to
 keep the window.
@@ -5597,6 +6258,37 @@ active, advances its animation clock, and captures once the tracks settle.
 to inspect an in-flight transition. An infinite animation can exhaust the
 10,000ms budget; the matcher warns and captures the frame at that budget.
 
+**Async native work is eager by default.** `flush()`, reads, event helpers, and
+screenshots drain queued native tasks before returning, preserving the existing
+test-root behavior. Use `createTestRoot({ asyncTaskMode: 'manual' })` (or the
+same option on `new TestRenderer`) when a test needs to observe the frames
+around image decode or other background work:
+
+```tsx
+const screen = createTestRoot({ asyncTaskMode: 'manual' })
+screen.render(<img data-testid="avatar" src={avatarPath} />)
+
+const image = screen.getByTestId('avatar')
+expect(screen.renderer.getImageLoadState(image.id)?.status).toBe('loading')
+screen.renderer.captureScreenshot('/tmp/loading.png')
+
+screen.renderer.advanceAsyncClock(0) // drain currently runnable async work
+expect(screen.renderer.getImageLoadState(image.id)?.status).toBe('loaded')
+screen.renderer.captureScreenshot('/tmp/still-loading.png')
+
+screen.renderer.drawPendingFrame()
+screen.renderer.captureScreenshot('/tmp/loaded.png')
+```
+
+In manual mode, `advanceAsyncClock()` is the only public operation that drains
+the native task queue, and `advanceAsyncClock(0)` drains work that is already
+runnable. It schedules the resulting repaint without drawing it;
+`drawPendingFrame()` crosses that frame boundary. Reads and event helpers do
+not drain the queue. `advanceTime()` queues its timer-clock delta for the next
+`advanceAsyncClock()` rather than running newly due work itself, and
+`captureScreenshot()` saves the pixels from the last explicit draw. Disposal
+still drains pending work so native entities are released safely.
+
 **One comparator, and it is the native one.** `comparatorName`, custom
 comparators, `screenshotOptions` (masking, `fullPage`, caret handling), and
 `timeout` are not implemented: they describe a browser page, not an offscreen
@@ -5772,6 +6464,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] RetainedTree (Rust-side element storage)
 - [x] Style mapping (CSS properties → GPUI style methods)
 - [x] Mouse events (click, mouseDown, mouseUp, mouseMove, mouseEnter, mouseLeave)
+- [x] React pointer events (down, move, up, cancel, enter, leave) and pointer capture
 - [x] Pointer capture across redraws and passive decoration hit testing
 - [x] Click outside (`onMouseDownOutside`)
 - [x] Scroll wheel events with delta and touch phase
@@ -5793,6 +6486,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Native `hover` and `active` styles
 - [x] Native focus styles, paint-only outlines, and keyboard activation
 - [x] Window title (`setWindowTitle`)
+- [x] Native window controls (`minimizeWindow`, `zoomWindow`, `toggleFullscreen`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Application menus, standard macOS shortcuts (`appName`), Cmd+Q, explicit quit, and graceful React termination
 - [x] Background launch (`focus`, `show`, `activateWindow`)
@@ -5805,6 +6499,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [ ] React Refresh during `bun --hot` (needs a Bun runtime transform)
 - [ ] Hot reload of the native `.node` addon. `bun run dev` rebuilds and restarts. Native modules cannot unload.
 - [x] Native `motion.div` transitions with deterministic frame capture
+- [x] `AnimatePresence` exit transitions for `motion.div`
 
 ## Documentation
 

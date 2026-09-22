@@ -22,7 +22,8 @@ use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 pub(crate) const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 const CANVAS_ATLAS_TILE_BUDGET: usize = 64;
 const URL_CACHE_CAPACITY: usize = 32;
-const IMG_DECODE_CACHE_CAPACITY: usize = 64;
+const IMG_DECODE_CACHE_BYTE_BUDGET: usize = 32 * 1024 * 1024;
+const IMG_DECODE_CACHE_ENTRY_BUDGET: usize = 256;
 const MAX_REDIRECTS: usize = 5;
 const IMAGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const URL_SUCCESS_TTL: Duration = Duration::from_secs(5 * 60);
@@ -36,17 +37,16 @@ const URL_FAILURE_RETRY_MAX: Duration = Duration::from_secs(30);
 pub(crate) struct ImageNetworkPolicy {
     allow_private: Arc<AtomicBool>,
     #[cfg(not(target_family = "wasm"))]
-    client: Arc<dyn gpui::http_client::HttpClient>,
+    client: Arc<OnceLock<Arc<dyn gpui::http_client::HttpClient>>>,
     request_timeout: Duration,
 }
 
 impl Default for ImageNetworkPolicy {
     fn default() -> Self {
-        let allow_private = Arc::new(AtomicBool::new(false));
         Self {
+            allow_private: Arc::new(AtomicBool::new(false)),
             #[cfg(not(target_family = "wasm"))]
-            client: restricted_image_http_client(allow_private.clone()),
-            allow_private,
+            client: Arc::new(OnceLock::new()),
             request_timeout: IMAGE_REQUEST_TIMEOUT,
         }
     }
@@ -68,7 +68,9 @@ impl ImageNetworkPolicy {
         #[cfg(not(target_family = "wasm"))]
         {
             let _ = fallback;
-            self.client.clone()
+            self.client
+                .get_or_init(|| restricted_image_http_client(self.allow_private.clone()))
+                .clone()
         }
         #[cfg(target_family = "wasm")]
         {
@@ -1202,10 +1204,17 @@ struct ImgImageEntry {
     reload_after: Option<Duration>,
     retry_attempt: u32,
     last_used: u64,
+    retained_bytes: usize,
     last_logged_error: Option<String>,
 }
 
 impl ImgImageEntry {
+    fn decoded_bytes(image: &gpui::RenderImage) -> usize {
+        (0..image.frame_count()).fold(0, |total, frame_index| {
+            total.saturating_add(image.as_bytes(frame_index).map_or(0, |bytes| bytes.len()))
+        })
+    }
+
     fn reload_delay(&self, request: &ImageRequest, result: &ImageLoadResult) -> Option<Duration> {
         if result.is_err() {
             let multiplier = 1u32 << self.retry_attempt.min(5);
@@ -1219,7 +1228,9 @@ impl ImgImageEntry {
     }
 
     fn take_loaded_image(&mut self) -> Option<Arc<gpui::RenderImage>> {
-        self.result.lock().unwrap().take()?.ok()
+        let image = self.result.lock().unwrap().take()?.ok();
+        self.retained_bytes = 0;
+        image
     }
 }
 
@@ -1352,6 +1363,7 @@ impl ImgImageStore {
                 if let Some(old_image) = entry.take_loaded_image() {
                     self.pending_dropped.push(old_image);
                 }
+                entry.retained_bytes = ImgImageEntry::decoded_bytes(&image);
                 *entry.result.lock().unwrap() = Some(Ok(image));
             }
             Err(error) => {
@@ -1399,13 +1411,22 @@ impl ImgImageStore {
         }
 
         let mut dropped = Vec::new();
-        while self
-            .entries
-            .values()
-            .filter(|entry| entry.users.is_empty() && entry.loaded_image().is_some())
-            .count()
-            > IMG_DECODE_CACHE_CAPACITY
-        {
+        loop {
+            let (unused_count, unused_bytes) = self
+                .entries
+                .values()
+                .filter(|entry| entry.users.is_empty() && entry.loaded_image().is_some())
+                .fold((0usize, 0usize), |(count, bytes), entry| {
+                    (
+                        count.saturating_add(1),
+                        bytes.saturating_add(entry.retained_bytes),
+                    )
+                });
+            if unused_count <= IMG_DECODE_CACHE_ENTRY_BUDGET
+                && unused_bytes <= IMG_DECODE_CACHE_BYTE_BUDGET
+            {
+                break;
+            }
             let Some(oldest) = self
                 .entries
                 .iter()
@@ -1445,7 +1466,8 @@ impl ImgImageStore {
 ///
 /// A request has one load, reload timer, and decoded result regardless of how
 /// many elements use it. Successful results survive unmount for cheap remounts;
-/// at most 64 results without live users are retained, with the oldest evicted.
+/// unused decoded pixels are retained under byte and entry budgets, with the
+/// oldest evicted first. Live images do not count against either budget.
 #[derive(Clone, Default)]
 pub(crate) struct SharedImgImageStore {
     state: Arc<Mutex<ImgImageStore>>,
@@ -2435,6 +2457,12 @@ impl CustomElement for ImgElement {
             "contextMenu",
             "mouseEnter",
             "mouseLeave",
+            "pointerDown",
+            "pointerUp",
+            "pointerMove",
+            "pointerCancel",
+            "pointerEnter",
+            "pointerLeave",
             "wheel",
             "dragEnter",
             "dragOver",
@@ -2603,6 +2631,12 @@ impl CustomElement for SvgElement {
             "contextMenu",
             "mouseEnter",
             "mouseLeave",
+            "pointerDown",
+            "pointerUp",
+            "pointerMove",
+            "pointerCancel",
+            "pointerEnter",
+            "pointerLeave",
             "wheel",
             "dragEnter",
             "dragOver",
@@ -2627,14 +2661,27 @@ mod tests {
         }
     }
 
+    fn img_image_store_test_image_with_frames(
+        width: u32,
+        height: u32,
+        frame_count: usize,
+        value: u8,
+    ) -> Arc<gpui::RenderImage> {
+        let frames = (0..frame_count)
+            .map(|_| {
+                let buffer = image::RgbaImage::from_pixel(
+                    width,
+                    height,
+                    image::Rgba([value, value, value, 255]),
+                );
+                image::Frame::from_parts(buffer, 0, 0, image::Delay::from_numer_denom_ms(17, 1))
+            })
+            .collect::<Vec<_>>();
+        Arc::new(gpui::RenderImage::new(frames))
+    }
+
     fn img_image_store_test_image(value: u8) -> Arc<gpui::RenderImage> {
-        let buffer = image::RgbaImage::from_raw(1, 1, vec![value, value, value, 255]).unwrap();
-        Arc::new(gpui::RenderImage::new(vec![image::Frame::from_parts(
-            buffer,
-            0,
-            0,
-            image::Delay::from_numer_denom_ms(17, 1),
-        )]))
+        img_image_store_test_image_with_frames(1, 1, 1, value)
     }
 
     #[test]
@@ -2771,27 +2818,139 @@ mod tests {
     }
 
     #[test]
-    fn img_image_store_evicts_the_least_recently_used_unmounted_result() {
+    fn img_image_store_keeps_two_viewports_of_unmounted_tiles() {
         let mut store = ImgImageStore::default();
         let now = Instant::now();
-        let mut oldest_image = None;
-        let mut evicted = Vec::new();
+        let mut first_image = None;
 
-        for index in 0..=IMG_DECODE_CACHE_CAPACITY {
+        for index in 0..80 {
             let request = img_image_store_test_request(index);
             let acquired = store.acquire(index as u64, &request, now);
             assert!(matches!(acquired.action, ImgImageAction::StartLoad));
-            let image = img_image_store_test_image(index as u8);
+            let image = img_image_store_test_image_with_frames(256, 256, 1, index as u8);
             if index == 0 {
-                oldest_image = Some(image.clone());
+                first_image = Some(image.clone());
+            }
+            store.finish_load(&request, Ok(image), now);
+            assert!(store.release(index as u64, &request).is_empty());
+        }
+
+        let reacquired = store.acquire(100, &img_image_store_test_request(0), now);
+        assert!(matches!(reacquired.action, ImgImageAction::None));
+        let loaded = reacquired
+            .result
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|result| result.as_ref().ok())
+            .cloned()
+            .unwrap();
+        assert!(Arc::ptr_eq(&loaded, first_image.as_ref().unwrap()));
+    }
+
+    #[test]
+    fn img_image_store_evicts_lru_results_until_within_the_byte_budget() {
+        let mut store = ImgImageStore::default();
+        let now = Instant::now();
+        let mut first_image = None;
+        let mut evicted = Vec::new();
+
+        for index in 0..5 {
+            let request = img_image_store_test_request(index);
+            store.acquire(index as u64, &request, now);
+            let image = img_image_store_test_image_with_frames(2048, 1024, 1, index as u8);
+            if index == 0 {
+                first_image = Some(image.clone());
             }
             store.finish_load(&request, Ok(image), now);
             evicted.extend(store.release(index as u64, &request));
         }
 
-        assert_eq!(store.entries.len(), IMG_DECODE_CACHE_CAPACITY);
+        assert_eq!(store.entries.len(), 4);
         assert_eq!(evicted.len(), 1);
-        assert!(Arc::ptr_eq(&evicted[0], oldest_image.as_ref().unwrap()));
+        assert!(Arc::ptr_eq(&evicted[0], first_image.as_ref().unwrap()));
+        assert!(!store.entries.contains_key(&img_image_store_test_request(0)));
+    }
+
+    #[test]
+    fn img_image_store_counts_every_frame_toward_the_byte_budget() {
+        let mut store = ImgImageStore::default();
+        let now = Instant::now();
+        let animated_request = img_image_store_test_request(0);
+        store.acquire(1, &animated_request, now);
+        let animated = img_image_store_test_image_with_frames(2048, 1024, 3, 1);
+        store.finish_load(&animated_request, Ok(animated.clone()), now);
+        assert!(store.release(1, &animated_request).is_empty());
+
+        let still_request = img_image_store_test_request(1);
+        store.acquire(2, &still_request, now);
+        let still = img_image_store_test_image_with_frames(1536, 2048, 1, 2);
+        store.finish_load(&still_request, Ok(still), now);
+        let evicted = store.release(2, &still_request);
+
+        assert_eq!(evicted.len(), 1);
+        assert!(Arc::ptr_eq(&evicted[0], &animated));
+        assert!(!store.entries.contains_key(&animated_request));
+        assert!(store.entries.contains_key(&still_request));
+    }
+
+    #[test]
+    fn img_image_store_drops_an_oversized_image_when_its_last_user_releases_it() {
+        let mut store = ImgImageStore::default();
+        let now = Instant::now();
+        let request = img_image_store_test_request(0);
+        store.acquire(1, &request, now);
+        let image = img_image_store_test_image_with_frames(3072, 3072, 1, 1);
+        store.finish_load(&request, Ok(image.clone()), now);
+
+        let evicted = store.release(1, &request);
+
+        assert_eq!(evicted.len(), 1);
+        assert!(Arc::ptr_eq(&evicted[0], &image));
+        assert!(!store.entries.contains_key(&request));
+    }
+
+    #[test]
+    fn img_image_store_reacquire_refreshes_lru_recency() {
+        let mut store = ImgImageStore::default();
+        let now = Instant::now();
+
+        for index in 0..4 {
+            let request = img_image_store_test_request(index);
+            store.acquire(index as u64, &request, now);
+            let image = img_image_store_test_image_with_frames(2048, 1024, 1, index as u8);
+            store.finish_load(&request, Ok(image), now);
+            assert!(store.release(index as u64, &request).is_empty());
+        }
+
+        let first_request = img_image_store_test_request(0);
+        let reacquired = store.acquire(100, &first_request, now);
+        assert!(matches!(reacquired.action, ImgImageAction::None));
+        assert!(store.release(100, &first_request).is_empty());
+
+        let fifth_request = img_image_store_test_request(4);
+        store.acquire(104, &fifth_request, now);
+        let fifth = img_image_store_test_image_with_frames(2048, 1024, 1, 4);
+        store.finish_load(&fifth_request, Ok(fifth), now);
+        assert_eq!(store.release(104, &fifth_request).len(), 1);
+
+        assert!(store.entries.contains_key(&first_request));
+        assert!(!store.entries.contains_key(&img_image_store_test_request(1)));
+    }
+
+    #[test]
+    fn img_image_store_caps_pathological_numbers_of_tiny_entries() {
+        let mut store = ImgImageStore::default();
+        let now = Instant::now();
+
+        for index in 0..=IMG_DECODE_CACHE_ENTRY_BUDGET {
+            let request = img_image_store_test_request(index);
+            store.acquire(index as u64, &request, now);
+            store.finish_load(&request, Ok(img_image_store_test_image(index as u8)), now);
+            store.release(index as u64, &request);
+        }
+
+        assert_eq!(store.entries.len(), IMG_DECODE_CACHE_ENTRY_BUDGET);
         assert!(!store.entries.contains_key(&img_image_store_test_request(0)));
     }
 

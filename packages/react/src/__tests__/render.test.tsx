@@ -19,6 +19,7 @@ import {
   TestRenderer,
 } from "../testing.js"
 import { useWindowSize } from "../hooks/use-window-size.js"
+import { encodeSse } from "../automation/index.js"
 import {
   installBrowserAutomation,
   render,
@@ -648,6 +649,20 @@ render(React.createElement("text", null, "injected native menu smoke"), {
 })
 
 setTimeout(() => renderer.simulateMenuAction("mark"), 50)
+`
+
+const STDIO_AUTOMATION_PROGRAM = `
+import { createRenderer } from ${JSON.stringify(join(srcDir, "reconciler/renderer.ts"))}
+
+const renderer = createRenderer()
+renderer.init({ title: "GPUIX automation stdio smoke", menus: [], focus: false })
+console.log("STDIO_AUTOMATION_INIT_RETURNED")
+
+setTimeout(() => {
+  console.error("STDIO_AUTOMATION_TIMEOUT")
+  renderer.quit()
+  process.exit(1)
+}, 10_000)
 `
 
 const PRODUCTION_WEBGPU_PROGRAM = `
@@ -1497,7 +1512,7 @@ describeNative("render()", () => {
   it("always exposes browser automation on globalThis", async () => {
     Reflect.set(globalThis, "window", {})
     try {
-      installBrowserAutomation(renderer)
+      await installBrowserAutomation(renderer)
       render(<text>automated</text>, { renderer })
       renderer.flush()
 
@@ -1837,6 +1852,44 @@ describeNative("render()", () => {
       } catch {}
     }
   }, 10_000)
+
+  it("serves a controller request written to stdin before init() returns", async () => {
+    const file = join(srcDir, "__tests__", "stdio-automation.tmp.tsx")
+    writeFileSync(file, STDIO_AUTOMATION_PROGRAM)
+
+    const child = spawn("bun", [file], {
+      cwd: packageRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+    })
+    let output = ""
+    child.stdout?.on("data", (chunk) => {
+      output += String(chunk)
+    })
+    child.stderr?.on("data", (chunk) => {
+      output += String(chunk)
+    })
+
+    try {
+      child.stdin?.write(encodeSse({ id: 1, method: "getAllText", params: {} }))
+
+      const start = Date.now()
+      while (!output.includes('"id":1')) {
+        if (Date.now() - start > 15_000) {
+          throw new Error(`timed out waiting for an automation reply\n${output}`)
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+
+      expect(output).toContain("STDIO_AUTOMATION_INIT_RETURNED")
+      expect(output).toMatch(/data: \{"id":1,"result":\{"text":\[\]\}\}/)
+      expect(output).not.toContain("STDIO_AUTOMATION_TIMEOUT")
+    } finally {
+      child.kill("SIGKILL")
+      try {
+        unlinkSync(file)
+      } catch {}
+    }
+  }, 20_000)
 
   itMac("presents successive WebGPU frames through the production macOS renderer", async () => {
     const file = join(srcDir, "__tests__", "production-webgpu.tmp.tsx")

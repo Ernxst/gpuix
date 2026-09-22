@@ -650,9 +650,8 @@ impl RetainedTree {
 ///   computation.
 /// * `label` — the authored `ariaLabel`.
 /// * `value` / `placeholder` — the `<input>`/`<textarea>` props. `value` is the
-///   retained prop, so for a controlled input it is the current value and for
-///   an uncontrolled one it is the last value the author set, not the live
-///   editing buffer.
+///   retained controlled value, or `defaultValue` for an uncontrolled editor,
+///   not the live editing buffer.
 /// * `disabled` — emitted only when true, from `disabled` or `ariaDisabled`,
 ///   the same predicate the accessibility tree uses.
 ///
@@ -673,6 +672,18 @@ fn semantics_to_json(element: &RetainedElement) -> Option<serde_json::Value> {
             .and_then(serde_json::Value::as_str)
         {
             semantics.insert(key.to_string(), serde_json::Value::String(text.to_string()));
+        }
+    }
+    if !semantics.contains_key("value") {
+        if let Some(text) = element
+            .custom_props
+            .get("defaultValue")
+            .and_then(serde_json::Value::as_str)
+        {
+            semantics.insert(
+                "value".to_string(),
+                serde_json::Value::String(text.to_string()),
+            );
         }
     }
 

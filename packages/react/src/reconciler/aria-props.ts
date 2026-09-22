@@ -19,11 +19,17 @@ export const ARIA_PROP_ALIASES = {
   "aria-description": "ariaDescription",
   "aria-describedby": "ariaDescribedBy",
   "aria-checked": "ariaChecked",
+  "aria-pressed": "ariaPressed",
+  "aria-orientation": "ariaOrientation",
+  "aria-readonly": "ariaReadOnly",
+  "aria-required": "ariaRequired",
+  "aria-invalid": "ariaInvalid",
   "aria-expanded": "ariaExpanded",
   "aria-current": "ariaCurrent",
   "aria-live": "ariaLive",
   "aria-atomic": "ariaAtomic",
   "aria-selected": "ariaSelected",
+  "aria-multiselectable": "ariaMultiSelectable",
   "aria-valuetext": "ariaValueText",
   "aria-valuemin": "ariaValueMin",
   "aria-valuemax": "ariaValueMax",
@@ -37,6 +43,10 @@ export const ARIA_PROP_ALIASES = {
   "aria-colspan": "ariaColSpan",
   "aria-disabled": "ariaDisabled",
   "aria-hidden": "ariaHidden",
+  "aria-controls": "ariaControls",
+  "aria-haspopup": "ariaHasPopup",
+  "aria-roledescription": "ariaRoleDescription",
+  "aria-relevant": "ariaRelevant",
 } as const
 
 /** DOM attribute names whose prop spelling differs outside the ARIA table. */
@@ -74,6 +84,7 @@ export function isIdentityProp(name: string): boolean {
 export const HTML_ATTRIBUTE_PROPS = new Set([
   "alt",
   "download",
+  "hidden",
   "href",
   "htmlFor",
   "name",
@@ -94,9 +105,30 @@ export const HTML_ATTRIBUTE_PROPS = new Set([
  */
 export const AUTHORED_ROLE_PROP = "authoredRole"
 
+/** Internal identity for an authored alias whose native retained type is `div`. */
+export const AUTHORED_HOST_TYPE_PROP = "authoredHostType"
+
+/**
+ * ARIA attributes kept for the author with no accessibility projection.
+ *
+ * `aria-controls` names a DOM relationship, and `aria-relevant` a live-region
+ * filter, that AccessKit has no field for, so the retained tree records them
+ * for `getAttribute` and the attribute matchers and the native side never
+ * reads them. The same rule as `HTML_ATTRIBUTE_PROPS` applies: a name belongs
+ * here only while no Rust code interprets it.
+ */
+export const RETAINED_ARIA_PROPS = new Set([
+  "ariaControls",
+  "ariaRelevant",
+  "ariaMultiSelectable",
+])
+
 /** Props the retained tree keeps for the author, whatever the element type. */
 export function isAuthorVisibleProp(name: string): boolean {
   return (
-    isIdentityProp(name) || HTML_ATTRIBUTE_PROPS.has(name) || name === AUTHORED_ROLE_PROP
+    isIdentityProp(name) ||
+    HTML_ATTRIBUTE_PROPS.has(name) ||
+    RETAINED_ARIA_PROPS.has(name) ||
+    name === AUTHORED_ROLE_PROP
   )
 }

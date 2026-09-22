@@ -1,11 +1,15 @@
 /**
  * Opt-in `globalThis` shims for code written against the browser DOM.
  *
- * `import "@gpuix/react/globals"` installs the browser conveniences used by
- * GPU-IX applications: animation frames, `window`, `scrollTo`,
- * `ResizeObserver`, clipboard access, and the incremental native WebGPU API.
- * Nobody is required to import this: the root `@gpuix/react` entry installs no
- * global, so a consumer who never touches the DOM never gets one either.
+ * `import "@gpuix/react/globals"` installs `requestAnimationFrame`,
+ * `cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`,
+ * `navigator.clipboard`, `navigator.gpu`, `PointerEvent`, and the element
+ * constructors `Node`, `Element`, `HTMLElement`, `HTMLDivElement`,
+ * `HTMLButtonElement`, `HTMLInputElement`, and `HTMLTextAreaElement`, and
+ * `document` as the single-window facade in `./document.js`, and the
+ * incremental native WebGPU API — and nothing else. Nobody is required to
+ * import this: the root `@gpuix/react` entry installs no global, so a consumer
+ * who never touches the DOM never gets one either.
  *
  * Each name is installed only if absent, so a real browser's globals (or an
  * earlier import of this module) always win. `requestAnimationFrame` and
@@ -19,6 +23,18 @@ import {
   requestNativeAnimationFrame,
 } from "./frame-clock.js"
 import { ResizeObserver } from "./resize-observer.js"
+import {
+  Element,
+  HTMLButtonElement,
+  HTMLDivElement,
+  HTMLElement,
+  HTMLInputElement,
+  HTMLTextAreaElement,
+  Node,
+} from "./element-constructors.js"
+import { Image } from "./canvas/image.js"
+import { PointerEvent } from "./pointer-event.js"
+import { gpuixDocument } from "./document.js"
 import { installWebGpuGlobal } from "./canvas/webgpu.js"
 
 function defineGlobalIfAbsent(name: string, value: unknown): void {
@@ -35,6 +51,16 @@ defineGlobalIfAbsent("cancelAnimationFrame", cancelNativeAnimationFrame)
 defineGlobalIfAbsent("window", globalThis)
 defineGlobalIfAbsent("scrollTo", () => undefined)
 defineGlobalIfAbsent("ResizeObserver", ResizeObserver)
+defineGlobalIfAbsent("Image", Image)
+defineGlobalIfAbsent("Node", Node)
+defineGlobalIfAbsent("Element", Element)
+defineGlobalIfAbsent("HTMLElement", HTMLElement)
+defineGlobalIfAbsent("HTMLDivElement", HTMLDivElement)
+defineGlobalIfAbsent("HTMLButtonElement", HTMLButtonElement)
+defineGlobalIfAbsent("HTMLInputElement", HTMLInputElement)
+defineGlobalIfAbsent("HTMLTextAreaElement", HTMLTextAreaElement)
+defineGlobalIfAbsent("PointerEvent", PointerEvent)
+defineGlobalIfAbsent("document", gpuixDocument())
 
 // `navigator.clipboard` needs its own path rather than `defineGlobalIfAbsent`:
 // Node has had a global `navigator` since v21, so the common case is not "no

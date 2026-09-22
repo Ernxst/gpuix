@@ -24,6 +24,10 @@ pub struct EventPayload {
     /// `error`, so JS can discard a completion queued before `src` changed.
     pub image_request_generation: Option<f64>,
 
+    /// Logical native motion target that reached completion. Populated for
+    /// `motionComplete`, so a stale completion cannot finish a new target.
+    pub motion_generation: Option<f64>,
+
     // ── Window ───────────────────────────────────────────────────────
     /// Logical GPUI window width. Populated for `windowResize`.
     pub width: Option<f64>,
@@ -61,6 +65,17 @@ pub struct EventPayload {
     /// Same encoding as `button`: 0=left, 1=middle, 2=right.
     /// Populated for: mouseMove.
     pub pressed_button: Option<u32>,
+
+    // ── Pointer ──────────────────────────────────────────────────────
+    /// Stable id for a platform pointer. Desktop mouse input uses 1.
+    /// Populated for: pointerDown, pointerUp, pointerMove, pointerCancel.
+    pub pointer_id: Option<u32>,
+    /// Platform pointer kind, for example "mouse", "touch", or "pen".
+    pub pointer_type: Option<String>,
+    /// Whether this is the platform's primary pointer of its kind.
+    pub is_primary: Option<bool>,
+    /// DOM PointerEvent buttons bitfield: left=1, right=2, middle=4.
+    pub buttons: Option<u32>,
 
     // ── Keyboard ─────────────────────────────────────────────────────
     /// Key name, e.g. "a", "enter", "escape", "down", "left", "f1".
@@ -113,8 +128,13 @@ pub struct EventPayload {
     /// Element-defined string payload.
     /// Populated for: `<diff>` toggleFile (the file path), showMore (the
     /// hidden line count), and lineClick (the line text); `<markdown>`
-    /// linkClick (the URL).
+    /// linkClick (the URL); `selectionChange` (joined selected text, or
+    /// absent when the selection is empty).
     pub value: Option<String>,
+
+    /// The Input Events `inputType` of a text-editor `change`: `insertText`,
+    /// `deleteContentBackward`, `insertFromPaste`, `historyUndo`, and so on.
+    pub input_type: Option<String>,
 
     /// Line number on the pre-change side. Populated for: `<diff>` lineClick.
     pub old_line: Option<f64>,
@@ -158,6 +178,7 @@ impl Default for EventPayload {
             element_id: 0.0,
             event_type: String::new(),
             image_request_generation: None,
+            motion_generation: None,
             width: None,
             height: None,
             scale_factor: None,
@@ -169,6 +190,10 @@ impl Default for EventPayload {
             is_right_click: None,
             input_source: None,
             pressed_button: None,
+            pointer_id: None,
+            pointer_type: None,
+            is_primary: None,
+            buttons: None,
             key: None,
             key_char: None,
             is_held: None,
@@ -180,6 +205,7 @@ impl Default for EventPayload {
             touch_phase: None,
             hovered: None,
             value: None,
+            input_type: None,
             old_line: None,
             new_line: None,
             start_index: None,
@@ -322,6 +348,10 @@ mod tests {
             element_id: 42.0,
             event_type: "click".to_string(),
             button: Some(0),
+            pointer_id: Some(1),
+            pointer_type: Some("mouse".to_string()),
+            is_primary: Some(true),
+            buttons: Some(1),
             input_source: Some("keyboard".to_string()),
             modifiers: Some(EventModifiers {
                 shift: true,
@@ -334,6 +364,10 @@ mod tests {
         assert_eq!(value["elementId"], 42.0);
         assert_eq!(value["eventType"], "click");
         assert_eq!(value["button"], 0);
+        assert_eq!(value["pointerId"], 1);
+        assert_eq!(value["pointerType"], "mouse");
+        assert_eq!(value["isPrimary"], true);
+        assert_eq!(value["buttons"], 1);
         assert_eq!(value["inputSource"], "keyboard");
         assert_eq!(value["modifiers"]["shift"], true);
     }

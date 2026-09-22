@@ -318,6 +318,16 @@ describeNative("render", () => {
     expect(again.renderer).toBe(narrow.renderer)
   })
 
+  it("does not reuse a shared window across async task modes", () => {
+    const manual = render(<text>manual</text>, { asyncTaskMode: "manual" })
+    const eager = render(<text>eager</text>, { asyncTaskMode: "eager" })
+
+    expect(eager.renderer).not.toBe(manual.renderer)
+    expect(render(<text>eager again</text>, { asyncTaskMode: "eager" }).renderer).toBe(
+      eager.renderer
+    )
+  })
+
   it("cleanup() unmounts the tree and keeps the window", () => {
     const screen = render(<text data-testid="kept">kept</text>)
     const renderer = screen.renderer

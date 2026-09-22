@@ -1,6 +1,7 @@
 import type { EventModifiers, EventPayload } from "@gpuix/native"
 import { createGpuixDataTransfer } from "./drop-files.js"
 import type { NativeRenderer, PublicInstance } from "../types/host.js"
+import type { GpuixDispatchableEvent } from "../pointer-event.js"
 
 export type GpuixEventPhase = 1 | 2 | 3
 
@@ -96,6 +97,22 @@ export function domKeyName(
   return printableKeyChar(keyChar) ?? key
 }
 
+/** The supported UI Events modifier names for the native four-bit payload. */
+function keyboardModifierState(modifiers: EventModifiers | undefined, keyArg: string): boolean {
+  switch (keyArg) {
+    case "Alt":
+      return modifiers?.alt ?? false
+    case "Control":
+      return modifiers?.ctrl ?? false
+    case "Meta":
+      return modifiers?.cmd ?? false
+    case "Shift":
+      return modifiers?.shift ?? false
+    default:
+      return false
+  }
+}
+
 /**
  * The kind-agnostic members every GPUIX synthetic event carries, regardless
  * of which native payload produced it.
@@ -164,7 +181,7 @@ export type GpuixMouseEventType =
  * both carry, parameterized over each kind's own `type` literal so a wheel
  * event's `type` can be `"wheel"` rather than a mouse event type.
  */
-interface GpuixPointerEvent<Type extends string> extends GpuixEvent {
+interface GpuixMouseLikeEvent<Type extends string> extends GpuixEvent {
   readonly type: Type
   readonly altKey: boolean
   readonly ctrlKey: boolean
@@ -197,10 +214,11 @@ interface GpuixPointerEvent<Type extends string> extends GpuixEvent {
    * or went to nothing outside the tree.
    */
   readonly relatedTarget: PublicInstance | null
-  /** Route this pressed-pointer sequence to the original event target. */
-  setPointerCapture(): void
-  /** Stop routing this pressed-pointer sequence to the original event target. */
-  releasePointerCapture(): void
+  /** Route this pressed-pointer sequence to the current target. The optional
+   *  id keeps the existing API compatible with DOM `Element` call sites. */
+  setPointerCapture(pointerId?: number): void
+  /** Stop routing this pressed-pointer sequence to the current target. */
+  releasePointerCapture(pointerId?: number): void
 
   readonly x?: number
   readonly y?: number
@@ -215,7 +233,30 @@ interface GpuixPointerEvent<Type extends string> extends GpuixEvent {
 }
 
 /** A click, press, hover-transition, or context-menu event. */
-export type GpuixMouseEvent = GpuixPointerEvent<GpuixMouseEventType>
+export type GpuixMouseEvent = GpuixMouseLikeEvent<GpuixMouseEventType>
+
+/** The pointer event types {@link EVENT_PROPS} declares in `host-config.ts`. */
+export type GpuixPointerEventType =
+  | "pointerDown"
+  | "pointerUp"
+  | "pointerMove"
+  | "pointerCancel"
+  | "pointerEnter"
+  | "pointerLeave"
+
+/**
+ * A DOM-shaped pointer event. Desktop input currently supplies a single primary
+ * mouse pointer (`pointerId === 1`, `pointerType === "mouse"`); the native
+ * payload retains these fields so other platform pointer sources can join the
+ * same React contract without changing the dispatcher.
+ */
+export interface GpuixPointerEvent extends GpuixMouseLikeEvent<GpuixPointerEventType> {
+  readonly pointerId: number
+  readonly pointerType: string
+  readonly isPrimary: boolean
+  /** DOM PointerEvent button bitfield: left=1, right=2, middle=4. */
+  readonly buttons: number
+}
 
 export interface GpuixFile {
   readonly name: string
@@ -246,7 +287,7 @@ export interface GpuixDragEvent extends GpuixMouseEvent {
 }
 
 /** A trackpad or wheel scroll gesture — bubbles, unlike `onScroll`. */
-export interface GpuixWheelEvent extends GpuixPointerEvent<"wheel"> {
+export interface GpuixWheelEvent extends GpuixMouseLikeEvent<"wheel"> {
   /** DOM signs: positive scrolls the view right. */
   readonly deltaX: number
   /** DOM signs: positive scrolls the view down. */
@@ -269,6 +310,8 @@ export interface GpuixKeyboardEvent extends GpuixEvent {
   readonly metaKey: boolean
   readonly shiftKey: boolean
   readonly modifiers?: EventModifiers
+  /** Reports the supported UI Events modifier state, or `false` when unavailable. */
+  getModifierState(keyArg: string): boolean
   /** The UI Events `key` value. See {@link domKeyName}. */
   readonly key: string
   /** Whether this is a key-repeat event (key held down). */
@@ -293,10 +336,33 @@ export interface GpuixScrollEvent extends GpuixEvent {
   readonly type: "scroll"
 }
 
-/** An `<input>` or `<textarea>` edit. */
+/** An `<input>` or `<textarea>` edit, or a checkbox or radio changing state. */
 export interface GpuixChangeEvent extends GpuixEvent {
   readonly type: "change"
+  /** A text editor's new text, or a range's new value. */
   readonly value?: string
+  /**
+   * The Input Events `inputType` of a text editor's edit — `insertText`,
+   * `deleteContentBackward`, `insertFromPaste`, `historyUndo` and so on — as
+   * a browser reports it on the `input` event React DOM's `onChange` wraps.
+   */
+  readonly inputType?: string
+  /** A checkbox's or radio's new checkedness. */
+  readonly checked?: boolean
+}
+
+/** A `<form>` submission from a submit button or `requestSubmit()`. */
+export interface GpuixSubmitEvent extends GpuixEvent {
+  readonly type: "submit"
+  /** The entries the form submits: its named, enabled controls' values. */
+  readonly formData: FormData
+  /** The submit button that submitted the form, or null for `requestSubmit()` without one. */
+  readonly submitter: PublicInstance | null
+}
+
+/** A `<form>` reset from a reset button or `reset()`. */
+export interface GpuixFormEvent extends GpuixEvent {
+  readonly type: "reset"
 }
 
 /** An `<img>` source reached a terminal load or decode state. */
@@ -308,7 +374,8 @@ export interface GpuixLoadEvent extends GpuixEvent {
  * Events from the built-in custom elements: `<diff>`'s `toggleFile`,
  * `showMore`, and `lineClick`; `<markdown>`'s `linkClick`; `<virtual-list>`'s
  * `visibleRange`; an element's own `highlight` match count; and an
- * accessibility action requested by assistive technology.
+ * accessibility action requested by assistive technology; and native motion
+ * completion.
  */
 export interface GpuixElementEvent extends GpuixEvent {
   readonly type:
@@ -319,6 +386,7 @@ export interface GpuixElementEvent extends GpuixEvent {
     | "visibleRange"
     | "highlight"
     | "accessibilityAction"
+    | "motionComplete"
   /** File path (`toggleFile`), hidden line count (`showMore`), line text
    *  (`lineClick`), or URL (`linkClick`). */
   readonly value?: string
@@ -335,6 +403,8 @@ export interface GpuixElementEvent extends GpuixEvent {
   /** AccessKit action requested by assistive technology.
    *  `accessibilityAction` only. */
   readonly accessibilityAction?: "increment" | "decrement" | "focus"
+  /** Logical motion target that completed. `motionComplete` only. */
+  readonly motionGeneration?: number
 }
 
 /**
@@ -349,12 +419,15 @@ export interface GpuixElementEvent extends GpuixEvent {
  */
 export type GpuixSyntheticEvent =
   | GpuixMouseEvent
+  | GpuixPointerEvent
   | GpuixDragEvent
   | GpuixWheelEvent
   | GpuixKeyboardEvent
   | GpuixFocusEvent
   | GpuixScrollEvent
   | GpuixChangeEvent
+  | GpuixSubmitEvent
+  | GpuixFormEvent
   | GpuixLoadEvent
   | GpuixElementEvent
 
@@ -371,17 +444,25 @@ interface SyntheticEventController {
   isImmediatePropagationStopped(): boolean
 }
 
+/**
+ * `dispatched` is the JS-created event behind a `dispatchEvent()` call. Its
+ * `bubbles`, `cancelable`, cancellation, and stopped propagation replace the
+ * ones this renderer derives for a native payload of the same type. Preventing
+ * or stopping the synthetic event does the same to it, so `dispatchEvent()`
+ * can report the cancellation and the caller sees `cancelBubble`.
+ */
 export function createGpuixSyntheticEvent(
   nativeEvent: EventPayload,
   target: PublicInstance,
   renderer: NativeRenderer,
-  relatedTarget: PublicInstance | null = null
+  relatedTarget: PublicInstance | null = null,
+  dispatched?: GpuixDispatchableEvent
 ): SyntheticEventController {
   let currentTarget = target
   let eventPhase: GpuixEventPhase = 2
-  let defaultPrevented = false
-  let propagationStopped = false
-  let immediatePropagationStopped = false
+  let defaultPrevented = dispatched?.defaultPrevented === true
+  let propagationStopped = dispatched?.cancelBubble === true
+  let immediatePropagationStopped = propagationStopped
 
   const modifiers = nativeEvent.modifiers
   const isNonCancelableEvent =
@@ -390,12 +471,16 @@ export function createGpuixSyntheticEvent(
     nativeEvent.eventType === "scroll" ||
     nativeEvent.eventType === "load" ||
     nativeEvent.eventType === "error"
-  const isNonBubblingEvent = isNonCancelableEvent
+  const isNonBubblingEvent =
+    isNonCancelableEvent ||
+    nativeEvent.eventType === "pointerEnter" ||
+    nativeEvent.eventType === "pointerLeave"
   const isDragEvent =
     nativeEvent.eventType === "dragEnter" ||
     nativeEvent.eventType === "dragOver" ||
     nativeEvent.eventType === "dragLeave" ||
     nativeEvent.eventType === "drop"
+  const cancelable = dispatched ? dispatched.cancelable : !isNonCancelableEvent
   const event = {
     ...nativeEvent,
     nativeEvent,
@@ -406,14 +491,25 @@ export function createGpuixSyntheticEvent(
           dataTransfer: createGpuixDataTransfer(nativeEvent, nativeEvent.eventType === "drop"),
         }
       : {}),
-    bubbles: !isNonBubblingEvent,
-    cancelable: !isNonCancelableEvent,
+    bubbles: dispatched ? dispatched.bubbles : !isNonBubblingEvent,
+    cancelable,
     altKey: modifiers?.alt ?? false,
     ctrlKey: modifiers?.ctrl ?? false,
     metaKey: modifiers?.cmd ?? false,
     shiftKey: modifiers?.shift ?? false,
-    button: nativeEvent.button ?? 0,
+    ...(nativeEvent.eventType === "keyDown" || nativeEvent.eventType === "keyUp"
+      ? {
+          getModifierState(keyArg: string): boolean {
+            return keyboardModifierState(modifiers, keyArg)
+          },
+        }
+      : {}),
+    button: nativeEvent.button ?? (nativeEvent.eventType === "pointerMove" ? -1 : 0),
     detail: nativeEvent.eventType === "contextMenu" ? 0 : (nativeEvent.clickCount ?? 0),
+    pointerId: nativeEvent.pointerId ?? 1,
+    pointerType: nativeEvent.pointerType ?? "mouse",
+    isPrimary: nativeEvent.isPrimary ?? true,
+    buttons: nativeEvent.buttons ?? 0,
     key: domKeyName(nativeEvent.key, nativeEvent.keyChar),
     repeat: nativeEvent.isHeld ?? false,
     clientX: nativeEvent.x ?? 0,
@@ -422,14 +518,18 @@ export function createGpuixSyntheticEvent(
     pageY: nativeEvent.y ?? 0,
     relatedTarget,
     preventDefault(): void {
-      if (!isNonCancelableEvent) defaultPrevented = true
+      if (!cancelable) return
+      defaultPrevented = true
+      dispatched?.preventDefault()
     },
     stopPropagation(): void {
       propagationStopped = true
+      dispatched?.stopPropagation?.()
     },
     stopImmediatePropagation(): void {
       propagationStopped = true
       immediatePropagationStopped = true
+      dispatched?.stopImmediatePropagation?.()
     },
     isDefaultPrevented(): boolean {
       return defaultPrevented
@@ -437,10 +537,10 @@ export function createGpuixSyntheticEvent(
     isPropagationStopped(): boolean {
       return propagationStopped
     },
-    setPointerCapture(): void {
+    setPointerCapture(_pointerId?: number): void {
       renderer.setPointerCapture?.(nativeEvent.elementId)
     },
-    releasePointerCapture(): void {
+    releasePointerCapture(_pointerId?: number): void {
       renderer.releasePointerCapture?.(nativeEvent.elementId)
     },
     persist(): void {},

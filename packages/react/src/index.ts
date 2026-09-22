@@ -180,7 +180,11 @@ export {
   Select,
   SelectContent,
   SelectGroup,
+  SelectIcon,
   SelectItem,
+  SelectItemIndicator,
+  SelectItemText,
+  SelectList,
   SelectLabel,
   SelectScrollDownButton,
   SelectScrollUpButton,
@@ -190,10 +194,18 @@ export {
 } from "./components/select.js"
 export type {
   SelectContentProps,
+  SelectIconProps,
+  SelectIconState,
   SelectItemData,
+  SelectItemIndicatorProps,
+  SelectItemIndicatorState,
+  SelectItemTextProps,
   SelectItemProps,
   SelectItemState,
+  SelectListProps,
   SelectProps,
+  SelectSelection,
+  SelectValueFor,
   SelectTriggerProps,
   SelectTriggerState,
   SelectValueProps,
@@ -227,7 +239,8 @@ export type {
   TooltipProviderProps,
   TooltipTriggerProps,
 } from "./components/tooltip.js"
-export { motion } from "./components/index.js"
+export { AnimatePresence, motion, useIsPresent, usePresence } from "./components/index.js"
+export type { AnimatePresenceProps } from "./components/index.js"
 export type {
   Root,
   FrameLoop,
@@ -260,10 +273,15 @@ export type {
   GridTrackMinmax,
   GridTrackNonRepeat,
   GridTrackSizing,
+  GpuixDocument,
   GpuixTheme,
   ImageMimeType,
   ImageSource,
   InputPublicInstance,
+  InputType,
+  ButtonProps,
+  FormProps,
+  FormPublicInstance,
   SelectionDirection,
   SharedStyle,
   LinearGradient,
@@ -318,16 +336,21 @@ export type {
   GpuixEventDispatchResult,
   GpuixEventPhase,
   GpuixFocusEvent,
+  GpuixFormEvent,
   GpuixKeyboardEvent,
   GpuixLoadEvent,
+  GpuixSubmitEvent,
   GpuixMouseEvent,
   GpuixMouseEventType,
+  GpuixPointerEvent,
+  GpuixPointerEventType,
   GpuixFile,
   GpuixFileList,
   GpuixScrollEvent,
   GpuixSyntheticEvent,
   GpuixWheelEvent,
 } from "./reconciler/synthetic-event.js"
+export type { GpuixDispatchableEvent, GpuixPointerEventInit } from "./pointer-event.js"
 export {
   applyMacCpuThrottleFromEnv,
   MAC_CPU_THROTTLES,

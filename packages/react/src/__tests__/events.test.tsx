@@ -1639,6 +1639,108 @@ describeNative("events", () => {
       expect(repeats).toEqual([false, true])
     })
 
+    it("exposes UI Events modifier state on keyDown and keyUp", () => {
+      const observed: Array<{ type: string; states: boolean[] }> = []
+      const modifierNames = ["Alt", "Control", "Meta", "Shift", "Unavailable"]
+      const record = (event: { type: string; getModifierState(keyArg: string): boolean }) => {
+        observed.push({
+          type: event.type,
+          states: modifierNames.map((name) => event.getModifierState(name)),
+        })
+      }
+
+      testRoot.render(
+        <div tabIndex={0} onKeyDown={record} onKeyUp={record} />
+      )
+      const target = testRoot.renderer
+        .findByType("div")
+        .find((element) => element.events.has("keyDown") && element.events.has("keyUp"))!
+
+      handleGpuixEvent(
+        {
+          elementId: target.id,
+          eventType: "keyDown",
+          key: "right",
+          modifiers: { alt: true, ctrl: false, cmd: true, shift: false },
+        },
+        testRoot.renderer
+      )
+      handleGpuixEvent(
+        {
+          elementId: target.id,
+          eventType: "keyUp",
+          key: "right",
+          modifiers: { alt: false, ctrl: true, cmd: false, shift: true },
+        },
+        testRoot.renderer
+      )
+      handleGpuixEvent(
+        { elementId: target.id, eventType: "keyDown", key: "right" },
+        testRoot.renderer
+      )
+
+      expect(observed).toEqual([
+        { type: "keyDown", states: [true, false, true, false, false] },
+        { type: "keyUp", states: [false, true, false, true, false] },
+        { type: "keyDown", states: [false, false, false, false, false] },
+      ])
+    })
+
+    it("lets Base UI-shaped ToggleGroup and Toolbar fixtures complete Arrow-key roving focus", () => {
+      function RovingFocus({ label }: { label: string }) {
+        const firstRef = useRef<PublicInstance>(null)
+        const secondRef = useRef<PublicInstance>(null)
+
+        return (
+          <div ariaLabel={label} style={{ flexDirection: "row", gap: 8 }}>
+            <button
+              ref={firstRef}
+              data-testid={`${label}-first`}
+              type="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight" && !event.getModifierState("Alt")) {
+                  secondRef.current!.focus()
+                }
+              }}
+              style={{ width: 100, height: 40 }}
+            >
+              <text>First</text>
+            </button>
+            <button
+              ref={secondRef}
+              data-testid={`${label}-second`}
+              type="button"
+              tabIndex={-1}
+              style={{ width: 100, height: 40 }}
+            >
+              <text>Second</text>
+            </button>
+          </div>
+        )
+      }
+
+      testRoot.render(
+        <div>
+          <RovingFocus label="toggle-group" />
+          <RovingFocus label="toolbar" />
+        </div>
+      )
+
+      for (const label of ["toggle-group", "toolbar"]) {
+        const first = testRoot.renderer.findByTestId(`${label}-first`)!
+        const second = testRoot.renderer.findByTestId(`${label}-second`)!
+        testRoot.renderer.focusElement(first.id)
+
+        handleGpuixEvent(
+          { elementId: first.id, eventType: "keyDown", key: "right" },
+          testRoot.renderer
+        )
+
+        expect(testRoot.renderer.getActiveElement()).toBe(second.id)
+      }
+    })
+
     it("should handle onKeyDown and update state", () => {
       function KeyTracker() {
         const [lastKey, setLastKey] = useState("none")
@@ -3405,6 +3507,249 @@ describeNative("events", () => {
       expect(up).toHaveBeenCalledOnce()
       expect(down.mock.calls[0]![0].target.id).toBe(child.id)
       expect(up.mock.calls[0]![0].target.id).toBe(child.id)
+    })
+  })
+
+  describe("pointer events", () => {
+    it("dispatches typed pointer events before their mouse counterparts", () => {
+      const order: string[] = []
+      const received: GpuixSyntheticEvent[] = []
+
+      testRoot.render(
+        <div
+          style={{ width: 240, height: 100 }}
+          onPointerDown={(event) => {
+            order.push("pointerDown")
+            received.push(event)
+          }}
+          onMouseDown={() => order.push("mouseDown")}
+          onPointerMove={(event) => {
+            order.push("pointerMove")
+            received.push(event)
+          }}
+          onMouseMove={() => order.push("mouseMove")}
+          onPointerUp={(event) => {
+            order.push("pointerUp")
+            received.push(event)
+          }}
+          onMouseUp={() => order.push("mouseUp")}
+          onClick={() => order.push("click")}
+        />
+      )
+
+      testRoot.renderer.nativeSimulateMouseDown(20, 30, 0, "shift", 1)
+      testRoot.renderer.nativeSimulateMouseMove(40, 30, 0, "shift")
+      testRoot.renderer.nativeSimulateMouseUp(40, 30, 0, "shift", 1)
+
+      expect(order).toEqual([
+        "pointerDown",
+        "mouseDown",
+        "pointerMove",
+        "mouseMove",
+        "pointerUp",
+        "mouseUp",
+        "click",
+      ])
+      const [down, move, up] = received
+      expect(down).toMatchObject({
+        type: "pointerDown",
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+        buttons: 1,
+        button: 0,
+        clientX: 20,
+        clientY: 30,
+        shiftKey: true,
+      })
+      expect(move).toMatchObject({ type: "pointerMove", button: -1, buttons: 1 })
+      expect(up).toMatchObject({ type: "pointerUp", button: 0, buttons: 0 })
+    })
+
+    it("uses the retained React path and event controls for pointer events", () => {
+      const trace: string[] = []
+
+      testRoot.render(
+        <div
+          data-testid="pointer-parent"
+          style={{ width: 240, height: 100 }}
+          onPointerDownCapture={(event) => {
+            trace.push(`capture:${event.currentTarget.id}:${event.target.id}`)
+            event.preventDefault()
+          }}
+          onPointerDown={(event) => trace.push(`bubble:${event.defaultPrevented}`)}
+        >
+          <div
+            data-testid="pointer-target"
+            style={{ width: 100, height: 60, backgroundColor: "#273449" }}
+            onPointerDownCapture={(event) =>
+              trace.push(`target-capture:${event.currentTarget.id}:${event.target.id}`)
+            }
+            onPointerDown={(event) => trace.push(`target:${event.defaultPrevented}`)}
+          />
+        </div>
+      )
+
+      const target = testRoot.renderer.findByTestId("pointer-target")!
+      const parent = testRoot.renderer.findByTestId("pointer-parent")!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(target.id)!
+      testRoot.renderer.nativeSimulateMouseDown(x + width / 2, y + height / 2)
+
+      expect(trace).toEqual([
+        `capture:${parent.id}:${target.id}`,
+        `target-capture:${target.id}:${target.id}`,
+        "target:true",
+        "bubble:true",
+      ])
+    })
+
+    it("dispatches pointer presses from a custom-element hit through ancestors", () => {
+      const down = vi.fn()
+      const up = vi.fn()
+      const move = vi.fn()
+      testRoot.render(
+        <div
+          style={{ width: 240, height: 100 }}
+          onPointerDown={down}
+          onPointerUp={up}
+          onPointerMove={move}
+        >
+          <canvas
+            data-testid="pointer-custom-child"
+            width={80}
+            height={60}
+          />
+        </div>,
+      )
+
+      const child = testRoot.renderer.findByTestId("pointer-custom-child")!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(child.id)!
+      testRoot.renderer.nativeSimulateMouseDown(x + width / 2, y + height / 2)
+      testRoot.renderer.nativeSimulateMouseMove(x + width + 40, y + height / 2)
+      testRoot.renderer.nativeSimulateMouseUp(x + width / 2, y + height / 2)
+
+      expect(down).toHaveBeenCalledOnce()
+      expect(up).toHaveBeenCalledOnce()
+      expect(move).toHaveBeenCalledOnce()
+      expect(down.mock.calls[0]![0].target.id).toBe(child.id)
+      expect(up.mock.calls[0]![0].target.id).toBe(child.id)
+      expect(move.mock.calls[0]![0].target.id).toBe(child.id)
+    })
+
+    it("honours pointer propagation controls at the target", () => {
+      const stopped: string[] = []
+      testRoot.render(
+        <div
+          style={{ width: 240, height: 100 }}
+          onPointerDownCapture={() => stopped.push("parent-capture")}
+          onPointerDown={() => stopped.push("parent-bubble")}
+        >
+          <div
+            data-testid="pointer-stop-target"
+            style={{ width: 100, height: 60, backgroundColor: "#273449" }}
+            onPointerDownCapture={(event) => {
+              stopped.push("target-capture")
+              event.stopPropagation()
+            }}
+            onPointerDown={() => stopped.push("target-bubble")}
+          />
+        </div>
+      )
+      const target = testRoot.renderer.findByTestId("pointer-stop-target")!
+      const bounds = testRoot.renderer.getElementBounds(target.id)!
+      testRoot.renderer.nativeSimulateMouseDown(bounds.x + 10, bounds.y + 10)
+      expect(stopped).toEqual(["parent-capture", "target-capture", "target-bubble"])
+
+      const immediate: string[] = []
+      testRoot.render(
+        <div style={{ width: 240, height: 100 }} onPointerDown={() => immediate.push("parent")}>
+          <div
+            data-testid="pointer-immediate-target"
+            style={{ width: 100, height: 60, backgroundColor: "#334155" }}
+            onPointerDownCapture={(event) => {
+              immediate.push("target-capture")
+              event.stopImmediatePropagation()
+            }}
+            onPointerDown={() => immediate.push("target-bubble")}
+          />
+        </div>
+      )
+      const immediateTarget = testRoot.renderer.findByTestId("pointer-immediate-target")!
+      const immediateBounds = testRoot.renderer.getElementBounds(immediateTarget.id)!
+      testRoot.renderer.nativeSimulateMouseDown(immediateBounds.x + 10, immediateBounds.y + 10)
+      expect(immediate).toEqual(["target-capture"])
+    })
+
+    it("delivers pointer transitions with related targets", () => {
+      const transitions: Array<{ type: string; target: number; related: number | null }> = []
+      testRoot.render(
+        <div style={{ display: "flex", width: 240, height: 60 }}>
+          <div
+            data-testid="pointer-left"
+            style={{ flexGrow: 1, backgroundColor: "#273449" }}
+            onPointerEnter={(event) =>
+              transitions.push({ type: event.type, target: event.target.id, related: event.relatedTarget?.id ?? null })
+            }
+            onPointerLeave={(event) =>
+              transitions.push({ type: event.type, target: event.target.id, related: event.relatedTarget?.id ?? null })
+            }
+          />
+          <div
+            data-testid="pointer-right"
+            style={{ flexGrow: 1, backgroundColor: "#475569" }}
+            onPointerEnter={(event) =>
+              transitions.push({ type: event.type, target: event.target.id, related: event.relatedTarget?.id ?? null })
+            }
+          />
+        </div>
+      )
+
+      const left = testRoot.renderer.findByTestId("pointer-left")!
+      const right = testRoot.renderer.findByTestId("pointer-right")!
+      const leftBounds = testRoot.renderer.getElementBounds(left.id)!
+      const rightBounds = testRoot.renderer.getElementBounds(right.id)!
+      testRoot.renderer.nativeSimulateMouseMove(leftBounds.x + leftBounds.width / 2, 20)
+      testRoot.renderer.nativeSimulateMouseMove(rightBounds.x + rightBounds.width / 2, 20)
+
+      expect(transitions).toEqual([
+        { type: "pointerEnter", target: left.id, related: null },
+        { type: "pointerLeave", target: left.id, related: right.id },
+        { type: "pointerEnter", target: right.id, related: left.id },
+      ])
+    })
+
+    it("routes a captured pointer through cancellation and releases it on deactivation", () => {
+      const trace: string[] = []
+      testRoot.render(
+        <div style={{ width: 400, height: 100 }} onPointerMove={() => trace.push("surface-move")}>
+          <div
+            style={{ width: 80, height: 60, backgroundColor: "#3366ff" }}
+            onPointerDown={(event) => {
+              trace.push("down")
+              event.setPointerCapture()
+            }}
+            onPointerMove={() => trace.push("handle-move")}
+            onPointerCancel={(event) => {
+              trace.push(`cancel:${event.pointerId}:${event.buttons}`)
+            }}
+            onPointerUp={() => trace.push("handle-up")}
+          />
+        </div>
+      )
+
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(220, 20, 0)
+      testRoot.renderer.nativeSimulateWindowDeactivation()
+      testRoot.renderer.nativeSimulateMouseMove(240, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(240, 20, 0)
+
+      expect(trace).toEqual([
+        "down",
+        "handle-move",
+        "surface-move",
+        "cancel:1:0",
+        "surface-move",
+      ])
     })
   })
 

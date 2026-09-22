@@ -5,12 +5,15 @@ import type { ImageSource, ImgProps, MotionTransition, Props, StyleDesc } from "
 import type { SharedStyle } from "../index.js"
 
 const validStyle = {
+  "--collapsible-panel-height": "40px",
+  "--accordion-panel-width": 240,
   display: "grid",
   alignItems: "baseline",
   width: "50%",
   minWidth: "auto",
   maxWidth: "clamp(240px, 70%, 960px)",
   height: "calc(100% - 4ch)",
+  aspectRatio: "16 / 9",
   lineHeight: "1.4",
   whiteSpace: "pre",
   background: "oklch(67.3% 0.182 276.935)",
@@ -37,6 +40,33 @@ const validStyle = {
     { type: "repeat", count: 2, tracks: [{ type: "auto" }] },
   ],
 } satisfies StyleDesc
+
+const validNestedCustomProperty = {
+  hover: { "--collapsible-panel-width": "120px" },
+} satisfies StyleDesc
+
+void validNestedCustomProperty
+
+const numericAspectRatio = { aspectRatio: 1 } satisfies StyleDesc
+void numericAspectRatio
+
+const numericZeroBorderShorthands = {
+  border: 0,
+  borderTop: 0,
+  borderRight: 0,
+  borderBottom: 0,
+  borderLeft: 0,
+} satisfies StyleDesc
+void numericZeroBorderShorthands
+
+const invalidNumericBorderShorthand: StyleDesc = {
+  // @ts-expect-error Border shorthands accept numeric zero, not arbitrary numbers.
+  border: 1,
+}
+void invalidNumericBorderShorthand
+
+const insetClipPath = { clipPath: "inset(50%)" } satisfies StyleDesc
+void insetClipPath
 
 const intrinsicAndViewportLengths = {
   width: "max-content",
@@ -289,8 +319,16 @@ declare const handWrittenShared: HandWrittenSharedStyle
 const sharedAssignsToHandWritten: HandWrittenSharedStyle = exportedShared
 const handWrittenAssignsToShared: SharedStyle = handWrittenShared
 
+const sharedTouchAction: SharedStyle = { touchAction: "none" }
+const nativeTouchAction: StyleDesc = {
+  touchAction: "none",
+  hover: { touchAction: "auto" },
+}
+
 void sharedAssignsToHandWritten
 void handWrittenAssignsToShared
+void sharedTouchAction
+void nativeTouchAction
 
 const invalidSharedStyle: SharedStyle = {
   // @ts-expect-error `focusVisible` is native-only and excluded from the shared surface.

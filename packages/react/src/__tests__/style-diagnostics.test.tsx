@@ -1,4 +1,4 @@
-import React from "react"
+import React, { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   createTestRoot,
@@ -15,6 +15,21 @@ afterEach(() => {
 })
 
 describeNative("style diagnostics", { timeout: 12_000 }, () => {
+  it("accepts touchAction as a silent native no-op", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    testRoot.render(
+      <div
+        data-testid="map"
+        style={{ touchAction: "none", hover: { touchAction: "auto" } }}
+      />,
+    )
+
+    expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it("keeps accessibility diagnostics honest about whether each value landed", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })
@@ -32,6 +47,12 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
           ariaSelected
         />
         <div data-testid="unsupported-selected" role="button" ariaLabel="Save" ariaSelected />
+        <div
+          data-testid="unsupported-pressed"
+          role={validRoleAdded ? "button" : "link"}
+          ariaLabel="Pin"
+          ariaPressed
+        />
         <div data-testid="mixed-switch" role="switch" ariaLabel="Mode" ariaChecked="mixed" />
         <div
           data-testid="double-disabled"
@@ -84,6 +105,12 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
           ariaLabel="Malformed checked"
           ariaChecked={"yes" as unknown as boolean}
         />
+        <div
+          data-testid="malformed-pressed"
+          role="button"
+          ariaLabel="Malformed pressed"
+          ariaPressed={"yes" as unknown as boolean}
+        />
       </div>
     )
 
@@ -91,7 +118,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       testRoot.render(cases(false, true))
 
       const diagnostics = testRoot.renderer.drainStyleDiagnostics()
-      expect(diagnostics).toHaveLength(12)
+      expect(diagnostics).toHaveLength(14)
       const byTestId = (testId: string) => {
         const diagnostic = diagnostics.find((candidate) => candidate.dataTestId === testId)
         expect(diagnostic, testId).toBeDefined()
@@ -145,6 +172,14 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         "true",
         "ignored",
         "role=Button does not support ariaSelected, so it is omitted from the accessibility tree"
+      )
+      expectDiagnostic(
+        "unsupported-pressed",
+        "div",
+        "ariaPressed",
+        "true",
+        "ignored",
+        "role=Link does not support ariaPressed, so it is omitted from the accessibility tree"
       )
       expectDiagnostic(
         "mixed-switch",
@@ -224,6 +259,14 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         "rejected",
         'expected a boolean or "mixed"'
       )
+      expectDiagnostic(
+        "malformed-pressed",
+        "div",
+        "ariaPressed",
+        '"yes"',
+        "rejected",
+        'expected a boolean or "mixed"'
+      )
 
       const nodes = Object.values(testRoot.renderer.getAccessibilityTree().nodes)
       const ariaByLabel = (label: string) =>
@@ -236,6 +279,8 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       expect(nodes.some((node) => node.aria.role === "ListBoxOption")).toBe(false)
       expect(ariaByLabel("Save")).toMatchObject({ role: "Button" })
       expect(ariaByLabel("Save")?.selected).toBeUndefined()
+      expect(ariaByLabel("Pin")).toMatchObject({ role: "Link" })
+      expect(ariaByLabel("Pin")?.toggled).toBeUndefined()
       expect(ariaByLabel("Mode")).toMatchObject({ role: "Switch", toggled: "False" })
       expect(ariaByLabel("Double disabled")).toMatchObject({ role: "Button", disabled: true })
       expect(ariaByLabel("Hidden focus")).toBeUndefined()
@@ -247,6 +292,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       expect(ariaByLabel("Malformed level")?.level).toBeUndefined()
       expect(ariaByLabel("Malformed value")?.numeric_value).toBeUndefined()
       expect(ariaByLabel("Malformed checked")?.toggled).toBeUndefined()
+      expect(ariaByLabel("Malformed pressed")?.toggled).toBeUndefined()
 
       testRoot.render(cases(true, false))
       expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
@@ -414,7 +460,6 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
         "ariaColCount",
         "ariaColIndex",
         "ariaColSpan",
-        "ariaCurrent",
         "ariaDisabled",
         "ariaExpanded",
         "ariaLevel",
@@ -447,7 +492,11 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       const node = Object.values(testRoot.renderer.getAccessibilityTree().nodes).find(
         (candidate) => candidate.aria.label === "Unsupported state set"
       )
-      expect(node?.aria).toEqual({ role: "Image", label: "Unsupported state set" })
+      expect(node?.aria).toEqual({
+        role: "Image",
+        label: "Unsupported state set",
+        current: "Page",
+      })
     } finally {
       testRoot.unmount()
     }
@@ -579,6 +628,179 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     } finally {
       testRoot.unmount()
       warn.mockRestore()
+    }
+  })
+
+  it("accepts Base UI's numeric-zero border reset and removes it on a later empty style", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    try {
+      testRoot.render(
+        <div
+          data-testid="visually-hidden-base"
+          style={{
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+            border: "4px solid #333333",
+            padding: 0,
+            width: 1,
+            height: 1,
+            margin: -1,
+          }}
+        />
+      )
+      const element = testRoot.renderer.findByTestId("visually-hidden-base")!
+      expect(testRoot.renderer.getResolvedStyle(element.id)?.borderWidth).toBe(4)
+
+      testRoot.render(
+        <div
+          data-testid="visually-hidden-base"
+          style={{
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+            border: 0,
+            padding: 0,
+            width: 1,
+            height: 1,
+            margin: -1,
+          }}
+        />
+      )
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(testRoot.renderer.getResolvedStyle(element.id)?.borderWidth).toBe(0)
+
+      testRoot.render(<div data-testid="visually-hidden-base" style={{}} />)
+      expect(testRoot.renderer.getResolvedStyle(element.id)).not.toHaveProperty("borderWidth")
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("ignores Base UI custom properties across updates and removal", () => {
+    const testRoot = createTestRoot({ strictStyles: true, width: 400, height: 200 })
+
+    try {
+      testRoot.render(
+        <div
+          data-testid="custom-property-panel"
+          style={{
+            width: 120,
+            height: 40,
+            "--collapsible-panel-height": "40px",
+            "--accordion-panel-height": "40px",
+          }}
+        />,
+      )
+
+      const element = testRoot.getByTestId("custom-property-panel")
+      const initialBounds = testRoot.renderer.getElementBounds(element.id)
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(element.style).not.toHaveProperty("--collapsible-panel-height")
+      expect(element.style).not.toHaveProperty("--accordion-panel-height")
+
+      testRoot.render(
+        <div
+          data-testid="custom-property-panel"
+          style={{
+            width: 120,
+            height: 40,
+            "--collapsible-panel-height": "80px",
+            "--accordion-panel-width": "240px",
+          }}
+        />,
+      )
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(testRoot.renderer.getElementBounds(element.id)).toEqual(initialBounds)
+      expect(element.style).not.toHaveProperty("--collapsible-panel-height")
+      expect(element.style).not.toHaveProperty("--accordion-panel-width")
+
+      testRoot.render(
+        <div data-testid="custom-property-panel" style={{ width: 120, height: 40 }} />,
+      )
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(testRoot.renderer.getElementBounds(element.id)).toEqual(initialBounds)
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("mounts Base UI-shaped Collapsible and Accordion styles without diagnostics", () => {
+    const testRoot = createTestRoot({ strictStyles: true, width: 400, height: 200 })
+
+    function Collapsible() {
+      const [open, setOpen] = useState(true)
+      return (
+        <div>
+          <button
+            data-testid="collapsible-trigger"
+            aria-controls="collapsible-panel"
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
+            <text>Collapsible</text>
+          </button>
+          <div
+            id="collapsible-panel"
+            hidden={!open}
+            role="region"
+            ariaLabel="Collapsible panel"
+            style={{ "--collapsible-panel-height": "40px", height: 40 }}
+          >
+            <text>Collapsible body</text>
+          </div>
+        </div>
+      )
+    }
+
+    function Accordion() {
+      const [open, setOpen] = useState(false)
+      return (
+        <div>
+          <button
+            data-testid="accordion-trigger"
+            aria-controls="accordion-panel"
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
+            <text>Accordion</text>
+          </button>
+          <div
+            id="accordion-panel"
+            hidden={!open}
+            role="region"
+            ariaLabel="Accordion panel"
+            style={{
+              "--accordion-panel-height": "40px",
+              "--accordion-panel-width": "120px",
+              height: 40,
+            }}
+          >
+            <text>Accordion body</text>
+          </div>
+        </div>
+      )
+    }
+
+    try {
+      testRoot.render(
+        <>
+          <Collapsible />
+          <Accordion />
+        </>,
+      )
+
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+      expect(testRoot.getByRole("region", { name: "Collapsible panel" })).toBeTruthy()
+      expect(testRoot.queryByRole("region", { name: "Accordion panel" })).toBeNull()
+
+      testRoot.renderer.nativeSimulateClick(10, 10)
+      expect(testRoot.queryByRole("region", { name: "Collapsible panel" })).toBeNull()
+      expect(testRoot.getByTestId("collapsible-trigger")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      )
+    } finally {
+      testRoot.unmount()
     }
   })
 

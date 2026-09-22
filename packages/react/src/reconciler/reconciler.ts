@@ -19,7 +19,12 @@ import {
   enqueueRendererDiagnostic,
   installRendererDiagnosticChannel,
 } from "./renderer-diagnostics.js"
-import { attachRoot, containerForRenderer, detachRoot } from "./event-registry.js"
+import {
+  attachRoot,
+  containerForRenderer,
+  detachRoot,
+  installFlushSync,
+} from "./event-registry.js"
 import { hostConfig } from "./host-config.js"
 
 // Cast to any because @types/react-reconciler is out of date with react-reconciler 0.33.0
@@ -57,6 +62,7 @@ const _r = reconciler as typeof reconciler & {
   flushSyncFromReconciler?: typeof reconciler.flushSync
 }
 export const flushSync = _r.flushSyncFromReconciler ?? _r.flushSync
+installFlushSync(flushSync)
 
 /** Run the passive effects (`useEffect`) the last commit queued instead of
  *  leaving them to the scheduler's next task. Returns whether any ran. */
@@ -125,6 +131,8 @@ export interface RootOptions {
   strictStyles?: boolean
   /** Receives the fatal state React records instead of rethrowing an uncaught root error. */
   onUncaughtError?: (failure: RootFailure) => void
+  /** Window-level text selection. Fires when the selected ranges change. */
+  onSelectionChange?: (event: import("@gpuix/native").EventPayload, renderer: NativeRenderer) => void
 }
 
 function describeThrownValue(error: unknown): string {
@@ -179,10 +187,14 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
   attachCanvasImageLoader(renderer)
   let container: OpaqueRoot | null = null
   const batchedRenderer = wrapWithBatching(renderer)
+  const ids = idAllocatorFor(renderer)
+  const windowSelectionEventId = options.onSelectionChange
+    ? (ids.nextElementId += 1)
+    : 0
   const gpuixContainer: Container = {
     renderer: batchedRenderer,
     native: renderer,
-    ids: idAllocatorFor(renderer),
+    ids,
     eventHandlers: new Map(),
     eventTargets: new Map(),
     preventedDragOvers: new Map(),
@@ -192,8 +204,13 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     rootElementId: null,
     rootElementType: null,
     announcer: { polite: null, assertive: null },
+    onSelectionChange: options.onSelectionChange,
+    windowSelectionEventId,
   }
   attachRoot(renderer, gpuixContainer)
+  if (options.onSelectionChange) {
+    renderer.setWindowSelectionChange?.(true, windowSelectionEventId)
+  }
   let status: RootStatus = { status: "active" }
 
   const cleanup = (): void => {
@@ -205,6 +222,9 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
       container = null
     }
     detachRoot(renderer, gpuixContainer)
+    if (options.onSelectionChange) {
+      renderer.setWindowSelectionChange?.(false, windowSelectionEventId)
+    }
     detachCanvasImageLoader(renderer)
     if (status.status === "active") status = { status: "unmounted" }
   }

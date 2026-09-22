@@ -1,4 +1,4 @@
-/// `@gpuix/react/globals` installs exactly four names on `globalThis`. This
+/// `@gpuix/react/globals` installs the browser-compatibility shims on `globalThis`. This
 /// file must never be merged with `globals-absent.test.tsx`; vitest's
 /// default forks pool isolates each test file's `globalThis`, and the two
 /// files assert opposite states of it.
@@ -7,6 +7,7 @@ import React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import "../globals.js"
+import { gpuixDocument, hasBrowserDocument } from "../document.js"
 import { createTestRoot, type TestRoot } from "../testing.js"
 
 const FRAME_MS = 1000 / 60
@@ -20,12 +21,15 @@ afterEach(() => {
 })
 
 describe("@gpuix/react/globals", () => {
-  it("installs requestAnimationFrame, cancelAnimationFrame, window, and scrollTo, and nothing else", () => {
+  it("installs the browser compatibility shims and the document facade, not a browser document", () => {
     expect(typeof globalThis.requestAnimationFrame).toBe("function")
     expect(typeof globalThis.cancelAnimationFrame).toBe("function")
     expect(globalThis.window).toBe(globalThis)
     expect(globalThis.scrollTo()).toBeUndefined()
-    expect(Reflect.has(globalThis, "document")).toBe(false)
+    expect(typeof globalThis.ResizeObserver).toBe("function")
+    expect(typeof globalThis.Image).toBe("function")
+    expect(globalThis.document).toBe(gpuixDocument())
+    expect(hasBrowserDocument()).toBe(false)
   })
 
   it("leaves a pre-existing requestAnimationFrame in place on a later import", async () => {
@@ -48,6 +52,16 @@ describe("@gpuix/react/globals", () => {
     expect(globalThis.window).toBe(existing)
   })
 
+  it("leaves a pre-existing Image constructor in place on a later import", async () => {
+    const existing = vi.fn()
+    vi.stubGlobal("Image", existing)
+
+    vi.resetModules()
+    await import("../globals.js")
+
+    expect(globalThis.Image).toBe(existing)
+  })
+
   it("delivers exactly one callback per advanced frame through the installed global", () => {
     root = createTestRoot()
     root.render(<text>global raf</text>)
@@ -62,11 +76,12 @@ describe("@gpuix/react/globals", () => {
     expect(callback).toHaveBeenCalledTimes(1)
   })
 
-  it("does not install browser automation, and the four-global invariant still holds, after a mount", () => {
+  it("does not install browser automation, and the globals remain stable after a mount", () => {
     // `createTestRoot`/`render()` never installs browser automation on its
     // own path, so this only proves the marker it would read stays honest:
-    // `document` is still absent after a mount (the check at
-    // reconciler/renderer.ts:736), so `globalThis.gpuix` — the literal key
+    // the installed document is the facade, not a browser document, after a
+    // mount (`hasBrowserDocument` in reconciler/renderer.ts), so
+    // `globalThis.gpuix` — the literal key
     // `installBrowserAutomation` writes, `BROWSER_AUTOMATION_KEY` in
     // reconciler/renderer.ts — is not defined.
     root = createTestRoot()
@@ -79,6 +94,7 @@ describe("@gpuix/react/globals", () => {
     expect(typeof globalThis.cancelAnimationFrame).toBe("function")
     expect(globalThis.window).toBe(globalThis)
     expect(globalThis.scrollTo()).toBeUndefined()
-    expect(Reflect.has(globalThis, "document")).toBe(false)
+    expect(typeof globalThis.Image).toBe("function")
+    expect(hasBrowserDocument()).toBe(false)
   })
 })

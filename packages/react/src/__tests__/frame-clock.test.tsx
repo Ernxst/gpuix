@@ -1,16 +1,22 @@
 import React, { useEffect, useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { cancelAnimationFrame, requestAnimationFrame } from "../frame-clock.js"
+import {
+  attachAnimationFrameSource,
+  cancelAnimationFrame,
+  requestAnimationFrame,
+} from "../frame-clock.js"
 import { createTestRoot, type TestRoot } from "../testing.js"
 
 const FRAME_MS = 1000 / 60
+const PERFORMANCE_ORIGIN_MS = 1_000
 
 let root: TestRoot | undefined
 
 afterEach(() => {
   root?.unmount()
   root = undefined
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -55,6 +61,40 @@ function StateAfterFrame() {
 }
 
 describe("requestAnimationFrame", () => {
+  it("uses the performance.now time origin for native frame callbacks", () => {
+    vi.spyOn(performance, "now").mockReturnValue(PERFORMANCE_ORIGIN_MS)
+    root = createTestRoot()
+    root.render(<text>performance origin</text>)
+    const timestamps: number[] = []
+
+    requestAnimationFrame((timestamp) => timestamps.push(timestamp))
+    root.renderer.advanceAsyncClock(16)
+
+    expect(timestamps).toEqual([PERFORMANCE_ORIGIN_MS + 16])
+  })
+
+  it("preserves its time origin when the same native frame source reattaches", () => {
+    const performanceNow = vi
+      .spyOn(performance, "now")
+      .mockReturnValue(PERFORMANCE_ORIGIN_MS)
+    root = createTestRoot()
+    root.render(<text>reattached origin</text>)
+    const timestamps: number[] = []
+
+    requestAnimationFrame((timestamp) => timestamps.push(timestamp))
+    root.renderer.advanceAsyncClock(16)
+
+    performanceNow.mockReturnValue(PERFORMANCE_ORIGIN_MS + 10_000)
+    attachAnimationFrameSource({
+      owner: root.renderer,
+      request: (callback) => root!.renderer.requestFrame(callback),
+    })
+    requestAnimationFrame((timestamp) => timestamps.push(timestamp))
+    root.renderer.advanceAsyncClock(16)
+
+    expect(timestamps).toEqual([PERFORMANCE_ORIGIN_MS + 16, PERFORMANCE_ORIGIN_MS + 32])
+  })
+
   it("keeps the frame pump alive when one callback throws", () => {
     root = createTestRoot()
     root.render(<text>callback errors</text>)
@@ -86,6 +126,7 @@ describe("requestAnimationFrame", () => {
   })
 
   it("queues callbacks registered before a desktop render host attaches", () => {
+    vi.spyOn(performance, "now").mockReturnValue(PERFORMANCE_ORIGIN_MS)
     const timestamps: number[] = []
     const id = requestAnimationFrame((timestamp) => timestamps.push(timestamp))
 
@@ -94,7 +135,7 @@ describe("requestAnimationFrame", () => {
     root.render(<text>late host</text>)
     root.renderer.advanceAsyncClock(FRAME_MS)
 
-    expect(timestamps[0]).toBeCloseTo(FRAME_MS, 5)
+    expect(timestamps[0]).toBeCloseTo(PERFORMANCE_ORIGIN_MS + FRAME_MS, 5)
   })
 
   it("does not issue a native frame token when the final callback is cancelled", async () => {
@@ -122,6 +163,7 @@ describe("requestAnimationFrame", () => {
   })
 
   it("receives its deterministic timestamp from the native frame callback", () => {
+    vi.spyOn(performance, "now").mockReturnValue(PERFORMANCE_ORIGIN_MS)
     root = createTestRoot()
     root.render(<text>native timestamp</text>)
     const timestamps: number[] = []
@@ -129,7 +171,7 @@ describe("requestAnimationFrame", () => {
     root.renderer.requestFrame((timestamp) => timestamps.push(timestamp))
     root.renderer.advanceAsyncClock(7)
 
-    expect(timestamps[0]).toBeCloseTo(7, 8)
+    expect(timestamps[0]).toBeCloseTo(PERFORMANCE_ORIGIN_MS + 7, 8)
   })
 
   it("keeps delivering direct frame requests after one throws, and still dispatches events", () => {
@@ -199,6 +241,7 @@ describe("requestAnimationFrame", () => {
   })
 
   it("delivers same-tick callbacks in order with one native timestamp", () => {
+    vi.spyOn(performance, "now").mockReturnValue(PERFORMANCE_ORIGIN_MS)
     root = createTestRoot()
     root.render(<text>frame clock</text>)
     const framesBefore = root.renderer.getDebugFrameOverlayStats().frames
@@ -224,7 +267,7 @@ describe("requestAnimationFrame", () => {
     root.renderer.advanceAsyncClock(FRAME_MS)
 
     expect(callbacks.map(([name]) => name)).toEqual(["first", "second"])
-    expect(callbacks[0]![1]).toBeCloseTo(FRAME_MS, 5)
+    expect(callbacks[0]![1]).toBeCloseTo(PERFORMANCE_ORIGIN_MS + FRAME_MS, 5)
     expect(callbacks[1]![1]).toBe(callbacks[0]![1])
   })
 
@@ -278,6 +321,7 @@ describe("requestAnimationFrame", () => {
   })
 
   it("runs a continuous loop at the deterministic 60 Hz test cadence", () => {
+    vi.spyOn(performance, "now").mockReturnValue(PERFORMANCE_ORIGIN_MS)
     root = createTestRoot()
     root.render(<text>paced loop</text>)
     const timestamps: number[] = []
@@ -295,7 +339,10 @@ describe("requestAnimationFrame", () => {
 
     expect(timestamps).toHaveLength(6)
     for (let index = 0; index < timestamps.length; index += 1) {
-      expect(timestamps[index]).toBeCloseTo(FRAME_MS * (index + 1), 5)
+      expect(timestamps[index]).toBeCloseTo(
+        PERFORMANCE_ORIGIN_MS + FRAME_MS * (index + 1),
+        5
+      )
     }
     const offeredHz = ((timestamps.length - 1) * 1000) /
       (timestamps.at(-1)! - timestamps[0]!)

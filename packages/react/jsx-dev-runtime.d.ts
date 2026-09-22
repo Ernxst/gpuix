@@ -6,11 +6,14 @@
 import type * as React from "react"
 import type {
   AnchoredProps,
+  ButtonProps,
   CanvasProps,
   CodeProps,
   DiffProps,
+  FormProps,
   ImgProps,
   InputProps,
+  LabelProps,
   MarkdownProps,
   Props,
   SvgProps,
@@ -53,7 +56,7 @@ export namespace JSX {
     ol: Props
     li: Props
     a: Props & { href?: string; target?: string }
-    button: Props & { type?: "button" | "submit" | "reset" }
+    button: ButtonProps
     kbd: Props
     abbr: Props
     address: Props
@@ -77,6 +80,8 @@ export namespace JSX {
     time: Props
     u: Props
     var: Props
+    label: LabelProps
+    form: FormProps
     img: ImgProps
     svg: SvgProps
     canvas: CanvasProps

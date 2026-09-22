@@ -35,6 +35,8 @@ import type { CanvasPublicInstance, PublicInstance } from "../types/host.js"
 import { SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+// Test GPU canvas presentation exists only in the macOS test-support build.
+const itMacOS = process.platform === "darwin" ? it : it.skip
 const canvasImageFixture = fileURLToPath(
   new URL("../../canvas-goldens/__fixtures__/canvas-image-source.png", import.meta.url)
 )
@@ -158,7 +160,36 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     }
   })
 
-  it("clears successive native WebGPU canvas frames and locks the context type", async () => {
+  it("resets the bitmap and recording state when a canvas dimension changes", () => {
+    const actual = createTestRoot({ width: 120, height: 80 })
+    const expected = createTestRoot({ width: 120, height: 80 })
+    const actualRef = createRef<CanvasPublicInstance>()
+    const expectedRef = createRef<CanvasPublicInstance>()
+    const actualPath = path.join(SHOTS_DIR, "canvas-resize-reset-actual.png")
+    const expectedPath = path.join(SHOTS_DIR, "canvas-resize-reset-expected.png")
+    try {
+      actual.render(<canvas ref={actualRef} width={120} height={80} />)
+      expected.render(<canvas ref={expectedRef} width={100} height={80} />)
+      const context = actualRef.current!.getContext("2d")!
+      context.fillStyle = "#ef4444"
+      context.translate(10, 12)
+      context.save()
+      context.fillRect(0, 0, 80, 60)
+      flushRecordingContext2D(context)
+      actual.renderer.flush()
+      actual.render(<canvas ref={actualRef} width={100} height={80} />)
+      actual.renderer.flush()
+      expected.renderer.flush()
+      expect(actualRef.current!.getContext("2d")).toBe(context)
+      expect(context.fillStyle).toBe("#000000")
+      expect(context.getTransform().isIdentity).toBe(true)
+      actual.renderer.captureScreenshot(actualPath)
+      expected.renderer.captureScreenshot(expectedPath)
+      expect(actual.renderer.compareImages(expectedPath, actualPath, 0)).toEqual({ differingPixelRatio: 0, maxChannelDelta: 0, maxChannelDeltaOutsideGoldenContour: 0, erodedGeometryMismatchRatio: 0 })
+    } finally { actual.unmount(); expected.unmount() }
+  })
+
+  itMacOS("clears successive native WebGPU canvas frames and locks the context type", async () => {
     const testRoot = createTestRoot({ width: 120, height: 80 })
     const canvasRef = createRef<CanvasPublicInstance>()
     try {
@@ -1271,7 +1302,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
 
   it("cancels a queued canvas flush before destroying its native target", async () => {
     const renderer = new TestRenderer({ width: 160, height: 100 })
-    const apply = vi.spyOn(renderer, "applyCanvasCommands")
+    const apply = vi.spyOn(renderer, "applyCanvasCommandDelta")
     const root = createRoot(renderer)
     const canvasRef = createRef<CanvasPublicInstance>()
     try {
@@ -1295,7 +1326,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
 
   it("does not replay a stale queued list across a --hot-style remount", async () => {
     const renderer = new TestRenderer({ width: 160, height: 100 })
-    const apply = vi.spyOn(renderer, "applyCanvasCommands")
+    const apply = vi.spyOn(renderer, "applyCanvasCommandDelta")
     const first = createRoot(renderer)
     const firstRef = createRef<CanvasPublicInstance>()
 

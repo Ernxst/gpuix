@@ -46,6 +46,7 @@ import { TEXT_EDITING_TYPES } from "./reconciler/text-editing.js"
 import {
   ARIA_PROP_ALIASES,
   ATTRIBUTE_PROP_ALIASES,
+  AUTHORED_HOST_TYPE_PROP,
   AUTHORED_ROLE_PROP,
 } from "./reconciler/aria-props.js"
 
@@ -534,7 +535,11 @@ function ownProp(
  * them through their own names would turn an implementation detail into an
  * attribute a test could assert on.
  */
-const RENDERER_BOOKKEEPING_PROPS: readonly string[] = [AUTHORED_ROLE_PROP, "activationKind"]
+const RENDERER_BOOKKEEPING_PROPS: readonly string[] = [
+  AUTHORED_ROLE_PROP,
+  AUTHORED_HOST_TYPE_PROP,
+  "activationKind",
+]
 
 /**
  * The prop holding the attribute of this name, if the element declares one.

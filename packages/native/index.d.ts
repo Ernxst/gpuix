@@ -58,6 +58,8 @@ export declare class GpuixRenderer {
    * requiring a React commit.
    */
   applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  applyCanvasCommandDelta(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  resetCanvas(id: number): void
   /**
    * Present one GPU-produced clear through the real macOS window renderer.
    * The producer signals GPUI with a Metal event and never reads pixels back.
@@ -168,7 +170,7 @@ export declare class GpuixRenderer {
    * creates frame demand without dirtying the window, so an otherwise idle
    * callback does not force a draw.
    */
-  requestFrame(callback: (timestamp: number) => void): void
+  requestFrame(callback: (timestamp: number) => void, performanceTimestampMs: number): void
   /** Whether this native window is active and receiving key events. */
   isActive(): boolean
   /** Bring the native window and application to the foreground. */
@@ -184,6 +186,12 @@ export declare class GpuixRenderer {
   resetDebugFrameOverlayStats(): void
   /** Same numbers as the on-screen overlay: current, p90, p99, max, frames. */
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
+  /** Minimize the native window. */
+  minimizeWindow(): void
+  /** Run the native zoom or maximize operation. */
+  zoomWindow(): void
+  /** Enter or exit native fullscreen. */
+  toggleFullscreen(): void
   setWindowTitle(title: string): void
   /**
    * Move focus to an element. `preventScroll` mirrors the `FocusOptions`
@@ -226,6 +234,8 @@ export declare class GpuixRenderer {
   writeClipboardText(text: string): void
   /** Read plain text from the platform clipboard, or null if it holds none. */
   readClipboardText(): string | null
+  /** Enable the window selectionChange event requested by the React renderer. */
+  setWindowSelectionChange(enabled: boolean, eventId: number): void
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
   /** Drop the current selection and request a repaint. */
@@ -379,6 +389,11 @@ export declare class TestGpuixRenderer {
    */
   dispose(): void
   /**
+   * Preserve eager test-root behavior by default, while allowing callers to
+   * make `advanceAsyncClock` the only operation that drains queued tasks.
+   */
+  setAutoDrainAsyncTasks(enabled: boolean): void
+  /**
    * The same capability contract as a live renderer, scoped to this
    * offscreen GPU-backed window.
    */
@@ -425,6 +440,8 @@ export declare class TestGpuixRenderer {
    * offscreen view without requiring a React commit.
    */
   applyCanvasCommands(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  applyCanvasCommandDelta(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
+  resetCanvas(id: number): void
   /**
    * Install a GPU-only test texture into one live `<canvas>` presentation.
    * This exercises the same retained Metal surface path as production.
@@ -471,7 +488,8 @@ export declare class TestGpuixRenderer {
   /** Whether GPUI reports a currently installed application menu bar. */
   hasMainMenu(): boolean
   /**
-   * Notify the view entity and run GPUI until parked.
+   * Notify the view entity and draw it immediately. Eager mode then drains
+   * queued native tasks; manual mode leaves them for `advanceAsyncClock`.
    * This triggers GpuixView::render() → build_element() → GPUI layout.
    * Must be called after mutations and before simulating events (GPUI's
    * hit testing requires elements to be laid out).
@@ -493,12 +511,13 @@ export declare class TestGpuixRenderer {
    * Queue one callback for the next manually advanced GPUI frame without
    * dirtying or synchronously drawing the offscreen window.
    */
-  requestFrame(): void
+  requestFrame(performanceTimestampMs: number): void
   /**
    * Advance GPUI's async executor clock so tests can deterministically fire
    * timers such as bounded image retry/revalidation deadlines. When the
    * renderer animation clock is paused, advance that clock by the same
-   * amount and render the resulting transition frame as well.
+   * amount. Eager mode renders the resulting transition frame immediately;
+   * manual mode leaves it pending for `drawPendingFrame`.
    */
   advanceAsyncClock(deltaMs: number): void
   /** Override GPUI's reduced-motion policy for deterministic tests. */
@@ -569,6 +588,11 @@ export declare class TestGpuixRenderer {
    * scroll ancestors.
    */
   focusElement(id: number, preventScroll?: boolean | undefined | null): void
+  /**
+   * Queue focus without scheduling a draw, matching the browser startup
+   * handoff before its GPUI window exists.
+   */
+  queueFocusElement(id: number, preventScroll?: boolean | undefined | null): void
   /** The focused host element id, analogous to `document.activeElement`, or null. */
   getActiveElement(): number | null
   /** Read the live interaction state for one retained element. */
@@ -635,6 +659,7 @@ export declare class TestGpuixRenderer {
   getSelectedText(): string | null
   /** Drop the current selection. */
   clearSelection(): void
+  setWindowSelectionChange(enabled: boolean, eventId: number): void
   /** One `<input>`/`<textarea>`'s API value, or null for any other element. */
   getInputValue(elementId: number): string | null
   /** `[selectionStart, selectionEnd, backward]` in UTF-16 code units, or null. */
@@ -734,6 +759,8 @@ export declare class TestGpuixRenderer {
   scrollElementIntoView(elementId: number, alignToTop?: boolean | undefined | null): void
   /**
    * Capture a screenshot of the current rendered state and save as PNG.
+   * Eager mode first settles the latest frame. Manual mode deliberately
+   * preserves the last explicit draw, including a pending async repaint.
    * Supported on macOS through Metal and Windows through DirectX.
    */
   captureScreenshot(path: string): void
@@ -798,7 +825,10 @@ export declare class TestGpuixRenderer {
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
   clockResume(): number
-  /** Advance GPUI's deterministic test executor and run due timers. */
+  /**
+   * Advance GPUI's deterministic test executor and run due timers. Manual
+   * mode queues this delta until `advanceAsyncClock`, its explicit drain.
+   */
   advanceTime(milliseconds: number): void
   /** Get the root element ID, or null if no root is set. */
   getRootId(): number | null
@@ -902,6 +932,11 @@ export interface EventPayload {
    * `error`, so JS can discard a completion queued before `src` changed.
    */
   imageRequestGeneration?: number
+  /**
+   * Logical native motion target that reached completion. Populated for
+   * `motionComplete`, so a stale completion cannot finish a new target.
+   */
+  motionGeneration?: number
   /** Logical GPUI window width. Populated for `windowResize`. */
   width?: number
   /** Logical GPUI window height. Populated for `windowResize`. */
@@ -940,6 +975,17 @@ export interface EventPayload {
    * Populated for: mouseMove.
    */
   pressedButton?: number
+  /**
+   * Stable id for a platform pointer. Desktop mouse input uses 1.
+   * Populated for: pointerDown, pointerUp, pointerMove, pointerCancel.
+   */
+  pointerId?: number
+  /** Platform pointer kind, for example "mouse", "touch", or "pen". */
+  pointerType?: string
+  /** Whether this is the platform's primary pointer of its kind. */
+  isPrimary?: boolean
+  /** DOM PointerEvent buttons bitfield: left=1, right=2, middle=4. */
+  buttons?: number
   /**
    * Key name, e.g. "a", "enter", "escape", "down", "left", "f1".
    * Populated for: keyDown, keyUp.
@@ -998,9 +1044,15 @@ export interface EventPayload {
    * Element-defined string payload.
    * Populated for: `<diff>` toggleFile (the file path), showMore (the
    * hidden line count), and lineClick (the line text); `<markdown>`
-   * linkClick (the URL).
+   * linkClick (the URL); `selectionChange` (joined selected text, or
+   * absent when the selection is empty).
    */
   value?: string
+  /**
+   * The Input Events `inputType` of a text-editor `change`: `insertText`,
+   * `deleteContentBackward`, `insertFromPaste`, `historyUndo`, and so on.
+   */
+  inputType?: string
   /** Line number on the pre-change side. Populated for: `<diff>` lineClick. */
   oldLine?: number
   /** Line number on the post-change side. Populated for: `<diff>` lineClick. */

@@ -168,6 +168,14 @@ jobs:
         shell: bash
         run: bun run build
 
+      - name: Build plugins package
+        run: bun run build
+        working-directory: packages/plugins
+
+      - name: Test plugins package
+        run: bun run test
+        working-directory: packages/plugins
+
       - name: Compile chat example
         working-directory: examples
         shell: bash

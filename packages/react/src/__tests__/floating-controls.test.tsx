@@ -4,6 +4,7 @@
 import React, { useState } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
 import * as ComboboxPrimitive from "../components/combobox"
+import { FloatingLayer } from "../components/floating"
 import * as SelectPrimitive from "../components/select"
 import * as TooltipPrimitive from "../components/tooltip"
 import {
@@ -59,6 +60,108 @@ describeNative("floating controls", () => {
 
   beforeEach(() => {
     testRoot = createTestRoot()
+  })
+
+  function renderSurfaceLayer(pointerEvents?: "none") {
+    testRoot.render(
+      <div style={{ width: 400, height: 300 }}>
+        <FloatingLayer
+          style={{
+            width: 120,
+            height: 60,
+            visibility: "hidden",
+            opacity: 0.5,
+            pointerEvents,
+            borderRadius: 16,
+            borderTopLeftRadius: 4,
+            borderTopRightRadius: 8,
+            borderBottomRightRadius: 12,
+            borderBottomLeftRadius: 20,
+            hover: {
+              opacity: 0.75,
+              borderTopLeftRadius: 24,
+              backgroundColor: "#222222",
+            },
+            active: {
+              opacity: 0.9,
+              borderBottomRightRadius: 28,
+            },
+          }}
+        >
+          <text>Rounded layer</text>
+        </FloatingLayer>
+      </div>,
+    )
+    const anchored = testRoot.renderer.findByType("anchored")[0]
+    return { anchored, content: anchored.children[0] }
+  }
+
+  it("forwards outer surface styles without multiplying opacity", () => {
+    const { anchored, content } = renderSurfaceLayer()
+    const surfaceHover = anchored.style.hover as Record<string, unknown>
+    const surfaceActive = anchored.style.active as Record<string, unknown>
+
+    expect({
+      visibility: anchored.style.visibility,
+      opacity: anchored.style.opacity,
+      borderRadius: anchored.style.borderRadius,
+      borderTopLeftRadius: anchored.style.borderTopLeftRadius,
+      borderTopRightRadius: anchored.style.borderTopRightRadius,
+      borderBottomRightRadius: anchored.style.borderBottomRightRadius,
+      borderBottomLeftRadius: anchored.style.borderBottomLeftRadius,
+      hover: {
+        opacity: surfaceHover.opacity,
+        borderTopLeftRadius: surfaceHover.borderTopLeftRadius,
+        backgroundColor: surfaceHover.backgroundColor,
+      },
+      active: {
+        opacity: surfaceActive.opacity,
+        borderBottomRightRadius: surfaceActive.borderBottomRightRadius,
+      },
+      occlude: anchored.customProps?.occlude,
+    }).toMatchInlineSnapshot(`
+      {
+        "active": {
+          "borderBottomRightRadius": 28,
+          "opacity": 0.9,
+        },
+        "borderBottomLeftRadius": 20,
+        "borderBottomRightRadius": 12,
+        "borderRadius": 16,
+        "borderTopLeftRadius": 4,
+        "borderTopRightRadius": 8,
+        "hover": {
+          "backgroundColor": null,
+          "borderTopLeftRadius": 24,
+          "opacity": 0.75,
+        },
+        "occlude": true,
+        "opacity": 0.5,
+        "visibility": "hidden",
+      }
+    `)
+    expect(content.style.opacity).toBeUndefined()
+    expect((content.style.hover as Record<string, unknown>).opacity).toBeNull()
+    expect((content.style.hover as Record<string, unknown>).backgroundColor).toBe("#222222")
+  })
+
+  it("keeps a pointerEvents none surface out of hover and active", () => {
+    const { anchored, content } = renderSurfaceLayer("none")
+
+    expect({
+      opacity: anchored.style.opacity,
+      hover: anchored.style.hover,
+      active: anchored.style.active,
+      occlude: anchored.customProps?.occlude,
+    }).toMatchInlineSnapshot(`
+      {
+        "active": undefined,
+        "hover": undefined,
+        "occlude": false,
+        "opacity": 0.5,
+      }
+    `)
+    expect(content.style.opacity).toBeUndefined()
   })
 
   it("composes a headless Select and supports keyboard selection", () => {

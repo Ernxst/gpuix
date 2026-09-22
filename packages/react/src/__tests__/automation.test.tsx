@@ -705,7 +705,7 @@ describeNative("automation", () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
-  it("publishes every ariaCurrent token as AccessKit current-item state", () => {
+  it("publishes ariaCurrent as global AccessKit current-item state", () => {
     const values = ["page", "step", "location", "date", "time", "true", "false"] as const
     const { render, renderer } = createTestRoot({ strictStyles: true })
 
@@ -727,6 +727,10 @@ describeNative("automation", () => {
             aria-current={current}
           />,
         ])}
+        <button ariaLabel="Rotor Rise" aria-current="location" />
+        <div role="listitem" ariaLabel="Current result" ariaCurrent="true" />
+        <div role="row" ariaLabel="Current row" ariaCurrent="step" />
+        <div ariaLabel="Current generic" ariaCurrent="date" />
       </div>
     )
     renderer.flush()
@@ -739,6 +743,166 @@ describeNative("automation", () => {
       expect(byLabel(`Camel ${current}`)).toMatchObject({ role: "Link", current: expected })
       expect(byLabel(`Hyphen ${current}`)).toMatchObject({ role: "Link", current: expected })
     }
+    expect(byLabel("Rotor Rise")).toMatchObject({ role: "Button", current: "Location" })
+    expect(byLabel("Current result")).toMatchObject({ role: "ListItem", current: "True" })
+    expect(byLabel("Current row")).toMatchObject({ role: "Row", current: "Step" })
+    expect(byLabel("Current generic")).toMatchObject({
+      role: "GenericContainer",
+      current: "Date",
+    })
+  })
+
+  it("publishes ariaPressed as button toggle state for both prop spellings", () => {
+    const { render, renderer } = createTestRoot({ strictStyles: true })
+    const values = [true, false, "mixed"] as const
+
+    render(
+      <div>
+        {values.flatMap((pressed) => [
+          <button
+            key={`implicit-camel-${String(pressed)}`}
+            ariaLabel={`Implicit camel ${String(pressed)}`}
+            ariaPressed={pressed}
+          />,
+          <button
+            key={`implicit-hyphen-${String(pressed)}`}
+            aria-label={`Implicit hyphen ${String(pressed)}`}
+            aria-pressed={pressed}
+          />,
+          <div
+            key={`explicit-camel-${String(pressed)}`}
+            role="button"
+            ariaLabel={`Explicit camel ${String(pressed)}`}
+            ariaPressed={pressed}
+          />,
+          <div
+            key={`explicit-hyphen-${String(pressed)}`}
+            role="button"
+            aria-label={`Explicit hyphen ${String(pressed)}`}
+            aria-pressed={pressed}
+          />,
+        ])}
+      </div>
+    )
+    renderer.flush()
+    renderer.drawPendingFrame()
+
+    const nodes = Object.values(renderer.getAccessibilityTree().nodes)
+    const byLabel = (label: string) => nodes.find((node) => node.aria.label === label)?.aria
+    for (const pressed of values) {
+      const expected =
+        pressed === "mixed" ? "Mixed" : pressed ? "True" : "False"
+      for (const host of ["Implicit", "Explicit"]) {
+        for (const spelling of ["camel", "hyphen"]) {
+          expect(byLabel(`${host} ${spelling} ${String(pressed)}`)).toMatchObject({
+            role: "Button",
+            toggled: expected,
+          })
+        }
+      }
+    }
+
+    render(<button ariaLabel="Dynamic pressed" ariaPressed />)
+    renderer.flush()
+    renderer.drawPendingFrame()
+    expect(
+      Object.values(renderer.getAccessibilityTree().nodes).find(
+        (node) => node.aria.label === "Dynamic pressed"
+      )?.aria.toggled
+    ).toBe("True")
+
+    render(<button ariaLabel="Dynamic pressed" ariaPressed={false} />)
+    renderer.flush()
+    renderer.drawPendingFrame()
+    expect(
+      Object.values(renderer.getAccessibilityTree().nodes).find(
+        (node) => node.aria.label === "Dynamic pressed"
+      )?.aria.toggled
+    ).toBe("False")
+
+    render(<button ariaLabel="Dynamic pressed" />)
+    renderer.flush()
+    renderer.drawPendingFrame()
+    expect(
+      Object.values(renderer.getAccessibilityTree().nodes).find(
+        (node) => node.aria.label === "Dynamic pressed"
+      )?.aria.toggled
+    ).toBeUndefined()
+  })
+
+  it("publishes and clears the remaining Base UI ARIA states", () => {
+    const { render, renderer } = createTestRoot({ strictStyles: true })
+    const draw = () => {
+      renderer.flush()
+      renderer.drawPendingFrame()
+    }
+    const byLabel = (label: string) =>
+      Object.values(renderer.getAccessibilityTree().nodes).find(
+        (node) => node.aria.label === label
+      )?.aria
+
+    render(
+      <div>
+        <div role="separator" ariaLabel="Camel separator" ariaOrientation="horizontal" />
+        <div role="separator" aria-label="Hyphen separator" aria-orientation="vertical" />
+        <input ariaLabel="Camel field" ariaReadOnly ariaRequired ariaInvalid="grammar" />
+        <input
+          aria-label="Hyphen field"
+          aria-readonly="true"
+          aria-required="true"
+          aria-invalid="spelling"
+        />
+      </div>
+    )
+    draw()
+
+    expect(byLabel("Camel separator")).toMatchObject({
+      role: "Splitter",
+      orientation: "Horizontal",
+    })
+    expect(byLabel("Hyphen separator")).toMatchObject({
+      role: "Splitter",
+      orientation: "Vertical",
+    })
+    expect(byLabel("Camel field")).toMatchObject({
+      role: "TextInput",
+      read_only: true,
+      required: true,
+      invalid: "Grammar",
+    })
+    expect(byLabel("Hyphen field")).toMatchObject({
+      role: "TextInput",
+      read_only: true,
+      required: true,
+      invalid: "Spelling",
+    })
+
+    render(<input ariaLabel="Dynamic field" ariaReadOnly ariaRequired ariaInvalid />)
+    draw()
+    expect(byLabel("Dynamic field")).toMatchObject({
+      read_only: true,
+      required: true,
+      invalid: "True",
+    })
+
+    render(
+      <input
+        ariaLabel="Dynamic field"
+        ariaReadOnly={false}
+        ariaRequired="false"
+        ariaInvalid={false}
+      />
+    )
+    draw()
+    expect(byLabel("Dynamic field")).not.toHaveProperty("read_only")
+    expect(byLabel("Dynamic field")).not.toHaveProperty("required")
+    expect(byLabel("Dynamic field")).not.toHaveProperty("invalid")
+
+    render(<input ariaLabel="Dynamic field" />)
+    draw()
+    expect(byLabel("Dynamic field")).not.toHaveProperty("read_only")
+    expect(byLabel("Dynamic field")).not.toHaveProperty("required")
+    expect(byLabel("Dynamic field")).not.toHaveProperty("invalid")
   })
 
   it("warns once per instance for unsupported hyphenated aria props under strict mode", () => {

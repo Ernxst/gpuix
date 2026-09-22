@@ -12,6 +12,7 @@ packages/native/wasm/
 # same generated pair as packages/native/wasm above.
 examples/web-dist/
 examples/bundle/
+examples/idle-hello.cjs
 examples/AppIcon.icns
 tmp-icons/
 # Test output churns every run; the curated set the README links to lives in

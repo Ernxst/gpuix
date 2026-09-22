@@ -15,11 +15,13 @@ use crate::renderer::EventCallback;
 
 pub mod anchored;
 pub mod canvas;
+pub mod choice_input;
 pub mod code;
 pub mod diff;
 pub mod img;
 pub mod input;
 pub mod markdown;
+pub mod range_input;
 
 // ── Render context ───────────────────────────────────────────────────
 
@@ -199,6 +201,21 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
     cx: &mut gpui::Context<crate::renderer::GpuixView>,
 ) -> E {
     let id = ctx.id;
+    let tracks_mouse_down = ctx.events.contains("mouseDown");
+    // Custom elements receive only the events declared on themselves in
+    // `ctx.events`, but React dispatches pointer events through the retained
+    // ancestor path. Install the native source when an ancestor owns one of
+    // these handlers so a custom-element hit remains the React target.
+    let tracks_pointer_down =
+        crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerDown");
+    let tracks_pointer_cancel =
+        crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerCancel");
+    let tracks_context_menu = ctx.events.contains("contextMenu");
+    let tracks_mouse_up = ctx.events.contains("mouseUp");
+    let tracks_pointer_up =
+        crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerUp");
+    let tracks_pointer_move =
+        crate::renderer::tracks_pointer_event(ctx.retained_element, ctx.tree, "pointerMove");
     // `doubleClick` and `contextMenu` are synthesized in React from the click
     // and mouse-down payloads, so they ride those listeners rather than owning
     // one. The flag keeps an element that declares both `click` and
@@ -237,23 +254,7 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
                     });
                 });
             }
-            "contextMenu" => {
-                el = el.on_mouse_down(gpui::MouseButton::Right, move |event, _window, cx| {
-                    crate::renderer::emit_event_full(&callback, id, "mouseDown", |p| {
-                        let (x, y) = crate::renderer::point_to_xy(event.position);
-                        p.x = Some(x);
-                        p.y = Some(y);
-                        p.button = Some(crate::renderer::mouse_button_to_u32(event.button));
-                        p.click_count = Some(event.click_count as u32);
-                        p.modifiers = Some(event.modifiers.into());
-                    });
-                    // The div and canvas paths stop here too. Without it an
-                    // ancestor's own GPUI listener also fires and React
-                    // dispatches its `onMouseDown` twice: once bubbling from
-                    // this element, once at the ancestor.
-                    cx.stop_propagation();
-                });
-            }
+            "mouseDown" | "pointerDown" | "contextMenu" | "mouseUp" | "pointerUp" => {}
             "wheel" => {
                 el = el.on_scroll_wheel(move |scroll, _window, _cx| {
                     crate::renderer::emit_event_full(&callback, id, "wheel", |p| {
@@ -271,6 +272,57 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
             _ => {}
         }
     }
+    if tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel || tracks_context_menu {
+        for &button in crate::renderer::mouse_down_button_set(
+            tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel,
+        ) {
+            let callback = ctx.event_callback.clone();
+            el = el.on_mouse_down(
+                button,
+                cx.listener(move |view, event, _window, cx| {
+                    view.record_pointer_down(id, event);
+                    if tracks_pointer_down {
+                        crate::renderer::emit_pointer_down(&callback, id, event);
+                    }
+                    if tracks_mouse_down || tracks_context_menu {
+                        crate::renderer::emit_event_full(&callback, id, "mouseDown", |p| {
+                            let (x, y) = crate::renderer::point_to_xy(event.position);
+                            p.x = Some(x);
+                            p.y = Some(y);
+                            p.button = Some(crate::renderer::mouse_button_to_u32(event.button));
+                            p.click_count = Some(event.click_count as u32);
+                            p.modifiers = Some(event.modifiers.into());
+                        });
+                    }
+                    // The div and canvas paths stop here too. Without it an
+                    // ancestor's own GPUI listener also fires and React
+                    // dispatches its `onMouseDown` twice: once bubbling from
+                    // this element, once at the ancestor.
+                    cx.stop_propagation();
+                }),
+            );
+        }
+    }
+    if tracks_mouse_up || tracks_pointer_up {
+        for &button in &[
+            gpui::MouseButton::Left,
+            gpui::MouseButton::Middle,
+            gpui::MouseButton::Right,
+        ] {
+            let callback = ctx.event_callback.clone();
+            el = el.on_mouse_up(button, move |event, _window, cx| {
+                if tracks_pointer_up {
+                    crate::renderer::emit_pointer_up(&callback, id, event);
+                }
+                if tracks_mouse_up {
+                    crate::renderer::emit_event_full(&callback, id, "mouseUp", |p| {
+                        crate::renderer::populate_mouse_up_payload(p, event);
+                    });
+                }
+                cx.stop_propagation();
+            });
+        }
+    }
     let el = crate::renderer::wire_external_drag_events(
         el,
         ctx.retained_element,
@@ -278,6 +330,13 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
         ctx.event_callback,
         cx,
     );
+    let el = if (tracks_mouse_down && ctx.events.contains("mouseMove"))
+        || (tracks_pointer_down && tracks_pointer_move)
+    {
+        el.capture_pointer()
+    } else {
+        el
+    };
     wire_hover_and_style_transition_events(el, ctx, cx)
 }
 
@@ -499,6 +558,19 @@ pub trait CustomElementFactory: 'static {
 
     /// Create a new element instance.
     fn create(&self, id: u64) -> Box<dyn CustomElement>;
+
+    /// Which adapter this declaration needs, for an element type served by
+    /// several — `<input>` is a text editor, a choice control, or a hidden
+    /// input according to its `type`. A change recreates the adapter, which
+    /// then receives every prop afresh.
+    fn variant(&self, _props: &HashMap<String, serde_json::Value>) -> &'static str {
+        ""
+    }
+
+    /// Create the adapter for a variant `variant` returned.
+    fn create_variant(&self, id: u64, _variant: &'static str) -> Box<dyn CustomElement> {
+        self.create(id)
+    }
 }
 
 // ── Registry ─────────────────────────────────────────────────────────
@@ -506,6 +578,7 @@ pub trait CustomElementFactory: 'static {
 /// Stores one custom adapter together with the state already synchronized into it.
 struct CustomElementEntry {
     element_type: String,
+    variant: &'static str,
     element: Box<dyn CustomElement>,
     applied_props: HashMap<String, serde_json::Value>,
 }
@@ -578,12 +651,22 @@ impl CustomElementRegistry {
     }
 
     /// Get an existing adapter or create one via the registered factory.
-    /// Reusing an ID for another type destroys the old adapter first.
-    fn get_or_create(&mut self, id: u64, element_type: &str) -> Option<&mut CustomElementEntry> {
+    /// Reusing an ID for another type, or a declaration switching variant,
+    /// destroys the old adapter first.
+    fn get_or_create(
+        &mut self,
+        id: u64,
+        element_type: &str,
+        props: &HashMap<String, serde_json::Value>,
+    ) -> Option<&mut CustomElementEntry> {
+        let variant = self
+            .factories
+            .get(element_type)
+            .map_or("", |factory| factory.variant(props));
         if self
             .instances
             .get(&id)
-            .is_some_and(|entry| entry.element_type != element_type)
+            .is_some_and(|entry| entry.element_type != element_type || entry.variant != variant)
         {
             self.destroy(id);
         }
@@ -594,11 +677,21 @@ impl CustomElementRegistry {
                 let factory = self.factories.get(element_type)?;
                 Some(entry.insert(CustomElementEntry {
                     element_type: element_type.to_string(),
-                    element: factory.create(id),
+                    variant,
+                    element: factory.create_variant(id, variant),
                     applied_props: HashMap::new(),
                 }))
             }
         }
+    }
+
+    /// Whether the element emits `event_type` itself while it listens for it.
+    /// The renderer wires every event on an element without an adapter; an
+    /// adapter emits only the events in its `supported_events`.
+    pub(crate) fn emits_event(&self, id: u64, event_type: &str) -> bool {
+        self.instances
+            .get(&id)
+            .is_none_or(|entry| entry.element.supported_events().contains(&event_type))
     }
 
     /// Synchronize one retained frame into an adapter and render it.
@@ -612,7 +705,7 @@ impl CustomElementRegistry {
     ) -> gpui::AnyElement {
         use gpui::IntoElement;
 
-        let Some(entry) = self.get_or_create(ctx.id, element_type) else {
+        let Some(entry) = self.get_or_create(ctx.id, element_type, props) else {
             log::warn!("Unknown element type: {element_type}");
             return gpui::Empty.into_any_element();
         };
@@ -792,6 +885,7 @@ mod tests {
         let destroyed = Rc::new(Cell::new(0));
         let mut entry = CustomElementEntry {
             element_type: "recording".to_string(),
+            variant: "",
             element: Box::new(RecordingElement {
                 updates: updates.clone(),
                 destroyed,
@@ -839,8 +933,8 @@ mod tests {
             }));
         }
 
-        assert!(registry.get_or_create(42, "first").is_some());
-        assert!(registry.get_or_create(42, "second").is_some());
+        assert!(registry.get_or_create(42, "first", &HashMap::new()).is_some());
+        assert!(registry.get_or_create(42, "second", &HashMap::new()).is_some());
         assert_eq!(destroyed.get(), 1);
     }
 }

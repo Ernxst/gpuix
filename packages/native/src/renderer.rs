@@ -53,7 +53,7 @@ use wasm_bindgen::JsCast as _;
 use crate::canvas::{CanvasDiagnostic, SharedDisplayLists};
 use crate::custom_elements::input::TextEditingState;
 use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
-use crate::element_tree::EventPayload;
+use crate::element_tree::{EventModifiers, EventPayload};
 use crate::retained_tree::{RetainedTree, StyleTable};
 use crate::style::{
     parse_font_weight, GridAutoRepeatKind, GridLineValue, GridRepeatCount,
@@ -960,6 +960,11 @@ thread_local! {
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     static PENDING_DEBUG_OVERLAY: RefCell<Option<gpui::DebugFrameOverlayMode>> =
         const { RefCell::new(None) };
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    static PENDING_WINDOW_SELECTION_CHANGE: RefCell<Option<(bool, u64)>> =
+        const { RefCell::new(None) };
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    static PENDING_FOCUS_ELEMENT: RefCell<Option<(u64, bool)>> = const { RefCell::new(None) };
     /// Shared scroll handles — GpuixView writes here during render(),
     /// platform-local handlers read from here for programmatic scroll control.
     /// ScrollHandle is Rc<RefCell<...>> so its methods (set_offset, offset,
@@ -1393,6 +1398,7 @@ enum UiCommand {
     RequestFrame {
         callback: AnimationFrameCallback,
         timestamp_origin: FrameTimestampOrigin,
+        requested_timestamp_origin: FrameTimestampOriginPair,
     },
     SetMenus {
         menus: Vec<MenuSpec>,
@@ -1406,7 +1412,14 @@ enum UiCommand {
         response: SyncSender<()>,
     },
     ActivateWindow,
+    MinimizeWindow,
+    ZoomWindow,
+    ToggleFullscreen,
     SetWindowTitle(String),
+    SetWindowSelectionChange {
+        enabled: bool,
+        event_id: u64,
+    },
     GetWindowSize {
         response: SyncSender<WindowSize>,
     },
@@ -1630,13 +1643,14 @@ async fn run_ui_commands(
             UiCommand::RequestFrame {
                 callback,
                 timestamp_origin,
-            } => window.update(cx, move |_view, window, cx| {
+                requested_timestamp_origin,
+            } => window.update(cx, move |_view, window, _cx| {
                 let origin =
-                    animation_frame_origin(&timestamp_origin, cx.background_executor().now());
-                window.on_next_frame(move |_window, cx| {
+                    animation_frame_origin(&timestamp_origin, requested_timestamp_origin);
+                window.on_next_frame(move |_window, _cx| {
                     dispatch_animation_frame_callback(
                         callback,
-                        animation_frame_timestamp_ms(origin, cx.background_executor().now()),
+                        animation_frame_timestamp_ms(origin, web_time::Instant::now()),
                     );
                 });
             }),
@@ -1660,11 +1674,25 @@ async fn run_ui_commands(
                 window.activate_window();
                 order_window_front_regardless(window);
             }),
+            UiCommand::MinimizeWindow => {
+                window.update(cx, |_view, window, _cx| window.minimize_window())
+            }
+            UiCommand::ZoomWindow => window.update(cx, |_view, window, _cx| window.zoom_window()),
+            UiCommand::ToggleFullscreen => {
+                window.update(cx, |_view, window, _cx| window.toggle_fullscreen())
+            }
             UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
                 view.window_title = title;
                 cx.notify();
                 window.refresh();
             }),
+            UiCommand::SetWindowSelectionChange { enabled, event_id } => {
+                window.update(cx, move |view, window, cx| {
+                    view.set_selection_change_listener(enabled, event_id);
+                    cx.notify();
+                    window.refresh();
+                })
+            }
             UiCommand::GetWindowSize { response } => {
                 window.update(cx, move |_view, window, _cx| {
                     response.send(window_size(window)).ok();
@@ -2473,7 +2501,24 @@ pub(crate) type AnimationFrameCallback =
     ThreadsafeFunction<f64, Unknown<'static>, f64, Status, false, false, 1>;
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-pub(crate) type FrameTimestampOrigin = Arc<Mutex<Option<web_time::Instant>>>;
+#[derive(Clone, Copy)]
+pub(crate) struct FrameTimestampOriginPair {
+    native: web_time::Instant,
+    performance_ms: f64,
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+impl FrameTimestampOriginPair {
+    pub(crate) fn new(native: web_time::Instant, performance_ms: f64) -> Self {
+        Self {
+            native,
+            performance_ms,
+        }
+    }
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub(crate) type FrameTimestampOrigin = Arc<Mutex<Option<FrameTimestampOriginPair>>>;
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 type PickerDeferred =
@@ -2579,23 +2624,56 @@ fn settle_new_path(guard: PickerPathGuard, result: anyhow::Result<Option<PathBuf
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub(crate) fn animation_frame_origin(
     timestamp_origin: &FrameTimestampOrigin,
-    now: web_time::Instant,
-) -> web_time::Instant {
+    requested_origin: FrameTimestampOriginPair,
+) -> FrameTimestampOriginPair {
     let mut timestamp_origin = timestamp_origin
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *timestamp_origin.get_or_insert(now)
+    *timestamp_origin.get_or_insert(requested_origin)
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub(crate) fn animation_frame_timestamp_ms(
-    timestamp_origin: web_time::Instant,
+    timestamp_origin: FrameTimestampOriginPair,
     frame_time: web_time::Instant,
 ) -> f64 {
-    frame_time
-        .saturating_duration_since(timestamp_origin)
-        .as_secs_f64()
-        * 1_000.0
+    timestamp_origin.performance_ms
+        + frame_time
+            .saturating_duration_since(timestamp_origin.native)
+            .as_secs_f64()
+            * 1_000.0
+}
+
+#[cfg(all(test, not(all(target_arch = "wasm32", target_os = "unknown"))))]
+mod animation_frame_timestamp_tests {
+    use super::*;
+
+    #[test]
+    fn retains_the_performance_origin_for_the_renderer_lifetime() {
+        let timestamp_origin = Arc::new(Mutex::new(None));
+        let native_origin = web_time::Instant::now();
+        let first = animation_frame_origin(
+            &timestamp_origin,
+            FrameTimestampOriginPair::new(native_origin, 1_000.0),
+        );
+        let reattached = animation_frame_origin(
+            &timestamp_origin,
+            FrameTimestampOriginPair::new(
+                native_origin + std::time::Duration::from_millis(10),
+                9_000.0,
+            ),
+        );
+
+        assert_eq!(first.performance_ms, 1_000.0);
+        assert_eq!(reattached.performance_ms, 1_000.0);
+        assert_eq!(
+            animation_frame_timestamp_ms(
+                reattached,
+                native_origin + std::time::Duration::from_millis(16),
+            ),
+            1_016.0
+        );
+    }
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -3006,7 +3084,6 @@ impl GpuixRenderer {
         // bun/node is not a .app. A Dock icon with no window cannot relaunch.
         // Last window close quits AppKit; tick() returns false and JS exits.
         let app = gpui::Application::with_platform(platform.clone())
-            .with_http_client(default_http_client())
             .with_quit_mode(gpui::QuitMode::LastWindowClosed);
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             let reduced_motion = effective_reduced_motion(reduced_motion_override, || {
@@ -3022,9 +3099,17 @@ impl GpuixRenderer {
             init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
             init_application_menu_support(cx, Some(application_callback.clone()));
-            if let Err(error) = install_application_menus(cx, &app_name, menus) {
-                *startup_error_for_app.borrow_mut() = Some(error);
-                return;
+            // Default menus (`menus: None`) load WritingToolsUI and, with it,
+            // SwiftUI, WebKit and about a hundred other frameworks; deferred
+            // below until after the second frame so it does not delay the
+            // first present. Caller-supplied menus are cheap and installed
+            // now so `open_window` observes any invalid spec immediately.
+            let defer_default_menus = menus.is_none();
+            if !defer_default_menus {
+                if let Err(error) = install_application_menus(cx, &app_name, menus) {
+                    *startup_error_for_app.borrow_mut() = Some(error);
+                    return;
+                }
             }
             let window_size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
             #[cfg(feature = "display-discovery-fault-injection")]
@@ -3065,6 +3150,19 @@ impl GpuixRenderer {
                                 })
                                 .ok();
                         }
+                    }
+                    if defer_default_menus {
+                        let app_name = app_name.clone();
+                        window_handle
+                            .update(cx, |_view, window, _cx| {
+                                window.on_next_frame(move |window, _cx| {
+                                    window.on_next_frame(move |_window, cx| {
+                                        // The default-menu path cannot fail.
+                                        let _ = install_application_menus(cx, &app_name, None);
+                                    });
+                                });
+                            })
+                            .ok();
                     }
                 }
                 Err(error) => {
@@ -3193,7 +3291,6 @@ impl GpuixRenderer {
                 Self::enable_per_monitor_dpi();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let app = gpui_platform::application()
-                        .with_http_client(default_http_client())
                         .with_quit_mode(gpui::QuitMode::LastWindowClosed);
                     app.run(move |cx| {
                         let reduced_motion =
@@ -3394,6 +3491,25 @@ impl GpuixRenderer {
             self.request_invalidate()?;
         }
         Ok(())
+    }
+
+    #[napi]
+    pub fn apply_canvas_command_delta(&self, id: f64, ops: Uint32Array, operands: Float64Array, strings: Vec<String>) -> Result<()> {
+        self.surface_canvas_preparation_diagnostics()?;
+        let id = to_element_id(id)?; let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
+        let decoded = crate::canvas::decode_delta(&self.canvas_display_lists, id, ops.as_ref(), operands.as_ref(), &strings, canvas_size(&tree, id)).map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
+        let strict = self.strict_styles.load(Ordering::Relaxed);
+        if strict && !decoded.diagnostics.is_empty() { let message = first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics).unwrap(); return Err(Error::from_reason(message)); }
+        let outcome = crate::canvas::install_decoded_delta(&self.canvas_display_lists, id, decoded); drop(tree);
+        if !strict { self.style_diagnostics.lock().unwrap().extend(fresh_canvas_diagnostics(id, outcome.diagnostics, &self.canvas_diagnostic_members)); }
+        if outcome.invalidates { self.request_invalidate()?; } Ok(())
+    }
+
+    #[napi]
+    pub fn reset_canvas(&self, id: f64) -> Result<()> {
+        let id = to_element_id(id)?; let tree = self.tree.lock().unwrap(); validate_canvas_target(&tree, id).map_err(Error::from_reason)?; drop(tree);
+        crate::canvas::reset_canvas(&self.canvas_display_lists, id); self.request_invalidate()
     }
 
     /// Present one GPU-produced clear through the real macOS window renderer.
@@ -4172,17 +4288,20 @@ impl GpuixRenderer {
     pub fn request_frame(
         &self,
         #[napi(ts_arg_type = "(timestamp: number) => void")] callback: AnimationFrameCallback,
+        performance_timestamp_ms: f64,
     ) -> Result<()> {
+        let requested_timestamp_origin =
+            FrameTimestampOriginPair::new(web_time::Instant::now(), performance_timestamp_ms);
         #[cfg(target_os = "macos")]
         {
             let timestamp_origin = self.animation_frame_timestamp_origin.clone();
-            return update_window_without_view(move |window, cx| {
+            return update_window_without_view(move |window, _cx| {
                 let origin =
-                    animation_frame_origin(&timestamp_origin, cx.background_executor().now());
-                window.on_next_frame(move |_window, cx| {
+                    animation_frame_origin(&timestamp_origin, requested_timestamp_origin);
+                window.on_next_frame(move |_window, _cx| {
                     dispatch_animation_frame_callback(
                         callback,
-                        animation_frame_timestamp_ms(origin, cx.background_executor().now()),
+                        animation_frame_timestamp_ms(origin, web_time::Instant::now()),
                     );
                 });
             });
@@ -4192,6 +4311,7 @@ impl GpuixRenderer {
         return self.send_ui_command(UiCommand::RequestFrame {
             callback,
             timestamp_origin: self.animation_frame_timestamp_origin.clone(),
+            requested_timestamp_origin,
         });
 
         #[cfg(not(any(
@@ -4201,7 +4321,7 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         {
-            let _ = callback;
+            let _ = (callback, requested_timestamp_origin);
             Err(Error::from_reason(
                 "The production GPUIX renderer does not support animation frames",
             ))
@@ -4420,6 +4540,60 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Minimize the native window.
+    #[napi]
+    pub fn minimize_window(&self, _env: Env) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.minimize_window());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::MinimizeWindow);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        unsupported_capability(_env, "window.minimize")
+    }
+
+    /// Run the native zoom or maximize operation.
+    #[napi]
+    pub fn zoom_window(&self, _env: Env) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.zoom_window());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ZoomWindow);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        unsupported_capability(_env, "window.zoom")
+    }
+
+    /// Enter or exit native fullscreen.
+    #[napi]
+    pub fn toggle_fullscreen(&self, _env: Env) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.toggle_fullscreen());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ToggleFullscreen);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        unsupported_capability(_env, "window.fullscreen")
     }
 
     #[napi]
@@ -4751,6 +4925,29 @@ impl GpuixRenderer {
     }
 
     // ── Selection API ────────────────────────────────────────────────
+
+    /// Enable the window selectionChange event requested by the React renderer.
+    #[napi]
+    pub fn set_window_selection_change(&self, enabled: bool, event_id: f64) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.set_selection_change_listener(enabled, event_id);
+            cx.notify();
+            window.refresh();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetWindowSelectionChange { enabled, event_id });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
 
     /// The current text selection joined in document order, or null.
     #[napi]
@@ -6020,7 +6217,7 @@ fn start_web_app(
                 window.set_debug_frame_overlay_mode(mode);
             }
             cx.new(|view_cx| {
-                GpuixView::new(
+                let mut view = GpuixView::new(
                     tree,
                     canvas_display_lists,
                     Some(event_callback),
@@ -6029,7 +6226,15 @@ fn start_web_app(
                     selection,
                     crate::custom_elements::img::ImageNetworkPolicy::default(),
                     view_cx,
-                )
+                );
+                if let Some((enabled, event_id)) =
+                    PENDING_WINDOW_SELECTION_CHANGE.with(|pending| pending.borrow_mut().take())
+                {
+                    view.set_selection_change_listener(enabled, event_id);
+                }
+                view.pending_focus_element =
+                    PENDING_FOCUS_ELEMENT.with(|pending| pending.borrow_mut().take());
+                view
             })
         });
         match window {
@@ -6409,6 +6614,19 @@ impl WebGpuixRenderer {
         Ok(())
     }
 
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = applyCanvasCommandDelta)]
+    pub fn apply_canvas_command_delta_web(&self, id: f64, ops: js_sys::Uint32Array, operands: js_sys::Float64Array, strings: js_sys::Array) -> Result<(), wasm_bindgen::JsValue> {
+        self.surface_canvas_preparation_diagnostics()?; let id = web_element_id(id)?; let tree = self.tree.lock().unwrap(); validate_canvas_target(&tree, id).map_err(|e| wasm_bindgen::JsValue::from_str(&e))?;
+        let mut op_values=vec![0;ops.length() as usize]; ops.copy_to(&mut op_values); let mut operand_values=vec![0.0;operands.length() as usize]; operands.copy_to(&mut operand_values);
+        let strings=strings.iter().enumerate().map(|(i,v)|v.as_string().ok_or_else(||wasm_bindgen::JsValue::from_str(&format!("<canvas> element {id}: side-table entry {i} is not a string")))).collect::<Result<Vec<_>,_>>()?;
+        let decoded=crate::canvas::decode_delta(&self.canvas_display_lists,id,&op_values,&operand_values,&strings,canvas_size(&tree,id)).map_err(|e|wasm_bindgen::JsValue::from_str(&format!("<canvas> element {id}: {e}")))?;
+        let strict=self.strict_styles.load(Ordering::Relaxed); if strict&&!decoded.diagnostics.is_empty(){return Err(wasm_bindgen::JsValue::from_str(&first_canvas_diagnostic_message(&tree,id,&decoded.diagnostics).unwrap()));}
+        let outcome=crate::canvas::install_decoded_delta(&self.canvas_display_lists,id,decoded); if !strict { for diagnostic in fresh_canvas_diagnostics(id,outcome.diagnostics,&self.canvas_diagnostic_members){web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&style_diagnostic_context(&diagnostic,&tree).0));} } drop(tree); if outcome.invalidates{notify_web();} Ok(())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = resetCanvas)]
+    pub fn reset_canvas_web(&self,id:f64)->Result<(),wasm_bindgen::JsValue>{let id=web_element_id(id)?;let tree=self.tree.lock().unwrap();validate_canvas_target(&tree,id).map_err(|e|wasm_bindgen::JsValue::from_str(&e))?;drop(tree);crate::canvas::reset_canvas(&self.canvas_display_lists,id);notify_web();Ok(())}
+
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = isInitialized)]
     pub fn is_initialized(&self) -> bool {
         WEB_APP.with(|app| app.borrow().is_some())
@@ -6455,6 +6673,10 @@ impl WebGpuixRenderer {
     ) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
         let reveal = !prevent_scroll.unwrap_or(false);
+        if WEB_WINDOW.with(|window| window.borrow().is_none()) {
+            PENDING_FOCUS_ELEMENT.with(|pending| *pending.borrow_mut() = Some((id, reveal)));
+            return Ok(());
+        }
         update_web_view(move |view, window, cx| {
             view.focus_element(id, reveal, window, cx);
         })
@@ -6552,6 +6774,25 @@ impl WebGpuixRenderer {
             .map_or(wasm_bindgen::JsValue::NULL, |value| {
                 wasm_bindgen::JsValue::from_str(&value)
             })
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowSelectionChange)]
+    pub fn set_window_selection_change(
+        &self,
+        enabled: bool,
+        event_id: f64,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let event_id = web_element_id(event_id)?;
+        if WEB_WINDOW.with(|window| window.borrow().is_none()) {
+            PENDING_WINDOW_SELECTION_CHANGE.with(|pending| {
+                *pending.borrow_mut() = Some((enabled, event_id));
+            });
+            return Ok(());
+        }
+        update_web_view(move |view, _window, cx| {
+            view.set_selection_change_listener(enabled, event_id);
+            cx.notify();
+        })
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = clearSelection)]
@@ -7083,6 +7324,8 @@ pub(crate) struct GpuixView {
     /// Created lazily for elements with keyboard or focus/blur listeners.
     /// Handles persist across renders so GPUI maintains focus state.
     pub(crate) focus_handles: HashMap<u64, gpui::FocusHandle>,
+    /// Latest explicit focus request waiting for its retained focus handle.
+    pending_focus_element: Option<(u64, bool)>,
     /// Autofocus targets whose reveal waits for their first layout pass.
     pending_autofocus_reveals: Vec<u64>,
     /// Tab defaults wait for the matching React keydown dispatch. Serializing
@@ -7151,6 +7394,9 @@ pub(crate) struct GpuixView {
     pub(crate) style_transition_frame_requests: u32,
     /// Live text selection, shared with the paint closures and the napi methods.
     pub(crate) selection: SharedSelection,
+    window_selection_change: bool,
+    window_selection_event_id: u64,
+    reported_selection: Option<u64>,
     pub(crate) image_network_policy: crate::custom_elements::img::ImageNetworkPolicy,
     /// Retained owner and pressed-button lifetime for mouse pointer capture.
     pointer_router: crate::pointer::SharedPointerRouter,
@@ -7274,6 +7520,24 @@ struct HighlightCacheEntry {
     reported: Option<u64>,
 }
 
+fn emit_motion_settled(
+    callback: &Option<EventCallback>,
+    tree: &crate::retained_tree::RetainedTree,
+    completions: &[(u64, u64)],
+) {
+    for &(id, generation) in completions {
+        if tree
+            .elements
+            .get(&id)
+            .is_some_and(|element| element.events.contains("motionComplete"))
+        {
+            emit_event_full(callback, id, "motionComplete", |payload| {
+                payload.motion_generation = Some(generation as f64);
+            });
+        }
+    }
+}
+
 fn emit_highlight_events(callback: &Option<EventCallback>, events: &[(u64, usize)]) {
     for &(id, total) in events {
         emit_event_full(callback, id, "highlight", |payload| {
@@ -7382,6 +7646,7 @@ impl GpuixView {
             root_focus_handle: cx.focus_handle().tab_stop(false),
             focus_lost_subscription: None,
             focus_handles: HashMap::new(),
+            pending_focus_element: None,
             pending_autofocus_reveals: Vec::new(),
             pending_tab_key_down: None,
             queued_tab_key_downs: VecDeque::new(),
@@ -7410,6 +7675,9 @@ impl GpuixView {
             transition_states: HashMap::new(),
             style_transition_frame_requests: 0,
             selection,
+            window_selection_change: false,
+            window_selection_event_id: 0,
+            reported_selection: None,
             image_network_policy,
             pointer_router: Default::default(),
             window_activation_subscription: None,
@@ -7436,6 +7704,34 @@ impl GpuixView {
 
     pub(crate) fn unobserve_resize(&mut self, id: u64) {
         self.observed_resizes.remove(&id);
+    }
+
+    pub(crate) fn set_selection_change_listener(&mut self, enabled: bool, event_id: u64) {
+        self.window_selection_change = enabled;
+        self.window_selection_event_id = event_id;
+        self.reported_selection = None;
+    }
+
+    fn emit_selection_change(&mut self) {
+        if !self.window_selection_change {
+            return;
+        }
+        let selection = self.selection.lock();
+        let identity = selection.identity();
+        if self.reported_selection == Some(identity)
+            || (identity == 0 && self.reported_selection.is_none())
+        {
+            return;
+        }
+        let value = selection.selected_text();
+        drop(selection);
+        self.reported_selection = Some(identity);
+        emit_event_full(
+            &self.event_callback,
+            self.window_selection_event_id,
+            "selectionChange",
+            |payload| payload.value = value,
+        );
     }
 
     fn emit_resize_observations(&mut self, scale_factor: f64) {
@@ -7800,9 +8096,36 @@ impl GpuixView {
         }
     }
 
+    pub(crate) fn record_pointer_down(&mut self, id: u64, event: &gpui::MouseDownEvent) {
+        let (x, y) = point_to_xy(event.position);
+        let mut router = self.pointer_router.borrow_mut();
+        router.record_target(id);
+        router.record_sample(x, y, event.modifiers.into());
+    }
+
+    pub(crate) fn record_pointer_sample(&mut self, x: f64, y: f64, modifiers: EventModifiers) {
+        self.pointer_router
+            .borrow_mut()
+            .record_sample(x, y, modifiers);
+    }
+
     fn cancel_pointer_sequence(&mut self, window: &mut gpui::Window) -> bool {
-        if self.pointer_router.borrow_mut().cancel() {
+        let was_pressed = self.pointer_router.borrow().is_pressed();
+        if let Some(cancelled) = self.pointer_router.borrow_mut().cancel() {
+            emit_event_full(&self.event_callback, cancelled.target, "pointerCancel", |payload| {
+                payload.x = cancelled.x;
+                payload.y = cancelled.y;
+                payload.modifiers = cancelled.modifiers;
+                populate_pointer_metadata(payload, 0);
+            });
             window.release_pointer();
+        }
+        // After the element's `pointerCancel`, as a DOM `pointercancel` reaches
+        // the document after its target; see `pointer_router_frame`.
+        if was_pressed {
+            emit_event_full(&self.event_callback, 0, "windowPointerCancel", |payload| {
+                populate_pointer_metadata(payload, 0);
+            });
         }
         let interactive_changed = self
             .interactive_style_states
@@ -7877,6 +8200,7 @@ impl GpuixView {
         let now = self.clock.now();
         let mut animation_active = false;
         let mut style_transition_active = false;
+        let mut motion_settled = Vec::new();
         let reduce_motion = cx.reduce_motion();
         let mut highlight_events = Vec::new();
 
@@ -7940,6 +8264,7 @@ impl GpuixView {
             now,
             animation_active: &mut animation_active,
             style_transition_active: &mut style_transition_active,
+            motion_settled: &mut motion_settled,
             reduce_motion,
             selection: self.selection.clone(),
             image_network_policy: &self.image_network_policy,
@@ -7953,6 +8278,7 @@ impl GpuixView {
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
+        emit_motion_settled(&callback, &tree, &motion_settled);
         if style_transition_active {
             self.style_transition_frame_requests =
                 self.style_transition_frame_requests.saturating_add(1);
@@ -8119,7 +8445,8 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        if let Some(handle) = self.focus_handles.get(&id) {
+        if let Some(handle) = self.focus_handles.get(&id).cloned() {
+            self.pending_focus_element = None;
             let hidden = {
                 let tree = self.tree.lock().unwrap();
                 self.display_none_in_ancestry(&tree, id, window)
@@ -8133,8 +8460,14 @@ impl GpuixView {
                     self.scroll_focused_element_into_view(id, cx);
                 }
             }
+        } else {
+            self.pending_focus_element = Some((id, reveal));
         }
         cx.notify();
+    }
+
+    pub(crate) fn queue_focus_element(&mut self, id: u64, reveal: bool) {
+        self.pending_focus_element = Some((id, reveal));
     }
 
     /// Whether `element_id` or any ancestor (including itself) currently
@@ -8199,6 +8532,7 @@ pub(crate) struct BuildCtx<'a> {
     pub now: web_time::Instant,
     pub animation_active: &'a mut bool,
     pub style_transition_active: &'a mut bool,
+    pub motion_settled: &'a mut Vec<(u64, u64)>,
     pub reduce_motion: bool,
     pub selection: SharedSelection,
     pub image_network_policy: &'a crate::custom_elements::img::ImageNetworkPolicy,
@@ -9141,48 +9475,123 @@ impl GpuixView {
         self.dispatch_next_scroll_key_down(window, cx);
     }
 
+    /// The focused element's key event when the element does not emit it
+    /// itself. A key event targets the focused element whether or not it
+    /// listens — a checkbox inside a keyboard-handling group, a row inside a
+    /// listbox — and the ancestors hear it through React's capture and bubble
+    /// path. Element-level listeners emit only for their own, focused element,
+    /// so this is the one other source and a key press is emitted once.
+    ///
+    /// An editor that emits Enter or a navigation key without a listener of its
+    /// own also stops propagation, so those keys never arrive here.
+    fn dispatch_focused_key_event(
+        &self,
+        event_type: &str,
+        keystroke: &gpui::Keystroke,
+        is_held: Option<bool>,
+        window: &gpui::Window,
+    ) {
+        let Some(target_id) = self.active_element_id(window) else {
+            return;
+        };
+        let tree = self.tree.lock().unwrap();
+        let Some(target) = tree.elements.get(&target_id) else {
+            return;
+        };
+        if self.emits_own_event(target, event_type)
+            || !listens_in_ancestry(&tree, target_id, event_type)
+        {
+            return;
+        }
+        drop(tree);
+        emit_event_full(&self.event_callback, target_id, event_type, |payload| {
+            payload.key = Some(keystroke.key.clone());
+            payload.key_char = keystroke.key_char.clone();
+            payload.is_held = is_held;
+            payload.modifiers = Some(keystroke.modifiers.into());
+        });
+    }
+
+    fn emits_own_event(
+        &self,
+        element: &crate::retained_tree::RetainedElement,
+        event_type: &str,
+    ) -> bool {
+        // A text editor also emits the keys an ancestor listens for; see
+        // `TextEditorElement::render`.
+        is_text_editor(element)
+            || element.events.contains(event_type)
+                && self.custom_registry.emits_event(element.id, event_type)
+    }
+
+    /// Queues a scroll key's default behind its keydown, and returns whether
+    /// the key took this path. The keydown is emitted here when its target
+    /// does not emit it itself.
     fn handle_scroll_key_down(
         &mut self,
         event: &gpui::KeyDownEvent,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
-    ) {
+    ) -> bool {
         let Some(action) = keyboard_scroll_action(&event.keystroke) else {
-            return;
+            return false;
         };
-        let target_id = self
-            .active_element_id(window)
-            .or_else(|| self.tree.lock().unwrap().root_id);
+        let active_id = self.active_element_id(window);
+        let target_id = active_id.or_else(|| self.tree.lock().unwrap().root_id);
         let Some(target_id) = target_id else {
-            return;
+            return false;
         };
 
         let tree = self.tree.lock().unwrap();
         let Some(target) = tree.elements.get(&target_id) else {
-            return;
+            return false;
         };
-        let is_editor = matches!(target.element_type.as_str(), "input" | "textarea");
-        let event_emitted = target.events.contains("keyDown");
+        let kind = crate::custom_elements::choice_input::InputKind::of(target);
+        let is_editor = is_text_editor(target);
+        // With nothing focused, the root's own key event came from the
+        // unfocused fallback.
+        let event_emitted = match active_id {
+            Some(_) => self.emits_own_event(target, "keyDown"),
+            None => target.events.contains("keyDown"),
+        };
         drop(tree);
 
         if is_editor {
             // A focused editor never enters the ancestor scroll-default chain:
             // its navigation keys resolve through the editor's own deferred
             // default, and its page and space keys are simply not scrolled.
-            return;
+            return false;
         }
+
+        // Space activates a checkbox or radio, a radio's arrow keys move its
+        // selection, and a range's arrow, page, Home and End keys step it;
+        // none of those scrolls.
+        let consumed = match kind {
+            crate::custom_elements::choice_input::InputKind::Checkbox => {
+                event.keystroke.key == "space"
+            }
+            crate::custom_elements::choice_input::InputKind::Radio => {
+                event.keystroke.key == "space"
+                    || matches!(action, KeyboardScrollAction::Line { .. })
+            }
+            crate::custom_elements::choice_input::InputKind::Range => {
+                event.keystroke.key != "space"
+            }
+            _ => false,
+        };
 
         self.enqueue_scroll_key_down(
             PendingScrollKeyDown {
                 target_id,
                 keystroke: event.keystroke.clone(),
                 is_held: event.is_held,
-                action,
+                action: (!consumed).then_some(action),
                 event_emitted,
             },
             window,
             cx,
         );
+        true
     }
 
     fn apply_keyboard_scroll(
@@ -9191,13 +9600,16 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        let Some(action) = request.action else {
+            return;
+        };
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
         let mut current = request.target_id;
 
         loop {
             if let Some(candidate) = keyboard_scroll_candidate(&tree, current) {
-                if self.apply_keyboard_scroll_candidate(&tree, candidate, request.action) {
+                if self.apply_keyboard_scroll_candidate(&tree, candidate, action) {
                     cx.notify();
                     window.refresh();
                     return;
@@ -9335,11 +9747,89 @@ impl GpuixView {
         if self.focus_unrendered_virtual_target(direction, window, cx) {
             return;
         }
+        self.leave_radio_group(direction, window, cx);
         match direction {
             FocusDirection::Next => window.focus_next(cx),
             FocusDirection::Previous => window.focus_prev(cx),
         }
+        self.enter_radio_group_backwards(direction, window, cx);
         self.scroll_current_focus_into_view(window, cx);
+    }
+
+    /// Radio groups over the radios Tab can reach: not under `display: none`
+    /// or `ariaHidden`.
+    fn reachable_radio_groups(
+        &self,
+        window: &gpui::Window,
+    ) -> crate::custom_elements::choice_input::RadioGroups {
+        let tree_arc = self.tree.clone();
+        let tree = tree_arc.lock().unwrap();
+        crate::custom_elements::choice_input::RadioGroups::collect(&tree, |id| {
+            self.display_none_in_ancestry(&tree, id, window)
+                || accessibility_hidden_in_ancestry(&tree, id)
+        })
+    }
+
+    fn focused_element_id(&self, window: &gpui::Window) -> Option<u64> {
+        self.focus_handles
+            .iter()
+            .find_map(|(id, handle)| handle.is_focused(window).then_some(*id))
+    }
+
+    /// Tab leaves a radio group from whichever member has focus. Traversal
+    /// continues from the group's last member going forwards and its first
+    /// going backwards, so no other member is visited on the way out.
+    fn leave_radio_group(
+        &mut self,
+        direction: FocusDirection,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(focused) = self.focused_element_id(window) else {
+            return;
+        };
+        let groups = self.reachable_radio_groups(window);
+        let Some(members) = groups.members(focused) else {
+            return;
+        };
+        let edge = match direction {
+            FocusDirection::Next => members.last(),
+            FocusDirection::Previous => members.first(),
+        };
+        if let Some(handle) = edge.and_then(|(id, _)| self.focus_handles.get(id)).cloned() {
+            handle.focus(window, cx);
+        }
+    }
+
+    /// Shift+Tab into a group with nothing checked lands on its last member,
+    /// as it does in a browser. The group's only tab stop is its first member,
+    /// which is right for Tab and wrong for Shift+Tab.
+    fn enter_radio_group_backwards(
+        &mut self,
+        direction: FocusDirection,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !matches!(direction, FocusDirection::Previous) {
+            return;
+        }
+        let Some(focused) = self.focused_element_id(window) else {
+            return;
+        };
+        let groups = self.reachable_radio_groups(window);
+        let Some(members) = groups.members(focused) else {
+            return;
+        };
+        if members.iter().any(|(_, checked)| *checked) {
+            return;
+        }
+        if let Some(handle) = members
+            .last()
+            .and_then(|(id, _)| self.focus_handles.get(id))
+            .cloned()
+        {
+            handle.focus(window, cx);
+        }
     }
 
     fn scroll_current_focus_into_view(
@@ -9599,15 +10089,23 @@ impl GpuixView {
                 return None;
             }
             tab_index(element).or_else(|| {
-                matches!(element.element_type.as_str(), "input" | "textarea").then_some(0)
+                crate::custom_elements::choice_input::is_default_focusable_control(element)
+                    .then_some(0)
             })
         };
+        // A radio group is one tab stop; its other members are reached with
+        // the arrow keys.
+        let radio_tab_skips = crate::custom_elements::choice_input::RadioGroups::collect(tree, |id| {
+            self.display_none_in_ancestry(tree, id, window)
+                || accessibility_hidden_in_ancestry(tree, id)
+        })
+        .tab_skips();
         let is_focus_anchor = |element: &crate::retained_tree::RetainedElement| {
             focused_id == Some(element.id)
                 && !sequential_tab_index(element).is_some_and(|index| index >= 0)
         };
         let needs_focus = |element: &crate::retained_tree::RetainedElement| {
-            matches!(element.element_type.as_str(), "input" | "textarea")
+            crate::custom_elements::choice_input::is_default_focusable_control(element)
                 || tab_index(element).is_some()
                 || element.events.contains("accessibilityAction")
                 || element.events.contains("keyDown")
@@ -9622,7 +10120,9 @@ impl GpuixView {
             let tab_index = sequential_tab_index(element);
             let focus_anchor = is_focus_anchor(element);
             let traversal_tab_index = focus_anchor.then_some(0).or(tab_index);
-            let tab_stop = !focus_anchor && tab_index.is_some_and(|index| index >= 0);
+            let tab_stop = !focus_anchor
+                && tab_index.is_some_and(|index| index >= 0)
+                && !radio_tab_skips.contains(&id);
 
             let native_disabled = crate::accessibility::is_native_disabled(element)
                 || accessibility_hidden_in_ancestry(tree, id);
@@ -10034,6 +10534,15 @@ impl gpui::Render for GpuixView {
         // Sync focus handles before building elements.
         self.sync_focus_handles(&tree, &callback, window, cx);
 
+        // Replaying queued focus can inspect the retained tree and reveal the
+        // target, both of which take this mutex. Release it after the handles
+        // exist, then reacquire it for the rest of the render.
+        drop(tree);
+        if let Some((id, reveal)) = self.pending_focus_element.take() {
+            self.focus_element(id, reveal, window, cx);
+        }
+        let tree = tree_arc.lock().unwrap();
+
         if self.focus_lost_subscription.is_none() {
             self.focus_lost_subscription = Some(cx.on_focus_lost(window, |view, window, cx| {
                 if window.focused(cx).is_none() {
@@ -10084,6 +10593,7 @@ impl gpui::Render for GpuixView {
         let now = self.clock.now();
         let mut animation_active = false;
         let mut style_transition_active = false;
+        let mut motion_settled = Vec::new();
         let reduce_motion = cx.reduce_motion();
         // Pruned by DECLARATION, not existence: an element that drops its
         // `highlight` prop keeps living, and its cached group list holds a copy
@@ -10125,6 +10635,7 @@ impl gpui::Render for GpuixView {
                     now,
                     animation_active: &mut animation_active,
                     style_transition_active: &mut style_transition_active,
+                    motion_settled: &mut motion_settled,
                     reduce_motion,
                     selection: self.selection.clone(),
                     image_network_policy: &self.image_network_policy,
@@ -10143,6 +10654,8 @@ impl gpui::Render for GpuixView {
         // Flushed after the root build so a `setState` in the handler cannot
         // re-enter this build.
         emit_highlight_events(&callback, &highlight_events);
+        emit_motion_settled(&callback, &tree, &motion_settled);
+        self.emit_selection_change();
 
         // The frame reset must paint BEFORE any text, so it is the first child of
         // the root wrapper. Without it the selection registry accumulates stale
@@ -10167,29 +10680,46 @@ impl gpui::Render for GpuixView {
                             Some(event.is_held),
                             window,
                         );
-                        view.handle_scroll_key_down(event, window, cx);
+                        if !view.handle_scroll_key_down(event, window, cx) {
+                            view.dispatch_focused_key_event(
+                                "keyDown",
+                                &event.keystroke,
+                                Some(event.is_held),
+                                window,
+                            );
+                        }
                     }),
                 )
                 .on_key_up(cx.listener(|view, event: &gpui::KeyUpEvent, window, _cx| {
                     view.dispatch_unfocused_key_event("keyUp", &event.keystroke, None, window);
+                    view.dispatch_focused_key_event("keyUp", &event.keystroke, None, window);
                 }));
             with_window_menu_actions(root)
                 .child(selection_frame_reset(
                     self.selection.clone(),
                     move |position, app| {
-                        drag_move_view
-                            .update(app, |view, cx| view.on_selection_mouse_move(position, cx))
-                            .ok();
+                        // AppKit dispatches with GpuixView leased. Defer until
+                        // that lease returns or a nested update panics.
+                        let drag_move_view = drag_move_view.clone();
+                        app.defer(move |app| {
+                            drag_move_view
+                                .update(app, |view, cx| view.on_selection_mouse_move(position, cx))
+                                .ok();
+                        });
                     },
                     move |app| {
-                        drag_end_view
-                            .update(app, |view, _cx| view.stop_selection_scroll())
-                            .ok();
+                        let drag_end_view = drag_end_view.clone();
+                        app.defer(move |app| {
+                            drag_end_view
+                                .update(app, |view, _cx| view.stop_selection_scroll())
+                                .ok();
+                        });
                     },
                 ))
                 .child(crate::automation::bounds_frame_reset())
                 .child(crate::pointer::pointer_router_frame(
                     self.pointer_router.clone(),
+                    self.event_callback.clone(),
                 ))
                 .child(result)
                 .child(crate::automation::resize_observation_frame(
@@ -10637,7 +11167,7 @@ fn build_element_with_parent_layout(
             .and_then(|_| ctx.motion_states.get(&id))
             .filter(|state| state.is_valid())
             .map(|state| {
-                let frame = state.frame(ctx.now, ctx.reduce_motion);
+                let frame = state.sampled_frame(ctx.now, ctx.reduce_motion);
                 let mut resolved = transitioned_style
                     .clone()
                     .or_else(|| declared_style.cloned())
@@ -10674,6 +11204,9 @@ fn build_element_with_parent_layout(
         state.is_valid().then(|| {
             let frame = state.frame(ctx.now, ctx.reduce_motion);
             *ctx.animation_active |= frame.active;
+            if frame.just_settled {
+                ctx.motion_settled.push((id, frame.generation));
+            }
             // `Arc<StyleDesc>` is shared, so the animated frame is applied to a
             // copy. Mutating through the pointer would restyle every element
             // that declared the same style.
@@ -12412,7 +12945,8 @@ struct PendingScrollKeyDown {
     target_id: u64,
     keystroke: gpui::Keystroke,
     is_held: bool,
-    action: KeyboardScrollAction,
+    /// `None` when the focused control consumes the key instead of scrolling.
+    action: Option<KeyboardScrollAction>,
     event_emitted: bool,
 }
 
@@ -12693,6 +13227,27 @@ fn scrolls_horizontally(element: &crate::retained_tree::RetainedElement) -> bool
     })
 }
 
+fn is_text_editor(element: &crate::retained_tree::RetainedElement) -> bool {
+    matches!(element.element_type.as_str(), "input" | "textarea")
+        && crate::custom_elements::choice_input::InputKind::of(element)
+            == crate::custom_elements::choice_input::InputKind::Text
+}
+
+/// Whether the element or one of its ancestors listens for `event_type`.
+pub(crate) fn listens_in_ancestry(tree: &RetainedTree, element_id: u64, event_type: &str) -> bool {
+    let mut current = Some(element_id);
+    while let Some(id) = current {
+        let Some(element) = tree.elements.get(&id) else {
+            return false;
+        };
+        if element.events.contains(event_type) {
+            return true;
+        }
+        current = element.parent;
+    }
+    false
+}
+
 fn nearest_scroll_ancestor(tree: &RetainedTree, element_id: u64) -> Option<ScrollAncestor> {
     let mut current = element_id;
     loop {
@@ -12943,6 +13498,8 @@ fn tracks_mouse_hover_events(
         };
         if current_element.events.contains("mouseEnter")
             || current_element.events.contains("mouseLeave")
+            || current_element.events.contains("pointerEnter")
+            || current_element.events.contains("pointerLeave")
         {
             return true;
         }
@@ -13071,8 +13628,9 @@ where
 {
     let tracks_external_drag = tracks_external_drag_events(element, tree);
     let tracks_mouse_move = tracks_pointer_event(element, tree, "mouseMove");
+    let tracks_pointer_move = tracks_pointer_event(element, tree, "pointerMove");
 
-    if tracks_mouse_move || tracks_external_drag {
+    if tracks_mouse_move || tracks_pointer_move || tracks_external_drag {
         let callback = event_callback.clone();
         let id = element.id;
         el = el.on_mouse_move(cx.listener(
@@ -13083,6 +13641,13 @@ where
                         cx.stop_propagation();
                         return;
                     }
+                }
+                if tracks_mouse_move || tracks_pointer_move {
+                    let (x, y) = point_to_xy(mouse_event.position);
+                    view.record_pointer_sample(x, y, mouse_event.modifiers.into());
+                }
+                if tracks_pointer_move {
+                    emit_pointer_move(&callback, id, mouse_event);
                 }
                 if tracks_mouse_move {
                     emit_event_full(&callback, id, "mouseMove", |p| {
@@ -13323,6 +13888,7 @@ where
         .and_then(serde_json::Value::as_str)
         != Some("anchor");
     let tracks_mouse_up = tracks_pointer_event(element, ctx.tree, "mouseUp");
+    let tracks_pointer_up = tracks_pointer_event(element, ctx.tree, "pointerUp");
     let callback = ctx.event_callback.clone();
     let id = element.id;
     el = el.on_click(move |click_event, _window, cx| {
@@ -13336,7 +13902,13 @@ where
             return;
         }
         let stop_native_propagation = !matches!(click_event, gpui::ClickEvent::Keyboard(_));
-        emit_click_mouse_up(&callback, id, &click_event, tracks_mouse_up);
+        emit_click_mouse_up(
+            &callback,
+            id,
+            &click_event,
+            tracks_pointer_up,
+            tracks_mouse_up,
+        );
         emit_event_full(&callback, id, "click", |payload| {
             let (x, y) = point_to_xy(click_event.position());
             payload.x = Some(x);
@@ -13373,8 +13945,10 @@ fn captures_pointer_in_ancestry(
         let Some(current_element) = tree.elements.get(&id) else {
             return false;
         };
-        if current_element.events.contains("mouseDown")
-            && current_element.events.contains("mouseMove")
+        if (current_element.events.contains("mouseDown")
+            && current_element.events.contains("mouseMove"))
+            || (current_element.events.contains("pointerDown")
+                && current_element.events.contains("pointerMove"))
         {
             return true;
         }
@@ -13687,21 +14261,16 @@ pub(crate) fn build_host_container(
             }
 
             // ── Key down ─────────────────────────────────────────
-            // Requires .focusable() (set above). Element must be focused
-            // (clicked or tabbed to) for these to fire.
+            // Requires .focusable() (set above). GPUI invokes every key
+            // listener on the focus path, but a key event has one target: the
+            // focused element. Only that element emits it here, and React
+            // carries it through the ancestors' capture and bubble listeners.
+            // A focused element without a listener of its own is emitted for
+            // by the root (`dispatch_focused_key_event`).
             "keyDown" => {
                 let focus_handle = ctx.focus_handles.get(&id).cloned();
                 el = el.on_key_down(move |key_event, window, _cx| {
-                    // GPUI invokes every key listener on the focus path. A
-                    // classified scroll key is emitted by its focused target
-                    // (or by the scroll path when the target has no listener),
-                    // so ancestor native listeners must not create a second,
-                    // ancestor-targeted event.
-                    if keyboard_scroll_action(&key_event.keystroke).is_some()
-                        && !focus_handle
-                            .as_ref()
-                            .is_some_and(|handle| handle.is_focused(window))
-                    {
+                    if !is_focused(focus_handle.as_ref(), window) {
                         return;
                     }
                     emit_event_full(&callback, id, "keyDown", |p| {
@@ -13715,7 +14284,11 @@ pub(crate) fn build_host_container(
 
             // ── Key up ───────────────────────────────────────────
             "keyUp" => {
-                el = el.on_key_up(move |key_event, _window, _cx| {
+                let focus_handle = ctx.focus_handles.get(&id).cloned();
+                el = el.on_key_up(move |key_event, window, _cx| {
+                    if !is_focused(focus_handle.as_ref(), window) {
+                        return;
+                    }
                     emit_event_full(&callback, id, "keyUp", |p| {
                         p.key = Some(key_event.keystroke.key.clone());
                         p.key_char = key_event.keystroke.key_char.clone();
@@ -13743,10 +14316,17 @@ pub(crate) fn build_host_container(
 
     if tracks_pointer_event(element, ctx.tree, "auxClick") {
         let tracks_mouse_up = tracks_pointer_event(element, ctx.tree, "mouseUp");
+        let tracks_pointer_up = tracks_pointer_event(element, ctx.tree, "pointerUp");
         let callback = ctx.event_callback.clone();
         let id = element.id;
         el = el.on_aux_click(move |click_event, _window, cx| {
-            emit_click_mouse_up(&callback, id, &click_event, tracks_mouse_up);
+            emit_click_mouse_up(
+                &callback,
+                id,
+                &click_event,
+                tracks_pointer_up,
+                tracks_mouse_up,
+            );
             emit_event_full(&callback, id, "auxClick", |p| {
                 let (x, y) = point_to_xy(click_event.position());
                 p.x = Some(x);
@@ -13775,26 +14355,41 @@ pub(crate) fn build_host_container(
     // on the press, so the DOM order is mousedown, contextmenu, mouseup,
     // auxclick. React synthesizes it from the right-button payload.
     let tracks_mouse_down = tracks_pointer_event(element, ctx.tree, "mouseDown");
+    let tracks_pointer_down = tracks_pointer_event(element, ctx.tree, "pointerDown");
+    let tracks_pointer_cancel = tracks_pointer_event(element, ctx.tree, "pointerCancel");
     let tracks_context_menu = tracks_pointer_event(element, ctx.tree, "contextMenu");
-    if tracks_mouse_down || tracks_context_menu {
-        for &button in mouse_down_button_set(tracks_mouse_down) {
+    if tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel || tracks_context_menu {
+        for &button in mouse_down_button_set(
+            tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel,
+        ) {
             let callback = ctx.event_callback.clone();
             let id = element.id;
-            el = el.on_mouse_down(button, move |mouse_event, _window, cx| {
-                emit_event_full(&callback, id, "mouseDown", |p| {
-                    let (x, y) = point_to_xy(mouse_event.position);
-                    p.x = Some(x);
-                    p.y = Some(y);
-                    p.button = Some(mouse_button_to_u32(mouse_event.button));
-                    p.click_count = Some(mouse_event.click_count as u32);
-                    p.modifiers = Some(mouse_event.modifiers.into());
-                });
-                cx.stop_propagation();
-            });
+            el = el.on_mouse_down(
+                button,
+                cx.listener(move |view, mouse_event, _window, cx| {
+                    view.record_pointer_down(id, mouse_event);
+                    if tracks_pointer_down {
+                        emit_pointer_down(&callback, id, mouse_event);
+                    }
+                    if tracks_mouse_down || tracks_context_menu {
+                        emit_event_full(&callback, id, "mouseDown", |p| {
+                            let (x, y) = point_to_xy(mouse_event.position);
+                            p.x = Some(x);
+                            p.y = Some(y);
+                            p.button = Some(mouse_button_to_u32(mouse_event.button));
+                            p.click_count = Some(mouse_event.click_count as u32);
+                            p.modifiers = Some(mouse_event.modifiers.into());
+                        });
+                    }
+                    cx.stop_propagation();
+                }),
+            );
         }
     }
 
-    if tracks_pointer_event(element, ctx.tree, "mouseUp") {
+    let tracks_mouse_up = tracks_pointer_event(element, ctx.tree, "mouseUp");
+    let tracks_pointer_up = tracks_pointer_event(element, ctx.tree, "pointerUp");
+    if tracks_mouse_up || tracks_pointer_up {
         for &button in &[
             gpui::MouseButton::Left,
             gpui::MouseButton::Middle,
@@ -13803,9 +14398,14 @@ pub(crate) fn build_host_container(
             let callback = ctx.event_callback.clone();
             let id = element.id;
             el = el.on_mouse_up(button, move |mouse_event, _window, cx| {
-                emit_event_full(&callback, id, "mouseUp", |p| {
-                    populate_mouse_up_payload(p, mouse_event);
-                });
+                if tracks_pointer_up {
+                    emit_pointer_up(&callback, id, mouse_event);
+                }
+                if tracks_mouse_up {
+                    emit_event_full(&callback, id, "mouseUp", |p| {
+                        populate_mouse_up_payload(p, mouse_event);
+                    });
+                }
                 cx.stop_propagation();
             });
         }
@@ -14618,6 +15218,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("visible") => el = el.visible(),
         _ => {}
     }
+    el.style().clip_path.clone_from(&style.clip_path);
     match style.display.as_deref() {
         Some("none") => el = el.hidden(),
         Some("flex") => el = el.flex(),
@@ -14753,6 +15354,9 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     }
     if let Some(ref h) = style.height {
         el = apply_height(el, h);
+    }
+    if let Some(ratio) = style.aspect_ratio {
+        el = el.aspect_ratio(ratio as f32);
     }
     if let Some(ref min_w) = style.min_width {
         el.style().min_size.width = Some(dimension_to_length(min_w));
@@ -15043,24 +15647,91 @@ pub(crate) fn point_to_xy(p: gpui::Point<gpui::Pixels>) -> (f64, f64) {
     (f64::from(f32::from(p.x)), f64::from(f32::from(p.y)))
 }
 
+pub(crate) fn mouse_button_bit(button: gpui::MouseButton) -> u32 {
+    match button {
+        gpui::MouseButton::Left => 1,
+        gpui::MouseButton::Right => 2,
+        gpui::MouseButton::Middle => 4,
+        gpui::MouseButton::Navigate(_) => 8,
+    }
+}
+
+pub(crate) fn populate_pointer_metadata(payload: &mut EventPayload, buttons: u32) {
+    payload.pointer_id = Some(1);
+    payload.pointer_type = Some("mouse".to_string());
+    payload.is_primary = Some(true);
+    payload.buttons = Some(buttons);
+}
+
+pub(crate) fn emit_pointer_down(
+    callback: &Option<EventCallback>,
+    element_id: u64,
+    event: &gpui::MouseDownEvent,
+) {
+    emit_event_full(callback, element_id, "pointerDown", |payload| {
+        let (x, y) = point_to_xy(event.position);
+        payload.x = Some(x);
+        payload.y = Some(y);
+        payload.button = Some(mouse_button_to_u32(event.button));
+        payload.click_count = Some(event.click_count as u32);
+        payload.modifiers = Some(event.modifiers.into());
+        populate_pointer_metadata(payload, mouse_button_bit(event.button));
+    });
+}
+
+pub(crate) fn emit_pointer_up(
+    callback: &Option<EventCallback>,
+    element_id: u64,
+    event: &gpui::MouseUpEvent,
+) {
+    emit_event_full(callback, element_id, "pointerUp", |payload| {
+        populate_mouse_up_payload(payload, event);
+        populate_pointer_metadata(payload, 0);
+    });
+}
+
+pub(crate) fn emit_pointer_move(
+    callback: &Option<EventCallback>,
+    element_id: u64,
+    event: &gpui::MouseMoveEvent,
+) {
+    emit_event_full(callback, element_id, "pointerMove", |payload| {
+        let (x, y) = point_to_xy(event.position);
+        payload.x = Some(x);
+        payload.y = Some(y);
+        payload.modifiers = Some(event.modifiers.into());
+        payload.pressed_button = event.pressed_button.map(mouse_button_to_u32);
+        populate_pointer_metadata(
+            payload,
+            event.pressed_button.map(mouse_button_bit).unwrap_or_default(),
+        );
+    });
+}
+
 pub(crate) fn emit_click_mouse_up(
     callback: &Option<EventCallback>,
     element_id: u64,
     click_event: &gpui::ClickEvent,
+    tracks_pointer_up: bool,
     tracks_mouse_up: bool,
 ) {
-    if !tracks_mouse_up {
+    if !tracks_pointer_up && !tracks_mouse_up {
         return;
     }
     let gpui::ClickEvent::Mouse(event) = click_event else {
         return;
     };
-    emit_event_full(callback, element_id, "mouseUp", |payload| {
-        populate_mouse_up_payload(payload, &event.up);
-    });
+    if tracks_pointer_up {
+        emit_pointer_up(callback, element_id, &event.up);
+    }
+    if tracks_mouse_up {
+        emit_event_full(callback, element_id, "mouseUp", |payload| {
+            populate_mouse_up_payload(payload, &event.up);
+        });
+    }
 }
 
-fn populate_mouse_up_payload(payload: &mut EventPayload, event: &gpui::MouseUpEvent) {
+pub(crate) fn populate_mouse_up_payload(payload: &mut EventPayload, event: &gpui::MouseUpEvent) {
     let (x, y) = point_to_xy(event.position);
     payload.x = Some(x);
     payload.y = Some(y);
@@ -15199,6 +15870,12 @@ mod mouse_down_button_set_tests {
 /// caller customize it via a closure, then sends it through the callback.
 /// Production: queues on Node.js event loop via ThreadsafeFunction.
 /// Tests: pushes to a synchronous Vec for drainEvents().
+/// Whether an element's key listener is hearing its own key event rather than
+/// a focused descendant's, which the descendant already emits.
+pub(crate) fn is_focused(handle: Option<&gpui::FocusHandle>, window: &gpui::Window) -> bool {
+    handle.is_some_and(|handle| handle.is_focused(window))
+}
+
 pub(crate) fn emit_event_full(
     callback: &Option<EventCallback>,
     element_id: u64,
@@ -15558,6 +16235,34 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
 /// included — degrades to the empty style with a recorded problem rather than
 /// rejecting the batch. It still runs before the apply loop and borrows only
 /// the style table, so the interned styles line up with the ops that use them.
+fn canonical_style_value(value: &serde_json::Value) -> Option<serde_json::Value> {
+    let object = value.as_object()?;
+    let mut changed = false;
+    let mut canonical = serde_json::Map::with_capacity(object.len());
+
+    for (key, value) in object {
+        if key.starts_with("--") {
+            changed = true;
+            continue;
+        }
+
+        if matches!(
+            key.as_str(),
+            "hover" | "hoverWithin" | "active" | "focus" | "focusVisible"
+        ) {
+            if let Some(nested) = canonical_style_value(value) {
+                canonical.insert(key.clone(), nested);
+                changed = true;
+                continue;
+            }
+        }
+
+        canonical.insert(key.clone(), value.clone());
+    }
+
+    changed.then_some(serde_json::Value::Object(canonical))
+}
+
 fn resolve_styles(
     styles: &mut StyleTable,
     ops: &[BatchOp<'_>],
@@ -15570,8 +16275,14 @@ fn resolve_styles(
             let raw = style.get().trim().as_bytes();
             let value: serde_json::Value =
                 serde_json::from_slice(raw).expect("a RawValue payload is always valid JSON");
-            let parsed = crate::style::parse_style_value(&value);
-            let shared = styles.intern_parsed(raw, parsed.style);
+            let canonical = canonical_style_value(&value);
+            let canonical_value = canonical.as_ref().unwrap_or(&value);
+            let canonical_bytes = canonical
+                .as_ref()
+                .map(|value| serde_json::to_vec(value).expect("style values are serializable"));
+            let interned_raw = canonical_bytes.as_deref().unwrap_or(raw);
+            let parsed = crate::style::parse_style_value(canonical_value);
+            let shared = styles.intern_parsed(interned_raw, parsed.style);
             let problems = if collect_diagnostics {
                 parsed.problems
             } else {
@@ -15586,7 +16297,7 @@ fn resolve_styles(
 #[cfg(test)]
 mod resolve_styles_tests {
     use super::*;
-    use crate::style::TransitionEasing;
+    use crate::style::{DimensionValue, TransitionEasing};
     use serde_json::json;
 
     fn resolve(
@@ -15633,6 +16344,47 @@ mod resolve_styles_tests {
         assert_eq!(transition[0].easing, TransitionEasing::Name("ease".into()));
         assert_eq!(strict_diagnostics.len(), 2);
         assert!(non_strict_diagnostics.is_empty());
+    }
+
+    #[test]
+    fn inert_custom_property_variants_share_one_retained_style() {
+        let mut tree = RetainedTree::new();
+        let batches = [
+            json!([
+                ["createElement", 1, "div"],
+                [
+                    "setStyle",
+                    1,
+                    {
+                        "width": 120,
+                        "--collapsible-panel-height": "40px",
+                        "hover": { "opacity": 0.5, "--collapsible-panel-width": "120px" }
+                    }
+                ],
+                ["setRoot", 1]
+            ]),
+            json!([[
+                "setStyle",
+                1,
+                {
+                    "width": 120,
+                    "--collapsible-panel-height": "80px",
+                    "hover": { "opacity": 0.5, "--collapsible-panel-width": "240px" }
+                }
+            ]]),
+            json!([["setStyle", 1, { "width": 120, "hover": { "opacity": 0.5 } }]]),
+        ];
+
+        for batch in batches {
+            let bytes = serde_json::to_vec(&batch).unwrap();
+            let outcome = apply_batch_to_tree_with_diagnostics(&mut tree, &bytes, true).unwrap();
+            assert!(outcome.diagnostics.is_empty());
+            assert_eq!(tree.styles.len(), 1);
+            assert_eq!(
+                tree.elements[&1].style.as_deref().unwrap().width,
+                Some(DimensionValue::Pixels(120.0))
+            );
+        }
     }
 }
 
