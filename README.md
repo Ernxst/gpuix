@@ -3275,7 +3275,7 @@ Each primitive has a dedicated namespace entry point:
 
 | Import | Main parts |
 |---|---|
-| `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Content`, `Item` |
+| `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Icon`, `Content`, `List`, `Item`, `ItemText`, `ItemIndicator` |
 | `@gpuix/react/combobox` | `Root`, `Input`, `Content`, `List`, `Item`, `Empty` |
 | `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Content` |
 | `@gpuix/react/floating` | `FloatingLayer`, `renderSlot` |
@@ -3391,6 +3391,34 @@ const models = [
 The trigger participates in normal tab navigation. Opening the Select focuses
 its content. `Up`, `Down`, `Ctrl+P`, `Ctrl+N`, `Enter`, and `Escape` control the
 menu. Closing it restores focus to the trigger. Disabled items are skipped.
+
+Set `multiple` on `Select` to keep the popup open while items are toggled. The
+controlled and uncontrolled values are string arrays, and `onValueChange`
+receives the complete selected array after each toggle:
+
+```tsx
+<Select multiple value={values} onValueChange={setValues}>
+  <SelectTrigger>
+    <SelectValue>{(selected) => Array.isArray(selected) ? selected.join(', ') : 'Select resources'}</SelectValue>
+    <SelectIcon>⌄</SelectIcon>
+  </SelectTrigger>
+  <SelectContent>
+    <SelectList>
+      {resources.map((resource) => (
+        <SelectItem key={resource.value} value={resource.value}>
+          <SelectItemIndicator>✓</SelectItemIndicator>
+          <SelectItemText>{resource.label}</SelectItemText>
+        </SelectItem>
+      ))}
+    </SelectList>
+  </SelectContent>
+</Select>
+```
+
+`List` exposes a `listbox` with `aria-multiselectable` in multiple mode. Each
+`Item` exposes an `option` with its current `aria-selected` state. `Icon`,
+`ItemText`, and `ItemIndicator` are presentational parts that can be styled or
+replaced with application components.
 
 `Select` discovers items by registration at mount time rather than by walking
 its element tree, so wrapping `Item` in your own component (for a shared label

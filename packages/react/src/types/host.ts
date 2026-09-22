@@ -1080,6 +1080,10 @@ export interface AccessibilityProps {
   ariaSelected?: Booleanish
   /** DOM-compatible alias for ariaSelected. */
   "aria-selected"?: Booleanish
+  /** Whether a listbox permits selecting more than one option. */
+  ariaMultiSelectable?: Booleanish
+  /** DOM-compatible alias for ariaMultiSelectable. */
+  "aria-multiselectable"?: Booleanish
   /** Human-readable value text for a value control. */
   ariaValueText?: string
   /** DOM-compatible semantic alias for ariaValueText. */

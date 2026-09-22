@@ -50,7 +50,8 @@ interface SelectItemRecord {
 
 interface SelectContextValue {
   open: boolean
-  value: string | undefined
+  value: SelectSelection | undefined
+  multiple: boolean
   disabled: boolean
   labels: Map<string, ReactNode>
   activeValue: string | null
@@ -66,7 +67,16 @@ interface SelectContextValue {
   unregisterItem: (value: string) => void
 }
 
+export type SelectSelection = string | string[]
+
+export type SelectValueFor<Multiple extends boolean | undefined> = Multiple extends true
+  ? string[]
+  : Multiple extends false | undefined
+    ? string
+    : SelectSelection
+
 const SelectContext = createContext<SelectContextValue | null>(null)
+const SelectItemContext = createContext<string | null>(null)
 
 function useSelectContext(name: string): SelectContextValue {
   const context = useContext(SelectContext)
@@ -103,19 +113,25 @@ function compareItemRecords(
   return registrationIndex(a.value) - registrationIndex(b.value)
 }
 
-export interface SelectProps extends Omit<Props, "children" | "onChange"> {
+export interface SelectProps<Multiple extends boolean | undefined = false>
+  extends Omit<Props, "children" | "onChange"> {
   children?: ReactNode
   items?: readonly SelectItemData[]
-  value?: string
-  defaultValue?: string
-  onValueChange?: (value: string) => void
+  value?: SelectValueFor<Multiple>
+  defaultValue?: SelectValueFor<Multiple>
+  onValueChange?: (value: SelectValueFor<Multiple>) => void
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
+  multiple?: Multiple
   disabled?: boolean
 }
 
-export function Select({
+function isValueSelected(value: SelectSelection | undefined, multiple: boolean, item: string): boolean {
+  return multiple ? Array.isArray(value) && value.includes(item) : value === item
+}
+
+export function Select<Multiple extends boolean | undefined = false>({
   children,
   items: itemsProp,
   value: valueProp,
@@ -124,16 +140,19 @@ export function Select({
   open: openProp,
   defaultOpen = false,
   onOpenChange,
+  multiple = false as Multiple,
   disabled = false,
   style,
   ...props
-}: SelectProps): ReactElement {
+}: SelectProps<Multiple>): ReactElement {
   const { renderer } = useGpuix()
-  const [value, setValue] = useControllableState<string | undefined>({
+  const [value, setValue] = useControllableState<SelectSelection | undefined>({
     value: valueProp,
     defaultValue,
     onChange: (nextValue) => {
-      if (nextValue !== undefined) onValueChange?.(nextValue)
+      if (nextValue !== undefined) {
+        onValueChange?.(nextValue as SelectValueFor<Multiple>)
+      }
     },
   })
   const [open, setOpenState] = useControllableState({
@@ -191,7 +210,9 @@ export function Select({
   })
   useLayoutEffect(() => {
     if (!open || activeValue !== null) return
-    const selected = items.find((item) => item.value === value && !item.disabled)
+    const selected = items.find(
+      (item) => isValueSelected(value, multiple === true, item.value) && !item.disabled
+    )
     if (selected) setActiveValue(selected.value)
   }, [open, value, items, activeValue])
   const labels = useMemo(() => {
@@ -205,7 +226,9 @@ export function Select({
   const setOpen = (nextOpen: boolean) => {
     setOpenState(nextOpen)
     if (nextOpen) {
-      const selected = items.find((item) => item.value === value && !item.disabled)
+      const selected = items.find(
+        (item) => isValueSelected(value, multiple === true, item.value) && !item.disabled
+      )
       setActiveValue(selected?.value ?? null)
     } else if (triggerRef.current) {
       renderer?.focusElement?.(triggerRef.current.id)
@@ -226,6 +249,15 @@ export function Select({
     if (disabled) return
     const item = items.find((candidate) => candidate.value === nextValue)
     if (!item || item.disabled) return
+    if (multiple) {
+      const selected = Array.isArray(value) ? value : []
+      setValue(
+        selected.includes(nextValue)
+          ? selected.filter((candidate) => candidate !== nextValue)
+          : [...selected, nextValue]
+      )
+      return
+    }
     setValue(nextValue)
     setOpen(false)
   }
@@ -234,6 +266,7 @@ export function Select({
     () => ({
       open,
       value,
+      multiple: multiple === true,
       disabled,
       items,
       labels,
@@ -248,7 +281,7 @@ export function Select({
       registerItem,
       unregisterItem,
     }),
-    [open, value, disabled, items, labels, activeValue]
+    [open, value, multiple, disabled, items, labels, activeValue]
   )
 
   return (
@@ -280,7 +313,9 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
     const state = {
       open: context.open,
       disabled,
-      placeholder: context.value === undefined,
+      placeholder: context.multiple
+        ? !Array.isArray(context.value) || context.value.length === 0
+        : context.value === undefined,
     }
     const ref = (value: PublicInstance | null) => {
       context.triggerRef.current = value
@@ -288,6 +323,9 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
     }
     const triggerProps: Props = {
       ...props,
+      role: props.role ?? "button",
+      ariaExpanded: context.open,
+      ariaHasPopup: "listbox",
       tabIndex: disabled ? -1 : (asChild ? props.tabIndex : (props.tabIndex ?? 0)),
       style: resolveStyle(style, state),
       onMouseDown: (event) => {
@@ -328,16 +366,35 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
   }
 )
 
-export interface SelectValueProps extends Props {
+export interface SelectValueProps extends Omit<Props, "children"> {
   placeholder?: ReactNode
+  children?: ReactNode | ((value: SelectSelection | undefined) => ReactNode)
 }
 
 export const SelectValue = forwardRef<PublicInstance, SelectValueProps>(
   function SelectValue({ placeholder, children, ...props }, ref) {
     const context = useSelectContext("SelectValue")
-    const label = context.value === undefined ? undefined : context.labels.get(context.value)
+    const values = Array.isArray(context.value)
+      ? context.value
+      : context.value === undefined
+        ? []
+        : [context.value]
+    const labels = values.map(
+      (value) =>
+        context.labels.get(value) ?? context.items.find((item) => item.value === value)?.label ?? value
+    )
+    const hasValue = context.multiple ? values.length > 0 : context.value !== undefined
+    const valueContent = hasValue
+      ? context.multiple
+        ? labels.flatMap((label, index) => (index === 0 ? [label] : [", ", label]))
+        : labels[0]
+      : undefined
+    const content =
+      typeof children === "function"
+        ? children(context.multiple ? values : context.value)
+        : children
     return <div {...props} ref={ref}>
-      {children ?? label ?? context.items.find((item) => item.value === context.value)?.label ?? context.value ?? placeholder}
+      {content ?? valueContent ?? placeholder}
     </div>
   }
 )
@@ -418,7 +475,7 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
     const context = useSelectContext("SelectItem")
     const instanceRef = useRef<PublicInstance | null>(null)
     const state = {
-      selected: context.value === value,
+      selected: isValueSelected(context.value, context.multiple, value),
       highlighted: context.activeValue === value,
       disabled,
     }
@@ -459,20 +516,102 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
     // accessibility tree, and is never hit-tested (see display-none.test.tsx).
     if (!context.open) return <div style={{ display: "none" }} ref={setInstanceRef} />
     return (
+      <SelectItemContext.Provider value={value}>
+        <div
+          {...props}
+          ref={setInstanceRef}
+          role="option"
+          ariaSelected={state.selected}
+          ariaDisabled={disabled || undefined}
+          style={resolveStyle(style, state)}
+          onMouseEnter={(event: GpuixMouseEvent) => {
+            onMouseEnter?.(event)
+            if (!disabled && !context.disabled) context.setActiveValue(value)
+          }}
+          onClick={(event: GpuixMouseEvent) => {
+            onClick?.(event)
+            if (!disabled && !context.disabled) context.selectValue(value)
+          }}
+        >
+          {typeof children === "function" ? children(state) : children}
+        </div>
+      </SelectItemContext.Provider>
+    )
+  }
+)
+
+export type SelectListProps = Props
+
+export const SelectList = forwardRef<PublicInstance, SelectListProps>(function SelectList(
+  { children, ...props },
+  ref
+) {
+  const context = useSelectContext("SelectList")
+  return (
+    <div
+      {...props}
+      ref={ref}
+      role="listbox"
+      ariaMultiSelectable={context.multiple || undefined}
+    >
+      {children}
+    </div>
+  )
+})
+
+export interface SelectIconState {
+  open: boolean
+}
+
+export interface SelectIconProps extends Omit<Props, "style"> {
+  style?: StateStyle<SelectIconState>
+}
+
+export const SelectIcon = forwardRef<PublicInstance, SelectIconProps>(function SelectIcon(
+  { children, style, ...props },
+  ref
+) {
+  const context = useSelectContext("SelectIcon")
+  return (
+    <div {...props} ref={ref} style={resolveStyle(style, { open: context.open })}>
+      {children}
+    </div>
+  )
+})
+
+export type SelectItemTextProps = Props
+
+export const SelectItemText = forwardRef<PublicInstance, SelectItemTextProps>(
+  function SelectItemText(props, ref) {
+    useSelectContext("SelectItemText")
+    return <div {...props} ref={ref} />
+  }
+)
+
+export interface SelectItemIndicatorState {
+  selected: boolean
+}
+
+export interface SelectItemIndicatorProps extends Omit<Props, "style"> {
+  keepMounted?: boolean
+  style?: StateStyle<SelectItemIndicatorState>
+}
+
+export const SelectItemIndicator = forwardRef<PublicInstance, SelectItemIndicatorProps>(
+  function SelectItemIndicator({ children, keepMounted = false, style, ...props }, ref) {
+    const context = useSelectContext("SelectItemIndicator")
+    const itemValue = useContext(SelectItemContext)
+    if (itemValue === null) throw new Error("SelectItemIndicator must be used inside SelectItem")
+    const selected = isValueSelected(context.value, context.multiple, itemValue)
+    if (!selected && !keepMounted) return null
+    return (
       <div
         {...props}
-        ref={setInstanceRef}
-        style={resolveStyle(style, state)}
-        onMouseEnter={(event: GpuixMouseEvent) => {
-          onMouseEnter?.(event)
-          if (!disabled && !context.disabled) context.setActiveValue(value)
-        }}
-        onClick={(event: GpuixMouseEvent) => {
-          onClick?.(event)
-          if (!disabled && !context.disabled) context.selectValue(value)
-        }}
+        ref={ref}
+        style={resolveStyle(style, { selected })}
+        ariaHidden
       >
-        {typeof children === "function" ? children(state) : children}
+        {children}
       </div>
     )
   }
@@ -518,7 +657,11 @@ export {
   Select as Root,
   SelectContent as Content,
   SelectGroup as Group,
+  SelectIcon as Icon,
   SelectItem as Item,
+  SelectItemIndicator as ItemIndicator,
+  SelectItemText as ItemText,
+  SelectList as List,
   SelectLabel as Label,
   SelectScrollDownButton as ScrollDownButton,
   SelectScrollUpButton as ScrollUpButton,
