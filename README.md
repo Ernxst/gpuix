@@ -1252,6 +1252,33 @@ window.
 bun --hot app.tsx
 ```
 
+To use native `*.module.css` imports with `bun --hot`, register the development
+plugin from a preload before the app entry is imported:
+
+```ts
+// gpuix.preload.ts
+import { gpuixDev } from '@gpuix/plugins/bun'
+
+Bun.plugin(gpuixDev())
+```
+
+```toml
+# bunfig.toml
+preload = ['./gpuix.preload.ts']
+```
+
+Opt into the matching TypeScript declaration from a project `.d.ts` file:
+
+```ts
+// gpuix-css-modules.d.ts
+import '@gpuix/plugins/css-modules'
+```
+
+Keep that declaration opt-in when the project also imports browser CSS modules;
+browser modules export class-name strings while native modules export style
+objects. Bun's runtime watcher does not currently re-run files handled by
+custom `onLoad` plugins, so restart the process after changing a CSS module.
+
 ### 5. Save the file
 
 ```
