@@ -464,6 +464,7 @@ describeNative("Select multiple selection (issue #612)", () => {
       </div>
     )
 
+    expect(testRoot.renderer.getAllText()).toContain("Alpha")
     testRoot.renderer.nativeSimulateClick(30, 25)
 
     expect(triggerRef.current).toBeDefined()

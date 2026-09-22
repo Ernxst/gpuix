@@ -523,10 +523,20 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
     // Closed content stays mounted (see registerItem's comment above), so
     // this marker keeps the item's document position current even while
     // Select is closed - unlike returning null, which would leave the item
-    // with no tree position for compareDocumentPosition to read. Inert:
-    // `display: "none"` takes no layout space, is absent from the
-    // accessibility tree, and is never hit-tested (see display-none.test.tsx).
-    if (!context.open) return <div style={{ display: "none" }} ref={setInstanceRef} />
+    // with no tree position for compareDocumentPosition to read. Its children
+    // stay mounted inside the hidden marker so ItemText can register the label
+    // before SelectValue renders it. Inert: `display: "none"` takes no layout
+    // space, is absent from the accessibility tree, and is never hit-tested
+    // (see display-none.test.tsx).
+    if (!context.open) {
+      return (
+        <SelectItemContext.Provider value={itemContext}>
+          <div style={{ display: "none" }} ref={setInstanceRef}>
+            {typeof children === "function" ? children(state) : children}
+          </div>
+        </SelectItemContext.Provider>
+      )
+    }
     return (
       <SelectItemContext.Provider value={itemContext}>
         <div
