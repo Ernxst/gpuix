@@ -1,5 +1,6 @@
 import React from "react"
 
+import "../../../../packages/react/src/globals.ts"
 import { createTestRoot } from "../../../../packages/react/src/testing.ts"
 import { runWorkload } from "./workload.mjs"
 

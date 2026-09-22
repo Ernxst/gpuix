@@ -1,0 +1,54 @@
+{
+  "provider": "GPU-IX #525 (wgpu recorder and replay)",
+  "runtime": "Bun 1.4.0",
+  "workload": {
+    "target": "256x256 bgra8unorm",
+    "warmupFrames": 50,
+    "measuredFrames": 300,
+    "draws": [
+      1000,
+      5000,
+      10000
+    ],
+    "commands": "setPipeline once; setVertexBuffer + setIndexBuffer + drawIndexed repeated",
+    "gpuCompleteTiming": "unsupported by this provider"
+  },
+  "measurements": [
+    {
+      "draws": 1000,
+      "encode": {
+        "medianNs": 52958,
+        "p95Ns": 324959
+      },
+      "finishSubmit": {
+        "medianNs": 306459,
+        "p95Ns": 845625
+      },
+      "gpuComplete": null
+    },
+    {
+      "draws": 5000,
+      "encode": {
+        "medianNs": 277875,
+        "p95Ns": 1326292
+      },
+      "finishSubmit": {
+        "medianNs": 1899000,
+        "p95Ns": 3072792
+      },
+      "gpuComplete": null
+    },
+    {
+      "draws": 10000,
+      "encode": {
+        "medianNs": 511416,
+        "p95Ns": 1688166
+      },
+      "finishSubmit": {
+        "medianNs": 3040167,
+        "p95Ns": 4252208
+      },
+      "gpuComplete": null
+    }
+  ]
+}
