@@ -93,6 +93,7 @@ import {
   DOCUMENT_POSITION_PRECEDING,
 } from "../dom-position.js"
 import { ownerDocument } from "../document.js"
+import { moveAnnouncerRegionsToRoot } from "../announce.js"
 
 let currentUpdatePriority = NoEventPriority
 
@@ -2109,10 +2110,11 @@ function promoteContainerRoot(
     return
   }
 
-  // A direct root owns any existing live regions. They would otherwise remain
-  // under its application child after that child moves beneath the wrapper.
-  clearAnnouncer(container, true)
   const root = createImplicitRoot(container)
+  // A direct root owns any existing live regions. Move their current values
+  // before reparenting that application root, so no stale pair remains below
+  // it and the next alternating write keeps its existing cadence.
+  moveAnnouncerRegionsToRoot(container, root.id)
   placeInImplicitRoot(container, root, previousRoot, null)
   placeInImplicitRoot(container, root, child, beforeChild)
   container.renderer.setRoot(root.id)

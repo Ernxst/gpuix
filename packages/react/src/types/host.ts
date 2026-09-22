@@ -1841,6 +1841,8 @@ export type AnnouncePoliteness = "polite" | "assertive"
 export interface AnnouncerRegionPair {
   regionIds: readonly [number, number]
   textIds: readonly [number, number]
+  /** Current text in each alternating region, retained when a container promotes. */
+  values: [string, string]
   next: 0 | 1
   /** The root element these regions are attached under; stale once the root remounts. */
   attachedToRootId: number

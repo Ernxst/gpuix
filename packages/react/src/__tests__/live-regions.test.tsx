@@ -391,7 +391,7 @@ describeNative("announce()", () => {
   it("recreates live regions when a direct root promotes", () => {
     const treeWith = (second: boolean) => (
       <>
-        <div>
+        <div data-testid="former-direct-root">
           <text>first</text>
         </div>
         {second && (
@@ -412,9 +412,17 @@ describeNative("announce()", () => {
     const wrappedRootId = screen.renderer.getRoot()!.id
     expect(wrappedRootId).not.toBe(directRootId)
     // The old regions belonged to the direct application root. Promotion
-    // destroys them rather than leaving the already announced value stranded
-    // beneath the first child or recreating it twice under the wrapper.
-    expect(regionWithValue("Status", "before promotion")).toBeUndefined()
+    // replaces them under the wrapper while preserving the one live value and
+    // leaving no stale regions beneath the former root.
+    expect(regionWithValue("Status", "before promotion")).toBeDefined()
+    expect(
+      Object.values(tree().nodes).filter(
+        (node) => node.aria.role === "Status" && node.aria.value === "before promotion"
+      )
+    ).toHaveLength(1)
+    expect(screen.getByTestId("former-direct-root").children.map((child) => child.type)).toEqual([
+      "text",
+    ])
 
     announce("after promotion")
     const afterPromotion = regionWithValue("Status", "after promotion")
