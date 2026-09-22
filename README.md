@@ -3292,6 +3292,10 @@ import * as SelectPrimitive from '@gpuix/react/select'
 export const Select = SelectPrimitive.Root
 export const SelectValue = SelectPrimitive.Value
 export const SelectGroup = SelectPrimitive.Group
+export const SelectIcon = SelectPrimitive.Icon
+export const SelectList = SelectPrimitive.List
+export const SelectItemText = SelectPrimitive.ItemText
+export const SelectItemIndicator = SelectPrimitive.ItemIndicator
 
 export const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
@@ -3399,7 +3403,7 @@ receives the complete selected array after each toggle:
 ```tsx
 <Select multiple value={values} onValueChange={setValues}>
   <SelectTrigger>
-    <SelectValue>{(selected) => Array.isArray(selected) ? selected.join(', ') : 'Select resources'}</SelectValue>
+    <SelectValue>{(selected) => Array.isArray(selected) && selected.length > 0 ? selected.join(', ') : 'Select resources'}</SelectValue>
     <SelectIcon>⌄</SelectIcon>
   </SelectTrigger>
   <SelectContent>
