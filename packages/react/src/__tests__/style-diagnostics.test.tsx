@@ -6,7 +6,15 @@ import {
   TestRenderer,
 } from "../testing.js"
 import { wrapWithBatching } from "../reconciler/batch-renderer.js"
+import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
 import type { StyleDesc } from "../types/host.js"
+
+expect.extend(gpuixMatchers)
+
+declare module "vitest" {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  interface Matchers<T = any> extends GpuixMatchers<T> {}
+}
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
@@ -782,11 +790,12 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     }
 
     try {
+      // createTestRoot currently retains one native root; see https://github.com/Ernxst/gpuix/issues/618.
       testRoot.render(
-        <>
+        <div>
           <Collapsible />
           <Accordion />
-        </>,
+        </div>,
       )
 
       expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
