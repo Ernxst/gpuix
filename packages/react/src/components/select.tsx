@@ -76,7 +76,12 @@ export type SelectValueFor<Multiple extends boolean | undefined> = Multiple exte
     : SelectSelection
 
 const SelectContext = createContext<SelectContextValue | null>(null)
-const SelectItemContext = createContext<string | null>(null)
+interface SelectItemContextValue {
+  value: string
+  setText: (text: { label: string; textValue: string } | null) => void
+}
+
+const SelectItemContext = createContext<SelectItemContextValue | null>(null)
 
 function useSelectContext(name: string): SelectContextValue {
   const context = useContext(SelectContext)
@@ -85,9 +90,13 @@ function useSelectContext(name: string): SelectContextValue {
 }
 
 function textContent(node: ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") return String(node)
-  if (!isValidElement<{ children?: ReactNode }>(node)) return ""
-  return Children.toArray(node.props.children).map(textContent).join("")
+  return Children.toArray(node)
+    .map((child) => {
+      if (typeof child === "string" || typeof child === "number") return String(child)
+      if (!isValidElement<{ children?: ReactNode }>(child)) return ""
+      return textContent(child.props.children)
+    })
+    .join("")
 }
 
 /**
@@ -474,14 +483,17 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
   ) {
     const context = useSelectContext("SelectItem")
     const instanceRef = useRef<PublicInstance | null>(null)
+    const [itemText, setItemText] = useState<{ label: string; textValue: string } | null>(null)
     const state = {
       selected: isValueSelected(context.value, context.multiple, value),
       highlighted: context.activeValue === value,
       disabled,
     }
-    const label = typeof children === "function" ? textValue : children
-    const resolvedTextValue =
-      textValue ?? (typeof children === "function" ? "" : textContent(children))
+    const fallbackTextValue = textValue ?? (typeof children === "function" ? "" : textContent(children))
+    const itemContext = useMemo<SelectItemContextValue>(
+      () => ({ value, setText: setItemText }),
+      [value]
+    )
 
     // Ref callbacks attach before layout effects run in the same commit, so
     // this is set before registerItem below reads it. Stable via useCallback
@@ -500,13 +512,13 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
     useLayoutEffect(() => {
       context.registerItem({
         value,
-        label,
-        textValue: resolvedTextValue,
+        label: itemText?.label ?? fallbackTextValue,
+        textValue: itemText?.textValue ?? fallbackTextValue,
         disabled,
         instance: instanceRef.current,
       })
       return () => context.unregisterItem(value)
-    }, [value, label, resolvedTextValue, disabled])
+    }, [value, itemText, fallbackTextValue, disabled])
 
     // Closed content stays mounted (see registerItem's comment above), so
     // this marker keeps the item's document position current even while
@@ -516,7 +528,7 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
     // accessibility tree, and is never hit-tested (see display-none.test.tsx).
     if (!context.open) return <div style={{ display: "none" }} ref={setInstanceRef} />
     return (
-      <SelectItemContext.Provider value={value}>
+      <SelectItemContext.Provider value={itemContext}>
         <div
           {...props}
           ref={setInstanceRef}
@@ -582,9 +594,20 @@ export const SelectIcon = forwardRef<PublicInstance, SelectIconProps>(function S
 export type SelectItemTextProps = Props
 
 export const SelectItemText = forwardRef<PublicInstance, SelectItemTextProps>(
-  function SelectItemText(props, ref) {
+  function SelectItemText({ children, ...props }, ref) {
     useSelectContext("SelectItemText")
-    return <div {...props} ref={ref} />
+    const context = useContext(SelectItemContext)
+    if (!context) throw new Error("SelectItemText must be used inside SelectItem")
+    const label = textContent(children)
+    useLayoutEffect(() => {
+      context.setText({ label, textValue: label })
+      return () => context.setText(null)
+    }, [context, label])
+    return (
+      <div {...props} ref={ref}>
+        {children}
+      </div>
+    )
   }
 )
 
@@ -600,9 +623,9 @@ export interface SelectItemIndicatorProps extends Omit<Props, "style"> {
 export const SelectItemIndicator = forwardRef<PublicInstance, SelectItemIndicatorProps>(
   function SelectItemIndicator({ children, keepMounted = false, style, ...props }, ref) {
     const context = useSelectContext("SelectItemIndicator")
-    const itemValue = useContext(SelectItemContext)
-    if (itemValue === null) throw new Error("SelectItemIndicator must be used inside SelectItem")
-    const selected = isValueSelected(context.value, context.multiple, itemValue)
+    const item = useContext(SelectItemContext)
+    if (!item) throw new Error("SelectItemIndicator must be used inside SelectItem")
+    const selected = isValueSelected(context.value, context.multiple, item.value)
     if (!selected && !keepMounted) return null
     return (
       <div
