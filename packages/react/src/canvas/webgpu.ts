@@ -167,49 +167,15 @@ type Attachment = {
   loadOp?: "clear"
   storeOp?: "store"
 }
-type SetPipelineCommand = {
-  kind: "setPipeline"
-  pipeline: GPURenderPipeline
-}
-type SetVertexBufferCommand = {
-  kind: "setVertexBuffer"
-  slot: number
-  buffer: GPUBuffer
-  offset: number
-  size: number
-}
-type SetIndexBufferCommand = {
-  kind: "setIndexBuffer"
-  buffer: GPUBuffer
-  indexFormat: "uint16" | "uint32"
-  offset: number
-  size: number
-}
-type DrawCommand = {
-  kind: "draw"
-  vertexCount: number
-  instanceCount: number
-  firstVertex: number
-  firstInstance: number
-}
-type DrawIndexedCommand = {
-  kind: "drawIndexed"
-  indexCount: number
-  instanceCount: number
-  firstIndex: number
-  baseVertex: number
-  firstInstance: number
-}
-type RenderCommand =
-  | SetPipelineCommand
-  | SetVertexBufferCommand
-  | SetIndexBufferCommand
-  | DrawCommand
-  | DrawIndexedCommand
 type RenderPassRecord = {
   view: GPUTextureView
   rgba: number
-  commands: RenderCommand[]
+  opStart: number
+  opCount: number
+  operandStart: number
+  operandCount: number
+  resourceStart: number
+  resourceCount: number
   ended: boolean
 }
 
@@ -231,6 +197,128 @@ const WEB_GPU_DRAW = 2
 const WEB_GPU_SET_VERTEX_BUFFER = 3
 const WEB_GPU_SET_INDEX_BUFFER = 4
 const WEB_GPU_DRAW_INDEXED = 5
+
+type RecordedResource = GPURenderPipeline | GPUBuffer
+
+let recordedOpCapacity = 32
+let recordedOperandCapacity = 128
+let reusableRecordedOps: Uint32Array | undefined
+let reusableRecordedOperands: Float64Array | undefined
+
+class RecordedCommandStream {
+  private ops: Uint32Array
+  private operands: Float64Array
+  private opLength = 0
+  private operandLength = 0
+  private readonly resources: RecordedResource[] = []
+  private readonly resourceOperandIndexes: number[] = []
+  private readonly nativeResourceIds = new Map<RecordedResource, number>()
+
+  constructor() {
+    this.ops = reusableRecordedOps ?? new Uint32Array(recordedOpCapacity)
+    this.operands = reusableRecordedOperands ?? new Float64Array(recordedOperandCapacity)
+    reusableRecordedOps = undefined
+    reusableRecordedOperands = undefined
+  }
+
+  get nextOp(): number { return this.opLength }
+  get nextOperand(): number { return this.operandLength }
+  get nextResource(): number { return this.resources.length }
+
+  writeOp(op: number): void {
+    this.ensureOps(1)
+    this.ops[this.opLength++] = op
+  }
+
+  writeOperand(operand: number): void {
+    this.ensureOperands(1)
+    this.operands[this.operandLength++] = operand
+  }
+
+  writeTwo(first: number, second: number): void {
+    this.ensureOperands(2)
+    const start = this.operandLength
+    this.operands[start] = first
+    this.operands[start + 1] = second
+    this.operandLength = start + 2
+  }
+
+  writeThree(first: number, second: number, third: number): void {
+    this.ensureOperands(3)
+    const start = this.operandLength
+    this.operands[start] = first
+    this.operands[start + 1] = second
+    this.operands[start + 2] = third
+    this.operandLength = start + 3
+  }
+
+  writeFour(first: number, second: number, third: number, fourth: number): void {
+    this.ensureOperands(4)
+    const start = this.operandLength
+    this.operands[start] = first
+    this.operands[start + 1] = second
+    this.operands[start + 2] = third
+    this.operands[start + 3] = fourth
+    this.operandLength = start + 4
+  }
+
+  writeFive(first: number, second: number, third: number, fourth: number, fifth: number): void {
+    this.ensureOperands(5)
+    const start = this.operandLength
+    this.operands[start] = first
+    this.operands[start + 1] = second
+    this.operands[start + 2] = third
+    this.operands[start + 3] = fourth
+    this.operands[start + 4] = fifth
+    this.operandLength = start + 5
+  }
+
+  writeResource(resource: RecordedResource): void {
+    this.resourceOperandIndexes.push(this.operandLength)
+    this.resources.push(resource)
+    this.writeOperand(this.resources.length - 1)
+  }
+
+  resolveResources(start: number, count: number): void {
+    for (let index = start; index < start + count; index++) {
+      const resource = this.resources[index]!
+      let id = this.nativeResourceIds.get(resource)
+      if (id === undefined) {
+        id = resource.nativeId()
+        this.nativeResourceIds.set(resource, id)
+      }
+      this.operands[this.resourceOperandIndexes[index]!] = id
+    }
+  }
+
+  opsView(): Uint32Array { return this.ops.subarray(0, this.opLength) }
+  operandsView(): Float64Array { return this.operands.subarray(0, this.operandLength) }
+
+  release(): void {
+    recordedOpCapacity = Math.max(recordedOpCapacity, this.ops.length)
+    recordedOperandCapacity = Math.max(recordedOperandCapacity, this.operands.length)
+    if (!reusableRecordedOps || reusableRecordedOps.length < this.ops.length) {
+      reusableRecordedOps = this.ops
+    }
+    if (!reusableRecordedOperands || reusableRecordedOperands.length < this.operands.length) {
+      reusableRecordedOperands = this.operands
+    }
+  }
+
+  private ensureOps(required: number): void {
+    if (this.opLength + required <= this.ops.length) return
+    const grown = new Uint32Array(Math.max(this.ops.length * 2, this.opLength + required))
+    grown.set(this.ops)
+    this.ops = grown
+  }
+
+  private ensureOperands(required: number): void {
+    if (this.operandLength + required <= this.operands.length) return
+    const grown = new Float64Array(Math.max(this.operands.length * 2, this.operandLength + required))
+    grown.set(this.operands)
+    this.operands = grown
+  }
+}
 
 const WEB_GPU_BUFFER_USAGE_MASK = 0x03ff
 const MAX_SAFE_GPU_SIZE = Number.MAX_SAFE_INTEGER
@@ -688,7 +776,8 @@ class GPUCommandBuffer {
 
   constructor(
     readonly device: GPUDevice,
-    private readonly passes: readonly RenderPassRecord[]
+    private readonly passes: readonly RenderPassRecord[],
+    readonly stream: RecordedCommandStream
   ) {}
 
   validate(device: GPUDevice): readonly RenderPassRecord[] {
@@ -706,6 +795,7 @@ class GPUCommandBuffer {
 
 export class GPUCommandEncoder {
   private readonly passes: RenderPassRecord[] = []
+  private readonly stream = new RecordedCommandStream()
   private activePass: GPURenderPassEncoder | null = null
   private finished = false
 
@@ -734,10 +824,15 @@ export class GPUCommandEncoder {
     const record: RenderPassRecord = {
       view: attachment.view,
       rgba: colorToRgba(attachment.clearValue ?? { a: 1 }),
-      commands: [],
+      opStart: this.stream.nextOp,
+      opCount: 0,
+      operandStart: this.stream.nextOperand,
+      operandCount: 0,
+      resourceStart: this.stream.nextResource,
+      resourceCount: 0,
       ended: false,
     }
-    const pass = new GPURenderPassEncoder(this, this.device, record)
+    const pass = new GPURenderPassEncoder(this, this.device, record, this.stream)
     this.passes.push(record)
     this.activePass = pass
     return pass
@@ -749,7 +844,7 @@ export class GPUCommandEncoder {
       throw new DOMException("The active render pass must be ended", "InvalidStateError")
     }
     this.finished = true
-    return new GPUCommandBuffer(this.device, this.passes)
+    return new GPUCommandBuffer(this.device, this.passes, this.stream)
   }
 
   endPass(pass: GPURenderPassEncoder): void {
@@ -774,7 +869,8 @@ export class GPURenderPassEncoder {
   constructor(
     private readonly encoder: GPUCommandEncoder,
     private readonly device: GPUDevice,
-    private readonly record: RenderPassRecord
+    private readonly record: RenderPassRecord,
+    private readonly stream: RecordedCommandStream
   ) {}
 
   setPipeline(pipeline: GPURenderPipeline): void {
@@ -786,7 +882,8 @@ export class GPURenderPassEncoder {
       throw new TypeError("Render pipeline belongs to a different device")
     }
     this.pipeline = pipeline
-    this.record.commands.push({ kind: "setPipeline", pipeline })
+    this.stream.writeOp(WEB_GPU_SET_PIPELINE)
+    this.stream.writeResource(pipeline)
   }
 
   setVertexBuffer(slot: number, buffer: GPUBuffer, offset = 0, size?: number): void {
@@ -803,13 +900,10 @@ export class GPURenderPassEncoder {
     if (bufferOffset > buffer.size || bufferSize < 0 || bufferOffset + bufferSize > buffer.size) {
       throw operationError("Vertex buffer binding exceeds the GPUBuffer")
     }
-    this.record.commands.push({
-      kind: "setVertexBuffer",
-      slot: gpuSize32(slot, "slot"),
-      buffer,
-      offset: bufferOffset,
-      size: bufferSize,
-    })
+    this.stream.writeOp(WEB_GPU_SET_VERTEX_BUFFER)
+    this.stream.writeOperand(gpuSize32(slot, "slot"))
+    this.stream.writeResource(buffer)
+    this.stream.writeTwo(bufferOffset, bufferSize)
   }
 
   setIndexBuffer(
@@ -839,13 +933,9 @@ export class GPURenderPassEncoder {
       throw operationError(`Index buffer offset and size must align to ${alignment} bytes`)
     }
     this.indexBuffer = buffer
-    this.record.commands.push({
-      kind: "setIndexBuffer",
-      buffer,
-      indexFormat,
-      offset: bufferOffset,
-      size: bufferSize,
-    })
+    this.stream.writeOp(WEB_GPU_SET_INDEX_BUFFER)
+    this.stream.writeResource(buffer)
+    this.stream.writeThree(indexFormat === "uint16" ? 0 : 1, bufferOffset, bufferSize)
   }
 
   draw(vertexCount: number, instanceCount = 1, firstVertex = 0, firstInstance = 0): void {
@@ -853,13 +943,13 @@ export class GPURenderPassEncoder {
     if (!this.pipeline) {
       throw new DOMException("A render pipeline must be set before draw", "InvalidStateError")
     }
-    this.record.commands.push({
-      kind: "draw",
-      vertexCount: gpuSize32(vertexCount, "vertexCount"),
-      instanceCount: gpuSize32(instanceCount, "instanceCount"),
-      firstVertex: gpuSize32(firstVertex, "firstVertex"),
-      firstInstance: gpuSize32(firstInstance, "firstInstance"),
-    })
+    this.stream.writeOp(WEB_GPU_DRAW)
+    this.stream.writeFour(
+      gpuSize32(vertexCount, "vertexCount"),
+      gpuSize32(instanceCount, "instanceCount"),
+      gpuSize32(firstVertex, "firstVertex"),
+      gpuSize32(firstInstance, "firstInstance"),
+    )
   }
 
   drawIndexed(
@@ -876,18 +966,21 @@ export class GPURenderPassEncoder {
     if (!this.indexBuffer) {
       throw new DOMException("An index buffer must be set before drawIndexed", "InvalidStateError")
     }
-    this.record.commands.push({
-      kind: "drawIndexed",
-      indexCount: gpuSize32(indexCount, "indexCount"),
-      instanceCount: gpuSize32(instanceCount, "instanceCount"),
-      firstIndex: gpuSize32(firstIndex, "firstIndex"),
-      baseVertex: gpuSigned32(baseVertex, "baseVertex"),
-      firstInstance: gpuSize32(firstInstance, "firstInstance"),
-    })
+    this.stream.writeOp(WEB_GPU_DRAW_INDEXED)
+    this.stream.writeFive(
+      gpuSize32(indexCount, "indexCount"),
+      gpuSize32(instanceCount, "instanceCount"),
+      gpuSize32(firstIndex, "firstIndex"),
+      gpuSigned32(baseVertex, "baseVertex"),
+      gpuSize32(firstInstance, "firstInstance"),
+    )
   }
 
   end(): void {
     this.assertActive()
+    this.record.opCount = this.stream.nextOp - this.record.opStart
+    this.record.operandCount = this.stream.nextOperand - this.record.operandStart
+    this.record.resourceCount = this.stream.nextResource - this.record.resourceStart
     this.record.ended = true
     this.encoder.endPass(this)
   }
@@ -921,12 +1014,12 @@ export class GPUQueue {
   submit(buffers: Iterable<GPUCommandBuffer>): void {
     this.device.assertAlive()
     const commandBuffers = Array.from(buffers)
-    const passes: RenderPassRecord[] = []
+    const records: Array<{ buffer: GPUCommandBuffer; passes: readonly RenderPassRecord[] }> = []
     for (const buffer of commandBuffers) {
       if (!(buffer instanceof GPUCommandBuffer)) {
         throw new TypeError("queue.submit requires GPUCommandBuffer values")
       }
-      passes.push(...buffer.validate(this.device))
+      records.push({ buffer, passes: buffer.validate(this.device) })
     }
 
     const { transport, deviceId } = this.device.nativeBinding()
@@ -937,104 +1030,88 @@ export class GPUQueue {
     const submission: NativeSubmission = { frames: [], passes: [] }
     const frameIndexes = new Map<GPUTexture, number>()
     const textures: GPUTexture[] = []
-    const ops: number[] = []
-    const operands: number[] = []
-
-    for (const pass of passes) {
-      const texture = pass.view.texture
-      const context = texture.context
-      context.assertOwner(this.device)
-      context.assertCurrent(pass.view.generation)
-      if (context.transport !== transport) {
-        throw new TypeError("GPUDevice is bound to a different renderer")
+    for (const { buffer, passes } of records) {
+      for (const pass of passes) {
+        const texture = pass.view.texture
+        const context = texture.context
+        context.assertOwner(this.device)
+        context.assertCurrent(pass.view.generation)
+        if (context.transport !== transport) {
+          throw new TypeError("GPUDevice is bound to a different renderer")
+        }
+        let frame = frameIndexes.get(texture)
+        if (frame === undefined) {
+          frame = submission.frames.length
+          frameIndexes.set(texture, frame)
+          textures.push(texture)
+          submission.frames.push(context.frameDescriptor())
+        }
+        try {
+          buffer.stream.resolveResources(pass.resourceStart, pass.resourceCount)
+        } catch (error) {
+          if (!isGpuError(error)) throw error
+          for (const commandBuffer of commandBuffers) commandBuffer.markSubmitted()
+          return
+        }
+        submission.passes.push({
+          frame,
+          rgba: pass.rgba,
+          opStart: pass.opStart,
+          opCount: pass.opCount,
+          operandStart: pass.operandStart,
+          operandCount: pass.operandCount,
+        })
       }
-      let frame = frameIndexes.get(texture)
-      if (frame === undefined) {
-        frame = submission.frames.length
-        frameIndexes.set(texture, frame)
-        textures.push(texture)
-        submission.frames.push(context.frameDescriptor())
-      }
-      const opStart = ops.length
-      const operandStart = operands.length
-      try {
-        encodeRenderCommands(pass.commands, ops, operands)
-      } catch (error) {
-        if (!isGpuError(error)) throw error
-        for (const buffer of commandBuffers) buffer.markSubmitted()
-        return
-      }
-      submission.passes.push({
-        frame,
-        rgba: pass.rgba,
-        opStart,
-        opCount: ops.length - opStart,
-        operandStart,
-        operandCount: operands.length - operandStart,
-      })
     }
-
     for (const buffer of commandBuffers) buffer.markSubmitted()
+    const [ops, operands] = commandBuffers.length === 1
+      ? [commandBuffers[0]!.stream.opsView(), commandBuffers[0]!.stream.operandsView()]
+      : combineCommandStreams(records, submission)
+    const submissionJson = JSON.stringify(submission)
     try {
       transport.submitWebGpuCommands(
         deviceId,
-        JSON.stringify(submission),
-        Uint32Array.from(ops),
-        Float64Array.from(operands),
+        submissionJson,
+        ops,
+        operands,
       )
     } catch (cause) {
       this.device.captureNativeError(cause)
       return
     }
+    for (const buffer of commandBuffers) buffer.stream.release()
     for (const texture of textures) texture.context.didPresent(texture)
   }
 }
 
-function encodeRenderCommands(
-  commands: readonly RenderCommand[],
-  ops: number[],
-  operands: number[],
-): void {
-  for (const command of commands) {
-    switch (command.kind) {
-      case "setPipeline":
-        ops.push(WEB_GPU_SET_PIPELINE)
-        operands.push(command.pipeline.nativeId())
-        break
-      case "setVertexBuffer":
-        ops.push(WEB_GPU_SET_VERTEX_BUFFER)
-        operands.push(command.slot, command.buffer.nativeId(), command.offset, command.size)
-        break
-      case "setIndexBuffer":
-        ops.push(WEB_GPU_SET_INDEX_BUFFER)
-        operands.push(
-          command.buffer.nativeId(),
-          command.indexFormat === "uint16" ? 0 : 1,
-          command.offset,
-          command.size,
-        )
-        break
-      case "draw":
-        ops.push(WEB_GPU_DRAW)
-        operands.push(
-          command.vertexCount,
-          command.instanceCount,
-          command.firstVertex,
-          command.firstInstance,
-        )
-        break
-      case "drawIndexed":
-        ops.push(WEB_GPU_DRAW_INDEXED)
-        operands.push(
-          command.indexCount,
-          command.instanceCount,
-          command.firstIndex,
-          command.baseVertex,
-          command.firstInstance,
-        )
-        break
+function combineCommandStreams(
+  records: readonly { buffer: GPUCommandBuffer; passes: readonly RenderPassRecord[] }[],
+  submission: NativeSubmission
+): [Uint32Array, Float64Array] {
+  const opLength = records.reduce((length, { buffer }) => length + buffer.stream.opsView().length, 0)
+  const operandLength = records.reduce(
+    (length, { buffer }) => length + buffer.stream.operandsView().length,
+    0
+  )
+  const ops = new Uint32Array(opLength)
+  const operands = new Float64Array(operandLength)
+  let opOffset = 0
+  let operandOffset = 0
+  let passIndex = 0
+  for (const { buffer, passes } of records) {
+    const streamOps = buffer.stream.opsView()
+    const streamOperands = buffer.stream.operandsView()
+    ops.set(streamOps, opOffset)
+    operands.set(streamOperands, operandOffset)
+    for (const pass of passes) {
+      const descriptor = submission.passes[passIndex++]!
+      descriptor.opStart += opOffset
+      descriptor.operandStart += operandOffset
     }
+    opOffset += streamOps.length
+    operandOffset += streamOperands.length
   }
+  return [ops, operands]
 }
 
 export class GPUDevice extends EventTarget {

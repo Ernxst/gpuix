@@ -26,60 +26,60 @@
       "draws": 100,
       "measuredFrames": 300,
       "wholeFrameNs": {
-        "median": 90792,
-        "p95": 343250
+        "median": 88292,
+        "p95": 117792
       },
       "nsPerDraw": {
-        "median": 907.92,
-        "p95": 3432.5
+        "median": 882.92,
+        "p95": 1177.92
       }
     },
     {
       "draws": 1000,
       "measuredFrames": 300,
       "wholeFrameNs": {
-        "median": 360209,
-        "p95": 480916
+        "median": 355208,
+        "p95": 588500
       },
       "nsPerDraw": {
-        "median": 360.209,
-        "p95": 480.916
+        "median": 355.208,
+        "p95": 588.5
       }
     },
     {
       "draws": 10000,
       "measuredFrames": 300,
       "wholeFrameNs": {
-        "median": 3335416,
-        "p95": 5376541
+        "median": 2942542,
+        "p95": 3870334
       },
       "nsPerDraw": {
-        "median": 333.5416,
-        "p95": 537.6541
+        "median": 294.2542,
+        "p95": 387.0334
       }
     },
     {
       "draws": 50000,
       "measuredFrames": 100,
       "wholeFrameNs": {
-        "median": 18533125,
-        "p95": 24352667
+        "median": 15745584,
+        "p95": 17304416
       },
       "nsPerDraw": {
-        "median": 370.6625,
-        "p95": 487.05334
+        "median": 314.91168,
+        "p95": 346.08832
       }
     },
     {
       "draws": 100000,
       "measuredFrames": 100,
       "wholeFrameNs": {
-        "median": 36791626,
-        "p95": 50605167
+        "median": 31282125,
+        "p95": 32744834
       },
       "nsPerDraw": {
-        "median": 367.91626,
-        "p95": 506.05167
+        "median": 312.82125,
+        "p95": 327.44834
       }
     }
   ],
