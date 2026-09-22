@@ -94,6 +94,8 @@ fn caret_rect(
         point(origin.x, origin.y + y_offset),
         size(CARET_WIDTH, height),
     )
+}
+
 fn clipboard_text(item: ClipboardItem) -> Option<String> {
     if item
         .entries
@@ -103,8 +105,6 @@ fn clipboard_text(item: ClipboardItem) -> Option<String> {
         return None;
     }
     item.text()
-}
-
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -899,10 +899,7 @@ describeNative("native text editors", () => {
           "v",
           "v",
         ],
-        "windowKeys": [
-          "v",
-          "v",
-        ],
+        "windowKeys": [],
       }
     `)
   })

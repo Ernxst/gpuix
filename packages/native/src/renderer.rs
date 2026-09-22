@@ -4423,66 +4423,6 @@ impl GpuixRenderer {
         unsupported_capability(_env, "window.fullscreen")
     }
 
-    /// Minimize the native window.
-    #[napi]
-    pub fn minimize_window(&self) -> Result<()> {
-        #[cfg(target_os = "macos")]
-        return update_window(|_view, window, _cx| window.minimize_window());
-
-        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::MinimizeWindow);
-
-        #[cfg(not(any(
-            target_os = "macos",
-            target_os = "windows",
-            target_os = "linux",
-            target_os = "freebsd"
-        )))]
-        Err(Error::from_reason(
-            "The production GPUIX renderer does not support this operating system",
-        ))
-    }
-
-    /// Run the native zoom or maximize operation.
-    #[napi]
-    pub fn zoom_window(&self) -> Result<()> {
-        #[cfg(target_os = "macos")]
-        return update_window(|_view, window, _cx| window.zoom_window());
-
-        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ZoomWindow);
-
-        #[cfg(not(any(
-            target_os = "macos",
-            target_os = "windows",
-            target_os = "linux",
-            target_os = "freebsd"
-        )))]
-        Err(Error::from_reason(
-            "The production GPUIX renderer does not support this operating system",
-        ))
-    }
-
-    /// Enter or exit native fullscreen.
-    #[napi]
-    pub fn toggle_fullscreen(&self) -> Result<()> {
-        #[cfg(target_os = "macos")]
-        return update_window(|_view, window, _cx| window.toggle_fullscreen());
-
-        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ToggleFullscreen);
-
-        #[cfg(not(any(
-            target_os = "macos",
-            target_os = "windows",
-            target_os = "linux",
-            target_os = "freebsd"
-        )))]
-        Err(Error::from_reason(
-            "The production GPUIX renderer does not support this operating system",
-        ))
-    }
-
     #[napi]
     pub fn set_window_title(&self, title: String) -> Result<()> {
         #[cfg(target_os = "macos")]
@@ -7410,15 +7350,17 @@ struct HighlightCacheEntry {
 fn emit_motion_settled(
     callback: &Option<EventCallback>,
     tree: &crate::retained_tree::RetainedTree,
-    ids: &[u64],
+    completions: &[(u64, u64)],
 ) {
-    for &id in ids {
+    for &(id, generation) in completions {
         if tree
             .elements
             .get(&id)
             .is_some_and(|element| element.events.contains("motionComplete"))
         {
-            emit_event_full(callback, id, "motionComplete", |_| {});
+            emit_event_full(callback, id, "motionComplete", |payload| {
+                payload.motion_generation = Some(generation as f64);
+            });
         }
     }
 }
@@ -8417,7 +8359,7 @@ pub(crate) struct BuildCtx<'a> {
     pub now: web_time::Instant,
     pub animation_active: &'a mut bool,
     pub style_transition_active: &'a mut bool,
-    pub motion_settled: &'a mut Vec<u64>,
+    pub motion_settled: &'a mut Vec<(u64, u64)>,
     pub reduce_motion: bool,
     pub selection: SharedSelection,
     pub image_network_policy: &'a crate::custom_elements::img::ImageNetworkPolicy,
@@ -11052,7 +10994,7 @@ fn build_element_with_parent_layout(
             .and_then(|_| ctx.motion_states.get(&id))
             .filter(|state| state.is_valid())
             .map(|state| {
-                let frame = state.frame(ctx.now, ctx.reduce_motion);
+                let frame = state.sampled_frame(ctx.now, ctx.reduce_motion);
                 let mut resolved = transitioned_style
                     .clone()
                     .or_else(|| declared_style.cloned())
@@ -11090,7 +11032,7 @@ fn build_element_with_parent_layout(
             let frame = state.frame(ctx.now, ctx.reduce_motion);
             *ctx.animation_active |= frame.active;
             if frame.just_settled {
-                ctx.motion_settled.push(id);
+                ctx.motion_settled.push((id, frame.generation));
             }
             // `Arc<StyleDesc>` is shared, so the animated frame is applied to a
             // copy. Mutating through the pointer would restyle every element
