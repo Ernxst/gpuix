@@ -16,7 +16,7 @@
     "react": "^19.2.4"
   },
   "devDependencies": {
-    "@gpuix/vite": "workspace:*",
+    "@gpuix/plugins": "workspace:*",
     "@types/bun": "^1.2.0",
     "@types/react": "^19.2.0",
     "typescript": "^5.3.0",

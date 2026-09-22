@@ -28,7 +28,7 @@ cd packages/native && cargo build --release --example hello_bench
   --example hello_bench`, no JS, no napi bridge. The baseline both other
   fixtures are measured against.
 - **`hot-reload-fixture.tsx`** — the same shape again, used only for the hot
-  reload measurement (both `bun --hot` and `@gpuix/vite`, via
+  reload measurement (both `bun --hot` and `@gpuix/plugins/vite`, via
   `vite.config.ts` in this directory), kept as a separate file from
   `hello-gpuix.tsx` so a hot-reload run never needs to recompile the binary
   the startup measurement depends on.
@@ -78,15 +78,15 @@ cd packages/native && cargo build --release --example hello_bench
   unrelated dependency-graph noise.
 - **Hot reload** — time from writing an edited `hot-reload-fixture.tsx` to a
   fresh "mounted" marker carrying the new content reaching stdout, for both
-  `bun --hot` (remount) and `@gpuix/vite` (native dev, `vite.config.ts` in
+  `bun --hot` (remount) and `@gpuix/plugins/vite` (native dev, `vite.config.ts` in
   this directory). The harness edits the `VERSION` string in place, records
   the write time, waits for the matching marker, then restores the file —
   even if the run fails partway through.
 
-  `@gpuix/vite`'s import isn't declared as an `examples` dependency: that
+  `@gpuix/plugins/vite`'s import isn't declared as an `examples` dependency: that
   workspace package doesn't otherwise need it, and adding it would touch the
   frozen lockfile for a benchmark-only config. `vite.config.ts` imports it
-  from `packages/vite/dist` directly, so run `bun run build:vite` first.
+  from `packages/plugins/dist` directly, so run `bun run build:vite` first.
 
 ## Focus
 

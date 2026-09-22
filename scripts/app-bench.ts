@@ -17,7 +17,7 @@
  *   bun install --frozen-lockfile
  *   bun run build:native   # produces packages/native/*.node
  *   bun run build:react    # produces packages/react/dist
- *   bun run build:vite     # produces packages/vite/dist, used by the Vite
+ *   bun run build:vite     # produces packages/plugins/dist, used by the Vite
  *                          # hot-reload measurement
  * and, once, the GPUI baseline binary:
  *   cd packages/native && cargo build --release --example hello_bench
@@ -628,7 +628,7 @@ async function main(): Promise<void> {
     runs,
   )
 
-  log("hot reload: @gpuix/vite")
+  log("hot reload: @gpuix/plugins/vite")
   const hotReloadVite = await measureHotReload(
     "vite",
     "bun",
@@ -661,7 +661,7 @@ async function main(): Promise<void> {
       report.hotReloadVite = stats(hotReloadVite)
       if (hotReloadVite.length === 0) {
         notes.push(
-          "@gpuix/vite hot reload not measured: the fixture produced no marker under the plugin",
+          "@gpuix/plugins/vite hot reload not measured: the fixture produced no marker under the plugin",
         )
       }
     }

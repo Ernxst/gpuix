@@ -3,7 +3,7 @@
  *
  * Used two ways, both by the same file:
  *   - `bun --hot hot-reload-fixture.tsx` (remount reload)
- *   - the `@gpuix/vite` plugin, in `examples/bench/vite.config.ts` (native dev)
+ *   - the `@gpuix/plugins/vite` plugin, in `examples/bench/vite.config.ts` (native dev)
  *
  * The harness edits VERSION below, in place, and times how long it takes for
  * a fresh "mounted" marker carrying the new value to reach stdout, then
