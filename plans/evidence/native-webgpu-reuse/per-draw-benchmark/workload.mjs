@@ -1,4 +1,8 @@
-const DRAW_COUNTS = [1_000, 5_000, 10_000]
+const DRAW_COUNTS = (process.env.PER_DRAW_COUNTS ?? "1000,5000,10000")
+  .split(",")
+  .map((value) => Number(value))
+  .filter((value) => Number.isInteger(value) && value > 0)
+if (DRAW_COUNTS.length === 0) throw new Error("PER_DRAW_COUNTS must contain positive integers")
 const WARMUP_FRAMES = 50
 const MEASURED_FRAMES = 300
 

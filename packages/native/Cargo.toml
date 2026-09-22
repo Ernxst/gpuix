@@ -134,6 +134,10 @@ path = "examples/hello.rs"
 name = "bench_serde"
 path = "examples/bench_serde.rs"
 
+[[example]]
+name = "bench_webgpu_draw"
+path = "examples/bench_webgpu_draw.rs"
+
 [profile.release]
 lto = true
 
