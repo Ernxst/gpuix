@@ -49,6 +49,17 @@ Temporary `Instant` timers were added to `webgpu_canvas.rs`, profiled at 10,000 
 
 The remaining submit-path residual includes JavaScript descriptor preparation and the N-API boundary. The direct typed-array recorder would remove a copy there, but it cost roughly 127 ns/draw more during Bun recording and was not retained.
 
+## Small-frame split
+
+Temporary timers around the native test-renderer bridge were run at 100 and 1,000 draws, then removed. These are synchronous median CPU times in microseconds; the JavaScript submit column is the outer submit time after subtracting native replay and presentation setup. The full-frame p95 remains in the main result table and baseline because independently sampled phase p95s cannot be combined.
+
+| Draws | JavaScript recording | JavaScript submit and N-API | Native replay | Presentation install and GPUI invalidation | Whole frame |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 6.6 | 33.9 | 49.0 | 0.3 | 89.7 |
+| 1,000 | 50.0 | 71.8 | 226.3 | 0.3 | 348.4 |
+
+The asynchronous GPUI compositor is outside the submit-return interval, so it cannot be attributed to that CPU total. No significant synchronous presentation cost remained after frame-wrapper reuse. The largest removable-looking cost is JavaScript submission preparation and N-API, but the attempted typed-array recorder regressed Bun’s recording path and was discarded.
+
 ## wgpu controls
 
 `packages/native/examples/bench_webgpu_draw.rs` is the high-level Rust control. It uses the same adapter, target, pipeline and commands with no JavaScript, N-API, decode, canvas or presentation work.
