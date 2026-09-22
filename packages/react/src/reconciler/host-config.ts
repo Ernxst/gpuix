@@ -325,14 +325,9 @@ function describeInvalidCompareDocumentPositionArgument(value: unknown): string 
  *
  * Two nodes with different roots are disconnected; the ordering picked for
  * them is arbitrary but stable within a process, matching the DOM's guarantee
- * that disconnected nodes still compare consistently. This also makes two
- * top-level siblings under the *same* container disconnected from each
- * other: {@link Container} tracks only its single current `rootElementId`,
- * not an ordered list of top-level children, so there is no ancestor to walk
- * up to for a common one. A single root under each container sidesteps this
- * — the only case the current call sites need — but two real top-level
- * siblings (e.g. two roots of one React Fragment mounted directly into a
- * container) will read as disconnected even though they share a container.
+ * that disconnected nodes still compare consistently. Several top-level
+ * children share the renderer-owned root after promotion, so they retain a
+ * common ancestor and their document order is observable like DOM siblings.
  */
 function compareDocumentPosition(self: HostNode, other: HostNode): number {
   if (!hostNodeStates.has(other)) {
@@ -2019,6 +2014,124 @@ function materialize(node: HostNode): HostNodeState {
   return state
 }
 
+function nativeType(instance: Instance): ElementType {
+  return DIV_ALIASES.has(instance.type) ? "div" : instance.type
+}
+
+function clearAnnouncer(container: Container, destroyRegions: boolean): void {
+  if (destroyRegions) {
+    const regions = new Set<number>()
+    for (const pair of Object.values(container.announcer)) {
+      if (!pair) continue
+      for (const id of pair.regionIds) regions.add(id)
+    }
+    for (const id of regions) container.renderer.destroyElement(id)
+  }
+  container.announcer.polite = null
+  container.announcer.assertive = null
+}
+
+function clearContainerRoot(container: Container): void {
+  const root = container.bodyElement
+  if (root) {
+    markUnmounted(root)
+    const destroyed = container.renderer.destroyElement(root.id)
+    for (const id of destroyed) {
+      unregisterEventHandlers(container.eventHandlers, id)
+      container.eventTargets.delete(id)
+      container.preventedKeyboardActivations.delete(id)
+      if (container.preventedDragOvers.has(id)) container.preventedDragOvers.clear()
+    }
+  }
+  clearAnnouncer(container, false)
+  container.bodyElement = null
+  container.implicitRoot = null
+  container.rootElementId = null
+  container.rootElementType = null
+}
+
+function createImplicitRoot(container: Container): Instance {
+  const root = instantiateHostElement(nextId(container), "div", {}, container)
+  hostNodeStates.set(root, {
+    container,
+    children: [],
+    mounted: true,
+    parent: null,
+  })
+  publicInstanceContainers.set(root, container)
+  container.renderer.createElement(root.id, "div")
+  container.bodyElement = root
+  container.implicitRoot = root
+  container.rootElementId = root.id
+  container.rootElementType = "div"
+  return root
+}
+
+function setDirectContainerRoot(container: Container, child: Instance): void {
+  child.parentId = null
+  stateFor(child).parent = null
+  materialize(child)
+  container.renderer.setRoot(child.id)
+  container.bodyElement = child
+  container.implicitRoot = null
+  container.rootElementId = child.id
+  container.rootElementType = nativeType(child)
+}
+
+function placeInImplicitRoot(
+  container: Container,
+  root: Instance,
+  child: Instance,
+  beforeChild: Instance | null
+): void {
+  const state = stateFor(root)
+  if (beforeChild) {
+    insertTrackedChild(root, state, child, beforeChild)
+  } else {
+    appendTrackedChild(root, state, child)
+  }
+  materialize(child)
+  if (beforeChild) {
+    container.renderer.insertBefore(root.id, child.id, beforeChild.id)
+  } else {
+    container.renderer.appendChild(root.id, child.id)
+  }
+}
+
+function promoteContainerRoot(
+  container: Container,
+  child: Instance,
+  beforeChild: Instance | null
+): void {
+  const previousRoot = container.bodyElement
+  if (!previousRoot) {
+    setDirectContainerRoot(container, child)
+    return
+  }
+
+  // A direct root owns any existing live regions. They would otherwise remain
+  // under its application child after that child moves beneath the wrapper.
+  clearAnnouncer(container, true)
+  const root = createImplicitRoot(container)
+  placeInImplicitRoot(container, root, previousRoot, null)
+  placeInImplicitRoot(container, root, child, beforeChild)
+  container.renderer.setRoot(root.id)
+}
+
+function placeInContainer(container: Container, child: Instance, beforeChild: Instance | null): void {
+  const root = container.bodyElement
+  if (!root) {
+    setDirectContainerRoot(container, child)
+    return
+  }
+  if (container.implicitRoot) {
+    placeInImplicitRoot(container, container.implicitRoot, child, beforeChild)
+    return
+  }
+  if (root === child) return
+  promoteContainerRoot(container, child, beforeChild)
+}
+
 // ── Host config ──────────────────────────────────────────────────────
 
 export const hostConfig = {
@@ -2105,20 +2218,21 @@ export const hostConfig = {
   },
 
   insertInContainerBefore(
-    _parent: Container,
-    _child: Instance,
-    _beforeChild: Instance
-  ): void {},
+    parent: Container,
+    child: Instance,
+    beforeChild: Instance
+  ): void {
+    placeInContainer(parent, child, beforeChild)
+  },
 
   removeChildFromContainer(parent: Container, child: Instance): void {
     disposeRecordingContext2D(child)
     disposeWebGpuContext(child)
-    // A fragment root can have several top-level children, so only the one
-    // `announce()` is actually attached under invalidates the id — an
-    // unrelated sibling leaving must not orphan `announce()`'s regions.
-    if (parent.rootElementId === child.id) {
-      parent.rootElementId = null
-      parent.rootElementType = null
+    const root = parent.bodyElement
+    if (!root) return
+
+    if (parent.implicitRoot) {
+      removeTrackedChild(stateFor(parent.implicitRoot), child)
     }
     markUnmounted(child)
     const destroyed = parent.renderer.destroyElement(child.id)
@@ -2129,6 +2243,23 @@ export const hostConfig = {
       if (parent.preventedDragOvers.has(id)) {
         parent.preventedDragOvers.clear()
       }
+    }
+    if (parent.implicitRoot) {
+      if (stateFor(parent.implicitRoot).children.length !== 0) return
+      markUnmounted(parent.implicitRoot)
+      parent.renderer.destroyElement(parent.implicitRoot.id)
+      clearAnnouncer(parent, false)
+      parent.bodyElement = null
+      parent.implicitRoot = null
+      parent.rootElementId = null
+      parent.rootElementType = null
+      return
+    }
+    if (root === child) {
+      clearAnnouncer(parent, false)
+      parent.bodyElement = null
+      parent.rootElementId = null
+      parent.rootElementType = null
     }
   },
 
@@ -2267,16 +2398,7 @@ export const hostConfig = {
   },
 
   appendChildToContainer(container: Container, child: Instance): void {
-    child.parentId = null
-    stateFor(child).parent = null
-    materialize(child)
-    container.renderer.setRoot(child.id)
-    // `announce()`'s regions hang off whichever element last became the root, so
-    // a remounted top-level instance invalidates them (see `announce.ts`). The
-    // *native* type — a `DIV_ALIASES` entry materializes as "div" — is what
-    // decides whether that element can host an appended child at all.
-    container.rootElementId = child.id
-    container.rootElementType = DIV_ALIASES.has(child.type) ? "div" : child.type
+    placeInContainer(container, child, null)
   },
 
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {
@@ -2305,7 +2427,9 @@ export const hostConfig = {
   hideTextInstance(_textInstance: TextInstance): void {},
   unhideTextInstance(_textInstance: TextInstance, _text: string): void {},
 
-  clearContainer(_container: Container): void {},
+  clearContainer(container: Container): void {
+    clearContainerRoot(container)
+  },
 
   setCurrentUpdatePriority(newPriority: number): void {
     currentUpdatePriority = newPriority

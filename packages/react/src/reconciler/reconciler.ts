@@ -203,6 +203,8 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     strictStyles,
     rootElementId: null,
     rootElementType: null,
+    bodyElement: null,
+    implicitRoot: null,
     announcer: { polite: null, assertive: null },
     onSelectionChange: options.onSelectionChange,
     windowSelectionEventId,
