@@ -4,6 +4,13 @@
 //! `packages/native`. It deliberately has no JavaScript, N-API, command
 //! decoding, JSON, canvas presentation, or error-scope work in its timed path.
 
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("bench_webgpu_draw is supported on macOS only");
+}
+
+#[cfg(target_os = "macos")]
+mod macos {
 use std::time::Instant;
 
 use anyhow::Context as _;
@@ -76,7 +83,7 @@ fn frame(
     (record_ns, submit_started.elapsed().as_nanos())
 }
 
-fn main() -> anyhow::Result<()> {
+pub fn run() -> anyhow::Result<()> {
     let draws = std::env::var("WEBGPU_BENCH_DRAWS")
         .ok()
         .map(|value| value.parse())
@@ -196,4 +203,11 @@ fn main() -> anyhow::Result<()> {
         if draws == 0 { 0 } else { (record_p95 + submit_p95) / draws as u128 },
     );
     Ok(())
+}
+
+}
+
+#[cfg(target_os = "macos")]
+fn main() -> anyhow::Result<()> {
+    macos::run()
 }

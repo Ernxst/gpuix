@@ -4,6 +4,7 @@ import {
   GPUAdapter,
   GPUCanvasContext,
   GPUDevice,
+  getOrCreateWebGpuContext,
   invalidateWebGpuTransport,
   type WebGpuCanvasTransport,
 } from "../canvas/webgpu.js"
@@ -210,6 +211,10 @@ function trackedResourceCount(device: GPUDevice): number {
 }
 
 describe("native WebGPU command model", () => {
+  it("returns no WebGPU context when the native transport does not expose submissions", () => {
+    expect(getOrCreateWebGpuContext({}, {}, 17, () => ({ width: 96, height: 72 }))).toBeNull()
+  })
+
   it("materialises renderer-owned resources and encodes a browser-shaped draw", async () => {
     const { context, device, pipeline, transport } = await pipelineFixture()
     const encoder = device.createCommandEncoder()
