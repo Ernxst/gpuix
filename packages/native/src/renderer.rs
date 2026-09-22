@@ -3511,7 +3511,14 @@ impl GpuixRenderer {
         let id = to_element_id(id)?; let tree = self.tree.lock().unwrap(); validate_canvas_target(&tree, id).map_err(Error::from_reason)?; drop(tree);
         crate::canvas::reset_canvas(&self.canvas_display_lists, id); self.request_invalidate()
     }
+}
 
+/// macOS-only WebGPU canvas transport. The outer cfg is required because
+/// napi collects methods from an impl before the cfg attributes on individual
+/// methods have removed their generated callbacks.
+#[cfg(target_os = "macos")]
+#[napi]
+impl GpuixRenderer {
     /// Present one GPU-produced clear through the real macOS window renderer.
     /// The producer signals GPUI with a Metal event and never reads pixels back.
     #[cfg(target_os = "macos")]
@@ -3678,7 +3685,11 @@ impl GpuixRenderer {
         }
         self.request_invalidate()
     }
+}
 
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[napi]
+impl GpuixRenderer {
     /// Start or join one renderer-local canvas image load. The observer keeps
     /// the decoded entry alive until JavaScript changes or releases the source.
     #[napi]

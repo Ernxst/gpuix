@@ -5,6 +5,13 @@
 //! same Metal adapter, target format, pipeline, buffers and draw commands as
 //! `bench_webgpu_draw`.
 
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("bench_webgpu_core_draw is supported on macOS only");
+}
+
+#[cfg(target_os = "macos")]
+mod macos {
 use std::borrow::Cow;
 use std::time::Instant;
 
@@ -242,7 +249,7 @@ fn frame(global: &wgc::global::Global, resources: &Resources) -> anyhow::Result<
     Ok((record_ns, submit_started.elapsed().as_nanos()))
 }
 
-fn main() -> anyhow::Result<()> {
+pub fn run() -> anyhow::Result<()> {
     let global = wgc::global::Global::new(
         "GPU-IX wgpu-core benchmark",
         wgt::InstanceDescriptor::new_without_display_handle(),
@@ -269,4 +276,11 @@ fn main() -> anyhow::Result<()> {
         (record_p95 + submit_p95) / DRAWS as u128,
     );
     Ok(())
+}
+
+}
+
+#[cfg(target_os = "macos")]
+fn main() -> anyhow::Result<()> {
+    macos::run()
 }
