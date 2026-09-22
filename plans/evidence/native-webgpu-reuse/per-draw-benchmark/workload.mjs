@@ -1,0 +1,159 @@
+const DRAW_COUNTS = [1_000, 5_000, 10_000]
+const WARMUP_FRAMES = 50
+const MEASURED_FRAMES = 300
+
+const WGSL = /* wgsl */ `
+struct VertexOutput {
+  @builtin(position) position: vec4f,
+}
+
+@vertex
+fn vertex_main(@location(0) position: vec2f) -> VertexOutput {
+  return VertexOutput(vec4f(position, 0.0, 1.0));
+}
+
+@fragment
+fn fragment_main() -> @location(0) vec4f {
+  return vec4f(0.2, 0.7, 1.0, 1.0);
+}
+`
+
+function elapsedNanoseconds(start) {
+  return Number(process.hrtime.bigint() - start)
+}
+
+function percentile(samples, fraction) {
+  const ordered = [...samples].sort((left, right) => left - right)
+  return ordered[Math.ceil(ordered.length * fraction) - 1]
+}
+
+function summary(samples) {
+  return {
+    medianNs: percentile(samples, 0.5),
+    p95Ns: percentile(samples, 0.95),
+  }
+}
+
+function createResources(device) {
+  const shader = device.createShaderModule({ code: WGSL })
+  const pipeline = device.createRenderPipeline({
+    layout: "auto",
+    vertex: {
+      module: shader,
+      entryPoint: "vertex_main",
+      buffers: [{
+        arrayStride: 8,
+        attributes: [{ shaderLocation: 0, offset: 0, format: "float32x2" }],
+      }],
+    },
+    fragment: {
+      module: shader,
+      entryPoint: "fragment_main",
+      targets: [{ format: "bgra8unorm" }],
+    },
+  })
+  const vertexBuffer = device.createBuffer({
+    size: 24,
+    usage: GPUBufferUsage.VERTEX,
+    mappedAtCreation: true,
+  })
+  new Float32Array(vertexBuffer.getMappedRange()).set([
+    0, 0.5,
+    -0.5, -0.5,
+    0.5, -0.5,
+  ])
+  vertexBuffer.unmap()
+  const indexBuffer = device.createBuffer({
+    // WebGPU requires mapped-at-creation buffers to have a four-byte-aligned
+    // size. The first three uint16 entries form the indexed triangle.
+    size: 8,
+    usage: GPUBufferUsage.INDEX,
+    mappedAtCreation: true,
+  })
+  new Uint16Array(indexBuffer.getMappedRange()).set([0, 1, 2])
+  indexBuffer.unmap()
+  return { pipeline, vertexBuffer, indexBuffer }
+}
+
+async function frame(device, resources, target, draws, measureGpuCompletion) {
+  const encoder = device.createCommandEncoder()
+  const view = target.acquireView()
+
+  const encodeStarted = process.hrtime.bigint()
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view,
+      clearValue: { r: 0, g: 0, b: 0, a: 1 },
+      loadOp: "clear",
+      storeOp: "store",
+    }],
+  })
+  pass.setPipeline(resources.pipeline)
+  for (let index = 0; index < draws; index++) {
+    pass.setVertexBuffer(0, resources.vertexBuffer)
+    pass.setIndexBuffer(resources.indexBuffer, "uint16")
+    pass.drawIndexed(3)
+  }
+  pass.end()
+  const encodeNs = elapsedNanoseconds(encodeStarted)
+
+  const submitStarted = process.hrtime.bigint()
+  const commandBuffer = encoder.finish()
+  device.queue.submit([commandBuffer])
+  const finishSubmitNs = elapsedNanoseconds(submitStarted)
+
+  let gpuCompleteNs = null
+  if (measureGpuCompletion) {
+    await device.queue.onSubmittedWorkDone()
+    gpuCompleteNs = elapsedNanoseconds(submitStarted)
+  }
+  return { encodeNs, finishSubmitNs, gpuCompleteNs }
+}
+
+/**
+ * Run the shared WebGPU calls. Providers may only differ in `target`: GPU-IX
+ * acquires a canvas texture and Dawn returns an off-screen texture view.
+ */
+export async function runWorkload({ provider, runtime, device, target }) {
+  const resources = createResources(device)
+  const supportsGpuCompletion = typeof device.queue.onSubmittedWorkDone === "function"
+  const measurements = []
+
+  for (const draws of DRAW_COUNTS) {
+    for (let frameIndex = 0; frameIndex < WARMUP_FRAMES; frameIndex++) {
+      await frame(device, resources, target, draws, supportsGpuCompletion)
+    }
+
+    const encode = []
+    const finishSubmit = []
+    const gpuComplete = []
+    for (let frameIndex = 0; frameIndex < MEASURED_FRAMES; frameIndex++) {
+      const result = await frame(device, resources, target, draws, supportsGpuCompletion)
+      encode.push(result.encodeNs)
+      finishSubmit.push(result.finishSubmitNs)
+      if (result.gpuCompleteNs !== null) gpuComplete.push(result.gpuCompleteNs)
+    }
+    measurements.push({
+      draws,
+      encode: summary(encode),
+      finishSubmit: summary(finishSubmit),
+      gpuComplete: gpuComplete.length === 0 ? null : summary(gpuComplete),
+    })
+  }
+
+  return {
+    provider,
+    runtime,
+    workload: {
+      target: "256x256 bgra8unorm",
+      warmupFrames: WARMUP_FRAMES,
+      measuredFrames: MEASURED_FRAMES,
+      draws: DRAW_COUNTS,
+      commands: "setPipeline once; setVertexBuffer + setIndexBuffer + drawIndexed repeated",
+      gpuCompleteTiming: supportsGpuCompletion
+        ? "submit invocation until queue.onSubmittedWorkDone() resolves; one frame is completed before the next"
+        : "unsupported by this provider",
+    },
+    measurements,
+  }
+}
