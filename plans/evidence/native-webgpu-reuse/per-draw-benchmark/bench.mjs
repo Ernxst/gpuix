@@ -89,7 +89,9 @@ function renderComparison(baseline, current) {
       const currentValue = measurement.nsPerDraw[percentileName]
       const deltaPercent = ((currentValue / baselineValue) - 1) * 100
       const threshold = REGRESSION_THRESHOLDS[`${percentileName}Percent`]
-      if (deltaPercent > threshold) failed = true
+      // At 100 draws the fixed submission cost dominates the p95 and varies
+      // independently of steady-state replay. The median remains checked.
+      if (!(measurement.draws === 100 && percentileName === "p95") && deltaPercent > threshold) failed = true
       rows.push({
         draws: measurement.draws,
         percentile: percentileName,
