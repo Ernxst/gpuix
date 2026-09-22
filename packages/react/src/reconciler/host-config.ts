@@ -1047,7 +1047,10 @@ function hasAuthoredName(props: Props): boolean {
   // ids resolve is decided in Rust, which holds the tree; an authored reference
   // is the most this side can see.
   const labelledBy = props.ariaLabelledBy ?? props["aria-labelledby"]
-  return typeof labelledBy === "string" && labelledBy.trim() !== ""
+  return (
+    (typeof labelledBy === "string" && labelledBy.trim() !== "") ||
+    (typeof labelledBy === "number" && Number.isFinite(labelledBy))
+  )
 }
 
 /**

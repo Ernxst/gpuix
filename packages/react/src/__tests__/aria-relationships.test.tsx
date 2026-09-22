@@ -24,7 +24,6 @@ describeNative("aria-labelledby and aria-describedby", () => {
           <text id="60522">Additional context</text>
           <div
             data-testid="details"
-            role="region"
             ariaDescribedBy={60522 as unknown as string}
           />
         </div>
@@ -33,7 +32,11 @@ describeNative("aria-labelledby and aria-describedby", () => {
       expect(screen.getByRole("region", { name: "Production ledger" })).toBe(
         screen.getByTestId("ledger")
       )
-      expect(screen.getByTestId("details")).toBeDefined()
+      const tree = screen.renderer.getAccessibilityTree()
+      const details = screen.getByTestId("details")
+      const node = Object.values(tree.nodes).find((candidate) => candidate.host_id === details.id)
+
+      expect(node?.aria.description).toBe("Additional context")
     } finally {
       screen.unmount()
     }
