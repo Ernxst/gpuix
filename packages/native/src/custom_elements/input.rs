@@ -13,11 +13,12 @@ use std::ops::Range;
 use std::time::Duration;
 
 use gpui::{
-    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem, Context,
-    CursorStyle, DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, FocusHandle,
-    GlobalElementId, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent, SharedString, Style, Task, TextRun,
-    TextStyle, UTF16Selection, UnderlineStyle, Window, WrappedLine,
+    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardEntry,
+    ClipboardItem, Context, CursorStyle, DispatchPhase, ElementInputHandler, Entity,
+    EntityInputHandler, FocusHandle, GlobalElementId, KeyBinding, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent,
+    SharedString, Style, Task, TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window,
+    WrappedLine,
 };
 use unicode_segmentation::UnicodeSegmentation;
 use web_time::Instant;
@@ -93,6 +94,17 @@ fn caret_rect(
         point(origin.x, origin.y + y_offset),
         size(CARET_WIDTH, height),
     )
+}
+
+fn clipboard_text(item: ClipboardItem) -> Option<String> {
+    if item
+        .entries
+        .iter()
+        .any(|entry| matches!(entry, ClipboardEntry::ExternalPaths(_)))
+    {
+        return None;
+    }
+    item.text()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1661,11 +1673,14 @@ impl TextEditorState {
             return;
         }
         if self.read_only {
+            cx.propagate();
             return;
         }
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            self.replace_selection_as(&text, "insertFromPaste", window, cx);
-        }
+        let Some(text) = cx.read_from_clipboard().and_then(clipboard_text) else {
+            cx.propagate();
+            return;
+        };
+        self.replace_selection_as(&text, "insertFromPaste", window, cx);
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
@@ -2964,6 +2979,32 @@ mod tests {
         assert!(!caret_visible(CARET_BLINK_MS));
         assert!(!caret_visible(2 * CARET_BLINK_MS - 1));
         assert!(caret_visible(2 * CARET_BLINK_MS));
+    }
+
+    #[test]
+    fn external_paths_are_not_text_editor_paste() {
+        let item = ClipboardItem {
+            entries: vec![
+                ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
+                    [std::path::PathBuf::from("/tmp/image.png")]
+                        .into_iter()
+                        .collect(),
+                )),
+                ClipboardEntry::String(gpui::ClipboardString::new("/tmp/image.png".to_string())),
+            ],
+        };
+        assert_eq!(clipboard_text(item), None);
+    }
+
+    #[test]
+    fn text_still_pastes_when_the_clipboard_also_has_an_image() {
+        let item = ClipboardItem {
+            entries: vec![
+                ClipboardEntry::String(gpui::ClipboardString::new("caption".to_string())),
+                ClipboardEntry::Image(gpui::Image::empty()),
+            ],
+        };
+        assert_eq!(clipboard_text(item), Some("caption".to_string()));
     }
 
     #[test]

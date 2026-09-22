@@ -374,7 +374,8 @@ export interface GpuixLoadEvent extends GpuixEvent {
  * Events from the built-in custom elements: `<diff>`'s `toggleFile`,
  * `showMore`, and `lineClick`; `<markdown>`'s `linkClick`; `<virtual-list>`'s
  * `visibleRange`; an element's own `highlight` match count; and an
- * accessibility action requested by assistive technology.
+ * accessibility action requested by assistive technology; and native motion
+ * completion.
  */
 export interface GpuixElementEvent extends GpuixEvent {
   readonly type:
@@ -385,6 +386,7 @@ export interface GpuixElementEvent extends GpuixEvent {
     | "visibleRange"
     | "highlight"
     | "accessibilityAction"
+    | "motionComplete"
   /** File path (`toggleFile`), hidden line count (`showMore`), line text
    *  (`lineClick`), or URL (`linkClick`). */
   readonly value?: string
@@ -401,6 +403,8 @@ export interface GpuixElementEvent extends GpuixEvent {
   /** AccessKit action requested by assistive technology.
    *  `accessibilityAction` only. */
   readonly accessibilityAction?: "increment" | "decrement" | "focus"
+  /** Logical motion target that completed. `motionComplete` only. */
+  readonly motionGeneration?: number
 }
 
 /**

@@ -892,6 +892,11 @@ export interface EventPayload {
    * `error`, so JS can discard a completion queued before `src` changed.
    */
   imageRequestGeneration?: number
+  /**
+   * Logical native motion target that reached completion. Populated for
+   * `motionComplete`, so a stale completion cannot finish a new target.
+   */
+  motionGeneration?: number
   /** Logical GPUI window width. Populated for `windowResize`. */
   width?: number
   /** Logical GPUI window height. Populated for `windowResize`. */

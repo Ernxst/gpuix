@@ -421,6 +421,7 @@ const EVENT_PROPS = [
   ["onSubmit", "submit", "bubble"],
   ["onResetCapture", "reset", "capture"],
   ["onReset", "reset", "bubble"],
+  ["onMotionComplete", "motionComplete", "bubble"],
   // Mouse events
   ["onClickCapture", "click", "capture"],
   ["onClick", "click", "bubble"],

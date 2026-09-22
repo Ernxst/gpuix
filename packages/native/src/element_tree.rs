@@ -24,6 +24,10 @@ pub struct EventPayload {
     /// `error`, so JS can discard a completion queued before `src` changed.
     pub image_request_generation: Option<f64>,
 
+    /// Logical native motion target that reached completion. Populated for
+    /// `motionComplete`, so a stale completion cannot finish a new target.
+    pub motion_generation: Option<f64>,
+
     // ── Window ───────────────────────────────────────────────────────
     /// Logical GPUI window width. Populated for `windowResize`.
     pub width: Option<f64>,
@@ -174,6 +178,7 @@ impl Default for EventPayload {
             element_id: 0.0,
             event_type: String::new(),
             image_request_generation: None,
+            motion_generation: None,
             width: None,
             height: None,
             scale_factor: None,

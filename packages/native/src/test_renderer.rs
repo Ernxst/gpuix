@@ -1468,9 +1468,7 @@ impl TestGpuixRenderer {
                 let motions = view
                     .motion_states
                     .values()
-                    .filter(|state| {
-                        state.is_valid() && state.frame(now, reduce_motion).active
-                    })
+                    .filter(|state| state.is_valid() && state.sampled_frame(now, reduce_motion).active)
                     .count();
                 u32::try_from(transitions.saturating_add(motions)).unwrap_or(u32::MAX)
             })
@@ -2786,7 +2784,7 @@ impl TestGpuixRenderer {
                     .motion_states
                     .get(&id)
                     .filter(|state| state.is_valid())
-                    .map(|state| state.frame(view.clock.now(), reduce_motion).style);
+                    .map(|state| state.sampled_frame(view.clock.now(), reduce_motion).style);
                 (
                     (f64::from(f32::from(mouse.x)), f64::from(f32::from(mouse.y))),
                     focus,

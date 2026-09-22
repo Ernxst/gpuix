@@ -239,7 +239,8 @@ export type {
   TooltipProviderProps,
   TooltipTriggerProps,
 } from "./components/tooltip.js"
-export { motion } from "./components/index.js"
+export { AnimatePresence, motion, useIsPresent, usePresence } from "./components/index.js"
+export type { AnimatePresenceProps } from "./components/index.js"
 export type {
   Root,
   FrameLoop,
