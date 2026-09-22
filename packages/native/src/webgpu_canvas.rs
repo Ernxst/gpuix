@@ -1113,15 +1113,9 @@ impl WebGpuProducer {
 fn wgpu_metal_device_registry_id(device: &wgpu::Device) -> Result<u64> {
     let device = unsafe { device.as_hal::<wgpu::hal::api::Metal>() }
         .context("Native WebGPU device did not use Metal")?;
-    let raw = retained_objc_object_ptr(device.raw_device());
+    let raw = &**device.raw_device() as *const _ as *mut objc::runtime::Object;
     #[allow(unexpected_cfgs)]
     Ok(unsafe { msg_send![raw, registryID] })
-}
-
-fn retained_objc_object_ptr<T: ?Sized + objc2::Message>(
-    retained: &objc2::rc::Retained<T>,
-) -> *mut objc::runtime::Object {
-    objc2::rc::Retained::as_ptr(retained) as *mut objc::runtime::Object
 }
 
 fn capture_gpu_operation<T>(
@@ -1580,15 +1574,6 @@ impl WebGpuCanvasStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn retained_object_pointer_is_not_the_retained_wrapper_address() {
-        let object = objc2_foundation::NSObject::new();
-        assert_eq!(
-            retained_objc_object_ptr(&object) as *const _,
-            objc2::rc::Retained::as_ptr(&object) as *const _,
-        );
-    }
 
     #[test]
     fn decodes_pipeline_and_draw_commands() {

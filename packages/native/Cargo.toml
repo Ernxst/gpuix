@@ -84,8 +84,6 @@ core-graphics = "=0.24.0"
 core-foundation = "=0.10.0"
 cocoa = "=0.26.0"
 objc = "0.2"
-# Match wgpu-hal's objc2 ABI for the retained Metal device handle.
-objc2 = "=0.6.4"
 # Same semver line GPUI depends on (zed/Cargo.toml); the workspace lockfile
 # unifies both to one resolved version.
 raw-window-handle = "0.6"
@@ -123,7 +121,6 @@ napi-build = "2"
 wgpu = { version = "29.0.4", features = ["noop"] }
 wgpu-core = { version = "29.0.4", features = ["metal", "wgsl"] }
 wgpu-types = "29.0.4"
-objc2-foundation = { version = "=0.3.2", features = ["NSObject"] }
 
 # Only the serialization bench needs a MessagePack codec. Keep it out of the
 # shipped addon: the wire format is still JSON until the bench says otherwise.
