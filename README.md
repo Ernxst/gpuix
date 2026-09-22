@@ -788,7 +788,7 @@ multisampling above one sample and Three.js `WebGPURenderer` are not yet
 supported, so this is an incremental compatibility slice rather than WebGPU
 conformance.
 Canvas 2D and WebGPU remain mutually exclusive on one canvas. Submitted frame
-textures are retained until GPUI retires the scenes that reference them; frame
+textures are retained until the compositor has finished the command buffers that sample them; frame
 submission signals the compositor on the GPU queue rather than waiting on the
 JavaScript thread.
 

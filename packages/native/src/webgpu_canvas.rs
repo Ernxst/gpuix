@@ -209,17 +209,24 @@ struct WebGpuProducer {
 impl WebGpuProducer {
     fn new() -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            force_fallback_adapter: false,
-            ..Default::default()
-        }))
-        .context("Native WebGPU requires a Metal adapter")?;
-        if adapter.get_info().device_type == wgpu::DeviceType::Cpu {
-            anyhow::bail!("Native WebGPU requires a hardware Metal adapter, not a CPU fallback");
+        let compositor_registry_id = metal::Device::system_default()
+            .context("Native WebGPU requires a Metal compositor device")?
+            .registry_id();
+        let mut selected = None;
+        for adapter in pollster::block_on(instance.enumerate_adapters(wgpu::Backends::METAL)) {
+            if adapter.get_info().device_type == wgpu::DeviceType::Cpu {
+                continue;
+            }
+            let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
+                .context("Native WebGPU device creation failed")?;
+            if wgpu_metal_device_registry_id(&device)? == compositor_registry_id {
+                selected = Some((device, queue));
+                break;
+            }
         }
-        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
-            .context("Native WebGPU device creation failed")?;
+        let (device, queue) = selected.with_context(|| {
+            format!("Native WebGPU found no hardware Metal adapter matching compositor MTLDevice registry ID {compositor_registry_id}")
+        })?;
         let physical_loss = Arc::new(Mutex::new(None));
         let physical_loss_callback = physical_loss.clone();
         device.set_device_lost_callback(move |reason, message| {
@@ -1099,6 +1106,14 @@ impl WebGpuProducer {
             })
             .collect())
     }
+}
+
+fn wgpu_metal_device_registry_id(device: &wgpu::Device) -> Result<u64> {
+    let device = unsafe { device.as_hal::<wgpu::hal::api::Metal>() }
+        .context("Native WebGPU device did not use Metal")?;
+    let raw = device.raw_device() as *const _ as *mut objc::runtime::Object;
+    #[allow(unexpected_cfgs)]
+    Ok(unsafe { msg_send![raw, registryID] })
 }
 
 fn capture_gpu_operation<T>(
