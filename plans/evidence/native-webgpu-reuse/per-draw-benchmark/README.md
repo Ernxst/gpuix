@@ -71,6 +71,18 @@ The asynchronous GPUI compositor is outside the submit-return interval, so it ca
 
 The core path is not faster, so GPU-IX does not prototype replay on `wgpu-core`. The source explains why: `render_pass_set_vertex_buffer` and `render_pass_set_index_buffer` resolve the buffer ID and append `ArcRenderCommand`s, while pass-end encoding performs resource tracking and validation. The high-level API wrapper is not the limiting layer. At 100,000 draws, direct `wgpu` rises to 192 ns/draw median, confirming that part of the high-count increase belongs to wgpu itself.
 
+## Fixed frame cost
+
+The direct Rust control includes encoder creation, render-pass recording, finish and submit. GPU-IX includes those steps plus the canvas route. These median whole-frame measurements show the canvas route adds about 16 µs before any draw calls.
+
+| Draws | Direct `wgpu` | GPU-IX | GPU-IX above direct |
+| ---: | ---: | ---: | ---: |
+| 0 | 20.6 µs | 36.4 µs | 15.8 µs |
+| 1 | 23.9 µs | 40.6 µs | 16.7 µs |
+| 100 | 38.5 µs | 69.8 µs | 31.3 µs |
+
+The direct 1,000-draw sample is omitted: it does not wait for completion and showed queue-pressure outliers, so it is not comparable. The extra fixed work is native submission argument and descriptor handling, canvas frame-wrapper and Metal-surface creation, shared-event registration, presentation installation, and ownership validation. It does not deliberately wait for GPU completion or GPUI compositing. Error-scope pops changed the zero-draw result by 1.4 µs and did not improve 100 or 1,000 draws. JSON encoding is below 1 ns/draw. Reusing a frame surface would require changing the presentation ownership rule that prevents GPUI from compositing a texture it still owns, so it was not attempted.
+
 ## Other providers
 
 The earlier cross-provider data remains in the checked-in result files and can be rerun with the commands below. Dawn `webgpu@0.6.1` measured 1,440 ns/draw at 10,000 draws under Node, and aborts under Bun during the workload even with `device.destroy()`, explicit texture destruction and explicit GC removed. `wgpu-bun`’s fastest 10,000-draw result was 216 ns/draw through `WGPU_BUN_IMPL=dawn`, or 72 ns per FFI call.
