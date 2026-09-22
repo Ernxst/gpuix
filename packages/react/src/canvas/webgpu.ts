@@ -387,10 +387,18 @@ type NativeResourceToken = {
   released: boolean
 }
 
-const nativeResourceFinalizer = new FinalizationRegistry<NativeResourceToken>((token) => {
-  if (token.released || !token.state.alive) return
+type DeviceResource = { destroyFromDevice(): void }
+type DeviceResourceToken = {
+  resources: Set<WeakRef<DeviceResource>>
+  reference: WeakRef<DeviceResource>
+  native: NativeResourceToken | null
+}
+
+const nativeResourceFinalizer = new FinalizationRegistry<DeviceResourceToken>((token) => {
+  token.resources.delete(token.reference)
+  if (!token.native || token.native.released || !token.native.state.alive) return
   try {
-    releaseNativeResource(token)
+    releaseNativeResource(token.native)
   } catch {
     // Native renderer teardown can race collection. Renderer invalidation is authoritative.
   }
@@ -472,7 +480,6 @@ export class GPUBuffer {
   private mappedRanges: MappedRange[] = []
   private initialData: Uint8Array | null = null
   private pendingWrites: PendingBufferWrite[] = []
-  private nativeToken: NativeResourceToken | null = null
   private nativeFailure: GPUError | null = null
 
   constructor(
@@ -482,6 +489,7 @@ export class GPUBuffer {
     this.size = descriptor.size
     this.usage = descriptor.usage
     this.mapStateValue = descriptor.mappedAtCreation ? "mapped" : "unmapped"
+    this.device.trackResource(this)
   }
 
   get mapState(): "mapped" | "unmapped" {
@@ -545,8 +553,7 @@ export class GPUBuffer {
     this.detachMappedRanges()
     this.initialData = null
     this.pendingWrites = []
-    if (this.nativeToken) releaseNativeResource(this.nativeToken)
-    nativeResourceFinalizer.unregister(this)
+    this.device.releaseTrackedResource(this)
   }
 
   nativeId(): number {
@@ -573,15 +580,14 @@ export class GPUBuffer {
       this.nativeFailure = this.device.captureNativeError(cause)
       throw this.nativeFailure
     }
-    this.nativeToken = {
+    this.device.setNativeResourceToken(this, {
       state: this.device.transportState(),
       transport,
       deviceId,
       resourceId: this.nativeIdValue,
       kind: "buffer",
       released: false,
-    }
-    nativeResourceFinalizer.register(this, this.nativeToken, this)
+    })
     this.initialData = null
     if (this.pendingWrites.length > 0) {
       if (!transport.writeWebGpuBuffer) {
@@ -644,8 +650,7 @@ export class GPUBuffer {
     this.detachMappedRanges()
     this.initialData = null
     this.pendingWrites = []
-    if (this.nativeToken) this.nativeToken.released = true
-    nativeResourceFinalizer.unregister(this)
+    this.device.discardTrackedResource(this)
   }
 
   private assertUsable(): void {
@@ -664,13 +669,14 @@ export class GPUBuffer {
 
 export class GPUShaderModule {
   private nativeIdValue: number | null = null
-  private nativeToken: NativeResourceToken | null = null
   private nativeFailure: GPUError | null = null
 
   constructor(
     readonly device: GPUDevice,
     readonly descriptor: GPUShaderModuleDescriptor
-  ) {}
+  ) {
+    this.device.trackResource(this)
+  }
 
   nativeId(): number {
     this.device.assertAlive()
@@ -690,33 +696,32 @@ export class GPUShaderModule {
       this.nativeFailure = this.device.captureNativeError(cause)
       throw this.nativeFailure
     }
-    this.nativeToken = {
+    this.device.setNativeResourceToken(this, {
       state: this.device.transportState(),
       transport,
       deviceId,
       resourceId: this.nativeIdValue,
       kind: "shaderModule",
       released: false,
-    }
-    nativeResourceFinalizer.register(this, this.nativeToken, this)
+    })
     return this.nativeIdValue
   }
 
   destroyFromDevice(): void {
-    if (this.nativeToken) this.nativeToken.released = true
-    nativeResourceFinalizer.unregister(this)
+    this.device.discardTrackedResource(this)
   }
 }
 
 export class GPURenderPipeline {
   private nativeIdValue: number | null = null
-  private nativeToken: NativeResourceToken | null = null
   private nativeFailure: GPUError | null = null
 
   constructor(
     readonly device: GPUDevice,
     readonly descriptor: GPURenderPipelineDescriptor
-  ) {}
+  ) {
+    this.device.trackResource(this)
+  }
 
   nativeId(): number {
     this.device.assertAlive()
@@ -745,15 +750,14 @@ export class GPURenderPipeline {
       }
       throw this.nativeFailure
     }
-    this.nativeToken = {
+    this.device.setNativeResourceToken(this, {
       state: this.device.transportState(),
       transport,
       deviceId,
       resourceId: this.nativeIdValue,
       kind: "renderPipeline",
       released: false,
-    }
-    nativeResourceFinalizer.register(this, this.nativeToken, this)
+    })
     return this.nativeIdValue
   }
 
@@ -766,8 +770,7 @@ export class GPURenderPipeline {
   }
 
   destroyFromDevice(): void {
-    if (this.nativeToken) this.nativeToken.released = true
-    nativeResourceFinalizer.unregister(this)
+    this.device.discardTrackedResource(this)
   }
 }
 
@@ -823,7 +826,7 @@ export class GPUCommandEncoder {
 
     const record: RenderPassRecord = {
       view: attachment.view,
-      rgba: colorToRgba(attachment.clearValue ?? { a: 1 }),
+      rgba: colorToRgba(attachment.clearValue ?? [0, 0, 0, 0]),
       opStart: this.stream.nextOp,
       opCount: 0,
       operandStart: this.stream.nextOperand,
@@ -1121,7 +1124,8 @@ export class GPUDevice extends EventTarget {
   private transport: WebGpuCanvasTransport | null = null
   private boundTransportState: TransportState | null = null
   private nativeIdValue: number | null = null
-  private readonly resources = new Set<WeakRef<{ destroyFromDevice(): void }>>()
+  private readonly resources = new Set<WeakRef<DeviceResource>>()
+  private readonly resourceTokens = new WeakMap<DeviceResource, DeviceResourceToken>()
   private readonly errorScopes: Array<{ filter: GPUErrorFilter; error: GPUError | null }> = []
 
   constructor() {
@@ -1139,7 +1143,6 @@ export class GPUDevice extends EventTarget {
       throw new TypeError("createShaderModule requires WGSL source code")
     }
     const module = new GPUShaderModule(this, { label: descriptor.label, code: descriptor.code })
-    this.trackResource(module)
     return module
   }
 
@@ -1152,7 +1155,6 @@ export class GPUDevice extends EventTarget {
       usage: descriptor.usage,
       mappedAtCreation: descriptor.mappedAtCreation ?? false,
     })
-    this.trackResource(buffer)
     if (this.transport && !descriptor.mappedAtCreation) buffer.materialize()
     return buffer
   }
@@ -1162,7 +1164,6 @@ export class GPUDevice extends EventTarget {
     const snapshot = snapshotRenderPipelineDescriptor(descriptor)
     validateRenderPipelineDescriptor(this, snapshot)
     const pipeline = new GPURenderPipeline(this, snapshot)
-    this.trackResource(pipeline)
     if (this.transport) pipeline.materialize()
     return pipeline
   }
@@ -1196,11 +1197,9 @@ export class GPUDevice extends EventTarget {
         : error instanceof GPUInternalError
           ? "internal"
           : "validation"
-    const scope = [...this.errorScopes]
-      .reverse()
-      .find((candidate) => candidate.filter === filter && candidate.error === null)
+    const scope = [...this.errorScopes].reverse().find((candidate) => candidate.filter === filter)
     if (scope) {
-      scope.error = error
+      if (scope.error === null) scope.error = error
     } else {
       queueMicrotask(() => {
         const event = new GPUUncapturedErrorEvent(error)
@@ -1255,11 +1254,6 @@ export class GPUDevice extends EventTarget {
     return { transport: this.transport, deviceId: this.nativeIdValue }
   }
 
-  nativeBindingIfAlive(): { transport: WebGpuCanvasTransport; deviceId: number } | null {
-    if (this.destroyed || !this.transport || this.nativeIdValue === null) return null
-    return { transport: this.transport, deviceId: this.nativeIdValue }
-  }
-
   isBound(): boolean {
     return this.transport !== null
   }
@@ -1272,8 +1266,35 @@ export class GPUDevice extends EventTarget {
     return this.boundTransportState
   }
 
-  private trackResource(resource: { destroyFromDevice(): void }): void {
-    this.resources.add(new WeakRef(resource))
+  trackResource(resource: DeviceResource): void {
+    const reference = new WeakRef(resource)
+    const token: DeviceResourceToken = { resources: this.resources, reference, native: null }
+    this.resources.add(reference)
+    this.resourceTokens.set(resource, token)
+    nativeResourceFinalizer.register(resource, token, resource)
+  }
+
+  setNativeResourceToken(resource: DeviceResource, native: NativeResourceToken): void {
+    const token = this.resourceTokens.get(resource)
+    if (token) token.native = native
+  }
+
+  releaseTrackedResource(resource: DeviceResource): void {
+    const token = this.resourceTokens.get(resource)
+    if (!token) return
+    this.resources.delete(token.reference)
+    this.resourceTokens.delete(resource)
+    nativeResourceFinalizer.unregister(resource)
+    if (token.native) releaseNativeResource(token.native)
+  }
+
+  discardTrackedResource(resource: DeviceResource): void {
+    const token = this.resourceTokens.get(resource)
+    if (!token) return
+    this.resources.delete(token.reference)
+    this.resourceTokens.delete(resource)
+    nativeResourceFinalizer.unregister(resource)
+    if (token.native) token.native.released = true
   }
 
   assertAlive(): void {
@@ -1598,8 +1619,11 @@ export function installWebGpuGlobal(): void {
 }
 
 function colorToRgba(color: GPUColor): number {
-  const channel = (value: number | undefined, fallback: number) =>
-    Math.round(Math.max(0, Math.min(1, value ?? fallback)) * 255)
+  const channel = (value: number | undefined, fallback: number) => {
+    const actual = value ?? fallback
+    if (!Number.isFinite(actual)) throw new TypeError("GPUColor channels must be finite")
+    return Math.round(Math.max(0, Math.min(1, actual)) * 255)
+  }
   const dictionary = color as { r?: number; g?: number; b?: number; a?: number }
   const [r, g, b, a] = Array.isArray(color)
     ? color

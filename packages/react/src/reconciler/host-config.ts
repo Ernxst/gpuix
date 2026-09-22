@@ -1750,7 +1750,7 @@ class CanvasHostElement extends HostElement {
 
   set width(value: unknown) {
     this.#width = canvasBitmapSize(value, 300)
-    webGpuContext(this)?.resize()
+    resetCanvasBitmap(this)
   }
 
   get height(): number {
@@ -1759,7 +1759,13 @@ class CanvasHostElement extends HostElement {
 
   set height(value: unknown) {
     this.#height = canvasBitmapSize(value, 150)
-    webGpuContext(this)?.resize()
+    resetCanvasBitmap(this)
+  }
+
+  setBitmapDimensions(width: unknown, height: unknown): void {
+    this.#width = canvasBitmapSize(width, 300)
+    this.#height = canvasBitmapSize(height, 150)
+    resetCanvasBitmap(this)
   }
 
   #diagnosticTarget() {
@@ -1806,6 +1812,13 @@ class CanvasHostElement extends HostElement {
     diagnoseUnsupportedCanvasElementMember(this, this.#diagnosticTarget(), "toDataURL")
     return undefined
   }
+}
+
+function resetCanvasBitmap(canvas: CanvasHostElement): void {
+  resetRecordingContext2D(canvas)
+  const container = containerFor(canvas)
+  container.native.resetCanvas?.(canvas.id)
+  webGpuContext(canvas)?.resize()
 }
 
 function canvasBitmapSize(value: unknown, fallback: number): number {
@@ -2254,10 +2267,6 @@ export const hostConfig = {
     const container = containerFor(instance)
     const oldCanvasProps = oldProps as Props & { width?: number; height?: number }
     const newCanvasProps = newProps as Props & { width?: number; height?: number }
-    if (instance.type === "canvas" && (oldCanvasProps.width !== newCanvasProps.width || oldCanvasProps.height !== newCanvasProps.height)) {
-      resetRecordingContext2D(instance)
-      container.native.resetCanvas?.(instance.id)
-    }
     diagnoseUnsupportedStyleTransition(instance, container, newProps)
     diagnoseUnsupportedClassNameProp(instance, container, newProps)
     diagnoseUnsupportedAccessibilityRoleProp(instance, container, newProps)
@@ -2278,8 +2287,9 @@ export const hostConfig = {
     instance.props = newProps
     if (instance.type === "canvas") {
       const canvas = instance as CanvasHostElement
-      if (oldCanvasProps.width !== newCanvasProps.width) canvas.width = newCanvasProps.width
-      if (oldCanvasProps.height !== newCanvasProps.height) canvas.height = newCanvasProps.height
+      if (oldCanvasProps.width !== newCanvasProps.width || oldCanvasProps.height !== newCanvasProps.height) {
+        canvas.setBitmapDimensions(newCanvasProps.width, newCanvasProps.height)
+      }
     }
     diffCustomProps(container.renderer, instance, oldProps, newProps)
     updateChoice(container, instance, oldProps, commitWriter(container))

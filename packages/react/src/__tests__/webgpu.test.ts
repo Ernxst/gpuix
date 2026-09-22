@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import {
   GPUAdapter,
   GPUCanvasContext,
+  GPUDevice,
   invalidateWebGpuTransport,
   type WebGpuCanvasTransport,
 } from "../canvas/webgpu.js"
@@ -202,6 +203,10 @@ async function pipelineFixture(transport = new RecordingTransport()) {
     },
   })
   return { context, device, module, pipeline, transport }
+}
+
+function trackedResourceCount(device: GPUDevice): number {
+  return (device as unknown as { resources: Set<unknown> }).resources.size
 }
 
 describe("native WebGPU command model", () => {
@@ -548,6 +553,25 @@ describe("native WebGPU command model", () => {
     expect(transport.frames[1]?.rgba).toBe(0xff0000ff)
   })
 
+  it("defaults clears to transparent black and rejects non-finite clear colours", async () => {
+    const transport = new RecordingTransport()
+    const device = await new GPUAdapter().requestDevice()
+    const context = new GPUCanvasContext(transport, 37, () => ({ width: 8, height: 8 }))
+    context.configure({ device, format: "bgra8unorm" })
+    const encoder = device.createCommandEncoder()
+    encoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView() }] }).end()
+    device.queue.submit([encoder.finish()])
+    expect(transport.frames[0]?.rgba).toBe(0x00000000)
+
+    expect(() =>
+      device.createCommandEncoder().beginRenderPass({
+        colorAttachments: [
+          { view: context.getCurrentTexture().createView(), clearValue: { r: Number.NaN } },
+        ],
+      }),
+    ).toThrow(TypeError)
+  })
+
   it("routes sample masks and rejects premultiplied canvas configuration", async () => {
     const { context, device, module, transport } = await pipelineFixture()
     const pipeline = device.createRenderPipeline({
@@ -579,6 +603,14 @@ describe("native WebGPU command model", () => {
     structuredClone(range, { transfer: [range] })
     expect(() => device.destroy()).not.toThrow()
     expect(() => device.createCommandEncoder()).toThrow(/destroyed/)
+  })
+
+  it("removes explicitly destroyed resources from device tracking", async () => {
+    const device = await new GPUAdapter().requestDevice()
+    const buffer = device.createBuffer({ size: 16, usage: 0x08 })
+    expect(trackedResourceCount(device)).toBe(1)
+    buffer.destroy()
+    expect(trackedResourceCount(device)).toBe(0)
   })
 
   it("invalidates every device wrapper when its renderer is replaced", async () => {
@@ -622,5 +654,69 @@ describe("native WebGPU command model", () => {
     otherContext.configure({ device: otherDevice, format: "bgra8unorm" })
     expect(() => otherDevice.createShaderModule({ code: SHADER })).not.toThrow()
     expect(() => otherDevice.createCommandEncoder()).not.toThrow()
+  })
+
+  it("delivers uncaptured errors to listeners and the event handler", async () => {
+    const transport = new RecordingTransport()
+    transport.createWebGpuShaderModule = () => {
+      throw new Error("WGSL parse error")
+    }
+    const device = await new GPUAdapter().requestDevice()
+    const context = new GPUCanvasContext(transport, 38, () => ({ width: 8, height: 8 }))
+    context.configure({ device, format: "bgra8unorm" })
+    const listener = vi.fn()
+    const handler = vi.fn()
+    device.addEventListener("uncapturederror", listener)
+    device.onuncapturederror = handler
+    device.pushErrorScope("internal")
+
+    const module = device.createShaderModule({ code: "not wgsl" })
+    device.createRenderPipeline({
+      layout: "auto",
+      vertex: { module },
+      fragment: { module, targets: [{ format: "bgra8unorm" }] },
+    })
+
+    await Promise.resolve()
+    expect(listener).toHaveBeenCalledOnce()
+    expect(handler).toHaveBeenCalledOnce()
+    expect(listener.mock.calls[0]?.[0]).toMatchObject({
+      type: "uncapturederror",
+      error: { name: "GPUValidationError", message: "WGSL parse error" },
+    })
+    await expect(device.popErrorScope()).resolves.toBeNull()
+  })
+
+  it("does not skip a populated inner error scope", async () => {
+    const transport = new RecordingTransport()
+    transport.createWebGpuShaderModule = () => {
+      throw new Error("WGSL parse error")
+    }
+    const device = await new GPUAdapter().requestDevice()
+    const context = new GPUCanvasContext(transport, 39, () => ({ width: 8, height: 8 }))
+    context.configure({ device, format: "bgra8unorm" })
+    const uncaptured = vi.fn()
+    device.addEventListener("uncapturederror", uncaptured)
+    device.pushErrorScope("validation")
+    device.pushErrorScope("validation")
+
+    for (let index = 0; index < 2; index++) {
+      const module = device.createShaderModule({ code: `not wgsl ${index}` })
+      device.createRenderPipeline({
+        layout: "auto",
+        vertex: { module },
+        fragment: { module, targets: [{ format: "bgra8unorm" }] },
+      })
+    }
+
+    await expect(device.popErrorScope()).resolves.toMatchObject({ name: "GPUValidationError" })
+    await expect(device.popErrorScope()).resolves.toBeNull()
+    await Promise.resolve()
+    expect(uncaptured).not.toHaveBeenCalled()
+  })
+
+  it("rejects popping an empty error scope with OperationError", async () => {
+    const device = await new GPUAdapter().requestDevice()
+    await expect(device.popErrorScope()).rejects.toMatchObject({ name: "OperationError" })
   })
 })
