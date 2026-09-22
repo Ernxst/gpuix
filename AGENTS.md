@@ -22,6 +22,8 @@ Use Bun and the checked-in lockfile. In a new checkout, install with `bun instal
 
 Verify the target changed: TypeScript checks do not compile Rust, and native checks do not validate the browser renderer. Consult the relevant package scripts or CI job for additional checks required by the change.
 
+The native renderer cannot start inside an agent sandbox: macOS denies it the window and system services it needs. React tests, native tests, the examples and anything else that loads it need an unsandboxed run, so request one on the first attempt instead of trying sandboxed first.
+
 ## Repository constraints
 
 - `packages/native/index.js`, `index.d.ts` and `*.node` are generated. Change Rust declarations and rebuild instead of editing generated output by hand.
