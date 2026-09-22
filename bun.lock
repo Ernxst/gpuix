@@ -63,7 +63,7 @@
     },
     "packages/plugins": {
       "name": "@gpuix/plugins",
-      "version": "0.20.0-fork.1",
+      "version": "0.21.0-fork.1",
       "dependencies": {
         "@babel/core": "^7.29.0",
         "css-to-react-native-transform": "^2.1.0",
@@ -78,7 +78,7 @@
         "vite": "^8.2.1",
       },
       "peerDependencies": {
-        "@gpuix/react": "0.20.0-fork.1",
+        "@gpuix/react": "0.21.0-fork.1",
         "vite": "^8.2.1",
       },
       "optionalPeers": [
