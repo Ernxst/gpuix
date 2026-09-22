@@ -1045,6 +1045,15 @@ function serializeCustomProp(
   value: object | string | number | boolean | null | undefined
 ): string | object | number | boolean | null {
   if (value === undefined || typeof value === "function") return null
+  // React libraries can use the renderer's numeric host ids for generated
+  // relationships (Base UI does this for checkbox groups). ARIA reference
+  // lists are strings at the native boundary, so preserve those ids as text.
+  if (
+    typeof value === "number" &&
+    (key === "ariaLabelledBy" || key === "ariaDescribedBy")
+  ) {
+    return String(value)
+  }
   if (
     key === "motion" &&
     typeof value === "object" &&
@@ -1208,7 +1217,10 @@ function hasAuthoredName(props: Props): boolean {
   // ids resolve is decided in Rust, which holds the tree; an authored reference
   // is the most this side can see.
   const labelledBy = props.ariaLabelledBy ?? props["aria-labelledby"]
-  return typeof labelledBy === "string" && labelledBy.trim() !== ""
+  return (
+    (typeof labelledBy === "string" && labelledBy.trim() !== "") ||
+    (typeof labelledBy === "number" && Number.isFinite(labelledBy))
+  )
 }
 
 /**

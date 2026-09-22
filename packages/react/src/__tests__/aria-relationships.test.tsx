@@ -9,6 +9,39 @@ const describeNative = isNativeTestRendererAvailable() ? describe : describe.ski
 const IMAGE = { kind: "url", url: "https://example.com/photo.png" } as const
 
 describeNative("aria-labelledby and aria-describedby", () => {
+  it("accepts numeric generated ids for reference props", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(
+        <div>
+          <text id="60511">Production ledger</text>
+          <div
+            data-testid="ledger"
+            role="region"
+            ariaLabelledBy={60511 as unknown as string}
+          />
+          <text id="60522">Additional context</text>
+          <div
+            data-testid="details"
+            ariaDescribedBy={60522 as unknown as string}
+          />
+        </div>
+      )
+
+      expect(screen.getByRole("region", { name: "Production ledger" })).toBe(
+        screen.getByTestId("ledger")
+      )
+      const tree = screen.renderer.getAccessibilityTree()
+      const details = screen.getByTestId("details")
+      const node = Object.values(tree.nodes).find((candidate) => candidate.host_id === details.id)
+
+      expect(node?.aria.description).toBe("Additional context")
+    } finally {
+      screen.unmount()
+    }
+  })
+
   it("names a node from the text of the element it references", () => {
     const screen = createTestRoot()
 
