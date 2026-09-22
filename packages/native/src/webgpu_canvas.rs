@@ -1,9 +1,8 @@
 //! macOS GPU canvas resources and presentation for the browser-shaped WebGPU slice.
 //!
 //! Each submitted frame owns its texture until GPUI retires every scene that
-//! references it. Allocating a frame texture here is deliberate: without a
-//! compositor-to-producer fence, reusing a texture could let the producer
-//! overwrite it while GPUI is still sampling.
+//! references it. Released frames return their wrappers to a bounded pool;
+//! active frames are never reused while GPUI may still sample their textures.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,6 +22,7 @@ const WEB_GPU_SET_VERTEX_BUFFER: u32 = 3;
 const WEB_GPU_SET_INDEX_BUFFER: u32 = 4;
 const WEB_GPU_DRAW_INDEXED: u32 = 5;
 const WEB_GPU_BUFFER_USAGE_MASK: u32 = 0x03ff;
+const REUSABLE_FRAME_LIMIT: usize = 8;
 
 #[derive(Debug, PartialEq)]
 enum WebGpuIndexFormat {
@@ -60,14 +60,38 @@ enum WebGpuPassCommand {
     },
 }
 
-struct WebGpuCanvasFrame {
+struct ReusableWebGpuFrame {
+    width: u32,
+    height: u32,
     _texture: Arc<wgpu::Texture>,
+    view: wgpu::TextureView,
+    metal_texture: metal::Texture,
+}
+
+struct WebGpuCanvasFrame {
+    frame: Option<ReusableWebGpuFrame>,
     released: Arc<AtomicU64>,
+    reusable_frames: Arc<Mutex<Vec<ReusableWebGpuFrame>>>,
+}
+
+impl WebGpuCanvasFrame {
+    fn frame(&self) -> &ReusableWebGpuFrame {
+        self.frame
+            .as_ref()
+            .expect("a live WebGPU canvas frame owns its reusable frame")
+    }
 }
 
 impl Drop for WebGpuCanvasFrame {
     fn drop(&mut self) {
         self.released.fetch_add(1, Ordering::Relaxed);
+        let Some(frame) = self.frame.take() else {
+            return;
+        };
+        let mut reusable_frames = self.reusable_frames.lock().unwrap();
+        if reusable_frames.len() < REUSABLE_FRAME_LIMIT {
+            reusable_frames.push(frame);
+        }
     }
 }
 
@@ -135,12 +159,38 @@ struct PreparedWebGpuPass {
     commands: Vec<WebGpuPassCommand>,
 }
 
+enum ResolvedWebGpuPassCommand<'a> {
+    SetPipeline(&'a wgpu::RenderPipeline),
+    SetVertexBuffer {
+        slot: u32,
+        buffer: wgpu::BufferSlice<'a>,
+    },
+    SetIndexBuffer {
+        buffer: wgpu::BufferSlice<'a>,
+        format: wgpu::IndexFormat,
+    },
+    Draw {
+        vertices: std::ops::Range<u32>,
+        instances: std::ops::Range<u32>,
+    },
+    DrawIndexed {
+        indices: std::ops::Range<u32>,
+        base_vertex: i32,
+        instances: std::ops::Range<u32>,
+    },
+}
+
+struct ResolvedWebGpuPass<'a> {
+    frame: usize,
+    rgba: u32,
+    commands: Vec<ResolvedWebGpuPassCommand<'a>>,
+}
+
 struct PreparedWebGpuFrame {
     id: u64,
     width: u32,
     height: u32,
-    _texture: Arc<wgpu::Texture>,
-    view: wgpu::TextureView,
+    owner: Arc<WebGpuCanvasFrame>,
     surface: gpui_apple::metal_renderer::MetalTextureSurface,
 }
 
@@ -152,6 +202,7 @@ struct WebGpuProducer {
     shader_modules: FxHashMap<u64, WebGpuShaderModule>,
     render_pipelines: FxHashMap<u64, WebGpuRenderPipeline>,
     buffers: FxHashMap<u64, WebGpuBuffer>,
+    reusable_frames: Arc<Mutex<Vec<ReusableWebGpuFrame>>>,
     physical_loss: Arc<Mutex<Option<String>>>,
 }
 
@@ -185,8 +236,56 @@ impl WebGpuProducer {
             shader_modules: FxHashMap::default(),
             render_pipelines: FxHashMap::default(),
             buffers: FxHashMap::default(),
+            reusable_frames: Arc::new(Mutex::new(Vec::new())),
             physical_loss,
         })
+    }
+
+    fn acquire_frame(
+        &self,
+        width: u32,
+        height: u32,
+        released: Arc<AtomicU64>,
+    ) -> Result<Arc<WebGpuCanvasFrame>> {
+        let reusable = {
+            let mut reusable_frames = self.reusable_frames.lock().unwrap();
+            reusable_frames
+                .iter()
+                .position(|frame| frame.width == width && frame.height == height)
+                .map(|index| reusable_frames.swap_remove(index))
+        };
+        let frame = match reusable {
+            Some(frame) => frame,
+            None => {
+                let texture = Arc::new(self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("GPU-IX native WebGPU canvas frame"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Bgra8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                }));
+                ReusableWebGpuFrame {
+                    width,
+                    height,
+                    view: texture.create_view(&Default::default()),
+                    metal_texture: retained_metal_texture(&texture)?,
+                    _texture: texture,
+                }
+            }
+        };
+        Ok(Arc::new(WebGpuCanvasFrame {
+            frame: Some(frame),
+            released,
+            reusable_frames: self.reusable_frames.clone(),
+        }))
     }
 
     fn allocate_resource_id(&mut self) -> Result<u64> {
@@ -523,32 +622,17 @@ impl WebGpuProducer {
             anyhow::bail!("Native WebGPU draw commands require a logical device");
         }
 
-        let texture = Arc::new(self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("GPU-IX native WebGPU canvas frame"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Bgra8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        }));
-        let metal_texture = retained_metal_texture(&texture)?;
-        let frame = Arc::new(WebGpuCanvasFrame {
-            _texture: texture.clone(),
-            released,
-        });
-        let surface = gpui_apple::metal_renderer::MetalTextureSurface::new(metal_texture, 1, frame);
+        let frame = self.acquire_frame(width, height, released)?;
+        let surface = gpui_apple::metal_renderer::MetalTextureSurface::new(
+            frame.frame().metal_texture.clone(),
+            1,
+            frame.clone(),
+        );
 
         let red = ((rgba >> 24) & 0xff) as f64 / 255.0;
         let green = ((rgba >> 16) & 0xff) as f64 / 255.0;
         let blue = ((rgba >> 8) & 0xff) as f64 / 255.0;
         let alpha = (rgba & 0xff) as f64 / 255.0;
-        let view = texture.create_view(&Default::default());
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -558,7 +642,7 @@ impl WebGpuProducer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("GPU-IX native WebGPU canvas render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: &frame.frame().view,
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
@@ -697,6 +781,156 @@ impl WebGpuProducer {
         )))
     }
 
+    fn resolve_pass_commands(
+        &self,
+        device_id: u64,
+        commands: Vec<WebGpuPassCommand>,
+    ) -> Result<Vec<ResolvedWebGpuPassCommand<'_>>> {
+        let mut resolved = Vec::with_capacity(commands.len());
+        let mut pipelines = FxHashMap::default();
+        let mut vertex_buffers = FxHashMap::default();
+        let mut index_buffers = FxHashMap::default();
+        let mut pipeline_is_set = false;
+        let mut index_buffer_is_set = false;
+
+        for command in commands {
+            match command {
+                WebGpuPassCommand::SetPipeline(pipeline_id) => {
+                    let pipeline = if let Some(pipeline) = pipelines.get(&pipeline_id) {
+                        *pipeline
+                    } else {
+                        let pipeline = self
+                            .render_pipelines
+                            .get(&pipeline_id)
+                            .with_context(|| {
+                                format!("Unknown WebGPU render pipeline {pipeline_id}")
+                            })?;
+                        if pipeline.device_id != device_id {
+                            anyhow::bail!(
+                                "WebGPU render pipeline belongs to a different logical device"
+                            );
+                        }
+                        pipelines.insert(pipeline_id, pipeline);
+                        pipeline
+                    };
+                    resolved.push(ResolvedWebGpuPassCommand::SetPipeline(&pipeline.pipeline));
+                    pipeline_is_set = true;
+                }
+                WebGpuPassCommand::SetVertexBuffer {
+                    slot,
+                    buffer_id,
+                    offset,
+                    size,
+                } => {
+                    let buffer = if let Some(buffer) = vertex_buffers.get(&buffer_id) {
+                        *buffer
+                    } else {
+                        let buffer = self
+                            .buffers
+                            .get(&buffer_id)
+                            .with_context(|| format!("Unknown WebGPU buffer {buffer_id}"))?;
+                        if buffer.device_id != device_id {
+                            anyhow::bail!(
+                                "WebGPU vertex buffer belongs to a different logical device"
+                            );
+                        }
+                        if !buffer.usage.contains(wgpu::BufferUsages::VERTEX) {
+                            anyhow::bail!("WebGPU buffer usage does not include VERTEX");
+                        }
+                        vertex_buffers.insert(buffer_id, buffer);
+                        buffer
+                    };
+                    let end = checked_buffer_binding_end(buffer, offset, size)?;
+                    resolved.push(ResolvedWebGpuPassCommand::SetVertexBuffer {
+                        slot,
+                        buffer: buffer.buffer.slice(offset..end),
+                    });
+                }
+                WebGpuPassCommand::SetIndexBuffer {
+                    buffer_id,
+                    format,
+                    offset,
+                    size,
+                } => {
+                    let buffer = if let Some(buffer) = index_buffers.get(&buffer_id) {
+                        *buffer
+                    } else {
+                        let buffer = self
+                            .buffers
+                            .get(&buffer_id)
+                            .with_context(|| format!("Unknown WebGPU buffer {buffer_id}"))?;
+                        if buffer.device_id != device_id {
+                            anyhow::bail!(
+                                "WebGPU index buffer belongs to a different logical device"
+                            );
+                        }
+                        if !buffer.usage.contains(wgpu::BufferUsages::INDEX) {
+                            anyhow::bail!("WebGPU buffer usage does not include INDEX");
+                        }
+                        index_buffers.insert(buffer_id, buffer);
+                        buffer
+                    };
+                    let end = checked_buffer_binding_end(buffer, offset, size)?;
+                    let format = match format {
+                        WebGpuIndexFormat::Uint16 => wgpu::IndexFormat::Uint16,
+                        WebGpuIndexFormat::Uint32 => wgpu::IndexFormat::Uint32,
+                    };
+                    resolved.push(ResolvedWebGpuPassCommand::SetIndexBuffer {
+                        buffer: buffer.buffer.slice(offset..end),
+                        format,
+                    });
+                    index_buffer_is_set = true;
+                }
+                WebGpuPassCommand::Draw {
+                    vertex_count,
+                    instance_count,
+                    first_vertex,
+                    first_instance,
+                } => {
+                    if !pipeline_is_set {
+                        anyhow::bail!("A WebGPU render pipeline must be set before draw");
+                    }
+                    let vertex_end = first_vertex
+                        .checked_add(vertex_count)
+                        .context("WebGPU vertex range overflow")?;
+                    let instance_end = first_instance
+                        .checked_add(instance_count)
+                        .context("WebGPU instance range overflow")?;
+                    resolved.push(ResolvedWebGpuPassCommand::Draw {
+                        vertices: first_vertex..vertex_end,
+                        instances: first_instance..instance_end,
+                    });
+                }
+                WebGpuPassCommand::DrawIndexed {
+                    index_count,
+                    instance_count,
+                    first_index,
+                    base_vertex,
+                    first_instance,
+                } => {
+                    if !pipeline_is_set {
+                        anyhow::bail!("A WebGPU render pipeline must be set before drawIndexed");
+                    }
+                    if !index_buffer_is_set {
+                        anyhow::bail!("A WebGPU index buffer must be set before drawIndexed");
+                    }
+                    let index_end = first_index
+                        .checked_add(index_count)
+                        .context("WebGPU index range overflow")?;
+                    let instance_end = first_instance
+                        .checked_add(instance_count)
+                        .context("WebGPU instance range overflow")?;
+                    resolved.push(ResolvedWebGpuPassCommand::DrawIndexed {
+                        indices: first_index..index_end,
+                        base_vertex,
+                        instances: first_instance..instance_end,
+                    });
+                }
+            }
+        }
+        Ok(resolved)
+    }
+
     fn submit(
         &self,
         device_id: u64,
@@ -745,6 +979,15 @@ impl WebGpuProducer {
                     commands: decode_pass_commands(pass_ops, pass_operands)?,
                 })
             })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .map(|pass| {
+                Ok(ResolvedWebGpuPass {
+                    frame: pass.frame,
+                    rgba: pass.rgba,
+                    commands: self.resolve_pass_commands(device_id, pass.commands)?,
+                })
+            })
             .collect::<Result<Vec<_>>>()?;
 
         let frames = capture_gpu_operation(&self.device, || {
@@ -752,38 +995,17 @@ impl WebGpuProducer {
                 .frames
                 .into_iter()
                 .map(|frame| {
-                    let texture = Arc::new(self.device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some("GPU-IX native WebGPU canvas frame"),
-                        size: wgpu::Extent3d {
-                            width: frame.width,
-                            height: frame.height,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Bgra8Unorm,
-                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                            | wgpu::TextureUsages::TEXTURE_BINDING,
-                        view_formats: &[],
-                    }));
-                    let view = texture.create_view(&Default::default());
-                    let metal_texture = retained_metal_texture(&texture)?;
-                    let owner = Arc::new(WebGpuCanvasFrame {
-                        _texture: texture.clone(),
-                        released: released.clone(),
-                    });
+                    let owner = self.acquire_frame(frame.width, frame.height, released.clone())?;
                     let surface = gpui_apple::metal_renderer::MetalTextureSurface::new_opaque(
-                        metal_texture,
+                        owner.frame().metal_texture.clone(),
                         1,
-                        owner,
+                        owner.clone(),
                     );
                     Ok(PreparedWebGpuFrame {
                         id: frame.id,
                         width: frame.width,
                         height: frame.height,
-                        _texture: texture,
-                        view,
+                        owner,
                         surface,
                     })
                 })
@@ -805,7 +1027,7 @@ impl WebGpuProducer {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("GPU-IX native WebGPU render pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &frame.view,
+                        view: &frame.owner.frame().view,
                         resolve_target: None,
                         depth_slice: None,
                         ops: wgpu::Operations {
@@ -824,115 +1046,29 @@ impl WebGpuProducer {
                     multiview_mask: None,
                 });
 
-                let mut pipeline_is_set = false;
-                let mut index_buffer_is_set = false;
                 for command in &prepared.commands {
-                    match *command {
-                        WebGpuPassCommand::SetPipeline(pipeline_id) => {
-                            let pipeline =
-                                self.render_pipelines.get(&pipeline_id).with_context(|| {
-                                    format!("Unknown WebGPU render pipeline {pipeline_id}")
-                                })?;
-                            if pipeline.device_id != device_id {
-                                anyhow::bail!(
-                                    "WebGPU render pipeline belongs to a different logical device"
-                                );
-                            }
-                            pass.set_pipeline(&pipeline.pipeline);
-                            pipeline_is_set = true;
+                    match command {
+                        ResolvedWebGpuPassCommand::SetPipeline(pipeline) => {
+                            pass.set_pipeline(pipeline);
                         }
-                        WebGpuPassCommand::SetVertexBuffer {
-                            slot,
-                            buffer_id,
-                            offset,
-                            size,
+                        ResolvedWebGpuPassCommand::SetVertexBuffer { slot, buffer } => {
+                            pass.set_vertex_buffer(*slot, buffer.clone());
+                        }
+                        ResolvedWebGpuPassCommand::SetIndexBuffer { buffer, format } => {
+                            pass.set_index_buffer(buffer.clone(), *format);
+                        }
+                        ResolvedWebGpuPassCommand::Draw {
+                            vertices,
+                            instances,
                         } => {
-                            let buffer = self
-                                .buffers
-                                .get(&buffer_id)
-                                .with_context(|| format!("Unknown WebGPU buffer {buffer_id}"))?;
-                            if buffer.device_id != device_id {
-                                anyhow::bail!(
-                                    "WebGPU vertex buffer belongs to a different logical device"
-                                );
-                            }
-                            if !buffer.usage.contains(wgpu::BufferUsages::VERTEX) {
-                                anyhow::bail!("WebGPU buffer usage does not include VERTEX");
-                            }
-                            let end = checked_buffer_binding_end(buffer, offset, size)?;
-                            pass.set_vertex_buffer(slot, buffer.buffer.slice(offset..end));
+                            pass.draw(vertices.clone(), instances.clone());
                         }
-                        WebGpuPassCommand::SetIndexBuffer {
-                            buffer_id,
-                            ref format,
-                            offset,
-                            size,
-                        } => {
-                            let buffer = self
-                                .buffers
-                                .get(&buffer_id)
-                                .with_context(|| format!("Unknown WebGPU buffer {buffer_id}"))?;
-                            if buffer.device_id != device_id {
-                                anyhow::bail!(
-                                    "WebGPU index buffer belongs to a different logical device"
-                                );
-                            }
-                            if !buffer.usage.contains(wgpu::BufferUsages::INDEX) {
-                                anyhow::bail!("WebGPU buffer usage does not include INDEX");
-                            }
-                            let end = checked_buffer_binding_end(buffer, offset, size)?;
-                            let format = match format {
-                                WebGpuIndexFormat::Uint16 => wgpu::IndexFormat::Uint16,
-                                WebGpuIndexFormat::Uint32 => wgpu::IndexFormat::Uint32,
-                            };
-                            pass.set_index_buffer(buffer.buffer.slice(offset..end), format);
-                            index_buffer_is_set = true;
-                        }
-                        WebGpuPassCommand::Draw {
-                            vertex_count,
-                            instance_count,
-                            first_vertex,
-                            first_instance,
-                        } => {
-                            if !pipeline_is_set {
-                                anyhow::bail!("A WebGPU render pipeline must be set before draw");
-                            }
-                            let vertex_end = first_vertex
-                                .checked_add(vertex_count)
-                                .context("WebGPU vertex range overflow")?;
-                            let instance_end = first_instance
-                                .checked_add(instance_count)
-                                .context("WebGPU instance range overflow")?;
-                            pass.draw(first_vertex..vertex_end, first_instance..instance_end);
-                        }
-                        WebGpuPassCommand::DrawIndexed {
-                            index_count,
-                            instance_count,
-                            first_index,
+                        ResolvedWebGpuPassCommand::DrawIndexed {
+                            indices,
                             base_vertex,
-                            first_instance,
+                            instances,
                         } => {
-                            if !pipeline_is_set {
-                                anyhow::bail!(
-                                    "A WebGPU render pipeline must be set before drawIndexed"
-                                );
-                            }
-                            if !index_buffer_is_set {
-                                anyhow::bail!(
-                                    "A WebGPU index buffer must be set before drawIndexed"
-                                );
-                            }
-                            let index_end = first_index
-                                .checked_add(index_count)
-                                .context("WebGPU index range overflow")?;
-                            let instance_end = first_instance
-                                .checked_add(instance_count)
-                                .context("WebGPU instance range overflow")?;
-                            pass.draw_indexed(
-                                first_index..index_end,
-                                base_vertex,
-                                first_instance..instance_end,
-                            );
+                            pass.draw_indexed(indices.clone(), *base_vertex, instances.clone());
                         }
                     }
                 }
