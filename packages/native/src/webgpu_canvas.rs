@@ -217,6 +217,8 @@ impl WebGpuProducer {
             if adapter.get_info().device_type == wgpu::DeviceType::Cpu {
                 continue;
             }
+            // wgpu exposes the Metal device only after request_device, so rejected
+            // adapters temporarily create a device in order to compare registry IDs.
             let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
                 .context("Native WebGPU device creation failed")?;
             if wgpu_metal_device_registry_id(&device)? == compositor_registry_id {
@@ -1111,7 +1113,7 @@ impl WebGpuProducer {
 fn wgpu_metal_device_registry_id(device: &wgpu::Device) -> Result<u64> {
     let device = unsafe { device.as_hal::<wgpu::hal::api::Metal>() }
         .context("Native WebGPU device did not use Metal")?;
-    let raw = device.raw_device() as *const _ as *mut objc::runtime::Object;
+    let raw = &**device.raw_device() as *const _ as *mut objc::runtime::Object;
     #[allow(unexpected_cfgs)]
     Ok(unsafe { msg_send![raw, registryID] })
 }
@@ -1664,6 +1666,16 @@ mod tests {
             )
             .unwrap(),
             vec![7, 9]
+        );
+    }
+
+    #[test]
+    fn producer_uses_the_compositor_metal_device() {
+        let producer = WebGpuProducer::new().expect("a WebGPU producer on the compositor device");
+        let compositor = metal::Device::system_default().expect("a system Metal device");
+        assert_eq!(
+            wgpu_metal_device_registry_id(&producer.device).unwrap(),
+            compositor.registry_id(),
         );
     }
 }
