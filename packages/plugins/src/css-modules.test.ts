@@ -2,9 +2,10 @@ import { expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { createServer } from "vite"
 import type { BunPlugin } from "bun"
-import { gpuix as gpuixBun } from "./bun.ts"
+import { gpuix as gpuixBun, gpuixDev } from "./bun.ts"
 import { transformGpuixCssModule } from "./css-modules.ts"
 import { gpuix } from "./index.ts"
 
@@ -163,6 +164,36 @@ test("Bun builds native CSS modules and receives GPUIX build defaults", async ()
       importSource: "@user/react",
     })
   } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("Bun dev plugin loads native CSS modules at runtime", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-bun-dev-css-module-"))
+
+  try {
+    const entry = path.join(fixture, "entry.ts")
+    await writeFile(
+      path.join(fixture, "panel.module.css"),
+      ".panel { color: #123456; padding: 4px; }\n",
+    )
+    await writeFile(
+      entry,
+      'import styles from "./panel.module.css"\nexport default styles.panel\n',
+    )
+
+    Bun.plugin(gpuixDev())
+    const result = await import(pathToFileURL(entry).href)
+
+    expect(result.default).toEqual({
+      color: "#123456",
+      paddingTop: 4,
+      paddingRight: 4,
+      paddingBottom: 4,
+      paddingLeft: 4,
+    })
+  } finally {
+    Bun.plugin.clearAll()
     await rm(fixture, { recursive: true, force: true })
   }
 })

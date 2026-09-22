@@ -28,6 +28,34 @@ Run the Vite executable under Bun in `package.json`:
 The Vite adapter is for native development. If a config includes `gpuix()` in
 `vite build`, it throws; use the Bun adapter for native packaging.
 
+### Bun hot reload
+
+Use `gpuixDev()` from a Bun preload when developing with `bun --hot`:
+
+```ts
+// src/gpuix.preload.ts
+import { gpuixDev } from "@gpuix/plugins/bun"
+
+Bun.plugin(gpuixDev())
+```
+
+Register the preload in `bunfig.toml`:
+
+```toml
+preload = ["./src/gpuix.preload.ts"]
+```
+
+Then run the application normally:
+
+```json
+{ "scripts": { "dev": "bun --hot src/app.tsx" } }
+```
+
+The preload must run before the application imports any CSS modules.
+Bun's runtime watcher does not currently re-run files handled by custom
+`onLoad` plugins, so restart the process after changing a CSS module. JavaScript
+and TypeScript changes continue to use Bun's hot reload.
+
 ## Bun build
 
 Use `@gpuix/plugins/bun` when packaging a native application with `Bun.build`:
@@ -113,14 +141,15 @@ selectors, pseudo-classes, at-rules, animations, and CSS-module composition
 are rejected until they have a native style representation.
 
 Vite's normal browser environment continues to use ordinary CSS Modules. Add a
-project declaration if TypeScript still resolves native CSS modules as class-name
-strings:
+type-only import to opt into the native CSS-module declaration:
 
 ```ts
-declare module "*.module.css" {
-  const styles: Record<string, import("@gpuix/react").StyleDesc>
-  export default styles
-}
+// src/gpuix-css-modules.d.ts
+import "@gpuix/plugins/css-modules"
 ```
+
+Keep this declaration opt-in in projects that also compile browser CSS modules:
+the browser and native environments give the same `.module.css` import
+different value shapes.
 
 For complete setup and packaging instructions, see the repository README.

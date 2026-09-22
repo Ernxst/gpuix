@@ -13,6 +13,9 @@
       "types": "./dist/bun.d.ts",
       "import": "./dist/bun.js",
       "default": "./dist/bun.js"
+    },
+    "./css-modules": {
+      "types": "./dist/css-modules-types.d.ts"
     }
   },
   "files": [
@@ -26,7 +29,7 @@
   },
   "scripts": {
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/plugins locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
-    "build": "tsc",
+    "build": "tsc && bun scripts/copy-css-modules-types.ts",
     "prepack": "bun run build",
     "test": "bun test src/spike.test.ts src/css-modules.test.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit"

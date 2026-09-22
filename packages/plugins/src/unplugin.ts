@@ -50,7 +50,7 @@ function isGpuixViteEnvironment(context: unknown): boolean {
   return (context as { environment?: { name?: string } }).environment?.name === "gpuix"
 }
 
-function resolveBunCssModule(id: string, importer: string | undefined): string {
+export function resolveBunCssModule(id: string, importer: string | undefined): string {
   const sourceId = cleanId(id)
   if (path.isAbsolute(sourceId)) return sourceId
   if (importer !== undefined && path.isAbsolute(importer)) {
