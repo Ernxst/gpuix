@@ -1,6 +1,6 @@
 {
   "name": "@gpuix/plugins",
-  "version": "0.21.0-fork.1",
+  "version": "0.22.0-fork.1",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -35,7 +35,7 @@
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "peerDependencies": {
-    "@gpuix/react": "0.21.0-fork.1",
+    "@gpuix/react": "0.22.0-fork.1",
     "vite": "^8.2.1"
   },
   "peerDependenciesMeta": {

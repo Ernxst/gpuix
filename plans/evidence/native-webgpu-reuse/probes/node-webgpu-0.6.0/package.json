@@ -1,0 +1,8 @@
+{
+  "name": "gpuix-node-webgpu-0-6-0-probe",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "webgpu": "0.6.0"
+  }
+}

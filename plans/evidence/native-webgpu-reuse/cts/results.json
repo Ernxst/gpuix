@@ -1,0 +1,45 @@
+{
+  "ctsRevision": "a2134bc7916dc6004781a137690b8741aef9aae1",
+  "runtime": "Bun 1.4.0 (34cbb9a40)",
+  "backend": "Metal on Apple M1",
+  "selectedCasesPerProvider": 15,
+  "results": {
+    "node-webgpu": {
+      "executedCases": 15,
+      "passed": 15,
+      "assertionFailures": 0,
+      "crashedBeforeResult": 0,
+      "timedOut": 0,
+      "skipped": 0,
+      "harnessBlocked": 0
+    },
+    "bun-webgpu": {
+      "executedCases": 15,
+      "passed": 11,
+      "assertionFailures": 4,
+      "crashedBeforeResult": 0,
+      "timedOut": 0,
+      "skipped": 0,
+      "harnessBlocked": 0,
+      "failures": [
+        "requestDevice default limits: four per-stage storage limits were reported as zero",
+        "copyBufferToBuffer overload: the omitted-size form was rejected and produced a validation error",
+        "getCompilationInfo for valid WGSL: not implemented",
+        "getCompilationInfo for invalid WGSL: not implemented"
+      ]
+    },
+    "wgpu-bun-dawn": {
+      "executedCases": 2,
+      "passed": 2,
+      "assertionFailures": 0,
+      "crashedBeforeResult": 11,
+      "timedOut": 0,
+      "skipped": 0,
+      "harnessBlocked": 2,
+      "failures": [
+        "Seven selectors covering 11 cases exited 139 with native segmentation faults",
+        "Adapter and device selectors exited zero before emitting a CTS result, indicating an async liveness failure"
+      ]
+    }
+  }
+}
