@@ -1850,7 +1850,7 @@ export interface AnnouncerRegionPair {
 
 export type AnnouncerState = Record<AnnouncePoliteness, AnnouncerRegionPair | null>
 
-// One React root. Event handlers stay on this object so two live roots
+// One React root container. Event handlers stay on this object so two live roots
 // can both use id 1. Ids come from an allocator that lives with the
 // NativeRenderer, so a remount on the same renderer cannot reuse them.
 export interface Container {
