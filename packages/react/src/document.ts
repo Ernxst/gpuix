@@ -11,10 +11,9 @@
  * other event types, or style computation, and nothing here pretends
  * otherwise.
  *
- * GPU-IX mounts one root per renderer and one renderer per native window, so
- * the facade reads the root `announce()` targets: the most recently attached
- * one that has rendered. Separate documents for several simultaneous windows
- * are not supported.
+ * GPU-IX mounts one container per renderer and one renderer per native window,
+ * so the facade reads the most recently attached container. Separate documents
+ * for several simultaneous windows are not supported.
  */
 import {
   addDocumentListener,
@@ -34,7 +33,7 @@ const GPUIX_DOCUMENT_KEY = "__gpuixDocument"
 
 function body(container: Container | undefined): PublicInstance | null {
   if (container?.rootElementId == null) return null
-  return container.eventTargets.get(container.rootElementId) ?? null
+  return container.bodyElement ?? container.eventTargets.get(container.rootElementId) ?? null
 }
 
 const LISTENER_TYPES: ReadonlySet<string> = new Set<DocumentPointerEventType>([

@@ -790,12 +790,11 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     }
 
     try {
-      // createTestRoot currently retains one native root; see https://github.com/Ernxst/gpuix/issues/618.
       testRoot.render(
-        <div>
+        <>
           <Collapsible />
           <Accordion />
-        </div>,
+        </>,
       )
 
       expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])

@@ -948,9 +948,9 @@ Enter fullscreen, choose **Actions → Fire JavaScript Action**, confirm the
 window and terminal log update once, then press Cmd+Q. The terminal should print
 `termination cleanup finished` and return to the shell.
 
-**One renderer drives one root.** A renderer owns one window, one native root
-id, and one event map, so `createRoot()` throws if that renderer already has a
-mounted root. Call `unmount()` on the first root before you create another;
+**One renderer drives one React container.** A renderer owns one window and
+one event map, so `createRoot()` throws if that renderer already has a mounted
+container. Call `unmount()` on the first root before you create another;
 `render()` already does that for you.
 
 ### Background launch
@@ -3209,11 +3209,11 @@ regions alternate per politeness, so setting the same string twice in a row —
 otherwise silent, per the bullet above — is announced twice: each call clears
 whichever region it is not about to write to, keeping every announcement a
 changed value for AccessKit's frame diff to find. `announce()` targets the
-most recently rendered root — the one `render()` mounted, or the newest test
-root, whichever last rendered — so call it after a `render()`; called with
-none rendered, or when that root's top-level element cannot host a live
-region (a bare `<text>` or `<virtual-list>` root), it is a no-op that logs a
-single warning instead.
+most recently rendered container — the one `render()` mounted, or the newest
+test root, whichever last rendered — so call it after a `render()`; called with
+none rendered, or with a singleton whose top-level element cannot host a live
+region (a bare `<text>` or `<virtual-list>`), it is a no-op that logs a single
+warning instead.
 
 Unroled drawn text enters AccessKit as `Label` content. `<text>` exposes its
 flattened inline string as one label, while native `<code>`, `<markdown>`, and
@@ -5185,11 +5185,11 @@ on `ownerDocument(element)` keeps reaching it. The host document cannot find
 GPUIX elements: its `getElementById()` and `activeElement` do not see the GPUIX
 tree.
 
-GPUIX mounts one root per renderer and one renderer per native window, so
-there is one document. It reads the most recently mounted root that has
-rendered, the one `announce()` targets. An app with several native windows open
-at once sees only the newest through `document`; per-window documents are not
-supported.
+GPUIX mounts one React container per renderer and one renderer per native
+window, so there is one document. It reads the most recently mounted container
+that has rendered, the one `announce()` targets. An app with several native
+windows open at once sees only the newest through `document`; per-window
+documents are not supported.
 
 ### Element constructors
 
@@ -5583,9 +5583,8 @@ size, so `render(<Panel />, { height: 600 })` still measures nothing.
 `createTestRoot()` is unaffected — it renders the node as the window's root, so
 a suite that wants the old resolution can use it directly.
 
-**A top-level fragment mounts every child.** A desktop window has one root, and
-before there was a container to append into each top-level child overwrote the
-last, so only the final one survived:
+**Top-level React children all mount in order.** A fragment can render several
+siblings:
 
 ```tsx
 const screen = render(
@@ -5596,6 +5595,11 @@ const screen = render(
 )
 screen.getByTestId('first') // both are mounted now
 ```
+
+A singleton stays the direct native root. When a second top-level child
+appears, GPUIX promotes them into an internal unstyled block container. That
+container remains until the tree is empty, so returning from two children to
+one retains wrapped block layout.
 
 **`unmount()` empties the container; `cleanup()` removes it.** This is Testing
 Library's own split. `unmount()` takes the component out of `container` and
@@ -5747,7 +5751,8 @@ an uncaught render error is never reused: its window is closed and the next
 
 **One tree, not many.** A second `render()` in the same test **replaces** the
 first tree rather than mounting beside it. A browser page has a `document.body`
-that holds any number of containers; a desktop window has one root.
+that holds any number of containers; a desktop window has one renderer-owned
+React container.
 `unmount()` on the result is vitest-browser-react's `unmount` — it removes the
 tree and **keeps** the window. Use `createTestRoot()` when you want to own the
 window's lifetime yourself.

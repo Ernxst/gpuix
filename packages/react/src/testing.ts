@@ -3541,8 +3541,8 @@ export function cleanup(): void {
  * Each `render()` unmounts the previous tree and starts from a reset window
  * (see `cleanup`), so a reused window is never a reused tree; it **replaces**
  * the previous tree rather than mounting a second one beside it, since a
- * desktop window has one root, not a `document.body` that can hold many
- * containers.
+ * desktop window has one renderer-owned React container, not a `document.body`
+ * that can hold many containers.
  *
  * **Options decide reuse.** `options` are the `createTestRoot()` options, all
  * of which are fixed when the window is constructed. A call whose options match

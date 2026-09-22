@@ -1878,6 +1878,8 @@ export type AnnouncePoliteness = "polite" | "assertive"
 export interface AnnouncerRegionPair {
   regionIds: readonly [number, number]
   textIds: readonly [number, number]
+  /** Current text in each alternating region, retained when a container promotes. */
+  values: [string, string]
   next: 0 | 1
   /** The root element these regions are attached under; stale once the root remounts. */
   attachedToRootId: number
@@ -1885,7 +1887,7 @@ export interface AnnouncerRegionPair {
 
 export type AnnouncerState = Record<AnnouncePoliteness, AnnouncerRegionPair | null>
 
-// One React root. Event handlers stay on this object so two live roots
+// One React root container. Event handlers stay on this object so two live roots
 // can both use id 1. Ids come from an allocator that lives with the
 // NativeRenderer, so a remount on the same renderer cannot reuse them.
 export interface Container {
@@ -1904,6 +1906,10 @@ export interface Container {
   rootElementId: number | null
   /** The native type `rootElementId` materialized as. Only `"div"` can host `announce()`'s regions. */
   rootElementType: ElementType | null
+  /** The public root view exposed by `document.body`; an internal div after container promotion. */
+  bodyElement?: Instance | null
+  /** The renderer-owned div that groups several React top-level children. */
+  implicitRoot?: Instance | null
   /** `announce()`'s lazily created regions, one alternating pair per politeness. */
   announcer: AnnouncerState
   onSelectionChange?: (event: EventPayload, renderer: NativeRenderer) => void
@@ -2102,10 +2108,9 @@ export interface PublicInstance {
    * browser mirror runs this same implementation on gpuix instances too — so
    * this method is how a ref's tree position is compared here.
    *
-   * Two top-level siblings mounted directly into the same root are the one
-   * pair this cannot place relative to each other: it reports them as
-   * disconnected, since nothing here tracks an ordered list of a root's own
-   * top-level children.
+   * Several top-level siblings share the renderer-owned root after the
+   * container promotes to it, so their order is observable here like DOM
+   * siblings.
    *
    * Throws `TypeError` when `other` was not obtained from a ref or the render
    * tree.

@@ -449,8 +449,7 @@ describeNative("render", () => {
     })
 
     it("mounts every child of a top-level fragment", () => {
-      // The window has one root, so before there was a container to append
-      // into each top-level child overwrote the last and only one survived.
+      // render() provides a container, so every fragment child mounts in order.
       const screen = render(
         <>
           <text data-testid="first">first</text>
