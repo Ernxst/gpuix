@@ -215,6 +215,35 @@ describeNative("AnimatePresence", () => {
     expect(completions).toEqual(["complete"])
   })
 
+  it("ignores a queued completion after the repeat count changes", () => {
+    const { render, renderer } = createTestRoot()
+    const completions: string[] = []
+
+    function App({ repeat }: { repeat: number }) {
+      return (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2, ease: "linear", repeat }}
+          onMotionComplete={() => completions.push("complete")}
+        />
+      )
+    }
+
+    renderer.clockPause()
+    render(<App repeat={0} />)
+    renderer.clockFastForward(200)
+    render(<App repeat={1} />)
+    renderer.dispatchNativeEvents()
+
+    expect(completions).toEqual([])
+
+    renderer.clockFastForward(400)
+    renderer.dispatchNativeEvents()
+
+    expect(completions).toEqual(["complete"])
+  })
+
   it("finishes an exit in an offscreen virtual-list row", () => {
     const { render, renderer } = createTestRoot({ height: 160 })
 
