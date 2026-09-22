@@ -1,0 +1,9 @@
+{
+  "name": "gpuix-wgpu-bun-probe",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@wgpu-bun/darwin-arm64-dawn": "29.1.0",
+    "wgpu-bun": "29.1.0"
+  }
+}
