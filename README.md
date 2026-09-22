@@ -1154,7 +1154,7 @@ Add the packed plugin and Vite as development dependencies:
 ```json
 {
   "devDependencies": {
-    "@gpuix/plugins": "file:/absolute/path/gpuix-plugins-0.21.0-fork.1.tgz",
+    "@gpuix/plugins": "file:/absolute/path/gpuix-plugins-0.22.0-fork.1.tgz",
     "vite": "^8.2.1"
   }
 }
