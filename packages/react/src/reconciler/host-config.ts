@@ -875,6 +875,15 @@ function serializeCustomProp(
   value: object | string | number | boolean | null | undefined
 ): string | object | number | boolean | null {
   if (value === undefined || typeof value === "function") return null
+  // React libraries can use the renderer's numeric host ids for generated
+  // relationships (Base UI does this for checkbox groups). ARIA reference
+  // lists are strings at the native boundary, so preserve those ids as text.
+  if (
+    typeof value === "number" &&
+    (key === "ariaLabelledBy" || key === "ariaDescribedBy")
+  ) {
+    return String(value)
+  }
   if (
     key === "motion" &&
     typeof value === "object" &&
