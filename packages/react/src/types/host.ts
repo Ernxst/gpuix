@@ -510,8 +510,11 @@ export type NativeStateStyleKey =
   | "hover"
   | "hoverWithin"
   | "active"
+  | "activeWithin"
   | "focus"
   | "focusVisible"
+  | "focusWithin"
+  | "dragOver"
 
 /** Base declarations accepted inside a native interaction-state style. */
 export type NativeStateStyle = Omit<
@@ -731,8 +734,20 @@ export interface StyleDesc {
    *  `hoverWithinGroup` set — while that specific named ancestor is hovered. */
   hoverWithin?: NativeStateStyle
   active?: NativeStateStyle
+  /** Applies while the nearest ancestor with `hoverGroup` is pressed. */
+  activeWithin?: NativeStateStyle
   focus?: NativeStateStyle
   focusVisible?: NativeStateStyle
+  /** Applies while this element or a descendant has focus, matching CSS
+   *  `:focus-within`. Unlike `hoverWithin`, this needs no `hoverGroup`
+   *  marker: the relationship comes from the focused element's ancestry.
+   *  Follows `focus` rather than `focusVisible` for modality, so it matches
+   *  for both pointer and keyboard focus. An element without `tabIndex`
+   *  still becomes focusable for this purpose, but not a tab stop. */
+  focusWithin?: NativeStateStyle
+  /** Applies while OS files are dragged over this element. Desktop-only:
+   *  there is no web equivalent. */
+  dragOver?: NativeStateStyle
 }
 
 /**
@@ -1426,10 +1441,10 @@ export interface FormProps extends Props {
 /** A variable-height list that builds only rows near its viewport. */
 export interface VirtualListProps
   extends AccessibilityProps, Pick<Props, "key" | "id"> {
-  /** No `hover` or `active`: gpui's `List` has no interactive element identity,
-   *  so it cannot hold the pressed or hovered state those styles read. Put them
-   *  on a wrapping `<div>` instead. */
-  style?: Omit<StyleDesc, "hover" | "active">
+  /** No `hover`, `active`, or `dragOver`: gpui's `List` has no interactive
+   *  element identity, so it cannot hold the pressed, hovered, or drag-over
+   *  state those styles read. Put them on a wrapping `<div>` instead. */
+  style?: Omit<StyleDesc, "hover" | "active" | "dragOver">
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
   alignment?: "top" | "bottom"

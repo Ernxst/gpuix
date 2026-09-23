@@ -7419,8 +7419,10 @@ pub(crate) struct GpuixView {
     external_drag_move_paths: Option<Vec<String>>,
     external_drag_move_position: Option<gpui::Point<gpui::Pixels>>,
     /// Last external drag target and paths, retained until the next frame after
-    /// GPUI clears `active_drag` for a window exit.
-    external_drag_target: Option<u64>,
+    /// GPUI clears `active_drag` for a window exit. The narrowest, currently
+    /// hit-tested target, matching GPUI's own `drag_over` hit test rather than
+    /// `interactive_style_states`' ancestor-wide `drag_inside`.
+    pub(crate) external_drag_target: Option<u64>,
     external_drag_paths: Option<Vec<String>>,
     /// The painted element currently winning hover hit testing. Native records
     /// it once per mouse event; the React bridge expands its ancestry into DOM
@@ -8631,15 +8633,23 @@ impl GpuixView {
             let Some(element) = tree.elements.get(&id) else {
                 return false;
             };
-            let (focused, focus_visible, hover_within) = interaction_state_for_element(
-                tree,
-                &self.focus_handles,
-                &self.interactive_style_states,
-                id,
-                window,
-            );
+            let (focused, focus_visible, hover_within, focus_within, active_within) =
+                interaction_state_for_element(
+                    tree,
+                    &self.focus_handles,
+                    &self.interactive_style_states,
+                    id,
+                    window,
+                );
             if element.style.as_deref().is_some_and(|style| {
-                effective_display(style, focused, focus_visible, hover_within) == Some("none")
+                effective_display(
+                    style,
+                    focused,
+                    focus_visible,
+                    hover_within,
+                    focus_within,
+                    active_within,
+                ) == Some("none")
             }) {
                 return true;
             }
@@ -10272,6 +10282,14 @@ impl GpuixView {
                 || element.events.contains("focus")
                 || element.events.contains("blur")
                 || is_focus_anchor(element)
+                // `focusWithin` reads `in_focus`, which needs a tracked focus
+                // handle the same way `focus`/`focusVisible` do, but the
+                // element itself need not be a tab stop: `sequential_tab_index`
+                // and `is_focus_anchor` below are untouched by this branch.
+                || element
+                    .style
+                    .as_deref()
+                    .is_some_and(|style| style.focus_within.is_some())
         };
         let mut pending_auto_focus = Vec::new();
         // Create handles for elements that need focus but don't have one yet.
@@ -11165,23 +11183,46 @@ fn build_element_with_parent_layout(
         .style
         .as_deref()
         .and_then(|style| style.hover_within_group.as_deref());
-    let hover_within = match hover_within_group_target {
-        Some(_) => nearest_hover_group(&parent_inherited.hover_groups, hover_within_group_target)
-            .is_some_and(|group| {
+    let (hover_within, active_within) = match hover_within_group_target {
+        Some(_) => {
+            let group = nearest_hover_group(&parent_inherited.hover_groups, hover_within_group_target);
+            (
+                group.is_some_and(|group| {
+                    ctx.interactive_style_states
+                        .get(&group.id)
+                        .is_some_and(|state| state.hovered)
+                }),
+                group.is_some_and(|group| {
+                    ctx.interactive_style_states
+                        .get(&group.id)
+                        .is_some_and(InteractiveStyleState::is_active)
+                }),
+            )
+        }
+        None => (
+            parent_inherited.hover_groups.iter().any(|group| {
                 ctx.interactive_style_states
                     .get(&group.id)
                     .is_some_and(|state| state.hovered)
             }),
-        None => parent_inherited.hover_groups.iter().any(|group| {
-            ctx.interactive_style_states
-                .get(&group.id)
-                .is_some_and(|state| state.hovered)
-        }),
+            parent_inherited.hover_groups.iter().any(|group| {
+                ctx.interactive_style_states
+                    .get(&group.id)
+                    .is_some_and(InteractiveStyleState::is_active)
+            }),
+        ),
     };
-    let effective_display = element
-        .style
-        .as_deref()
-        .and_then(|style| effective_display(style, focused, focus_visible, hover_within));
+    let focus_within = is_focus_within(ctx.tree, ctx.focus_handles, id, window);
+    let effective_display = element.style.as_deref().and_then(|style| {
+        effective_display(
+            style,
+            focused,
+            focus_visible,
+            hover_within,
+            focus_within,
+            active_within,
+        )
+    });
     let effective_display_none = effective_display == Some("none");
 
     if effective_display_none {
@@ -11459,12 +11500,19 @@ fn build_element_with_parent_layout(
     }
     if let Some(style) = resolved_style.as_mut() {
         style.display = effective_display.map(str::to_owned);
-        // GPUI's focus, focus-visible, and hover-within refinements can set
-        // `display: "none"`, which must be stripped before the refinement is
-        // built to avoid a prepaint/paint children mismatch. The parser already
-        // rejects it for hover and active, so those display values must remain:
-        // GPUI applies them at layout through the retained interaction state.
-        for refinement in [&mut style.hover_within, &mut style.focus, &mut style.focus_visible] {
+        // GPUI's focus, focus-visible, hover-within, focus-within, and
+        // active-within refinements can set `display: "none"`, which must be
+        // stripped before the refinement is built to avoid a prepaint/paint
+        // children mismatch. The parser already rejects it for hover, active,
+        // and dragOver, so those display values must remain: GPUI applies
+        // them at layout through the retained interaction state.
+        for refinement in [
+            &mut style.hover_within,
+            &mut style.focus,
+            &mut style.focus_visible,
+            &mut style.focus_within,
+            &mut style.active_within,
+        ] {
             if let Some(refinement) = refinement.as_mut() {
                 refinement.display = None;
             }
@@ -13705,6 +13753,13 @@ fn tracks_external_drag_events(
     ["dragEnter", "dragOver", "dragLeave", "drop", "fileDrop"]
         .into_iter()
         .any(|event_type| tracks_pointer_event(element, tree, event_type))
+        // A `dragOver` style needs the same external-drag-target bookkeeping
+        // as the JS events, even without a listener: `GpuixView::external_drag_target`
+        // is what `dragOver`'s test-only resolved-style read keys off.
+        || element
+            .style
+            .as_deref()
+            .is_some_and(|style| style.drag_over.is_some())
 }
 
 #[cfg(test)]
@@ -13925,13 +13980,39 @@ fn is_display_none(element: &crate::retained_tree::RetainedElement) -> bool {
         == Some("none")
 }
 
+/// Whether `element_id` is the currently focused element or an ancestor of
+/// it, matching CSS `:focus-within`. There is at most one focused element, so
+/// this walks up from it once rather than probing every ancestor of
+/// `element_id` down through its (unvisited, at this point) descendants.
+pub(crate) fn is_focus_within(
+    tree: &RetainedTree,
+    focus_handles: &HashMap<u64, gpui::FocusHandle>,
+    element_id: u64,
+    window: &gpui::Window,
+) -> bool {
+    let Some(focused_id) = focus_handles
+        .iter()
+        .find_map(|(&id, handle)| handle.is_focused(window).then_some(id))
+    else {
+        return false;
+    };
+    let mut current = Some(focused_id);
+    while let Some(id) = current {
+        if id == element_id {
+            return true;
+        }
+        current = tree.elements.get(&id).and_then(|element| element.parent);
+    }
+    false
+}
+
 fn interaction_state_for_element(
     tree: &RetainedTree,
     focus_handles: &HashMap<u64, gpui::FocusHandle>,
     interactive_style_states: &HashMap<u64, InteractiveStyleState>,
     element_id: u64,
     window: &gpui::Window,
-) -> (bool, bool, bool) {
+) -> (bool, bool, bool, bool, bool) {
     let focused = focus_handles
         .get(&element_id)
         .is_some_and(|handle| handle.is_focused(window));
@@ -13943,6 +14024,7 @@ fn interaction_state_for_element(
         .and_then(|style| style.hover_within_group.as_deref());
     let mut current = tree.elements.get(&element_id).and_then(|element| element.parent);
     let mut hover_within = false;
+    let mut active_within = false;
     while let Some(id) = current {
         let Some(element) = tree.elements.get(&id) else {
             break;
@@ -13953,24 +14035,29 @@ fn interaction_state_for_element(
             .and_then(|style| style.hover_group.as_deref());
         match (hover_within_group_target, group_name) {
             (Some(target), Some(name)) if target == name => {
-                hover_within = interactive_style_states
-                    .get(&id)
-                    .is_some_and(|state| state.hovered);
+                let group_state = interactive_style_states.get(&id);
+                hover_within = group_state.is_some_and(|state| state.hovered);
+                active_within = group_state.is_some_and(InteractiveStyleState::is_active);
                 break;
             }
-            (None, Some(_))
-                if interactive_style_states
-                    .get(&id)
-                    .is_some_and(|state| state.hovered) =>
-            {
-                hover_within = true;
-                break;
+            (None, Some(_)) => {
+                let group_state = interactive_style_states.get(&id);
+                if group_state.is_some_and(|state| state.hovered) {
+                    hover_within = true;
+                }
+                if group_state.is_some_and(InteractiveStyleState::is_active) {
+                    active_within = true;
+                }
+                if hover_within && active_within {
+                    break;
+                }
             }
             _ => {}
         }
         current = element.parent;
     }
-    (focused, focus_visible, hover_within)
+    let focus_within = is_focus_within(tree, focus_handles, element_id, window);
+    (focused, focus_visible, hover_within, focus_within, active_within)
 }
 
 fn effective_display<'a>(
@@ -13978,8 +14065,17 @@ fn effective_display<'a>(
     focused: bool,
     focus_visible: bool,
     hover_within: bool,
+    focus_within: bool,
+    active_within: bool,
 ) -> Option<&'a str> {
     let mut display = style.display.as_deref();
+    if focus_within {
+        display = style
+            .focus_within
+            .as_deref()
+            .and_then(|style| style.display.as_deref())
+            .or(display);
+    }
     if focused {
         display = style
             .focus
@@ -14001,6 +14097,13 @@ fn effective_display<'a>(
             .and_then(|style| style.display.as_deref())
             .or(display);
     }
+    if active_within {
+        display = style
+            .active_within
+            .as_deref()
+            .and_then(|style| style.display.as_deref())
+            .or(display);
+    }
     display
 }
 
@@ -14014,7 +14117,10 @@ mod effective_display_tests {
             display: Some("none".into()),
             ..Default::default()
         };
-        assert_eq!(effective_display(&style, false, false, false), Some("none"));
+        assert_eq!(
+            effective_display(&style, false, false, false, false, false),
+            Some("none")
+        );
     }
 
     #[test]
@@ -14026,8 +14132,14 @@ mod effective_display_tests {
             })),
             ..Default::default()
         };
-        assert_eq!(effective_display(&style, true, false, false), Some("none"));
-        assert_eq!(effective_display(&style, false, false, false), None);
+        assert_eq!(
+            effective_display(&style, true, false, false, false, false),
+            Some("none")
+        );
+        assert_eq!(
+            effective_display(&style, false, false, false, false, false),
+            None
+        );
     }
 
     #[test]
@@ -14040,7 +14152,10 @@ mod effective_display_tests {
             })),
             ..Default::default()
         };
-        assert_eq!(effective_display(&style, false, false, true), Some("flex"));
+        assert_eq!(
+            effective_display(&style, false, false, true, false, false),
+            Some("flex")
+        );
     }
 
     #[test]
@@ -14052,8 +14167,96 @@ mod effective_display_tests {
             })),
             ..Default::default()
         };
-        assert_eq!(effective_display(&style, false, false, false), None);
-        assert_eq!(effective_display(&style, false, true, false), Some("none"));
+        assert_eq!(
+            effective_display(&style, false, false, false, false, false),
+            None
+        );
+        assert_eq!(
+            effective_display(&style, false, true, false, false, false),
+            Some("none")
+        );
+    }
+
+    #[test]
+    fn focus_within_visible_display_overrides_a_hidden_base() {
+        let style = StyleDesc {
+            display: Some("none".into()),
+            focus_within: Some(Box::new(StyleDesc {
+                display: Some("flex".into()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        assert_eq!(
+            effective_display(&style, false, false, false, true, false),
+            Some("flex")
+        );
+        assert_eq!(
+            effective_display(&style, false, false, false, false, false),
+            Some("none")
+        );
+    }
+
+    #[test]
+    fn active_within_visible_display_overrides_a_hidden_base() {
+        let style = StyleDesc {
+            display: Some("none".into()),
+            active_within: Some(Box::new(StyleDesc {
+                display: Some("flex".into()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        assert_eq!(
+            effective_display(&style, false, false, false, false, true),
+            Some("flex")
+        );
+        assert_eq!(
+            effective_display(&style, false, false, false, false, false),
+            Some("none")
+        );
+    }
+
+    #[test]
+    fn hover_within_wins_over_focus_within_when_both_apply() {
+        // Matches GPUI's own precedence, where `group_hover` refines after
+        // `in_focus`.
+        let style = StyleDesc {
+            focus_within: Some(Box::new(StyleDesc {
+                display: Some("flex".into()),
+                ..Default::default()
+            })),
+            hover_within: Some(Box::new(StyleDesc {
+                display: Some("grid".into()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        assert_eq!(
+            effective_display(&style, false, false, true, true, false),
+            Some("grid")
+        );
+    }
+
+    #[test]
+    fn active_within_wins_over_hover_within_when_both_apply() {
+        // Matches GPUI's own precedence, where `group_active` refines after
+        // `group_hover`.
+        let style = StyleDesc {
+            hover_within: Some(Box::new(StyleDesc {
+                display: Some("flex".into()),
+                ..Default::default()
+            })),
+            active_within: Some(Box::new(StyleDesc {
+                display: Some("grid".into()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        assert_eq!(
+            effective_display(&style, false, false, true, false, true),
+            Some("grid")
+        );
     }
 }
 
@@ -15071,11 +15274,23 @@ fn resolve_length_expressions(
         let state_font = font_with_overrides(font.clone(), Some(state));
         Box::new(resolve_length_expressions(state, window, &state_font))
     });
+    resolved.active_within = style.active_within.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
     resolved.focus = style.focus.as_ref().map(|state| {
         let state_font = font_with_overrides(font.clone(), Some(state));
         Box::new(resolve_length_expressions(state, window, &state_font))
     });
     resolved.focus_visible = style.focus_visible.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
+    resolved.focus_within = style.focus_within.as_ref().map(|state| {
+        let state_font = font_with_overrides(font.clone(), Some(state));
+        Box::new(resolve_length_expressions(state, window, &state_font))
+    });
+    resolved.drag_over = style.drag_over.as_ref().map(|state| {
         let state_font = font_with_overrides(font.clone(), Some(state));
         Box::new(resolve_length_expressions(state, window, &state_font))
     });
@@ -15150,6 +15365,12 @@ pub(crate) fn apply_focus_styles<E: gpui::StatefulInteractiveElement>(
     mut el: E,
     style: &StyleDesc,
 ) -> E {
+    // `in_focus` refines before `focus` and `focus_visible` in GPUI's own
+    // precedence, so it is wired first here too.
+    if let Some(ref focus_within_style) = style.focus_within {
+        let focus_within_style = effective_state_style(style, focus_within_style);
+        el = el.in_focus(|refinement| apply_styles(refinement, &focus_within_style));
+    }
     if let Some(ref focus_style) = style.focus {
         let focus_style = effective_state_style(style, focus_style);
         el = el.focus(|refinement| apply_styles(refinement, &focus_style));
@@ -15271,6 +15492,14 @@ where
         let active_style = effective_state_style(style, active_style);
         el = el.active(|refinement| apply_styles(refinement, &active_style));
     }
+    if let Some(drag_over_style) = style.drag_over.as_deref() {
+        // `drag_over` reads the live dragged value at paint time, so its
+        // closure must own its style rather than borrow `style`'s lifetime.
+        let drag_over_style = effective_state_style(style, drag_over_style).into_owned();
+        el = el.drag_over::<gpui::ExternalPaths>(move |refinement, _paths, _window, _cx| {
+            apply_styles(refinement, &drag_over_style)
+        });
+    }
     el = apply_focus_styles(el, style);
     if let (Some(group), Some(hover_within_style)) = (
         style.resolved_hover_within_group.clone(),
@@ -15279,6 +15508,15 @@ where
         let hover_within_style = effective_state_style(style, hover_within_style);
         el = el.group_hover(group, |refinement| {
             apply_styles(refinement, &hover_within_style)
+        });
+    }
+    if let (Some(group), Some(active_within_style)) = (
+        style.resolved_hover_within_group.clone(),
+        style.active_within.as_deref(),
+    ) {
+        let active_within_style = effective_state_style(style, active_within_style);
+        el = el.group_active(group, |refinement| {
+            apply_styles(refinement, &active_within_style)
         });
     }
     el
@@ -16430,7 +16668,14 @@ fn canonical_style_value(value: &serde_json::Value) -> Option<serde_json::Value>
 
         if matches!(
             key.as_str(),
-            "hover" | "hoverWithin" | "active" | "focus" | "focusVisible"
+            "hover"
+                | "hoverWithin"
+                | "active"
+                | "activeWithin"
+                | "focus"
+                | "focusVisible"
+                | "focusWithin"
+                | "dragOver"
         ) {
             if let Some(nested) = canonical_style_value(value) {
                 canonical.insert(key.clone(), nested);

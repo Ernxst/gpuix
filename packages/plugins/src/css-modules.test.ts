@@ -314,6 +314,7 @@ test("folds interaction pseudo-classes into their class style", async () => {
         .button:active { opacity: 0.8; }
         .button:focus { outline-width: 2px; }
         .button:focus-visible { outline-color: #fff; }
+        .button:focus-within { border-color: #f59e0b; }
       `,
       "/fixture/button.module.css",
     ),
@@ -324,6 +325,7 @@ test("folds interaction pseudo-classes into their class style", async () => {
       active: { opacity: 0.8 },
       focus: { outlineWidth: 2 },
       focusVisible: { outlineColor: "#fff" },
+      focusWithin: { borderColor: "#f59e0b" },
     },
   })
 })

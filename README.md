@@ -4296,18 +4296,18 @@ custom-property values.
 testing, accessibility, and text collection. It is not transitioned. A hidden
 element and its descendants are not focusable, are skipped by Tab, and a
 focused element that becomes hidden blurs; `autoFocus` on a hidden element
-does not fire, as in the browser. A `focus`, `focusVisible` or `hoverWithin`
-refinement may set `display: "none"`; the element then behaves as declared-hidden
-for building, hit testing, focus, Tab and blur. The effective display is resolved
-from the current interaction state, using the same resolution the next frame
-builds from, so programmatic focus, `autoFocus`, Tab order and blur see it
-immediately. A refinement's `display` value is resolved into the element's layout
-as part of that same per-frame resolution, so
-`hoverWithin: { display: "flex" }` over a hidden base reveals the element. An
-element whose own `focus` refinement hides it refuses focus: focusing it hides
-it and the same frame blurs it, so neither `focus` nor `blur` fires and the
-element stays visible.
-`hover` and `active` reject `display: "none"`
+does not fire, as in the browser. A `focus`, `focusVisible`, `hoverWithin`,
+`focusWithin` or `activeWithin` refinement may set `display: "none"`; the
+element then behaves as declared-hidden for building, hit testing, focus, Tab
+and blur. The effective display is resolved from the current interaction
+state, using the same resolution the next frame builds from, so programmatic
+focus, `autoFocus`, Tab order and blur see it immediately. A refinement's
+`display` value is resolved into the element's layout as part of that same
+per-frame resolution, so `hoverWithin: { display: "flex" }` over a hidden base
+reveals the element. An element whose own `focus` refinement hides it refuses
+focus: focusing it hides it and the same frame blurs it, so neither `focus`
+nor `blur` fires and the element stays visible.
+`hover`, `active`, and `dragOver` reject `display: "none"`
 with a diagnostic because hiding the element removes the hit-test box that
 triggers the state. `getAllText` and accessible-name flattening read the
 declared display only.
@@ -4582,10 +4582,18 @@ does not yet implement those wrapping algorithms.
 
 ### Hover, active, and focus
 
-`hover`, `hoverWithin`, `active`, `focus`, and `focusVisible` are **nested style objects**.
-GPUI applies them natively without a JavaScript round trip. `focus` applies for
-pointer and keyboard focus. `focusVisible` applies only while the directly
-tracked element has keyboard-modality focus, matching CSS `:focus-visible`.
+`hover`, `hoverWithin`, `active`, `activeWithin`, `focus`, `focusVisible`,
+`focusWithin`, and `dragOver` are **nested style objects**. GPUI applies them
+natively without a JavaScript round trip. `focus` applies for pointer and
+keyboard focus. `focusVisible` applies only while the directly tracked element
+has keyboard-modality focus, matching CSS `:focus-visible`. `focusWithin`
+applies while the element itself or a descendant has focus, pointer or
+keyboard, matching CSS `:focus-within`; unlike `hoverWithin`, it needs no
+`hoverGroup` marker, since the relationship comes from the focused element's
+own ancestry. `activeWithin` applies while the nearest `hoverGroup` ancestor is
+pressed, matching CSS `.group:active .descendant`. `dragOver` applies while OS
+files are dragged over the element; it is desktop-only, since there is no web
+equivalent.
 
 ### Shared web and native style helpers
 
@@ -4623,7 +4631,7 @@ GPUIX adds another native state style, without copying a literal union into an
 application. Escape B is useful when the shared helper should remain strictly
 cross-renderer.
 
-`NativeStateStyleKey` contains only the five interaction states above.
+`NativeStateStyleKey` contains only the eight interaction states above.
 `transition`, `hoverGroup`, and `hoverWithinGroup` remain root-level
 `StyleDesc` declarations and are excluded from `NativeStateStyle`; native
 parsing rejects any of them inside a state style. The native transition
@@ -4662,13 +4670,17 @@ group's hit-test bounds or the capture owner is the group or one of its
 descendants. Releasing capture outside the group clears the style. No React
 hover state or mouse handlers are involved.
 
+`activeWithin` shares the same `hoverGroup` marker and matches the CSS
+`.group:active .descendant` pattern: it applies while the nearest marked
+ancestor is pressed rather than hovered.
+
 A descendant nested inside more than one named group can pick one with
 `hoverWithinGroup`, matching Tailwind's `group-hover/name`. Set it to a
-`hoverGroup` name and `hoverWithin` binds to the nearest ancestor with that
-name instead of the outermost marked ancestor; hovering any other group,
-including one nested inside it, no longer activates the style. A
-`hoverWithinGroup` naming no ancestor `hoverGroup` produces a style
-diagnostic.
+`hoverGroup` name and `hoverWithin` (and, sharing the same binding,
+`activeWithin`) binds to the nearest ancestor with that name instead of the
+outermost marked ancestor; hovering or pressing any other group, including one
+nested inside it, no longer activates the style. A `hoverWithinGroup` naming
+no ancestor `hoverGroup` produces a style diagnostic.
 
 ```tsx
 <div style={{ hoverGroup: 'outer' }}>
@@ -4706,13 +4718,16 @@ diagnostic.
 An outline is painted outside the border and does not change measured size or
 move content. Focus styles do not make an element focusable: use `tabIndex`, a
 keyboard/focus event, or a native input. A focused descendant does not apply a
-parent's `focus` or `focusVisible` style.
+parent's `focus` or `focusVisible` style; use `focusWithin` on the parent for
+that. `focusWithin` needs no `tabIndex` of its own — it gets a focus handle
+without becoming a tab stop, so a descendant's focus is all that is required.
 
 Nesting is one level deep. A state style cannot contain `hover`, `hoverWithin`,
-`active`, `focus`, `focusVisible`, `transition`, `hoverGroup`, or
-`hoverWithinGroup`; the last three are declarations on the base style only.
-`hover` and `active` also reject `display: "none"`, because hiding the
-element removes the hit-test box that triggers the state.
+`active`, `activeWithin`, `focus`, `focusVisible`, `focusWithin`, `dragOver`,
+`transition`, `hoverGroup`, or `hoverWithinGroup`; the last three are
+declarations on the base style only. `hover`, `active`, and `dragOver` also
+reject `display: "none"`, because hiding the element removes the hit-test box
+that triggers the state.
 
 ### Keyboard activation
 
@@ -6272,8 +6287,9 @@ disk took.
 
 `TestElement.style` is the declared descriptor and keeps nested state styles
 unchanged. Use `getResolvedStyle(elementId)` after simulating input to read the
-descriptor with the currently painted `hover`, `hoverWithin`, `active`, `focus`,
-and `focusVisible` refinements applied:
+descriptor with the currently painted `hover`, `hoverWithin`, `active`,
+`activeWithin`, `focus`, `focusVisible`, `focusWithin`, and `dragOver`
+refinements applied:
 
 ```ts
 const target = renderer.findByTestId('row-underline')!
