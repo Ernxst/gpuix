@@ -402,21 +402,7 @@ fn wire_hover_and_style_transition_events<E: gpui::StatefulInteractiveElement>(
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(move |view, _event: &gpui::MouseDownEvent, _window, cx| {
-                    let transition_changed = transition_active
-                        && view
-                            .transition_states
-                            .get_mut(&id)
-                            .is_some_and(|state| state.set_active(true));
-                    let interactive_changed = tracks_active
-                        && view
-                            .interactive_style_states
-                            .entry(id)
-                            .or_default()
-                            .set_active(true);
-                    if interactive_changed {
-                        view.interaction_revision = view.interaction_revision.saturating_add(1);
-                    }
-                    if transition_changed || interactive_changed {
+                    if view.set_pointer_active(id, true) {
                         cx.notify();
                     }
                 }),
@@ -424,21 +410,7 @@ fn wire_hover_and_style_transition_events<E: gpui::StatefulInteractiveElement>(
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
-                    let transition_changed = transition_active
-                        && view
-                            .transition_states
-                            .get_mut(&id)
-                            .is_some_and(|state| state.set_active(false));
-                    let interactive_changed = tracks_active
-                        && view
-                            .interactive_style_states
-                            .entry(id)
-                            .or_default()
-                            .set_active(false);
-                    if interactive_changed {
-                        view.interaction_revision = view.interaction_revision.saturating_add(1);
-                    }
-                    if transition_changed || interactive_changed {
+                    if view.set_pointer_active(id, false) {
                         cx.notify();
                     }
                 }),
@@ -446,21 +418,7 @@ fn wire_hover_and_style_transition_events<E: gpui::StatefulInteractiveElement>(
             .on_mouse_up_out(
                 gpui::MouseButton::Left,
                 cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
-                    let transition_changed = transition_active
-                        && view
-                            .transition_states
-                            .get_mut(&id)
-                            .is_some_and(|state| state.set_active(false));
-                    let interactive_changed = tracks_active
-                        && view
-                            .interactive_style_states
-                            .entry(id)
-                            .or_default()
-                            .set_active(false);
-                    if interactive_changed {
-                        view.interaction_revision = view.interaction_revision.saturating_add(1);
-                    }
-                    if transition_changed || interactive_changed {
+                    if view.set_pointer_active(id, false) {
                         cx.notify();
                     }
                 }),

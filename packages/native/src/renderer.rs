@@ -7447,11 +7447,18 @@ pub(crate) struct GpuixView {
 #[derive(Clone, Copy, Default)]
 pub(crate) struct InteractiveStyleState {
     pub hovered: bool,
-    pub active: bool,
+    pointer_active: bool,
+    keyboard_active: bool,
     /// Whether this element is in the ancestry of the current external file
     /// drag target. GPUI clears `active_drag` before it reports a window exit,
     /// so this survives long enough for the next frame to emit dragLeave.
     pub drag_inside: bool,
+}
+
+#[derive(Clone, Copy)]
+enum InteractiveActiveSource {
+    Pointer,
+    Keyboard,
 }
 
 #[derive(Clone, Copy)]
@@ -7492,12 +7499,33 @@ impl InteractiveStyleState {
         true
     }
 
-    pub(crate) fn set_active(&mut self, active: bool) -> bool {
-        if self.active == active {
-            return false;
+    pub(crate) fn is_active(&self) -> bool {
+        self.pointer_active || self.keyboard_active
+    }
+
+    fn set_active_source(&mut self, pointer: bool, active: bool) -> bool {
+        let was_active = self.is_active();
+        if pointer {
+            self.pointer_active = active;
+        } else {
+            self.keyboard_active = active;
         }
-        self.active = active;
-        true
+        was_active != self.is_active()
+    }
+
+    pub(crate) fn set_pointer_active(&mut self, active: bool) -> bool {
+        self.set_active_source(true, active)
+    }
+
+    pub(crate) fn set_keyboard_active(&mut self, active: bool) -> bool {
+        self.set_active_source(false, active)
+    }
+
+    pub(crate) fn clear_active(&mut self) -> bool {
+        let was_active = self.is_active();
+        self.pointer_active = false;
+        self.keyboard_active = false;
+        was_active
     }
 
     pub(crate) fn set_drag_inside(&mut self, inside: bool) -> bool {
@@ -8144,7 +8172,7 @@ impl GpuixView {
         let interactive_changed = self
             .interactive_style_states
             .values_mut()
-            .fold(false, |changed, state| state.set_active(false) || changed);
+            .fold(false, |changed, state| state.clear_active() || changed);
         let transition_changed = self
             .transition_states
             .values_mut()
@@ -8157,32 +8185,16 @@ impl GpuixView {
         changed
     }
 
-    fn begin_keyboard_active(
-        &mut self,
-        id: u64,
-        tracks_active: bool,
-        transition_active: bool,
-    ) -> bool {
-        if self.keyboard_active != Some(id) {
-            self.clear_keyboard_active();
+    pub(crate) fn begin_keyboard_active(&mut self, id: u64) -> bool {
+        let cleared = if self.keyboard_active != Some(id) {
+            let cleared = self.clear_keyboard_active();
             self.keyboard_active = Some(id);
-        }
+            cleared
+        } else {
+            false
+        };
 
-        let transition_changed = transition_active
-            && self
-                .transition_states
-                .get_mut(&id)
-                .is_some_and(|state| state.set_active(true));
-        let interactive_changed = tracks_active
-            && self
-                .interactive_style_states
-                .entry(id)
-                .or_default()
-                .set_active(true);
-        if interactive_changed {
-            self.interaction_revision = self.interaction_revision.saturating_add(1);
-        }
-        transition_changed || interactive_changed
+        self.set_keyboard_active(id, true) || cleared
     }
 
     fn clear_keyboard_active(&mut self) -> bool {
@@ -8190,14 +8202,33 @@ impl GpuixView {
             return false;
         };
 
-        let interactive_changed = self
-            .interactive_style_states
-            .get_mut(&id)
-            .is_some_and(|state| state.set_active(false));
+        self.set_keyboard_active(id, false)
+    }
+
+    pub(crate) fn set_pointer_active(&mut self, id: u64, active: bool) -> bool {
+        self.set_active_source(id, active, InteractiveActiveSource::Pointer)
+    }
+
+    fn set_keyboard_active(&mut self, id: u64, active: bool) -> bool {
+        self.set_active_source(id, active, InteractiveActiveSource::Keyboard)
+    }
+
+    fn set_active_source(
+        &mut self,
+        id: u64,
+        active: bool,
+        source: InteractiveActiveSource,
+    ) -> bool {
+        let state = self.interactive_style_states.entry(id).or_default();
+        let interactive_changed = match source {
+            InteractiveActiveSource::Pointer => state.set_pointer_active(active),
+            InteractiveActiveSource::Keyboard => state.set_keyboard_active(active),
+        };
+        let resolved_active = state.is_active();
         let transition_changed = self
             .transition_states
             .get_mut(&id)
-            .is_some_and(|state| state.set_active(false));
+            .is_some_and(|state| state.set_active(resolved_active));
         if interactive_changed {
             self.interaction_revision = self.interaction_revision.saturating_add(1);
         }
@@ -8488,7 +8519,7 @@ impl GpuixView {
                     && mouse_y <= bounds.y + bounds.height
             })
         };
-        let active = tracks_active && state.is_some_and(|state| state.active);
+        let active = tracks_active && state.is_some_and(InteractiveStyleState::is_active);
 
         Some(ElementInteractionState {
             focused,
@@ -11318,7 +11349,7 @@ fn build_element_with_parent_layout(
         focus_visible,
         hover_within,
         hovered: interaction.hovered,
-        active: interaction.active,
+        active: interaction.is_active(),
     };
     // Percentage terms stay deferred through GPUI/Taffy, where the layout
     // algorithm supplies the containing block's content size. Only `ch`, `vw`,
@@ -11385,7 +11416,7 @@ fn build_element_with_parent_layout(
         focus_visible,
         hover_within,
         interaction.hovered,
-        interaction.active,
+        interaction.is_active(),
     );
     ctx.inherited = parent_inherited
         .clone()
@@ -13979,7 +14010,7 @@ where
             if activates
                 && (activates_on_space || key_event.keystroke.key != "space")
                 && is_focused(focus_handle.as_ref(), window)
-                && view.begin_keyboard_active(id, tracks_active, transition_active)
+                && view.begin_keyboard_active(id)
             {
                 cx.notify();
             }
@@ -14545,21 +14576,7 @@ pub(crate) fn build_host_container(
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(move |view, _event: &gpui::MouseDownEvent, _window, cx| {
-                    let transition_changed = transition_active
-                        && view
-                            .transition_states
-                            .get_mut(&id)
-                            .is_some_and(|state| state.set_active(true));
-                    let interactive_changed = tracks_active
-                        && view
-                            .interactive_style_states
-                            .entry(id)
-                            .or_default()
-                            .set_active(true);
-                    if interactive_changed {
-                        view.interaction_revision = view.interaction_revision.saturating_add(1);
-                    }
-                    if transition_changed || interactive_changed {
+                    if view.set_pointer_active(id, true) {
                         cx.notify();
                     }
                 }),
@@ -14567,21 +14584,7 @@ pub(crate) fn build_host_container(
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
-                    let transition_changed = transition_active
-                        && view
-                            .transition_states
-                            .get_mut(&id)
-                            .is_some_and(|state| state.set_active(false));
-                    let interactive_changed = tracks_active
-                        && view
-                            .interactive_style_states
-                            .entry(id)
-                            .or_default()
-                            .set_active(false);
-                    if interactive_changed {
-                        view.interaction_revision = view.interaction_revision.saturating_add(1);
-                    }
-                    if transition_changed || interactive_changed {
+                    if view.set_pointer_active(id, false) {
                         cx.notify();
                     }
                 }),
@@ -14589,21 +14592,7 @@ pub(crate) fn build_host_container(
             .on_mouse_up_out(
                 gpui::MouseButton::Left,
                 cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
-                    let transition_changed = transition_active
-                        && view
-                            .transition_states
-                            .get_mut(&id)
-                            .is_some_and(|state| state.set_active(false));
-                    let interactive_changed = tracks_active
-                        && view
-                            .interactive_style_states
-                            .entry(id)
-                            .or_default()
-                            .set_active(false);
-                    if interactive_changed {
-                        view.interaction_revision = view.interaction_revision.saturating_add(1);
-                    }
-                    if transition_changed || interactive_changed {
+                    if view.set_pointer_active(id, false) {
                         cx.notify();
                     }
                 }),
