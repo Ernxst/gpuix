@@ -11,6 +11,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./cn": {
+      "types": "./dist/cn.d.ts",
+      "import": "./dist/cn.js",
+      "default": "./dist/cn.js"
+    },
     "./jsx-runtime": {
       "types": "./jsx-runtime.d.ts",
       "import": "./jsx-runtime.js",
@@ -99,6 +104,7 @@
   },
   "dependencies": {
     "@gpuix/native": "0.22.0-fork.1",
+    "cn": "^0.4.0",
     "eventsource-parser": "^4.1.0",
     "zod": "^4.4.3"
   },

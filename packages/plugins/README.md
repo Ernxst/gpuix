@@ -1,54 +1,24 @@
 # @gpuix/plugins
 
-Use `@gpuix/plugins/vite` to run a native GPUIX app with Vite during
-development. Use `@gpuix/plugins/bun` to package it with `Bun.build`.
+Use `@gpuix/plugins` with Bun to develop and package a native GPUIX app. Install
+it alongside `@gpuix/react`.
 
-The Vite process runs under Bun, so the native N-API binding and Vite share one
-runtime.
+### Develop with Bun hot reload
 
-Install this package alongside `@gpuix/react`. Add Vite when using the `/vite`
-entry point, then configure it with an application entry point:
+Pass the package preload to Bun when developing with `bun --hot`:
 
-```ts
-import { defineConfig } from "vite"
-import { gpuix } from "@gpuix/plugins/vite"
-
-export default defineConfig({
-  appType: "custom",
-  plugins: [gpuix({ entry: "app.tsx" })],
-})
+```bash
+bun --hot --preload @gpuix/plugins/preload src/app.tsx
 ```
 
-Run the Vite executable under Bun in `package.json`:
-
-```json
-{ "scripts": { "dev": "bun run --bun vite" } }
-```
-
-The Vite adapter is for native development. If a config includes `gpuix()` in
-`vite build`, it throws; use the Bun adapter for native packaging.
-
-### Bun hot reload
-
-Use `gpuixDev()` from a Bun preload when developing with `bun --hot`:
+If the app needs other Bun plugins, register them alongside `gpuixDev()` in a
+custom preload instead:
 
 ```ts
 // src/gpuix.preload.ts
 import { gpuixDev } from "@gpuix/plugins/bun"
 
 Bun.plugin(gpuixDev())
-```
-
-Register the preload in `bunfig.toml`:
-
-```toml
-preload = ["./src/gpuix.preload.ts"]
-```
-
-Then run the application normally:
-
-```json
-{ "scripts": { "dev": "bun --hot src/app.tsx" } }
 ```
 
 The preload must run before the application imports any CSS modules.
@@ -89,73 +59,99 @@ plugins: [
 ]
 ```
 
-## Shared native and web config
+## CSS modules
 
-When one Vite config also serves a browser entry, keep the React plugin enabled
-and add `gpuix()` only in native mode:
-
-```ts
-import { defineConfig } from "vite"
-import react from "@vitejs/plugin-react"
-import { gpuix } from "@gpuix/plugins/vite"
-
-export default defineConfig(({ mode }) => {
-  const native = mode === "native"
-
-  return {
-    appType: native ? "custom" : "spa",
-    plugins: [
-      react({ jsxImportSource: "@gpuix/react" }),
-      native && gpuix({ entry: "src/native.tsx" }),
-    ],
-  }
-})
-```
-
-The React plugin refreshes Vite's client environment. GPUIX refreshes the
-native environment, so the two plugins do not apply two Refresh wrappers to the
-native app. The scoped `--bun` flag runs only Vite under Bun; browser and Node
-test commands keep their usual runtimes.
-
-Component-only React edits use Fast Refresh and preserve state. Changes to a
-module with incompatible exports, such as a TanStack Router route module,
-perform Vite's ordinary reload and remount the native React tree. Rebuild and
-restart Bun after changing Rust or the native binding.
-
-## Native CSS modules
-
-In the native `gpuix` environment and the Bun build plugin, imports ending in
-`.module.css` are converted to objects for the `style` prop:
+A `.module.css` import goes in `className`, the same as on the web:
 
 ```tsx
 import styles from "./button.module.css"
 
 export function Button() {
-  return <div style={styles.button}>Save</div>
+  return <div className={styles.button}>Save</div>
 }
 ```
 
-The transform accepts simple local class selectors and declarations supported
-by GPUIX's native style model. Grouped class selectors are supported, including
-selectors with one `:hover`, `:active`, `:focus`, or `:focus-visible` state.
-It also accepts `.container:hover .child`, which adds a generated `hoverGroup`
-to the container and a `hoverWithin` style to the child. A child class can have
-one hovered ancestor relation. The renderer activates `hoverWithin` when any
-hovered group is above the child, so nesting that child below another hovered
-group also activates the style. Other selectors, at-rules, animations, and
-CSS-module composition are rejected until they have a native style
-representation.
+A web build resolves that import to a class name and applies the stylesheet. A
+GPUIX build has no CSS engine, so `@gpuix/plugins/css` compiles the file into
+the styles it describes and the renderer applies them as the element's style.
+One component source works on both, and `style` wins where both set the same
+property.
 
-Vite's normal browser environment continues to use ordinary CSS Modules. Add a
-type-only import to opt into the native CSS-module declaration:
+The transform puts compiled styles in `className` and accepts local class
+selectors, grouped selectors, and declarations supported by GPUIX's native
+style model. It supports the `:hover`, `:active`, `:focus`, and
+`:focus-visible` states, plus hovered-descendant selectors such as
+`.container:hover .child`, limited to one hovered-ancestor relation per child.
+Other selectors, at-rules, animations, and CSS-module composition are rejected
+until they have a native style representation.
+
+Add `@gpuix/plugins/css` to the Vite or Vitest project that should compile
+native CSS modules:
+
+```ts
+import { defineConfig } from "vite"
+import { gpuixCssModules } from "@gpuix/plugins/css"
+
+export default defineConfig({
+  plugins: [gpuixCssModules()],
+})
+```
+
+The plugin compiles CSS modules in the project where it is installed. A web
+build needs no GPUIX plugin: Vite's CSS modules already produce what
+`className` wants there.
+
+`gpuixCssModulesBun()` is the same transform for Bun, in `Bun.build()` or in a
+`Bun.plugin()` preload. A Bun build without it compiles `.module.css` to class
+names of Bun's own, which the renderer cannot resolve:
+
+```ts
+import { gpuixCssModulesBun } from "@gpuix/plugins/css"
+
+await Bun.build({
+  entrypoints: ["src/app.tsx"],
+  compile: { outfile: "dist/app" },
+  plugins: [gpuixCssModulesBun()],
+})
+```
+
+`bun build` on the command line takes no plugins, so a packaged application
+needs either this API or a `Bun.plugin()` preload. A preload named in
+`bunfig.toml` is also embedded in a `--compile` binary, where it fails to
+resolve `@gpuix/plugins`, so keep the preload for `bun --hot` and build through
+the API.
+
+### Combining classes
+
+Import `cn` from `@gpuix/react/cn` rather than from `cn` or `clsx`:
+
+```tsx
+import { cn } from "@gpuix/react/cn"
+
+<div className={cn(styles.item, active && styles.active, className)} />
+```
+
+On the web it is the `cn` package, Tailwind conflict resolution included. On
+GPUIX it merges the compiled styles instead, later values winning. A literal
+class name reaching a GPUIX build cannot be applied, so the renderer names it
+in a diagnostic rather than dropping it silently. `cn({ [styles.active]: on })`
+works only on the web, because the key of a compiled style is not a class name;
+write `on && styles.active` for code that runs on both.
+
+### Types
+
+Opt into the `.module.css` declaration from a project `.d.ts` file:
 
 ```ts
 // src/gpuix-css-modules.d.ts
 import "@gpuix/plugins/css-modules"
 ```
 
-Keep this declaration opt-in in projects that also compile browser CSS modules:
-the browser and native environments give the same `.module.css` import
-different value shapes.
+It types the import as the class-name string a web build produces, which is
+what both targets pass along and neither reads as text. Typing it that way
+keeps one component compiling against react-dom and GPUIX alike, and keeps an
+inline style object out of `className`. Building a class name out of one —
+`` `${styles.a} extra` `` — compiles and then fails on GPUIX, where the value
+is an object.
 
 For complete setup and packaging instructions, see the repository README.

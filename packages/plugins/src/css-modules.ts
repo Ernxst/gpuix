@@ -1,9 +1,14 @@
 import transformCssModule from "css-to-react-native-transform"
 import postcss from "postcss"
 
-const transformCss = transformCssModule as unknown as (
-  css: string,
-) => Record<string, unknown>
+type TransformCss = (css: string) => Record<string, unknown>
+
+// The transform is CommonJS. Bun hands back the function; Node's interop hands
+// back the module namespace, which a Vitest run or a Node bundler hits.
+const transformCss: TransformCss =
+  typeof transformCssModule === "function"
+    ? (transformCssModule as TransformCss)
+    : ((transformCssModule as { default: TransformCss }).default)
 
 const SUPPORTED_PROPERTIES = new Set([
   "display",

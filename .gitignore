@@ -27,3 +27,4 @@ docs/agents/
 # `bun pm pack` output. The tarballs are built per consumer, not committed.
 packages/native/*.tgz
 packages/react/*.tgz
+packages/plugins/*.tgz

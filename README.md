@@ -85,7 +85,7 @@ cd ../plugins && bun pm pack
 
 Pin the generated native and React `.tgz` files in your app — plus an `overrides`
 entry for `@gpuix/native`, without which the install fails. Add the plugins
-tarball when the app uses Vite or Bun, then add the types.
+tarball when the app uses Bun or native CSS modules, then add the types.
 [Consuming an unpublished checkout](#consuming-an-unpublished-checkout) has the
 exact `package.json` shape and the peer-dependency rules.
 
@@ -1179,82 +1179,24 @@ render(<App />, { title: 'My App', width: 800, height: 600 })
 Do **not** call `createRenderer()` or `init()` in this file. `bun --hot` re-runs
 the whole entry on save. A second `init()` would open a second window.
 
-### 2. Use Vite without a GPUIX CLI
+### 2. Start the app with `bun --hot`
 
-Use `@gpuix/plugins/vite` when the app needs Vite's plugin pipeline. Vite and the native
-module runner stay in the Bun process, so no separate launcher is needed.
+Prefer **`bun --hot`** over a plain `bun` or `tsx` run. With it, `render()`
+remounts React on the same native window after a source change.
 
-Add the packed plugin and Vite as development dependencies:
-
-```json
-{
-  "devDependencies": {
-    "@gpuix/plugins": "file:/absolute/path/gpuix-plugins-0.22.0-fork.1.tgz",
-    "vite": "^8.2.1"
-  }
-}
+```bash
+bun --hot app.tsx
 ```
 
-Configure Vite and keep the app entry ending with `render()`:
+To use native `*.module.css` imports, register the package preload before the
+app entry is imported:
 
-```ts
-// vite.config.ts
-import { defineConfig } from 'vite'
-import { gpuix } from '@gpuix/plugins/vite'
-
-export default defineConfig({
-  appType: 'custom',
-  plugins: [gpuix({ entry: 'app.tsx' })],
-})
+```bash
+bun --hot --preload @gpuix/plugins/preload --conditions=browser --conditions=desktop src/entry.desktop.tsx
 ```
 
-```json
-{ "scripts": { "dev": "bun run --bun vite" } }
-```
-
-The Vite adapter is for native development. If a config includes `gpuix()` in
-`vite build`, it throws; use `@gpuix/plugins/bun` for native packaging.
-
-Run `bun run dev`. Component-only edits keep React state. A mixed module such
-as a TanStack route invalidates the Refresh boundary, then Vite re-evaluates the
-entry and `render()` remounts the app on the same native window. Rust and native
-addon changes still need the Bun process restarted.
-
-#### Share a Vite config with the web target
-
-Keep the React plugin enabled for the browser target and add `gpuix()` only in
-native mode. The React plugin only installs its Refresh wrapper in Vite's client
-environment, so GPUIX remains responsible for native Refresh.
-
-```ts
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { gpuix } from '@gpuix/plugins/vite'
-
-export default defineConfig(({ mode }) => {
-  const native = mode === 'native'
-
-  return {
-    appType: native ? 'custom' : 'spa',
-    plugins: [
-      react({ jsxImportSource: '@gpuix/react' }),
-      native && gpuix({ entry: 'src/native.tsx' }),
-    ],
-  }
-})
-```
-
-```json
-{
-  "scripts": {
-    "dev:native": "vite --mode native",
-    "dev:web": "vite --mode web"
-  }
-}
-```
-
-The scoped `--bun` flag runs only Vite under Bun. It does not change the browser
-bundle, select a renderer, or alter Node-based tools such as Vitest.
+If the app registers other Bun plugins, use a custom preload with `gpuixDev()`
+from `@gpuix/plugins/bun` and pass that file with `--preload`.
 
 ### 3. Build with Bun
 
@@ -1275,32 +1217,8 @@ if (!result.success) throw new Error('Bun build failed')
 The adapter defaults to Bun as the target, ESM output, automatic JSX using
 `@gpuix/react`, and an external `@gpuix/native` import. Explicit scalar build
 options win. `external`, `define`, and `conditions` are merged. The adapter
-also converts native `*.module.css` imports into objects for the `style` prop.
-
-### 4. Start the app with `bun --hot`
-
-Prefer **`bun --hot`** over a plain `bun` or `tsx` run. Without `--hot`, a
-save starts a second process. With it, `render()` remounts React on the same
-window.
-
-```bash
-bun --hot app.tsx
-```
-
-To use native `*.module.css` imports with `bun --hot`, register the development
-plugin from a preload before the app entry is imported:
-
-```ts
-// gpuix.preload.ts
-import { gpuixDev } from '@gpuix/plugins/bun'
-
-Bun.plugin(gpuixDev())
-```
-
-```toml
-# bunfig.toml
-preload = ['./gpuix.preload.ts']
-```
+also compiles `*.module.css` imports into the styles the renderer applies for
+`className`.
 
 Opt into the matching TypeScript declaration from a project `.d.ts` file:
 
@@ -1309,12 +1227,15 @@ Opt into the matching TypeScript declaration from a project `.d.ts` file:
 import '@gpuix/plugins/css-modules'
 ```
 
-Keep that declaration opt-in when the project also imports browser CSS modules;
-browser modules export class-name strings while native modules export style
-objects. Bun's runtime watcher does not currently re-run files handled by
+A `.module.css` import goes in `className` on both targets: a browser build
+resolves it to a class name, and a GPUIX build compiles the file into the
+styles the renderer applies. Combine classes with `cn` from `@gpuix/react/cn`,
+which joins them on the web and merges the compiled styles on GPUIX. See the
+[`@gpuix/plugins` README](packages/plugins/README.md) for what the transform
+accepts. Bun's runtime watcher does not currently re-run files handled by
 custom `onLoad` plugins, so restart the process after changing a CSS module.
 
-### 5. Save the file
+### 4. Save the file
 
 ```
 save .tsx  ►  bun re-evaluates the entry  ►  render() remounts React
@@ -4356,6 +4277,12 @@ CSS-like styling via the `style` prop:
   </div>
 </div>
 ```
+
+`className` takes a `.module.css` import, which `@gpuix/plugins/css` compiles
+into these same styles; the renderer applies them, with `style` winning where
+both set a property. A class name that reaches the renderer uncompiled is
+reported, because GPU-IX resolves no CSS classes. See [hot
+reload](#4-start-the-app-with-bun---hot) for the setup.
 
 GPU-IX accepts CSS custom-property keys such as `--collapsible-panel-height`
 and `--accordion-panel-width` for compatibility with components that measure

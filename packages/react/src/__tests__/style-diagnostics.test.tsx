@@ -5,6 +5,7 @@ import {
   isNativeTestRendererAvailable,
   TestRenderer,
 } from "../testing.js"
+import { cn } from "../cn.js"
 import { wrapWithBatching } from "../reconciler/batch-renderer.js"
 import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
 import type { StyleDesc } from "../types/host.js"
@@ -17,6 +18,7 @@ declare module "vitest" {
 }
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+const COMPILED_STYLE = Symbol.for("gpuix.compiledStyle")
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -1307,30 +1309,20 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     compatibility.unmount()
   })
 
-  it("diagnoses className on mount and update and points to the style prop", () => {
+  it("diagnoses an unresolved className on mount and update", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const strictCreate = createTestRoot({ strictStyles: true })
-    strictCreate.render(
-      <div
-        data-testid="strict-class-name"
-        {...({ className: "rounded-lg" } as Record<string, string>)}
-      />
-    )
+    strictCreate.render(<div data-testid="strict-class-name" className="rounded-lg" />)
 
     const strictUpdate = createTestRoot({ strictStyles: true })
     strictUpdate.render(<div data-testid="strict-class-name-update" />)
-    strictUpdate.render(
-      <div
-        data-testid="strict-class-name-update"
-        {...({ className: "text-sm" } as Record<string, string>)}
-      />
-    )
+    strictUpdate.render(<div data-testid="strict-class-name-update" className="text-sm" />)
 
     expect(error.mock.calls.flat()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           name: "UnsupportedClassNamePropError",
-          message: expect.stringMatching(/className.*style prop/),
+          message: expect.stringMatching(/cannot apply the class names "rounded-lg"/),
         }),
       ])
     )
@@ -1341,26 +1333,92 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const compatibility = createTestRoot({ strictStyles: false })
     compatibility.render(<div data-testid="compat-class-name" />)
-    compatibility.render(
-      <div
-        data-testid="compat-class-name"
-        {...({ className: "bg-slate-900" } as Record<string, string>)}
-      />
-    )
-    compatibility.render(
-      <div
-        data-testid="compat-class-name"
-        {...({ className: "bg-slate-800" } as Record<string, string>)}
-      />
-    )
+    compatibility.render(<div data-testid="compat-class-name" className="bg-slate-900" />)
+    compatibility.render(<div data-testid="compat-class-name" className="bg-slate-800" />)
 
     expect(warn).toHaveBeenCalledTimes(1)
     expect(warn).toHaveBeenCalledWith(
       expect.stringMatching(
-        /<div data-testid="compat-class-name">.*does not support className.*style prop/
+        /<div data-testid="compat-class-name">.*cannot apply the class names "bg-slate-900".*@gpuix\/plugins\/css/
       )
     )
     compatibility.unmount()
+  })
+
+  it("applies a className compiled from a CSS module as the element style", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    // What `@gpuix/plugins/css` puts in the prop: the styles the class
+    // describes, typed as the class name a web build would produce.
+    const button = { backgroundColor: "red", padding: 4 } as StyleDesc
+    Object.defineProperty(button, COMPILED_STYLE, { value: true })
+    const styles = { button }
+
+    testRoot.render(
+      <div data-testid="compiled-class-name" className={styles.button as unknown as string} />
+    )
+
+    expect(testRoot.renderer.findByTestId("compiled-class-name")?.style).toMatchObject({
+      backgroundColor: "red",
+      padding: 4,
+    })
+    expect(warn).not.toHaveBeenCalled()
+    testRoot.unmount()
+  })
+
+  it("lets the style prop outrank a compiled className", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+    const card = { backgroundColor: "red", padding: 4 } as StyleDesc
+    Object.defineProperty(card, COMPILED_STYLE, { value: true })
+    const styles = { card }
+
+    testRoot.render(
+      <div
+        data-testid="class-name-and-style"
+        className={styles.card as unknown as string}
+        style={{ backgroundColor: "blue" }}
+      />
+    )
+
+    expect(testRoot.renderer.findByTestId("class-name-and-style")?.style).toMatchObject({
+      backgroundColor: "blue",
+      padding: 4,
+    })
+    testRoot.unmount()
+  })
+
+  it("applies compiled styles and still reports the class names cn() could not compile", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: false })
+    const compiled = { backgroundColor: "red" }
+    Object.defineProperty(compiled, COMPILED_STYLE, { value: true })
+    const merged = cn(...([compiled, "rounded-lg"] as unknown as string[]))
+
+    testRoot.render(<div data-testid="partly-compiled" className={merged} />)
+
+    expect(testRoot.renderer.findByTestId("partly-compiled")?.style).toMatchObject({
+      backgroundColor: "red",
+    })
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/<div data-testid="partly-compiled">.*"rounded-lg"/)
+    )
+    testRoot.unmount()
+  })
+
+  it("reports and ignores an uncompiled object in className", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: false })
+
+    testRoot.render(
+      <div data-testid="uncompiled-class-name" className={{ backgroundColor: "red" } as unknown as string} />,
+    )
+
+    expect(testRoot.renderer.findByTestId("uncompiled-class-name")?.style).toEqual({})
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/className value that was not compiled by @gpuix\/plugins\/css/),
+    )
+    testRoot.unmount()
   })
 
   it("stays quiet for a className that applies no classes", () => {
@@ -1370,14 +1428,9 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     // `className=""` and `className={null}` apply no CSS classes on the web
     // either, so there is nothing for the native renderer to lose.
     const strict = createTestRoot({ strictStyles: true })
+    strict.render(<div data-testid="empty-class-name" className="" />)
     strict.render(
-      <div data-testid="empty-class-name" {...({ className: "" } as Record<string, string>)} />
-    )
-    strict.render(
-      <div
-        data-testid="empty-class-name"
-        {...({ className: null } as unknown as Record<string, string>)}
-      />
+      <div data-testid="empty-class-name" className={null as unknown as string} />
     )
 
     expect(warn).not.toHaveBeenCalled()

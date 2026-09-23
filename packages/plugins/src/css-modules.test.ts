@@ -1,13 +1,11 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { pathToFileURL } from "node:url"
-import { createServer } from "vite"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import type { BunPlugin } from "bun"
 import { gpuix as gpuixBun, gpuixDev } from "./bun.ts"
 import { transformGpuixCssModule } from "./css-modules.ts"
-import { gpuix } from "./index.ts"
 
 test("converts simple CSS module classes into GPUIX style objects", () => {
   expect(
@@ -210,52 +208,6 @@ test("rejects other selectors and at-rules", () => {
   ).toThrow('at-rule "@media" is not supported yet')
 })
 
-test("Vite rejects native builds", () => {
-  const plugin = gpuix({ entry: "main.tsx" })
-  const apply = plugin.apply
-
-  expect(typeof apply).toBe("function")
-  expect(() =>
-    Reflect.apply(apply as (...args: unknown[]) => unknown, undefined, [
-      {},
-      { command: "build", mode: "production" },
-    ]),
-  ).toThrow(
-    "[gpuix] Vite builds are not supported for native apps; use @gpuix/plugins/bun with Bun.build().",
-  )
-})
-
-test("Vite serves a native CSS module as a JavaScript style object", async () => {
-  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-vite-css-module-"))
-  let server: Awaited<ReturnType<typeof createServer>> | undefined
-
-  try {
-    await writeFile(
-      path.join(fixture, "panel.module.css"),
-      ".panel { background-color: #123456; }\n",
-    )
-    const basePlugin = gpuix({ entry: "main.tsx" })
-
-    server = await createServer({
-      appType: "custom",
-      configFile: false,
-      root: fixture,
-      plugins: [{ ...basePlugin, configureServer: undefined }],
-    })
-
-    const result = await server.environments.gpuix.transformRequest("/panel.module.css")
-    expect(result?.code).toContain('__vite_ssr_export_default__')
-    expect(result?.code).toContain('"backgroundColor":"#123456"')
-
-    const browserResult = await server.transformRequest("/panel.module.css")
-    expect(browserResult?.code).toContain("__vite__css")
-    expect(browserResult?.code).not.toContain("backgroundColor")
-  } finally {
-    await server?.close()
-    await rm(fixture, { recursive: true, force: true })
-  }
-})
-
 test("Bun builds native CSS modules and receives GPUIX build defaults", async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-bun-css-module-"))
   const observed: {
@@ -307,6 +259,16 @@ test("Bun builds native CSS modules and receives GPUIX build defaults", async ()
     const output = await result.outputs[0]?.text()
     expect(output).toContain('backgroundColor: "#123456"')
     expect(output).toContain("paddingTop: 4")
+
+    const outputFile = path.join(fixture, "entry-built.js")
+    await writeFile(outputFile, output ?? "")
+    const builtModule = await import(pathToFileURL(outputFile).href)
+    expect(
+      Object.getOwnPropertySymbols(builtModule.default).includes(
+        Symbol.for("gpuix.compiledStyle"),
+      ),
+    ).toBe(true)
+
     expect(observed.target).toBe("bun")
     expect(observed.format).toBe("esm")
     expect(observed.external).toEqual([
@@ -352,8 +314,61 @@ test("Bun dev plugin loads native CSS modules at runtime", async () => {
       paddingBottom: 4,
       paddingLeft: 4,
     })
+    expect(
+      Object.getOwnPropertySymbols(result.default).includes(Symbol.for("gpuix.compiledStyle")),
+    ).toBe(true)
   } finally {
     Bun.plugin.clearAll()
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("Bun preload entry loads native CSS modules at runtime", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-bun-preload-css-module-"))
+  const packageRoot = fileURLToPath(new URL("../", import.meta.url))
+  const preload = path.join(packageRoot, "dist/preload.js")
+
+  try {
+    try {
+      await access(preload)
+    } catch {
+      throw new Error("@gpuix/plugins/preload is missing from dist; run bun run build before bun test")
+    }
+
+    const entry = path.join(fixture, "entry.ts")
+    const packageLink = path.join(fixture, "node_modules/@gpuix/plugins")
+    await mkdir(path.dirname(packageLink), { recursive: true })
+    await symlink(packageRoot, packageLink, "dir")
+
+    await writeFile(
+      path.join(fixture, "panel.module.css"),
+      ".panel { color: #123456; padding: 4px; }\n",
+    )
+    await writeFile(
+      entry,
+      'import styles from "./panel.module.css"\nconsole.log(JSON.stringify({ style: styles.panel, compiled: Object.getOwnPropertySymbols(styles.panel).includes(Symbol.for("gpuix.compiledStyle")) }))\n',
+    )
+
+    const result = Bun.spawnSync([process.execPath, "--preload", "@gpuix/plugins/preload", entry], {
+      cwd: fixture,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    expect(result.exitCode, result.stderr.toString()).toBe(0)
+    const loaded = JSON.parse(result.stdout.toString()) as {
+      style: Record<string, unknown>
+      compiled: boolean
+    }
+    expect(loaded.style).toEqual({
+      color: "#123456",
+      paddingTop: 4,
+      paddingRight: 4,
+      paddingBottom: 4,
+      paddingLeft: 4,
+    })
+    expect(loaded.compiled).toBe(true)
+  } finally {
     await rm(fixture, { recursive: true, force: true })
   }
 })

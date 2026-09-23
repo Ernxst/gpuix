@@ -1,8 +1,8 @@
 /**
  * Repeatable benchmark harness for GPUIX apps.
  *
- * Measures bundle size, cold startup, idle memory, build/rebuild time, and
- * hot-reload latency for the fixtures in `examples/bench/`, against a plain
+ * Measures bundle size, cold startup, idle memory, and build/rebuild time for
+ * the fixtures in `examples/bench/`, against a plain
  * GPUI baseline built from the same GPUI checkout. See
  * `examples/bench/README.md` for what each metric means and why it is
  * measured the way it is.
@@ -17,8 +17,6 @@
  *   bun install --frozen-lockfile
  *   bun run build:native   # produces packages/native/*.node
  *   bun run build:react    # produces packages/react/dist
- *   bun run build:vite     # produces packages/plugins/dist, used by the Vite
- *                          # hot-reload measurement
  * and, once, the GPUI baseline binary:
  *   cd packages/native && cargo build --release --example hello_bench
  */
@@ -38,7 +36,6 @@ const BIN_DIR = path.join(OUT_DIR, "bin")
 const MARKER_PREFIX = "GPUIX_BENCH "
 const READY_TIMEOUT_MS = 20_000
 const IDLE_BEFORE_MEMORY_MS = 2_000
-const HOT_RELOAD_TIMEOUT_MS = 20_000
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -128,7 +125,7 @@ function parseMarkerLine(line: string): BenchMarker | undefined {
  * Runs the app under `script` so its stdin is a terminal that stays open, as
  * when a person launches it. A non-TTY stdin turns on GPUIX automation
  * (`createRenderer`), which adds memory and startup cost a real launch does
- * not pay, and a stdin that ends makes Vite's dev server exit. `script` needs
+ * not pay. The launcher needs
  * a real pipe on its own stdin (Bun's `"pipe"` is a socket, which it rejects),
  * so `tail -f /dev/null` feeds it one that never closes.
  */
@@ -300,14 +297,12 @@ interface Fixture {
   readyPredicate: (marker: BenchMarker) => boolean
   /** Present only for fixtures the harness also runs from source (skips a rebuild round-trip). */
   measuresBuild: boolean
-  measuresHotReload: boolean
 }
 
 const HELLO_GPUIX_ENTRY = path.join(BENCH_DIR, "hello-gpuix.tsx")
 const HELLO_GPUI_SRC = path.join(NATIVE_DIR, "examples", "hello_bench.rs")
 const HELLO_GPUI_BIN = path.join(NATIVE_DIR, "target", "release", "examples", "hello_bench")
 const CHAT_ENTRY = path.join(EXAMPLES_DIR, "chat.tsx")
-const HOT_RELOAD_ENTRY = path.join(BENCH_DIR, "hot-reload-fixture.tsx")
 
 function runCommand(
   command: string,
@@ -344,7 +339,6 @@ const gpuixHello: Fixture = {
   id: "gpuix-hello",
   label: "GPUIX hello-world",
   measuresBuild: true,
-  measuresHotReload: true,
   readyPredicate: (m) => m.event === "ready",
   build(kind) {
     const outfile = path.join(BIN_DIR, "hello-gpuix")
@@ -371,7 +365,6 @@ const gpuiHello: Fixture = {
   id: "gpui-hello",
   label: "GPUI hello-world (baseline)",
   measuresBuild: true,
-  measuresHotReload: false,
   readyPredicate: (m) => m.event === "ready",
   build(kind) {
     if (kind === "cold") {
@@ -400,7 +393,6 @@ const gpuixChat: Fixture = {
   id: "gpuix-chat",
   label: "GPUIX chat (realistic)",
   measuresBuild: false,
-  measuresHotReload: false,
   readyPredicate: (m) => m.event === "ready",
   build(kind) {
     if (kind === "rebuild") return { binary: path.join(BIN_DIR, "chat"), buildMs: 0 }
@@ -477,62 +469,6 @@ async function measureStartupAndMemoryRun(fixture: Fixture): Promise<{
 }
 
 // ---------------------------------------------------------------------------
-// Hot reload
-// ---------------------------------------------------------------------------
-
-async function measureHotReload(
-  label: string,
-  command: string,
-  args: string[],
-  cwd: string,
-  runs: number,
-): Promise<number[]> {
-  const original = fs.readFileSync(HOT_RELOAD_ENTRY, "utf8")
-  const samples: number[] = []
-  const app = launch(command, args, { cwd })
-  try {
-    const initial = await waitForMarker(app, (m) => m.event === "mounted", READY_TIMEOUT_MS)
-    if (!initial) {
-      log(`hot reload (${label}): fixture never mounted within ${READY_TIMEOUT_MS}ms`)
-      return samples
-    }
-    let seen = app.markers.length
-    for (let i = 0; i < runs; i++) {
-      const version = `v1-bench-${i}-${Date.now()}`
-      const edited = original.replace("const VERSION = 'v1'", `const VERSION = '${version}'`)
-      const writeEpochMs = Date.now()
-      fs.writeFileSync(HOT_RELOAD_ENTRY, edited)
-      const marker = await waitForMarker(
-        app,
-        (m) => m.event === "mounted" && m.version === version,
-        HOT_RELOAD_TIMEOUT_MS,
-        seen,
-      )
-      seen = app.markers.length
-      fs.writeFileSync(HOT_RELOAD_ENTRY, original)
-      // Let the reload the restore triggers finish, so the next edit is not
-      // queued behind it and timed with it.
-      await waitForMarker(
-        app,
-        (m) => m.event === "mounted" && m.version === "v1",
-        HOT_RELOAD_TIMEOUT_MS,
-        seen,
-      )
-      seen = app.markers.length
-      if (!marker) {
-        log(`hot reload (${label}): edit ${i} never reflected within ${HOT_RELOAD_TIMEOUT_MS}ms`)
-        continue
-      }
-      samples.push((marker.atEpochMs as number) - writeEpochMs)
-    }
-  } finally {
-    fs.writeFileSync(HOT_RELOAD_ENTRY, original)
-    await stop(app)
-  }
-  return samples
-}
-
-// ---------------------------------------------------------------------------
 // Report
 // ---------------------------------------------------------------------------
 
@@ -548,30 +484,27 @@ interface FixtureReport {
   startupSamples: number[]
   physFootprint?: Stats
   rss?: Stats
-  hotReloadBunHot?: Stats
-  hotReloadVite?: Stats
   notes: string[]
 }
 
 // Jamon Holmgren's published figures for the same shape of app, kept as a
 // fixed reference — not remeasured here. See the brief for the source.
 const JAMON_REFERENCE: Record<string, string> = {
-  "gpuix-hello": "bundle 83.0 MB · startup 1249 ms · memory 140 MB · build 0.4 s · rebuild 0.5 s · hot reload N/A",
+  "gpuix-hello": "bundle 83.0 MB · startup 1249 ms · memory 140 MB · build 0.4 s · rebuild 0.5 s",
   "gpui-hello": "bundle 6.9 MB · startup 215 ms · memory 83.6 MB",
 }
 
 function printReport(reports: FixtureReport[]): void {
   const header =
-    "| Fixture | Bundle (MB) | First launch ms | Startup ms (median, min–max) | Memory phys/RSS (MB, median) | Build cold/rebuild (s) | Hot reload bun/vite (ms, median) | Jamon reference |"
-  const divider = "|---|---|---|---|---|---|---|---|"
+    "| Fixture | Bundle (MB) | First launch ms | Startup ms (median, min–max) | Memory phys/RSS (MB, median) | Build cold/rebuild (s) | Jamon reference |"
+  const divider = "|---|---|---|---|---|---|---|"
   console.log(header)
   console.log(divider)
   for (const r of reports) {
     const memory = `${fmt(r.physFootprint?.median)} / ${fmt(r.rss?.median)}`
     const build = `${fmt(r.coldBuildS, 2)} / ${fmt(r.rebuildS, 2)}`
-    const hotReload = `${fmt(r.hotReloadBunHot?.median, 0)} / ${fmt(r.hotReloadVite?.median, 0)}`
     console.log(
-      `| ${r.label} | ${fmt(r.bundleMB)} | ${fmt(r.firstLaunchMs, 0)} | ${fmtStats(r.startup)} | ${memory} | ${build} | ${hotReload} | ${JAMON_REFERENCE[r.id] ?? "–"} |`,
+      `| ${r.label} | ${fmt(r.bundleMB)} | ${fmt(r.firstLaunchMs, 0)} | ${fmtStats(r.startup)} | ${memory} | ${build} | ${JAMON_REFERENCE[r.id] ?? "–"} |`,
     )
   }
   for (const r of reports) {
@@ -619,30 +552,11 @@ async function main(): Promise<void> {
     }
   }
 
-  log("hot reload: bun --hot")
-  const hotReloadBunHot = await measureHotReload(
-    "bun --hot",
-    "bun",
-    ["--hot", HOT_RELOAD_ENTRY],
-    BENCH_DIR,
-    runs,
-  )
-
-  log("hot reload: @gpuix/plugins/vite")
-  const hotReloadVite = await measureHotReload(
-    "vite",
-    "bun",
-    ["run", "--bun", "vite", "--config", "vite.config.ts"],
-    BENCH_DIR,
-    runs,
-  )
-
   const reports: FixtureReport[] = FIXTURES.map((fixture) => {
     const build = buildResults.get(fixture.id)!
     const sm = startupMemory.get(fixture.id)!
     const notes: string[] = []
     if (!fixture.measuresBuild) notes.push("bundle/build not measured — see examples/bench/README.md")
-    if (!fixture.measuresHotReload) notes.push("hot reload not applicable")
     const report: FixtureReport = {
       id: fixture.id,
       label: fixture.label,
@@ -656,15 +570,6 @@ async function main(): Promise<void> {
       rss: stats(sm.rssMB),
       notes,
     }
-    if (fixture.id === gpuixHello.id) {
-      report.hotReloadBunHot = stats(hotReloadBunHot)
-      report.hotReloadVite = stats(hotReloadVite)
-      if (hotReloadVite.length === 0) {
-        notes.push(
-          "@gpuix/plugins/vite hot reload not measured: the fixture produced no marker under the plugin",
-        )
-      }
-    }
     return report
   })
 
@@ -676,7 +581,7 @@ async function main(): Promise<void> {
   fs.writeFileSync(
     jsonPath,
     JSON.stringify(
-      { runs, generatedAt: new Date().toISOString(), reports, hotReloadBunHot, hotReloadVite },
+      { runs, generatedAt: new Date().toISOString(), reports },
       null,
       2,
     ),
