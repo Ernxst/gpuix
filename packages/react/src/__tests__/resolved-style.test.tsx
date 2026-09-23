@@ -195,6 +195,50 @@ describe("resolved test-renderer styles", () => {
     }
   })
 
+  it.each(["space", "enter"] as const)(
+    "clears the active style when focus moves during %s activation",
+    (key) => {
+      const root = createTestRoot()
+      try {
+        let clicks = 0
+        root.render(
+          <div>
+            <button
+              data-testid="first"
+              autoFocus
+              onClick={() => {
+                clicks += 1
+              }}
+              style={{
+                width: 60,
+                height: 40,
+                backgroundColor: "#111111",
+                active: { backgroundColor: "#222222" },
+              }}
+            >
+              First
+            </button>
+            <div data-testid="second" tabIndex={0} />
+          </div>
+        )
+
+        const first = root.renderer.findByTestId("first")!
+        const second = root.renderer.findByTestId("second")!
+        root.renderer.nativeSimulateKeyDown(first.id, key)
+        expect(root.renderer.getResolvedStyle(first.id)?.backgroundColor).toBe("#222222")
+
+        root.renderer.focusElement(second.id)
+        expect(root.renderer.getResolvedStyle(first.id)?.backgroundColor).toBe("#111111")
+        expect(clicks).toBe(0)
+
+        root.renderer.simulateKeyUp(key)
+        expect(clicks).toBe(0)
+      } finally {
+        root.unmount()
+      }
+    }
+  )
+
   it.each([
     ["keyboard then pointer; keyboard then pointer", ["keyboard", "pointer"], ["keyboard", "pointer"]],
     ["keyboard then pointer; pointer then keyboard", ["keyboard", "pointer"], ["pointer", "keyboard"]],

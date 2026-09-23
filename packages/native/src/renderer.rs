@@ -7415,6 +7415,8 @@ pub(crate) struct GpuixView {
     window_activation_subscription: Option<gpui::Subscription>,
     /// The element whose keyboard activation is holding its `active` style.
     keyboard_active: Option<u64>,
+    /// Cancels keyboard activation when its focused element loses focus.
+    keyboard_active_blur_subscription: Option<gpui::Subscription>,
     /// Persistent measurement and scroll state for React-backed virtual lists.
     virtual_lists: HashMap<u64, VirtualListEntry>,
     /// Latest pointer sample and list during selection edge scrolling.
@@ -7723,6 +7725,7 @@ impl GpuixView {
             pointer_router: Default::default(),
             window_activation_subscription: None,
             keyboard_active: None,
+            keyboard_active_blur_subscription: None,
             virtual_lists: HashMap::new(),
             selection_drag_position: None,
             selection_scroll_list: None,
@@ -8179,16 +8182,29 @@ impl GpuixView {
             .fold(false, |changed, state| state.set_active(false) || changed);
         let changed = interactive_changed || transition_changed;
         self.keyboard_active = None;
+        self.keyboard_active_blur_subscription = None;
         if changed {
             self.interaction_revision = self.interaction_revision.saturating_add(1);
         }
         changed
     }
 
-    pub(crate) fn begin_keyboard_active(&mut self, id: u64) -> bool {
+    pub(crate) fn begin_keyboard_active(
+        &mut self,
+        id: u64,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
         let cleared = if self.keyboard_active != Some(id) {
             let cleared = self.clear_keyboard_active();
             self.keyboard_active = Some(id);
+            self.keyboard_active_blur_subscription = self.focus_handles.get(&id).map(|handle| {
+                cx.on_blur(handle, window, move |view, _window, cx| {
+                    if view.keyboard_active == Some(id) && view.clear_keyboard_active() {
+                        cx.notify();
+                    }
+                })
+            });
             cleared
         } else {
             false
@@ -10681,6 +10697,7 @@ impl gpui::Render for GpuixView {
             .is_some_and(|id| !tree.elements.contains_key(&id))
         {
             self.keyboard_active = None;
+            self.keyboard_active_blur_subscription = None;
         }
         self.hovered_targets
             .retain(|id| tree.elements.contains_key(id));
@@ -14010,7 +14027,7 @@ where
             if activates
                 && (activates_on_space || key_event.keystroke.key != "space")
                 && is_focused(focus_handle.as_ref(), window)
-                && view.begin_keyboard_active(id)
+                && view.begin_keyboard_active(id, window, cx)
             {
                 cx.notify();
             }

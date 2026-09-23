@@ -369,7 +369,7 @@ impl CustomElement for ChoiceInputElement {
                 let activates = event.keystroke.key == "space" && !event.keystroke.modifiers.modified();
                 if activates
                     && focus_handle.as_ref().is_some_and(|handle| handle.is_focused(window))
-                    && view.begin_keyboard_active(id)
+                    && view.begin_keyboard_active(id, window, cx)
                 {
                     cx.notify();
                 }
