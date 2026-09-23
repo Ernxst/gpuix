@@ -9,6 +9,7 @@ import path from "path"
 import React from "react"
 import { beforeAll, describe, expect, it, vi } from "vitest"
 import { createTestRoot } from "../testing.js"
+import { decodePng } from "../testing-png.js"
 import {
   expectScreenshotsDiffer,
   expectScreenshotsEqual,
@@ -1094,12 +1095,30 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     const inner = boundsFor(renderer, "inner-card")
     const target = renderer.findByTestId("same-name-target")!
     const before = path.join(SHOTS_DIR, "same-name-before.png")
+    const directOuterActive = path.join(SHOTS_DIR, "same-name-direct-outer-active.png")
     const outerHovered = path.join(SHOTS_DIR, "same-name-outer-hovered.png")
     const bothHovered = path.join(SHOTS_DIR, "same-name-both-hovered.png")
+    const outerActive = path.join(SHOTS_DIR, "same-name-outer-active.png")
+    const targetBounds = renderer.getElementBounds(target.id)!
+    const scaleFactor = renderer.getWindowSize().scaleFactor
+    const paintedTargetColor = (file: string) => {
+      const image = decodePng(fs.readFileSync(file), file)
+      const x = Math.floor((targetBounds.x + targetBounds.width / 2) * scaleFactor)
+      const y = Math.floor((targetBounds.y + targetBounds.height / 2) * scaleFactor)
+      const offset = (y * image.width + x) * 4
+      return Array.from(image.data.subarray(offset, offset + 3))
+    }
 
     renderer.nativeSimulateMouseMove(outer.x + outer.width + 20, outer.y + outer.height + 20)
     expect(renderer.getResolvedStyle(target.id)?.backgroundColor).toBe("#334155")
     renderer.captureScreenshot(before)
+
+    // A press can arrive without a preceding move over the outer group's box.
+    renderer.nativeSimulateMouseDown(outer.x + 10, outer.y + 10, 0)
+    expect(renderer.getResolvedStyle(target.id)?.backgroundColor).toBe("#22c55e")
+    renderer.captureScreenshot(directOuterActive)
+    expect(paintedTargetColor(directOuterActive)).toEqual([34, 197, 94])
+    renderer.nativeSimulateMouseUp(outer.x + 10, outer.y + 10, 0)
 
     renderer.nativeSimulateMouseMove(outer.x + 10, outer.y + 10)
     expect(renderer.getResolvedStyle(target.id)?.backgroundColor).toBe("#f59e0b")
@@ -1114,10 +1133,13 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     renderer.nativeSimulateMouseMove(outer.x + 10, outer.y + 10)
     renderer.nativeSimulateMouseDown(outer.x + 10, outer.y + 10, 0)
     expect(renderer.getResolvedStyle(target.id)?.backgroundColor).toBe("#22c55e")
+    renderer.captureScreenshot(outerActive)
+    expect(paintedTargetColor(outerHovered)).toEqual([245, 158, 11])
+    expect(paintedTargetColor(outerActive)).toEqual([34, 197, 94])
     renderer.nativeSimulateMouseUp(outer.x + 10, outer.y + 10, 0)
   })
 
-  it("lets virtual-list hoverGroup activate descendant hoverWithin", () => {
+  it("lets virtual-list hoverGroup activate descendant hoverWithin and activeWithin", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div
@@ -1158,7 +1180,9 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
                 height: 40,
                 pointerEvents: "none",
                 backgroundColor: "#334155",
+                hoverWithinGroup: "virtual-list-group",
                 hoverWithin: { backgroundColor: "#f59e0b" },
+                activeWithin: { display: "none" },
               }}
             />
           </div>
@@ -1180,6 +1204,11 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     renderer.nativeSimulateMouseMove(centerX(row), row.y - 12)
     renderer.captureScreenshot(after)
     expectScreenshotsDiffer(before, after)
+
+    renderer.nativeSimulateMouseDown(centerX(row), row.y - 12, 0)
+    expect(renderer.getElementBounds(target.id)).toMatchObject({ width: 0, height: 0 })
+    renderer.nativeSimulateMouseUp(centerX(row), row.y - 12, 0)
+    expect(renderer.getElementBounds(target.id)?.width).toBeGreaterThan(0)
   })
 
   it("keeps hover and click interaction isolated between two live offscreen roots", () => {

@@ -8773,22 +8773,24 @@ struct ResolvedHoverGroups<'a> {
 
 /// Match every marked ancestor with the requested name. GPUI can paint only
 /// one group refinement, so each state targets its nearest matching ancestor
-/// with that state; an unhovered match keeps the paint listener installed.
+/// with that state. Before a press, the active target follows the nearest
+/// hovered match, or the outermost match when no hover has been delivered:
+/// GPUI latches that hitbox on mouse-down.
 fn resolve_hover_groups<'a>(
     groups: &'a [InheritedHoverGroup],
     target: Option<&str>,
     states: &HashMap<u64, InteractiveStyleState>,
 ) -> ResolvedHoverGroups<'a> {
-    let mut fallback = None;
+    let mut outermost = None;
+    let mut nearest = None;
     let mut hovered = None;
     let mut active = None;
     for group in groups {
         if target.is_some_and(|name| group.name.as_ref() != name) {
             continue;
         }
-        if fallback.is_none() || target.is_some() {
-            fallback = Some(group);
-        }
+        outermost.get_or_insert(group);
+        nearest = Some(group);
         let state = states.get(&group.id);
         if state.is_some_and(|state| state.hovered) {
             hovered = Some(group);
@@ -8797,11 +8799,12 @@ fn resolve_hover_groups<'a>(
             active = Some(group);
         }
     }
+    let hover_fallback = if target.is_some() { nearest } else { outermost };
     ResolvedHoverGroups {
         hover_within: hovered.is_some(),
         active_within: active.is_some(),
-        hover_paint_group: hovered.or(fallback),
-        active_paint_group: active.or(fallback),
+        hover_paint_group: hovered.or(hover_fallback),
+        active_paint_group: active.or(hovered).or(outermost),
     }
 }
 
@@ -8844,6 +8847,38 @@ mod nearest_hover_group_tests {
         assert_eq!(resolved.hover_paint_group.map(|group| group.id), Some(1));
         assert_eq!(resolved.active_paint_group.map(|group| group.id), Some(1));
         assert_ne!(paint_hover_group_name(1), paint_hover_group_name(2));
+    }
+
+    #[test]
+    fn nearest_hover_group_preselects_the_hovered_group_for_active_paint() {
+        let groups = same_named_groups();
+        let mut states = HashMap::new();
+
+        let resolved = resolve_hover_groups(&groups, Some("card"), &states);
+        assert!(!resolved.active_within);
+        assert_eq!(resolved.active_paint_group.map(|group| group.id), Some(1));
+
+        states.insert(
+            1,
+            InteractiveStyleState {
+                hovered: true,
+                ..Default::default()
+            },
+        );
+
+        let resolved = resolve_hover_groups(&groups, Some("card"), &states);
+        assert!(!resolved.active_within);
+        assert_eq!(resolved.active_paint_group.map(|group| group.id), Some(1));
+
+        states.insert(
+            2,
+            InteractiveStyleState {
+                hovered: true,
+                ..Default::default()
+            },
+        );
+        let resolved = resolve_hover_groups(&groups, Some("card"), &states);
+        assert_eq!(resolved.active_paint_group.map(|group| group.id), Some(2));
     }
 
     #[test]
@@ -13248,7 +13283,31 @@ fn build_virtual_list(
                 {
                     cx.notify();
                 }
-            }));
+            }))
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(move |view, _: &gpui::MouseDownEvent, _window, cx| {
+                    if view.set_pointer_active(id, true) {
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(move |view, _: &gpui::MouseUpEvent, _window, cx| {
+                    if view.set_pointer_active(id, false) {
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_mouse_up_out(
+                gpui::MouseButton::Left,
+                cx.listener(move |view, _: &gpui::MouseUpEvent, _window, cx| {
+                    if view.set_pointer_active(id, false) {
+                        cx.notify();
+                    }
+                }),
+            );
         if style.and_then(|style| style.pointer_events.as_deref()) == Some("none") {
             surface = surface.ignore_mouse();
         }
