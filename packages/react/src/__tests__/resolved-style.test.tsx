@@ -114,6 +114,87 @@ describe("resolved test-renderer styles", () => {
     }
   })
 
+  it.each(["space", "enter"] as const)(
+    "applies the active style while a focused button is activated with %s",
+    (key) => {
+      const root = createTestRoot()
+      try {
+        let clicks = 0
+        root.render(
+          <button
+            data-testid="tile"
+            autoFocus
+            onClick={() => {
+              clicks += 1
+            }}
+            style={{
+              width: 60,
+              height: 40,
+              backgroundColor: "#111111",
+              active: { backgroundColor: "#222222" },
+            }}
+          >
+            Save
+          </button>
+        )
+
+        const tile = root.renderer.findByTestId("tile")!
+        expect(root.renderer.getResolvedStyle(tile.id)?.backgroundColor).toBe("#111111")
+
+        root.renderer.nativeSimulateKeyDown(tile.id, key)
+        expect({
+          whilePressed: root.renderer.getResolvedStyle(tile.id)?.backgroundColor,
+          clicks,
+        }).toEqual({ whilePressed: "#222222", clicks: 0 })
+
+        root.renderer.nativeSimulateKeyUp(tile.id, key)
+        expect({
+          afterRelease: root.renderer.getResolvedStyle(tile.id)?.backgroundColor,
+          clicks,
+        }).toEqual({ afterRelease: "#111111", clicks: 1 })
+      } finally {
+        root.unmount()
+      }
+    }
+  )
+
+  it("clears the active style when another key cancels keyboard activation", () => {
+    const root = createTestRoot()
+    try {
+      let clicks = 0
+      root.render(
+        <button
+          data-testid="tile"
+          autoFocus
+          onClick={() => {
+            clicks += 1
+          }}
+          style={{
+            width: 60,
+            height: 40,
+            backgroundColor: "#111111",
+            active: { backgroundColor: "#222222" },
+          }}
+        >
+          Save
+        </button>
+      )
+
+      const tile = root.renderer.findByTestId("tile")!
+      root.renderer.nativeSimulateKeyDown(tile.id, "space")
+      expect(root.renderer.getResolvedStyle(tile.id)?.backgroundColor).toBe("#222222")
+
+      root.renderer.nativeSimulateKeyDown(tile.id, "escape")
+      expect(root.renderer.getResolvedStyle(tile.id)?.backgroundColor).toBe("#111111")
+
+      root.renderer.nativeSimulateKeyUp(tile.id, "escape")
+      root.renderer.nativeSimulateKeyUp(tile.id, "space")
+      expect(clicks).toBe(0)
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("clears a base boxShadow when hover authors an empty array", () => {
     const root = createTestRoot()
     try {
