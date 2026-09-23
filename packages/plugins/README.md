@@ -30,25 +30,20 @@ The Vite adapter is for native development. If a config includes `gpuix()` in
 
 ### Bun hot reload
 
-Use `gpuixDev()` from a Bun preload when developing with `bun --hot`:
+Pass the package preload to Bun when developing with `bun --hot`:
+
+```bash
+bun --hot --preload @gpuix/plugins/preload src/app.tsx
+```
+
+If the app needs other Bun plugins, register them alongside `gpuixDev()` in a
+custom preload instead:
 
 ```ts
 // src/gpuix.preload.ts
 import { gpuixDev } from "@gpuix/plugins/bun"
 
 Bun.plugin(gpuixDev())
-```
-
-Register the preload in `bunfig.toml`:
-
-```toml
-preload = ["./src/gpuix.preload.ts"]
-```
-
-Then run the application normally:
-
-```json
-{ "scripts": { "dev": "bun --hot src/app.tsx" } }
 ```
 
 The preload must run before the application imports any CSS modules.

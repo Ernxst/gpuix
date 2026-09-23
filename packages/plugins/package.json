@@ -19,6 +19,7 @@
       "import": "./dist/css.js",
       "default": "./dist/css.js"
     },
+    "./preload": "./dist/preload.js",
     "./css-modules": {
       "types": "./dist/css-modules-types.d.ts"
     }

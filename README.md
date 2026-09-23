@@ -1288,20 +1288,15 @@ window.
 bun --hot app.tsx
 ```
 
-To use native `*.module.css` imports with `bun --hot`, register the development
-plugin from a preload before the app entry is imported:
+To use native `*.module.css` imports with `bun --hot`, pass the package preload
+before the app entry is imported:
 
-```ts
-// gpuix.preload.ts
-import { gpuixDev } from '@gpuix/plugins/bun'
-
-Bun.plugin(gpuixDev())
+```bash
+bun --hot --preload @gpuix/plugins/preload --conditions=browser --conditions=desktop src/entry.desktop.tsx
 ```
 
-```toml
-# bunfig.toml
-preload = ['./gpuix.preload.ts']
-```
+If the app registers other Bun plugins, use a custom preload with `gpuixDev()`
+from `@gpuix/plugins/bun` and pass that file with `--preload`.
 
 Opt into the matching TypeScript declaration from a project `.d.ts` file:
 

@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { createServer } from "vite"
 import type { BunPlugin } from "bun"
 import { gpuix as gpuixBun, gpuixDev } from "./bun.ts"
@@ -354,6 +354,51 @@ test("Bun dev plugin loads native CSS modules at runtime", async () => {
     })
   } finally {
     Bun.plugin.clearAll()
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("Bun preload entry loads native CSS modules at runtime", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-bun-preload-css-module-"))
+  const packageRoot = fileURLToPath(new URL("../", import.meta.url))
+  const preload = path.join(packageRoot, "dist/preload.js")
+
+  try {
+    try {
+      await access(preload)
+    } catch {
+      throw new Error("@gpuix/plugins/preload is missing from dist; run bun run build before bun test")
+    }
+
+    const entry = path.join(fixture, "entry.ts")
+    const packageLink = path.join(fixture, "node_modules/@gpuix/plugins")
+    await mkdir(path.dirname(packageLink), { recursive: true })
+    await symlink(packageRoot, packageLink, "dir")
+
+    await writeFile(
+      path.join(fixture, "panel.module.css"),
+      ".panel { color: #123456; padding: 4px; }\n",
+    )
+    await writeFile(
+      entry,
+      'import styles from "./panel.module.css"\nconsole.log(JSON.stringify(styles.panel))\n',
+    )
+
+    const result = Bun.spawnSync([process.execPath, "--preload", "@gpuix/plugins/preload", entry], {
+      cwd: fixture,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    expect(result.exitCode, result.stderr.toString()).toBe(0)
+    expect(JSON.parse(result.stdout.toString())).toEqual({
+      color: "#123456",
+      paddingTop: 4,
+      paddingRight: 4,
+      paddingBottom: 4,
+      paddingLeft: 4,
+    })
+  } finally {
     await rm(fixture, { recursive: true, force: true })
   }
 })
