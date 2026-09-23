@@ -1,5 +1,6 @@
 import transformCssModule from "css-to-react-native-transform"
 import postcss from "postcss"
+import type { AcceptedPlugin } from "postcss"
 
 type TransformCss = (css: string) => Record<string, unknown>
 
@@ -142,8 +143,24 @@ type CssModuleSelector =
  * boundary removes its React Native-only metadata and rejects declarations
  * that GPUIX cannot apply instead of silently dropping them.
  */
-export function transformGpuixCssModule(css: string, sourceId: string): CssModuleStyles {
-  const root = validateSelectors(css, sourceId)
+export async function transformGpuixCssModule(
+  css: string,
+  sourceId: string,
+  plugins: readonly AcceptedPlugin[] = [],
+): Promise<CssModuleStyles> {
+  const processed = await postcss(plugins).process(css, { from: sourceId })
+  const preprocessed = postcss.parse(processed.css, { from: sourceId })
+  // Custom properties provide values to the processor, not native styles.
+  preprocessed.walkDecls(/^--/, (declaration) => {
+    declaration.remove()
+  })
+  // A token rule is gone once its custom properties are, even when a comment
+  // remains: `:root` has no native style representation and would be rejected.
+  preprocessed.walkRules((rule) => {
+    if (rule.nodes.every((node) => node.type === "comment")) rule.remove()
+  })
+
+  const root = validateSelectors(preprocessed.toString(), sourceId)
   const styles: CssModuleStyles = {}
   const hoverWithinRelations = new Map<string, { ancestor: string; selector: string }>()
 

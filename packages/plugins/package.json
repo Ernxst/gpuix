@@ -51,6 +51,8 @@
   },
   "devDependencies": {
     "@gpuix/react": "workspace:*",
+    "postcss-custom-properties": "^15.0.1",
+    "postcss-import": "^17.0.0",
     "react": "^19.2.4",
     "vite": "^8.2.1"
   }

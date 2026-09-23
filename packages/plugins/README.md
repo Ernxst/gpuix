@@ -101,6 +101,48 @@ The plugin compiles CSS modules in the project where it is installed. A web
 build needs no GPUIX plugin: Vite's CSS modules already produce what
 `className` wants there.
 
+Pass PostCSS plugins explicitly when the native transform needs to inline
+imports or resolve custom properties. Set `preserve: false` so the custom
+properties plugin does not leave a second `var()` declaration beside the
+resolved value. The native transform removes custom-property declarations
+after substitution, while unsupported at-rules and selectors still fail
+validation. The same option is available to `gpuixCssModulesBun()`. Install
+the plugins in the consuming project; the package does not bundle them.
+
+```ts
+import postcssCustomProperties from "postcss-custom-properties"
+import postcssImport from "postcss-import"
+import { gpuixCssModules } from "@gpuix/plugins/css"
+
+const cssPlugins = [postcssImport(), postcssCustomProperties({ preserve: false })]
+
+export default defineConfig({
+  plugins: [gpuixCssModules({ plugins: cssPlugins })],
+})
+```
+
+For example, `tokens.css` can hold values shared with the web build:
+
+```css
+:root {
+  --band-hover: #252e34;
+}
+```
+
+A native CSS module can import those tokens and use `var()`:
+
+```css
+@import "./tokens.css";
+
+.item {
+  background-color: var(--band-hover);
+}
+```
+
+The plugins run before GPUIX validates the CSS, so this becomes
+`{ item: { backgroundColor: "#252e34" } }`. Without the plugins, the native
+transform reports the unsupported `@import` at-rule.
+
 `gpuixCssModulesBun()` is the same transform for Bun, in `Bun.build()` or in a
 `Bun.plugin()` preload. A Bun build without it compiles `.module.css` to class
 names of Bun's own, which the renderer cannot resolve:
@@ -111,7 +153,7 @@ import { gpuixCssModulesBun } from "@gpuix/plugins/css"
 await Bun.build({
   entrypoints: ["src/app.tsx"],
   compile: { outfile: "dist/app" },
-  plugins: [gpuixCssModulesBun()],
+  plugins: [gpuixCssModulesBun({ plugins: cssPlugins })],
 })
 ```
 
