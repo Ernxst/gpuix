@@ -18,6 +18,7 @@ declare module "vitest" {
 }
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+const COMPILED_STYLE = Symbol.for("gpuix.compiledStyle")
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -1350,7 +1351,9 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
     // What `@gpuix/plugins/css` puts in the prop: the styles the class
     // describes, typed as the class name a web build would produce.
-    const styles = { button: { backgroundColor: "red", padding: 4 } as StyleDesc }
+    const button = { backgroundColor: "red", padding: 4 } as StyleDesc
+    Object.defineProperty(button, COMPILED_STYLE, { value: true })
+    const styles = { button }
 
     testRoot.render(
       <div data-testid="compiled-class-name" className={styles.button as unknown as string} />
@@ -1366,7 +1369,9 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
   it("lets the style prop outrank a compiled className", () => {
     const testRoot = createTestRoot({ strictStyles: true })
-    const styles = { card: { backgroundColor: "red", padding: 4 } as StyleDesc }
+    const card = { backgroundColor: "red", padding: 4 } as StyleDesc
+    Object.defineProperty(card, COMPILED_STYLE, { value: true })
+    const styles = { card }
 
     testRoot.render(
       <div
@@ -1386,7 +1391,9 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
   it("applies compiled styles and still reports the class names cn() could not compile", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: false })
-    const merged = cn(...([{ backgroundColor: "red" }, "rounded-lg"] as unknown as string[]))
+    const compiled = { backgroundColor: "red" }
+    Object.defineProperty(compiled, COMPILED_STYLE, { value: true })
+    const merged = cn(...([compiled, "rounded-lg"] as unknown as string[]))
 
     testRoot.render(<div data-testid="partly-compiled" className={merged} />)
 
@@ -1395,6 +1402,21 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     })
     expect(warn).toHaveBeenCalledWith(
       expect.stringMatching(/<div data-testid="partly-compiled">.*"rounded-lg"/)
+    )
+    testRoot.unmount()
+  })
+
+  it("reports and ignores an uncompiled object in className", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: false })
+
+    testRoot.render(
+      <div data-testid="uncompiled-class-name" className={{ backgroundColor: "red" } as unknown as string} />,
+    )
+
+    expect(testRoot.renderer.findByTestId("uncompiled-class-name")?.style).toEqual({})
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/className value that was not compiled by @gpuix\/plugins\/css/),
     )
     testRoot.unmount()
   })

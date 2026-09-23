@@ -6,7 +6,7 @@
 
 import { createContext } from "react"
 import { DefaultEventPriority } from "react-reconciler/constants.js"
-import { unresolvedClassNames } from "../class-names.js"
+import { isCompiledStyle, unresolvedClassNames } from "../class-names.js"
 
 const NoEventPriority = 0
 import type {
@@ -859,7 +859,7 @@ function authoredStyle(instance: Instance, container: Container, props: Props): 
  */
 function classNameStyle(props: Props): StyleDesc | undefined {
   const { className } = props as Props & { className?: unknown }
-  return isPlainStyleObject(className) ? className : undefined
+  return isCompiledStyle(className) ? className : undefined
 }
 
 /** Class names in `className` that no build resolved into native styles. */
@@ -869,7 +869,7 @@ function unresolvedClassNamesOf(props: Props): string[] | undefined {
   // either, so nothing is lost by ignoring them here.
   if (className === undefined || className === null || className === "") return undefined
   if (typeof className === "string") return [className]
-  if (isPlainStyleObject(className)) return unresolvedClassNames(className)
+  if (isCompiledStyle(className)) return unresolvedClassNames(className)
   return [String(className)]
 }
 
@@ -878,6 +878,18 @@ function diagnoseUnsupportedClassNameProp(
   container: Container,
   props: Props
 ): void {
+  const { className } = props as Props & { className?: unknown }
+  if (isPlainStyleObject(className) && !isCompiledStyle(className)) {
+    const message =
+      `[gpuix] ${elementSubject(instance, props)} received a className value that ` +
+      "was not compiled by @gpuix/plugins/css."
+    if (container.strictStyles) throw new UnsupportedClassNamePropError(message)
+    if (warnedUnsupportedClassNameProps.has(instance)) return
+    warnedUnsupportedClassNameProps.add(instance)
+    console.warn(message)
+    return
+  }
+
   const unresolved = unresolvedClassNamesOf(props)
   if (unresolved === undefined) return
 
@@ -2497,12 +2509,15 @@ export const hostConfig = {
     // style that sets `visibility` would otherwise paint an element React
     // asked to hide.
     const { hover: _hover, active: _active, ...base } =
-      withHiddenDisplay(instance.props.style, instance.props) ?? {}
+      styleForRenderer(instance, containerFor(instance), instance.props) ?? {}
     rendererFor(instance).setStyle(instance.id, { ...base, visibility: "hidden" })
   },
 
   unhideInstance(instance: Instance, props: Props): void {
-    rendererFor(instance).setStyle(instance.id, withHiddenDisplay(props.style, props) ?? {})
+    rendererFor(instance).setStyle(
+      instance.id,
+      styleForRenderer(instance, containerFor(instance), props) ?? {},
+    )
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},

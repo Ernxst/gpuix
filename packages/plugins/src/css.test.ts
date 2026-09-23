@@ -38,9 +38,15 @@ test("compiles CSS modules in a plain Vite config, with no gpuix environment", a
     styles: Record<string, unknown>
   }
 
+  const style = module.styles.button as Record<symbol, unknown>
+
   expect(module.styles).toEqual({
     button: { color: "#ffffff", paddingTop: 16, paddingRight: 2, paddingBottom: 16, paddingLeft: 2 },
   })
+  expect(style[Symbol.for("gpuix.compiledStyle")]).toBe(true)
+  expect(Object.getOwnPropertyDescriptor(style, Symbol.for("gpuix.compiledStyle"))?.enumerable).toBe(
+    false,
+  )
 })
 
 test("resolves a Bun import against its importer", async () => {
@@ -58,7 +64,8 @@ test("compiles a virtual module id and watches its source", async () => {
   const id = (await resolveCssModule({}, source, undefined, "bun")) as string
   const result = await loadCssModule({ addWatchFile: (file: string) => watched.push(file) }, id)
 
-  expect(result.code).toBe('export default {"card":{"display":"flex"}}')
+  expect(result.code).toContain('Symbol.for("gpuix.compiledStyle")')
+  expect(result.code).toContain("export default styles")
   expect(watched).toEqual([source])
 })
 

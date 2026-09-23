@@ -84,7 +84,12 @@ export async function loadCssModule(
   ;(context as ViteLoadContext).addWatchFile?.(sourceId)
   const css = await readFile(sourceId, "utf8")
   return {
-    code: `export default ${JSON.stringify(transformGpuixCssModule(css, sourceId))}`,
+    code:
+      `const styles = ${JSON.stringify(transformGpuixCssModule(css, sourceId))};\n` +
+      `for (const style of Object.values(styles)) {\n` +
+      `  Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true });\n` +
+      `}\n` +
+      `export default styles`,
     map: null,
   }
 }

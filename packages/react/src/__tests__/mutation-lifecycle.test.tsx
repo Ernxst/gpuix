@@ -7,6 +7,7 @@ import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from "../
 import type { Container, HostContext, MutationRenderer, Props } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+const COMPILED_STYLE = Symbol.for("gpuix.compiledStyle")
 
 function recordingRenderer(): MutationRenderer & {
   styles: object[]
@@ -78,6 +79,26 @@ describe("host config hideInstance", () => {
 
     hostConfig.unhideInstance(instance, props)
     expect(renderer.styles.at(-1)).toEqual(props.style)
+  })
+
+  it("keeps compiled className styles when React hides and reveals the element", () => {
+    const compiled = { width: 80, backgroundColor: "red" }
+    Object.defineProperty(compiled, COMPILED_STYLE, { value: true })
+    const props = {
+      className: compiled as unknown as string,
+      style: { backgroundColor: "blue" },
+    } as Props
+    const { instance, renderer } = createRecordingInstance("div", props)
+
+    hostConfig.hideInstance(instance)
+    expect(renderer.styles.at(-1)).toEqual({
+      width: 80,
+      backgroundColor: "blue",
+      visibility: "hidden",
+    })
+
+    hostConfig.unhideInstance(instance, props)
+    expect(renderer.styles.at(-1)).toEqual({ width: 80, backgroundColor: "blue" })
   })
 
   it("keeps a hidden element display none through a Suspense hide and reveal", () => {
