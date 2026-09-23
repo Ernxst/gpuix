@@ -44,10 +44,72 @@ test("rejects declarations outside the native style model", () => {
   ).toThrow('property "animation" is not supported by the native style prop')
 })
 
-test("rejects selectors that cannot become one inline style object", () => {
+test("folds interaction pseudo-classes into their class style", () => {
+  expect(
+    transformGpuixCssModule(
+      `
+        .button { background-color: #111; }
+        .button:hover { background-color: #222; }
+        .button:active { opacity: 0.8; }
+        .button:focus { outline-width: 2px; }
+        .button:focus-visible { outline-color: #fff; }
+      `,
+      "/fixture/button.module.css",
+    ),
+  ).toEqual({
+    button: {
+      backgroundColor: "#111",
+      hover: { backgroundColor: "#222" },
+      active: { opacity: 0.8 },
+      focus: { outlineWidth: 2 },
+      focusVisible: { outlineColor: "#fff" },
+    },
+  })
+})
+
+test("creates a class style when only an interaction selector is present", () => {
+  expect(
+    transformGpuixCssModule(
+      ".button:hover { background-color: #222; }",
+      "/fixture/button.module.css",
+    ),
+  ).toEqual({ button: { hover: { backgroundColor: "#222" } } })
+})
+
+test("applies a grouped state selector to each class", () => {
+  expect(
+    transformGpuixCssModule(
+      ".button:hover, .icon:focus-visible { color: red; }",
+      "/fixture/button.module.css",
+    ),
+  ).toEqual({
+    button: { hover: { color: "red" } },
+    icon: { focusVisible: { color: "red" } },
+  })
+})
+
+test("rejects selectors with more than one pseudo-class", () => {
   expect(() =>
-    transformGpuixCssModule(".panel:hover { color: red; }", "/fixture/panel.module.css"),
-  ).toThrow('selector ".panel:hover" is not supported yet')
+    transformGpuixCssModule(".panel:hover:focus { color: red; }", "/fixture/panel.module.css"),
+  ).toThrow('selector ".panel:hover:focus" is not supported yet')
+})
+
+test("names the interaction state when a declaration is unsupported there", () => {
+  expect(() =>
+    transformGpuixCssModule(".panel:active { animation: fade 1s; }", "/fixture/panel.module.css"),
+  ).toThrow('property "animation" is not supported by the native "active" style')
+  expect(() =>
+    transformGpuixCssModule(".panel:hover { transition: opacity 1s; }", "/fixture/panel.module.css"),
+  ).toThrow('property "transition" is not supported by the native "hover" style')
+})
+
+test("rejects other selectors and at-rules", () => {
+  expect(() =>
+    transformGpuixCssModule(".panel .child { color: red; }", "/fixture/panel.module.css"),
+  ).toThrow('selector ".panel .child" is not supported yet')
+  expect(() =>
+    transformGpuixCssModule("@media (min-width: 1px) { .panel { color: red; } }", "/fixture/panel.module.css"),
+  ).toThrow('at-rule "@media" is not supported yet')
 })
 
 test("Vite rejects native builds", () => {

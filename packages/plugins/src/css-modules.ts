@@ -109,6 +109,11 @@ const SUPPORTED_PROPERTIES = new Set([
   "interpolateSize",
 ])
 
+const NATIVE_STATE_PROPERTIES = new Set(
+  [...SUPPORTED_PROPERTIES].filter((property) => property !== "transition"),
+)
+const CLASS_SELECTOR = /^\.([A-Za-z_][A-Za-z0-9_-]*)(?::(hover|active|focus|focus-visible))?$/
+
 type CssModuleStyles = Record<string, Record<string, unknown>>
 
 /**
@@ -121,39 +126,53 @@ type CssModuleStyles = Record<string, Record<string, unknown>>
  * that GPUIX cannot apply instead of silently dropping them.
  */
 export function transformGpuixCssModule(css: string, sourceId: string): CssModuleStyles {
-  validateSelectors(css, sourceId)
-
-  const transformed = transformCss(css) as Record<string, unknown>
+  const root = validateSelectors(css, sourceId)
   const styles: CssModuleStyles = {}
 
-  for (const [name, value] of Object.entries(transformed)) {
-    if (name === "__viewportUnits") continue
+  root.walkRules((rule) => {
+    for (const selector of rule.selectors) {
+      const match = CLASS_SELECTOR.exec(selector.trim())
+      if (!match) continue // validateSelectors has already rejected this selector.
 
-    if (name.startsWith("@media ")) {
-      throw unsupportedCss(sourceId, `media queries are not supported yet (${name})`)
-    }
+      const [, name, pseudoClass] = match
+      const state = pseudoClass === "focus-visible" ? "focusVisible" : pseudoClass
+      const transformed = transformCss(rule.clone({ selector: `.${name}` }).toString())
+      const value = transformed[name]
 
-    if (!isPlainObject(value)) {
-      throw unsupportedCss(sourceId, `class ".${name}" did not produce a style object`)
-    }
+      if (!isPlainObject(value)) {
+        throw unsupportedCss(sourceId, `class ".${name}" did not produce a style object`)
+      }
 
-    const unsupported = Object.keys(value).find(
-      (property) => !SUPPORTED_PROPERTIES.has(property),
-    )
-    if (unsupported !== undefined) {
-      throw unsupportedCss(
-        sourceId,
-        `property "${unsupported}" is not supported by the native style prop`,
+      const allowedProperties = state ? NATIVE_STATE_PROPERTIES : SUPPORTED_PROPERTIES
+      const unsupported = Object.keys(value).find(
+        (property) => !allowedProperties.has(property),
       )
-    }
+      if (unsupported !== undefined) {
+        throw unsupportedCss(
+          sourceId,
+          state
+            ? `property "${unsupported}" is not supported by the native ${JSON.stringify(state)} style`
+            : `property "${unsupported}" is not supported by the native style prop`,
+        )
+      }
 
-    styles[name] = value
-  }
+      const classStyle = (styles[name] ??= {})
+      if (state) {
+        const previousState = classStyle[state]
+        classStyle[state] = {
+          ...(isPlainObject(previousState) ? previousState : {}),
+          ...value,
+        }
+      } else {
+        Object.assign(classStyle, value)
+      }
+    }
+  })
 
   return styles
 }
 
-function validateSelectors(css: string, sourceId: string): void {
+function validateSelectors(css: string, sourceId: string): postcss.Root {
   const root = postcss.parse(css, { from: sourceId })
 
   root.walkAtRules((rule) => {
@@ -162,7 +181,7 @@ function validateSelectors(css: string, sourceId: string): void {
 
   root.walkRules((rule) => {
     for (const selector of rule.selectors) {
-      if (!/^\.[A-Za-z_][A-Za-z0-9_-]*$/.test(selector.trim())) {
+      if (!CLASS_SELECTOR.test(selector.trim())) {
         throw unsupportedCss(
           sourceId,
           `selector ${JSON.stringify(selector)} is not supported yet`,
@@ -170,6 +189,8 @@ function validateSelectors(css: string, sourceId: string): void {
       }
     }
   })
+
+  return root
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
