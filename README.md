@@ -4624,10 +4624,10 @@ application. Escape B is useful when the shared helper should remain strictly
 cross-renderer.
 
 `NativeStateStyleKey` contains only the five interaction states above.
-`transition` and `hoverGroup` remain root-level `StyleDesc` declarations and
-are excluded from `NativeStateStyle`; native parsing rejects either inside a
-state style. The native transition object is not a compatible replacement for
-React's CSS `transition` string.
+`transition`, `hoverGroup`, and `hoverWithinGroup` remain root-level
+`StyleDesc` declarations and are excluded from `NativeStateStyle`; native
+parsing rejects any of them inside a state style. The native transition
+object is not a compatible replacement for React's CSS `transition` string.
 
 ```tsx
 <div
@@ -4662,6 +4662,27 @@ group's hit-test bounds or the capture owner is the group or one of its
 descendants. Releasing capture outside the group clears the style. No React
 hover state or mouse handlers are involved.
 
+A descendant nested inside more than one named group can pick one with
+`hoverWithinGroup`, matching Tailwind's `group-hover/name`. Set it to a
+`hoverGroup` name and `hoverWithin` binds to the nearest ancestor with that
+name instead of the outermost marked ancestor; hovering any other group,
+including one nested inside it, no longer activates the style. A
+`hoverWithinGroup` naming no ancestor `hoverGroup` produces a style
+diagnostic.
+
+```tsx
+<div style={{ hoverGroup: 'outer' }}>
+  <div style={{ hoverGroup: 'inner' }}>
+    <span
+      style={{
+        hoverWithinGroup: 'inner',
+        hoverWithin: { backgroundColor: '#7c86ff' },
+      }}
+    />
+  </div>
+</div>
+```
+
 ```tsx
 <div
   style={{
@@ -4688,10 +4709,10 @@ keyboard/focus event, or a native input. A focused descendant does not apply a
 parent's `focus` or `focusVisible` style.
 
 Nesting is one level deep. A state style cannot contain `hover`, `hoverWithin`,
-`active`, `focus`, `focusVisible`, `transition`, or `hoverGroup`; the last two
-are declarations on the base style only. `hover` and `active` also reject
-`display: "none"`, because hiding the element removes the hit-test box that
-triggers the state.
+`active`, `focus`, `focusVisible`, `transition`, `hoverGroup`, or
+`hoverWithinGroup`; the last three are declarations on the base style only.
+`hover` and `active` also reject `display: "none"`, because hiding the
+element removes the hit-test box that triggers the state.
 
 ### Keyboard activation
 

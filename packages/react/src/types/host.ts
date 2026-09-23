@@ -516,7 +516,7 @@ export type NativeStateStyleKey =
 /** Base declarations accepted inside a native interaction-state style. */
 export type NativeStateStyle = Omit<
   StyleDesc,
-  NativeStateStyleKey | "transition" | "hoverGroup"
+  NativeStateStyleKey | "transition" | "hoverGroup" | "hoverWithinGroup"
 >
 
 /**
@@ -718,11 +718,17 @@ export interface StyleDesc {
 
   /** Marks this element as the ancestor for descendant `hoverWithin` styles. */
   hoverGroup?: string
+  /** Binds `hoverWithin` to the nearest ancestor whose `hoverGroup` equals
+   *  this name, instead of the outermost marked ancestor. Matches Tailwind's
+   *  `group-hover/name`. A name with no matching ancestor is a style
+   *  diagnostic. */
+  hoverWithinGroup?: string
 
   // Native state styles — applied by GPUI without a JS round trip.
   // Nesting is one level deep: a state style cannot contain another state style.
   hover?: NativeStateStyle
-  /** Applies while any ancestor with `hoverGroup` is hovered. */
+  /** Applies while any ancestor with `hoverGroup` is hovered, or — with
+   *  `hoverWithinGroup` set — while that specific named ancestor is hovered. */
   hoverWithin?: NativeStateStyle
   active?: NativeStateStyle
   focus?: NativeStateStyle

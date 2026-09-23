@@ -203,7 +203,11 @@ fn point_is_inside(bounds: crate::automation::ElementBounds, point: (f64, f64)) 
         && point.1 < bounds.y + bounds.height
 }
 
-fn ancestor_hover_groups(tree: &RetainedTree, element_id: u64) -> Vec<u64> {
+/// Ancestor `hoverGroup` sources for `element_id`. `target` mirrors
+/// `hoverWithinGroup`: `None` collects every marked ancestor, matching the
+/// CSS OR; `Some(name)` returns only the nearest ancestor whose own
+/// `hoverGroup` equals it (or none, if no ancestor matches).
+fn ancestor_hover_groups(tree: &RetainedTree, element_id: u64, target: Option<&str>) -> Vec<u64> {
     let mut groups = Vec::new();
     let mut current = tree
         .elements
@@ -213,13 +217,17 @@ fn ancestor_hover_groups(tree: &RetainedTree, element_id: u64) -> Vec<u64> {
         let Some(element) = tree.elements.get(&id) else {
             break;
         };
-        if element
+        let name = element
             .style
             .as_deref()
-            .and_then(|style| style.hover_group.as_deref())
-            .is_some()
-        {
-            groups.push(id);
+            .and_then(|style| style.hover_group.as_deref());
+        match (target, name) {
+            (Some(target_name), Some(name)) if target_name == name => {
+                groups.push(id);
+                break;
+            }
+            (None, Some(_)) => groups.push(id),
+            _ => {}
         }
         current = element.parent;
     }
@@ -2794,9 +2802,11 @@ impl TestGpuixRenderer {
             let Some(element) = tree.elements.get(&id) else {
                 return Ok(None);
             };
+            let style = element.style.clone().unwrap_or_default();
+            let hover_within_group_target = style.hover_within_group.clone();
             (
-                element.style.clone().unwrap_or_default(),
-                ancestor_hover_groups(&tree, id)
+                style,
+                ancestor_hover_groups(&tree, id, hover_within_group_target.as_deref())
                     .into_iter()
                     .map(|group_id| {
                         let accepts_pointer = tree

@@ -986,6 +986,66 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     expectScreenshotsEqual(outerHovered, innerHovered)
   })
 
+  it("binds hoverWithinGroup to a named ancestor instead of the outermost one", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div
+        data-testid="outer"
+        style={{
+          hoverGroup: "outer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 360,
+          height: 220,
+          padding: 30,
+          backgroundColor: "#111827",
+        }}
+      >
+        <div
+          data-testid="inner"
+          style={{
+            hoverGroup: "inner",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 220,
+            height: 120,
+            padding: 20,
+            backgroundColor: "#1f2937",
+          }}
+        >
+          <span
+            data-testid="named-hover-within-target"
+            style={{
+              width: 120,
+              height: 40,
+              backgroundColor: "#334155",
+              hoverWithinGroup: "inner",
+              hoverWithin: { backgroundColor: "#f59e0b" },
+            }}
+          />
+        </div>
+      </div>
+    )
+
+    const outer = boundsFor(renderer, "outer")
+    const inner = boundsFor(renderer, "inner")
+    const target = renderer.findByTestId("named-hover-within-target")!
+
+    // Hovering the outer group's own padding leaves a descendant bound to
+    // "inner" unstyled: it follows the named group, not any marked ancestor.
+    renderer.nativeSimulateMouseMove(outer.x + 10, outer.y + 10)
+    expect(renderer.getResolvedStyle(target.id)).toMatchObject({
+      backgroundColor: "#334155",
+    })
+
+    renderer.nativeSimulateMouseMove(inner.x + 10, inner.y + 10)
+    expect(renderer.getResolvedStyle(target.id)).toMatchObject({
+      backgroundColor: "#f59e0b",
+    })
+  })
+
   it("lets virtual-list hoverGroup activate descendant hoverWithin", () => {
     const { render, renderer } = createTestRoot()
     render(
