@@ -88,6 +88,57 @@ test("applies a grouped state selector to each class", () => {
   })
 })
 
+test("compiles a hovered ancestor selector into hoverGroup and hoverWithin styles", () => {
+  expect(
+    transformGpuixCssModule(
+      `
+        .card { background-color: #12161a; }
+        .card:hover .title { color: #ffffff; }
+      `,
+      "/fixture/card.module.css",
+    ),
+  ).toEqual({
+    card: {
+      backgroundColor: "#12161a",
+      hoverGroup: "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+    },
+    title: { hoverWithin: { color: "#ffffff" } },
+  })
+})
+
+test("reuses the generated hover group for an ancestor in several rules", () => {
+  expect(
+    transformGpuixCssModule(
+      `
+        .card:hover .title { color: #ffffff; }
+        .card:hover .subtitle { color: #aaaaaa; }
+      `,
+      "/fixture/card.module.css",
+    ),
+  ).toEqual({
+    card: {
+      hoverGroup: "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+    },
+    title: { hoverWithin: { color: "#ffffff" } },
+    subtitle: { hoverWithin: { color: "#aaaaaa" } },
+  })
+})
+
+test("preserves a hand-written hover group on a hovered ancestor", () => {
+  expect(
+    transformGpuixCssModule(
+      `
+        .card:hover .title { color: #ffffff; }
+        .card { hover-group: card; }
+      `,
+      "/fixture/card.module.css",
+    ),
+  ).toEqual({
+    card: { hoverGroup: "card" },
+    title: { hoverWithin: { color: "#ffffff" } },
+  })
+})
+
 test("rejects selectors with more than one pseudo-class", () => {
   expect(() =>
     transformGpuixCssModule(".panel:hover:focus { color: red; }", "/fixture/panel.module.css"),
@@ -107,6 +158,24 @@ test("rejects other selectors and at-rules", () => {
   expect(() =>
     transformGpuixCssModule(".panel .child { color: red; }", "/fixture/panel.module.css"),
   ).toThrow('selector ".panel .child" is not supported yet')
+  expect(() =>
+    transformGpuixCssModule(
+      ".card:hover > .title { color: red; }",
+      "/fixture/card.module.css",
+    ),
+  ).toThrow('selector ".card:hover > .title" is not supported yet')
+  expect(() =>
+    transformGpuixCssModule(
+      ".card:hover .body .title { color: red; }",
+      "/fixture/card.module.css",
+    ),
+  ).toThrow('selector ".card:hover .body .title" is not supported yet')
+  expect(() =>
+    transformGpuixCssModule(
+      ".card:focus .title { color: red; }",
+      "/fixture/card.module.css",
+    ),
+  ).toThrow('selector ".card:focus .title" is not supported yet')
   expect(() =>
     transformGpuixCssModule("@media (min-width: 1px) { .panel { color: red; } }", "/fixture/panel.module.css"),
   ).toThrow('at-rule "@media" is not supported yet')

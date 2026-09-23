@@ -106,15 +106,27 @@ const SUPPORTED_PROPERTIES = new Set([
   "userSelect",
   "selectionColor",
   "transition",
+  "hoverGroup",
   "interpolateSize",
 ])
 
 const NATIVE_STATE_PROPERTIES = new Set(
-  [...SUPPORTED_PROPERTIES].filter((property) => property !== "transition"),
+  [...SUPPORTED_PROPERTIES].filter(
+    (property) => property !== "transition" && property !== "hoverGroup",
+  ),
 )
-const CLASS_SELECTOR = /^\.([A-Za-z_][A-Za-z0-9_-]*)(?::(hover|active|focus|focus-visible))?$/
+const CLASS_NAME = "[A-Za-z_][A-Za-z0-9_-]*"
+const CLASS_SELECTOR = new RegExp(
+  `^\\.(${CLASS_NAME})(?::(hover|active|focus|focus-visible))?$`,
+)
+const HOVER_WITHIN_SELECTOR = new RegExp(
+  `^\\.(${CLASS_NAME}):hover\\s+\\.(${CLASS_NAME})$`,
+)
 
 type CssModuleStyles = Record<string, Record<string, unknown>>
+type CssModuleSelector =
+  | { kind: "class"; name: string; pseudoClass?: string }
+  | { kind: "hoverWithin"; ancestor: string; descendant: string }
 
 /**
  * Convert the deliberately small CSS-module subset supported by the native
@@ -131,11 +143,17 @@ export function transformGpuixCssModule(css: string, sourceId: string): CssModul
 
   root.walkRules((rule) => {
     for (const selector of rule.selectors) {
-      const match = CLASS_SELECTOR.exec(selector.trim())
-      if (!match) continue // validateSelectors has already rejected this selector.
+      const parsed = parseSelector(selector.trim())
+      if (!parsed) continue // validateSelectors has already rejected this selector.
 
-      const [, name, pseudoClass] = match
-      const state = pseudoClass === "focus-visible" ? "focusVisible" : pseudoClass
+      const name = parsed.kind === "class" ? parsed.name : parsed.descendant
+      const pseudoClass = parsed.kind === "class" ? parsed.pseudoClass : undefined
+      const state =
+        parsed.kind === "hoverWithin"
+          ? "hoverWithin"
+          : pseudoClass === "focus-visible"
+            ? "focusVisible"
+            : pseudoClass
       const transformed = transformCss(rule.clone({ selector: `.${name}` }).toString())
       const value = transformed[name]
 
@@ -166,6 +184,10 @@ export function transformGpuixCssModule(css: string, sourceId: string): CssModul
       } else {
         Object.assign(classStyle, value)
       }
+
+      if (parsed.kind === "hoverWithin" && !("hoverGroup" in (styles[parsed.ancestor] ??= {}))) {
+        styles[parsed.ancestor].hoverGroup = generatedHoverGroup(sourceId, parsed.ancestor)
+      }
     }
   })
 
@@ -181,7 +203,7 @@ function validateSelectors(css: string, sourceId: string): postcss.Root {
 
   root.walkRules((rule) => {
     for (const selector of rule.selectors) {
-      if (!CLASS_SELECTOR.test(selector.trim())) {
+      if (!parseSelector(selector.trim())) {
         throw unsupportedCss(
           sourceId,
           `selector ${JSON.stringify(selector)} is not supported yet`,
@@ -191,6 +213,24 @@ function validateSelectors(css: string, sourceId: string): postcss.Root {
   })
 
   return root
+}
+
+function parseSelector(selector: string): CssModuleSelector | undefined {
+  const classMatch = CLASS_SELECTOR.exec(selector)
+  if (classMatch) {
+    const [, name, pseudoClass] = classMatch
+    return { kind: "class", name, pseudoClass }
+  }
+
+  const hoverWithinMatch = HOVER_WITHIN_SELECTOR.exec(selector)
+  if (hoverWithinMatch) {
+    const [, ancestor, descendant] = hoverWithinMatch
+    return { kind: "hoverWithin", ancestor, descendant }
+  }
+}
+
+function generatedHoverGroup(sourceId: string, className: string): string {
+  return `gpuix-css-module:hover-group:${encodeURIComponent(sourceId)}:${className}`
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
