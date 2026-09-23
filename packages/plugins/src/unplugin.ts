@@ -2,18 +2,19 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import type { BuildConfig, PluginBuilder } from "bun"
 import { createUnplugin } from "unplugin"
-import { rewriteTextImports } from "./assets.js"
+import { rewriteFileImports, rewriteTextImports } from "./assets.js"
 import type { GpuixPluginOptions } from "./bun-types.js"
 import { transformGpuixCssModule } from "./css-modules.js"
 import { reactRefreshRuntimePath, transformReactRefresh } from "./refresh.js"
 
 const NATIVE_ENTRY = "\0gpuix:native-entry"
 const CSS_MODULE_PREFIX = "\0gpuix:css-module:"
+const FILE_MODULE_PREFIX = "\0gpuix:file:"
 const NATIVE_PACKAGE = "@gpuix/native"
 
-const VIRTUAL_MODULE_RE = /^\0gpuix:(?:css-module:|native-entry$)/
+const VIRTUAL_MODULE_RE = /^\0gpuix:(?:css-module:|file:|native-entry$)/
 const TRANSFORM_ID_RE = /\.[cm]?[jt]sx?(?:$|[?#])/
-const RESOLVE_ID_RE = /(?:\.module\.css(?:$|[?#])|^react-refresh\/runtime$|^\0gpuix:native-entry$)/
+const RESOLVE_ID_RE = /(?:\.module\.css(?:$|[?#])|^react-refresh\/runtime$|^\0gpuix:native-entry$|__gpuix_file(?:$|[&#]))/
 
 type ViteResolveContext = {
   environment?: { name?: string }
@@ -44,6 +45,14 @@ function cssModuleId(sourceId: string): string {
 
 function sourceIdFromCssModuleId(id: string): string {
   return decodeURIComponent(id.slice(CSS_MODULE_PREFIX.length))
+}
+
+function fileModuleId(sourceId: string): string {
+  return `${FILE_MODULE_PREFIX}${encodeURIComponent(sourceId).replaceAll(".", "%2E")}`
+}
+
+function sourceIdFromFileModuleId(id: string): string {
+  return decodeURIComponent(id.slice(FILE_MODULE_PREFIX.length))
 }
 
 function isGpuixViteEnvironment(context: unknown): boolean {
@@ -115,6 +124,20 @@ export const gpuixUnplugin = createUnplugin<GpuixPluginOptions | undefined, fals
             return meta.framework === "vite" ? NATIVE_ENTRY : undefined
           }
 
+          if (id.includes("__gpuix_file")) {
+            if (meta.framework !== "vite" || !isGpuixViteEnvironment(this)) {
+              return undefined
+            }
+
+            const context = this as unknown as ViteResolveContext
+            const sourceId = id.slice(0, id.indexOf("__gpuix_file")).replace(/[?&]$/, "")
+            const resolved = await context.resolve?.(sourceId, importer, { skipSelf: true })
+            if (resolved === null || resolved === undefined || resolved.external) {
+              return undefined
+            }
+            return fileModuleId(cleanId(resolved.id))
+          }
+
           if (id === "react-refresh/runtime") {
             if (meta.framework !== "vite") return undefined
             return { id: reactRefreshRuntimePath, external: true }
@@ -141,6 +164,14 @@ export const gpuixUnplugin = createUnplugin<GpuixPluginOptions | undefined, fals
       load: {
         filter: { id: VIRTUAL_MODULE_RE },
         async handler(id) {
+          if (id.startsWith(FILE_MODULE_PREFIX)) {
+            const sourceId = sourceIdFromFileModuleId(id)
+            return {
+              code: `export default ${JSON.stringify(sourceId)}`,
+              map: null,
+            }
+          }
+
           if (id.startsWith(CSS_MODULE_PREFIX)) {
             const sourceId = sourceIdFromCssModuleId(id)
             const context = this as unknown as ViteLoadContext
@@ -197,7 +228,7 @@ await import(${JSON.stringify(entryId)})
           filter: { id: TRANSFORM_ID_RE },
           handler(code, id) {
             if (!isGpuixViteEnvironment(this)) return undefined
-            const source = rewriteTextImports(code)
+            const source = rewriteFileImports(rewriteTextImports(code))
             return (
               transformReactRefresh(source, id) ??
               (source === code ? undefined : { code: source, map: null })

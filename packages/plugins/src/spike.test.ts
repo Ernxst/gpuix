@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { createServer, type ViteDevServer } from "vite"
@@ -27,12 +27,14 @@ function component(prefix: string): string {
   return `
 import React, { useState } from "react"
 import icon from "./icon.svg" with { type: "text" }
+import bundledNodes from "./nodes.json" with { type: "file" }
 import styles from "./counter.module.css"
 
 export function Counter({ label }: { label: string }) {
   const [count, setCount] = useState(0)
   Reflect.set(globalThis, "__gpuixViteClick", () => setCount((value) => value + 1))
   Reflect.set(globalThis, "__gpuixViteIcon", icon)
+  Reflect.set(globalThis, "__gpuixViteFile", bundledNodes)
   Reflect.set(globalThis, "__gpuixViteStyle", styles.label)
   Reflect.set(globalThis, "__gpuixViteText", "${prefix} " + label + " " + count)
   return <text style={styles.label}>${prefix} {label} {count}</text>
@@ -82,6 +84,7 @@ afterEach(async () => {
   Reflect.deleteProperty(globalThis, "__gpuixViteClick")
   Reflect.deleteProperty(globalThis, "__gpuixViteFlush")
   Reflect.deleteProperty(globalThis, "__gpuixViteIcon")
+  Reflect.deleteProperty(globalThis, "__gpuixViteFile")
   Reflect.deleteProperty(globalThis, "__gpuixViteStyle")
   Reflect.deleteProperty(globalThis, "__gpuixViteText")
   await server?.close()
@@ -110,6 +113,7 @@ nativeTest("Vite refreshes a native component and remounts an invalidated route"
     `.label { color: #ffffff; font-size: 14px; padding: 1rem 2px; display: flex; }\n`,
   )
   await writeFile(path.join(fixture, "icon.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>\n')
+  await writeFile(path.join(fixture, "nodes.json"), '{"nodes":["fixture"]}\n')
   await writeFile(path.join(fixture, "route.tsx"), route("child"))
 
   server = await createServer({
@@ -126,6 +130,10 @@ nativeTest("Vite refreshes a native component and remounts an invalidated route"
   expect(Reflect.get(globalThis, "__gpuixViteIcon")).toBe(
     '<svg xmlns="http://www.w3.org/2000/svg"/>\n',
   )
+  const bundledNodes = Reflect.get(globalThis, "__gpuixViteFile")
+  expect(typeof bundledNodes).toBe("string")
+  expect(path.isAbsolute(bundledNodes as string)).toBe(true)
+  expect(await readFile(bundledNodes as string, "utf8")).toBe('{"nodes":["fixture"]}\n')
   expect(Reflect.get(globalThis, "__gpuixViteStyle")).toEqual({
     color: "#ffffff",
     fontSize: 14,

@@ -28,6 +28,19 @@ Run the Vite executable under Bun in `package.json`:
 The Vite adapter is for native development. If a config includes `gpuix()` in
 `vite build`, it throws; use the Bun adapter for native packaging.
 
+### Bun import attributes in Vite development
+
+The Vite dev server recognises Bun's `type: "text"` and `type: "file"`
+import attributes in the native `gpuix` environment. A text import evaluates to
+the file contents. A file import evaluates to the file's absolute path on disk,
+so APIs such as `Bun.file` can open it:
+
+```ts
+import bundledNodes from "./nodes.json" with { type: "file" }
+
+const nodesFile = Bun.file(bundledNodes)
+```
+
 ### Bun hot reload
 
 Use `gpuixDev()` from a Bun preload when developing with `bun --hot`:
