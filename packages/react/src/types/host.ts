@@ -1194,8 +1194,13 @@ export interface Props extends AccessibilityProps {
    * and the renderer applies them as this element's style, with `style`
    * winning where both set a property. A class name that reaches the renderer
    * unresolved is reported: no CSS classes are resolved natively.
+   *
+   * `| undefined` is explicit, as React's own element types write it: a
+   * CSS-module class read under `noUncheckedIndexedAccess` is
+   * `string | undefined`, which `exactOptionalPropertyTypes` would otherwise
+   * reject at every call site.
    */
-  className?: string
+  className?: string | undefined
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
 
