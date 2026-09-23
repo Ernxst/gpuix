@@ -919,8 +919,17 @@ pub struct StyleDesc {
     pub hover: Option<Box<StyleDesc>>,
     pub hover_within: Option<Box<StyleDesc>>,
     pub active: Option<Box<StyleDesc>>,
+    /// Applies while the nearest `hoverGroup` ancestor is pressed.
+    pub active_within: Option<Box<StyleDesc>>,
     pub focus: Option<Box<StyleDesc>>,
     pub focus_visible: Option<Box<StyleDesc>>,
+    /// Applies while this element or a descendant has focus. Needs no
+    /// `hoverGroup`-style marker: the relationship comes from the focused
+    /// element's ancestry, which the renderer already walks.
+    pub focus_within: Option<Box<StyleDesc>>,
+    /// Applies while OS files are dragged over this element. Desktop-only:
+    /// there is no web equivalent.
+    pub drag_over: Option<Box<StyleDesc>>,
 }
 
 /// One rejected field. The renderer adds element context when diagnostics are drained,
@@ -2498,14 +2507,14 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             continue;
         }
         if key == "display"
-            && matches!(prefix, "hover" | "active")
+            && matches!(prefix, "hover" | "active" | "dragOver")
             && value.as_str() == Some("none")
         {
             reject(
                 &mut parsed.problems,
                 property!("display"),
                 value,
-                "display: \"none\" cannot be set by hover or active: hiding the element removes the hit-test box that triggers the state; use visibility: \"hidden\" or hoverWithin on a descendant",
+                "display: \"none\" cannot be set by hover, active, or dragOver: hiding the element removes the hit-test box that triggers the state; use visibility: \"hidden\" or hoverWithin on a descendant",
             );
             continue;
         }
@@ -3208,14 +3217,24 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
 
         if matches!(
             key.as_str(),
-            "hover" | "hoverWithin" | "active" | "focus" | "focusVisible"
+            "hover"
+                | "hoverWithin"
+                | "active"
+                | "activeWithin"
+                | "focus"
+                | "focusVisible"
+                | "focusWithin"
+                | "dragOver"
         ) {
             let property = match key.as_str() {
                 "hover" => property!("hover"),
                 "hoverWithin" => property!("hoverWithin"),
                 "active" => property!("active"),
+                "activeWithin" => property!("activeWithin"),
                 "focus" => property!("focus"),
                 "focusVisible" => property!("focusVisible"),
+                "focusWithin" => property!("focusWithin"),
+                "dragOver" => property!("dragOver"),
                 _ => unreachable!(),
             };
             if !prefix.is_empty() {
@@ -3239,6 +3258,10 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                         parsed.style.active =
                             parse_nested_style("active", value, &mut parsed.problems)
                     }
+                    "activeWithin" => {
+                        parsed.style.active_within =
+                            parse_nested_style("activeWithin", value, &mut parsed.problems)
+                    }
                     "focus" => {
                         parsed.style.focus =
                             parse_nested_style("focus", value, &mut parsed.problems)
@@ -3246,6 +3269,14 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                     "focusVisible" => {
                         parsed.style.focus_visible =
                             parse_nested_style("focusVisible", value, &mut parsed.problems)
+                    }
+                    "focusWithin" => {
+                        parsed.style.focus_within =
+                            parse_nested_style("focusWithin", value, &mut parsed.problems)
+                    }
+                    "dragOver" => {
+                        parsed.style.drag_over =
+                            parse_nested_style("dragOver", value, &mut parsed.problems)
                     }
                     _ => unreachable!(),
                 }
@@ -4175,11 +4206,12 @@ mod tests {
 
     #[test]
     fn rejects_display_none_in_hover_and_active_styles() {
-        let reason = "display: \"none\" cannot be set by hover or active: hiding the element removes the hit-test box that triggers the state; use visibility: \"hidden\" or hoverWithin on a descendant";
+        let reason = "display: \"none\" cannot be set by hover, active, or dragOver: hiding the element removes the hit-test box that triggers the state; use visibility: \"hidden\" or hoverWithin on a descendant";
 
         for (state, style) in [
             ("hover", json!({ "hover": { "display": "none" } })),
             ("active", json!({ "active": { "display": "none" } })),
+            ("dragOver", json!({ "dragOver": { "display": "none" } })),
         ] {
             let parsed = parse_style_value(&style);
             assert_eq!(parsed.problems.len(), 1, "{state}: {:?}", parsed.problems);
@@ -4205,6 +4237,44 @@ mod tests {
             hover_within_none
                 .style
                 .hover_within
+                .as_deref()
+                .unwrap()
+                .display
+                .as_deref(),
+            Some("none")
+        );
+
+        let focus_within_none = parse_style_value(&json!({
+            "focusWithin": { "display": "none" }
+        }));
+        assert!(
+            focus_within_none.problems.is_empty(),
+            "{:?}",
+            focus_within_none.problems
+        );
+        assert_eq!(
+            focus_within_none
+                .style
+                .focus_within
+                .as_deref()
+                .unwrap()
+                .display
+                .as_deref(),
+            Some("none")
+        );
+
+        let active_within_none = parse_style_value(&json!({
+            "activeWithin": { "display": "none" }
+        }));
+        assert!(
+            active_within_none.problems.is_empty(),
+            "{:?}",
+            active_within_none.problems
+        );
+        assert_eq!(
+            active_within_none
+                .style
+                .active_within
                 .as_deref()
                 .unwrap()
                 .display
@@ -5179,8 +5249,11 @@ mod tests {
             "hover": { "color": "blue" },
             "hoverWithin": { "backgroundColor": "magenta" },
             "active": { "color": "green" },
+            "activeWithin": { "color": "orange" },
             "focus": { "borderColor": "yellow" },
-            "focusVisible": { "outlineColor": "cyan" }
+            "focusVisible": { "outlineColor": "cyan" },
+            "focusWithin": { "borderColor": "pink" },
+            "dragOver": { "backgroundColor": "teal" }
         }"#,
         )
         .unwrap();

@@ -26,9 +26,18 @@ const validStyle = {
   hoverWithin: {
     borderColor: "#7c86ff",
   },
+  activeWithin: {
+    borderColor: "#5b63cc",
+  },
   focusVisible: {
     outlineColor: "rgba(124, 134, 255, 0.9)",
     outlineWidth: 2,
+  },
+  focusWithin: {
+    borderColor: "#7c86ff",
+  },
+  dragOver: {
+    borderColor: "#22c55e",
   },
   transition: {
     properties: ["opacity", "backgroundColor", "borderRadius"],

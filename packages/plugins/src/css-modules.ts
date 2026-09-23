@@ -123,7 +123,7 @@ const NATIVE_STATE_PROPERTIES = new Set(
 )
 const CLASS_NAME = "[A-Za-z_][A-Za-z0-9_-]*"
 const CLASS_SELECTOR = new RegExp(
-  `^\\.(${CLASS_NAME})(?::(hover|active|focus|focus-visible))?$`,
+  `^\\.(${CLASS_NAME})(?::(hover|active|focus|focus-visible|focus-within))?$`,
 )
 const HOVER_WITHIN_SELECTOR = new RegExp(
   `^\\.(${CLASS_NAME}):hover\\s+\\.(${CLASS_NAME})$`,
@@ -191,7 +191,9 @@ export async function transformGpuixCssModule(
           ? "hoverWithin"
           : pseudoClass === "focus-visible"
             ? "focusVisible"
-            : pseudoClass
+            : pseudoClass === "focus-within"
+              ? "focusWithin"
+              : pseudoClass
       const transformed = transformCss(rule.clone({ selector: `.${name}` }).toString())
       const value = transformed[name]
 

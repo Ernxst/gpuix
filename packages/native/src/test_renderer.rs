@@ -2831,10 +2831,13 @@ impl TestGpuixRenderer {
         let (
             pointer,
             focus,
+            focus_within,
             keyboard_input,
             hovered_state,
             hover_within_state,
             active_state,
+            active_within_state,
+            drag_over,
             transitioned_style,
             motion_style,
         ) = with_test_state(self.state_id, |cx, window, view| {
@@ -2847,6 +2850,10 @@ impl TestGpuixRenderer {
                     .focus_handles
                     .get(&id)
                     .is_some_and(|handle| handle.is_focused(window));
+                let focus_within = {
+                    let tree = view.tree.lock().unwrap();
+                    crate::renderer::is_focus_within(&tree, &view.focus_handles, id, window)
+                };
                 let keyboard = window.last_input_was_keyboard();
                 let hovered = view
                     .interactive_style_states
@@ -2864,6 +2871,15 @@ impl TestGpuixRenderer {
                     .interactive_style_states
                     .get(&id)
                     .map(InteractiveStyleState::is_active);
+                let active_within = hover_groups
+                    .iter()
+                    .map(|(group_id, _)| {
+                        view.interactive_style_states
+                            .get(group_id)
+                            .map(InteractiveStyleState::is_active)
+                    })
+                    .collect::<Vec<_>>();
+                let drag_over = view.external_drag_target == Some(id);
                 let transitioned_style = view
                     .transition_states
                     .get(&id)
@@ -2876,10 +2892,13 @@ impl TestGpuixRenderer {
                 (
                     (f64::from(f32::from(mouse.x)), f64::from(f32::from(mouse.y))),
                     focus,
+                    focus_within,
                     keyboard,
                     hovered,
                     hover_within,
                     active,
+                    active_within,
+                    drag_over,
                     transitioned_style,
                     motion_style,
                 )
@@ -2906,6 +2925,18 @@ impl TestGpuixRenderer {
                     element_bounds.is_some_and(|bounds| point_is_inside(bounds, origin))
                 })
         });
+        let active_within = active_within_state
+            .iter()
+            .zip(hover_groups.iter())
+            .zip(hover_group_bounds.iter())
+            .any(|((state, (_, accepts_pointer)), bounds)| {
+                state.unwrap_or_else(|| {
+                    *accepts_pointer
+                        && active_pointer_origin.is_some_and(|origin| {
+                            bounds.is_some_and(|bounds| point_is_inside(bounds, origin))
+                        })
+                })
+            });
 
         let layered_style = motion_style.map(|motion_style| {
             let mut layered = transitioned_style
@@ -2919,6 +2950,9 @@ impl TestGpuixRenderer {
             .or(transitioned_style.as_ref())
             .unwrap_or(&style);
         let mut resolved = style_object(effective_style)?;
+        if focus_within {
+            refine_style_object(&mut resolved, effective_style.focus_within.as_deref())?;
+        }
         if focus {
             refine_style_object(&mut resolved, effective_style.focus.as_deref())?;
         }
@@ -2930,6 +2964,12 @@ impl TestGpuixRenderer {
         }
         if hovered {
             refine_style_object(&mut resolved, effective_style.hover.as_deref())?;
+        }
+        if drag_over {
+            refine_style_object(&mut resolved, effective_style.drag_over.as_deref())?;
+        }
+        if active_within {
+            refine_style_object(&mut resolved, effective_style.active_within.as_deref())?;
         }
         if active {
             refine_style_object(&mut resolved, effective_style.active.as_deref())?;

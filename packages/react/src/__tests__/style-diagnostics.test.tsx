@@ -1489,7 +1489,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })
     const reason =
-      'display: "none" cannot be set by hover or active: hiding the element removes the hit-test box that triggers the state; use visibility: "hidden" or hoverWithin on a descendant'
+      'display: "none" cannot be set by hover, active, or dragOver: hiding the element removes the hit-test box that triggers the state; use visibility: "hidden" or hoverWithin on a descendant'
 
     testRoot.render(
       <div>
@@ -1498,18 +1498,25 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
           style={{ hover: { display: "none", opacity: 0.5 } }}
         />
         <div data-testid="active-hidden" style={{ active: { display: "none" } }} />
+        <div data-testid="drag-over-hidden" style={{ dragOver: { display: "none" } }} />
         <div
           data-testid="allowed-state-display"
-          style={{ hoverWithin: { display: "none" }, hover: { display: "grid" } }}
+          style={{
+            hoverWithin: { display: "none" },
+            focusWithin: { display: "none" },
+            activeWithin: { display: "none" },
+            hover: { display: "grid" },
+          }}
         />
       </div>,
     )
 
     const diagnostics = testRoot.renderer.drainStyleDiagnostics()
-    expect(diagnostics).toHaveLength(2)
+    expect(diagnostics).toHaveLength(3)
     for (const [testId, property] of [
       ["hover-hidden", "hover.display"],
       ["active-hidden", "active.display"],
+      ["drag-over-hidden", "dragOver.display"],
     ] as const) {
       const element = testRoot.renderer.findByTestId(testId)!
       expect(diagnostics.find((diagnostic) => diagnostic.dataTestId === testId)).toMatchObject({

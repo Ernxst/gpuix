@@ -56,6 +56,48 @@ describe("resolved test-renderer styles", () => {
     }
   })
 
+  it("resolves the activeWithin style while the nearest hoverGroup ancestor is pressed", () => {
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div
+          style={{
+            hoverGroup: "row",
+            display: "flex",
+            flexDirection: "row",
+            width: 400,
+            height: 40,
+          }}
+        >
+          <span
+            data-testid="active-within-target"
+            style={{
+              width: 200,
+              height: 40,
+              backgroundColor: "#333333",
+              activeWithin: { backgroundColor: "#7d8b8c" },
+            }}
+          />
+        </div>
+      )
+      const r = root.renderer
+      const target = r.findByTestId("active-within-target")!
+      const { x, y, width, height } = r.getElementBounds(target.id)!
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+
+      expect(r.getResolvedStyle(target.id)).toMatchObject({ backgroundColor: "#333333" })
+
+      r.nativeSimulateMouseDown(centerX, centerY)
+      expect(r.getResolvedStyle(target.id)).toMatchObject({ backgroundColor: "#7d8b8c" })
+
+      r.nativeSimulateMouseUp(centerX, centerY)
+      expect(r.getResolvedStyle(target.id)).toMatchObject({ backgroundColor: "#333333" })
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("resolves hover and active styles at read time", () => {
     const root = createTestRoot()
     try {
@@ -109,6 +151,35 @@ describe("resolved test-renderer styles", () => {
       expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
         backgroundColor: "#333333",
       })
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("resolves the dragOver style while OS files are dragged over the element", () => {
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div
+          data-testid="drag-over-target"
+          style={{
+            width: 200,
+            height: 200,
+            backgroundColor: "#333333",
+            dragOver: { backgroundColor: "#7d8b8c" },
+          }}
+        />
+      )
+      const r = root.renderer
+      const target = r.findByTestId("drag-over-target")!
+
+      expect(r.getResolvedStyle(target.id)).toMatchObject({ backgroundColor: "#333333" })
+
+      r.nativeSimulateFileDragMove(40, 40, ["/tmp/gpuix-drag.txt"])
+      expect(r.getResolvedStyle(target.id)).toMatchObject({ backgroundColor: "#7d8b8c" })
+
+      r.nativeSimulateFileDragExit()
+      expect(r.getResolvedStyle(target.id)).toMatchObject({ backgroundColor: "#333333" })
     } finally {
       root.unmount()
     }
@@ -387,6 +458,231 @@ describe("resolved test-renderer styles", () => {
       expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
         backgroundColor: "#c2415d",
       })
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("resolves the focusWithin style of a container while a descendant has focus", () => {
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div
+          data-testid="focus-within-container"
+          style={{
+            width: 400,
+            height: 120,
+            padding: 40,
+            backgroundColor: "#333333",
+            focusWithin: { backgroundColor: "#c2415d" },
+          }}
+        >
+          <div data-testid="focus-within-child" tabIndex={0} style={{ width: 160, height: 40 }} />
+        </div>
+      )
+
+      const container = root.renderer.findByTestId("focus-within-container")!
+      const child = root.renderer.findByTestId("focus-within-child")!
+      expect(root.renderer.getResolvedStyle(container.id)).toMatchObject({
+        backgroundColor: "#333333",
+      })
+
+      root.renderer.focusElement(child.id)
+      expect(root.renderer.getResolvedStyle(container.id)).toMatchObject({
+        backgroundColor: "#c2415d",
+      })
+
+      root.renderer.blur()
+      expect(root.renderer.getResolvedStyle(container.id)).toMatchObject({
+        backgroundColor: "#333333",
+      })
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("resolves the focusWithin style when the container itself is focused", () => {
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div
+          data-testid="focus-within-self"
+          tabIndex={0}
+          style={{
+            width: 160,
+            height: 40,
+            backgroundColor: "#333333",
+            focusWithin: { backgroundColor: "#c2415d" },
+          }}
+        />
+      )
+
+      const target = root.renderer.findByTestId("focus-within-self")!
+      root.renderer.focusElement(target.id)
+      expect(root.renderer.getResolvedStyle(target.id)).toMatchObject({
+        backgroundColor: "#c2415d",
+      })
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("gives a focusWithin container a focus handle without making it a tab stop", () => {
+    const root = createTestRoot()
+    const focused: string[] = []
+    try {
+      root.render(
+        <div style={{ width: 400, height: 120 }}>
+          <div
+            data-testid="focus-within-not-a-tab-stop"
+            onFocus={() => focused.push("container")}
+            style={{
+              width: 160,
+              height: 40,
+              focusWithin: { backgroundColor: "#c2415d" },
+            }}
+          >
+            <div
+              data-testid="focus-within-tabbable"
+              tabIndex={0}
+              onFocus={() => focused.push("first")}
+              style={{ width: 40, height: 40 }}
+            />
+          </div>
+          <div
+            data-testid="focus-within-next-stop"
+            tabIndex={0}
+            onFocus={() => focused.push("next")}
+            style={{ width: 40, height: 40 }}
+          />
+        </div>
+      )
+
+      const first = root.renderer.findByTestId("focus-within-tabbable")!
+
+      root.renderer.focusElement(first.id)
+      expect(focused).toEqual(["first"])
+
+      root.renderer.simulateKeystrokes("tab")
+      // A focus-only handle created for `focusWithin` is skipped by tab
+      // order: the next stop is "next", not the container itself.
+      expect(focused).toEqual(["first", "next"])
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("resolves focusWithin as Tab moves real keyboard focus into and out of the container", () => {
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div style={{ width: 400, height: 160, padding: 20 }}>
+          <div data-testid="before-stop" tabIndex={0} style={{ width: 40, height: 40 }} />
+          <div
+            data-testid="focus-within-tab-container"
+            style={{
+              width: 200,
+              height: 40,
+              backgroundColor: "#333333",
+              focusWithin: { backgroundColor: "#c2415d" },
+            }}
+          >
+            <div data-testid="focus-within-tab-child" tabIndex={0} style={{ width: 40, height: 40 }} />
+          </div>
+        </div>
+      )
+
+      const r = root.renderer
+      const container = r.findByTestId("focus-within-tab-container")!
+      const before = r.findByTestId("before-stop")!
+
+      r.focusElement(before.id)
+      expect(r.getResolvedStyle(container.id)).toMatchObject({ backgroundColor: "#333333" })
+
+      r.simulateKeystrokes("tab")
+      expect(r.getResolvedStyle(container.id)).toMatchObject({ backgroundColor: "#c2415d" })
+
+      r.simulateKeystrokes("shift-tab")
+      expect(r.getResolvedStyle(container.id)).toMatchObject({ backgroundColor: "#333333" })
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("clears focusWithin when the focused descendant unmounts", () => {
+    const root = createTestRoot()
+    try {
+      const render = (showChild: boolean) =>
+        root.render(
+          <div
+            data-testid="focus-within-unmount-container"
+            style={{
+              width: 200,
+              height: 40,
+              backgroundColor: "#333333",
+              focusWithin: { backgroundColor: "#c2415d" },
+            }}
+          >
+            {showChild && (
+              <div data-testid="focus-within-unmount-child" tabIndex={0} style={{ width: 40, height: 40 }} />
+            )}
+          </div>
+        )
+
+      render(true)
+      const r = root.renderer
+      const container = r.findByTestId("focus-within-unmount-container")!
+      const child = r.findByTestId("focus-within-unmount-child")!
+
+      r.focusElement(child.id)
+      expect(r.getResolvedStyle(container.id)).toMatchObject({ backgroundColor: "#c2415d" })
+
+      render(false)
+      r.flush()
+      expect(r.getResolvedStyle(container.id)).toMatchObject({ backgroundColor: "#333333" })
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("applies focusWithin to every ancestor when containers nest", () => {
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div
+          data-testid="focus-within-outer"
+          style={{
+            width: 300,
+            height: 120,
+            backgroundColor: "#111111",
+            focusWithin: { backgroundColor: "#1f2937" },
+          }}
+        >
+          <div
+            data-testid="focus-within-inner"
+            style={{
+              width: 200,
+              height: 80,
+              backgroundColor: "#333333",
+              focusWithin: { backgroundColor: "#c2415d" },
+            }}
+          >
+            <div data-testid="focus-within-nested-child" tabIndex={0} style={{ width: 40, height: 40 }} />
+          </div>
+        </div>
+      )
+
+      const r = root.renderer
+      const outer = r.findByTestId("focus-within-outer")!
+      const inner = r.findByTestId("focus-within-inner")!
+      const child = r.findByTestId("focus-within-nested-child")!
+
+      expect(r.getResolvedStyle(outer.id)).toMatchObject({ backgroundColor: "#111111" })
+      expect(r.getResolvedStyle(inner.id)).toMatchObject({ backgroundColor: "#333333" })
+
+      r.focusElement(child.id)
+      expect(r.getResolvedStyle(outer.id)).toMatchObject({ backgroundColor: "#1f2937" })
+      expect(r.getResolvedStyle(inner.id)).toMatchObject({ backgroundColor: "#c2415d" })
     } finally {
       root.unmount()
     }
