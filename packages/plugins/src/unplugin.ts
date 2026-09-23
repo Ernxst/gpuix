@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import type { BuildConfig, PluginBuilder } from "bun"
 import { createUnplugin } from "unplugin"
-import { rewriteFileImports, rewriteTextImports } from "./assets.js"
+import { FILE_IMPORT_QUERY } from "./assets.js"
 import type { GpuixPluginOptions } from "./bun-types.js"
 import { transformGpuixCssModule } from "./css-modules.js"
 import { reactRefreshRuntimePath, transformReactRefresh } from "./refresh.js"
@@ -14,7 +14,9 @@ const NATIVE_PACKAGE = "@gpuix/native"
 
 const VIRTUAL_MODULE_RE = /^\0gpuix:(?:css-module:|file:|native-entry$)/
 const TRANSFORM_ID_RE = /\.[cm]?[jt]sx?(?:$|[?#])/
-const RESOLVE_ID_RE = /(?:\.module\.css(?:$|[?#])|^react-refresh\/runtime$|^\0gpuix:native-entry$|__gpuix_file(?:$|[&#]))/
+const RESOLVE_ID_RE = new RegExp(
+  `(?:\\.module\\.css(?:$|[?#])|^react-refresh/runtime$|^\\0gpuix:native-entry$|[?&]${FILE_IMPORT_QUERY}(?:[&#]|$))`,
+)
 
 type ViteResolveContext = {
   environment?: { name?: string }
@@ -31,6 +33,25 @@ type ViteLoadContext = {
 
 function cleanId(id: string): string {
   return id.split(/[?#]/, 1)[0]
+}
+
+function hasFileImportQuery(id: string): boolean {
+  const queryStart = id.indexOf("?")
+  if (queryStart === -1) return false
+  const hashStart = id.indexOf("#", queryStart)
+  const query = id.slice(queryStart + 1, hashStart === -1 ? undefined : hashStart)
+  return query.split("&").includes(FILE_IMPORT_QUERY)
+}
+
+function removeFileImportQuery(id: string): string {
+  const queryStart = id.indexOf("?")
+  if (queryStart === -1) return id
+  const hashStart = id.indexOf("#", queryStart)
+  const pathname = id.slice(0, queryStart)
+  const query = id.slice(queryStart + 1, hashStart === -1 ? undefined : hashStart)
+  const hash = hashStart === -1 ? "" : id.slice(hashStart)
+  const parameters = query.split("&").filter((parameter) => parameter !== FILE_IMPORT_QUERY)
+  return `${pathname}${parameters.length === 0 ? "" : `?${parameters.join("&")}`}${hash}`
 }
 
 function isCssModule(id: string): boolean {
@@ -124,13 +145,13 @@ export const gpuixUnplugin = createUnplugin<GpuixPluginOptions | undefined, fals
             return meta.framework === "vite" ? NATIVE_ENTRY : undefined
           }
 
-          if (id.includes("__gpuix_file")) {
+          if (hasFileImportQuery(id)) {
             if (meta.framework !== "vite" || !isGpuixViteEnvironment(this)) {
               return undefined
             }
 
             const context = this as unknown as ViteResolveContext
-            const sourceId = id.slice(0, id.indexOf("__gpuix_file")).replace(/[?&]$/, "")
+            const sourceId = removeFileImportQuery(id)
             const resolved = await context.resolve?.(sourceId, importer, { skipSelf: true })
             if (resolved === null || resolved === undefined || resolved.external) {
               return undefined
@@ -228,11 +249,7 @@ await import(${JSON.stringify(entryId)})
           filter: { id: TRANSFORM_ID_RE },
           handler(code, id) {
             if (!isGpuixViteEnvironment(this)) return undefined
-            const source = rewriteFileImports(rewriteTextImports(code))
-            return (
-              transformReactRefresh(source, id) ??
-              (source === code ? undefined : { code: source, map: null })
-            )
+            return transformReactRefresh(code, id)
           },
         },
         hotUpdate(context) {

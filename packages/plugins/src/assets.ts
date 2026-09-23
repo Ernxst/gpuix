@@ -1,18 +1,53 @@
-const TEXT_IMPORT = /(from\s+["'])([^"']+)(["'])\s+with\s+\{\s*type\s*:\s*["']text["']\s*\}/g
-const FILE_IMPORT = /(from\s+["'])([^"']+)(["'])\s+with\s+\{\s*type\s*:\s*["']file["']\s*\}/g
+import type { PluginObj } from "@babel/core"
 
-/** Translate Bun's text import attribute to Vite's raw-asset query. */
-export function rewriteTextImports(code: string): string {
-  return code.replace(TEXT_IMPORT, (_match, start: string, id: string, end: string) => {
-    const query = id.includes("?") ? "&raw" : "?raw"
-    return `${start}${id}${query}${end}`
-  })
+export const FILE_IMPORT_QUERY = "__gpuix_file"
+
+function appendQueryParameter(specifier: string, parameter: string): string {
+  const hashIndex = specifier.indexOf("#")
+  const address = hashIndex === -1 ? specifier : specifier.slice(0, hashIndex)
+  const hash = hashIndex === -1 ? "" : specifier.slice(hashIndex)
+  const separator = address.includes("?")
+    ? address.endsWith("?") || address.endsWith("&")
+      ? ""
+      : "&"
+    : "?"
+
+  return `${address}${separator}${parameter}${hash}`
 }
 
-/** Mark Bun's file import attribute for resolution by the Vite dev plugin. */
-export function rewriteFileImports(code: string): string {
-  return code.replace(FILE_IMPORT, (_match, start: string, id: string, end: string) => {
-    const query = id.includes("?") ? "&__gpuix_file" : "?__gpuix_file"
-    return `${start}${id}${query}${end}`
-  })
-}
+/** Translate Bun's text and file import attributes for the Vite dev server. */
+export const bunAssetImportAttributes = (
+  { types }: { types: typeof import("@babel/core").types },
+): PluginObj => ({
+  visitor: {
+    ImportDeclaration(importPath) {
+      const attributes = importPath.node.attributes
+      if (attributes === null || attributes === undefined) return
+      const typeAttribute = attributes.find((attribute) => {
+        const key = attribute.key
+        const isTypeKey =
+          (types.isIdentifier(key) && key.name === "type") ||
+          (types.isStringLiteral(key) && key.value === "type")
+        return isTypeKey && types.isStringLiteral(attribute.value)
+      })
+      if (typeAttribute === undefined || !types.isStringLiteral(typeAttribute.value)) return
+
+      const query =
+        typeAttribute.value.value === "text"
+          ? "raw"
+          : typeAttribute.value.value === "file"
+            ? FILE_IMPORT_QUERY
+            : undefined
+      if (query === undefined) return
+
+      const source = importPath.node.source
+      source.value = appendQueryParameter(source.value, query)
+      source.extra = {
+        ...source.extra,
+        raw: JSON.stringify(source.value),
+        rawValue: source.value,
+      }
+      importPath.node.attributes = attributes.filter((attribute) => attribute !== typeAttribute)
+    },
+  },
+})

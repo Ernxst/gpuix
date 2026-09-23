@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
@@ -8,6 +8,50 @@ import type { BunPlugin } from "bun"
 import { gpuix as gpuixBun, gpuixDev } from "./bun.ts"
 import { transformGpuixCssModule } from "./css-modules.ts"
 import { gpuix } from "./index.ts"
+
+function originalPositionAt(
+  mappings: string,
+  generatedLine: number,
+  generatedColumn: number,
+): { line: number; column: number } | undefined {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  let source = 0
+  let originalLine = 0
+  let originalColumn = 0
+
+  for (const [lineIndex, line] of mappings.split(";").entries()) {
+    let generated = 0
+    let match: { line: number; column: number } | undefined
+    for (const segment of line.split(",")) {
+      if (segment.length === 0) continue
+      const values: number[] = []
+      let value = 0
+      let shift = 0
+      for (const character of segment) {
+        const digit = alphabet.indexOf(character)
+        value += (digit & 31) << shift
+        if ((digit & 32) !== 0) {
+          shift += 5
+        } else {
+          values.push((value & 1) === 1 ? -(value >> 1) : value >> 1)
+          value = 0
+          shift = 0
+        }
+      }
+      generated += values[0] ?? 0
+      if (values.length >= 4) {
+        source += values[1] ?? 0
+        originalLine += values[2] ?? 0
+        originalColumn += values[3] ?? 0
+        if (lineIndex + 1 === generatedLine && generated <= generatedColumn) {
+          match = { line: originalLine + 1, column: originalColumn }
+        }
+      }
+    }
+    if (lineIndex + 1 === generatedLine) return match
+  }
+  return undefined
+}
 
 test("converts simple CSS module classes into GPUIX style objects", () => {
   expect(
@@ -90,6 +134,146 @@ test("Vite serves a native CSS module as a JavaScript style object", async () =>
     const browserResult = await server.transformRequest("/panel.module.css")
     expect(browserResult?.code).toContain("__vite__css")
     expect(browserResult?.code).not.toContain("backgroundColor")
+  } finally {
+    await server?.close()
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("Vite rewrites only real Bun asset imports", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-vite-asset-import-syntax-"))
+  let server: Awaited<ReturnType<typeof createServer>> | undefined
+
+  try {
+    const entry = path.join(fixture, "entry.ts")
+    await writeFile(path.join(fixture, "note.txt"), "note contents\n")
+    await writeFile(path.join(fixture, "nodes.json"), '{"nodes":["fixture"]}\n')
+    const source = `import note from "./note.txt" with { type: "text" }
+import bundled from "./nodes.json" with { type: "file" }
+const stringValue = 'from "./note.txt" with { type: "text" }'
+const templateValue = \`from "./nodes.json" with { type: "file" }\`
+// from "./nodes.json" with { type: "file" }
+export default { stringValue, templateValue, note, bundled }
+`
+    await writeFile(entry, source)
+
+    const basePlugin = gpuix({ entry: "entry.ts" })
+    server = await createServer({
+      appType: "custom",
+      configFile: false,
+      root: fixture,
+      plugins: [{ ...basePlugin, configureServer: undefined }],
+    })
+
+    const transformed = await server.environments.gpuix.transformRequest("/entry.ts")
+    expect(transformed?.code).toContain('// from "./nodes.json" with { type: "file" }')
+
+    const environment = server.environments.gpuix as unknown as {
+      runner: { import: (id: string) => Promise<{ default: Record<string, string> }> }
+    }
+    const result = await environment.runner.import(entry)
+    expect(result.default).toEqual({
+      stringValue: 'from "./note.txt" with { type: "text" }',
+      templateValue: 'from "./nodes.json" with { type: "file" }',
+      note: "note contents\n",
+      bundled: await realpath(path.join(fixture, "nodes.json")),
+    })
+  } finally {
+    await server?.close()
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("Vite maps an expression after a file import attribute to its original column", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-vite-file-import-map-"))
+  let server: Awaited<ReturnType<typeof createServer>> | undefined
+
+  try {
+    const entry = path.join(fixture, "counter.tsx")
+    const source = `import bundled from "./nodes.json" with { type: "file" }; const afterImport = bundled.length + 1; export function Counter() { return afterImport }`
+    await writeFile(path.join(fixture, "nodes.json"), '{"nodes":["fixture"]}\n')
+    await writeFile(entry, source)
+
+    const basePlugin = gpuix({ entry: "counter.tsx" })
+    server = await createServer({
+      appType: "custom",
+      configFile: false,
+      root: fixture,
+      plugins: [{ ...basePlugin, configureServer: undefined }],
+    })
+
+    const transformed = await server.environments.gpuix.transformRequest("/counter.tsx")
+    expect(transformed?.map?.sourcesContent).toEqual([source])
+    const generatedIndex = transformed?.code.indexOf("afterImport") ?? -1
+    const beforeExpression = transformed?.code.slice(0, generatedIndex) ?? ""
+    const generatedLine = beforeExpression.split("\n").length
+    const generatedColumn = generatedIndex - beforeExpression.lastIndexOf("\n") - 1
+    expect(
+      originalPositionAt(transformed?.map?.mappings ?? "", generatedLine, generatedColumn),
+    ).toEqual({ line: 1, column: source.indexOf("afterImport") })
+  } finally {
+    await server?.close()
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("Vite file imports resolve extensionless files named like the query marker", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-vite-file-marker-name-"))
+  let server: Awaited<ReturnType<typeof createServer>> | undefined
+
+  try {
+    const target = path.join(fixture, "__gpuix_file")
+    const entry = path.join(fixture, "entry.ts")
+    await writeFile(target, "fixture file contents\n")
+    await writeFile(
+      entry,
+      'import file from "./__gpuix_file" with { type: "file" }\nexport default file\n',
+    )
+
+    const basePlugin = gpuix({ entry: "entry.ts" })
+    server = await createServer({
+      appType: "custom",
+      configFile: false,
+      root: fixture,
+      plugins: [{ ...basePlugin, configureServer: undefined }],
+    })
+
+    const environment = server.environments.gpuix as unknown as {
+      runner: { import: (id: string) => Promise<{ default: string }> }
+    }
+    const result = await environment.runner.import(entry)
+    expect(result.default).toBe(await realpath(target))
+  } finally {
+    await server?.close()
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("Vite leaves an import query value ending in the file marker alone", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-vite-file-marker-query-"))
+  let server: Awaited<ReturnType<typeof createServer>> | undefined
+
+  try {
+    const entry = path.join(fixture, "entry.ts")
+    await writeFile(path.join(fixture, "value.ts"), 'export default "ordinary module"\n')
+    await writeFile(
+      entry,
+      'import value from "./value.ts?label=__gpuix_file"\nexport default value\n',
+    )
+
+    const basePlugin = gpuix({ entry: "entry.ts" })
+    server = await createServer({
+      appType: "custom",
+      configFile: false,
+      root: fixture,
+      plugins: [{ ...basePlugin, configureServer: undefined }],
+    })
+
+    const environment = server.environments.gpuix as unknown as {
+      runner: { import: (id: string) => Promise<{ default: string }> }
+    }
+    const result = await environment.runner.import(entry)
+    expect(result.default).toBe("ordinary module")
   } finally {
     await server?.close()
     await rm(fixture, { recursive: true, force: true })

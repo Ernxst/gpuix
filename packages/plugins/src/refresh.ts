@@ -1,5 +1,6 @@
 import { transformSync, type PluginItem } from "@babel/core"
 import { createRequire } from "node:module"
+import { bunAssetImportAttributes } from "./assets.js"
 
 const require = createRequire(import.meta.url)
 const reactRefreshBabel = require("react-refresh/babel") as PluginItem
@@ -25,9 +26,9 @@ const REFRESH_PREAMBLE_LINES = REFRESH_PREAMBLE.split("\n").length - 1
 /**
  * Add React Refresh registration and boundary handling to a source module.
  *
- * The Babel plugin recognises component definitions. A module without one is
- * left for Vite to propagate normally, so edits to ordinary utilities still
- * reach their importing component.
+ * The Babel plugin recognises component definitions. Components receive a
+ * Refresh boundary; other modules still pass through Babel so Bun import
+ * attributes can be translated before Vite processes them.
  */
 export function transformReactRefresh(code: string, id: string) {
   if (!REACT_SOURCE.test(id) || id.includes("/node_modules/")) return undefined
@@ -36,17 +37,18 @@ export function transformReactRefresh(code: string, id: string) {
     babelrc: false,
     configFile: false,
     filename: id,
-    parserOpts: { plugins: ["jsx", "typescript"] },
-    plugins: [[reactRefreshBabel, { skipEnvCheck: true }]],
+    parserOpts: { plugins: ["jsx", "typescript", "importAttributes"] },
+    plugins: [bunAssetImportAttributes, [reactRefreshBabel, { skipEnvCheck: true }]],
     sourceMaps: true,
   })
 
   const transformed = result?.code
-  if (transformed === null || transformed === undefined || !transformed.includes("$RefreshReg$(")) {
-    return undefined
-  }
+  if (transformed === null || transformed === undefined) return undefined
 
   const map = result?.map
+  if (!transformed.includes("$RefreshReg$(")) {
+    return { code: transformed, map: map ?? null }
+  }
 
   return {
     code: `${REFRESH_PREAMBLE.replace("__MODULE_ID__", JSON.stringify(id))}${transformed}
