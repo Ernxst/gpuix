@@ -84,14 +84,20 @@ export async function loadCssModule(
   ;(context as ViteLoadContext).addWatchFile?.(sourceId)
   const css = await readFile(sourceId, "utf8")
   return {
-    code:
-      `const styles = ${JSON.stringify(transformGpuixCssModule(css, sourceId))};\n` +
-      `for (const style of Object.values(styles)) {\n` +
-      `  Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true });\n` +
-      `}\n` +
-      `export default styles`,
+    code: compileCssModuleCode(css, sourceId),
     map: null,
   }
+}
+
+/** Emit a self-contained module that tags every compiled class style. */
+function compileCssModuleCode(css: string, sourceId: string): string {
+  return (
+    `const styles = ${JSON.stringify(transformGpuixCssModule(css, sourceId))};\n` +
+    `for (const style of Object.values(styles)) {\n` +
+    `  Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true });\n` +
+    `}\n` +
+    `export default styles`
+  )
 }
 
 /**
@@ -141,9 +147,7 @@ export function gpuixCssModulesBun(): BunPlugin {
       }))
 
       build.onLoad({ filter: /\.module\.css$/, namespace: "file" }, async ({ path: id }) => ({
-        contents: `export default ${JSON.stringify(
-          transformGpuixCssModule(await readFile(id, "utf8"), id),
-        )}`,
+        contents: compileCssModuleCode(await readFile(id, "utf8"), id),
         loader: "js",
         resolveDir: path.dirname(id),
       }))

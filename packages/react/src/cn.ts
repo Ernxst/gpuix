@@ -22,18 +22,25 @@ export function cn(...inputs: (ClassValue | CompiledStyle)[]): string | Compiled
   const classNames: string[] = []
   let styles: Record<string, unknown> | undefined
 
-  for (const input of inputs) {
+  const collect = (input: ClassValue | CompiledStyle): void => {
     if (isCompiledStyle(input)) {
       classNames.push(...(unresolvedClassNames(input) ?? []))
       styles = Object.assign(styles ?? {}, input)
-      continue
+      return
+    }
+
+    if (Array.isArray(input)) {
+      for (const nested of input) collect(nested)
+      return
     }
 
     const className = mergeClassNames(input)
     if (className !== "") classNames.push(className)
   }
 
-  if (styles === undefined) return mergeClassNames(...classNames)
+  for (const input of inputs) collect(input)
+
+  if (styles === undefined) return mergeClassNames(...inputs)
 
   Object.defineProperty(styles, COMPILED_STYLE, { value: true })
   if (classNames.length > 0) {

@@ -259,6 +259,16 @@ test("Bun builds native CSS modules and receives GPUIX build defaults", async ()
     const output = await result.outputs[0]?.text()
     expect(output).toContain('backgroundColor: "#123456"')
     expect(output).toContain("paddingTop: 4")
+
+    const outputFile = path.join(fixture, "entry-built.js")
+    await writeFile(outputFile, output ?? "")
+    const builtModule = await import(pathToFileURL(outputFile).href)
+    expect(
+      Object.getOwnPropertySymbols(builtModule.default).includes(
+        Symbol.for("gpuix.compiledStyle"),
+      ),
+    ).toBe(true)
+
     expect(observed.target).toBe("bun")
     expect(observed.format).toBe("esm")
     expect(observed.external).toEqual([
@@ -304,6 +314,9 @@ test("Bun dev plugin loads native CSS modules at runtime", async () => {
       paddingBottom: 4,
       paddingLeft: 4,
     })
+    expect(
+      Object.getOwnPropertySymbols(result.default).includes(Symbol.for("gpuix.compiledStyle")),
+    ).toBe(true)
   } finally {
     Bun.plugin.clearAll()
     await rm(fixture, { recursive: true, force: true })
@@ -333,7 +346,7 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
     )
     await writeFile(
       entry,
-      'import styles from "./panel.module.css"\nconsole.log(JSON.stringify(styles.panel))\n',
+      'import styles from "./panel.module.css"\nconsole.log(JSON.stringify({ style: styles.panel, compiled: Object.getOwnPropertySymbols(styles.panel).includes(Symbol.for("gpuix.compiledStyle")) }))\n',
     )
 
     const result = Bun.spawnSync([process.execPath, "--preload", "@gpuix/plugins/preload", entry], {
@@ -343,13 +356,18 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
     })
 
     expect(result.exitCode, result.stderr.toString()).toBe(0)
-    expect(JSON.parse(result.stdout.toString())).toEqual({
+    const loaded = JSON.parse(result.stdout.toString()) as {
+      style: Record<string, unknown>
+      compiled: boolean
+    }
+    expect(loaded.style).toEqual({
       color: "#123456",
       paddingTop: 4,
       paddingRight: 4,
       paddingBottom: 4,
       paddingLeft: 4,
     })
+    expect(loaded.compiled).toBe(true)
   } finally {
     await rm(fixture, { recursive: true, force: true })
   }

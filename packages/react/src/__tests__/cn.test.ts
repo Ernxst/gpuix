@@ -33,6 +33,26 @@ describe("cn", () => {
     expect(cn({ "text-white": true })).toBe("text-white")
   })
 
+  it("collects compiled styles from nested class value arrays", () => {
+    const base = compiledStyle({ color: "red", padding: 4 }) as unknown as string
+    const active = compiledStyle({ color: "blue" }) as unknown as string
+
+    expect(cn([base, false && active])).toEqual({ color: "red", padding: 4 })
+    expect(cn([base, [false, active]])).toEqual({ color: "blue", padding: 4 })
+  })
+
+  it("walks deeply nested class values and keeps unresolved classes in order", () => {
+    const base = compiledStyle({ color: "red", padding: 4 }) as unknown as string
+    const active = compiledStyle({ color: "blue" }) as unknown as string
+    const merged = cn([["rounded-lg", [base, [["px-4", [false, active]]]]]])
+
+    expect(merged).toEqual({ color: "blue", padding: 4 })
+    expect(unresolvedClassNames(merged as unknown as object)).toEqual([
+      "rounded-lg",
+      "px-4",
+    ])
+  })
+
   it("merges compiled styles with the later value winning", () => {
     const base = compiledStyle({ color: "red", padding: 4 })
     const active = compiledStyle({ color: "blue" })
