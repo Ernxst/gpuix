@@ -124,6 +124,35 @@ test("reuses the generated hover group for an ancestor in several rules", () => 
   })
 })
 
+test("merges hovered descendant rules from the same ancestor", () => {
+  expect(
+    transformGpuixCssModule(
+      `
+        .card:hover .title { color: #ffffff; }
+        .card:hover .title { background-color: #12161a; }
+      `,
+      "/fixture/card.module.css",
+    ),
+  ).toEqual({
+    card: {
+      hoverGroup: "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+    },
+    title: { hoverWithin: { color: "#ffffff", backgroundColor: "#12161a" } },
+  })
+})
+
+test("rejects hovered descendant rules from different ancestors", () => {
+  expect(() =>
+    transformGpuixCssModule(
+      `
+        .card:hover .title { color: red; }
+        .panel:hover .title { background-color: blue; }
+      `,
+      "/fixture/card.module.css",
+    ),
+  ).toThrow('selector ".panel:hover .title" conflicts with selector ".card:hover .title"')
+})
+
 test("preserves a hand-written hover group on a hovered ancestor", () => {
   expect(
     transformGpuixCssModule(

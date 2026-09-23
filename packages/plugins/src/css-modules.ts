@@ -140,11 +140,27 @@ type CssModuleSelector =
 export function transformGpuixCssModule(css: string, sourceId: string): CssModuleStyles {
   const root = validateSelectors(css, sourceId)
   const styles: CssModuleStyles = {}
+  const hoverWithinRelations = new Map<string, { ancestor: string; selector: string }>()
 
   root.walkRules((rule) => {
     for (const selector of rule.selectors) {
-      const parsed = parseSelector(selector.trim())
+      const trimmedSelector = selector.trim()
+      const parsed = parseSelector(trimmedSelector)
       if (!parsed) continue // validateSelectors has already rejected this selector.
+
+      if (parsed.kind === "hoverWithin") {
+        const previousRelation = hoverWithinRelations.get(parsed.descendant)
+        if (previousRelation && previousRelation.ancestor !== parsed.ancestor) {
+          throw unsupportedCss(
+            sourceId,
+            `selector ${JSON.stringify(trimmedSelector)} conflicts with selector ${JSON.stringify(previousRelation.selector)}`,
+          )
+        }
+        hoverWithinRelations.set(parsed.descendant, {
+          ancestor: parsed.ancestor,
+          selector: trimmedSelector,
+        })
+      }
 
       const name = parsed.kind === "class" ? parsed.name : parsed.descendant
       const pseudoClass = parsed.kind === "class" ? parsed.pseudoClass : undefined

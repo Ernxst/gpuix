@@ -139,9 +139,12 @@ The transform accepts simple local class selectors and declarations supported
 by GPUIX's native style model. Grouped class selectors are supported, including
 selectors with one `:hover`, `:active`, `:focus`, or `:focus-visible` state.
 It also accepts `.container:hover .child`, which adds a generated `hoverGroup`
-to the container and a `hoverWithin` style to the child. Other selectors,
-at-rules, animations, and CSS-module composition are rejected until they have a
-native style representation.
+to the container and a `hoverWithin` style to the child. A child class can have
+one hovered ancestor relation. The renderer activates `hoverWithin` when any
+hovered group is above the child, so nesting that child below another hovered
+group also activates the style. Other selectors, at-rules, animations, and
+CSS-module composition are rejected until they have a native style
+representation.
 
 Vite's normal browser environment continues to use ordinary CSS Modules. Add a
 type-only import to opt into the native CSS-module declaration:
