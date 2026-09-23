@@ -85,7 +85,7 @@ test("compiles under Node's CommonJS interop, not only Bun's", () => {
     "--input-type=module",
     "-e",
     `const { transformGpuixCssModule } = await import(${JSON.stringify(pathToFileURL(dist).href)})
-process.stdout.write(JSON.stringify(transformGpuixCssModule(".card { display: flex; }", "card.module.css")))`,
+process.stdout.write(JSON.stringify(await transformGpuixCssModule(".card { display: flex; }", "card.module.css")))`,
   ])
 
   expect(result.stderr.toString()).toBe("")

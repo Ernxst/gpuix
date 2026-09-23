@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import type { BunPlugin } from "bun"
 import type { Plugin } from "vite"
+import type { AcceptedPlugin } from "postcss"
 import { createUnplugin } from "unplugin"
 import { transformGpuixCssModule } from "./css-modules.js"
 
@@ -53,6 +54,10 @@ type ViteLoadContext = {
   addWatchFile: (id: string) => void
 }
 
+export type CssModulesOptions = {
+  plugins?: readonly AcceptedPlugin[]
+}
+
 /**
  * Point a `.module.css` import at the virtual module that holds its compiled
  * styles. Bun resolves the file itself; Vite asks the rest of the pipeline
@@ -79,20 +84,25 @@ export async function resolveCssModule(
 export async function loadCssModule(
   context: unknown,
   id: string,
+  plugins: readonly AcceptedPlugin[] = [],
 ): Promise<{ code: string; map: null }> {
   const sourceId = sourceIdFromCssModuleId(id)
   ;(context as ViteLoadContext).addWatchFile?.(sourceId)
   const css = await readFile(sourceId, "utf8")
   return {
-    code: compileCssModuleCode(css, sourceId),
+    code: await compileCssModuleCode(css, sourceId, plugins),
     map: null,
   }
 }
 
 /** Emit a self-contained module that tags every compiled class style. */
-function compileCssModuleCode(css: string, sourceId: string): string {
+async function compileCssModuleCode(
+  css: string,
+  sourceId: string,
+  plugins: readonly AcceptedPlugin[] = [],
+): Promise<string> {
   return (
-    `const styles = ${JSON.stringify(transformGpuixCssModule(css, sourceId))};\n` +
+    `const styles = ${JSON.stringify(await transformGpuixCssModule(css, sourceId, plugins))};\n` +
     `for (const style of Object.values(styles)) {\n` +
     `  Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true });\n` +
     `}\n` +
@@ -106,7 +116,7 @@ function compileCssModuleCode(css: string, sourceId: string): string {
  * A Vite or Vitest project can use this plugin wherever it needs native CSS
  * module compilation.
  */
-export const gpuixCssUnplugin = createUnplugin<undefined, false>((_userOptions, meta) => {
+export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOptions, meta) => {
   return {
     name: "gpuix-css-modules",
     // Resolve before Vite's own CSS plugin, which would otherwise claim the
@@ -121,15 +131,15 @@ export const gpuixCssUnplugin = createUnplugin<undefined, false>((_userOptions, 
     load: {
       filter: { id: CSS_MODULE_VIRTUAL_RE },
       handler(id) {
-        return loadCssModule(this, id)
+        return loadCssModule(this, id, userOptions.plugins)
       },
     },
   }
 })
 
 /** Compile `.module.css` imports into GPUIX styles in Vite or Vitest. */
-export function gpuixCssModules(): Plugin {
-  return gpuixCssUnplugin.vite()
+export function gpuixCssModules(options: CssModulesOptions = {}): Plugin {
+  return gpuixCssUnplugin.vite(options)
 }
 
 /**
@@ -138,7 +148,7 @@ export function gpuixCssModules(): Plugin {
  * Bun's bundler compiles `.module.css` to class names of its own, so a build
  * without this plugin hands the renderer strings it cannot resolve.
  */
-export function gpuixCssModulesBun(): BunPlugin {
+export function gpuixCssModulesBun(options: CssModulesOptions = {}): BunPlugin {
   return {
     name: "gpuix-css-modules",
     setup(build) {
@@ -147,7 +157,7 @@ export function gpuixCssModulesBun(): BunPlugin {
       }))
 
       build.onLoad({ filter: /\.module\.css$/, namespace: "file" }, async ({ path: id }) => ({
-        contents: compileCssModuleCode(await readFile(id, "utf8"), id),
+        contents: await compileCssModuleCode(await readFile(id, "utf8"), id, options.plugins),
         loader: "js",
         resolveDir: path.dirname(id),
       }))
