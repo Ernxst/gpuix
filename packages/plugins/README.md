@@ -165,6 +165,26 @@ It compiles every environment by default. Pass `environments` to restrict it,
 as `gpuix()` does for its own. A web build needs no GPUIX plugin at all: Vite's
 CSS modules already produce what `className` wants there.
 
+`gpuixCssModulesBun()` is the same transform for Bun, in `Bun.build()` or in a
+`Bun.plugin()` preload. A Bun build without it compiles `.module.css` to class
+names of Bun's own, which the renderer cannot resolve:
+
+```ts
+import { gpuixCssModulesBun } from "@gpuix/plugins/css"
+
+await Bun.build({
+  entrypoints: ["src/app.tsx"],
+  compile: { outfile: "dist/app" },
+  plugins: [gpuixCssModulesBun()],
+})
+```
+
+`bun build` on the command line takes no plugins, so a packaged application
+needs either this API or a `Bun.plugin()` preload. A preload named in
+`bunfig.toml` is also embedded in a `--compile` binary, where it fails to
+resolve `@gpuix/plugins`, so keep the preload for `bun --hot` and build through
+the API.
+
 ### Combining classes
 
 Import `cn` from `@gpuix/react/cn` rather than from `cn` or `clsx`:

@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
+import type { BunPlugin } from "bun"
 import type { Plugin } from "vite"
 import { createUnplugin } from "unplugin"
 import { transformGpuixCssModule } from "./css-modules.js"
@@ -141,6 +142,31 @@ export const gpuixCssUnplugin = createUnplugin<GpuixCssOptions | undefined, fals
 /** Compile `.module.css` imports into GPUIX styles in Vite or Vitest. */
 export function gpuixCssModules(options?: GpuixCssOptions): Plugin {
   return gpuixCssUnplugin.vite(options)
+}
+
+/**
+ * The same transform for Bun, in `Bun.build()` or `Bun.plugin()`.
+ *
+ * Bun's bundler compiles `.module.css` to class names of its own, so a build
+ * without this plugin hands the renderer strings it cannot resolve.
+ */
+export function gpuixCssModulesBun(): BunPlugin {
+  return {
+    name: "gpuix-css-modules",
+    setup(build) {
+      build.onResolve({ filter: /\.module\.css$/ }, ({ path: id, importer }) => ({
+        path: resolveBunCssModule(id, importer),
+      }))
+
+      build.onLoad({ filter: /\.module\.css$/, namespace: "file" }, async ({ path: id }) => ({
+        contents: `export default ${JSON.stringify(
+          transformGpuixCssModule(await readFile(id, "utf8"), id),
+        )}`,
+        loader: "js",
+        resolveDir: path.dirname(id),
+      }))
+    },
+  }
 }
 
 export default gpuixCssModules
