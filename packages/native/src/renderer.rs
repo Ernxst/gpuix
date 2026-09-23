@@ -7413,6 +7413,10 @@ pub(crate) struct GpuixView {
     pointer_router: crate::pointer::SharedPointerRouter,
     /// Cancels the pressed-pointer sequence when the platform deactivates this window.
     window_activation_subscription: Option<gpui::Subscription>,
+    /// The element whose keyboard activation is holding its `active` style.
+    keyboard_active: Option<u64>,
+    /// Cancels keyboard activation when its focused element loses focus.
+    keyboard_active_blur_subscription: Option<gpui::Subscription>,
     /// Persistent measurement and scroll state for React-backed virtual lists.
     virtual_lists: HashMap<u64, VirtualListEntry>,
     /// Latest pointer sample and list during selection edge scrolling.
@@ -7445,11 +7449,18 @@ pub(crate) struct GpuixView {
 #[derive(Clone, Copy, Default)]
 pub(crate) struct InteractiveStyleState {
     pub hovered: bool,
-    pub active: bool,
+    pointer_active: bool,
+    keyboard_active: bool,
     /// Whether this element is in the ancestry of the current external file
     /// drag target. GPUI clears `active_drag` before it reports a window exit,
     /// so this survives long enough for the next frame to emit dragLeave.
     pub drag_inside: bool,
+}
+
+#[derive(Clone, Copy)]
+enum InteractiveActiveSource {
+    Pointer,
+    Keyboard,
 }
 
 #[derive(Clone, Copy)]
@@ -7490,12 +7501,33 @@ impl InteractiveStyleState {
         true
     }
 
-    pub(crate) fn set_active(&mut self, active: bool) -> bool {
-        if self.active == active {
-            return false;
+    pub(crate) fn is_active(&self) -> bool {
+        self.pointer_active || self.keyboard_active
+    }
+
+    fn set_active_source(&mut self, pointer: bool, active: bool) -> bool {
+        let was_active = self.is_active();
+        if pointer {
+            self.pointer_active = active;
+        } else {
+            self.keyboard_active = active;
         }
-        self.active = active;
-        true
+        was_active != self.is_active()
+    }
+
+    pub(crate) fn set_pointer_active(&mut self, active: bool) -> bool {
+        self.set_active_source(true, active)
+    }
+
+    pub(crate) fn set_keyboard_active(&mut self, active: bool) -> bool {
+        self.set_active_source(false, active)
+    }
+
+    pub(crate) fn clear_active(&mut self) -> bool {
+        let was_active = self.is_active();
+        self.pointer_active = false;
+        self.keyboard_active = false;
+        was_active
     }
 
     pub(crate) fn set_drag_inside(&mut self, inside: bool) -> bool {
@@ -7692,6 +7724,8 @@ impl GpuixView {
             image_network_policy,
             pointer_router: Default::default(),
             window_activation_subscription: None,
+            keyboard_active: None,
+            keyboard_active_blur_subscription: None,
             virtual_lists: HashMap::new(),
             selection_drag_position: None,
             selection_scroll_list: None,
@@ -8141,16 +8175,80 @@ impl GpuixView {
         let interactive_changed = self
             .interactive_style_states
             .values_mut()
-            .fold(false, |changed, state| state.set_active(false) || changed);
+            .fold(false, |changed, state| state.clear_active() || changed);
         let transition_changed = self
             .transition_states
             .values_mut()
             .fold(false, |changed, state| state.set_active(false) || changed);
         let changed = interactive_changed || transition_changed;
+        self.keyboard_active = None;
+        self.keyboard_active_blur_subscription = None;
         if changed {
             self.interaction_revision = self.interaction_revision.saturating_add(1);
         }
         changed
+    }
+
+    pub(crate) fn begin_keyboard_active(
+        &mut self,
+        id: u64,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let cleared = if self.keyboard_active != Some(id) {
+            let cleared = self.clear_keyboard_active();
+            self.keyboard_active = Some(id);
+            self.keyboard_active_blur_subscription = self.focus_handles.get(&id).map(|handle| {
+                cx.on_blur(handle, window, move |view, _window, cx| {
+                    if view.keyboard_active == Some(id) && view.clear_keyboard_active() {
+                        cx.notify();
+                    }
+                })
+            });
+            cleared
+        } else {
+            false
+        };
+
+        self.set_keyboard_active(id, true) || cleared
+    }
+
+    fn clear_keyboard_active(&mut self) -> bool {
+        let Some(id) = self.keyboard_active.take() else {
+            return false;
+        };
+
+        self.set_keyboard_active(id, false)
+    }
+
+    pub(crate) fn set_pointer_active(&mut self, id: u64, active: bool) -> bool {
+        self.set_active_source(id, active, InteractiveActiveSource::Pointer)
+    }
+
+    fn set_keyboard_active(&mut self, id: u64, active: bool) -> bool {
+        self.set_active_source(id, active, InteractiveActiveSource::Keyboard)
+    }
+
+    fn set_active_source(
+        &mut self,
+        id: u64,
+        active: bool,
+        source: InteractiveActiveSource,
+    ) -> bool {
+        let state = self.interactive_style_states.entry(id).or_default();
+        let interactive_changed = match source {
+            InteractiveActiveSource::Pointer => state.set_pointer_active(active),
+            InteractiveActiveSource::Keyboard => state.set_keyboard_active(active),
+        };
+        let resolved_active = state.is_active();
+        let transition_changed = self
+            .transition_states
+            .get_mut(&id)
+            .is_some_and(|state| state.set_active(resolved_active));
+        if interactive_changed {
+            self.interaction_revision = self.interaction_revision.saturating_add(1);
+        }
+        interactive_changed || transition_changed
     }
 
     fn observe_window_resize(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) {
@@ -8437,7 +8535,7 @@ impl GpuixView {
                     && mouse_y <= bounds.y + bounds.height
             })
         };
-        let active = tracks_active && state.is_some_and(|state| state.active);
+        let active = tracks_active && state.is_some_and(InteractiveStyleState::is_active);
 
         Some(ElementInteractionState {
             focused,
@@ -10594,6 +10692,13 @@ impl gpui::Render for GpuixView {
             .retain(|id, _| tree.elements.contains_key(id));
         self.interactive_style_states
             .retain(|id, _| tree.elements.contains_key(id));
+        if self
+            .keyboard_active
+            .is_some_and(|id| !tree.elements.contains_key(&id))
+        {
+            self.keyboard_active = None;
+            self.keyboard_active_blur_subscription = None;
+        }
         self.hovered_targets
             .retain(|id| tree.elements.contains_key(id));
         self.transition_states.retain(|id, _| tree.is_attached(*id));
@@ -10685,6 +10790,11 @@ impl gpui::Render for GpuixView {
                 .on_action(cx.listener(Self::focus_previous_action))
                 .on_key_down(
                     cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
+                        let activates = (event.keystroke.key == "enter" || event.keystroke.key == "space")
+                            && !event.keystroke.modifiers.modified();
+                        if !activates && view.clear_keyboard_active() {
+                            cx.notify();
+                        }
                         view.dispatch_unfocused_key_event(
                             "keyDown",
                             &event.keystroke,
@@ -10701,7 +10811,10 @@ impl gpui::Render for GpuixView {
                         }
                     }),
                 )
-                .on_key_up(cx.listener(|view, event: &gpui::KeyUpEvent, window, _cx| {
+                .on_key_up(cx.listener(|view, event: &gpui::KeyUpEvent, window, cx| {
+                    if view.clear_keyboard_active() {
+                        cx.notify();
+                    }
                     view.dispatch_unfocused_key_event("keyUp", &event.keystroke, None, window);
                     view.dispatch_focused_key_event("keyUp", &event.keystroke, None, window);
                 }));
@@ -11253,7 +11366,7 @@ fn build_element_with_parent_layout(
         focus_visible,
         hover_within,
         hovered: interaction.hovered,
-        active: interaction.active,
+        active: interaction.is_active(),
     };
     // Percentage terms stay deferred through GPUI/Taffy, where the layout
     // algorithm supplies the containing block's content size. Only `ch`, `vw`,
@@ -11320,7 +11433,7 @@ fn build_element_with_parent_layout(
         focus_visible,
         hover_within,
         interaction.hovered,
-        interaction.active,
+        interaction.is_active(),
     );
     ctx.inherited = parent_inherited
         .clone()
@@ -13882,6 +13995,7 @@ fn apply_click_handler<E>(
     mut el: E,
     element: &crate::retained_tree::RetainedElement,
     ctx: &BuildCtx,
+    cx: &mut gpui::Context<GpuixView>,
 ) -> E
 where
     E: gpui::StatefulInteractiveElement,
@@ -13900,6 +14014,25 @@ where
         != Some("anchor");
     let tracks_mouse_up = tracks_pointer_event(element, ctx.tree, "mouseUp");
     let tracks_pointer_up = tracks_pointer_event(element, ctx.tree, "pointerUp");
+    let tracks_active = tracks_active(element.style.as_deref());
+    let transition_active = element.style.as_deref().is_some_and(|style| {
+        style.transition.is_some() && style.active.is_some()
+    });
+    if tracks_active || transition_active {
+        let focus_handle = ctx.focus_handles.get(&element.id).cloned();
+        let id = element.id;
+        el = el.on_key_down(cx.listener(move |view, key_event: &gpui::KeyDownEvent, window, cx| {
+            let activates = (key_event.keystroke.key == "enter" || key_event.keystroke.key == "space")
+                && !key_event.keystroke.modifiers.modified();
+            if activates
+                && (activates_on_space || key_event.keystroke.key != "space")
+                && is_focused(focus_handle.as_ref(), window)
+                && view.begin_keyboard_active(id, window, cx)
+            {
+                cx.notify();
+            }
+        }));
+    }
     let callback = ctx.event_callback.clone();
     let id = element.id;
     el = el.on_click(move |click_event, _window, cx| {
@@ -14323,7 +14456,7 @@ pub(crate) fn build_host_container(
     // capture/target/bubble walk from that source to the listener's ancestor.
     // This preserves an interactive child's target identity while allowing an
     // inert background-painted child to reach an ancestor listener.
-    el = apply_click_handler(el, element, ctx);
+    el = apply_click_handler(el, element, ctx, cx);
 
     if tracks_pointer_event(element, ctx.tree, "auxClick") {
         let tracks_mouse_up = tracks_pointer_event(element, ctx.tree, "mouseUp");
@@ -14460,21 +14593,7 @@ pub(crate) fn build_host_container(
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(move |view, _event: &gpui::MouseDownEvent, _window, cx| {
-                    let transition_changed = transition_active
-                        && view
-                            .transition_states
-                            .get_mut(&id)
-                            .is_some_and(|state| state.set_active(true));
-                    let interactive_changed = tracks_active
-                        && view
-                            .interactive_style_states
-                            .entry(id)
-                            .or_default()
-                            .set_active(true);
-                    if interactive_changed {
-                        view.interaction_revision = view.interaction_revision.saturating_add(1);
-                    }
-                    if transition_changed || interactive_changed {
+                    if view.set_pointer_active(id, true) {
                         cx.notify();
                     }
                 }),
@@ -14482,21 +14601,7 @@ pub(crate) fn build_host_container(
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
-                    let transition_changed = transition_active
-                        && view
-                            .transition_states
-                            .get_mut(&id)
-                            .is_some_and(|state| state.set_active(false));
-                    let interactive_changed = tracks_active
-                        && view
-                            .interactive_style_states
-                            .entry(id)
-                            .or_default()
-                            .set_active(false);
-                    if interactive_changed {
-                        view.interaction_revision = view.interaction_revision.saturating_add(1);
-                    }
-                    if transition_changed || interactive_changed {
+                    if view.set_pointer_active(id, false) {
                         cx.notify();
                     }
                 }),
@@ -14504,21 +14609,7 @@ pub(crate) fn build_host_container(
             .on_mouse_up_out(
                 gpui::MouseButton::Left,
                 cx.listener(move |view, _event: &gpui::MouseUpEvent, _window, cx| {
-                    let transition_changed = transition_active
-                        && view
-                            .transition_states
-                            .get_mut(&id)
-                            .is_some_and(|state| state.set_active(false));
-                    let interactive_changed = tracks_active
-                        && view
-                            .interactive_style_states
-                            .entry(id)
-                            .or_default()
-                            .set_active(false);
-                    if interactive_changed {
-                        view.interaction_revision = view.interaction_revision.saturating_add(1);
-                    }
-                    if transition_changed || interactive_changed {
+                    if view.set_pointer_active(id, false) {
                         cx.notify();
                     }
                 }),

@@ -362,6 +362,19 @@ impl CustomElement for ChoiceInputElement {
                 }
             });
         }
+        if !native_disabled && ctx.style.is_some_and(|style| style.active.is_some()) {
+            let focus_handle = ctx.focus_handle.cloned();
+            let id = ctx.id;
+            el = el.on_key_down(cx.listener(move |view, event: &gpui::KeyDownEvent, window, cx| {
+                let activates = event.keystroke.key == "space" && !event.keystroke.modifiers.modified();
+                if activates
+                    && focus_handle.as_ref().is_some_and(|handle| handle.is_focused(window))
+                    && view.begin_keyboard_active(id, window, cx)
+                {
+                    cx.notify();
+                }
+            }));
+        }
         if ctx.events.contains("keyDown") {
             let callback = ctx.event_callback.clone();
             let id = ctx.id;

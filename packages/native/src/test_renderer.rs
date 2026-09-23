@@ -33,7 +33,8 @@ use crate::renderer::{
     parse_debug_frame_overlay_mode, set_application_menus, take_style_diagnostics_for_reporting,
     to_element_id, validate_canvas_target, CanvasImageLoadState, DebugFrameOverlayStats,
     ElementInteractionState, EventCallback, FocusDirection, FrameTimestampOrigin,
-    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostics, WindowSize,
+    GpuixStyleDiagnostic, GpuixView, InteractiveStyleState, MenuSpec, PendingStyleDiagnostics,
+    WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -2852,7 +2853,7 @@ impl TestGpuixRenderer {
                 let active = view
                     .interactive_style_states
                     .get(&id)
-                    .map(|state| state.active);
+                    .map(InteractiveStyleState::is_active);
                 let transitioned_style = view
                     .transition_states
                     .get(&id)
