@@ -46,6 +46,7 @@
         "string-dedent": "^3.0.2",
       },
       "devDependencies": {
+        "@gpuix/native": "workspace:*",
         "@types/mdast": "^4.0.4",
         "@types/react": "^19.2.0",
         "cbor-x": "^1.6.6",
@@ -56,7 +57,7 @@
     },
     "packages/native": {
       "name": "@gpuix/native",
-      "version": "0.8.0-fork.1",
+      "version": "0.22.0-fork.1",
       "devDependencies": {
         "@napi-rs/cli": "^3.1.3",
       },
@@ -87,9 +88,10 @@
     },
     "packages/react": {
       "name": "@gpuix/react",
-      "version": "0.8.0-fork.1",
+      "version": "0.22.0-fork.1",
       "dependencies": {
-        "@gpuix/native": "workspace:^",
+        "@gpuix/native": "0.22.0-fork.1",
+        "cn": "^0.4.0",
         "eventsource-parser": "^4.1.0",
         "zod": "^4.4.3",
       },
@@ -112,6 +114,7 @@
         "vitest": "^3.0.0 || ^4.0.0",
       },
       "optionalPeers": [
+        "scheduler",
         "vitest",
       ],
     },
@@ -640,6 +643,8 @@
     "cli-width": ["cli-width@4.1.0", "", {}, "sha512-ouuZd4/dm2Sw5Gmqy6bGyNNNe1qt9RpmxveLSO7KcgsTnU7RXfsw+/bukWGo1abgBiMAic068rclZsO4IWmmxQ=="],
 
     "clipanion": ["clipanion@4.0.0-rc.4", "", { "dependencies": { "typanion": "^3.8.0" } }, "sha512-CXkMQxU6s9GklO/1f714dkKBMu1lopS1WFF0B8o4AxPykR1hpozxSiUZ5ZUeBjfPgCWqbcNOtZVFhB8Lkfp1+Q=="],
+
+    "cn": ["cn@0.4.0", "", { "bin": { "cn": "bin/cn.mjs" } }, "sha512-qOAeUhPwPzBxx6jaeQdo646XIKliKHc2j1ZF7Ngb1o0pJZKH5gq8FkA0aVdUdPFUDXNXyUCXpCtoJISo6dhizg=="],
 
     "collapse-white-space": ["collapse-white-space@2.1.0", "", {}, "sha512-loKTxY1zCOuG4j9f6EPnuyyYkf58RnhhWTvRoZEokgB+WbdXehfjFviyOVYkqzEWz1Q5kRiZdBYS5SwxbQYwzw=="],
 

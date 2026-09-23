@@ -1,62 +1,23 @@
-import { readFile } from "node:fs/promises"
 import path from "node:path"
 import type { BuildConfig, PluginBuilder } from "bun"
 import { createUnplugin } from "unplugin"
 import { rewriteTextImports } from "./assets.js"
 import type { GpuixPluginOptions } from "./bun-types.js"
-import { transformGpuixCssModule } from "./css-modules.js"
+import { cssModuleId, isCssModule, isCssModuleId, loadCssModule, resolveCssModule } from "./css.js"
 import { reactRefreshRuntimePath, transformReactRefresh } from "./refresh.js"
 
 const NATIVE_ENTRY = "\0gpuix:native-entry"
-const CSS_MODULE_PREFIX = "\0gpuix:css-module:"
 const NATIVE_PACKAGE = "@gpuix/native"
+
+/** CSS modules are compiled in this environment only, never in a web one. */
+const GPUIX_ENVIRONMENTS = ["gpuix"]
 
 const VIRTUAL_MODULE_RE = /^\0gpuix:(?:css-module:|native-entry$)/
 const TRANSFORM_ID_RE = /\.[cm]?[jt]sx?(?:$|[?#])/
 const RESOLVE_ID_RE = /(?:\.module\.css(?:$|[?#])|^react-refresh\/runtime$|^\0gpuix:native-entry$)/
 
-type ViteResolveContext = {
-  environment?: { name?: string }
-  resolve?: (
-    id: string,
-    importer?: string,
-    options?: { skipSelf?: boolean },
-  ) => Promise<{ id: string; external?: boolean } | null>
-}
-
-type ViteLoadContext = {
-  addWatchFile: (id: string) => void
-}
-
-function cleanId(id: string): string {
-  return id.split(/[?#]/, 1)[0]
-}
-
-function isCssModule(id: string): boolean {
-  return cleanId(id).endsWith(".module.css")
-}
-
-function cssModuleId(sourceId: string): string {
-  // `encodeURIComponent` leaves periods alone. Encode them too so Vite's CSS
-  // plugin does not mistake this virtual JavaScript module for a CSS request.
-  return `${CSS_MODULE_PREFIX}${encodeURIComponent(sourceId).replaceAll(".", "%2E")}`
-}
-
-function sourceIdFromCssModuleId(id: string): string {
-  return decodeURIComponent(id.slice(CSS_MODULE_PREFIX.length))
-}
-
 function isGpuixViteEnvironment(context: unknown): boolean {
   return (context as { environment?: { name?: string } }).environment?.name === "gpuix"
-}
-
-export function resolveBunCssModule(id: string, importer: string | undefined): string {
-  const sourceId = cleanId(id)
-  if (path.isAbsolute(sourceId)) return sourceId
-  if (importer !== undefined && path.isAbsolute(importer)) {
-    return path.resolve(path.dirname(importer), sourceId)
-  }
-  return path.resolve(sourceId)
 }
 
 function asList(value: string | string[] | undefined): string[] {
@@ -120,39 +81,13 @@ export const gpuixUnplugin = createUnplugin<GpuixPluginOptions | undefined, fals
             return { id: reactRefreshRuntimePath, external: true }
           }
 
-          if (!isCssModule(id)) return undefined
-
-          if (meta.framework === "bun") {
-            return cssModuleId(resolveBunCssModule(id, importer))
-          }
-
-          if (meta.framework !== "vite" || !isGpuixViteEnvironment(this)) {
-            return undefined
-          }
-
-          const context = this as unknown as ViteResolveContext
-          const resolved = await context.resolve?.(id, importer, { skipSelf: true })
-          if (resolved === null || resolved === undefined || resolved.external) {
-            return undefined
-          }
-          return cssModuleId(cleanId(resolved.id))
+          return resolveCssModule(this, id, importer, meta.framework, GPUIX_ENVIRONMENTS)
         },
       },
       load: {
         filter: { id: VIRTUAL_MODULE_RE },
         async handler(id) {
-          if (id.startsWith(CSS_MODULE_PREFIX)) {
-            const sourceId = sourceIdFromCssModuleId(id)
-            const context = this as unknown as ViteLoadContext
-            context.addWatchFile(sourceId)
-            const css = await readFile(sourceId, "utf8")
-            return {
-              code: `export default ${JSON.stringify(
-                transformGpuixCssModule(css, sourceId),
-              )}`,
-              map: null,
-            }
-          }
+          if (isCssModuleId(id)) return loadCssModule(this, id)
 
           if (meta.framework !== "vite" || id !== NATIVE_ENTRY || entryId === undefined) {
             return undefined

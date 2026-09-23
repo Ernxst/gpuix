@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import type { BunPlugin } from "bun"
-import { gpuixUnplugin, resolveBunCssModule } from "./unplugin.js"
+import { resolveBunCssModule } from "./css.js"
+import { gpuixUnplugin } from "./unplugin.js"
 import type { GpuixBunOptions } from "./bun-types.js"
 import { transformGpuixCssModule } from "./css-modules.js"
 

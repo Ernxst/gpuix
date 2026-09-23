@@ -6,6 +6,7 @@
 
 import { createContext } from "react"
 import { DefaultEventPriority } from "react-reconciler/constants.js"
+import { unresolvedClassNames } from "../class-names.js"
 
 const NoEventPriority = 0
 import type {
@@ -828,7 +829,12 @@ function styleForRenderer(instance: Instance, container: Container, props: Props
 
 function authoredStyle(instance: Instance, container: Container, props: Props): StyleDesc | undefined {
   const { style } = props
-  if (style == null || isPlainStyleObject(style)) return style
+  if (style == null || isPlainStyleObject(style)) {
+    const fromClassName = classNameStyle(props)
+    if (fromClassName === undefined) return style
+    // `style` outranks the class, as an author rule outranks a stylesheet.
+    return style == null ? fromClassName : { ...fromClassName, ...style }
+  }
 
   const message =
     `[gpuix] ${elementSubject(instance, props)} received an invalid style prop. ` +
@@ -843,19 +849,42 @@ function authoredStyle(instance: Instance, container: Container, props: Props): 
   return {}
 }
 
+/**
+ * Styles a GPUIX build put in `className`.
+ *
+ * `@gpuix/plugins/css` compiles a `.module.css` import to the native styles it
+ * describes, so what a web build spells as a class name arrives here as a
+ * style object. Anything else in the prop is reported instead: the native
+ * renderer resolves no CSS classes.
+ */
+function classNameStyle(props: Props): StyleDesc | undefined {
+  const { className } = props as Props & { className?: unknown }
+  return isPlainStyleObject(className) ? className : undefined
+}
+
+/** Class names in `className` that no build resolved into native styles. */
+function unresolvedClassNamesOf(props: Props): string[] | undefined {
+  const { className } = props as Props & { className?: unknown }
+  // `className=""` and `className={null}` apply no CSS classes on the web
+  // either, so nothing is lost by ignoring them here.
+  if (className === undefined || className === null || className === "") return undefined
+  if (typeof className === "string") return [className]
+  if (isPlainStyleObject(className)) return unresolvedClassNames(className)
+  return [String(className)]
+}
+
 function diagnoseUnsupportedClassNameProp(
   instance: Instance,
   container: Container,
   props: Props
 ): void {
-  const className = (props as Props & { className?: unknown }).className
-  // `className=""` and `className={null}` apply no CSS classes on the web
-  // either, so nothing is lost by ignoring them here.
-  if (className === undefined || className === null || className === "") return
+  const unresolved = unresolvedClassNamesOf(props)
+  if (unresolved === undefined) return
 
   const message =
-    `[gpuix] ${elementSubject(instance, props)} does not support className. ` +
-    "CSS classes are not applied by the native renderer; use the style prop with a GPUIX style object instead."
+    `[gpuix] ${elementSubject(instance, props)} cannot apply the class names ` +
+    `${JSON.stringify(unresolved.join(" "))}. The native renderer resolves no CSS classes; ` +
+    "compile `.module.css` imports with @gpuix/plugins/css, or move the declarations into the style prop."
   if (container.strictStyles) throw new UnsupportedClassNamePropError(message)
   if (warnedUnsupportedClassNameProps.has(instance)) return
   warnedUnsupportedClassNameProps.add(instance)

@@ -1,0 +1,75 @@
+import { afterEach, expect, test } from "bun:test"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import { createServer, type ViteDevServer } from "vite"
+import { gpuixCssModules, loadCssModule, resolveCssModule } from "./css.ts"
+
+let server: ViteDevServer | undefined
+let fixture: string | undefined
+
+afterEach(async () => {
+  await server?.close()
+  server = undefined
+  if (fixture) await rm(fixture, { recursive: true, force: true })
+  fixture = undefined
+})
+
+test("compiles CSS modules in a plain Vite config, with no gpuix environment", async () => {
+  fixture = await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)), ".css-spike-"))
+  await writeFile(
+    path.join(fixture, "button.module.css"),
+    ".button { color: #ffffff; padding: 1rem 2px; }\n",
+  )
+  await writeFile(
+    path.join(fixture, "entry.ts"),
+    'export { default as styles } from "./button.module.css"\n',
+  )
+
+  server = await createServer({
+    appType: "custom",
+    configFile: false,
+    root: fixture,
+    plugins: [gpuixCssModules()],
+  })
+
+  const module = (await server.ssrLoadModule("/entry.ts")) as {
+    styles: Record<string, unknown>
+  }
+
+  expect(module.styles).toEqual({
+    button: { color: "#ffffff", paddingTop: 16, paddingRight: 2, paddingBottom: 16, paddingLeft: 2 },
+  })
+})
+
+test("skips environments the options leave out", async () => {
+  const context = {
+    environment: { name: "client" },
+    resolve: () => {
+      throw new Error("should not resolve in an unselected environment")
+    },
+  }
+
+  expect(
+    await resolveCssModule(context, "./button.module.css", "/app/main.tsx", "vite", ["gpuix"]),
+  ).toBeUndefined()
+})
+
+test("resolves a Bun import against its importer", async () => {
+  const id = await resolveCssModule({}, "./button.module.css", "/app/main.tsx", "bun")
+
+  expect(id).toBe("\0gpuix:css-module:%2Fapp%2Fbutton%2Emodule%2Ecss")
+})
+
+test("compiles a virtual module id and watches its source", async () => {
+  fixture = await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)), ".css-load-"))
+  const source = path.join(fixture, "card.module.css")
+  await writeFile(source, ".card { display: flex; }\n")
+
+  const watched: string[] = []
+  const id = (await resolveCssModule({}, source, undefined, "bun")) as string
+  const result = await loadCssModule({ addWatchFile: (file: string) => watched.push(file) }, id)
+
+  expect(result.code).toBe('export default {"card":{"display":"flex"}}')
+  expect(watched).toEqual([source])
+})

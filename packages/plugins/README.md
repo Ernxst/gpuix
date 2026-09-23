@@ -122,40 +122,80 @@ module with incompatible exports, such as a TanStack Router route module,
 perform Vite's ordinary reload and remount the native React tree. Rebuild and
 restart Bun after changing Rust or the native binding.
 
-## Native CSS modules
+## CSS modules
 
-In the native `gpuix` environment and the Bun build plugin, imports ending in
-`.module.css` are converted to objects for the `style` prop:
+A `.module.css` import goes in `className`, the same as on the web:
 
 ```tsx
 import styles from "./button.module.css"
 
 export function Button() {
-  return <div style={styles.button}>Save</div>
+  return <div className={styles.button}>Save</div>
 }
 ```
 
-The transform accepts simple local class selectors and declarations supported
-by GPUIX's native style model. Grouped class selectors are supported, including
-selectors with one `:hover`, `:active`, `:focus`, or `:focus-visible` state.
-It also accepts `.container:hover .child`, which adds a generated `hoverGroup`
-to the container and a `hoverWithin` style to the child. A child class can have
-one hovered ancestor relation. The renderer activates `hoverWithin` when any
-hovered group is above the child, so nesting that child below another hovered
-group also activates the style. Other selectors, at-rules, animations, and
-CSS-module composition are rejected until they have a native style
-representation.
+A web build resolves that import to a class name and applies the stylesheet. A
+GPUIX build has no CSS engine, so `@gpuix/plugins/css` compiles the file into
+the styles it describes and the renderer applies them as the element's style.
+One component source works on both, and `style` wins where both set the same
+property.
 
-Vite's normal browser environment continues to use ordinary CSS Modules. Add a
-type-only import to opt into the native CSS-module declaration:
+The transform puts compiled styles in `className` and accepts local class
+selectors, grouped selectors, and declarations supported by GPUIX's native
+style model. It supports the `:hover`, `:active`, `:focus`, and
+`:focus-visible` states, plus hovered-descendant selectors such as
+`.container:hover .child`, limited to one hovered-ancestor relation per child.
+Other selectors, at-rules, animations, and CSS-module composition are rejected
+until they have a native style representation.
+
+`gpuix()` already compiles CSS modules in its own Vite environment. Add the
+standalone plugin where that one cannot run — a Vitest config, a native-only
+Vite config, another bundler:
+
+```ts
+import { defineConfig } from "vite"
+import { gpuixCssModules } from "@gpuix/plugins/css"
+
+export default defineConfig({
+  plugins: [gpuixCssModules()],
+})
+```
+
+It compiles every environment by default. Pass `environments` to restrict it,
+as `gpuix()` does for its own. A web build needs no GPUIX plugin at all: Vite's
+CSS modules already produce what `className` wants there.
+
+### Combining classes
+
+Import `cn` from `@gpuix/react/cn` rather than from `cn` or `clsx`:
+
+```tsx
+import { cn } from "@gpuix/react/cn"
+
+<div className={cn(styles.item, active && styles.active, className)} />
+```
+
+On the web it is the `cn` package, Tailwind conflict resolution included. On
+GPUIX it merges the compiled styles instead, later values winning. A literal
+class name reaching a GPUIX build cannot be applied, so the renderer names it
+in a diagnostic rather than dropping it silently. `cn({ [styles.active]: on })`
+works only on the web, because the key of a compiled style is not a class name;
+write `on && styles.active` for code that runs on both.
+
+### Types
+
+Opt into the `.module.css` declaration from a project `.d.ts` file:
 
 ```ts
 // src/gpuix-css-modules.d.ts
 import "@gpuix/plugins/css-modules"
 ```
 
-Keep this declaration opt-in in projects that also compile browser CSS modules:
-the browser and native environments give the same `.module.css` import
-different value shapes.
+It types the import as the class-name string a web build produces, which is
+what both targets pass along and neither reads as text. Typing it that way
+keeps one component compiling against react-dom and GPUIX alike, and keeps an
+inline style object out of `className`. Building a class name out of one —
+`` `${styles.a} extra` `` — compiles and then fails on GPUIX, where the value
+is an object.
 
 For complete setup and packaging instructions, see the repository README.

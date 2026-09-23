@@ -1275,7 +1275,8 @@ if (!result.success) throw new Error('Bun build failed')
 The adapter defaults to Bun as the target, ESM output, automatic JSX using
 `@gpuix/react`, and an external `@gpuix/native` import. Explicit scalar build
 options win. `external`, `define`, and `conditions` are merged. The adapter
-also converts native `*.module.css` imports into objects for the `style` prop.
+also compiles `*.module.css` imports into the styles the renderer applies for
+`className`.
 
 ### 4. Start the app with `bun --hot`
 
@@ -1309,9 +1310,12 @@ Opt into the matching TypeScript declaration from a project `.d.ts` file:
 import '@gpuix/plugins/css-modules'
 ```
 
-Keep that declaration opt-in when the project also imports browser CSS modules;
-browser modules export class-name strings while native modules export style
-objects. Bun's runtime watcher does not currently re-run files handled by
+A `.module.css` import goes in `className` on both targets: a browser build
+resolves it to a class name, and a GPUIX build compiles the file into the
+styles the renderer applies. Combine classes with `cn` from `@gpuix/react/cn`,
+which joins them on the web and merges the compiled styles on GPUIX. See the
+[`@gpuix/plugins` README](packages/plugins/README.md) for what the transform
+accepts. Bun's runtime watcher does not currently re-run files handled by
 custom `onLoad` plugins, so restart the process after changing a CSS module.
 
 ### 5. Save the file
@@ -4356,6 +4360,12 @@ CSS-like styling via the `style` prop:
   </div>
 </div>
 ```
+
+`className` takes a `.module.css` import, which `@gpuix/plugins/css` compiles
+into these same styles; the renderer applies them, with `style` winning where
+both set a property. A class name that reaches the renderer uncompiled is
+reported, because GPU-IX resolves no CSS classes. See [hot
+reload](#4-start-the-app-with-bun---hot) for the setup.
 
 GPU-IX accepts CSS custom-property keys such as `--collapsible-panel-height`
 and `--accordion-panel-width` for compatibility with components that measure

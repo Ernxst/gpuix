@@ -35,7 +35,7 @@ export function Counter({ label }: { label: string }) {
   Reflect.set(globalThis, "__gpuixViteIcon", icon)
   Reflect.set(globalThis, "__gpuixViteStyle", styles.label)
   Reflect.set(globalThis, "__gpuixViteText", "${prefix} " + label + " " + count)
-  return <text style={styles.label}>${prefix} {label} {count}</text>
+  return <text className={styles.label}>${prefix} {label} {count}</text>
 }
 `
 }

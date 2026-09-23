@@ -1187,6 +1187,15 @@ export interface Props extends AccessibilityProps {
   // `<div key={...} />` inside a `.map()` fails to typecheck.
   key?: React.Key | null
   style?: StyleDesc
+  /**
+   * CSS-module compatibility, so one component can render on the web and on
+   * GPUIX. Typed as the class name a web build produces; a GPUIX build
+   * compiles `.module.css` imports to native styles with `@gpuix/plugins/css`
+   * and the renderer applies them as this element's style, with `style`
+   * winning where both set a property. A class name that reaches the renderer
+   * unresolved is reported: no CSS classes are resolved natively.
+   */
+  className?: string
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
 
