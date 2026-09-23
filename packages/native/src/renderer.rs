@@ -205,6 +205,41 @@ pub(crate) fn pending_custom_prop_diagnostic(
     })
 }
 
+/// Whether a `hoverWithinGroup` name on `element_id` matches any ancestor's
+/// `hoverGroup`. `None` when there is no `hoverWithinGroup` to check, or when
+/// a matching ancestor exists.
+pub(crate) fn pending_hover_within_group_diagnostic(
+    tree: &RetainedTree,
+    element_id: u64,
+) -> Option<PendingStyleDiagnostic> {
+    let style = tree.elements.get(&element_id)?.style.as_deref()?;
+    let target = style.hover_within_group.as_deref()?;
+    let mut current = tree.elements.get(&element_id).and_then(|element| element.parent);
+    while let Some(id) = current {
+        let Some(element) = tree.elements.get(&id) else {
+            break;
+        };
+        if element
+            .style
+            .as_deref()
+            .and_then(|style| style.hover_group.as_deref())
+            == Some(target)
+        {
+            return None;
+        }
+        current = element.parent;
+    }
+    Some(PendingStyleDiagnostic {
+        element_id,
+        problem: StyleProblem {
+            property: "hoverWithinGroup".to_string(),
+            value: format!("{target:?}"),
+            reason: format!("no ancestor hoverGroup named {target:?} was found"),
+        },
+        kind: DiagnosticKind::Property,
+    })
+}
+
 pub(crate) fn pending_accessibility_diagnostics(
     tree: &RetainedTree,
     element_id: u64,
@@ -8719,6 +8754,21 @@ struct InheritedHoverGroup {
     id: u64,
 }
 
+/// The marked ancestor a `hoverWithinGroup` name binds to, or — when unnamed —
+/// the outermost marked ancestor. `groups` is outer-to-inner, so a named
+/// search walks from the innermost end to find the nearest match, matching
+/// Tailwind's `group-hover/name` semantics: the nearest ancestor with that
+/// name, not any ancestor.
+fn nearest_hover_group<'a>(
+    groups: &'a [InheritedHoverGroup],
+    target: Option<&str>,
+) -> Option<&'a InheritedHoverGroup> {
+    match target {
+        Some(name) => groups.iter().rev().find(|group| group.name.as_ref() == name),
+        None => groups.first(),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct InheritedFont {
     font: gpui::Font,
@@ -11111,11 +11161,23 @@ fn build_element_with_parent_layout(
         .get(&id)
         .is_some_and(|handle| handle.is_focused(window));
     let focus_visible = focused && window.last_input_was_keyboard();
-    let hover_within = parent_inherited.hover_groups.iter().any(|group| {
-        ctx.interactive_style_states
-            .get(&group.id)
-            .is_some_and(|state| state.hovered)
-    });
+    let hover_within_group_target = element
+        .style
+        .as_deref()
+        .and_then(|style| style.hover_within_group.as_deref());
+    let hover_within = match hover_within_group_target {
+        Some(_) => nearest_hover_group(&parent_inherited.hover_groups, hover_within_group_target)
+            .is_some_and(|group| {
+                ctx.interactive_style_states
+                    .get(&group.id)
+                    .is_some_and(|state| state.hovered)
+            }),
+        None => parent_inherited.hover_groups.iter().any(|group| {
+            ctx.interactive_style_states
+                .get(&group.id)
+                .is_some_and(|state| state.hovered)
+        }),
+    };
     let effective_display = element
         .style
         .as_deref()
@@ -11412,14 +11474,18 @@ fn build_element_with_parent_layout(
         default_flex_none_for_parent_layout(resolved_style.get_or_insert_default());
     }
     if let Some(style) = resolved_style.as_mut() {
-        // GPUI stores one group-hover refinement per element. The outermost
-        // marked ancestor is sufficient for the CSS OR: hovering any nested
-        // marked ancestor also hovers every ancestor containing it, while the
-        // outer group's own padding remains independently hoverable.
-        style.hover_within_group = parent_inherited
-            .hover_groups
-            .first()
-            .map(|group| group.name.clone());
+        // GPUI stores one group-hover refinement per element. Unnamed,
+        // the outermost marked ancestor is sufficient for the CSS OR:
+        // hovering any nested marked ancestor also hovers every ancestor
+        // containing it, while the outer group's own padding remains
+        // independently hoverable. A `hoverWithinGroup` name instead binds to
+        // the nearest ancestor with that `hoverGroup` name specifically, per
+        // Tailwind's `group-hover/name`; no match leaves it unbound.
+        style.resolved_hover_within_group = nearest_hover_group(
+            &parent_inherited.hover_groups,
+            style.hover_within_group.as_deref(),
+        )
+        .map(|group| group.name.clone());
     }
     let style = resolved_style.as_ref();
     let box_insets = style.map(|style| {
@@ -13870,23 +13936,37 @@ fn interaction_state_for_element(
         .get(&element_id)
         .is_some_and(|handle| handle.is_focused(window));
     let focus_visible = focused && window.last_input_was_keyboard();
+    let hover_within_group_target = tree
+        .elements
+        .get(&element_id)
+        .and_then(|element| element.style.as_deref())
+        .and_then(|style| style.hover_within_group.as_deref());
     let mut current = tree.elements.get(&element_id).and_then(|element| element.parent);
     let mut hover_within = false;
     while let Some(id) = current {
         let Some(element) = tree.elements.get(&id) else {
             break;
         };
-        if element
+        let group_name = element
             .style
             .as_deref()
-            .and_then(|style| style.hover_group.as_deref())
-            .is_some()
-            && interactive_style_states
-                .get(&id)
-                .is_some_and(|state| state.hovered)
-        {
-            hover_within = true;
-            break;
+            .and_then(|style| style.hover_group.as_deref());
+        match (hover_within_group_target, group_name) {
+            (Some(target), Some(name)) if target == name => {
+                hover_within = interactive_style_states
+                    .get(&id)
+                    .is_some_and(|state| state.hovered);
+                break;
+            }
+            (None, Some(_))
+                if interactive_style_states
+                    .get(&id)
+                    .is_some_and(|state| state.hovered) =>
+            {
+                hover_within = true;
+                break;
+            }
+            _ => {}
         }
         current = element.parent;
     }
@@ -15193,7 +15273,7 @@ where
     }
     el = apply_focus_styles(el, style);
     if let (Some(group), Some(hover_within_style)) = (
-        style.hover_within_group.clone(),
+        style.resolved_hover_within_group.clone(),
         style.hover_within.as_deref(),
     ) {
         let hover_within_style = effective_state_style(style, hover_within_style);
@@ -16591,6 +16671,11 @@ pub(crate) fn apply_batch_to_tree_with_diagnostics(
     }
     let mut inline_style_candidates = inline_style_candidates.into_iter().collect::<Vec<_>>();
     inline_style_candidates.sort_unstable();
+    if collect_diagnostics {
+        for &id in &inline_style_candidates {
+            diagnostics.extend(pending_hover_within_group_diagnostic(tree, id));
+        }
+    }
     for id in inline_style_candidates {
         if !crate::text::inline::is_inline_text_descendant(tree, id) {
             continue;

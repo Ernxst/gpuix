@@ -906,11 +906,15 @@ pub struct StyleDesc {
     #[serde(default, deserialize_with = "deserialize_transition_list")]
     pub transition: Option<Vec<StyleTransition>>,
     pub hover_group: Option<String>,
+    /// Name of the marked ancestor `hoverWithin` follows. Unset falls back to
+    /// the outermost marked ancestor, matching CSS's ancestor-hover OR.
+    pub hover_within_group: Option<String>,
 
-    /// Nearest ancestor hover group, resolved by the renderer for this frame.
-    /// This is paint context rather than an authored declaration.
+    /// The marked ancestor `hoverWithin` actually binds to for this frame,
+    /// resolved from `hover_within_group` by the renderer. This is paint
+    /// context rather than an authored declaration.
     #[serde(skip)]
-    pub(crate) hover_within_group: Option<gpui::SharedString>,
+    pub(crate) resolved_hover_within_group: Option<gpui::SharedString>,
 
     pub hover: Option<Box<StyleDesc>>,
     pub hover_within: Option<Box<StyleDesc>>,
@@ -2472,6 +2476,23 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                     property!("hoverGroup"),
                     value,
                     "hoverGroup marks the base element and cannot be nested in a state style",
+                );
+            }
+            continue;
+        }
+        if key == "hoverWithinGroup" {
+            if prefix.is_empty() {
+                parsed.style.hover_within_group = decode::<String>(
+                    &property!("hoverWithinGroup"),
+                    value,
+                    &mut parsed.problems,
+                );
+            } else {
+                reject(
+                    &mut parsed.problems,
+                    property!("hoverWithinGroup"),
+                    value,
+                    "hoverWithinGroup marks the base element and cannot be nested in a state style",
                 );
             }
             continue;
@@ -4133,6 +4154,26 @@ mod tests {
     }
 
     #[test]
+    fn hover_within_group_is_a_top_level_style_marker() {
+        let top_level = parse_style_value(&json!({ "hoverWithinGroup": "sidebar" }));
+        assert!(top_level.problems.is_empty());
+        assert_eq!(
+            top_level.style.hover_within_group.as_deref(),
+            Some("sidebar")
+        );
+
+        let nested = parse_style_value(&json!({
+            "hover": { "hoverWithinGroup": "sidebar" }
+        }));
+        assert_eq!(nested.problems.len(), 1);
+        assert_eq!(nested.problems[0].property, "hover.hoverWithinGroup");
+        assert_eq!(
+            nested.problems[0].reason,
+            "hoverWithinGroup marks the base element and cannot be nested in a state style"
+        );
+    }
+
+    #[test]
     fn rejects_display_none_in_hover_and_active_styles() {
         let reason = "display: \"none\" cannot be set by hover or active: hiding the element removes the hit-test box that triggers the state; use visibility: \"hidden\" or hoverWithin on a descendant";
 
@@ -5134,6 +5175,7 @@ mod tests {
                 "easing": "ease"
             },
             "hoverGroup": "destination-row",
+            "hoverWithinGroup": "destination-row",
             "hover": { "color": "blue" },
             "hoverWithin": { "backgroundColor": "magenta" },
             "active": { "color": "green" },

@@ -1524,4 +1524,34 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(diagnostics.find((diagnostic) => diagnostic.dataTestId === "allowed-state-display")).toBeUndefined()
     expect(warn).toHaveBeenCalled()
   })
+
+  it("reports a hoverWithinGroup naming no ancestor hoverGroup", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    testRoot.render(
+      <div style={{ hoverGroup: "outer" }}>
+        <span
+          data-testid="orphaned-hover-within"
+          style={{
+            hoverWithinGroup: "sidebar",
+            hoverWithin: { backgroundColor: "#7c86ff" },
+          }}
+        />
+      </div>,
+    )
+
+    const element = testRoot.renderer.findByTestId("orphaned-hover-within")!
+    const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementId: element.id,
+      elementType: "div",
+      dataTestId: "orphaned-hover-within",
+      property: "hoverWithinGroup",
+      value: '"sidebar"',
+    })
+    expect(diagnostics[0].message).toContain('no ancestor hoverGroup named "sidebar" was found')
+    expect(warn).toHaveBeenCalled()
+  })
 })
