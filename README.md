@@ -5112,21 +5112,22 @@ real platform and a native clipboard call would hit it.
 
 `import "@gpuix/react/globals"` is an opt-in, side-effect-only entry for code
 that assumes a browser: it installs exactly `requestAnimationFrame`,
-`cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`,
+`cancelAnimationFrame`, `window`, `self`, `scrollTo`, `ResizeObserver`, `Image`,
 `navigator.clipboard`, `navigator.gpu`, `PointerEvent`, and the element
 constructors and `document` facade below on `globalThis`, and nothing else. Each
 name is installed only if it is not already present, so a real browser,
 Vitest's `jsdom`/`happy-dom` environment, or an earlier import of this module
 all win over the shim.
-`window` is `globalThis` itself, not a constructed DOM `Window`; GPUIX has no
-scroll position to move, so `scrollTo` is a no-op returning `undefined`.
-TanStack Router, for example, reads `window?.origin` and calls `scrollTo()`
-during navigation; without this entry those calls hit an undefined global
-under GPUIX. `navigator.clipboard` is installed as the `clipboard` object
-above — defined on a pre-existing `navigator` that lacks a `clipboard` of its
-own, or as part of a newly defined `navigator` when none exists at all
-(Node has had a global `navigator` since v21, so the common case on the
-server is the former).
+`window` and `self` are `globalThis` itself, not a constructed DOM `Window`;
+GPUIX has no scroll position to move, so `scrollTo` is a no-op returning
+`undefined`. TanStack Router reads `window?.origin` and calls `scrollTo()` during
+navigation. Its `RouterCore` constructor also assigns
+`self.__TSR_ROUTER__ = this` when it detects a document; these globals would
+otherwise be undefined under GPUIX. `navigator.clipboard` is installed as the
+`clipboard` object above — defined on a pre-existing `navigator` that lacks a
+`clipboard` of its own, or as part of a newly defined `navigator` when none
+exists at all (Node has had a global `navigator` since v21, so the common case
+on the server is the former).
 
 `Image` is the native-compatible constructor exported by `@gpuix/react`; its
 instances load through the most recently attached GPUIX root and support

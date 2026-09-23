@@ -2,7 +2,7 @@
  * Opt-in `globalThis` shims for code written against the browser DOM.
  *
  * `import "@gpuix/react/globals"` installs `requestAnimationFrame`,
- * `cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`,
+ * `cancelAnimationFrame`, `window`, `self`, `scrollTo`, `ResizeObserver`, `Image`,
  * `navigator.clipboard`, `navigator.gpu`, `PointerEvent`, and the element
  * constructors `Node`, `Element`, `HTMLElement`, `HTMLDivElement`,
  * `HTMLButtonElement`, `HTMLInputElement`, and `HTMLTextAreaElement`, and
@@ -49,6 +49,7 @@ function defineGlobalIfAbsent(name: string, value: unknown): void {
 defineGlobalIfAbsent("requestAnimationFrame", requestNativeAnimationFrame)
 defineGlobalIfAbsent("cancelAnimationFrame", cancelNativeAnimationFrame)
 defineGlobalIfAbsent("window", globalThis)
+defineGlobalIfAbsent("self", globalThis)
 defineGlobalIfAbsent("scrollTo", () => undefined)
 defineGlobalIfAbsent("ResizeObserver", ResizeObserver)
 defineGlobalIfAbsent("Image", Image)

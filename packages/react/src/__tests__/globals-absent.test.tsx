@@ -12,6 +12,7 @@ import type { PublicInstance } from "../types/host.js"
 describe("@gpuix/react (root entry)", () => {
   it("installs no globals", () => {
     expect(typeof window).toBe("undefined")
+    expect(typeof self).toBe("undefined")
     expect(Reflect.has(globalThis, "requestAnimationFrame")).toBe(false)
     expect(Reflect.has(globalThis, "cancelAnimationFrame")).toBe(false)
     expect(Reflect.has(globalThis, "scrollTo")).toBe(false)
