@@ -3,11 +3,9 @@ import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
-import { createServer } from "vite"
 import type { BunPlugin } from "bun"
 import { gpuix as gpuixBun, gpuixDev } from "./bun.ts"
 import { transformGpuixCssModule } from "./css-modules.ts"
-import { gpuix } from "./index.ts"
 
 test("converts simple CSS module classes into GPUIX style objects", () => {
   expect(
@@ -208,52 +206,6 @@ test("rejects other selectors and at-rules", () => {
   expect(() =>
     transformGpuixCssModule("@media (min-width: 1px) { .panel { color: red; } }", "/fixture/panel.module.css"),
   ).toThrow('at-rule "@media" is not supported yet')
-})
-
-test("Vite rejects native builds", () => {
-  const plugin = gpuix({ entry: "main.tsx" })
-  const apply = plugin.apply
-
-  expect(typeof apply).toBe("function")
-  expect(() =>
-    Reflect.apply(apply as (...args: unknown[]) => unknown, undefined, [
-      {},
-      { command: "build", mode: "production" },
-    ]),
-  ).toThrow(
-    "[gpuix] Vite builds are not supported for native apps; use @gpuix/plugins/bun with Bun.build().",
-  )
-})
-
-test("Vite serves a native CSS module as a JavaScript style object", async () => {
-  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-vite-css-module-"))
-  let server: Awaited<ReturnType<typeof createServer>> | undefined
-
-  try {
-    await writeFile(
-      path.join(fixture, "panel.module.css"),
-      ".panel { background-color: #123456; }\n",
-    )
-    const basePlugin = gpuix({ entry: "main.tsx" })
-
-    server = await createServer({
-      appType: "custom",
-      configFile: false,
-      root: fixture,
-      plugins: [{ ...basePlugin, configureServer: undefined }],
-    })
-
-    const result = await server.environments.gpuix.transformRequest("/panel.module.css")
-    expect(result?.code).toContain('__vite_ssr_export_default__')
-    expect(result?.code).toContain('"backgroundColor":"#123456"')
-
-    const browserResult = await server.transformRequest("/panel.module.css")
-    expect(browserResult?.code).toContain("__vite__css")
-    expect(browserResult?.code).not.toContain("backgroundColor")
-  } finally {
-    await server?.close()
-    await rm(fixture, { recursive: true, force: true })
-  }
 })
 
 test("Bun builds native CSS modules and receives GPUIX build defaults", async () => {

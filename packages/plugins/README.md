@@ -1,34 +1,9 @@
 # @gpuix/plugins
 
-Use `@gpuix/plugins/vite` to run a native GPUIX app with Vite during
-development. Use `@gpuix/plugins/bun` to package it with `Bun.build`.
+Use `@gpuix/plugins` with Bun to develop and package a native GPUIX app. Install
+it alongside `@gpuix/react`.
 
-The Vite process runs under Bun, so the native N-API binding and Vite share one
-runtime.
-
-Install this package alongside `@gpuix/react`. Add Vite when using the `/vite`
-entry point, then configure it with an application entry point:
-
-```ts
-import { defineConfig } from "vite"
-import { gpuix } from "@gpuix/plugins/vite"
-
-export default defineConfig({
-  appType: "custom",
-  plugins: [gpuix({ entry: "app.tsx" })],
-})
-```
-
-Run the Vite executable under Bun in `package.json`:
-
-```json
-{ "scripts": { "dev": "bun run --bun vite" } }
-```
-
-The Vite adapter is for native development. If a config includes `gpuix()` in
-`vite build`, it throws; use the Bun adapter for native packaging.
-
-### Bun hot reload
+### Develop with Bun hot reload
 
 Pass the package preload to Bun when developing with `bun --hot`:
 
@@ -84,39 +59,6 @@ plugins: [
 ]
 ```
 
-## Shared native and web config
-
-When one Vite config also serves a browser entry, keep the React plugin enabled
-and add `gpuix()` only in native mode:
-
-```ts
-import { defineConfig } from "vite"
-import react from "@vitejs/plugin-react"
-import { gpuix } from "@gpuix/plugins/vite"
-
-export default defineConfig(({ mode }) => {
-  const native = mode === "native"
-
-  return {
-    appType: native ? "custom" : "spa",
-    plugins: [
-      react({ jsxImportSource: "@gpuix/react" }),
-      native && gpuix({ entry: "src/native.tsx" }),
-    ],
-  }
-})
-```
-
-The React plugin refreshes Vite's client environment. GPUIX refreshes the
-native environment, so the two plugins do not apply two Refresh wrappers to the
-native app. The scoped `--bun` flag runs only Vite under Bun; browser and Node
-test commands keep their usual runtimes.
-
-Component-only React edits use Fast Refresh and preserve state. Changes to a
-module with incompatible exports, such as a TanStack Router route module,
-perform Vite's ordinary reload and remount the native React tree. Rebuild and
-restart Bun after changing Rust or the native binding.
-
 ## CSS modules
 
 A `.module.css` import goes in `className`, the same as on the web:
@@ -143,9 +85,8 @@ style model. It supports the `:hover`, `:active`, `:focus`, and
 Other selectors, at-rules, animations, and CSS-module composition are rejected
 until they have a native style representation.
 
-`gpuix()` already compiles CSS modules in its own Vite environment. Add the
-standalone plugin where that one cannot run — a Vitest config, a native-only
-Vite config, another bundler:
+Add `@gpuix/plugins/css` to the Vite or Vitest project that should compile
+native CSS modules:
 
 ```ts
 import { defineConfig } from "vite"
@@ -156,9 +97,9 @@ export default defineConfig({
 })
 ```
 
-It compiles every environment by default. Pass `environments` to restrict it,
-as `gpuix()` does for its own. A web build needs no GPUIX plugin at all: Vite's
-CSS modules already produce what `className` wants there.
+The plugin compiles CSS modules in the project where it is installed. A web
+build needs no GPUIX plugin: Vite's CSS modules already produce what
+`className` wants there.
 
 `gpuixCssModulesBun()` is the same transform for Bun, in `Bun.build()` or in a
 `Bun.plugin()` preload. A Bun build without it compiles `.module.css` to class

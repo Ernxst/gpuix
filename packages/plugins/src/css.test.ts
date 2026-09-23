@@ -43,19 +43,6 @@ test("compiles CSS modules in a plain Vite config, with no gpuix environment", a
   })
 })
 
-test("skips environments the options leave out", async () => {
-  const context = {
-    environment: { name: "client" },
-    resolve: () => {
-      throw new Error("should not resolve in an unselected environment")
-    },
-  }
-
-  expect(
-    await resolveCssModule(context, "./button.module.css", "/app/main.tsx", "vite", ["gpuix"]),
-  ).toBeUndefined()
-})
-
 test("resolves a Bun import against its importer", async () => {
   const id = await resolveCssModule({}, "./button.module.css", "/app/main.tsx", "bun")
 
