@@ -4679,16 +4679,15 @@ descendants. Releasing capture outside the group clears the style. No React
 hover state or mouse handlers are involved.
 
 `activeWithin` shares the same `hoverGroup` marker and matches the CSS
-`.group:active .descendant` pattern: it applies while the nearest marked
+`.group:active .descendant` pattern: it applies while any matching marked
 ancestor is pressed rather than hovered.
 
-A descendant nested inside more than one named group can pick one with
-`hoverWithinGroup`, matching Tailwind's `group-hover/name`. Set it to a
-`hoverGroup` name and `hoverWithin` (and, sharing the same binding,
-`activeWithin`) binds to the nearest ancestor with that name instead of the
-outermost marked ancestor; hovering or pressing any other group, including one
-nested inside it, no longer activates the style. A `hoverWithinGroup` naming
-no ancestor `hoverGroup` produces a style diagnostic.
+A descendant nested inside named groups can select a name with
+`hoverWithinGroup`, matching Tailwind's `group-hover/name`. `hoverWithin` and
+`activeWithin` then match every ancestor whose `hoverGroup` has that name. An
+outer group can activate the style through an unhovered inner group with the
+same name. Groups with other names do not activate it. A `hoverWithinGroup`
+naming no ancestor `hoverGroup` produces a style diagnostic.
 
 ```tsx
 <div style={{ hoverGroup: 'outer' }}>

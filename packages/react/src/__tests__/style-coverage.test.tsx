@@ -1046,6 +1046,77 @@ describe("style props reach the renderer", { timeout: 16_000 }, () => {
     })
   })
 
+  it("matches every same-named hoverGroup for hoverWithin and activeWithin", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div
+        data-testid="outer-card"
+        style={{
+          hoverGroup: "card",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 360,
+          height: 220,
+          padding: 30,
+          backgroundColor: "#111827",
+        }}
+      >
+        <div
+          data-testid="inner-card"
+          style={{
+            hoverGroup: "card",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 220,
+            height: 120,
+            padding: 20,
+            backgroundColor: "#1f2937",
+          }}
+        >
+          <span
+            data-testid="same-name-target"
+            style={{
+              width: 120,
+              height: 40,
+              backgroundColor: "#334155",
+              hoverWithinGroup: "card",
+              hoverWithin: { backgroundColor: "#f59e0b" },
+              activeWithin: { backgroundColor: "#22c55e" },
+            }}
+          />
+        </div>
+      </div>
+    )
+
+    const outer = boundsFor(renderer, "outer-card")
+    const inner = boundsFor(renderer, "inner-card")
+    const target = renderer.findByTestId("same-name-target")!
+    const before = path.join(SHOTS_DIR, "same-name-before.png")
+    const outerHovered = path.join(SHOTS_DIR, "same-name-outer-hovered.png")
+    const bothHovered = path.join(SHOTS_DIR, "same-name-both-hovered.png")
+
+    renderer.nativeSimulateMouseMove(outer.x + outer.width + 20, outer.y + outer.height + 20)
+    expect(renderer.getResolvedStyle(target.id)?.backgroundColor).toBe("#334155")
+    renderer.captureScreenshot(before)
+
+    renderer.nativeSimulateMouseMove(outer.x + 10, outer.y + 10)
+    expect(renderer.getResolvedStyle(target.id)?.backgroundColor).toBe("#f59e0b")
+    renderer.captureScreenshot(outerHovered)
+
+    renderer.nativeSimulateMouseMove(inner.x + 10, inner.y + 10)
+    expect(renderer.getResolvedStyle(target.id)?.backgroundColor).toBe("#f59e0b")
+    renderer.captureScreenshot(bothHovered)
+    expectScreenshotsDiffer(before, outerHovered)
+    expectScreenshotsEqual(outerHovered, bothHovered)
+
+    renderer.nativeSimulateMouseMove(outer.x + 10, outer.y + 10)
+    renderer.nativeSimulateMouseDown(outer.x + 10, outer.y + 10, 0)
+    expect(renderer.getResolvedStyle(target.id)?.backgroundColor).toBe("#22c55e")
+    renderer.nativeSimulateMouseUp(outer.x + 10, outer.y + 10, 0)
+  })
+
   it("lets virtual-list hoverGroup activate descendant hoverWithin", () => {
     const { render, renderer } = createTestRoot()
     render(

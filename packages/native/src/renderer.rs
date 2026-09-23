@@ -8764,18 +8764,118 @@ struct InheritedHoverGroup {
     id: u64,
 }
 
-/// The marked ancestor a `hoverWithinGroup` name binds to, or — when unnamed —
-/// the outermost marked ancestor. `groups` is outer-to-inner, so a named
-/// search walks from the innermost end to find the nearest match, matching
-/// Tailwind's `group-hover/name` semantics: the nearest ancestor with that
-/// name, not any ancestor.
-fn nearest_hover_group<'a>(
+struct ResolvedHoverGroups<'a> {
+    hover_within: bool,
+    active_within: bool,
+    hover_paint_group: Option<&'a InheritedHoverGroup>,
+    active_paint_group: Option<&'a InheritedHoverGroup>,
+}
+
+/// Match every marked ancestor with the requested name. GPUI can paint only
+/// one group refinement, so each state targets its nearest matching ancestor
+/// with that state; an unhovered match keeps the paint listener installed.
+fn resolve_hover_groups<'a>(
     groups: &'a [InheritedHoverGroup],
     target: Option<&str>,
-) -> Option<&'a InheritedHoverGroup> {
-    match target {
-        Some(name) => groups.iter().rev().find(|group| group.name.as_ref() == name),
-        None => groups.first(),
+    states: &HashMap<u64, InteractiveStyleState>,
+) -> ResolvedHoverGroups<'a> {
+    let mut fallback = None;
+    let mut hovered = None;
+    let mut active = None;
+    for group in groups {
+        if target.is_some_and(|name| group.name.as_ref() != name) {
+            continue;
+        }
+        if fallback.is_none() || target.is_some() {
+            fallback = Some(group);
+        }
+        let state = states.get(&group.id);
+        if state.is_some_and(|state| state.hovered) {
+            hovered = Some(group);
+        }
+        if state.is_some_and(InteractiveStyleState::is_active) {
+            active = Some(group);
+        }
+    }
+    ResolvedHoverGroups {
+        hover_within: hovered.is_some(),
+        active_within: active.is_some(),
+        hover_paint_group: hovered.or(fallback),
+        active_paint_group: active.or(fallback),
+    }
+}
+
+fn paint_hover_group_name(id: u64) -> gpui::SharedString {
+    gpui::SharedString::from(format!("__gpuix_hover_group_{id}"))
+}
+
+#[cfg(test)]
+mod nearest_hover_group_tests {
+    use super::*;
+
+    fn same_named_groups() -> [InheritedHoverGroup; 2] {
+        [
+            InheritedHoverGroup {
+                name: "card".into(),
+                id: 1,
+            },
+            InheritedHoverGroup {
+                name: "card".into(),
+                id: 2,
+            },
+        ]
+    }
+
+    #[test]
+    fn nearest_hover_group_selects_outer_when_only_outer_is_hovered() {
+        let groups = same_named_groups();
+        let states = HashMap::from([(
+            1,
+            InteractiveStyleState {
+                hovered: true,
+                pointer_active: true,
+                ..Default::default()
+            },
+        )]);
+
+        let resolved = resolve_hover_groups(&groups, Some("card"), &states);
+        assert!(resolved.hover_within);
+        assert!(resolved.active_within);
+        assert_eq!(resolved.hover_paint_group.map(|group| group.id), Some(1));
+        assert_eq!(resolved.active_paint_group.map(|group| group.id), Some(1));
+        assert_ne!(paint_hover_group_name(1), paint_hover_group_name(2));
+    }
+
+    #[test]
+    fn nearest_hover_group_selects_inner_when_both_are_hovered() {
+        let groups = same_named_groups();
+        let mut states = HashMap::from([
+            (
+                1,
+                InteractiveStyleState {
+                    hovered: true,
+                    pointer_active: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                2,
+                InteractiveStyleState {
+                    hovered: true,
+                    ..Default::default()
+                },
+            ),
+        ]);
+
+        let resolved = resolve_hover_groups(&groups, Some("card"), &states);
+        assert!(resolved.hover_within);
+        assert!(resolved.active_within);
+        assert_eq!(resolved.hover_paint_group.map(|group| group.id), Some(2));
+        assert_eq!(resolved.active_paint_group.map(|group| group.id), Some(1));
+
+        states.get_mut(&2).unwrap().pointer_active = true;
+        let resolved = resolve_hover_groups(&groups, Some("card"), &states);
+        assert_eq!(resolved.active_paint_group.map(|group| group.id), Some(2));
     }
 }
 
@@ -11183,35 +11283,13 @@ fn build_element_with_parent_layout(
         .style
         .as_deref()
         .and_then(|style| style.hover_within_group.as_deref());
-    let (hover_within, active_within) = match hover_within_group_target {
-        Some(_) => {
-            let group = nearest_hover_group(&parent_inherited.hover_groups, hover_within_group_target);
-            (
-                group.is_some_and(|group| {
-                    ctx.interactive_style_states
-                        .get(&group.id)
-                        .is_some_and(|state| state.hovered)
-                }),
-                group.is_some_and(|group| {
-                    ctx.interactive_style_states
-                        .get(&group.id)
-                        .is_some_and(InteractiveStyleState::is_active)
-                }),
-            )
-        }
-        None => (
-            parent_inherited.hover_groups.iter().any(|group| {
-                ctx.interactive_style_states
-                    .get(&group.id)
-                    .is_some_and(|state| state.hovered)
-            }),
-            parent_inherited.hover_groups.iter().any(|group| {
-                ctx.interactive_style_states
-                    .get(&group.id)
-                    .is_some_and(InteractiveStyleState::is_active)
-            }),
-        ),
-    };
+    let hover_groups = resolve_hover_groups(
+        &parent_inherited.hover_groups,
+        hover_within_group_target,
+        ctx.interactive_style_states,
+    );
+    let (hover_within, active_within) =
+        (hover_groups.hover_within, hover_groups.active_within);
     let focus_within = is_focus_within(ctx.tree, ctx.focus_handles, id, window);
     let effective_display = element.style.as_deref().and_then(|style| {
         effective_display(
@@ -11522,18 +11600,19 @@ fn build_element_with_parent_layout(
         default_flex_none_for_parent_layout(resolved_style.get_or_insert_default());
     }
     if let Some(style) = resolved_style.as_mut() {
-        // GPUI stores one group-hover refinement per element. Unnamed,
-        // the outermost marked ancestor is sufficient for the CSS OR:
-        // hovering any nested marked ancestor also hovers every ancestor
-        // containing it, while the outer group's own padding remains
-        // independently hoverable. A `hoverWithinGroup` name instead binds to
-        // the nearest ancestor with that `hoverGroup` name specifically, per
-        // Tailwind's `group-hover/name`; no match leaves it unbound.
-        style.resolved_hover_within_group = nearest_hover_group(
-            &parent_inherited.hover_groups,
-            style.hover_within_group.as_deref(),
-        )
-        .map(|group| group.name.clone());
+        // GPUI resolves group paint by name and takes the last nested hitbox.
+        // Give every marked element its own paint name, then select the nearest
+        // matching ancestor with the relevant state for each refinement.
+        style.resolved_hover_group = style
+            .hover_group
+            .as_ref()
+            .map(|_| paint_hover_group_name(id));
+        style.resolved_hover_within_group = hover_groups
+            .hover_paint_group
+            .map(|group| paint_hover_group_name(group.id));
+        style.resolved_active_within_group = hover_groups
+            .active_paint_group
+            .map(|group| paint_hover_group_name(group.id));
     }
     let style = resolved_style.as_ref();
     let box_insets = style.map(|style| {
@@ -13140,7 +13219,7 @@ fn build_virtual_list(
         None,
         box_insets,
     );
-    if let Some(group) = style.and_then(|style| style.hover_group.as_deref()) {
+    if let Some(group) = style.and_then(|style| style.resolved_hover_group.as_ref()) {
         // `gpui::List` is Styled but has no interactive identity. A transparent
         // stateful surface gives the retained virtual-list node the same group
         // hitbox/state contract as every other hoverGroup source while the list
@@ -13158,7 +13237,7 @@ fn build_virtual_list(
         let mut surface = gpui::div()
             .id(group_id)
             .relative()
-            .group(gpui::SharedString::from(group.to_owned()))
+            .group(group.clone())
             .child(list)
             .on_hover(cx.listener(move |view, is_hovered: &bool, _window, cx| {
                 if view
@@ -13446,7 +13525,7 @@ fn tracks_hover(style: Option<&StyleDesc>) -> bool {
 }
 
 fn tracks_active(style: Option<&StyleDesc>) -> bool {
-    style.is_some_and(|style| style.active.is_some())
+    style.is_some_and(|style| style.active.is_some() || style.hover_group.is_some())
 }
 
 fn is_overflow_scroller(element: &crate::retained_tree::RetainedElement) -> bool {
@@ -14058,9 +14137,8 @@ fn interaction_state_for_element(
         match (hover_within_group_target, group_name) {
             (Some(target), Some(name)) if target == name => {
                 let group_state = interactive_style_states.get(&id);
-                hover_within = group_state.is_some_and(|state| state.hovered);
-                active_within = group_state.is_some_and(InteractiveStyleState::is_active);
-                break;
+                hover_within |= group_state.is_some_and(|state| state.hovered);
+                active_within |= group_state.is_some_and(InteractiveStyleState::is_active);
             }
             (None, Some(_)) => {
                 let group_state = interactive_style_states.get(&id);
@@ -14070,11 +14148,11 @@ fn interaction_state_for_element(
                 if group_state.is_some_and(InteractiveStyleState::is_active) {
                     active_within = true;
                 }
-                if hover_within && active_within {
-                    break;
-                }
             }
             _ => {}
+        }
+        if hover_within && active_within {
+            break;
         }
         current = element.parent;
     }
@@ -15503,8 +15581,8 @@ where
     E: gpui::Styled + gpui::StatefulInteractiveElement,
 {
     el = apply_styles(el, style);
-    if let Some(group) = style.hover_group.as_deref() {
-        el = el.group(gpui::SharedString::from(group.to_owned()));
+    if let Some(group) = style.resolved_hover_group.as_ref() {
+        el = el.group(group.clone());
     }
     if let Some(hover_style) = style.hover.as_deref() {
         let hover_style = effective_state_style(style, hover_style);
@@ -15533,7 +15611,7 @@ where
         });
     }
     if let (Some(group), Some(active_within_style)) = (
-        style.resolved_hover_within_group.clone(),
+        style.resolved_active_within_group.clone(),
         style.active_within.as_deref(),
     ) {
         let active_within_style = effective_state_style(style, active_within_style);

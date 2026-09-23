@@ -204,9 +204,8 @@ fn point_is_inside(bounds: crate::automation::ElementBounds, point: (f64, f64)) 
 }
 
 /// Ancestor `hoverGroup` sources for `element_id`. `target` mirrors
-/// `hoverWithinGroup`: `None` collects every marked ancestor, matching the
-/// CSS OR; `Some(name)` returns only the nearest ancestor whose own
-/// `hoverGroup` equals it (or none, if no ancestor matches).
+/// `hoverWithinGroup`: `None` collects every marked ancestor; `Some(name)`
+/// collects every ancestor whose own `hoverGroup` equals it.
 fn ancestor_hover_groups(tree: &RetainedTree, element_id: u64, target: Option<&str>) -> Vec<u64> {
     let mut groups = Vec::new();
     let mut current = tree
@@ -224,7 +223,6 @@ fn ancestor_hover_groups(tree: &RetainedTree, element_id: u64, target: Option<&s
         match (target, name) {
             (Some(target_name), Some(name)) if target_name == name => {
                 groups.push(id);
-                break;
             }
             (None, Some(_)) => groups.push(id),
             _ => {}

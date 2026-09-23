@@ -906,20 +906,24 @@ pub struct StyleDesc {
     #[serde(default, deserialize_with = "deserialize_transition_list")]
     pub transition: Option<Vec<StyleTransition>>,
     pub hover_group: Option<String>,
-    /// Name of the marked ancestor `hoverWithin` follows. Unset falls back to
-    /// the outermost marked ancestor, matching CSS's ancestor-hover OR.
+    /// Name shared by the marked ancestors `hoverWithin` and `activeWithin`
+    /// follow. Unset matches every marked ancestor.
     pub hover_within_group: Option<String>,
 
-    /// The marked ancestor `hoverWithin` actually binds to for this frame,
-    /// resolved from `hover_within_group` by the renderer. This is paint
-    /// context rather than an authored declaration.
+    /// Per-element GPUI paint identity for this element's `hoverGroup`.
+    #[serde(skip)]
+    pub(crate) resolved_hover_group: Option<gpui::SharedString>,
+    /// The matching ancestor selected for GPUI's one hover refinement.
     #[serde(skip)]
     pub(crate) resolved_hover_within_group: Option<gpui::SharedString>,
+    /// The matching ancestor selected for GPUI's one active refinement.
+    #[serde(skip)]
+    pub(crate) resolved_active_within_group: Option<gpui::SharedString>,
 
     pub hover: Option<Box<StyleDesc>>,
     pub hover_within: Option<Box<StyleDesc>>,
     pub active: Option<Box<StyleDesc>>,
-    /// Applies while the nearest `hoverGroup` ancestor is pressed.
+    /// Applies while any matching `hoverGroup` ancestor is pressed.
     pub active_within: Option<Box<StyleDesc>>,
     pub focus: Option<Box<StyleDesc>>,
     pub focus_visible: Option<Box<StyleDesc>>,
