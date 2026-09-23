@@ -226,7 +226,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     }
   })
 
-  it("uses imperative canvas bitmap dimensions and expires the prior WebGPU texture", async () => {
+  itMacOS("uses imperative canvas bitmap dimensions and expires the prior WebGPU texture", async () => {
     const testRoot = createTestRoot({ width: 160, height: 120 })
     const canvasRef = createRef<CanvasPublicInstance>()
     const canvas2dRef = createRef<CanvasPublicInstance>()

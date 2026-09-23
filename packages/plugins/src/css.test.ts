@@ -4,7 +4,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { createServer, type ViteDevServer } from "vite"
-import { gpuixCssModules, gpuixCssModulesBun, loadCssModule, resolveCssModule } from "./css.ts"
+import {
+  cssModuleId,
+  gpuixCssModules,
+  gpuixCssModulesBun,
+  loadCssModule,
+  resolveCssModule,
+} from "./css.ts"
 
 let server: ViteDevServer | undefined
 let fixture: string | undefined
@@ -50,9 +56,13 @@ test("compiles CSS modules in a plain Vite config, with no gpuix environment", a
 })
 
 test("resolves a Bun import against its importer", async () => {
-  const id = await resolveCssModule({}, "./button.module.css", "/app/main.tsx", "bun")
+  // A POSIX-style literal like "/app/main.tsx" is not a genuine absolute path
+  // on Windows (no drive letter), so `path.resolve` would resolve it against
+  // the current drive instead of treating it as already absolute.
+  const importer = path.join(path.dirname(fileURLToPath(import.meta.url)), "main.tsx")
+  const id = await resolveCssModule({}, "./button.module.css", importer, "bun")
 
-  expect(id).toBe("\0gpuix:css-module:%2Fapp%2Fbutton%2Emodule%2Ecss")
+  expect(id).toBe(cssModuleId(path.join(path.dirname(importer), "button.module.css")))
 })
 
 test("compiles a virtual module id and watches its source", async () => {
