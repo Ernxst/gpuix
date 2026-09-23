@@ -4595,6 +4595,14 @@ pressed, matching CSS `.group:active .descendant`. `dragOver` applies while OS
 files are dragged over the element; it is desktop-only, since there is no web
 equivalent.
 
+`focusWithin`, `activeWithin`, and `dragOver` do not yet participate in
+`transition`, content-sized intrinsic measurement (`width: "max-content"` and
+the like), or custom-element `currentColor` resolution, unlike `hover`,
+`active`, `focus`, `focusVisible`, and `hoverWithin`, which do. A property
+refined by one of these three states under a `transition` snaps to its new
+value instead of animating — a card that lifts while focus is inside it, via
+`focusWithin: { top: -4 }` under a `top` transition, jumps rather than eases.
+
 ### Shared web and native style helpers
 
 `@gpuix/react` exports `SharedStyle`, a mapped type over the keys React's

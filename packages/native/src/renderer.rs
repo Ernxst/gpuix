@@ -11590,7 +11590,17 @@ fn build_element_with_parent_layout(
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
-            build_virtual_list(element, style, box_insets, hover_within, ctx, window, cx)
+            build_virtual_list(
+                element,
+                style,
+                box_insets,
+                hover_within,
+                focus_within,
+                active_within,
+                ctx,
+                window,
+                cx,
+            )
         }
 
         // Polymorphic dispatch for all custom elements.
@@ -12927,6 +12937,8 @@ fn build_virtual_list(
     style: Option<&StyleDesc>,
     box_insets: Option<crate::automation::BoxInsets>,
     hover_within: bool,
+    focus_within: bool,
+    active_within: bool,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -13098,6 +13110,16 @@ fn build_virtual_list(
         if hover_within {
             if let Some(hover_within_style) = style.hover_within.as_deref() {
                 list = apply_styles(list, hover_within_style);
+            }
+        }
+        if focus_within {
+            if let Some(focus_within_style) = style.focus_within.as_deref() {
+                list = apply_styles(list, focus_within_style);
+            }
+        }
+        if active_within {
+            if let Some(active_within_style) = style.active_within.as_deref() {
+                list = apply_styles(list, active_within_style);
             }
         }
     }
