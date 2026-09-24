@@ -4280,7 +4280,8 @@ CSS-like styling via the `style` prop:
 
 `className` takes a `.module.css` import, which `@gpuix/plugins/css` compiles
 into these same styles; the renderer applies them, with `style` winning where
-both set a property. A class name that reaches the renderer uncompiled is
+both set a property, including while a class-provided native state style is
+active. A class name that reaches the renderer uncompiled is
 reported, because GPU-IX resolves no CSS classes. See [hot
 reload](#4-start-the-app-with-bun---hot) for the setup.
 
