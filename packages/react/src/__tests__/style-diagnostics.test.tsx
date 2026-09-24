@@ -1474,6 +1474,72 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     }
   })
 
+  it("treats own undefined style keys like absent keys for a compiled className", () => {
+    const testRoot = createTestRoot({ width: 120, height: 80, scaleFactor: 1 })
+    const card = {
+      width: 100,
+      height: 60,
+      backgroundColor: "#ff0000",
+      hover: { backgroundColor: "#00ff00" },
+    } as StyleDesc
+    Object.defineProperty(card, COMPILED_STYLE, { value: true })
+
+    const render = (style: StyleDesc) => {
+      testRoot.render(
+        <div
+          data-testid="class-name-style-undefined-equivalence"
+          className={card as unknown as string}
+          style={style}
+        />
+      )
+      return testRoot.renderer.findByTestId("class-name-style-undefined-equivalence")!
+    }
+
+    try {
+      const withoutKeys = render({})
+      const withoutKeysStyle = structuredClone(withoutKeys.style)
+      const withoutKeysBounds = testRoot.renderer.getElementBounds(withoutKeys.id)!
+      testRoot.renderer.nativeSimulateMouseMove(110, 70)
+      testRoot.renderer.dispatchNativeEvents()
+      testRoot.renderer.flush()
+      const withoutKeysRest = structuredClone(testRoot.renderer.getResolvedStyle(withoutKeys.id))
+
+      testRoot.renderer.nativeSimulateMouseMove(
+        withoutKeysBounds.x + withoutKeysBounds.width / 2,
+        withoutKeysBounds.y + withoutKeysBounds.height / 2,
+      )
+      testRoot.renderer.dispatchNativeEvents()
+      testRoot.renderer.flush()
+      const withoutKeysHover = structuredClone(testRoot.renderer.getResolvedStyle(withoutKeys.id))
+
+      const explicitUndefined = {
+        backgroundColor: undefined,
+        hover: { backgroundColor: undefined },
+      } as StyleDesc
+      expect(Object.hasOwn(explicitUndefined, "backgroundColor")).toBe(true)
+      expect(Object.hasOwn(explicitUndefined.hover!, "backgroundColor")).toBe(true)
+
+      const withUndefinedKeys = render(explicitUndefined)
+      expect(withUndefinedKeys.style).toEqual(withoutKeysStyle)
+
+      const withUndefinedBounds = testRoot.renderer.getElementBounds(withUndefinedKeys.id)!
+      testRoot.renderer.nativeSimulateMouseMove(110, 70)
+      testRoot.renderer.dispatchNativeEvents()
+      testRoot.renderer.flush()
+      expect(testRoot.renderer.getResolvedStyle(withUndefinedKeys.id)).toEqual(withoutKeysRest)
+
+      testRoot.renderer.nativeSimulateMouseMove(
+        withUndefinedBounds.x + withUndefinedBounds.width / 2,
+        withUndefinedBounds.y + withUndefinedBounds.height / 2,
+      )
+      testRoot.renderer.dispatchNativeEvents()
+      testRoot.renderer.flush()
+      expect(testRoot.renderer.getResolvedStyle(withUndefinedKeys.id)).toEqual(withoutKeysHover)
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
   it("lets state styles in the style prop outrank compiled className state styles per property", () => {
     const testRoot = createTestRoot({ strictStyles: true })
     const card = {
