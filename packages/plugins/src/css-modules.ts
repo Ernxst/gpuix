@@ -122,12 +122,16 @@ const SUPPORTED_PROPERTIES = new Set([
   "selectionColor",
   "transition",
   "hoverGroup",
+  "hoverWithinGroup",
   "interpolateSize",
 ])
 
 const NATIVE_STATE_PROPERTIES = new Set(
   [...SUPPORTED_PROPERTIES].filter(
-    (property) => property !== "transition" && property !== "hoverGroup",
+    (property) =>
+      property !== "transition" &&
+      property !== "hoverGroup" &&
+      property !== "hoverWithinGroup",
   ),
 )
 const CLASS_NAME = "[A-Za-z_][A-Za-z0-9_-]*"
@@ -148,6 +152,7 @@ type Composition = {
   classes: string[]
   from?: string
   declaration: string
+  importer: string
 }
 type ParsedCssModule = {
   sourceId: string
@@ -249,7 +254,9 @@ async function parseCssModule(
       context.watchImport?.(message.file)
     }
   }
-  const preprocessed = postcss.parse(processed.css, { from: sourceId })
+  // Keep PostCSS's imported nodes so declarations retain the file they came
+  // from. `composes` is resolved relative to that declaring stylesheet.
+  const preprocessed = processed.root
   // Custom properties provide values to the processor, not native styles.
   preprocessed.walkDecls(/^--/, (declaration) => {
     declaration.remove()
@@ -289,7 +296,7 @@ async function parseCssModule(
     compositions.set(className, classCompositions)
   })
 
-  const root = validateSelectors(preprocessed.toString(), sourceId)
+  const root = validateSelectors(preprocessed, sourceId)
   const classNames = new Set<string>()
   const contributions: StyleContribution[] = []
   const accumulatedStyles: CssModuleStyles = {}
@@ -379,6 +386,21 @@ async function parseCssModule(
     }
   })
 
+  // Bind the descendant state to the marker on its matching ancestor. The
+  // marker may be declared after the relation, so derive it after all rules
+  // have contributed in stylesheet order.
+  for (const [descendant, { ancestor }] of hoverWithinRelations) {
+    const hoverGroup = accumulatedStyles[ancestor]?.hoverGroup
+    if (typeof hoverGroup !== "string") continue
+
+    const descendantStyle = accumulatedStyles[descendant] ??= {}
+    if ("hoverWithinGroup" in descendantStyle) continue
+
+    const binding = { hoverWithinGroup: hoverGroup }
+    contributions.push({ className: descendant, style: binding })
+    mergeStyle(descendantStyle, binding)
+  }
+
   for (const className of compositions.keys()) classNames.add(className)
   return { sourceId, classNames, contributions, compositions }
 }
@@ -406,6 +428,7 @@ function parseComposition(declaration: postcss.Declaration, sourceId: string): C
     classes,
     from: quotedSource?.[2] ?? quotedSource?.[3],
     declaration: description,
+    importer: declaration.source?.input.file ?? sourceId,
   }
 }
 
@@ -461,7 +484,7 @@ async function resolveComposedClass(
 
       const composedModule = await loadComposedModule(
         composition.from,
-        module.sourceId,
+        composition.importer,
         composition,
         context,
       )
@@ -555,9 +578,7 @@ function mergeStyle(target: Record<string, unknown>, source: Record<string, unkn
   }
 }
 
-function validateSelectors(css: string, sourceId: string): postcss.Root {
-  const root = postcss.parse(css, { from: sourceId })
-
+function validateSelectors(root: postcss.Root, sourceId: string): postcss.Root {
   root.walkAtRules((rule) => {
     throw unsupportedCss(sourceId, `at-rule "@${rule.name}" is not supported yet`)
   })

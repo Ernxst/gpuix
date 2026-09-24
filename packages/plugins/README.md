@@ -82,8 +82,10 @@ selectors, grouped selectors, and declarations supported by GPUIX's native
 style model. It supports the `:hover`, `:active`, `:focus`, `:focus-visible`,
 and `:focus-within` states, plus hovered-descendant selectors such as
 `.container:hover .child`, limited to one hovered-ancestor relation per child.
-Other selectors, at-rules and animations are rejected until they have a native
-style representation.
+The transform binds each child's `hoverWithin` style to the matching ancestor's
+`hoverGroup`, including when the two classes are composed separately. Other
+selectors, at-rules and animations are rejected until they have a native style
+representation.
 
 CSS modules can compose local classes from the same file or another CSS module:
 
@@ -100,8 +102,9 @@ in stylesheet order. Cross-file classes merge in the order listed by
 `composes`, with later classes winning conflicts; the local module's rules merge
 after them in stylesheet order. CSS Modules does not define the order of
 conflicting declarations across files, so those conflicts are not guaranteed to
-match the web build. `composes: name from global` is rejected because GPU-IX
-cannot resolve a global class to a style object.
+match the web build. A `from` path resolves relative to the stylesheet that
+declares the `composes` statement. `composes: name from global` is rejected
+because GPU-IX cannot resolve a global class to a style object.
 
 Add `@gpuix/plugins/css` to the Vite or Vitest project that should compile
 native CSS modules:

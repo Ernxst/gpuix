@@ -99,6 +99,43 @@ test("inlines imported tokens and resolves custom properties before validation",
   }
 })
 
+test("resolves composes in imported CSS from the stylesheet that declares it", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-imported-composes-"))
+  try {
+    const sourceId = path.join(fixture, "button.module.css")
+    const parts = path.join(fixture, "parts")
+    await mkdir(parts)
+    await writeFile(sourceId, '@import "./parts/base.css";\n.button { composes: base; }\n')
+    await writeFile(
+      path.join(parts, "base.css"),
+      '.base { composes: accent from "./accent.module.css"; }\n',
+    )
+    await writeFile(path.join(parts, "accent.module.css"), ".accent { color: magenta; }\n")
+
+    const resolutions: Array<[string, string]> = []
+    await expect(
+      transformGpuixCssModule(
+        await Bun.file(sourceId).text(),
+        sourceId,
+        [],
+        async (specifier, importer) => {
+          resolutions.push([specifier, importer])
+          return path.resolve(path.dirname(importer), specifier)
+        },
+      ),
+    ).resolves.toMatchObject({ button: { color: "magenta" } })
+    const compositionResolutions = resolutions.filter(
+      ([specifier]) => specifier === "./accent.module.css",
+    )
+    expect(compositionResolutions.length).toBeGreaterThan(0)
+    expect(
+      compositionResolutions.every(([, importer]) => importer === path.join(parts, "base.css")),
+    ).toBe(true)
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 test("watches token files imported by a Vite CSS module", async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-watch-"))
   try {
@@ -561,7 +598,11 @@ test("compiles a hovered ancestor selector into hoverGroup and hoverWithin style
       backgroundColor: "#12161a",
       hoverGroup: "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
     },
-    title: { hoverWithin: { color: "#ffffff" } },
+    title: {
+      hoverWithinGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+      hoverWithin: { color: "#ffffff" },
+    },
   })
 })
 
@@ -635,6 +676,8 @@ test("merges composed and local declarations inside every interaction state", as
     focus: { color: "red", backgroundColor: "blue" },
     focusVisible: { color: "red", backgroundColor: "blue" },
     focusWithin: { color: "red", backgroundColor: "blue" },
+    hoverWithinGroup:
+      `gpuix-css-module:hover-group:${encodeURIComponent("/fixture/states.module.css")}:panel`,
     hoverWithin: { color: "red", backgroundColor: "blue" },
   })
   expect(styles.panel).toHaveProperty("hoverGroup")
@@ -649,6 +692,7 @@ test("composes the hovered ancestor and descendant across modules", async () => 
       `
         .frame { composes: card from "./hover.module.css"; }
         .caption { composes: label from "./hover.module.css"; }
+        .other { hover-group: unrelated; }
       `,
       path.join(fixture, "consumer.module.css"),
     )
@@ -657,7 +701,11 @@ test("composes the hovered ancestor and descendant across modules", async () => 
       "hoverGroup",
       `gpuix-css-module:hover-group:${encodeURIComponent(hoverModule)}:card`,
     )
-    expect(styles.caption).toEqual({ hoverWithin: { color: "white" } })
+    expect(styles.caption).toEqual({
+      hoverWithinGroup: styles.frame.hoverGroup,
+      hoverWithin: { color: "white" },
+    })
+    expect(styles.caption.hoverWithinGroup).not.toBe(styles.other.hoverGroup)
   } finally {
     await rm(fixture, { recursive: true, force: true })
   }
@@ -738,8 +786,16 @@ test("reuses the generated hover group for an ancestor in several rules", async 
     card: {
       hoverGroup: "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
     },
-    title: { hoverWithin: { color: "#ffffff" } },
-    subtitle: { hoverWithin: { color: "#aaaaaa" } },
+    title: {
+      hoverWithinGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+      hoverWithin: { color: "#ffffff" },
+    },
+    subtitle: {
+      hoverWithinGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+      hoverWithin: { color: "#aaaaaa" },
+    },
   })
 })
 
@@ -756,7 +812,11 @@ test("merges hovered descendant rules from the same ancestor", async () => {
     card: {
       hoverGroup: "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
     },
-    title: { hoverWithin: { color: "#ffffff", backgroundColor: "#12161a" } },
+    title: {
+      hoverWithinGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+      hoverWithin: { color: "#ffffff", backgroundColor: "#12161a" },
+    },
   })
 })
 
@@ -783,7 +843,7 @@ test("preserves a hand-written hover group on a hovered ancestor", async () => {
     ),
   ).resolves.toEqual({
     card: { hoverGroup: "card" },
-    title: { hoverWithin: { color: "#ffffff" } },
+    title: { hoverWithinGroup: "card", hoverWithin: { color: "#ffffff" } },
   })
 })
 
