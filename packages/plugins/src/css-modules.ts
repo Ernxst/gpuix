@@ -1,4 +1,5 @@
 import transformCssModule from "css-to-react-native-transform"
+import path from "node:path"
 import postcss from "postcss"
 import type { AcceptedPlugin } from "postcss"
 import postcssCustomProperties from "postcss-custom-properties"
@@ -6,6 +7,7 @@ import postcssImport from "postcss-import"
 import postcssNesting from "postcss-nesting"
 
 type TransformCss = (css: string) => Record<string, unknown>
+export type CssImportResolver = (id: string, importer: string) => Promise<string> | string
 
 // The transform is CommonJS. Bun hands back the function; Node's interop hands
 // back the module namespace, which a Vitest run or a Node bundler hits.
@@ -150,8 +152,16 @@ type CssModuleSelector =
  * properties they carry are in scope, and nesting is flattened before `var()`
  * substitution walks the declarations that remain.
  */
-function defaultCssModulePlugins(): AcceptedPlugin[] {
-  return [postcssImport(), postcssNesting(), postcssCustomProperties({ preserve: false })]
+function defaultCssModulePlugins(resolveImport?: CssImportResolver): AcceptedPlugin[] {
+  const imports = resolveImport
+    ? postcssImport({
+        // postcss-import passes the current at-rule as a fourth argument. Its
+        // published types omit it, so keep this optional for that signature.
+        resolve: (id, basedir, _options, atRule?: postcss.AtRule) =>
+          resolveImport(id, atRule?.source?.input?.file ?? path.join(basedir, "index.css")),
+      })
+    : postcssImport()
+  return [imports, postcssNesting(), postcssCustomProperties({ preserve: false })]
 }
 
 /**
@@ -167,10 +177,17 @@ export async function transformGpuixCssModule(
   css: string,
   sourceId: string,
   plugins: readonly AcceptedPlugin[] = [],
+  resolveImport?: CssImportResolver,
+  watchImport?: (file: string) => void,
 ): Promise<CssModuleStyles> {
-  const processed = await postcss([...defaultCssModulePlugins(), ...plugins]).process(css, {
+  const processed = await postcss([...defaultCssModulePlugins(resolveImport), ...plugins]).process(css, {
     from: sourceId,
   })
+  for (const message of processed.messages) {
+    if (message.type === "dependency" && message.plugin === "postcss-import") {
+      watchImport?.(message.file)
+    }
+  }
   const preprocessed = postcss.parse(processed.css, { from: sourceId })
   // Custom properties provide values to the processor, not native styles.
   preprocessed.walkDecls(/^--/, (declaration) => {
@@ -216,12 +233,23 @@ export async function transformGpuixCssModule(
             : pseudoClass === "focus-within"
               ? "focusWithin"
               : pseudoClass
-      const transformed = transformCss(rule.clone({ selector: `.${name}` }).toString())
+      const transformRule = rule.clone({ selector: `.${name}` })
+      let unitlessLineHeight: string | undefined
+      transformRule.walkDecls("line-height", (declaration) => {
+        if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(declaration.value)) {
+          unitlessLineHeight = declaration.value
+          declaration.value += "px"
+        } else {
+          unitlessLineHeight = undefined
+        }
+      })
+      const transformed = transformCss(transformRule.toString())
       const value = transformed[name]
 
       if (!isPlainObject(value)) {
         throw unsupportedCss(sourceId, `class ".${name}" did not produce a style object`)
       }
+      if (unitlessLineHeight !== undefined) value.lineHeight = unitlessLineHeight
 
       const allowedProperties = state ? NATIVE_STATE_PROPERTIES : SUPPORTED_PROPERTIES
       const unsupported = Object.keys(value).find(

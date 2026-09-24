@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -8,7 +8,7 @@ import postcssCustomProperties from "postcss-custom-properties"
 import postcssImport from "postcss-import"
 import { createServer } from "vite"
 import { gpuix as gpuixBun, gpuixDev } from "./bun.ts"
-import { gpuixCssModules, gpuixCssModulesBun } from "./css.ts"
+import { cssModuleId, gpuixCssModules, gpuixCssModulesBun, loadCssModule } from "./css.ts"
 import { transformGpuixCssModule } from "./css-modules.ts"
 
 // The comment matters: a token rule that keeps one after its custom properties
@@ -94,6 +94,88 @@ test("inlines imported tokens and resolves custom properties before validation",
     await expect(
       transformGpuixCssModule(tokenModuleCss, sourceId, tokenPlugins),
     ).resolves.toEqual(expected)
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("watches token files imported by a Vite CSS module", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-watch-"))
+  try {
+    const sourceId = path.join(fixture, "panel.module.css")
+    const tokens = path.join(fixture, "tokens.css")
+    await writeFile(sourceId, tokenModuleCss)
+    await writeFile(tokens, tokenCss)
+    const watched: string[] = []
+    await loadCssModule({ addWatchFile: (id: string) => watched.push(id) }, cssModuleId(sourceId))
+    expect(watched).toEqual([sourceId, await realpath(tokens)])
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("keeps unitless line-height as a ratio and pixel line-height as a length", async () => {
+  await expect(
+    transformGpuixCssModule(
+      ".ratio { font-size: 12px; line-height: 1.5; } .pixels { line-height: 18px; }",
+      "/fixture/text.module.css",
+    ),
+  ).resolves.toEqual({
+    ratio: { fontSize: 12, lineHeight: "1.5" },
+    pixels: { lineHeight: 18 },
+  })
+})
+
+test("Vite and Bun resolve package imports and bare CSS packages inside nested modules", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-resolution-"))
+
+  try {
+    const entry = path.join(fixture, "entry.ts")
+    const moduleDir = path.join(fixture, "src/components")
+    const themeDir = path.join(fixture, "node_modules/@fixture/theme")
+    await mkdir(moduleDir, { recursive: true })
+    await mkdir(themeDir, { recursive: true })
+    await writeFile(
+      path.join(fixture, "package.json"),
+      JSON.stringify({ imports: { "#styles/tokens.css": "./src/styles/tokens.css" } }),
+    )
+    await mkdir(path.join(fixture, "src/styles"), { recursive: true })
+    await writeFile(path.join(fixture, "src/styles/tokens.css"), '@import "./palette.css";')
+    await writeFile(path.join(fixture, "src/styles/palette.css"), ":root { --ink: #123456; }")
+    await writeFile(
+      path.join(themeDir, "package.json"),
+      JSON.stringify({ name: "@fixture/theme", exports: "./tokens.css" }),
+    )
+    await writeFile(path.join(themeDir, "tokens.css"), ":root { --space: 7px; }")
+    await writeFile(
+      path.join(moduleDir, "panel.module.css"),
+      '@import "#styles/tokens.css";\n@import "@fixture/theme";\n.panel { color: var(--ink); padding: var(--space); line-height: 1.5; }',
+    )
+    await writeFile(entry, 'import styles from "./src/components/panel.module.css"\nexport default styles.panel\n')
+
+    const vite = await createServer({
+      appType: "custom",
+      configFile: false,
+      root: fixture,
+      plugins: [gpuixCssModules()],
+    })
+    try {
+      const loaded = (await vite.ssrLoadModule("/entry.ts")) as { default: Record<string, unknown> }
+      expect(loaded.default).toMatchObject({ color: "#123456", paddingTop: 7, lineHeight: "1.5" })
+    } finally {
+      await vite.close()
+    }
+
+    const built = await Bun.build({
+      entrypoints: [entry],
+      target: "bun",
+      plugins: [gpuixCssModulesBun()],
+    })
+    expect(built.success, built.logs.map(String).join("\n")).toBe(true)
+    const output = await built.outputs[0]?.text()
+    expect(output).toContain('color: "#123456"')
+    expect(output).toContain("paddingTop: 7")
+    expect(output).toContain('lineHeight: "1.5"')
   } finally {
     await rm(fixture, { recursive: true, force: true })
   }
@@ -200,7 +282,7 @@ test("Bun builds native CSS modules and receives GPUIX build defaults", async ()
 
     const outputFile = path.join(fixture, "entry-built.js")
     await writeFile(outputFile, output ?? "")
-    const builtModule = await import(pathToFileURL(outputFile).href)
+    const builtModule = await import(pathToFileURL(await realpath(outputFile)).href)
     expect(
       Object.getOwnPropertySymbols(builtModule.default).includes(
         Symbol.for("gpuix.compiledStyle"),
@@ -283,20 +365,30 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
     const packageLink = path.join(fixture, "node_modules/@gpuix/plugins")
     await mkdir(path.dirname(packageLink), { recursive: true })
     await symlink(packageRoot, packageLink, "dir")
+    await mkdir(path.join(fixture, "src/components"), { recursive: true })
+    await mkdir(path.join(fixture, "src/styles"), { recursive: true })
+    const themeDir = path.join(fixture, "node_modules/@fixture/theme")
+    await mkdir(themeDir, { recursive: true })
+    await writeFile(
+      path.join(fixture, "package.json"),
+      JSON.stringify({ imports: { "#styles/tokens.css": "./src/styles/tokens.css" } }),
+    )
+    await writeFile(path.join(fixture, "src/styles/tokens.css"), ":root { --panel-ink: #123456; }")
+    await writeFile(
+      path.join(themeDir, "package.json"),
+      JSON.stringify({ name: "@fixture/theme", exports: "./tokens.css" }),
+    )
+    await writeFile(path.join(themeDir, "tokens.css"), ":root { --panel-space: 4px; }")
 
     // Imported tokens and `var()`, so the fixture fails without the default
     // PostCSS plugins the preload entry has no way to be handed.
     await writeFile(
-      path.join(fixture, "tokens.css"),
-      ":root {\n  --panel-ink: #123456;\n  --panel-space: 4px;\n}\n",
-    )
-    await writeFile(
-      path.join(fixture, "panel.module.css"),
-      '@import "./tokens.css";\n\n.panel { color: var(--panel-ink); padding: var(--panel-space); }\n',
+      path.join(fixture, "src/components/panel.module.css"),
+      '@import "#styles/tokens.css";\n@import "@fixture/theme";\n.panel { color: var(--panel-ink); padding: var(--panel-space); line-height: 1.5; }\n',
     )
     await writeFile(
       entry,
-      'import styles from "./panel.module.css"\nconsole.log(JSON.stringify({ style: styles.panel, compiled: Object.getOwnPropertySymbols(styles.panel).includes(Symbol.for("gpuix.compiledStyle")) }))\n',
+      'import styles from "./src/components/panel.module.css"\nconsole.log(JSON.stringify({ style: styles.panel, compiled: Object.getOwnPropertySymbols(styles.panel).includes(Symbol.for("gpuix.compiledStyle")) }))\n',
     )
 
     const result = Bun.spawnSync([process.execPath, "--preload", "@gpuix/plugins/preload", entry], {
@@ -316,6 +408,7 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
       paddingRight: 4,
       paddingBottom: 4,
       paddingLeft: 4,
+      lineHeight: "1.5",
     })
     expect(loaded.compiled).toBe(true)
   } finally {

@@ -4,7 +4,7 @@ import type { BunPlugin } from "bun"
 import type { Plugin } from "vite"
 import type { AcceptedPlugin } from "postcss"
 import { createUnplugin } from "unplugin"
-import { transformGpuixCssModule } from "./css-modules.js"
+import { transformGpuixCssModule, type CssImportResolver } from "./css-modules.js"
 
 const CSS_MODULE_PREFIX = "\0gpuix:css-module:"
 
@@ -52,6 +52,7 @@ type ViteResolveContext = {
 
 type ViteLoadContext = {
   addWatchFile: (id: string) => void
+  resolve?: ViteResolveContext["resolve"]
 }
 
 export type CssModulesOptions = {
@@ -88,10 +89,26 @@ export async function loadCssModule(
   plugins: readonly AcceptedPlugin[] = [],
 ): Promise<{ code: string; map: null }> {
   const sourceId = sourceIdFromCssModuleId(id)
-  ;(context as ViteLoadContext).addWatchFile?.(sourceId)
+  const viteContext = context as ViteLoadContext
+  viteContext.addWatchFile?.(sourceId)
+  const resolveImport: CssImportResolver | undefined = viteContext.resolve
+    ? async (specifier, importer) => {
+        const resolved = await viteContext.resolve?.(specifier, importer, { skipSelf: true })
+        if (!resolved || resolved.external) {
+          throw new Error(`[gpuix] cannot resolve CSS import ${JSON.stringify(specifier)} from ${JSON.stringify(importer)}`)
+        }
+        return cleanId(resolved.id)
+      }
+    : undefined
   const css = await readFile(sourceId, "utf8")
   return {
-    code: await compileCssModuleCode(css, sourceId, plugins),
+    code: await compileCssModuleCode(
+      css,
+      sourceId,
+      plugins,
+      resolveImport,
+      (file) => viteContext.addWatchFile?.(file),
+    ),
     map: null,
   }
 }
@@ -101,9 +118,11 @@ async function compileCssModuleCode(
   css: string,
   sourceId: string,
   plugins: readonly AcceptedPlugin[] = [],
+  resolveImport?: CssImportResolver,
+  watchImport?: (file: string) => void,
 ): Promise<string> {
   return (
-    `const styles = ${JSON.stringify(await transformGpuixCssModule(css, sourceId, plugins))};\n` +
+    `const styles = ${JSON.stringify(await transformGpuixCssModule(css, sourceId, plugins, resolveImport, watchImport))};\n` +
     `for (const style of Object.values(styles)) {\n` +
     `  Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true });\n` +
     `}\n` +
@@ -158,7 +177,12 @@ export function gpuixCssModulesBun(options: CssModulesOptions = {}): BunPlugin {
       }))
 
       build.onLoad({ filter: /\.module\.css$/, namespace: "file" }, async ({ path: id }) => ({
-        contents: await compileCssModuleCode(await readFile(id, "utf8"), id, options.plugins),
+        contents: await compileCssModuleCode(
+          await readFile(id, "utf8"),
+          id,
+          options.plugins,
+          (specifier, importer) => Bun.resolveSync(specifier, path.dirname(importer)),
+        ),
         loader: "js",
         resolveDir: path.dirname(id),
       }))
