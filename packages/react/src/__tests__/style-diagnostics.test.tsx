@@ -8,7 +8,7 @@ import {
 import { cn } from "../cn.js"
 import { wrapWithBatching } from "../reconciler/batch-renderer.js"
 import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
-import type { StyleDesc } from "../types/host.js"
+import type { NativeStateStyleKey, StyleDesc } from "../types/host.js"
 
 expect.extend(gpuixMatchers)
 
@@ -1369,7 +1369,13 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
   it("lets the style prop outrank a compiled className", () => {
     const testRoot = createTestRoot({ strictStyles: true })
-    const card = { backgroundColor: "red", padding: 4 } as StyleDesc
+    const card = {
+      backgroundColor: "red",
+      padding: 4,
+      width: 100,
+      height: 40,
+      hover: { backgroundColor: "green" },
+    } as StyleDesc
     Object.defineProperty(card, COMPILED_STYLE, { value: true })
     const styles = { card }
 
@@ -1381,10 +1387,82 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       />
     )
 
-    expect(testRoot.renderer.findByTestId("class-name-and-style")?.style).toMatchObject({
+    const target = testRoot.renderer.findByTestId("class-name-and-style")!
+    expect(target.style).toMatchObject({
       backgroundColor: "blue",
       padding: 4,
     })
+    expect(target.style.hover?.backgroundColor).toBeNull()
+    expect(testRoot.renderer.getResolvedStyle(target.id)).toMatchObject({
+      backgroundColor: "blue",
+    })
+
+    const bounds = testRoot.renderer.getElementBounds(target.id)!
+    testRoot.renderer.nativeSimulateMouseMove(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2,
+    )
+    testRoot.renderer.dispatchNativeEvents()
+    testRoot.renderer.flush()
+    expect(testRoot.renderer.getResolvedStyle(target.id)).toMatchObject({
+      backgroundColor: "blue",
+    })
+    testRoot.unmount()
+  })
+
+  it("lets state styles in the style prop outrank compiled className state styles per property", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+    const card = {
+      backgroundColor: "red",
+      hover: { backgroundColor: "green" },
+    } as StyleDesc
+    Object.defineProperty(card, COMPILED_STYLE, { value: true })
+    const styles = { card }
+
+    testRoot.render(
+      <div
+        data-testid="class-name-and-state-style"
+        className={styles.card as unknown as string}
+        style={{ backgroundColor: "blue", hover: { padding: 2 } }}
+      />
+    )
+
+    expect(testRoot.renderer.findByTestId("class-name-and-state-style")?.style).toMatchObject({
+      backgroundColor: "blue",
+      hover: { padding: 2 },
+    })
+    expect(
+      testRoot.renderer.findByTestId("class-name-and-state-style")?.style.hover?.backgroundColor,
+    ).toBeNull()
+    testRoot.unmount()
+  })
+
+  it("applies style prop precedence to every native state style", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+    const stateKeys = [
+      "hover",
+      "hoverWithin",
+      "active",
+      "activeWithin",
+      "focus",
+      "focusVisible",
+      "focusWithin",
+      "dragOver",
+    ] as const satisfies readonly NativeStateStyleKey[]
+    const card: StyleDesc = { opacity: 0.5 }
+    for (const key of stateKeys) card[key] = { opacity: 0.1 }
+    Object.defineProperty(card, COMPILED_STYLE, { value: true })
+
+    testRoot.render(
+      <div
+        data-testid="class-name-and-all-state-styles"
+        className={card as unknown as string}
+        style={{ opacity: 0.8 }}
+      />
+    )
+
+    const style = testRoot.renderer.findByTestId("class-name-and-all-state-styles")?.style
+    for (const key of stateKeys) expect(style?.[key]?.opacity).toBeNull()
     testRoot.unmount()
   })
 

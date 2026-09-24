@@ -19,6 +19,7 @@ import type {
   HostContext,
   Instance,
   MutationRenderer,
+  NativeStateStyleKey,
   Props,
   PublicInstance,
   SelectionDirection,
@@ -833,7 +834,22 @@ function authoredStyle(instance: Instance, container: Container, props: Props): 
     const fromClassName = classNameStyle(props)
     if (fromClassName === undefined) return style
     // `style` outranks the class, as an author rule outranks a stylesheet.
-    return style == null ? fromClassName : { ...fromClassName, ...style }
+    if (style == null) return fromClassName
+
+    const merged = { ...fromClassName, ...style }
+    const authoredProperties = new Set(Object.keys(style))
+    for (const key of NATIVE_STATE_STYLE_KEYS) {
+      const classState = fromClassName[key]
+      if (classState === undefined) continue
+
+      const state = { ...classState }
+      for (const property of authoredProperties) {
+        delete state[property as keyof typeof state]
+      }
+      Object.assign(state, style[key])
+      merged[key] = state
+    }
+    return merged
   }
 
   const message =
@@ -848,6 +864,17 @@ function authoredStyle(instance: Instance, container: Container, props: Props): 
   // serialising an arbitrary value into the native renderer.
   return {}
 }
+
+const NATIVE_STATE_STYLE_KEYS = [
+  "hover",
+  "hoverWithin",
+  "active",
+  "activeWithin",
+  "focus",
+  "focusVisible",
+  "focusWithin",
+  "dragOver",
+] as const satisfies readonly NativeStateStyleKey[]
 
 /**
  * Styles a GPUIX build put in `className`.
