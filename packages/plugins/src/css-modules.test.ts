@@ -99,6 +99,43 @@ test("inlines imported tokens and resolves custom properties before validation",
   }
 })
 
+test("resolves composes in imported CSS from the stylesheet that declares it", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-imported-composes-"))
+  try {
+    const sourceId = path.join(fixture, "button.module.css")
+    const parts = path.join(fixture, "parts")
+    await mkdir(parts)
+    await writeFile(sourceId, '@import "./parts/base.css";\n.button { composes: base; }\n')
+    await writeFile(
+      path.join(parts, "base.css"),
+      '.base { composes: accent from "./accent.module.css"; }\n',
+    )
+    await writeFile(path.join(parts, "accent.module.css"), ".accent { color: magenta; }\n")
+
+    const resolutions: Array<[string, string]> = []
+    await expect(
+      transformGpuixCssModule(
+        await Bun.file(sourceId).text(),
+        sourceId,
+        [],
+        async (specifier, importer) => {
+          resolutions.push([specifier, importer])
+          return path.resolve(path.dirname(importer), specifier)
+        },
+      ),
+    ).resolves.toMatchObject({ button: { color: "magenta" } })
+    const compositionResolutions = resolutions.filter(
+      ([specifier]) => specifier === "./accent.module.css",
+    )
+    expect(compositionResolutions.length).toBeGreaterThan(0)
+    expect(
+      compositionResolutions.every(([, importer]) => importer === path.join(parts, "base.css")),
+    ).toBe(true)
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 test("watches token files imported by a Vite CSS module", async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-watch-"))
   try {
@@ -401,12 +438,16 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
     )
     await writeFile(path.join(stylePackageDir, "index.js"), "export default 'not CSS'")
     await writeFile(path.join(stylePackageDir, "tokens.css"), ":root { --panel-band: #abcdef; }")
+    await writeFile(
+      path.join(fixture, "src/components/plate.module.css"),
+      ".plate { font-size: 11px; }\n",
+    )
 
     // Imported tokens and `var()`, so the fixture fails without the default
     // PostCSS plugins the preload entry has no way to be handed.
     await writeFile(
       path.join(fixture, "src/components/panel.module.css"),
-      '@import "#styles/tokens.css";\n@import "@fixture/theme";\n@import "style-package";\n.panel { color: var(--panel-ink); background-color: var(--panel-band); padding: var(--panel-space); line-height: 1.5; }\n',
+      '@import "#styles/tokens.css";\n@import "@fixture/theme";\n@import "style-package";\n.panel { composes: plate from "./plate.module.css"; color: var(--panel-ink); background-color: var(--panel-band); padding: var(--panel-space); line-height: 1.5; }\n',
     )
     await writeFile(
       entry,
@@ -427,6 +468,7 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
     expect(loaded.style).toEqual({
       color: "#123456",
       backgroundColor: "#abcdef",
+      fontSize: 11,
       paddingTop: 4,
       paddingRight: 4,
       paddingBottom: 4,
@@ -556,8 +598,203 @@ test("compiles a hovered ancestor selector into hoverGroup and hoverWithin style
       backgroundColor: "#12161a",
       hoverGroup: "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
     },
-    title: { hoverWithin: { color: "#ffffff" } },
+    title: {
+      hoverWithinGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+      hoverWithin: { color: "#ffffff" },
+    },
   })
+})
+
+test("composes same-file classes in stylesheet order", async () => {
+  await expect(
+    transformGpuixCssModule(
+      `
+        .base { color: red; }
+        .icon { font-size: 12px; }
+        .button { color: blue; composes: base icon; }
+        .base { color: green; }
+      `,
+      "/fixture/composes.module.css",
+    ),
+  ).resolves.toMatchObject({
+    button: { color: "green", fontSize: 12 },
+  })
+})
+
+test("merges cross-file classes in composition order before local rules", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-order-"))
+  try {
+    await writeFile(path.join(fixture, "light.module.css"), ".light { color: white; }\n")
+    await writeFile(path.join(fixture, "dark.module.css"), ".dark { color: black; }\n")
+    const styles = await transformGpuixCssModule(
+      `
+        .button {
+          composes: light from "./light.module.css";
+          composes: dark from "./dark.module.css";
+          background-color: blue;
+        }
+        .local {
+          composes: light from "./light.module.css";
+          composes: dark from "./dark.module.css";
+          color: red;
+        }
+      `,
+      path.join(fixture, "button.module.css"),
+    )
+
+    expect(styles.button).toEqual({ color: "black", backgroundColor: "blue" })
+    expect(styles.local).toEqual({ color: "red" })
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("rejects composed classes with conflicting hovered-descendant relationships", async () => {
+  await expect(
+    transformGpuixCssModule(
+      `
+        .card:hover .label { color: red; }
+        .panel:hover .caption { background-color: blue; }
+        .title { composes: label caption; }
+      `,
+      "/fixture/conflicting-hover-within.module.css",
+    ),
+  ).rejects.toThrow('class ".title" cannot compose conflicting "hoverWithinGroup" values')
+
+  await expect(
+    transformGpuixCssModule(
+      `
+        .card:hover .label { color: red; }
+        .panel:hover .caption { background-color: blue; }
+        .frame { composes: card panel; }
+      `,
+      "/fixture/conflicting-hover-group.module.css",
+    ),
+  ).rejects.toThrow('class ".frame" cannot compose conflicting "hoverGroup" values')
+})
+
+test("merges composed and local declarations inside every interaction state", async () => {
+  const styles = await transformGpuixCssModule(
+    `
+      .base:hover { color: red; }
+      .button:hover { background-color: blue; }
+      .base:active { color: red; }
+      .button:active { background-color: blue; }
+      .base:focus { color: red; }
+      .button:focus { background-color: blue; }
+      .base:focus-visible { color: red; }
+      .button:focus-visible { background-color: blue; }
+      .base:focus-within { color: red; }
+      .button:focus-within { background-color: blue; }
+      .panel:hover .base { color: red; }
+      .panel:hover .button { background-color: blue; }
+      .button { composes: base; }
+    `,
+    "/fixture/states.module.css",
+  )
+
+  expect(styles.button).toEqual({
+    hover: { color: "red", backgroundColor: "blue" },
+    active: { color: "red", backgroundColor: "blue" },
+    focus: { color: "red", backgroundColor: "blue" },
+    focusVisible: { color: "red", backgroundColor: "blue" },
+    focusWithin: { color: "red", backgroundColor: "blue" },
+    hoverWithinGroup:
+      `gpuix-css-module:hover-group:${encodeURIComponent("/fixture/states.module.css")}:panel`,
+    hoverWithin: { color: "red", backgroundColor: "blue" },
+  })
+  expect(styles.panel).toHaveProperty("hoverGroup")
+})
+
+test("composes the hovered ancestor and descendant across modules", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-hover-composes-"))
+  try {
+    const hoverModule = path.join(fixture, "hover.module.css")
+    await writeFile(hoverModule, ".card:hover .label { color: white; }\n")
+    const styles = await transformGpuixCssModule(
+      `
+        .frame { composes: card from "./hover.module.css"; }
+        .caption { composes: label from "./hover.module.css"; }
+        .other { hover-group: unrelated; }
+      `,
+      path.join(fixture, "consumer.module.css"),
+    )
+
+    expect(styles.frame).toHaveProperty(
+      "hoverGroup",
+      `gpuix-css-module:hover-group:${encodeURIComponent(hoverModule)}:card`,
+    )
+    expect(styles.caption).toEqual({
+      hoverWithinGroup: styles.frame.hoverGroup,
+      hoverWithin: { color: "white" },
+    })
+    expect(styles.caption.hoverWithinGroup).not.toBe(styles.other.hoverGroup)
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("rejects missing composed classes and missing composed files", async () => {
+  await expect(
+    transformGpuixCssModule(
+      ".button { composes: missing; }",
+      "/fixture/missing-class.module.css",
+    ),
+  ).rejects.toThrow('declaration "composes: missing" references missing class ".missing"')
+
+  await expect(
+    transformGpuixCssModule(
+      '.button { composes: plate from "./missing.module.css"; }',
+      "/fixture/missing-file.module.css",
+    ),
+  ).rejects.toThrow(/declaration .*composes: plate from.*missing\.module\.css.*could not read/)
+
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-missing-composed-class-"))
+  try {
+    await writeFile(path.join(fixture, "tile.module.css"), ".other { color: white; }\n")
+    await expect(
+      transformGpuixCssModule(
+        '.button { composes: missing from "./tile.module.css"; }',
+        path.join(fixture, "button.module.css"),
+      ),
+    ).rejects.toThrow(/declaration .*references missing class "\.missing" in/)
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("rejects global composition with a diagnostic naming the declaration", async () => {
+  await expect(
+    transformGpuixCssModule(
+      ".button { composes: reset from global; }",
+      "/fixture/global.module.css",
+    ),
+  ).rejects.toThrow('declaration "composes: reset from global" cannot use "from global"')
+})
+
+test("rejects composition cycles with the class chain", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-cycle-"))
+  try {
+    await writeFile(
+      path.join(fixture, "a.module.css"),
+      '.a { composes: b from "./b.module.css"; }\n',
+    )
+    await writeFile(
+      path.join(fixture, "b.module.css"),
+      '.b { composes: a from "./a.module.css"; }\n',
+    )
+    await expect(
+      transformGpuixCssModule(
+        await Bun.file(path.join(fixture, "a.module.css")).text(),
+        path.join(fixture, "a.module.css"),
+      ),
+    ).rejects.toThrow(
+      `composition cycle: ${path.join(fixture, "a.module.css")}#.a -> ${path.join(fixture, "b.module.css")}#.b -> ${path.join(fixture, "a.module.css")}#.a`,
+    )
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
 })
 
 test("reuses the generated hover group for an ancestor in several rules", async () => {
@@ -573,8 +810,16 @@ test("reuses the generated hover group for an ancestor in several rules", async 
     card: {
       hoverGroup: "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
     },
-    title: { hoverWithin: { color: "#ffffff" } },
-    subtitle: { hoverWithin: { color: "#aaaaaa" } },
+    title: {
+      hoverWithinGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+      hoverWithin: { color: "#ffffff" },
+    },
+    subtitle: {
+      hoverWithinGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+      hoverWithin: { color: "#aaaaaa" },
+    },
   })
 })
 
@@ -591,7 +836,11 @@ test("merges hovered descendant rules from the same ancestor", async () => {
     card: {
       hoverGroup: "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
     },
-    title: { hoverWithin: { color: "#ffffff", backgroundColor: "#12161a" } },
+    title: {
+      hoverWithinGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+      hoverWithin: { color: "#ffffff", backgroundColor: "#12161a" },
+    },
   })
 })
 
@@ -618,7 +867,7 @@ test("preserves a hand-written hover group on a hovered ancestor", async () => {
     ),
   ).resolves.toEqual({
     card: { hoverGroup: "card" },
-    title: { hoverWithin: { color: "#ffffff" } },
+    title: { hoverWithinGroup: "card", hoverWithin: { color: "#ffffff" } },
   })
 })
 

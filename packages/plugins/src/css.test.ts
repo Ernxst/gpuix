@@ -61,6 +61,43 @@ test("compiles CSS modules in a plain Vite config, with no gpuix environment", a
   )
 })
 
+test("resolves and watches a composed CSS module in Vite", async () => {
+  fixture = await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)), ".css-vite-composes-"))
+  const tile = path.join(fixture, "tile.module.css")
+  await writeFile(
+    tile,
+    ".plate { color: white; &:hover { color: silver; } }\n",
+  )
+  await writeFile(
+    path.join(fixture, "button.module.css"),
+    '.button { composes: plate from "./tile.module.css"; background-color: black; &:hover { background-color: navy; } }\n',
+  )
+  await writeFile(
+    path.join(fixture, "entry.ts"),
+    'import styles from "./button.module.css"\nexport default styles.button\n',
+  )
+
+  server = await createServer({
+    appType: "custom",
+    configFile: false,
+    root: fixture,
+    plugins: [gpuixCssModules()],
+  })
+  const loaded = (await server.ssrLoadModule("/entry.ts")) as {
+    default: Record<string, unknown>
+  }
+
+  expect(loaded.default).toEqual({
+    color: "white",
+    backgroundColor: "black",
+    hover: { color: "silver", backgroundColor: "navy" },
+  })
+  const watched = Object.entries(server.watcher.getWatched()).some(
+    ([directory, files]) => path.resolve(directory) === fixture && files.includes("tile.module.css"),
+  )
+  expect(watched).toBe(true)
+})
+
 test("resolves a Bun import against its importer", async () => {
   // A POSIX-style literal like "/app/main.tsx" is not a genuine absolute path
   // on Windows (no drive letter), so `path.resolve` would resolve it against
@@ -129,4 +166,27 @@ test("compiles CSS modules for Bun's bundler, which otherwise emits class names"
   expect(await build([gpuixCssModulesBun()])).toMatch(/card:\s*\{\s*display:\s*"flex"\s*\}/)
   // Bun's own CSS modules name the class instead, which the renderer cannot use.
   expect(await build([])).toMatch(/card:\s*"card_/)
+})
+
+test("resolves composed CSS modules in Bun.build()", async () => {
+  fixture = await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)), ".css-bun-composes-"))
+  await writeFile(path.join(fixture, "tile.module.css"), ".plate { color: white; }\n")
+  await writeFile(
+    path.join(fixture, "button.module.css"),
+    '.button { composes: plate from "./tile.module.css"; background-color: black; }\n',
+  )
+  await writeFile(
+    path.join(fixture, "entry.ts"),
+    'import styles from "./button.module.css"\nconsole.log(JSON.stringify(styles.button))\n',
+  )
+
+  const result = await Bun.build({
+    entrypoints: [path.join(fixture, "entry.ts")],
+    target: "bun",
+    plugins: [gpuixCssModulesBun()],
+  })
+  expect(result.success, result.logs.map(String).join("\n")).toBe(true)
+  const output = await result.outputs[0]?.text()
+  expect(output).toContain('color: "white"')
+  expect(output).toContain('backgroundColor: "black"')
 })
