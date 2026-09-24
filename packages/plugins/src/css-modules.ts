@@ -3,6 +3,7 @@ import postcss from "postcss"
 import type { AcceptedPlugin } from "postcss"
 import postcssCustomProperties from "postcss-custom-properties"
 import postcssImport from "postcss-import"
+import postcssNesting from "postcss-nesting"
 
 type TransformCss = (css: string) => Record<string, unknown>
 
@@ -139,15 +140,18 @@ type CssModuleSelector =
 /**
  * The PostCSS plugins the native transform cannot do without.
  *
- * `@import` and every other at-rule fails validation, and custom properties
- * are removed rather than substituted, so a CSS module that shares tokens with
- * a web build needs both of these before GPUIX sees it. `preserve: false`
- * keeps the resolved value from sitting beside a second `var()` declaration.
- * Order matters: imports must be inlined before the custom properties they
- * define are in scope.
+ * `@import` and every other at-rule fails validation, nested rules do not parse
+ * at all, and custom properties are removed rather than substituted, so a CSS
+ * module written the way its web counterpart is needs all three of these before
+ * GPUIX sees it. `preserve: false` keeps the resolved value from sitting beside
+ * a second `var()` declaration.
+ *
+ * Order matters twice: imports are inlined before the rules and custom
+ * properties they carry are in scope, and nesting is flattened before `var()`
+ * substitution walks the declarations that remain.
  */
 function defaultCssModulePlugins(): AcceptedPlugin[] {
-  return [postcssImport(), postcssCustomProperties({ preserve: false })]
+  return [postcssImport(), postcssNesting(), postcssCustomProperties({ preserve: false })]
 }
 
 /**
