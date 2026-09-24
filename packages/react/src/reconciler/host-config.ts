@@ -836,8 +836,9 @@ function authoredStyle(instance: Instance, container: Container, props: Props): 
     // `style` outranks the class, as an author rule outranks a stylesheet.
     if (style == null) return fromClassName
 
-    const merged = { ...fromClassName, ...style }
-    const authoredProperties = new Set(Object.keys(style))
+    const authoredStyleValues = definedStyleValues(style)
+    const merged = { ...fromClassName, ...authoredStyleValues }
+    const authoredProperties = new Set(Object.keys(authoredStyleValues))
     for (const key of NATIVE_STATE_STYLE_KEYS) {
       const classState = fromClassName[key]
       if (classState === undefined) continue
@@ -846,7 +847,7 @@ function authoredStyle(instance: Instance, container: Container, props: Props): 
       for (const property of authoredProperties) {
         delete state[property as keyof typeof state]
       }
-      Object.assign(state, style[key])
+      Object.assign(state, definedStyleValues(style[key] ?? {}))
       merged[key] = state
     }
     return merged
@@ -863,6 +864,12 @@ function authoredStyle(instance: Instance, container: Container, props: Props): 
   // Treat a rejected update like style removal instead of preserving stale or
   // serialising an arbitrary value into the native renderer.
   return {}
+}
+
+function definedStyleValues<T extends object>(style: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(style).filter(([, value]) => value !== undefined),
+  ) as Partial<T>
 }
 
 const NATIVE_STATE_STYLE_KEYS = [

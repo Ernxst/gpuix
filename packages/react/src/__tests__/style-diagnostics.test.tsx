@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
 import React, { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
@@ -8,6 +12,7 @@ import {
 import { cn } from "../cn.js"
 import { wrapWithBatching } from "../reconciler/batch-renderer.js"
 import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
+import { decodePng } from "../testing-png.js"
 import type { NativeStateStyleKey, StyleDesc } from "../types/host.js"
 
 expect.extend(gpuixMatchers)
@@ -1408,6 +1413,65 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
       backgroundColor: "blue",
     })
     testRoot.unmount()
+  })
+
+  it("keeps compiled class styles when corresponding style prop values are undefined", () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "gpuix-style-precedence-"))
+    const testRoot = createTestRoot({ width: 120, height: 80, scaleFactor: 1 })
+
+    const pixelAt = (screenshot: string, x: number, y: number) => {
+      const image = decodePng(readFileSync(screenshot), screenshot)
+      const offset = (y * image.width + x) * 4
+      return [...image.data.subarray(offset, offset + 4)]
+    }
+
+    try {
+      const card = {
+        width: 100,
+        height: 60,
+        backgroundColor: "#ff0000",
+        hover: { backgroundColor: "#00ff00" },
+      } as StyleDesc
+      Object.defineProperty(card, COMPILED_STYLE, { value: true })
+
+      testRoot.render(
+        <div
+          data-testid="class-name-and-undefined-style"
+          className={card as unknown as string}
+          style={{ backgroundColor: undefined, hover: { backgroundColor: undefined } }}
+        />
+      )
+
+      const target = testRoot.renderer.findByTestId("class-name-and-undefined-style")!
+      const bounds = testRoot.renderer.getElementBounds(target.id)!
+      testRoot.renderer.nativeSimulateMouseMove(110, 70)
+      testRoot.renderer.dispatchNativeEvents()
+      testRoot.renderer.flush()
+      const baseScreenshot = path.join(directory, "base.png")
+      testRoot.renderer.captureScreenshot(baseScreenshot)
+
+      expect(pixelAt(baseScreenshot, 50, 30)).toEqual([255, 0, 0, 255])
+      expect(testRoot.renderer.getResolvedStyle(target.id)).toMatchObject({
+        backgroundColor: "#ff0000",
+      })
+
+      testRoot.renderer.nativeSimulateMouseMove(
+        bounds.x + bounds.width / 2,
+        bounds.y + bounds.height / 2,
+      )
+      testRoot.renderer.dispatchNativeEvents()
+      testRoot.renderer.flush()
+      const hoverScreenshot = path.join(directory, "hover.png")
+      testRoot.renderer.captureScreenshot(hoverScreenshot)
+
+      expect(testRoot.renderer.getResolvedStyle(target.id)).toMatchObject({
+        backgroundColor: "#00ff00",
+      })
+      expect(pixelAt(hoverScreenshot, 50, 30)).toEqual([0, 255, 0, 255])
+    } finally {
+      testRoot.unmount()
+      rmSync(directory, { recursive: true, force: true })
+    }
   })
 
   it("lets state styles in the style prop outrank compiled className state styles per property", () => {
