@@ -450,7 +450,7 @@ async function resolveComposedClass(
 
   const includedLocalClasses = new Set<string>()
   const visitedLocalClasses = new Set<string>()
-  const externalStyles: Record<string, unknown>[] = []
+  const externalStyles: Array<{ style: Record<string, unknown>; sourceKey: string }> = []
   const externalKeys = new Set<string>()
 
   const collect = async (localClassName: string, localChain: string[]): Promise<void> => {
@@ -498,18 +498,43 @@ async function resolveComposedClass(
           )
         }
         externalKeys.add(externalKey)
-        externalStyles.push(
-          await resolveComposedClass(composedModule, composedClass, compositionChain, context),
-        )
+        externalStyles.push({
+          style: await resolveComposedClass(
+            composedModule,
+            composedClass,
+            compositionChain,
+            context,
+          ),
+          sourceKey: externalKey,
+        })
       }
     }
   }
 
   await collect(className, chain)
   const style: Record<string, unknown> = {}
-  for (const externalStyle of externalStyles) mergeStyle(style, externalStyle)
+  const metadataSources = new Map<string, string>()
+  for (const { style: externalStyle, sourceKey } of externalStyles) {
+    mergeCompositionStyle(
+      style,
+      externalStyle,
+      module.sourceId,
+      className,
+      sourceKey,
+      metadataSources,
+    )
+  }
   for (const contribution of module.contributions) {
-    if (includedLocalClasses.has(contribution.className)) mergeStyle(style, contribution.style)
+    if (includedLocalClasses.has(contribution.className)) {
+      mergeCompositionStyle(
+        style,
+        contribution.style,
+        module.sourceId,
+        className,
+        compositionKey(module.sourceId, contribution.className),
+        metadataSources,
+      )
+    }
   }
   return style
 }
@@ -575,6 +600,30 @@ function mergeStyle(target: Record<string, unknown>, source: Record<string, unkn
     } else {
       target[property] = value
     }
+  }
+}
+
+function mergeCompositionStyle(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  sourceId: string,
+  className: string,
+  sourceKey: string,
+  metadataSources: Map<string, string>,
+): void {
+  for (const property of ["hoverGroup", "hoverWithinGroup"] as const) {
+    if (property in target && property in source && target[property] !== source[property]) {
+      if (metadataSources.get(property) !== sourceKey) {
+        throw unsupportedCss(
+          sourceId,
+          `class ".${className}" cannot compose conflicting ${JSON.stringify(property)} values`,
+        )
+      }
+    }
+  }
+  mergeStyle(target, source)
+  for (const property of ["hoverGroup", "hoverWithinGroup"] as const) {
+    if (property in source) metadataSources.set(property, sourceKey)
   }
 }
 

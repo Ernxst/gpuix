@@ -650,6 +650,30 @@ test("merges cross-file classes in composition order before local rules", async 
   }
 })
 
+test("rejects composed classes with conflicting hovered-descendant relationships", async () => {
+  await expect(
+    transformGpuixCssModule(
+      `
+        .card:hover .label { color: red; }
+        .panel:hover .caption { background-color: blue; }
+        .title { composes: label caption; }
+      `,
+      "/fixture/conflicting-hover-within.module.css",
+    ),
+  ).rejects.toThrow('class ".title" cannot compose conflicting "hoverWithinGroup" values')
+
+  await expect(
+    transformGpuixCssModule(
+      `
+        .card:hover .label { color: red; }
+        .panel:hover .caption { background-color: blue; }
+        .frame { composes: card panel; }
+      `,
+      "/fixture/conflicting-hover-group.module.css",
+    ),
+  ).rejects.toThrow('class ".frame" cannot compose conflicting "hoverGroup" values')
+})
+
 test("merges composed and local declarations inside every interaction state", async () => {
   const styles = await transformGpuixCssModule(
     `
