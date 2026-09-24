@@ -55,6 +55,7 @@ type ViteLoadContext = {
 }
 
 export type CssModulesOptions = {
+  /** PostCSS plugins to run after the built-in ones. */
   plugins?: readonly AcceptedPlugin[]
 }
 

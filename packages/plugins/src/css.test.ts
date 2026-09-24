@@ -25,8 +25,14 @@ afterEach(async () => {
 test("compiles CSS modules in a plain Vite config, with no gpuix environment", async () => {
   fixture = await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)), ".css-spike-"))
   await writeFile(
+    path.join(fixture, "tokens.css"),
+    ":root {\n  --button-ink: #ffffff;\n  --button-space: 1rem 2px;\n}\n",
+  )
+  // No `plugins` option, so the default PostCSS plugins are what make the
+  // import and the `var()` references compile.
+  await writeFile(
     path.join(fixture, "button.module.css"),
-    ".button { color: #ffffff; padding: 1rem 2px; }\n",
+    '@import "./tokens.css";\n\n.button { color: var(--button-ink); padding: var(--button-space); }\n',
   )
   await writeFile(
     path.join(fixture, "entry.ts"),
