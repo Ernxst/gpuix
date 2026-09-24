@@ -1,6 +1,6 @@
 {
   "name": "@gpuix/react",
-  "version": "0.25.0-fork.1",
+  "version": "0.25.0-fork.2",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -103,7 +103,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@gpuix/native": "0.25.0-fork.1",
+    "@gpuix/native": "0.25.0-fork.2",
     "cn": "^0.4.0",
     "eventsource-parser": "^4.1.0",
     "zod": "^4.4.3"
@@ -112,7 +112,7 @@
     "react": "^19.2.0",
     "react-reconciler": "^0.33.0",
     "scheduler": "^0.27.0",
-    "vitest": "^3.0.0 || ^4.0.0"
+    "vitest": "^5.0.0"
   },
   "peerDependenciesMeta": {
     "scheduler": {
@@ -132,6 +132,6 @@
     "scheduler": "^0.27.0",
     "react-refresh": "^0.18.0",
     "typescript": "^5.3.0",
-    "vitest": "^4.0.18"
+    "vitest": "^5.0.1"
   }
 }

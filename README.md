@@ -5830,6 +5830,12 @@ registers once for the whole worker either way. The window-close and
 configured-defaults restore does not: see **Automatic cleanup, and where
 vitest enters**, above, for `setupFiles` placement under `isolate: false`.
 
+The Vitest entry supports Vitest 5. Vitest 3 and 4 are no longer supported
+because their matcher declaration cannot merge with Vitest 5's two-parameter
+shape. The GPU-IX matcher pack keeps its `toHaveTextContent(matcher)` behaviour:
+partial strings, regular expressions and predicates still work when the pack is
+registered, even though Vitest 5's own matcher uses exact matching.
+
 ```ts
 // vitest setup file, or the top of a test file
 import '@gpuix/react/testing/vitest'
@@ -5845,7 +5851,10 @@ import { gpuixMatchers, type GpuixMatchers } from '@gpuix/react/testing/matchers
 expect.extend(gpuixMatchers)
 
 declare module 'vitest' {
-  interface Matchers<T = any> extends GpuixMatchers<T> {}
+  interface Matchers<
+    R extends void | Promise<void> = void | Promise<void>,
+    T = unknown,
+  > extends GpuixMatchers<R> {}
 }
 ```
 

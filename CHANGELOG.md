@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.25.0-fork.2
+
+**`@gpuix/react` supports Vitest 5.** The Vitest entry now augments Vitest 5's
+matcher types, and the package test suite runs on Vitest 5. **Breaking:** Vitest
+3 and 4 are no longer supported. Update Vitest to `^5.0.0` to use
+`@gpuix/react/testing/vitest`. The GPU-IX `toHaveTextContent(matcher)` matcher
+keeps its partial-string, regular-expression and predicate behaviour when the
+matcher pack is registered.
+
 ## 0.5.1
 
 1. **Fixed `@gpuix/react/testing` reporting no native renderer when installed from npm.** `hasNativeTestRenderer` was always `false`, so every suite that guards on it skipped silently:

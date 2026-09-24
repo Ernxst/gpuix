@@ -29,8 +29,10 @@ import { configuredScreenshots, configureScreenshots } from "./testing-screensho
 export * from "./testing.js"
 
 declare module "vitest" {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  interface Matchers<T = any> extends GpuixMatchers<T> {}
+  interface Matchers<
+    R extends void | Promise<void> = void | Promise<void>,
+    T = unknown,
+  > extends GpuixMatchers<R> {}
 }
 
 expect.extend(gpuixMatchers)

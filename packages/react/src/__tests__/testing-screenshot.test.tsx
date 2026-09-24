@@ -32,8 +32,10 @@ import { withNewGoldenWrites } from "./test-utils.js"
 expect.extend(gpuixMatchers)
 
 declare module "vitest" {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  interface Matchers<T = any> extends GpuixMatchers<T> {}
+  interface Matchers<
+    R extends void | Promise<void> = void | Promise<void>,
+    T = unknown,
+  > extends GpuixMatchers<R> {}
 }
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
