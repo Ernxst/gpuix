@@ -101,10 +101,11 @@ The plugin compiles CSS modules in the project where it is installed. A web
 build needs no GPUIX plugin: Vite's CSS modules already produce what
 `className` wants there.
 
-The transform inlines `@import` and resolves custom properties on its own: it
-runs `postcss-import` and `postcss-custom-properties` with `preserve: false`
-before validation, and the package depends on both. A `plugins` option adds to
-those built-in plugins rather than replacing them, and runs after them:
+The transform inlines `@import`, flattens nested rules and resolves custom
+properties on its own: it runs `postcss-import`, `postcss-nesting` and
+`postcss-custom-properties` with `preserve: false` before validation, and the
+package depends on all three. A `plugins` option adds to those built-in plugins
+rather than replacing them, and runs after them:
 
 ```ts
 import { gpuixCssModules } from "@gpuix/plugins/css"
@@ -117,6 +118,29 @@ export default defineConfig({
 Custom-property declarations are removed after substitution, while unsupported
 at-rules and selectors still fail validation. The same option is available to
 `gpuixCssModulesBun()`.
+
+Nesting is flattened before validation, so an interaction state can sit inside
+its class and a hovered descendant inside its ancestor:
+
+```css
+.card {
+  background-color: #111;
+
+  &:hover {
+    background-color: #222;
+  }
+
+  &:hover .label {
+    color: #fff;
+  }
+}
+```
+
+Flattening hands the result to the same selector rules rather than widening
+them. `&:hover` becomes `.card:hover` and folds into the class style, and
+`&:hover .label` becomes the `hoverGroup` and `hoverWithin` pair. A nested
+descendant or child selector such as `.card { .label { … } }` becomes
+`.card .label`, which is still rejected.
 
 For example, `tokens.css` can hold values shared with the web build:
 

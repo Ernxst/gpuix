@@ -323,6 +323,63 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
   }
 })
 
+test("flattens nested interaction states into their class style", async () => {
+  await expect(
+    transformGpuixCssModule(
+      `
+        .button {
+          background-color: #111;
+
+          &:hover {
+            background-color: #222;
+          }
+
+          &:focus-visible {
+            outline-color: #fff;
+          }
+        }
+      `,
+      "/fixture/button.module.css",
+    ),
+  ).resolves.toEqual({
+    button: {
+      backgroundColor: "#111",
+      hover: { backgroundColor: "#222" },
+      focusVisible: { outlineColor: "#fff" },
+    },
+  })
+})
+
+test("flattens a nested hovered descendant into hoverGroup and hoverWithin styles", async () => {
+  const styles = await transformGpuixCssModule(
+    `
+      .card {
+        background-color: #111;
+
+        &:hover .label {
+          color: #fff;
+        }
+      }
+    `,
+    "/fixture/card.module.css",
+  )
+
+  expect(styles.card).toMatchObject({ backgroundColor: "#111" })
+  expect(styles.card).toHaveProperty("hoverGroup")
+  expect(styles.label).toHaveProperty("hoverWithin", { color: "#fff" })
+})
+
+test("rejects a nested descendant selector on its flattened form", async () => {
+  // Nesting reaches the native selector rules rather than bypassing them: this
+  // becomes `.card .label`, which has no single style object to become.
+  await expect(
+    transformGpuixCssModule(
+      ".card { .label { color: #fff; } }",
+      "/fixture/card.module.css",
+    ),
+  ).rejects.toThrow('selector ".card .label" is not supported yet')
+})
+
 test("folds interaction pseudo-classes into their class style", async () => {
   await expect(
     transformGpuixCssModule(
