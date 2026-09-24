@@ -12,6 +12,7 @@
     "src/__tests__/synthetic-event.types.tsx",
     "src/__tests__/input-change-input-type.test.tsx",
     "src/__tests__/input-numeric-value.test.tsx",
+    "src/__tests__/resize-observer-globals.types.ts",
     "src/__tests__/testing-exports.types.ts",
     "src/__tests__/testing-act.types.ts",
     "src/__tests__/resize-observer.types.tsx",

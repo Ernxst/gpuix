@@ -22,9 +22,10 @@ import {
   cancelNativeAnimationFrame,
   requestNativeAnimationFrame,
 } from "./frame-clock.js"
-import { ResizeObserver } from "./resize-observer.js"
+import { ResizeObserver as GpuixResizeObserver } from "./resize-observer.js"
+import type { ResizeObserverOptions as GpuixResizeObserverOptions } from "./resize-observer.js"
 import {
-  Element,
+  Element as GpuixElement,
   HTMLButtonElement,
   HTMLDivElement,
   HTMLElement,
@@ -36,6 +37,13 @@ import { Image } from "./canvas/image.js"
 import { PointerEvent } from "./pointer-event.js"
 import { gpuixDocument } from "./document.js"
 import { installWebGpuGlobal } from "./canvas/webgpu.js"
+import type { PublicInstance } from "./types/host.js"
+
+declare global {
+  interface ResizeObserver {
+    observe(target: Element | PublicInstance, options?: GpuixResizeObserverOptions): void
+  }
+}
 
 function defineGlobalIfAbsent(name: string, value: unknown): void {
   if (Reflect.has(globalThis, name)) return
@@ -51,10 +59,10 @@ defineGlobalIfAbsent("cancelAnimationFrame", cancelNativeAnimationFrame)
 defineGlobalIfAbsent("window", globalThis)
 defineGlobalIfAbsent("self", globalThis)
 defineGlobalIfAbsent("scrollTo", () => undefined)
-defineGlobalIfAbsent("ResizeObserver", ResizeObserver)
+defineGlobalIfAbsent("ResizeObserver", GpuixResizeObserver)
 defineGlobalIfAbsent("Image", Image)
 defineGlobalIfAbsent("Node", Node)
-defineGlobalIfAbsent("Element", Element)
+defineGlobalIfAbsent("Element", GpuixElement)
 defineGlobalIfAbsent("HTMLElement", HTMLElement)
 defineGlobalIfAbsent("HTMLDivElement", HTMLDivElement)
 defineGlobalIfAbsent("HTMLButtonElement", HTMLButtonElement)
