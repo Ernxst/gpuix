@@ -164,8 +164,9 @@ The built-in plugins run before GPUIX validates the CSS, so this becomes
 `{ item: { backgroundColor: "#252e34" } }`.
 Imports inside a CSS module use Vite's resolver in Vite and Vitest, or Bun's
 resolver in Bun. Relative imports, package `imports` subpaths such as
-`#styles/tokens.css`, and bare package specifiers therefore resolve from the
-stylesheet that contains each `@import`.
+`#styles/tokens.css`, and bare package specifiers resolve from the stylesheet
+that contains each `@import`. PostCSS retains its CSS-aware lookup when a
+package's JavaScript entry differs from its `style` field.
 
 Unitless `line-height`, such as `line-height: 1.5`, compiles to the font-size
 multiplier `lineHeight: "1.5"`. A pixel value such as `18px` remains an absolute

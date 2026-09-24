@@ -7,7 +7,10 @@ import postcssImport from "postcss-import"
 import postcssNesting from "postcss-nesting"
 
 type TransformCss = (css: string) => Record<string, unknown>
-export type CssImportResolver = (id: string, importer: string) => Promise<string> | string
+export type CssImportResolver = (
+  id: string,
+  importer: string,
+) => Promise<string | undefined> | string | undefined
 
 // The transform is CommonJS. Bun hands back the function; Node's interop hands
 // back the module namespace, which a Vitest run or a Node bundler hits.
@@ -157,8 +160,13 @@ function defaultCssModulePlugins(resolveImport?: CssImportResolver): AcceptedPlu
     ? postcssImport({
         // postcss-import passes the current at-rule as a fourth argument. Its
         // published types omit it, so keep this optional for that signature.
-        resolve: (id, basedir, _options, atRule?: postcss.AtRule) =>
-          resolveImport(id, atRule?.source?.input?.file ?? path.join(basedir, "index.css")),
+        resolve: async (id, basedir, _options, atRule?: postcss.AtRule) => {
+          const importer = atRule?.source?.input?.file ?? path.join(basedir, "index.css")
+          const resolved = await resolveImport(id, importer)
+          // Package `main` can point at JavaScript while its `style` field points
+          // at CSS. Let postcss-import retain its CSS-aware package lookup then.
+          return !resolved || /\.[cm]?[jt]sx?$/i.test(resolved) ? id : resolved
+        },
       })
     : postcssImport()
   return [imports, postcssNesting(), postcssCustomProperties({ preserve: false })]

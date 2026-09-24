@@ -133,8 +133,10 @@ test("Vite and Bun resolve package imports and bare CSS packages inside nested m
     const entry = path.join(fixture, "entry.ts")
     const moduleDir = path.join(fixture, "src/components")
     const themeDir = path.join(fixture, "node_modules/@fixture/theme")
+    const stylePackageDir = path.join(fixture, "node_modules/style-package")
     await mkdir(moduleDir, { recursive: true })
     await mkdir(themeDir, { recursive: true })
+    await mkdir(stylePackageDir, { recursive: true })
     await writeFile(
       path.join(fixture, "package.json"),
       JSON.stringify({ imports: { "#styles/tokens.css": "./src/styles/tokens.css" } }),
@@ -148,8 +150,14 @@ test("Vite and Bun resolve package imports and bare CSS packages inside nested m
     )
     await writeFile(path.join(themeDir, "tokens.css"), ":root { --space: 7px; }")
     await writeFile(
+      path.join(stylePackageDir, "package.json"),
+      JSON.stringify({ name: "style-package", main: "index.js", style: "tokens.css" }),
+    )
+    await writeFile(path.join(stylePackageDir, "index.js"), "export default 'not CSS'")
+    await writeFile(path.join(stylePackageDir, "tokens.css"), ":root { --accent: #abcdef; }")
+    await writeFile(
       path.join(moduleDir, "panel.module.css"),
-      '@import "#styles/tokens.css";\n@import "@fixture/theme";\n.panel { color: var(--ink); padding: var(--space); line-height: 1.5; }',
+      '@import "#styles/tokens.css";\n@import "@fixture/theme";\n@import "style-package";\n.panel { color: var(--ink); background-color: var(--accent); padding: var(--space); line-height: 1.5; }',
     )
     await writeFile(entry, 'import styles from "./src/components/panel.module.css"\nexport default styles.panel\n')
 
@@ -161,7 +169,12 @@ test("Vite and Bun resolve package imports and bare CSS packages inside nested m
     })
     try {
       const loaded = (await vite.ssrLoadModule("/entry.ts")) as { default: Record<string, unknown> }
-      expect(loaded.default).toMatchObject({ color: "#123456", paddingTop: 7, lineHeight: "1.5" })
+      expect(loaded.default).toMatchObject({
+        color: "#123456",
+        backgroundColor: "#abcdef",
+        paddingTop: 7,
+        lineHeight: "1.5",
+      })
     } finally {
       await vite.close()
     }
@@ -174,6 +187,7 @@ test("Vite and Bun resolve package imports and bare CSS packages inside nested m
     expect(built.success, built.logs.map(String).join("\n")).toBe(true)
     const output = await built.outputs[0]?.text()
     expect(output).toContain('color: "#123456"')
+    expect(output).toContain('backgroundColor: "#abcdef"')
     expect(output).toContain("paddingTop: 7")
     expect(output).toContain('lineHeight: "1.5"')
   } finally {
@@ -368,7 +382,9 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
     await mkdir(path.join(fixture, "src/components"), { recursive: true })
     await mkdir(path.join(fixture, "src/styles"), { recursive: true })
     const themeDir = path.join(fixture, "node_modules/@fixture/theme")
+    const stylePackageDir = path.join(fixture, "node_modules/style-package")
     await mkdir(themeDir, { recursive: true })
+    await mkdir(stylePackageDir, { recursive: true })
     await writeFile(
       path.join(fixture, "package.json"),
       JSON.stringify({ imports: { "#styles/tokens.css": "./src/styles/tokens.css" } }),
@@ -379,12 +395,18 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
       JSON.stringify({ name: "@fixture/theme", exports: "./tokens.css" }),
     )
     await writeFile(path.join(themeDir, "tokens.css"), ":root { --panel-space: 4px; }")
+    await writeFile(
+      path.join(stylePackageDir, "package.json"),
+      JSON.stringify({ name: "style-package", main: "index.js", style: "tokens.css" }),
+    )
+    await writeFile(path.join(stylePackageDir, "index.js"), "export default 'not CSS'")
+    await writeFile(path.join(stylePackageDir, "tokens.css"), ":root { --panel-band: #abcdef; }")
 
     // Imported tokens and `var()`, so the fixture fails without the default
     // PostCSS plugins the preload entry has no way to be handed.
     await writeFile(
       path.join(fixture, "src/components/panel.module.css"),
-      '@import "#styles/tokens.css";\n@import "@fixture/theme";\n.panel { color: var(--panel-ink); padding: var(--panel-space); line-height: 1.5; }\n',
+      '@import "#styles/tokens.css";\n@import "@fixture/theme";\n@import "style-package";\n.panel { color: var(--panel-ink); background-color: var(--panel-band); padding: var(--panel-space); line-height: 1.5; }\n',
     )
     await writeFile(
       entry,
@@ -404,6 +426,7 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
     }
     expect(loaded.style).toEqual({
       color: "#123456",
+      backgroundColor: "#abcdef",
       paddingTop: 4,
       paddingRight: 4,
       paddingBottom: 4,

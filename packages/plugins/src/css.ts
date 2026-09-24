@@ -94,10 +94,7 @@ export async function loadCssModule(
   const resolveImport: CssImportResolver | undefined = viteContext.resolve
     ? async (specifier, importer) => {
         const resolved = await viteContext.resolve?.(specifier, importer, { skipSelf: true })
-        if (!resolved || resolved.external) {
-          throw new Error(`[gpuix] cannot resolve CSS import ${JSON.stringify(specifier)} from ${JSON.stringify(importer)}`)
-        }
-        return cleanId(resolved.id)
+        return resolved && !resolved.external ? cleanId(resolved.id) : undefined
       }
     : undefined
   const css = await readFile(sourceId, "utf8")
@@ -181,7 +178,13 @@ export function gpuixCssModulesBun(options: CssModulesOptions = {}): BunPlugin {
           await readFile(id, "utf8"),
           id,
           options.plugins,
-          (specifier, importer) => Bun.resolveSync(specifier, path.dirname(importer)),
+          (specifier, importer) => {
+            try {
+              return Bun.resolveSync(specifier, path.dirname(importer))
+            } catch {
+              return undefined
+            }
+          },
         ),
         loader: "js",
         resolveDir: path.dirname(id),
