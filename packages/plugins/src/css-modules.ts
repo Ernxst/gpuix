@@ -1,6 +1,8 @@
 import transformCssModule from "css-to-react-native-transform"
 import postcss from "postcss"
 import type { AcceptedPlugin } from "postcss"
+import postcssCustomProperties from "postcss-custom-properties"
+import postcssImport from "postcss-import"
 
 type TransformCss = (css: string) => Record<string, unknown>
 
@@ -135,6 +137,20 @@ type CssModuleSelector =
   | { kind: "hoverWithin"; ancestor: string; descendant: string }
 
 /**
+ * The PostCSS plugins the native transform cannot do without.
+ *
+ * `@import` and every other at-rule fails validation, and custom properties
+ * are removed rather than substituted, so a CSS module that shares tokens with
+ * a web build needs both of these before GPUIX sees it. `preserve: false`
+ * keeps the resolved value from sitting beside a second `var()` declaration.
+ * Order matters: imports must be inlined before the custom properties they
+ * define are in scope.
+ */
+function defaultCssModulePlugins(): AcceptedPlugin[] {
+  return [postcssImport(), postcssCustomProperties({ preserve: false })]
+}
+
+/**
  * Convert the deliberately small CSS-module subset supported by the native
  * renderer into the shape accepted by its `style` prop.
  *
@@ -148,7 +164,9 @@ export async function transformGpuixCssModule(
   sourceId: string,
   plugins: readonly AcceptedPlugin[] = [],
 ): Promise<CssModuleStyles> {
-  const processed = await postcss(plugins).process(css, { from: sourceId })
+  const processed = await postcss([...defaultCssModulePlugins(), ...plugins]).process(css, {
+    from: sourceId,
+  })
   const preprocessed = postcss.parse(processed.css, { from: sourceId })
   // Custom properties provide values to the processor, not native styles.
   preprocessed.walkDecls(/^--/, (declaration) => {

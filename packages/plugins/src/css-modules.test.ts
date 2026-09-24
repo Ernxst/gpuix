@@ -73,27 +73,27 @@ test("rejects selectors that cannot become one inline style object", async () =>
   ).rejects.toThrow('selector ".panel::before" is not supported yet')
 })
 
-test("PostCSS plugins inline imported tokens and resolve custom properties before validation", async () => {
+test("inlines imported tokens and resolves custom properties before validation", async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-postcss-"))
+  const expected = {
+    item: {
+      backgroundColor: "#252e34",
+      paddingTop: 12,
+      paddingRight: 12,
+      paddingBottom: 12,
+      paddingLeft: 12,
+    },
+  }
 
   try {
     const sourceId = path.join(fixture, "panel.module.css")
     await writeFile(path.join(fixture, "tokens.css"), tokenCss)
 
+    // The default plugins carry this; passing them again must not change it.
+    await expect(transformGpuixCssModule(tokenModuleCss, sourceId)).resolves.toEqual(expected)
     await expect(
       transformGpuixCssModule(tokenModuleCss, sourceId, tokenPlugins),
-    ).resolves.toEqual({
-      item: {
-        backgroundColor: "#252e34",
-        paddingTop: 12,
-        paddingRight: 12,
-        paddingBottom: 12,
-        paddingLeft: 12,
-      },
-    })
-    await expect(transformGpuixCssModule(tokenModuleCss, sourceId)).rejects.toThrow(
-      'at-rule "@import" is not supported yet',
-    )
+    ).resolves.toEqual(expected)
   } finally {
     await rm(fixture, { recursive: true, force: true })
   }
@@ -166,9 +166,15 @@ test("Bun builds native CSS modules and receives GPUIX build defaults", async ()
   try {
     const entry = path.join(fixture, "entry.ts")
     await writeFile(entry, 'import styles from "./panel.module.css"\nexport default styles.panel\n')
+    // `gpuix()` takes no PostCSS plugins, so imported tokens and `var()` only
+    // compile here if the transform carries them by default.
+    await writeFile(
+      path.join(fixture, "tokens.css"),
+      ":root {\n  --panel-band: #123456;\n  --panel-space: 4px;\n}\n",
+    )
     await writeFile(
       path.join(fixture, "panel.module.css"),
-      ".panel { background-color: #123456; padding: 4px; }\n",
+      '@import "./tokens.css";\n\n.panel { background-color: var(--panel-band); padding: var(--panel-space); }\n',
     )
 
     const result = await Bun.build({
@@ -227,9 +233,15 @@ test("Bun dev plugin loads native CSS modules at runtime", async () => {
 
   try {
     const entry = path.join(fixture, "entry.ts")
+    // Imported tokens and `var()`, so the fixture fails without the default
+    // PostCSS plugins the preload entry has no way to be handed.
+    await writeFile(
+      path.join(fixture, "tokens.css"),
+      ":root {\n  --panel-ink: #123456;\n  --panel-space: 4px;\n}\n",
+    )
     await writeFile(
       path.join(fixture, "panel.module.css"),
-      ".panel { color: #123456; padding: 4px; }\n",
+      '@import "./tokens.css";\n\n.panel { color: var(--panel-ink); padding: var(--panel-space); }\n',
     )
     await writeFile(
       entry,
@@ -272,9 +284,15 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
     await mkdir(path.dirname(packageLink), { recursive: true })
     await symlink(packageRoot, packageLink, "dir")
 
+    // Imported tokens and `var()`, so the fixture fails without the default
+    // PostCSS plugins the preload entry has no way to be handed.
+    await writeFile(
+      path.join(fixture, "tokens.css"),
+      ":root {\n  --panel-ink: #123456;\n  --panel-space: 4px;\n}\n",
+    )
     await writeFile(
       path.join(fixture, "panel.module.css"),
-      ".panel { color: #123456; padding: 4px; }\n",
+      '@import "./tokens.css";\n\n.panel { color: var(--panel-ink); padding: var(--panel-space); }\n',
     )
     await writeFile(
       entry,

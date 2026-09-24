@@ -67,12 +67,13 @@
       "dependencies": {
         "css-to-react-native-transform": "^2.1.0",
         "postcss": "^8.5.28",
+        "postcss-custom-properties": "^15.0.1",
+        "postcss-import": "^17.0.0",
         "unplugin": "^3.4.0",
       },
       "devDependencies": {
         "@gpuix/react": "workspace:*",
-        "postcss-custom-properties": "^15.0.1",
-        "postcss-import": "^17.0.0",
+        "@types/postcss-import": "^14.0.3",
         "react": "^19.2.4",
         "vite": "^8.2.1",
       },
@@ -541,6 +542,8 @@
     "@types/ms": ["@types/ms@2.1.0", "", {}, "sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA=="],
 
     "@types/node": ["@types/node@25.3.3", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-DpzbrH7wIcBaJibpKo9nnSQL0MTRdnWttGyE5haGwK86xgMOkFLp7vEyfQPGLOJh5wNYiJ3V9PmUMDhV9u8kkQ=="],
+
+    "@types/postcss-import": ["@types/postcss-import@14.0.3", "", { "dependencies": { "postcss": "^8.0.0" } }, "sha512-raZhRVTf6Vw5+QbmQ7LOHSDML71A5rj4+EqDzAbrZPfxfoGzFxMHRCq16VlddGIZpHELw0BG4G0YE2ANkdZiIQ=="],
 
     "@types/react": ["@types/react@19.2.18", "", { "dependencies": { "csstype": "^3.2.2" } }, "sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w=="],
 
