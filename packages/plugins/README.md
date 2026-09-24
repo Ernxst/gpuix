@@ -162,6 +162,15 @@ A native CSS module can import those tokens and use `var()`:
 
 The built-in plugins run before GPUIX validates the CSS, so this becomes
 `{ item: { backgroundColor: "#252e34" } }`.
+Imports inside a CSS module use Vite's resolver in Vite and Vitest, or Bun's
+resolver in Bun. Relative imports, package `imports` subpaths such as
+`#styles/tokens.css`, and bare package specifiers resolve from the stylesheet
+that contains each `@import`. PostCSS retains its CSS-aware lookup when a
+package's JavaScript entry differs from its `style` field.
+
+Unitless `line-height`, such as `line-height: 1.5`, compiles to the font-size
+multiplier `lineHeight: "1.5"`. A pixel value such as `18px` remains an absolute
+line height.
 
 `gpuixCssModulesBun()` is the same transform for Bun, in `Bun.build()` or in a
 `Bun.plugin()` preload. A Bun build without it compiles `.module.css` to class
