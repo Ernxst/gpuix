@@ -42,6 +42,18 @@ export function resolveBunCssModule(id: string, importer: string | undefined): s
   return path.resolve(sourceId)
 }
 
+function resolveBunCssDependency(specifier: string, importer: string): string | undefined {
+  // Bun's build plugin and runtime preload expose different parent forms to
+  // `resolveSync`. Try the importer first, then its directory for build hooks.
+  for (const parent of [importer, path.dirname(importer)]) {
+    try {
+      return Bun.resolveSync(specifier, parent)
+    } catch {
+      // Try the other parent form before reporting an unresolved dependency.
+    }
+  }
+}
+
 type ViteResolveContext = {
   resolve?: (
     id: string,
@@ -178,13 +190,7 @@ export function gpuixCssModulesBun(options: CssModulesOptions = {}): BunPlugin {
           await readFile(id, "utf8"),
           id,
           options.plugins,
-          (specifier, importer) => {
-            try {
-              return Bun.resolveSync(specifier, path.dirname(importer))
-            } catch {
-              return undefined
-            }
-          },
+          resolveBunCssDependency,
         ),
         loader: "js",
         resolveDir: path.dirname(id),
