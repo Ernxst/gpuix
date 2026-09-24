@@ -5244,6 +5244,8 @@ The underlying native event uses `elementId: 0` when the tree has no root at
 report time; React uses each entry's `target` instead.
 Typed code can import `ResizeObserver` and its entry and option types as named
 exports from `@gpuix/react`.
+The ambient `ResizeObserver.observe` type accepts both DOM `Element` and GPU-IX
+`PublicInstance` targets when importing `@gpuix/react/globals`.
 
 ## Testing
 
