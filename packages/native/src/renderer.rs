@@ -1859,7 +1859,8 @@ async fn run_ui_commands(
 
                     // `Window` also has an inherent `window_handle()`; qualify the
                     // call to reach the raw-window-handle trait.
-                    let handle = HasWindowHandle::window_handle(window)?;
+                    let handle = HasWindowHandle::window_handle(window)
+                        .map_err(|error| anyhow::anyhow!("no window handle: {error:?}"))?;
                     if let RawWindowHandle::Win32(handle) = handle.as_raw() {
                         gpui_windows::show_window_opened_hidden(handle.hwnd)?;
                     }
