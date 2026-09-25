@@ -3,7 +3,6 @@ import path from "node:path"
 import React from "react"
 import type { CSSProperties } from "react"
 import { describe, expect, it } from "vitest"
-import { transformGpuixCssModule } from "../../../plugins/dist/css-modules.js"
 import type { NativeStateStyleKey, StyleDesc } from "../index.js"
 import { createTestRoot } from "../testing.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
@@ -20,6 +19,9 @@ type WidenedShared = SharedStyle & Pick<StyleDesc, NativeStateStyleKey>
 
 describe("resolved test-renderer styles", () => {
   it("renders a CSS module descendant state while its ancestor is pressed", async () => {
+    // Resolve at runtime so this test uses plugin source without changing React's TS rootDir.
+    const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+    const { transformGpuixCssModule } = await import(source)
     const styles = await transformGpuixCssModule(
       `.card { width: 300px; height: 80px; padding: 20px; }
        .title { width: 100px; height: 40px; background-color: #334155; }
