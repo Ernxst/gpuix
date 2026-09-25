@@ -30,7 +30,7 @@ use crate::renderer::{
     dispatch_application_menu_action, drain_style_diagnostics, first_canvas_diagnostic_message,
     forget_canvas_diagnostics, fresh_canvas_diagnostics, has_application_menus,
     init_application_menu_support, install_application_menus, parse_canvas_image_source,
-    parse_debug_frame_overlay_mode, set_application_menus, take_style_diagnostics_for_reporting,
+    parse_debug_frame_overlay_mode, reset_application_menus, set_application_menus, take_style_diagnostics_for_reporting,
     to_element_id, validate_canvas_target, CanvasImageLoadState, DebugFrameOverlayStats,
     ElementInteractionState, EventCallback, FocusDirection, FrameTimestampOrigin,
     GpuixStyleDiagnostic, GpuixView, InteractiveStyleState, MenuSpec, PendingStyleDiagnostics,
@@ -140,6 +140,15 @@ fn with_test_state<R>(
 
 fn dispose_test_state(state_id: u64) {
     let _ = TEST_STATES.try_with(|cell| cell.borrow_mut().remove(&state_id));
+}
+
+/// The application name the test app's menus and view are built with.
+const TEST_APP_NAME: &str = "GPUIX Test";
+
+/// The key bindings every test app starts with, before any menu adds its own.
+fn bind_test_app_keys(cx: &mut gpui::App) {
+    crate::renderer::init_key_bindings(cx);
+    crate::custom_elements::input::init(cx);
 }
 
 /// Default offscreen window size. Matches gpui's `open_offscreen_window_default`,
@@ -496,6 +505,13 @@ pub struct TestGpuixRenderer {
     /// Whether the test input path has an active simulated external drag, so
     /// subsequent moves use GPUI's Pending event rather than Entered.
     file_drag_active: AtomicBool,
+    /// GPUI's total frame count when `reset_window_state` last ran. GPUI keeps
+    /// that count for the window's lifetime, so the stats report frames drawn
+    /// since this point, which is what a newly opened window would report.
+    debug_frame_overlay_frame_origin: AtomicU64,
+    /// Bumped by `reset_window_state`, so a next-frame callback requested
+    /// before the reset records no timestamp when its frame arrives.
+    frame_request_generation: Arc<AtomicU64>,
 }
 
 #[napi]
@@ -541,10 +557,9 @@ impl TestGpuixRenderer {
         };
         cx.update(|cx| {
             cx.set_http_client(default_http_client());
-            crate::renderer::init_key_bindings(cx);
-            crate::custom_elements::input::init(cx);
+            bind_test_app_keys(cx);
             init_application_menu_support(cx, event_callback.clone());
-            install_application_menus(cx, "GPUIX Test", None).expect("default test menu is valid");
+            install_application_menus(cx, TEST_APP_NAME, None).expect("default test menu is valid");
         });
 
         // Open an offscreen window at (-10000, -10000) with the same GpuixView
@@ -557,7 +572,7 @@ impl TestGpuixRenderer {
                         canvas_display_lists_for_view,
                         callback_clone,
                         Arc::new(Mutex::new(event_callback.clone())),
-                        "GPUIX Test".to_string(),
+                        TEST_APP_NAME.to_string(),
                         selection_clone,
                         image_network_policy_for_view,
                         cx,
@@ -620,6 +635,8 @@ impl TestGpuixRenderer {
             animation_frame_timestamp_origin: Arc::new(Mutex::new(None)),
             active_pointer_origin: Mutex::new(None),
             file_drag_active: AtomicBool::new(false),
+            debug_frame_overlay_frame_origin: AtomicU64::new(0),
+            frame_request_generation: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -628,6 +645,58 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn dispose(&self) {
         dispose_test_state(self.state_id);
+    }
+
+    /// Return the window-level state a test can leave behind, and that outlives
+    /// the React tree, to what a newly opened window has: the keymap and
+    /// application menus, the debug frame overlay's mode and statistics, a
+    /// held or captured pointer, an OS file drag still over the window,
+    /// requested frames, native WebGPU devices and their resources, and the
+    /// frames, diagnostics and manual-mode pixels this renderer buffers.
+    ///
+    /// Events the reset produces, such as the `pointerCancel` for a held
+    /// pointer, are queued like any other; the caller drains them.
+    #[napi]
+    pub fn reset_window_state(&self) -> Result<()> {
+        let file_drag_active = self.file_drag_active.swap(false, Ordering::Relaxed);
+        let frames = with_test_state(self.state_id, |cx, window, view| {
+            if file_drag_active {
+                self.simulate_event(cx, window, gpui::FileDropEvent::Exited)?;
+            }
+            cx.update(|cx| {
+                cx.clear_key_bindings();
+                bind_test_app_keys(cx);
+                reset_application_menus(cx, TEST_APP_NAME)
+            })
+            .map_err(Error::from_reason)?;
+            let view = view.clone();
+            let frames = cx
+                .update_window(window, |_, window, app| {
+                    view.update(app, |view, _cx| view.cancel_pointer_sequence(window));
+                    window.release_pointer();
+                    window.set_debug_frame_overlay_mode(gpui::DebugFrameOverlayMode::Hidden);
+                    window.reset_debug_frame_overlay_stats();
+                    window.debug_frame_overlay_stats().frames
+                })
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            self.drain_async_tasks_if_eager(cx);
+            Ok(frames)
+        })?;
+        self.debug_frame_overlay_frame_origin
+            .store(frames, Ordering::Relaxed);
+        *self.active_pointer_origin.lock().unwrap() = None;
+        self.frame_request_generation.fetch_add(1, Ordering::Relaxed);
+        self.frame_timestamps.lock().unwrap().clear();
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        self.test_gpu_canvases.reset();
+        *self.animation_frame_timestamp_origin.lock().unwrap() = None;
+        self.style_diagnostics.lock().unwrap().clear();
+        self.canvas_diagnostic_members.lock().unwrap().clear();
+        self.manual_frame.lock().unwrap().take();
+        *self.manual_async_clock_advance.lock().unwrap() = Duration::ZERO;
+        // Draw the reset window, empty as a newly opened one is after its
+        // first frame, which its statistics count.
+        self.flush()
     }
 
     /// Preserve eager test-root behavior by default, while allowing callers to
@@ -1471,6 +1540,8 @@ impl TestGpuixRenderer {
     pub fn request_frame(&self, performance_timestamp_ms: f64) -> Result<()> {
         let timestamp_origin = self.animation_frame_timestamp_origin.clone();
         let frame_timestamps = self.frame_timestamps.clone();
+        let generation = self.frame_request_generation.clone();
+        let requested_generation = generation.load(Ordering::Relaxed);
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, move |_, window, app| {
                 let origin = animation_frame_origin(
@@ -1481,6 +1552,9 @@ impl TestGpuixRenderer {
                     ),
                 );
                 window.on_next_frame(move |_window, app| {
+                    if generation.load(Ordering::Relaxed) != requested_generation {
+                        return;
+                    }
                     frame_timestamps
                         .lock()
                         .unwrap()
@@ -2552,9 +2626,12 @@ impl TestGpuixRenderer {
     /// Same numbers as the on-screen overlay: current, p90, p99, max, frames.
     #[napi]
     pub fn get_debug_frame_overlay_stats(&self) -> Result<DebugFrameOverlayStats> {
+        let origin = self.debug_frame_overlay_frame_origin.load(Ordering::Relaxed);
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, _app| {
-                debug_frame_overlay_stats_js(window.debug_frame_overlay_stats())
+                let mut stats = window.debug_frame_overlay_stats();
+                stats.frames = stats.frames.saturating_sub(origin);
+                debug_frame_overlay_stats_js(stats)
             })
             .map_err(|e| Error::from_reason(e.to_string()))
         })

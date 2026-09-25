@@ -224,6 +224,16 @@ export function attachAnimationFrameSource(source: FrameSource): void {
   requestNativeFrame(slot)
 }
 
+/** Drop every callback queued through `owner`'s source while keeping it
+ *  attached, as detaching and attaching it again would. */
+export function resetAnimationFrameSource(owner: object): void {
+  const slot = frameClockSlot()
+  if (slot.source?.owner !== owner) return
+  cancelPendingNativeFrame(slot)
+  slot.generation += 1
+  slot.callbacks.clear()
+}
+
 export function detachAnimationFrameSource(owner: object): void {
   const slot = frameClockSlot()
   if (slot.source?.owner !== owner) return

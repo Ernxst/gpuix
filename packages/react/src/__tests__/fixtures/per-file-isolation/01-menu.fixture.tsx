@@ -1,5 +1,5 @@
 /// Fixture for `testing-per-file-isolation.test.tsx`. Renders a window and
-/// installs a custom menu action — nothing else. Proves window disposal alone
+/// installs a custom menu action — nothing else. Proves the window reset alone
 /// (not `configureTestWindow` / `configureScreenshots`) clears it before
 /// `02-configure.fixture.tsx` runs next in the same worker, under
 /// `--no-isolate`.

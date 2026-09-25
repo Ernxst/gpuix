@@ -8,6 +8,7 @@ import {
   cleanup,
   isNativeTestRendererAvailable,
   render,
+  resetSharedWindowForNextFile,
   textContent,
   type TestRenderer,
 } from "../testing.js"
@@ -328,6 +329,43 @@ describeNative("render", () => {
     expect(render(<text>eager again</text>, { asyncTaskMode: "eager" }).renderer).toBe(
       eager.renderer
     )
+  })
+
+  it("does not reuse a shared window across onSelectionChange handlers", () => {
+    const first = render(<text>first</text>, { onSelectionChange: () => {} })
+    const second = render(<text>second</text>, { onSelectionChange: () => {} })
+
+    expect(second.renderer).not.toBe(first.renderer)
+  })
+
+  it("keeps the window for the next file when it asks for the same options", () => {
+    const first = render(<text>first</text>, { width: 640, height: 480 })
+    resetSharedWindowForNextFile()
+
+    const same = render(<text data-testid="same">same</text>, { width: 640, height: 480 })
+    expect(same.renderer).toBe(first.renderer)
+    expect(textContent(same.renderer, same.getByTestId("same"))).toBe("same")
+    resetSharedWindowForNextFile()
+
+    const different = render(<text>different</text>, { width: 800, height: 480 })
+    expect(different.renderer).not.toBe(first.renderer)
+    expect(different.renderer.getWindowSize().width).toBe(800)
+  })
+
+  it("closes a window whose root died on an uncaught render error at the file boundary", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      render(<text>before</text>)
+      const dead = render(<Boom />)
+      expect(dead.root.getStatus().status).toBe("failed")
+      resetSharedWindowForNextFile()
+
+      const live = render(<text data-testid="ok">ok</text>)
+      expect(live.renderer).not.toBe(dead.renderer)
+      expect(live.root.getStatus().status).toBe("active")
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   it("cleanup() unmounts the tree and keeps the window", () => {
