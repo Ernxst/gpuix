@@ -5505,7 +5505,9 @@ space-separated keystroke syntax — not user-event's `{Shift>}A{/Shift}` bracke
 syntax, and it takes the target element rather than reading the focused one.
 Each physical keypress is committed through React before the next is sent, so a
 `tab` in the middle of a string moves focus and the rest of the string lands on
-the newly focused element. `type(element, text)` converts literal spaces,
+the newly focused element. Keyboard input draws only when a key changed
+something, so a Tab costs one draw (the one that reports the focus move) and a
+key nothing handles costs none. `type(element, text)` converts literal spaces,
 newlines, and tabs for that syntax. `clear(element)` selects all with the
 platform chord (`cmd-a` on macOS, `ctrl-a` elsewhere) and deletes.
 `unhover(element)` moves the pointer to the nearest point off the element, or
