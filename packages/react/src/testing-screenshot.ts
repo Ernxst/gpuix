@@ -21,7 +21,6 @@ import os from "node:os"
 import path from "node:path"
 
 import {
-  cropImage,
   decodePng,
   diffImage,
   encodePng,
@@ -423,11 +422,15 @@ function resolveCaptureTarget(received: unknown): CaptureTarget {
  */
 function deviceRect(
   renderer: TestRenderer,
-  element: TestElement,
-  image: PngSize
+  element: TestElement
 ): PixelRect {
   const rect = element.getBoundingClientRect()
-  const scale = renderer.getWindowSize().scaleFactor
+  const window = renderer.getWindowSize()
+  const scale = window.scaleFactor
+  const image = {
+    width: Math.round(window.width * scale),
+    height: Math.round(window.height * scale),
+  }
   const left = Math.max(0, Math.round(rect.left * scale))
   const top = Math.max(0, Math.round(rect.top * scale))
   const right = Math.min(image.width, Math.round(rect.right * scale))
@@ -454,12 +457,15 @@ function deviceRect(
  */
 function capture(target: CaptureTarget, directory: string): { bytes: Buffer; file: string } {
   const file = path.join(directory, "actual.png")
-  target.renderer.captureScreenshot(file)
-  if (target.element === null) return { bytes: readFileSync(file), file }
+  if (target.element === null) {
+    target.renderer.captureScreenshot(file)
+    return { bytes: readFileSync(file), file }
+  }
 
-  const image = decodePng(readFileSync(file), "screenshot")
-  const bytes = encodePng(cropImage(image, deviceRect(target.renderer, target.element, image)))
-  writeFileSync(file, bytes)
+  target.renderer.prepareScreenshotCapture()
+  const rect = deviceRect(target.renderer, target.element)
+  target.renderer.captureScreenshotClip(file, rect.x, rect.y, rect.width, rect.height)
+  const bytes = readFileSync(file)
   return { bytes, file }
 }
 
