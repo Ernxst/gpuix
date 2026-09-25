@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.25.0-fork.7
+
+1. **Element refs expose their mounted state and the `Node` shim has standard position constants.** `ref.current.isConnected` is `true` while mounted and `false` after removal. `DOCUMENT_POSITION_*` lets composite lists order mounted refs; automatic reordering after an item moves remains unsupported because `MutationObserver` is unavailable. [#660](https://github.com/Ernxst/gpuix/issues/660), [PR #681](https://github.com/Ernxst/gpuix/pull/681)
+2. **`@gpuix/react/globals` declares the WebGPU globals it installs.** The declarations merge with `@webgpu/types`, and `GPUUncapturedErrorEvent` accepts the standard `(type, { error })` constructor. [#651](https://github.com/Ernxst/gpuix/issues/651), [PR #682](https://github.com/Ernxst/gpuix/pull/682)
+3. **Overlapping glyphs and emoji blend in paint order.** Fresh and reused test windows now render the same pixels. Consumer screenshot goldens captured with the previous blending order may change by a few pixels. [#664](https://github.com/Ernxst/gpuix/issues/664), [PR #683](https://github.com/Ernxst/gpuix/pull/683), [Ernxst/zed#2](https://github.com/Ernxst/zed/pull/2)
+4. **Element `toMatchScreenshot` crops in the native test renderer.** It encodes the element crop directly instead of decoding a full-window PNG in JavaScript; full-window captures are unchanged. [#662](https://github.com/Ernxst/gpuix/issues/662), [PR #686](https://github.com/Ernxst/gpuix/pull/686)
+5. **Vitest reuses a test window across files when `isolate: false` and resets it to fresh-window state.** `@gpuix/react/testing/vitest` handles this automatically. Other runners can reset a shared window from their per-file teardown:
+
+   ```ts
+   import { afterAll } from 'vitest'
+   import { resetSharedWindowForNextFile } from '@gpuix/react/testing'
+
+   afterAll(resetSharedWindowForNextFile)
+   ```
+
+   [#661](https://github.com/Ernxst/gpuix/issues/661), [PR #687](https://github.com/Ernxst/gpuix/pull/687)
+
 ## 0.25.0-fork.6
 
 1. **CSS modules accept `text-decoration` line values.** Values such as `underline` and `line-through` compile. A decoration colour or combined line values fail at build time with the CSS file name; native does not support decoration colours. [#672](https://github.com/Ernxst/gpuix/issues/672), [PR #677](https://github.com/Ernxst/gpuix/pull/677)
