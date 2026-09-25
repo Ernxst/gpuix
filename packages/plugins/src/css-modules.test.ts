@@ -481,6 +481,44 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
   }
 })
 
+test("Bun preload resolves package imports in CSS compositions", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-bun-composes-import-"))
+  const preload = fileURLToPath(new URL("../dist/preload.js", import.meta.url))
+
+  try {
+    await mkdir(path.join(fixture, "ui/control"), { recursive: true })
+    await mkdir(path.join(fixture, "ui/button"), { recursive: true })
+    await writeFile(
+      path.join(fixture, "package.json"),
+      JSON.stringify({ imports: { "#ui/*": "./ui/*" } }),
+    )
+    await writeFile(
+      path.join(fixture, "ui/control/control.module.css"),
+      ".control { display: flex; }\n",
+    )
+    await writeFile(
+      path.join(fixture, "ui/button/button.module.css"),
+      '.tile { composes: control from "#ui/control/control.module.css"; }\n',
+    )
+    const entry = path.join(fixture, "entry.ts")
+    await writeFile(
+      entry,
+      'import styles from "./ui/button/button.module.css"\nconsole.log(JSON.stringify(styles.tile))\n',
+    )
+
+    const result = Bun.spawnSync([process.execPath, "--preload", preload, entry], {
+      cwd: fixture,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    expect(result.exitCode, result.stderr.toString()).toBe(0)
+    expect(JSON.parse(result.stdout.toString())).toEqual({ display: "flex" })
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 test("flattens nested interaction states into their class style", async () => {
   await expect(
     transformGpuixCssModule(

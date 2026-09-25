@@ -50,6 +50,7 @@
     "postcss-custom-properties": "^15.0.1",
     "postcss-import": "^17.0.0",
     "postcss-nesting": "^14.0.1",
+    "resolve.exports": "^2.0.3",
     "unplugin": "^3.4.0"
   },
   "devDependencies": {
