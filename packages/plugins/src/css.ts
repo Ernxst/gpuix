@@ -64,10 +64,10 @@ function resolveBunCssDependency(specifier: string, importer: string): string | 
       // Try the other parent form before reporting an unresolved dependency.
     }
   }
-  return resolveBunPackageExport(specifier, importer)
+  return resolveBunPackageSubpath(specifier, importer)
 }
 
-function resolveBunPackageExport(specifier: string, importer: string): string | undefined {
+function resolveBunPackageSubpath(specifier: string, importer: string): string | undefined {
   const segments = specifier.split("/")
   const packageName = specifier.startsWith("@")
     ? segments.slice(0, 2).join("/")
@@ -80,7 +80,15 @@ function resolveBunPackageExport(specifier: string, importer: string): string | 
     const manifest = path.join(packageDir, "package.json")
     if (existsSync(manifest)) {
       const pkg = JSON.parse(readFileSync(manifest, "utf8")) as Package
-      if (pkg.exports === undefined) return undefined
+      if (pkg.exports === undefined) {
+        if (!subpath) return undefined
+        const resolved = path.resolve(packageDir, `.${subpath}`)
+        try {
+          return statSync(resolved).isFile() ? resolved : undefined
+        } catch {
+          return undefined
+        }
+      }
       let targets: ReturnType<typeof resolvePackageExports>
       try {
         targets = resolvePackageExports(pkg, `.${subpath}`, { conditions: ["bun"] })
@@ -119,7 +127,7 @@ function resolveBunPackageImport(specifier: string, importer: string): string | 
         try {
           const resolved = target.startsWith("./")
             ? path.resolve(directory, target)
-            : Bun.resolveSync(target, importer)
+            : resolveBunPackageSubpath(target, importer) ?? Bun.resolveSync(target, importer)
           if (statSync(resolved).isFile()) return resolved
         } catch {
           // Try the next target in a package imports fallback array.
