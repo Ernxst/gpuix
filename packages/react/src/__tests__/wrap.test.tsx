@@ -4,6 +4,7 @@ import path from "path"
 import React from "react"
 import { describe, expect, it } from "vitest"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
+import { transformGpuixCssModule } from "../../../plugins/src/css-modules.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
@@ -33,6 +34,27 @@ function expectInside(
 }
 
 describeNative("text wrapping", () => {
+  it("renders CSS module pixel line-height at the same height as inline pixels", async () => {
+    const styles = await transformGpuixCssModule(
+      ".label { font-size: 12px; line-height: 18px; }",
+      "/fixture/label.module.css",
+    )
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <text data-testid="module" style={styles.label as { fontSize: number; lineHeight: string }}>
+          Label
+        </text>
+        <text data-testid="inline" style={{ fontSize: 12, lineHeight: "18px" }}>
+          Label
+        </text>
+      </div>,
+    )
+
+    expect(rect(renderer, "module").height).toBe(18)
+    expect(rect(renderer, "module").height).toBe(rect(renderer, "inline").height)
+  })
+
   // Issue #486: a bare numeric lineHeight is a unitless multiplier of the
   // resolved font size, matching React DOM, not a pixel shorthand. 12 * 1.5
   // resolves to the same 18px row GPUI rounds `"18px"` to, so both elements

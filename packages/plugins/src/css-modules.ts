@@ -337,13 +337,15 @@ async function parseCssModule(
       transformRule.walkDecls(/^composes$/i, (declaration) => {
         declaration.remove()
       })
-      let unitlessLineHeight: string | undefined
+      let explicitLineHeight: string | undefined
       transformRule.walkDecls("line-height", (declaration) => {
         if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(declaration.value)) {
-          unitlessLineHeight = declaration.value
+          explicitLineHeight = declaration.value
           declaration.value += "px"
         } else {
-          unitlessLineHeight = undefined
+          explicitLineHeight = /^[+-]?(?:\d+\.?\d*|\.\d+)px$/i.test(declaration.value)
+            ? declaration.value
+            : undefined
         }
       })
       const hasDeclarations = transformRule.nodes?.some((node) => node.type === "decl") ?? false
@@ -353,7 +355,7 @@ async function parseCssModule(
       if (!isPlainObject(value)) {
         throw unsupportedCss(sourceId, `class ".${name}" did not produce a style object`)
       }
-      if (unitlessLineHeight !== undefined) value.lineHeight = unitlessLineHeight
+      if (explicitLineHeight !== undefined) value.lineHeight = explicitLineHeight
 
       const allowedProperties = state ? NATIVE_STATE_PROPERTIES : SUPPORTED_PROPERTIES
       const unsupported = Object.keys(value).find(
