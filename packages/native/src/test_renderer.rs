@@ -753,18 +753,15 @@ impl TestGpuixRenderer {
         .map_err(|error| Error::from_reason(error.to_string()))
     }
 
-    fn dispatch_keystroke(
-        &self,
+    /// Draw the window only if something invalidated it since the last draw.
+    fn draw_if_dirty(
         cx: &mut gpui::VisualTestAppContext,
         window: gpui::AnyWindowHandle,
-        keystroke: gpui::Keystroke,
     ) -> Result<()> {
-        if self.auto_drains_async_tasks() {
-            cx.dispatch_keystroke(window, keystroke);
-            return Ok(());
-        }
         cx.update_window(window, |_, window, app| {
-            window.dispatch_keystroke(keystroke, app);
+            if window.is_dirty() {
+                window.draw(app).clear(app);
+            }
         })
         .map_err(|error| Error::from_reason(error.to_string()))
     }
@@ -1820,10 +1817,31 @@ impl TestGpuixRenderer {
                 .map_err(|error| Error::from_reason(error.to_string()))?;
             }
 
+            // Dispatch directly rather than through `VisualTestAppContext`,
+            // whose keystroke and event helpers redraw after every key even
+            // when nothing changed. A clean window's last frame is already
+            // current, and a redraw rebuilds and lays out the whole tree (#663).
+            let auto_drain = self.auto_drains_async_tasks();
             for keystroke in keystrokes {
                 // Match GPUI's simulated key-down/text-input path before releasing the key.
-                self.dispatch_keystroke(cx, window, keystroke.clone())?;
-                self.simulate_event(cx, window, gpui::KeyUpEvent { keystroke })?;
+                cx.update_window(window, |_, window, app| {
+                    window.dispatch_keystroke(keystroke.clone(), app);
+                })
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+                if auto_drain {
+                    Self::draw_if_dirty(cx, window)?;
+                }
+                cx.update_window(window, |_, window, app| {
+                    window.dispatch_event(
+                        gpui::InputEvent::to_platform_input(gpui::KeyUpEvent { keystroke }),
+                        app,
+                    );
+                })
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+                if auto_drain {
+                    cx.run_until_parked();
+                    Self::draw_if_dirty(cx, window)?;
+                }
             }
             Ok(())
         })

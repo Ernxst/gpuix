@@ -1221,15 +1221,17 @@ export class TestRenderer implements NativeRenderer {
    *  Unlike `nativeSimulateKeystrokes`, this focuses nothing first, which is
    *  the only way to test that `autoFocus` (or a click) actually moved focus. */
   simulateKeystrokes(keystrokes: string): void {
-    this.native.flush()
+    // Draw only what changed. A clean window's last frame is already current,
+    // and a redraw rebuilds and lays out the whole tree.
+    this.native.drawPendingFrame()
     for (const keystroke of keystrokes.split(/\s+/).filter(Boolean)) {
       this.native.simulateKeystrokes(keystroke)
       // A Tab keydown now resolves its focus default through React. Drain each
       // physical keypress before sending the next one so `tab a` delivers `a`
       // to the newly focused element, as a real platform event stream does.
-      this.native.flush()
+      this.native.drawPendingFrame()
       this.dispatchNativeEvents()
-      this.native.flush()
+      this.native.drawPendingFrame()
     }
   }
 
@@ -1835,14 +1837,16 @@ export class TestRenderer implements NativeRenderer {
   resolveTabKeyDown(defaultPrevented: boolean): void {
     this.native.resolveTabKeyDown(defaultPrevented)
     // Production reports the resulting focus transition on a later frame.
-    // Draw it now so the enclosing drain loop observes blur/focus in order.
-    this.native.flush()
+    // Draw it now so the enclosing drain loop observes blur/focus in order:
+    // the draw is what fires GPUI's focus listeners, and moving focus is what
+    // dirties the window.
+    this.native.drawPendingFrame()
   }
 
   resolveScrollKeyDown(defaultPrevented: boolean): void {
     this.native.resolveScrollKeyDown(defaultPrevented)
     // The native scroll default invalidates the same frame as production.
-    this.native.flush()
+    this.native.drawPendingFrame()
   }
 
   /** Complete an editor's deferred keydown default after synthetic dispatch. */
