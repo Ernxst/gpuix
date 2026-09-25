@@ -389,6 +389,17 @@ export declare class TestGpuixRenderer {
    */
   dispose(): void
   /**
+   * Return the window-level state a test can leave behind, and that outlives
+   * the React tree, to what a newly opened window has: the keymap and
+   * application menus, the debug frame overlay's mode and statistics, a
+   * held or captured pointer, an OS file drag still over the window, and the
+   * frames, diagnostics and manual-mode pixels this renderer buffers.
+   *
+   * Events the reset produces, such as the `pointerCancel` for a held
+   * pointer, are queued like any other; the caller drains them.
+   */
+  resetWindowState(): void
+  /**
    * Preserve eager test-root behavior by default, while allowing callers to
    * make `advanceAsyncClock` the only operation that drains queued tasks.
    */

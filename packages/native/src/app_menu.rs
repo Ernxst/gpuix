@@ -41,6 +41,17 @@ gpui::actions!(
 /// `ZoomWindow`, `CloseWindow`) are handled by the root element in
 /// `GpuixView::render`, which is the only place a `Window` exists.
 pub(crate) fn init(app_name: &str, cx: &mut App) {
+    cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
+    cx.on_action(|_: &Hide, cx: &mut App| cx.hide());
+    cx.on_action(|_: &HideOthers, cx: &mut App| cx.hide_other_apps());
+    cx.on_action(|_: &ShowAll, cx: &mut App| cx.unhide_other_apps());
+
+    install_menu_bar(app_name, cx);
+}
+
+/// Binds the standard macOS shortcuts and installs the default menu bar,
+/// without registering the handlers [`init`] adds once per app.
+pub(crate) fn install_menu_bar(app_name: &str, cx: &mut App) {
     cx.bind_keys([
         gpui::KeyBinding::new("cmd-q", Quit, None),
         gpui::KeyBinding::new("cmd-h", Hide, None),
@@ -48,11 +59,6 @@ pub(crate) fn init(app_name: &str, cx: &mut App) {
         gpui::KeyBinding::new("cmd-m", MinimizeWindow, None),
         gpui::KeyBinding::new("cmd-w", CloseWindow, None),
     ]);
-
-    cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
-    cx.on_action(|_: &Hide, cx: &mut App| cx.hide());
-    cx.on_action(|_: &HideOthers, cx: &mut App| cx.hide_other_apps());
-    cx.on_action(|_: &ShowAll, cx: &mut App| cx.unhide_other_apps());
 
     cx.set_menus(default_menus(app_name));
 }

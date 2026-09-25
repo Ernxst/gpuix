@@ -843,6 +843,28 @@ pub(crate) fn install_application_menus(
     )
 }
 
+/// Put back the menus `install_application_menus(cx, app_name, None)` installed
+/// on a new app, after `set_application_menus` replaced them. Actions from the
+/// replaced menus stop dispatching; their key equivalents stay bound, so a
+/// caller that needs the keymap back too clears and rebinds it first.
+pub(crate) fn reset_application_menus(
+    cx: &mut gpui::App,
+    app_name: &str,
+) -> std::result::Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let state = cx.global_mut::<ApplicationMenuState>();
+        state.generation = state.generation.wrapping_add(1);
+        state.actions_by_id.clear();
+        state.installed_menu_count = 2;
+        crate::app_menu::install_menu_bar(app_name, cx);
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    set_application_menus(cx, default_application_menus(app_name))
+}
+
 pub(crate) fn set_application_menus(
     cx: &mut gpui::App,
     specs: Vec<MenuSpec>,
@@ -8198,7 +8220,7 @@ impl GpuixView {
             .record_sample(x, y, modifiers);
     }
 
-    fn cancel_pointer_sequence(&mut self, window: &mut gpui::Window) -> bool {
+    pub(crate) fn cancel_pointer_sequence(&mut self, window: &mut gpui::Window) -> bool {
         let was_pressed = self.pointer_router.borrow().is_pressed();
         if let Some(cancelled) = self.pointer_router.borrow_mut().cancel() {
             emit_event_full(&self.event_callback, cancelled.target, "pointerCancel", |payload| {

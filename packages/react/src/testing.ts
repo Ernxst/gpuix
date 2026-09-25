@@ -280,6 +280,7 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
   cycleDebugFrameOverlay(): string
   resetDebugFrameOverlayStats(): void
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
+  resetWindowState(): void
   dragSelect(x1: number, y1: number, x2: number, y2: number): void
   getSelectedText(): string | null
   getPaintedText(): string[]
@@ -359,10 +360,9 @@ export function configureTestWindow(options: TestWindowOptions): void {
   // the first `TestRenderer`. One opened at geometry these defaults resolve to
   // still can — a call that restores what was already configured keeps it.
   releaseProbeWindowUnlessOpenedAt(resolveTestWindowOptions())
-  // The shared window is unconditional: `render()` records the geometry it was
-  // built with, so without this a `configureTestWindow` after the first
-  // `render()` in a file would be a silent no-op for every later one.
-  if (activeRenderRoot !== null) disposeSharedRoot(activeRenderRoot)
+  // The shared window needs nothing here: `render()` compares the geometry it
+  // would build at, these defaults applied, with the geometry the live window
+  // was built at, and opens a new window when they differ.
 }
 
 /** What `configureTestWindow` was last given, for a caller that wants to
@@ -1783,6 +1783,19 @@ export class TestRenderer implements NativeRenderer {
    *  clipboard, never the machine pasteboard. */
   setClipboardText(text: string | null): void {
     this.clipboardText = text
+  }
+
+  /** Put the window-level state that outlives a React tree back to what a
+   *  newly opened window has: the keymap and application menus, the debug
+   *  frame overlay's mode and statistics, a held or captured pointer, an OS
+   *  file drag, the in-memory clipboard, and scripted picker results. The
+   *  native events this queues, such as a held pointer's cancellation, are left
+   *  for the caller to drain or dispatch. */
+  resetWindowState(): void {
+    this.native.resetWindowState()
+    this.clipboardText = null
+    this.pickerResults = []
+    this.pickerRequestLog = []
   }
 
   blur(): void {
@@ -3403,13 +3416,17 @@ interface ActiveRenderRoot {
   /** Window size at creation, restored after a test calls `simulateResize`. */
   windowSize: { width: number; height: number }
   result: RenderResult
+  /** Set by `resetSharedWindowForNextFile` and cleared by the next `render()`,
+   *  which has nothing to unmount or reset: another cleanup would draw frames
+   *  that a newly opened window's statistics would not count. */
+  resetForNextFile: boolean
 }
 
 /** The one offscreen window `render()` shares, per module instance — which
  *  vitest gives each test file its own copy of under `isolate: true` (the
  *  default). Under `isolate: false`, a worker keeps one module instance for
- *  every file it runs, so this persists across files unless something closes
- *  it — see `disposeSharedWindow`. */
+ *  every file it runs, so this persists across files, reset between them by
+ *  `resetSharedWindowForNextFile`. */
 let activeRenderRoot: ActiveRenderRoot | null = null
 
 /** Every field of `TestRootOptions` is fixed when the window is constructed,
@@ -3421,14 +3438,17 @@ function sameTestRootOptions(a: TestRootOptions, b: TestRootOptions): boolean {
     a.scaleFactor === b.scaleFactor &&
     a.asyncTaskMode === b.asyncTaskMode &&
     a.allowPrivateNetworkImages === b.allowPrivateNetworkImages &&
-    a.strictStyles === b.strictStyles
+    a.strictStyles === b.strictStyles &&
+    a.onSelectionChange === b.onSelectionChange
   )
 }
 
 /** Return the shared window to the state a freshly created one is in, for the
- *  knobs a test can move without going through the React tree. Everything else
- *  set through `renderer` — menus, the debug frame overlay, CPU throttling —
- *  persists for the rest of the file. */
+ *  knobs a test can move without going through the React tree. The rest of
+ *  what a test sets through `renderer` — menus, the debug frame overlay, a held
+ *  pointer — persists for the rest of the file; `resetSharedWindowForNextFile`
+ *  resets it at the file boundary. CPU throttling is process-wide and neither
+ *  resets it. */
 function resetSharedWindow(active: ActiveRenderRoot): void {
   const { renderer } = active.root
   const size = renderer.getWindowSize()
@@ -3463,17 +3483,52 @@ function disposeSharedRoot(active: ActiveRenderRoot): void {
 }
 
 /**
- * Drop the shared window if one is open, otherwise do nothing.
+ * Drop the shared window if one is open, otherwise do nothing. The next
+ * `render()` opens a new one.
  *
- * `@gpuix/react/testing/vitest` calls this from the cleanup its `beforeAll`
- * returns, which vitest runs after every `afterAll` in the file whatever
- * `sequence.hooks` says, so menus, the debug frame overlay, held pointer buttons, and
- * every other window-level knob `resetSharedWindow` deliberately leaves alone
- * do not leak into the next file. Call it yourself from your own runner's
- * suite-level teardown when you import `@gpuix/react/testing` directly.
+ * `resetSharedWindowForNextFile` is the cheaper way to keep one file's window
+ * state from reaching the next; this closes the window outright.
  */
 export function disposeSharedWindow(): void {
   if (activeRenderRoot !== null) disposeSharedRoot(activeRenderRoot)
+}
+
+/**
+ * Unmount the tree `render()` mounted and return the shared window to the
+ * state a newly opened one is in, keeping it open for the next test file.
+ *
+ * `cleanup()` resets what a test in the same file should not inherit; this
+ * also resets what a file should not inherit, which `cleanup()` leaves for the
+ * rest of the file on purpose: application menus and their key equivalents,
+ * the debug frame overlay's mode and statistics, a held or captured pointer,
+ * an OS file drag, the in-memory clipboard, and scripted picker results. The
+ * next file's `render()` reuses the window when it asks for the same options,
+ * and opens a new one when it does not. A root that died on an uncaught render
+ * error is closed, as by `cleanup()`.
+ *
+ * `@gpuix/react/testing/vitest` calls this from the cleanup its `beforeAll`
+ * returns, which vitest runs after every `afterAll` in the file whatever
+ * `sequence.hooks` says. Call it yourself from your own runner's suite-level
+ * teardown when you import `@gpuix/react/testing` directly, or call
+ * `disposeSharedWindow()` to close the window instead.
+ */
+export function resetSharedWindowForNextFile(): void {
+  const active = activeRenderRoot
+  if (active === null) return
+  cleanup()
+  if (activeRenderRoot !== active) return
+
+  const { renderer } = active.root
+  try {
+    renderer.resetWindowState()
+  } catch (error) {
+    disposeSharedRoot(active)
+    throw error
+  }
+  // The reset's own events, such as a held pointer's cancellation, belong to
+  // the file that left the pointer held, not to the next file's tree.
+  renderer.drainEvents()
+  active.resetForNextFile = true
 }
 
 /**
@@ -3531,13 +3586,14 @@ export function cleanup(): void {
  * therefore a `getBy*` away, not a `findBy*`; the async queries remain for work
  * that is genuinely asynchronous.
  *
- * **One window per test file.** Opening an offscreen GPUI window costs about a
- * second, so the window created by the first `render()` is reused by every
- * later one in the same file — vitest isolates module state per file under
- * `isolate: true` (the default), so nothing is shared between files. Under
- * `isolate: false`, a worker keeps this module for every file it runs, so
- * something has to close the window between files itself: see
- * `disposeSharedWindow`, which `@gpuix/react/testing/vitest` calls for you.
+ * **One window per test file, or per worker.** Opening an offscreen GPUI
+ * window is expensive, so the window created by the first `render()` is reused
+ * by every later one in the same file — vitest isolates module state per file
+ * under `isolate: true` (the default), so nothing is shared between files.
+ * Under `isolate: false`, a worker keeps this module for every file it runs, so
+ * the window carries on into the next file after a reset that leaves it as a
+ * newly opened one would be: see `resetSharedWindowForNextFile`, which
+ * `@gpuix/react/testing/vitest` calls for you.
  * Each `render()` unmounts the previous tree and starts from a reset window
  * (see `cleanup`), so a reused window is never a reused tree; it **replaces**
  * the previous tree rather than mounting a second one beside it, since a
@@ -3545,7 +3601,8 @@ export function cleanup(): void {
  * that can hold many containers.
  *
  * **Options decide reuse.** `options` are the `createTestRoot()` options, all
- * of which are fixed when the window is constructed. A call whose options match
+ * of which are fixed when the window is constructed; `onSelectionChange` is
+ * compared by identity. A call whose options match
  * the live window's reuses it; a call whose options differ — compared field by
  * field, so an omitted option differs from one passed at its default value —
  * tears that window down and opens a fresh one. So does a root that died on an
@@ -3568,7 +3625,7 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
     disposeSharedRoot(live)
   }
 
-  if (activeRenderRoot !== null) {
+  if (activeRenderRoot !== null && !activeRenderRoot.resetForNextFile) {
     // Unmount before resetting — rendering the new node straight into the
     // live root would reconcile against the old tree, and an unmount effect
     // running after the reset could re-dirty the window that was just
@@ -3598,8 +3655,10 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
         asyncTaskMode: request.asyncTaskMode,
         allowPrivateNetworkImages: request.allowPrivateNetworkImages,
         strictStyles: request.strictStyles,
+        onSelectionChange: request.onSelectionChange,
       },
       windowSize: { width: size.width, height: size.height },
+      resetForNextFile: false,
       result: renderResult(root, {
         ...root,
         render: renderWrapped,
@@ -3629,6 +3688,7 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
     activeRenderRoot = active
   }
 
+  active.resetForNextFile = false
   active.root.render(wrapForRender(node))
   // Prime both handles while the tree is up. They remember the last element
   // they resolved so that they can answer after a `cleanup()`, and a cache

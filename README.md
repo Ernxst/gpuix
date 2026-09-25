@@ -5671,20 +5671,22 @@ calling `render` inside your own `act` scope, since React keeps one queue and
 drains it when the outermost scope exits, and a production React build, which
 ships no `act` at all.
 
-**One window per test file.** Opening an offscreen GPUI window costs roughly
+**One window per test file, or per worker.** Opening an offscreen GPUI window costs roughly
 250–700 ms for the first window in a process and about 150 ms for each later
 one, so the window the first `render()` opens is reused by every later
 `render()` in the same file. Vitest gives each test file its own module
 instance under its default `pool: 'forks'` with `isolate: true`, so nothing is
 shared between files. Under `isolate: false`, a worker keeps one module
 instance for every file it runs, so the window and the `configureTestWindow` /
-`configureScreenshots` defaults would otherwise persist from one file into the
-next; `@gpuix/react/testing/vitest` closes the window and restores both
-defaults in the cleanup its `beforeAll` returns, so each file still starts
-fresh — see **Automatic cleanup, and where vitest enters**, below.
+`configureScreenshots` defaults carry on from one file into the next.
+`@gpuix/react/testing/vitest` restores both defaults and resets the window in
+the cleanup its `beforeAll` returns, so each file starts from a window in the
+state a newly opened one is in, and the next file reuses it when it asks for
+the same options — see **Automatic cleanup, and where vitest enters**, below.
 
 **`options` decide reuse.** `options` is `TestRootOptions` — `width`, `height`,
-`scaleFactor`, `asyncTaskMode`, `allowPrivateNetworkImages`, `strictStyles` —
+`scaleFactor`, `asyncTaskMode`, `allowPrivateNetworkImages`, `strictStyles`,
+`onSelectionChange` —
 and every one of them is fixed when the window is constructed. A call whose
 options match the live window's reuses it; a call whose options differ tears
 that window down and opens a fresh one.
@@ -5700,7 +5702,7 @@ from omitting the field, because nothing fills it in before the comparison:
 they alternate,
 even though the window is identical. `asyncTaskMode`,
 `allowPrivateNetworkImages`, and `strictStyles` are compared as passed, with no
-defaults applied.
+defaults applied, and `onSelectionChange` by identity.
 
 Keep the options object identical across a file — or omit it everywhere — to
 keep the window.
@@ -5731,9 +5733,9 @@ built-in geometry, and `configuredTestWindow()` reads back what was last set for
 a test that wants to put it back rather than reset it.
 
 A window's geometry is fixed when it is constructed, so nothing already open
-changes shape: calling it drops the window `render()` shares and reopens at the
-new geometry on the next `render()`. Put it in a setup file and no window is
-thrown away.
+changes shape: the next `render()` finds the window it shares was built at other
+geometry and opens a new one. Put it in a setup file and no window is thrown
+away.
 
 **`simulateResize` moves the reported size, not the window.** It is GPUI's test
 hook for a native resize, so `useWindowSize()`, layout, and
@@ -5757,19 +5759,19 @@ so the old tree's input cannot land on the new one.
 
 Everything else you set through `renderer` persists for the rest of the file,
 and is gone at the end of it; reset it yourself if the next test in the same
-file cares. That includes application menus, the debug frame overlay, CPU
-throttling, and any pointer button or modifier left held by a partial drag —
-GPUI exposes no cheap way to read those back, so `render()` does not restore
-them. It is the window closing at the end of the file — see **One window per
-test file**, above — that clears them for the next file, not anything a test
-does. "Gone at the end of the file" holds under `isolate: true` (the default),
-or under `isolate: false` when the file runs through
-`@gpuix/react/testing/vitest` (which closes the window itself) or calls
-`disposeSharedWindow()` directly — not for a plain `@gpuix/react/testing`
-import whose only teardown is `cleanup()`, which keeps the window on purpose;
-see **Automatic cleanup, and where vitest enters**, below. A root that died on
-an uncaught render error is never reused: its window is closed and the next
-`render()` opens a new one, even mid-test.
+file cares. That includes application menus and their key equivalents, the
+debug frame overlay's mode and statistics, a pointer button left held or
+captured by a partial drag, an OS file drag left over the window, the
+in-memory clipboard, and scripted picker results. At the end of the file,
+`resetSharedWindowForNextFile()` puts all of them back to what a newly opened
+window has. Under `isolate: true` (the default) the next file gets a new module
+and a new window anyway; under `isolate: false`, `@gpuix/react/testing/vitest`
+calls it for you, and a plain `@gpuix/react/testing` import whose only teardown
+is `cleanup()` keeps the window with that state on purpose — see **Automatic
+cleanup, and where vitest enters**, below. CPU throttling is process-wide, and
+neither reset touches it. A root that died on an uncaught render error is never
+reused: its window is closed and the next `render()` opens a new one, even
+mid-test.
 
 **One tree, not many.** A second `render()` in the same test **replaces** the
 first tree rather than mounting beside it. A browser page has a `document.body`
@@ -5784,7 +5786,7 @@ imports vitest: it also runs from plain scripts, other runners, and the
 automation harness. `@gpuix/react/testing/vitest` registers two things:
 `afterEach` unmounts after each test, and a `beforeAll` that snapshots the
 `configureTestWindow` / `configureScreenshots` defaults and returns a cleanup
-that restores them and closes the shared window. The restore is that returned
+that restores them and calls `resetSharedWindowForNextFile()`. The restore is that returned
 cleanup, not a separate `afterAll` — vitest calls it after every `afterAll` in
 the file regardless of `sequence.hooks`, where a plain `afterAll` registered
 here could instead run before, or concurrently with, a file's own `afterAll`
@@ -5795,7 +5797,7 @@ next file in the same worker under `isolate: false`. The matcher pack's
 
 | Import | Cleanup | Matchers |
 |---|---|---|
-| `@gpuix/react/testing/vitest` | `afterEach(cleanup)`, plus the window and its configured defaults restored by `beforeAll`'s returned cleanup, are registered for you | `expect.extend(gpuixMatchers)` is registered for you |
+| `@gpuix/react/testing/vitest` | `afterEach(cleanup)`, plus the window reset and its configured defaults restored by `beforeAll`'s returned cleanup, are registered for you | `expect.extend(gpuixMatchers)` is registered for you |
 | `@gpuix/react/testing` | Call the exported `cleanup()` from your own teardown | Call `expect.extend(gpuixMatchers)` yourself — see [Matchers](#matchers) |
 
 Under `isolate: false`, put `@gpuix/react/testing/vitest` directly in
@@ -5820,11 +5822,13 @@ afterEach(cleanup) // the `afterEach` half of what `@gpuix/react/testing/vitest`
 
 `cleanup()` unmounts the rendered tree and resets the window, keeping it open
 for the next `render()`. It is safe to call when nothing is rendered. This
-teardown alone never closes the window or restores `configureTestWindow` /
-`configureScreenshots` — under `isolate: false` that keeps it open, and those
-defaults dirtied, across every file in the worker; add the `beforeAll` /
-returned-cleanup pair `@gpuix/react/testing/vitest` registers, or call
-`disposeSharedWindow()` yourself, if that matters for this runner.
+teardown alone never resets the window-level state listed under **Every
+`render()` starts from a reset window**, or restores `configureTestWindow` /
+`configureScreenshots` — under `isolate: false` that state, and those defaults,
+carry across every file in the worker. Add the `beforeAll` / returned-cleanup
+pair `@gpuix/react/testing/vitest` registers, or call
+`resetSharedWindowForNextFile()` from this runner's per-file teardown, if that
+matters for this runner. `disposeSharedWindow()` closes the window instead.
 
 ### act()
 

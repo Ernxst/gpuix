@@ -1334,9 +1334,10 @@ describeNative("render()", () => {
     expect(geometry()).toEqual({ width: 1280, height: 800, scaleFactor: 2 })
   })
 
-  // `render()` records the geometry its shared window was built with, so a
-  // `configureTestWindow` after the first render has to drop that window or it
-  // would go unnoticed for the rest of the file.
+  // `render()` records the geometry its shared window was built with and
+  // compares it with the configured defaults, so a `configureTestWindow` after
+  // the first render opens a new window rather than going unnoticed for the
+  // rest of the file.
   it("applies configureTestWindow to the next render() after one already ran", () => {
     const configured = configuredTestWindow()
     try {

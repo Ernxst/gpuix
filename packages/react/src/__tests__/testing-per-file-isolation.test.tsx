@@ -1,6 +1,6 @@
 /// Regression test for issue #469: `@gpuix/react/testing/vitest`'s
 /// `beforeAll`-returned cleanup must restore `configureTestWindow` and
-/// `configureScreenshots` defaults, and close the shared window, at the end of
+/// `configureScreenshots` defaults, and reset the shared window, at the end of
 /// every test file — not just the first one a worker runs. That distinction
 /// only shows up under `isolate: false`, where `setupFiles` re-executes per
 /// file but the modules it imports do not, so this spawns a real child vitest
@@ -95,7 +95,7 @@ function runChildWithStatus(
 
 describe("per-file isolation under vitest isolate: false", () => {
   it(
-    "restores configureTestWindow / configureScreenshots defaults and closes the shared window between files in one worker",
+    "restores configureTestWindow / configureScreenshots defaults and resets the shared window between files in one worker",
     async () => {
       const configDir = mkdtempSync(join(tmpdir(), "gpuix-per-file-isolation-"))
       const configPath = join(configDir, "vitest.config.ts")

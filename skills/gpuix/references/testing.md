@@ -42,8 +42,8 @@ Tests render into a real native window placed offscreen, through Metal on macOS 
 
 | Import | Contents |
 |---|---|
-| `@gpuix/react/testing` | Framework-free: `render`, `createTestRoot`, `cleanup`, `act`, `TestRenderer`, `configureTestWindow`, `configuredTestWindow`, `disposeSharedWindow`, `isNativeTestRendererAvailable`, `textContent`, `rendererOf`, `describeElement`, `accessibleNameOf`, `computedRoleOf`, `matchesComputedRole`, `recordCanvasCommands`, `canvasGoldenPath`, `expectCanvasMatchesBrowser`. It never imports Vitest. |
-| `@gpuix/react/testing/vitest` | Everything above, plus `expect.extend(gpuixMatchers)`, `afterEach(cleanup)`, and a per-file teardown that restores the `configureTestWindow`/`configureScreenshots` values in effect when the file started and closes the shared window (`testing-vitest.ts`). |
+| `@gpuix/react/testing` | Framework-free: `render`, `createTestRoot`, `cleanup`, `act`, `TestRenderer`, `configureTestWindow`, `configuredTestWindow`, `resetSharedWindowForNextFile`, `disposeSharedWindow`, `isNativeTestRendererAvailable`, `textContent`, `rendererOf`, `describeElement`, `accessibleNameOf`, `computedRoleOf`, `matchesComputedRole`, `recordCanvasCommands`, `canvasGoldenPath`, `expectCanvasMatchesBrowser`. It never imports Vitest. |
+| `@gpuix/react/testing/vitest` | Everything above, plus `expect.extend(gpuixMatchers)`, `afterEach(cleanup)`, and a per-file teardown that restores the `configureTestWindow`/`configureScreenshots` values in effect when the file started and calls `resetSharedWindowForNextFile()` (`testing-vitest.ts`). |
 | `@gpuix/react/testing/matchers` | `gpuixMatchers`, `configureScreenshots`, `configuredScreenshots` and the matcher types (`testing-expect.ts`). |
 | `@gpuix/react/automation` | The Playwright-like `App`/`Locator` client (see Automation client). |
 
@@ -58,7 +58,7 @@ import "@gpuix/react/testing/vitest"
 - Under `isolate: false`, list `@gpuix/react/testing/vitest` directly in `setupFiles`. Importing it from your own setup file registers the per-file hooks once only.
 - Suite-wide geometry goes in a setup file: `configureTestWindow({ width, height, scaleFactor })`. Each call replaces the previous defaults wholesale. The default window is 1280×800 logical pixels at scale factor 2, never the host display's geometry.
 
-Other runners wire it by hand: import from `@gpuix/react/testing`, register `afterEach(cleanup)`, call `disposeSharedWindow()` at suite teardown, and `expect.extend(gpuixMatchers)`. No Bun test in the repository exercises this, and `toMatchScreenshot` reads Vitest's test context, so expect it to fail under other runners.
+Other runners wire it by hand: import from `@gpuix/react/testing`, register `afterEach(cleanup)`, call `resetSharedWindowForNextFile()` at each file's teardown (or `disposeSharedWindow()` to close the window), and `expect.extend(gpuixMatchers)`. No Bun test in the repository exercises this, and `toMatchScreenshot` reads Vitest's test context, so expect it to fail under other runners.
 
 ## `render()` and `createTestRoot()`
 
@@ -76,11 +76,11 @@ Other runners wire it by hand: import from `@gpuix/react/testing`, register `aft
 
 ## Window reuse and reset
 
-`render()` keeps one window per module instance, which under Vitest's default `isolate: true` is one per test file (`testing-render.test.tsx` › "shares one window across sequential render() calls in a file"). A new window opens when the options differ, when `asyncTaskMode` differs, or after the root died on an uncaught render error. The first window in a process costs roughly 250–700 ms and each later one about 150 ms (#661).
+`render()` keeps one window per module instance, which under Vitest's default `isolate: true` is one per test file (`testing-render.test.tsx` › "shares one window across sequential render() calls in a file"), and under `isolate: false` one per worker. A new window opens when the options differ (`onSelectionChange` by identity; geometry after `configureTestWindow` defaults are applied), or after the root died on an uncaught render error. The first window in a process costs roughly 250–700 ms and each later one about 150 ms.
 
 Between tests, `cleanup()` renders `null` and resets the window size, the pointer (moved to (-1, -1)), focus and window activation, the text selection, the motion clock (set to 0 and resumed), reduced motion (`false`), `allowPrivateNetworkImages`, `strictStyles`, and queued native events.
 
-Not reset between tests in one file: application menus, the debug frame overlay, CPU throttling, held pointer buttons and modifiers, and the in-memory clipboard (#661). Between files, the Vitest entry's teardown closes the window.
+Not reset between tests in one file: application menus and their key equivalents, the debug frame overlay's mode and statistics, a held or captured pointer, an OS file drag, the in-memory clipboard and scripted picker results. `resetSharedWindowForNextFile()`, which the Vitest entry's per-file teardown calls, resets all of them and keeps the window for the next file (`testing-window-reuse.test.tsx`). CPU throttling is process-wide and never reset.
 
 ## Queries and `TestElement`
 
@@ -187,6 +187,5 @@ Launch a live app without stealing focus by passing `env: { GPUIX_BACKGROUND: "1
 | Issue | Gap |
 |---|---|
 | #641 | Direct `vitest run` without a built `dist` fails to resolve modules. |
-| #661 | Window closed and reopened at every file boundary under `isolate: false`; clipboard, menus, overlay and held pointer state not reset within a file. |
 | #662 | Element screenshots decode the whole window in JavaScript. |
 | #663 | Render and Tab cost grow sharply with tree size. |
