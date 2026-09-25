@@ -1017,6 +1017,9 @@ thread_local! {
     static GPUI_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
     #[cfg(target_os = "macos")]
     static GPUI_WINDOW: RefCell<Option<gpui::WindowHandle<GpuixView>>> = const { RefCell::new(None) };
+    #[cfg(target_os = "macos")]
+    static PENDING_WINDOW_REVEAL: std::cell::Cell<Option<PendingWindowReveal>> =
+        const { std::cell::Cell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     static WEB_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -1312,26 +1315,134 @@ fn invalidate_window() -> Result<()> {
 // cocoa's Objective-C message macros still probe its removed cargo-clippy cfg.
 #[allow(unexpected_cfgs)]
 fn order_window_front_regardless(window: &gpui::Window) {
+    let Some(ns_window) = ns_window(window) else {
+        return;
+    };
+    // SAFETY: `ns_window` belongs to the still-live window we were just
+    // handed; `orderFrontRegardless` is an ordinary AppKit call made on the
+    // platform's main thread.
+    unsafe {
+        let _: () = msg_send![ns_window, orderFrontRegardless];
+    }
+}
+
+#[cfg(target_os = "macos")]
+// cocoa's Objective-C message macros still probe its removed cargo-clippy cfg.
+#[allow(unexpected_cfgs)]
+fn ns_window(window: &gpui::Window) -> Option<id> {
+    // SAFETY: `ns_view` belongs to the still-live window we were just handed;
+    // `[view window]` is an ordinary AppKit call made on the platform's main
+    // thread.
+    let ns_window: id = unsafe { msg_send![ns_view(window)?, window] };
+    (ns_window != nil).then_some(ns_window)
+}
+
+#[cfg(target_os = "macos")]
+fn ns_view(window: &gpui::Window) -> Option<id> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     // `Window` also has an inherent `window_handle()` returning its GPUI
     // `AnyWindowHandle`; qualify the call to reach the raw-window-handle trait.
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
-        return;
-    };
+    let handle = HasWindowHandle::window_handle(window).ok()?;
     let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
-        return;
+        return None;
     };
-    // SAFETY: `ns_view` is the AppKit handle's `NSView*` for the still-live
-    // window we were just handed; `[view window]` and `orderFrontRegardless`
+    Some(handle.ns_view.as_ptr() as id)
+}
+
+/// How to show the window that `init` opened hidden, once the app first
+/// ticks.
+///
+/// GPUI shows a `show: true` window while opening it, before JavaScript has
+/// committed anything, so its first present is an empty scene. On macOS and
+/// Windows, `init` therefore opens the window hidden and the first
+/// `tick`/`tickIdle` shows it: `render()` commits React before it starts the
+/// frame loop, so the first present already contains the rendered tree. On
+/// Windows the pending reveal is `GpuixRenderer::pending_window_reveal`, sent
+/// to the UI thread as `UiCommand::RevealWindow`. GPUI's Linux backends
+/// cannot open a window hidden, so Linux still shows it while opening.
+#[cfg(target_os = "macos")]
+struct PendingWindowReveal {
+    /// The caller's `focus`: make the window key and activate the app, as
+    /// GPUI's own `show: true, focus: true` open does, or order it front
+    /// behind the active app.
+    activate: bool,
+    /// Set when the default menus are installed after the first frames. The
+    /// hidden window's own frame must not count as one of them.
+    default_menus_app_name: Option<String>,
+}
+
+#[cfg(target_os = "macos")]
+// cocoa's Objective-C message macros still probe its removed cargo-clippy cfg.
+#[allow(unexpected_cfgs)]
+fn reveal_pending_window() -> Result<()> {
+    let Some(reveal) = PENDING_WINDOW_REVEAL.with(std::cell::Cell::take) else {
+        return Ok(());
+    };
+    let native = update_window(|_view, window, cx| {
+        if reveal.activate {
+            cx.activate(true);
+        }
+        ns_view(window).zip(ns_window(window))
+    })?;
+    // Outside `update_window`: showing the window makes AppKit ask GPUI for a
+    // frame, and GPUI cannot draw while the app is leased to this call.
+    if let Some((ns_view, ns_window)) = native {
+        show_window_with_current_frame(ns_view, ns_window, reveal.activate);
+    }
+    update_window(|_view, window, _cx| {
+        if reveal.activate {
+            order_window_front_regardless(window);
+        }
+        // Registered after the reveal's own frame: a pending next-frame
+        // callback subjects that frame to GPUI's inactive-window throttle.
+        if let Some(app_name) = reveal.default_menus_app_name {
+            install_default_menus_after_second_frame(window, app_name);
+        }
+    })
+}
+
+#[cfg(target_os = "macos")]
+// cocoa's Objective-C message macros still probe its removed cargo-clippy cfg.
+#[allow(unexpected_cfgs)]
+fn show_window_with_current_frame(ns_view: id, ns_window: id, activate: bool) {
+    // SAFETY: `ns_view` and `ns_window` belong to the live GPUI window; these
     // are ordinary AppKit calls made on the platform's main thread.
     unsafe {
-        let ns_view: id = handle.ns_view.as_ptr() as id;
-        let ns_window: id = msg_send![ns_view, window];
-        if ns_window != nil {
-            let _: () = msg_send![ns_window, orderFrontRegardless];
+        // The layer still holds whatever AppKit had GPUI present while the
+        // window was hidden, before React committed. Marking it for display
+        // makes ordering the window front ask GPUI for a frame, which draws
+        // the committed tree and presents it with the Core Animation
+        // transaction that puts the window on screen.
+        let layer: id = msg_send![ns_view, layer];
+        if layer != nil {
+            let _: () = msg_send![layer, setNeedsDisplay];
+        }
+        if activate {
+            let _: () = msg_send![ns_window, makeKeyAndOrderFront: nil];
+        } else {
+            let _: () = msg_send![ns_window, orderFront: nil];
+        }
+        // AppKit skips that display for a window that opens fully covered,
+        // which would uncover the hidden-time frame later. Display it now if
+        // ordering front did not.
+        if layer != nil {
+            let _: () = msg_send![layer, displayIfNeeded];
         }
     }
+}
+
+/// Default menus (`menus: None`) load WritingToolsUI and, with it, SwiftUI,
+/// WebKit and about a hundred other frameworks. Install them after the
+/// window's second frame so they do not delay its first present.
+#[cfg(target_os = "macos")]
+fn install_default_menus_after_second_frame(window: &mut gpui::Window, app_name: String) {
+    window.on_next_frame(move |window, _cx| {
+        window.on_next_frame(move |_window, cx| {
+            // The default-menu path cannot fail.
+            let _ = install_application_menus(cx, &app_name, None);
+        });
+    });
 }
 
 /// Windows' foreground lock refuses `SetForegroundWindow` (what
@@ -1476,6 +1587,9 @@ enum UiCommand {
         response: SyncSender<()>,
     },
     ActivateWindow,
+    /// Show the window `init` opened hidden; see `PendingWindowReveal`.
+    #[cfg(target_os = "windows")]
+    RevealWindow { activate: bool },
     MinimizeWindow,
     ZoomWindow,
     ToggleFullscreen,
@@ -1738,6 +1852,24 @@ async fn run_ui_commands(
                 window.activate_window();
                 order_window_front_regardless(window);
             }),
+            #[cfg(target_os = "windows")]
+            UiCommand::RevealWindow { activate } => window
+                .update(cx, |_view, window, cx| {
+                    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+                    // `Window` also has an inherent `window_handle()`; qualify the
+                    // call to reach the raw-window-handle trait.
+                    let handle = HasWindowHandle::window_handle(window)?;
+                    if let RawWindowHandle::Win32(handle) = handle.as_raw() {
+                        gpui_windows::show_window_opened_hidden(handle.hwnd)?;
+                    }
+                    if activate {
+                        cx.activate(true);
+                        order_window_front_regardless(window);
+                    }
+                    anyhow::Ok(())
+                })
+                .and_then(std::convert::identity),
             UiCommand::MinimizeWindow => {
                 window.update(cx, |_view, window, _cx| window.minimize_window())
             }
@@ -2790,6 +2922,10 @@ pub struct GpuixRenderer {
     canvas_diagnostic_members: Mutex<HashSet<(u64, String)>>,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     ui_commands: Mutex<Option<mpsc::UnboundedSender<UiCommand>>>,
+    /// The window `init` opened hidden, to show on the first `tick`/`tickIdle`;
+    /// see `PendingWindowReveal`. Holds the caller's `focus`.
+    #[cfg(target_os = "windows")]
+    pending_window_reveal: Mutex<Option<bool>>,
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -2978,6 +3114,8 @@ impl GpuixRenderer {
             canvas_diagnostic_members: Mutex::new(HashSet::new()),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
+            #[cfg(target_os = "windows")]
+            pending_window_reveal: Mutex::new(None),
         }
     }
 
@@ -3164,9 +3302,9 @@ impl GpuixRenderer {
             crate::custom_elements::input::init(cx);
             init_application_menu_support(cx, Some(application_callback.clone()));
             // Default menus (`menus: None`) load WritingToolsUI and, with it,
-            // SwiftUI, WebKit and about a hundred other frameworks; deferred
-            // below until after the second frame so it does not delay the
-            // first present. Caller-supplied menus are cheap and installed
+            // SwiftUI, WebKit and about a hundred other frameworks, so they
+            // wait until after the shown window's second frame and do not
+            // delay its first present. Caller-supplied menus are cheap and installed
             // now so `open_window` observes any invalid spec immediately.
             let defer_default_menus = menus.is_none();
             if !defer_default_menus {
@@ -3186,8 +3324,12 @@ impl GpuixRenderer {
             #[cfg(not(feature = "display-discovery-fault-injection"))]
             let bounds = gpui::Bounds::centered(None, window_size, cx);
 
+            // A shown window opens hidden and is revealed by the first pump;
+            // see `PendingWindowReveal`.
+            let mut gpui_window_options = to_gpui_window_options(&window_options, bounds);
+            gpui_window_options.show = false;
             match cx.open_window(
-                to_gpui_window_options(&window_options, bounds),
+                gpui_window_options,
                 |_window, cx| {
                     cx.new(|view_cx| {
                         GpuixView::new(
@@ -3205,28 +3347,25 @@ impl GpuixRenderer {
             ) {
                 Ok(window_handle) => {
                     *opened_window_for_app.borrow_mut() = Some(window_handle);
-                    if activate {
-                        cx.activate(true);
-                        if show {
+                    let default_menus_app_name = defer_default_menus.then(|| app_name.clone());
+                    if show {
+                        PENDING_WINDOW_REVEAL.with(|pending| {
+                            pending.set(Some(PendingWindowReveal {
+                                activate,
+                                default_menus_app_name,
+                            }));
+                        });
+                    } else {
+                        if activate {
+                            cx.activate(true);
+                        }
+                        if let Some(app_name) = default_menus_app_name {
                             window_handle
                                 .update(cx, |_view, window, _cx| {
-                                    order_window_front_regardless(window);
+                                    install_default_menus_after_second_frame(window, app_name);
                                 })
                                 .ok();
                         }
-                    }
-                    if defer_default_menus {
-                        let app_name = app_name.clone();
-                        window_handle
-                            .update(cx, |_view, window, _cx| {
-                                window.on_next_frame(move |window, _cx| {
-                                    window.on_next_frame(move |_window, cx| {
-                                        // The default-menu path cannot fail.
-                                        let _ = install_application_menus(cx, &app_name, None);
-                                    });
-                                });
-                            })
-                            .ok();
                     }
                 }
                 Err(error) => {
@@ -3247,6 +3386,7 @@ impl GpuixRenderer {
         let window_handle = match startup_result {
             Ok(window_handle) => window_handle,
             Err(error) => {
+                PENDING_WINDOW_REVEAL.with(|pending| pending.set(None));
                 app_handle.update(|cx| cx.quit());
                 if platform.pump_events() {
                     MAC_PLATFORM.with(|stored| {
@@ -3387,8 +3527,18 @@ impl GpuixRenderer {
                         } else {
                             gpui::Bounds::centered(None, size, cx)
                         };
+                        #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
+                        let mut gpui_window_options =
+                            to_gpui_window_options(&window_options, bounds);
+                        // A shown Windows window opens hidden and is revealed by the
+                        // first tick; see `PendingWindowReveal`. GPUI's Linux backends
+                        // cannot open a window hidden.
+                        #[cfg(target_os = "windows")]
+                        {
+                            gpui_window_options.show = false;
+                        }
                         let window = match cx.open_window(
-                            to_gpui_window_options(&window_options, bounds),
+                            gpui_window_options,
                             |_window, cx| {
                                 cx.new(|view_cx| {
                                     GpuixView::new(
@@ -3418,7 +3568,8 @@ impl GpuixRenderer {
                             run_ui_commands(command_receiver, window, cx).await;
                         })
                         .detach();
-                        if activate {
+                        // Windows activates the window when the first tick reveals it.
+                        if activate && !(cfg!(target_os = "windows") && show) {
                             cx.activate(true);
                             if show {
                                 window
@@ -3460,6 +3611,10 @@ impl GpuixRenderer {
             .map_err(Error::from_reason)?;
 
         *self.ui_commands.lock().unwrap() = Some(command_sender);
+        #[cfg(target_os = "windows")]
+        if show {
+            *self.pending_window_reveal.lock().unwrap() = Some(activate);
+        }
         self.event_callback.lock().unwrap().take();
         Ok(())
     }
@@ -4144,6 +4299,7 @@ impl GpuixRenderer {
 
         #[cfg(target_os = "macos")]
         {
+            reveal_pending_window()?;
             // Avoid an extra idle pump when a native callback is already queued.
             // This is only a latency optimization: a request can race this load,
             // so MacPlatform::pump_events itself must always return before waiting.
@@ -4179,6 +4335,10 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let _ = (dispatch_frame_request, after_precheck);
+            #[cfg(target_os = "windows")]
+            if let Some(activate) = self.pending_window_reveal.lock().unwrap().take() {
+                self.send_ui_command(UiCommand::RevealWindow { activate })?;
+            }
             let running = *self.lifecycle.lock().unwrap() == RendererLifecycle::Running;
             if !running {
                 self.ui_commands.lock().unwrap().take();
@@ -4220,6 +4380,7 @@ impl GpuixRenderer {
 
     #[cfg(target_os = "macos")]
     fn finish_macos_termination(&self) {
+        PENDING_WINDOW_REVEAL.with(|pending| pending.set(None));
         GPUI_WINDOW.with(|window| {
             window.borrow_mut().take();
         });
@@ -4430,6 +4591,7 @@ impl GpuixRenderer {
     pub fn activate_window(&self, _env: Env) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
+            PENDING_WINDOW_REVEAL.with(|pending| pending.set(None));
             GPUI_APP.with(|app| {
                 let app = app.borrow();
                 let app = app
@@ -4444,6 +4606,8 @@ impl GpuixRenderer {
             });
         }
 
+        #[cfg(target_os = "windows")]
+        self.pending_window_reveal.lock().unwrap().take();
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::ActivateWindow);
 
