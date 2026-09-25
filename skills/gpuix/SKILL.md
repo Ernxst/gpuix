@@ -41,7 +41,7 @@ Before writing code that relies on a browser behaviour, check it in the referenc
 **`className` takes compiled CSS modules only.** Import `.module.css` by relative path, combine classes with `cn()` from `@gpuix/react/cn`, never with template strings or `clsx`. A string class throws in development.
 - Selectors: `.a`, `.a` with `:hover`, `:active`, `:focus`, `:focus-visible` or `:focus-within`, `.a:hover .b`, `.a:active .b`, and lists of these. No other selectors and no at-rules.
 - A module may declare `:root` custom properties and use `var()`; they are substituted at build time.
-- Write `box-shadow` and `text-decoration` in `style`. Keep `line-height` unitless or `px`.
+- Write `box-shadow` in `style`. CSS modules support solid `text-decoration` using the native underline, line-through, and none values; an explicit decoration colour also colours the text. Keep `line-height` unitless or `px`.
 - `style` beats `className` per property, including inside state styles.
 
 **Interaction styling is built in.** `style.hover`, `active`, `focus`, `focusVisible`, `focusWithin` and `dragOver` style the element itself. `hoverGroup` on an ancestor with `hoverWithin`/`activeWithin` on a descendant (optionally `hoverWithinGroup: "name"`) replaces `.parent:hover .child`. A `hoverWithin` with no `hoverGroup` ancestor silently never applies. Nothing styles a descendant from its ancestor's focus; drive that from React state. Built-in components expose state through `style={(state) => …}` on `SelectTrigger`, `SelectIcon`, `SelectItem`, `SelectItemIndicator` and `ComboboxItem`, not through `data-*` attributes (`references/components.md`).

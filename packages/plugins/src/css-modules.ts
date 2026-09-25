@@ -344,6 +344,7 @@ async function parseCssModule(
         declaration.remove()
       })
       let explicitLineHeight: string | undefined
+      let explicitTextDecorationColor = false
       transformRule.walkDecls("line-height", (declaration) => {
         if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(declaration.value)) {
           explicitLineHeight = declaration.value
@@ -354,6 +355,27 @@ async function parseCssModule(
             : undefined
         }
       })
+      transformRule.walkDecls("text-decoration", (declaration) => {
+        explicitTextDecorationColor ||= declaration.value
+          .split(/\s+/)
+          .some(
+            (part) =>
+              ![
+                "underline",
+                "overline",
+                "line-through",
+                "none",
+                "solid",
+                "double",
+                "dotted",
+                "dashed",
+                "wavy",
+              ].includes(part.toLowerCase()),
+          )
+      })
+      transformRule.walkDecls("text-decoration-color", () => {
+        explicitTextDecorationColor = true
+      })
       const hasDeclarations = transformRule.nodes?.some((node) => node.type === "decl") ?? false
       const transformed = hasDeclarations ? transformCss(transformRule.toString()) : {}
       const value = hasDeclarations ? transformed[name] : {}
@@ -361,6 +383,18 @@ async function parseCssModule(
       if (!isPlainObject(value)) {
         throw unsupportedCss(sourceId, `class ".${name}" did not produce a style object`)
       }
+      if ("textDecorationLine" in value) {
+        value.textDecoration = value.textDecorationLine
+        delete value.textDecorationLine
+      }
+      // GPUIX uses the text colour for its decoration colour and supports solid
+      // decoration only. The translator adds black/solid defaults to shorthand
+      // declarations, so only carry a colour when CSS supplied one explicitly.
+      if ("textDecorationColor" in value) {
+        if (explicitTextDecorationColor) value.color = value.textDecorationColor
+        delete value.textDecorationColor
+      }
+      if (value.textDecorationStyle === "solid") delete value.textDecorationStyle
       if (explicitLineHeight !== undefined) value.lineHeight = explicitLineHeight
 
       const allowedProperties = state ? NATIVE_STATE_PROPERTIES : SUPPORTED_PROPERTIES
