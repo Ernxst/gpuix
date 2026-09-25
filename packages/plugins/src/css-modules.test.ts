@@ -482,6 +482,62 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
   }
 })
 
+test("Bun preload resolves package imports in CSS compositions", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-bun-composes-import-"))
+  const preload = fileURLToPath(new URL("../dist/preload.js", import.meta.url))
+
+  try {
+    await mkdir(path.join(fixture, "ui/control"), { recursive: true })
+    await mkdir(path.join(fixture, "ui/button"), { recursive: true })
+    const packageDir = path.join(fixture, "node_modules/style-pkg")
+    const legacyPackageDir = path.join(fixture, "node_modules/legacy-pkg")
+    await mkdir(packageDir, { recursive: true })
+    await mkdir(legacyPackageDir, { recursive: true })
+    await writeFile(
+      path.join(fixture, "package.json"),
+      JSON.stringify({ imports: { "#local/*": "./ui/*", "#ui/*": "style-pkg/*" } }),
+    )
+    await writeFile(
+      path.join(fixture, "ui/control/control.module.css"),
+      ".control { display: flex; }\n",
+    )
+    await writeFile(
+      path.join(packageDir, "package.json"),
+      JSON.stringify({ name: "style-pkg", exports: { "./tile.module.css": "./tile.module.css" } }),
+    )
+    await writeFile(path.join(packageDir, "tile.module.css"), ".tile { color: red; }\n")
+    await writeFile(path.join(legacyPackageDir, "package.json"), JSON.stringify({ name: "legacy-pkg" }))
+    await writeFile(
+      path.join(legacyPackageDir, "tile.module.css"),
+      ".tile { background-color: blue; }\n",
+    )
+    await writeFile(
+      path.join(fixture, "ui/button/button.module.css"),
+      '.button { composes: control from "#local/control/control.module.css"; composes: tile from "style-pkg/tile.module.css"; composes: tile from "#ui/tile.module.css"; composes: tile from "legacy-pkg/tile.module.css"; }\n',
+    )
+    const entry = path.join(fixture, "entry.ts")
+    await writeFile(
+      entry,
+      'import styles from "./ui/button/button.module.css"\nconsole.log(JSON.stringify(styles.button))\n',
+    )
+
+    const result = Bun.spawnSync([process.execPath, "--preload", preload, entry], {
+      cwd: fixture,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    expect(result.exitCode, result.stderr.toString()).toBe(0)
+    expect(JSON.parse(result.stdout.toString())).toEqual({
+      display: "flex",
+      color: "red",
+      backgroundColor: "blue",
+    })
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 test("flattens nested interaction states into their class style", async () => {
   await expect(
     transformGpuixCssModule(

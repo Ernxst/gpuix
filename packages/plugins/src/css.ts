@@ -1,8 +1,14 @@
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import type { BunPlugin } from "bun"
 import type { Plugin } from "vite"
 import type { AcceptedPlugin } from "postcss"
+import {
+  exports as resolvePackageExports,
+  imports as resolvePackageImports,
+  type Package,
+} from "resolve.exports"
 import { createUnplugin } from "unplugin"
 import { transformGpuixCssModule, type CssImportResolver } from "./css-modules.js"
 
@@ -43,14 +49,95 @@ export function resolveBunCssModule(id: string, importer: string | undefined): s
 }
 
 function resolveBunCssDependency(specifier: string, importer: string): string | undefined {
+  if (specifier.startsWith("#")) {
+    // During an onLoad hook Bun.resolveSync can return the importer's directory
+    // for a package import. Resolve that package map from the declaring file.
+    return resolveBunPackageImport(specifier, importer)
+  }
   // Bun's build plugin and runtime preload expose different parent forms to
   // `resolveSync`. Try the importer first, then its directory for build hooks.
   for (const parent of [importer, path.dirname(importer)]) {
     try {
-      return Bun.resolveSync(specifier, parent)
+      const resolved = Bun.resolveSync(specifier, parent)
+      if (statSync(resolved).isFile()) return resolved
     } catch {
       // Try the other parent form before reporting an unresolved dependency.
     }
+  }
+  return resolveBunPackageSubpath(specifier, importer)
+}
+
+function resolveBunPackageSubpath(specifier: string, importer: string): string | undefined {
+  const segments = specifier.split("/")
+  const packageName = specifier.startsWith("@")
+    ? segments.slice(0, 2).join("/")
+    : segments[0]
+  if (!packageName) return undefined
+  const subpath = specifier.slice(packageName.length)
+  let directory = path.dirname(importer)
+  while (true) {
+    const packageDir = path.join(directory, "node_modules", packageName)
+    const manifest = path.join(packageDir, "package.json")
+    if (existsSync(manifest)) {
+      const pkg = JSON.parse(readFileSync(manifest, "utf8")) as Package
+      if (pkg.exports === undefined) {
+        if (!subpath) return undefined
+        const resolved = path.resolve(packageDir, `.${subpath}`)
+        try {
+          return statSync(resolved).isFile() ? resolved : undefined
+        } catch {
+          return undefined
+        }
+      }
+      let targets: ReturnType<typeof resolvePackageExports>
+      try {
+        targets = resolvePackageExports(pkg, `.${subpath}`, { conditions: ["bun"] })
+      } catch {
+        return undefined
+      }
+      for (const target of targets ?? []) {
+        const resolved = path.resolve(packageDir, target)
+        try {
+          if (statSync(resolved).isFile()) return resolved
+        } catch {
+          // Try the next target in a package exports fallback array.
+        }
+      }
+      return undefined
+    }
+    const parent = path.dirname(directory)
+    if (parent === directory) return undefined
+    directory = parent
+  }
+}
+
+function resolveBunPackageImport(specifier: string, importer: string): string | undefined {
+  let directory = path.dirname(importer)
+  while (true) {
+    const manifest = path.join(directory, "package.json")
+    if (existsSync(manifest)) {
+      const pkg = JSON.parse(readFileSync(manifest, "utf8")) as Package
+      let targets: ReturnType<typeof resolvePackageImports>
+      try {
+        targets = resolvePackageImports(pkg, specifier, { conditions: ["bun"] })
+      } catch {
+        return undefined
+      }
+      for (const target of targets ?? []) {
+        try {
+          const resolved = target.startsWith("./")
+            ? path.resolve(directory, target)
+            : resolveBunPackageSubpath(target, importer) ?? Bun.resolveSync(target, importer)
+          if (statSync(resolved).isFile()) return resolved
+        } catch {
+          // Try the next target in a package imports fallback array.
+        }
+      }
+      return undefined
+    }
+    const parent = path.dirname(directory)
+    if (parent === directory) return undefined
+    directory = parent
   }
 }
 

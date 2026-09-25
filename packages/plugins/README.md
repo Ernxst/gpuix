@@ -102,8 +102,13 @@ in stylesheet order. Cross-file classes merge in the order listed by
 `composes`, with later classes winning conflicts; the local module's rules merge
 after them in stylesheet order. CSS Modules does not define the order of
 conflicting declarations across files, so those conflicts are not guaranteed to
-match the web build. A `from` path resolves relative to the stylesheet that
-declares the `composes` statement. `composes: name from global` is rejected
+match the web build. A relative `from` path resolves from the stylesheet that
+declares the `composes` statement. Package `imports` subpaths such as
+`composes: control from "#ui/control/control.module.css"` use the same Vite or
+Bun resolution as `@import`. Exported package subpaths such as
+`composes: tile from "style-pkg/tile.module.css"` also resolve under Bun's
+preload, as do package subpaths without an `exports` map and package `imports`
+aliases that point to those subpaths. `composes: name from global` is rejected
 because GPU-IX cannot resolve a global class to a style object. Composition also
 rejects classes whose `hoverGroup` or `hoverWithinGroup` values name different
 groups, because one style object cannot represent both relationships.
