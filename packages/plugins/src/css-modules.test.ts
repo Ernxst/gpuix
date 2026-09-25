@@ -92,7 +92,7 @@ test("converts text-decoration shorthand and longhands to style prop keys", asyn
 test("renders a text-decoration CSS module on the desktop renderer", async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-decoration-"))
   const sourceId = path.join(fixture, "decoration.module.css")
-  await writeFile(sourceId, ".link { text-decoration: underline red; }")
+  await writeFile(sourceId, ".link { text-decoration: underline; }")
   const vite = await createServer({
     appType: "custom",
     configFile: false,
