@@ -90,7 +90,7 @@ const TARGET_ONLY_EVENTS = new Set([
   "visibleRange",
 ])
 
-const NON_BUBBLING_EVENTS = new Set(["focus", "blur", "scroll", "fileDrop", "load", "error"])
+const NON_BUBBLING_EVENTS = new Set(["scroll", "fileDrop", "load", "error"])
 // React delegates resource events: ancestors observe `onLoad` and `onError`
 // even though the DOM event's `bubbles` property remains false.
 const REACT_DELEGATED_NON_BUBBLING_EVENTS = new Set(["load", "error"])

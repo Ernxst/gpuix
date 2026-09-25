@@ -4171,7 +4171,7 @@ text imports no longer need a runtime flag.
 | Pointer leave | `onPointerLeave` | `GpuixPointerEvent` | `relatedTarget`, pointer metadata; no capture variant in React |
 | Key down | `onKeyDown` | `GpuixKeyboardEvent` | `key`, `keyChar`, `isHeld`, modifier values, `getModifierState()`, `modifiers` |
 | Key up | `onKeyUp` | `GpuixKeyboardEvent` | `key`, `keyChar`, modifier values, `getModifierState()`, `modifiers` |
-| Focus | `onFocus`, `onFocusCapture` | `GpuixFocusEvent` | `relatedTarget` always `null`; does not bubble, unlike react-dom's — an ancestor sees it only through `onFocusCapture`, and only when the focused element itself listens |
+| Focus | `onFocus`, `onFocusCapture` | `GpuixFocusEvent` | Bubbles through retained ancestry; `target` is the focused element and `currentTarget` is each receiving element; `relatedTarget` is always `null` |
 | Blur | `onBlur`, `onBlurCapture` | `GpuixFocusEvent` | Same as `onFocus` |
 | Wheel | `onWheel` | `GpuixWheelEvent` | `x`, `y`, `deltaX`, `deltaY`, `deltaZ`, `deltaMode`, `precise`, `touchPhase`, `modifiers` |
 | Scroll | `onScroll` | `GpuixScrollEvent` | — read `scrollLeft` / `scrollTop` from `currentTarget` |

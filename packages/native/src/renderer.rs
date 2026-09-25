@@ -10477,21 +10477,16 @@ impl GpuixView {
             .retain(|id, _| tree.elements.get(id).is_some_and(&needs_focus));
         self.sync_focus_scroll_anchors(tree);
 
-        self.focus_subscriptions.retain(|(id, event), _| {
-            self.focus_handles.contains_key(id)
-                && tree
-                    .elements
-                    .get(id)
-                    .is_some_and(|element| element.events.contains(event))
-        });
-        for (&id, element) in &tree.elements {
+        self.focus_subscriptions
+            .retain(|(id, _), _| self.focus_handles.contains_key(id));
+        // Observe every focus handle so a focused descendant emits its own
+        // event even when only an ancestor has a React focus listener.
+        for &id in tree.elements.keys() {
             let Some(handle) = self.focus_handles.get(&id).cloned() else {
                 continue;
             };
             let focus_key = (id, "focus".to_string());
-            if element.events.contains("focus")
-                && !self.focus_subscriptions.contains_key(&focus_key)
-            {
+            if !self.focus_subscriptions.contains_key(&focus_key) {
                 let callback = callback.clone();
                 let subscription = cx.on_focus(&handle, window, move |_this, _window, cx| {
                     let callback = callback.clone();
@@ -10506,8 +10501,7 @@ impl GpuixView {
                 self.focus_subscriptions.insert(focus_key, subscription);
             }
             let blur_key = (id, "blur".to_string());
-            if element.events.contains("blur") && !self.focus_subscriptions.contains_key(&blur_key)
-            {
+            if !self.focus_subscriptions.contains_key(&blur_key) {
                 let callback = callback.clone();
                 let subscription = cx.on_blur(&handle, window, move |_this, _window, _cx| {
                     emit_event_full(&callback, id, "blur", |_| {});
