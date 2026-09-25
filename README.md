@@ -880,6 +880,13 @@ later calls only remount React.
 tests and custom hosts. Pass `{ renderer }` into `render()` when you already
 have one.
 
+On macOS and Windows, `init()` opens a shown window hidden, and the first
+`tick()` or `tickIdle()` shows it, so its first frame contains whatever was
+committed before that tick. `render()` commits before it starts the frame
+loop. A custom host should do the same: commit its root, then tick. Until
+that tick, `isActive()` reads `false` even for a focused window. Linux
+shows the window while `init()` opens it.
+
 ## Application menus and termination
 
 Every desktop app gets a minimal application menu with **Quit**. Its shortcut

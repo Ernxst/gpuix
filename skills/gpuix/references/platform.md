@@ -146,6 +146,7 @@ await Bun.build({
 - **Menus**: `render(…, { menus })` takes `{ name, items, disabled? }` menus. Item kinds: `action` (`id`, `label`, optional `keyEquivalent` and `osAction`; `role: "quit"` needs no `id`), `separator`, `submenu` (`label`, `items`) and `system` (`label`, `systemMenu: "services"`). `menus: []` removes the default menu; `onMenuAction({ id })` handles actions; `renderer.setMenus()` and `renderer.quit()` exist. macOS gets no Edit menu by default.
 - **Window controls** on the renderer from `useGpuixRequired()`: `activateWindow()`, `minimizeWindow()`, `zoomWindow()`, `toggleFullscreen()`.
 - **Background launch**: `focus: false` opens without stealing focus; `show: false` keeps the window hidden until `activateWindow()`. Both are ignored on Linux. Agents launching a live app pass `GPUIX_BACKGROUND=1` and the app maps it to `focus: false`.
+- **First frame**: on macOS and Windows a shown window appears at the renderer's first `tick()`/`tickIdle()`, not in `init()`. `render()` commits before ticking, so the first frame has content. A custom host (`createRenderer()` + `init()`) should commit its root before the first tick.
 - **Auto-update**: `import { checkUpdate } from "@gpuix/native"`; `checkUpdate(currentVersion, { endpoints, pubkey, … })` returns an update or `null`, and `update.downloadAndInstall()` replaces the packaged files without relaunching.
 
 ## Clipboard and announcements
