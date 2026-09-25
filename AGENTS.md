@@ -8,6 +8,7 @@ React/TypeScript renderers backed by GPUI, with native and browser targets. Matc
 - `packages/native/src/`: Rust renderer and napi bridge.
 - `zed/`: GPUI submodule; consult the relevant implementation when changing GPUI integration.
 - `README.md`: public API reference. Read the sections relevant to the task.
+- `skills/gpuix/`: the agent skill app authors install to build on GPU-IX. Its `SKILL.md` holds the rules and traps; `references/` maps the feature surface.
 - `examples/`: runnable usage examples. `scripts/`: build and release entry points.
 
 ## Build and verification
@@ -30,6 +31,7 @@ The native renderer cannot start inside an agent sandbox: macOS denies it the wi
 
 - `packages/native/index.js`, `index.d.ts` and `*.node` are generated. Change Rust declarations and rebuild instead of editing generated output by hand.
 - Update the relevant README API section for user-facing fixes or features.
+- Update `skills/gpuix/` in the same PR when a change alters user-facing behaviour: a supported element, prop, style, selector, event, export or DOM API, a known gap closing or opening, or a testing behaviour. `bun run test` in `packages/plugins` fails when the lists the skill states drift from the source.
 - This fork ships package tarballs attached to GitHub releases, stamped and packed by hand. It does not publish the upstream package names to npm. Do not publish locally.
 - Preserve attribution headers and `THIRD_PARTY_NOTICES.md` when changing ported code.
 

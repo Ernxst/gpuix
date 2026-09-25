@@ -32,7 +32,7 @@
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/plugins locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
     "build": "tsc && bun scripts/copy-css-modules-types.ts",
     "prepack": "bun run build",
-    "test": "bun test src/css.test.ts src/css-modules.test.ts",
+    "test": "bun test src/css.test.ts src/css-modules.test.ts src/skill.test.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "peerDependencies": {

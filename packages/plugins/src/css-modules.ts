@@ -20,7 +20,7 @@ const transformCss: TransformCss =
     ? (transformCssModule as TransformCss)
     : ((transformCssModule as { default: TransformCss }).default)
 
-const SUPPORTED_PROPERTIES = new Set([
+export const SUPPORTED_PROPERTIES = new Set([
   "display",
   "visibility",
   "flexDirection",

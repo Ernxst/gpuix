@@ -88,6 +88,13 @@ classes are composed separately. Other
 selectors, at-rules and animations are rejected until they have a native style
 representation.
 
+`box-shadow` and `text-decoration` are part of the native style model, but the
+underlying CSS-to-object transform expands them into React Native's split
+properties (`shadowOffset`, `shadowRadius`, `textDecorationLine`, and so on),
+which GPUIX's model does not accept, so a CSS module declaring either is
+rejected (`text-decoration` is [#672](https://github.com/Ernxst/gpuix/issues/672)).
+Set them through the `style` prop instead.
+
 CSS modules can compose local classes from the same file or another CSS module:
 
 ```css
@@ -200,6 +207,10 @@ package's JavaScript entry differs from its `style` field.
 Unitless `line-height`, such as `line-height: 1.5`, compiles to the font-size
 multiplier `lineHeight: "1.5"`. A pixel value such as `line-height: 18px`
 compiles to `lineHeight: "18px"`, an absolute line height on desktop.
+`line-height` must be unitless or `px`: a `rem` value is converted to a bare
+number that the native side reads as a multiplier (`line-height: 2rem`
+compiles to `32`, not a 32px absolute height), and `em` or `%` values compile
+but the native renderer rejects them.
 
 `gpuixCssModulesBun()` is the same transform for Bun, in `Bun.build()` or in a
 `Bun.plugin()` preload. A Bun build without it compiles `.module.css` to class
