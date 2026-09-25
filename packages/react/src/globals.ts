@@ -36,10 +36,76 @@ import {
 import { Image } from "./canvas/image.js"
 import { PointerEvent } from "./pointer-event.js"
 import { gpuixDocument } from "./document.js"
-import { installWebGpuGlobal } from "./canvas/webgpu.js"
+import {
+  installWebGpuGlobal,
+  type GPUAdapter as GpuixGPUAdapter,
+  type GPUError as GpuixGPUError,
+  type GPUInternalError as GpuixGPUInternalError,
+  type GPUOutOfMemoryError as GpuixGPUOutOfMemoryError,
+  type GPUValidationError as GpuixGPUValidationError,
+} from "./canvas/webgpu.js"
 import type { PublicInstance } from "./types/host.js"
 
 declare global {
+  interface Navigator {
+    readonly gpu: GPU
+  }
+
+  interface GPU {
+    requestAdapter(): Promise<GpuixGPUAdapter>
+  }
+
+  interface GPUError {
+    readonly message: GpuixGPUError["message"]
+  }
+
+  interface GPUValidationError extends GPUError {
+    readonly name: GpuixGPUValidationError["name"]
+  }
+  interface GPUOutOfMemoryError extends GPUError {
+    readonly name: GpuixGPUOutOfMemoryError["name"]
+  }
+  interface GPUInternalError extends GPUError {
+    readonly name: GpuixGPUInternalError["name"]
+  }
+  interface GPUUncapturedErrorEvent extends Event {
+    readonly error: GPUError
+  }
+  interface GPUUncapturedErrorEventInit {
+    error: GPUError
+  }
+
+  interface GPUBufferUsage {
+    readonly MAP_READ: number
+    readonly MAP_WRITE: number
+    readonly COPY_SRC: number
+    readonly COPY_DST: number
+    readonly INDEX: number
+    readonly VERTEX: number
+    readonly UNIFORM: number
+    readonly STORAGE: number
+    readonly INDIRECT: number
+    readonly QUERY_RESOLVE: number
+  }
+
+  var GPUBufferUsage: GPUBufferUsage
+  var GPUValidationError: {
+    prototype: GPUValidationError
+    new(message: string): GPUValidationError
+  }
+  var GPUOutOfMemoryError: {
+    prototype: GPUOutOfMemoryError
+    new(message: string): GPUOutOfMemoryError
+  }
+  var GPUInternalError: {
+    prototype: GPUInternalError
+    new(message: string): GPUInternalError
+  }
+  var GPUUncapturedErrorEvent: {
+    prototype: GPUUncapturedErrorEvent
+    new(type: string, init: GPUUncapturedErrorEventInit): GPUUncapturedErrorEvent
+  }
+
   interface ResizeObserver {
     observe(target: Element | PublicInstance, options?: GpuixResizeObserverOptions): void
   }

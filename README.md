@@ -5137,6 +5137,11 @@ constructors and `document` facade below on `globalThis`, and nothing else. Each
 name is installed only if it is not already present, so a real browser,
 Vitest's `jsdom`/`happy-dom` environment, or an earlier import of this module
 all win over the shim.
+The entry also declares the WebGPU globals it installs: `navigator.gpu`,
+`GPUBufferUsage`, `GPUValidationError`, `GPUOutOfMemoryError`,
+`GPUInternalError`, and `GPUUncapturedErrorEvent`. The declarations describe
+GPU-IX's implemented WebGPU subset and merge with the browser declarations from
+`@webgpu/types`.
 `window` and `self` are `globalThis` itself, not a constructed DOM `Window`;
 GPUIX has no scroll position to move, so `scrollTo` is a no-op returning
 `undefined`. TanStack Router reads `window?.origin` and calls `scrollTo()` during
