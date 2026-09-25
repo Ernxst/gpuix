@@ -1,0 +1,5 @@
+.tileBase,
+.tileCurrent { position: relative; display: flex; }
+.iconSlot { display: flex; width: 22px; height: 22px; }
+.iconImage { width: 18px; height: 18px; }
+.tileBase:hover .iconImage { width: 22px; height: 22px; }

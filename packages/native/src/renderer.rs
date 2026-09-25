@@ -208,6 +208,8 @@ pub(crate) fn pending_custom_prop_diagnostic(
 /// Whether a `hoverWithinGroup` name on `element_id` matches any ancestor's
 /// `hoverGroup`. `None` when there is no `hoverWithinGroup` to check, or when
 /// a matching ancestor exists.
+const CSS_MODULE_HOVER_GROUP_PREFIX: &str = "gpuix-css-module:hover-group:";
+
 pub(crate) fn pending_hover_within_group_diagnostic(
     tree: &RetainedTree,
     element_id: u64,
@@ -228,6 +230,9 @@ pub(crate) fn pending_hover_within_group_diagnostic(
             return None;
         }
         current = element.parent;
+    }
+    if target.starts_with(CSS_MODULE_HOVER_GROUP_PREFIX) {
+        return None;
     }
     Some(PendingStyleDiagnostic {
         element_id,
@@ -16884,7 +16889,7 @@ mod resolve_styles_tests {
         style: serde_json::Value,
         collect_diagnostics: bool,
     ) -> (StyleDesc, Vec<PendingStyleDiagnostic>) {
-        let batch = serde_json::to_vec(&json!([
+        let batch = serde_json::to_vec(&serde_json::json!([
             ["createElement", 1, "div"],
             ["setStyle", 1, style],
             ["setRoot", 1]
@@ -17828,6 +17833,40 @@ mod batch_tests {
 
     fn apply(tree: &mut RetainedTree, json: &str) -> BatchResult<Vec<f64>> {
         apply_batch_to_tree(tree, json.as_bytes())
+    }
+
+    fn hover_group_diagnostics(target: &str) -> Vec<PendingStyleDiagnostic> {
+        let batch = serde_json::to_vec(&serde_json::json!([
+            ["createElement", 1, "div"],
+            ["createElement", 2, "img"],
+            ["setStyle", 2, { "hoverWithinGroup": target }],
+            ["appendChild", 1, 2],
+            ["setRoot", 1]
+        ]))
+        .unwrap();
+        let mut tree = RetainedTree::new();
+        apply_batch_to_tree_with_diagnostics(&mut tree, &batch, true)
+            .expect("the batch is structurally valid")
+            .diagnostics
+    }
+
+    #[test]
+    fn unmatched_css_module_hover_groups_do_not_diagnose() {
+        let diagnostics = hover_group_diagnostics(
+            "gpuix-css-module:hover-group:/fixture/dock.module.css:tileBase",
+        );
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn unmatched_handwritten_hover_groups_still_diagnose() {
+        let diagnostics = hover_group_diagnostics("handwritten");
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].problem.property, "hoverWithinGroup");
+        assert!(diagnostics[0]
+            .problem
+            .reason
+            .contains("no ancestor hoverGroup named \"handwritten\" was found"));
     }
 
     #[test]
