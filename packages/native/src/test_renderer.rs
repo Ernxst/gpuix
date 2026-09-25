@@ -472,6 +472,9 @@ pub struct TestGpuixRenderer {
     /// that count for the window's lifetime, so the stats report frames drawn
     /// since this point, which is what a newly opened window would report.
     debug_frame_overlay_frame_origin: AtomicU64,
+    /// Bumped by `reset_window_state`, so a next-frame callback requested
+    /// before the reset records no timestamp when its frame arrives.
+    frame_request_generation: Arc<AtomicU64>,
 }
 
 #[napi]
@@ -596,6 +599,7 @@ impl TestGpuixRenderer {
             active_pointer_origin: Mutex::new(None),
             file_drag_active: AtomicBool::new(false),
             debug_frame_overlay_frame_origin: AtomicU64::new(0),
+            frame_request_generation: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -609,7 +613,8 @@ impl TestGpuixRenderer {
     /// Return the window-level state a test can leave behind, and that outlives
     /// the React tree, to what a newly opened window has: the keymap and
     /// application menus, the debug frame overlay's mode and statistics, a
-    /// held or captured pointer, an OS file drag still over the window, and the
+    /// held or captured pointer, an OS file drag still over the window,
+    /// requested frames, native WebGPU devices and their resources, and the
     /// frames, diagnostics and manual-mode pixels this renderer buffers.
     ///
     /// Events the reset produces, such as the `pointerCancel` for a held
@@ -643,7 +648,10 @@ impl TestGpuixRenderer {
         self.debug_frame_overlay_frame_origin
             .store(frames, Ordering::Relaxed);
         *self.active_pointer_origin.lock().unwrap() = None;
+        self.frame_request_generation.fetch_add(1, Ordering::Relaxed);
         self.frame_timestamps.lock().unwrap().clear();
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        self.test_gpu_canvases.reset();
         *self.animation_frame_timestamp_origin.lock().unwrap() = None;
         self.style_diagnostics.lock().unwrap().clear();
         self.canvas_diagnostic_members.lock().unwrap().clear();
@@ -1495,6 +1503,8 @@ impl TestGpuixRenderer {
     pub fn request_frame(&self, performance_timestamp_ms: f64) -> Result<()> {
         let timestamp_origin = self.animation_frame_timestamp_origin.clone();
         let frame_timestamps = self.frame_timestamps.clone();
+        let generation = self.frame_request_generation.clone();
+        let requested_generation = generation.load(Ordering::Relaxed);
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, move |_, window, app| {
                 let origin = animation_frame_origin(
@@ -1505,6 +1515,9 @@ impl TestGpuixRenderer {
                     ),
                 );
                 window.on_next_frame(move |_window, app| {
+                    if generation.load(Ordering::Relaxed) != requested_generation {
+                        return;
+                    }
                     frame_timestamps
                         .lock()
                         .unwrap()

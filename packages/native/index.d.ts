@@ -392,7 +392,8 @@ export declare class TestGpuixRenderer {
    * Return the window-level state a test can leave behind, and that outlives
    * the React tree, to what a newly opened window has: the keymap and
    * application menus, the debug frame overlay's mode and statistics, a
-   * held or captured pointer, an OS file drag still over the window, and the
+   * held or captured pointer, an OS file drag still over the window,
+   * requested frames, native WebGPU devices and their resources, and the
    * frames, diagnostics and manual-mode pixels this renderer buffers.
    *
    * Events the reset produces, such as the `pointerCancel` for a held

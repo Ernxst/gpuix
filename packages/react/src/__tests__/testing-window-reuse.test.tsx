@@ -2,8 +2,9 @@
 /// `@gpuix/react/testing/vitest` keeps the shared window open between test
 /// files, so the reset it runs at a file boundary has to leave that window in
 /// the state a freshly opened one is in. Menus, the debug frame overlay, the
-/// in-memory clipboard, scripted picker results and a held, captured pointer
-/// are all window-level state that the reset between tests leaves alone.
+/// in-memory clipboard, scripted picker results, a held, captured pointer,
+/// pending animation frames and WebGPU devices are all window-level state that
+/// the reset between tests leaves alone.
 ///
 /// The fixtures under `fixtures/window-reuse/` each read that state and then
 /// dirty it, and the first to run records what a fresh window reads. The pair

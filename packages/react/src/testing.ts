@@ -62,11 +62,12 @@ import {
   getOrCreateRecordingContext2D,
 } from "./canvas/context-2d.js"
 import { Image } from "./canvas/image.js"
-import { invalidateWebGpuTransport } from "./canvas/webgpu.js"
+import { invalidateWebGpuTransport, retireWebGpuTransportObjects } from "./canvas/webgpu.js"
 import {
   attachAnimationFrameSource,
   detachAnimationFrameSource,
   flushFrameRequests,
+  resetAnimationFrameSource,
 } from "./frame-clock.js"
 import {
   CANVAS_GOLDEN_DPR,
@@ -1788,11 +1789,17 @@ export class TestRenderer implements NativeRenderer {
   /** Put the window-level state that outlives a React tree back to what a
    *  newly opened window has: the keymap and application menus, the debug
    *  frame overlay's mode and statistics, a held or captured pointer, an OS
-   *  file drag, the in-memory clipboard, and scripted picker results. The
+   *  file drag, pending animation frames, WebGPU devices and their resources,
+   *  the in-memory clipboard, and scripted picker results. The
    *  native events this queues, such as a held pointer's cancellation, are left
    *  for the caller to drain or dispatch. */
   resetWindowState(): void {
     this.native.resetWindowState()
+    resetAnimationFrameSource(this)
+    this.animationFrameCallbacks = []
+    this.animationFrameRequestCount = 0
+    retireWebGpuTransportObjects(this)
+    this.webGpuCanvasIds.clear()
     this.clipboardText = null
     this.pickerResults = []
     this.pickerRequestLog = []
@@ -3501,8 +3508,9 @@ export function disposeSharedWindow(): void {
  * also resets what a file should not inherit, which `cleanup()` leaves for the
  * rest of the file on purpose: application menus and their key equivalents,
  * the debug frame overlay's mode and statistics, a held or captured pointer,
- * an OS file drag, the in-memory clipboard, and scripted picker results. The
- * next file's `render()` reuses the window when it asks for the same options,
+ * an OS file drag, pending animation frames, WebGPU devices and their
+ * resources, the in-memory clipboard, and scripted picker results. The next
+ * file's `render()` reuses the window when it asks for the same options,
  * and opens a new one when it does not. A root that died on an uncaught render
  * error is closed, as by `cleanup()`.
  *

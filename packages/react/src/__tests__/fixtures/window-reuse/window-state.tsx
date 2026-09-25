@@ -8,8 +8,9 @@
 /// `globalThis`, which `isolate: false` keeps for the whole worker. Every later
 /// fixture must get the same window back and read the same state from it.
 
-import React from "react"
+import React, { useEffect } from "react"
 import { expect } from "vitest"
+import { requestAnimationFrame } from "@gpuix/react"
 import { render, type RenderResult, type TestRenderer } from "@gpuix/react/testing"
 
 interface WorkerRecord {
@@ -19,7 +20,27 @@ interface WorkerRecord {
 
 const WORKER_RECORD = Symbol.for("gpuix.window-reuse-fixture")
 
-type WorkerGlobal = typeof globalThis & { [WORKER_RECORD]?: WorkerRecord }
+/** Frame callbacks that ran, for whichever file queued them to be caught
+ *  running in the next one. */
+const FRAMES_RUN = Symbol.for("gpuix.window-reuse-fixture.frames")
+
+type WorkerGlobal = typeof globalThis & {
+  [WORKER_RECORD]?: WorkerRecord
+  [FRAMES_RUN]?: string[]
+}
+
+function framesRun(): string[] {
+  const worker = globalThis as WorkerGlobal
+  return (worker[FRAMES_RUN] ??= [])
+}
+
+/** Queues an animation frame on mount and never cancels it. */
+function PendingFrame() {
+  useEffect(() => {
+    requestAnimationFrame(() => framesRun().push("requestAnimationFrame"))
+  }, [])
+  return null
+}
 
 function Probe({ trace }: { trace: string[] }) {
   return (
@@ -70,6 +91,12 @@ function menuAction(renderer: TestRenderer, id: string): string {
  *  one would change. Timings are left out; only their presence counts. */
 function readWindowState(screen: RenderResult, trace: string[]) {
   const { renderer } = screen
+  const frameRequests = renderer.getAnimationFrameRequestCount()
+  renderer.advanceAsyncClock(16)
+  const frames = [...framesRun()]
+  framesRun().length = 0
+  const webGpuDevice = renderer.createWebGpuDevice()
+  renderer.destroyWebGpuDevice(webGpuDevice)
   const stats = renderer.getDebugFrameOverlayStats()
   const idle = {
     hasMainMenu: renderer.hasMainMenu(),
@@ -86,6 +113,9 @@ function readWindowState(screen: RenderResult, trace: string[]) {
     selectedText: renderer.getSelectedText(),
     windowSize: renderer.getWindowSize(),
     pendingEvents: renderer.drainEvents().length,
+    frameRequests,
+    frames,
+    webGpuDevice,
   }
 
   // Held buttons and a leftover capture both show up in what a fresh
@@ -122,9 +152,16 @@ export function expectFreshWindow(): void {
 
 export function dirtyWindow(): void {
   const trace: string[] = []
-  const screen = render(<Probe trace={trace} />)
+  const screen = render(
+    <>
+      <Probe trace={trace} />
+      <PendingFrame />
+    </>
+  )
   const { renderer } = screen
 
+  renderer.requestFrame(() => framesRun().push("renderer.requestFrame"))
+  renderer.createWebGpuDevice()
   renderer.setMenus([
     { name: "Leftover", items: [{ kind: "action", id: "leftover", label: "Leftover" }] },
   ])

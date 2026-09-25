@@ -380,6 +380,16 @@ export function invalidateWebGpuTransport(transport: WebGpuCanvasTransport): voi
   stateForTransport(transport).alive = false
 }
 
+/** Invalidate every object created through `transport` so far, as
+ *  `invalidateWebGpuTransport` does, while objects created from now on use
+ *  the transport normally. */
+export function retireWebGpuTransportObjects(transport: WebGpuCanvasTransport): void {
+  const state = transportStates.get(transport)
+  if (state === undefined) return
+  state.alive = false
+  transportStates.delete(transport)
+}
+
 type NativeResourceKind = "buffer" | "shaderModule" | "renderPipeline"
 type NativeResourceToken = {
   state: TransportState

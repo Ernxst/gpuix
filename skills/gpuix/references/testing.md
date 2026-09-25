@@ -80,7 +80,7 @@ Other runners wire it by hand: import from `@gpuix/react/testing`, register `aft
 
 Between tests, `cleanup()` renders `null` and resets the window size, the pointer (moved to (-1, -1)), focus and window activation, the text selection, the motion clock (set to 0 and resumed), reduced motion (`false`), `allowPrivateNetworkImages`, `strictStyles`, and queued native events.
 
-Not reset between tests in one file: application menus and their key equivalents, the debug frame overlay's mode and statistics, a held or captured pointer, an OS file drag, the in-memory clipboard and scripted picker results. `resetSharedWindowForNextFile()`, which the Vitest entry's per-file teardown calls, resets all of them and keeps the window for the next file (`testing-window-reuse.test.tsx`). CPU throttling is process-wide and never reset.
+Not reset between tests in one file: application menus and their key equivalents, the debug frame overlay's mode and statistics, a held or captured pointer, an OS file drag, pending animation frames, WebGPU devices and their resources, the in-memory clipboard and scripted picker results. `resetSharedWindowForNextFile()`, which the Vitest entry's per-file teardown calls, resets all of them and keeps the window for the next file (`testing-window-reuse.test.tsx`). CPU throttling is process-wide and never reset.
 
 ## Queries and `TestElement`
 

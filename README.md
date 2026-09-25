@@ -5761,7 +5761,8 @@ Everything else you set through `renderer` persists for the rest of the file,
 and is gone at the end of it; reset it yourself if the next test in the same
 file cares. That includes application menus and their key equivalents, the
 debug frame overlay's mode and statistics, a pointer button left held or
-captured by a partial drag, an OS file drag left over the window, the
+captured by a partial drag, an OS file drag left over the window, animation
+frames requested and never run, WebGPU devices and their resources, the
 in-memory clipboard, and scripted picker results. At the end of the file,
 `resetSharedWindowForNextFile()` puts all of them back to what a newly opened
 window has. Under `isolate: true` (the default) the next file gets a new module

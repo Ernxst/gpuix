@@ -1384,6 +1384,16 @@ impl WebGpuCanvasStore {
         use_producer(producer.as_mut().expect("producer was initialized"))
     }
 
+    /// Drop every logical device, and the resources and frames they own, so
+    /// the store is as a new renderer's: the next device is created from a new
+    /// producer and gets the first id.
+    #[cfg(feature = "test-support")]
+    pub(crate) fn reset(&self) {
+        self.producer.lock().unwrap().take();
+        self.dimensions.lock().unwrap().clear();
+        self.released.store(0, Ordering::Relaxed);
+    }
+
     pub(crate) fn create_device(&self) -> Result<f64> {
         self.with_producer(|producer| producer.create_logical_device().map(|id| id as f64))
     }
