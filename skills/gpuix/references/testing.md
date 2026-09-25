@@ -36,7 +36,6 @@ Tests render into a real native window placed offscreen, through Metal on macOS 
 - **Unpainted elements throw.** `getBoundingClientRect()` and every `userEvent` pointer helper throw on an element that painted nothing, such as a culled row. Neither returns zeros.
 - **`userEvent.keyboard(element, keys)` takes GPUI keystroke syntax**: space-separated, `"cmd-enter"`, `"shift-tab"`. user-event's `{Shift>}` syntax is not accepted.
 - **Goldens are exact and have no platform suffix by default.** A macOS golden fails on Windows. Add the platform with `configureScreenshots({ resolveScreenshotPath })`.
-- **A golden can depend on what the window drew earlier** (#664): a reused window shifts a few glyph-edge pixels after other text was drawn, so moving a test to another file changes the result. Capture goldens in a fresh window (`disposeSharedWindow()` before the golden `render()`), or allow a small `comparatorOptions.differingPixelBudget`.
 - **Keep test trees small.** Render and Tab cost grow with the tree: at 250 rows about 65 ms per render and 118 ms per Tab, against 1–2 ms for a small tree (#663).
 
 ## Entry points and setup
@@ -191,4 +190,3 @@ Launch a live app without stealing focus by passing `env: { GPUIX_BACKGROUND: "1
 | #661 | Window closed and reopened at every file boundary under `isolate: false`; clipboard, menus, overlay and held pointer state not reset within a file. |
 | #662 | Element screenshots decode the whole window in JavaScript. |
 | #663 | Render and Tab cost grow sharply with tree size. |
-| #664 | Warm and fresh windows differ by glyph-edge pixels. |
