@@ -1945,6 +1945,7 @@ ref.current.localName                             // "div"
 ref.current.hasAttribute("data-state")           // agrees with getAttribute()
 ref.current.contains(otherRef.current)            // retained-tree containment
 ref.current.parentElement                         // live retained parent, or null
+ref.current.isConnected                           // true while mounted in its root
 ref.current.ownerDocument                         // the host document, or the GPUIX facade; see Globals
 ref.current.dispatchEvent(event)                  // a PointerEvent; see Globals
 
@@ -1969,7 +1970,8 @@ deliberately supports only these state pseudo-classes.
 `Node.compareDocumentPosition()`: it returns the same bitmask a browser does —
 `DOCUMENT_POSITION_PRECEDING`, `_FOLLOWING`, `_CONTAINS`, `_CONTAINED_BY`,
 `_DISCONNECTED`, and `_IMPLEMENTATION_SPECIFIC` — exported as constants from
-`@gpuix/react`. The same node returns `0`; an ancestor/descendant pair sets
+`@gpuix/react` and exposed as static constants on the `Node` shim. The same
+node returns `0`; an ancestor/descendant pair sets
 `_CONTAINS`/`_CONTAINED_BY` alongside `_PRECEDING`/`_FOLLOWING`; unrelated
 trees set `_DISCONNECTED` plus `_IMPLEMENTATION_SPECIFIC` and a pick between
 them that stays consistent for the life of the process, as the DOM guarantees.

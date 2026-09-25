@@ -2031,6 +2031,8 @@ export interface PublicInstance {
   readonly localName: string
   /** The authored host name in uppercase, matching `Node.nodeName` for elements. */
   readonly nodeName: string
+  /** Whether this element is currently mounted in its root, matching `Node.isConnected`. */
+  readonly isConnected: boolean
   /**
    * The host element that currently holds this one in the retained tree,
    * matching `Node.parentElement`. Reads the live tree, so it follows appends,
