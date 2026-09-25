@@ -68,8 +68,11 @@ function isGpuError(error: unknown): error is GPUError {
 }
 
 export class GPUUncapturedErrorEvent extends Event {
-  constructor(readonly error: GPUError) {
-    super("uncapturederror")
+  readonly error: GPUError
+
+  constructor(type: string, init: { error: GPUError }) {
+    super(type)
+    this.error = init.error
   }
 }
 export const GPUBufferUsage = Object.freeze({
@@ -1202,7 +1205,7 @@ export class GPUDevice extends EventTarget {
       if (scope.error === null) scope.error = error
     } else {
       queueMicrotask(() => {
-        const event = new GPUUncapturedErrorEvent(error)
+        const event = new GPUUncapturedErrorEvent("uncapturederror", { error })
         this.dispatchEvent(event)
         this.onuncapturederror?.(event)
       })

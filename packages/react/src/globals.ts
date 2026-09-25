@@ -38,7 +38,7 @@ import { PointerEvent } from "./pointer-event.js"
 import { gpuixDocument } from "./document.js"
 import {
   installWebGpuGlobal,
-  type GPU as GpuixGPU,
+  type GPUAdapter as GpuixGPUAdapter,
   type GPUError as GpuixGPUError,
   type GPUInternalError as GpuixGPUInternalError,
   type GPUOutOfMemoryError as GpuixGPUOutOfMemoryError,
@@ -51,13 +51,23 @@ declare global {
     readonly gpu: GPU
   }
 
-  interface GPU extends GpuixGPU {}
+  interface GPU {
+    requestAdapter(): Promise<GpuixGPUAdapter>
+  }
 
-  interface GPUError extends Pick<GpuixGPUError, "message"> {}
+  interface GPUError {
+    readonly message: GpuixGPUError["message"]
+  }
 
-  interface GPUValidationError extends GPUError, Pick<GpuixGPUValidationError, "name"> {}
-  interface GPUOutOfMemoryError extends GPUError, Pick<GpuixGPUOutOfMemoryError, "name"> {}
-  interface GPUInternalError extends GPUError, Pick<GpuixGPUInternalError, "name"> {}
+  interface GPUValidationError extends GPUError {
+    readonly name: GpuixGPUValidationError["name"]
+  }
+  interface GPUOutOfMemoryError extends GPUError {
+    readonly name: GpuixGPUOutOfMemoryError["name"]
+  }
+  interface GPUInternalError extends GPUError {
+    readonly name: GpuixGPUInternalError["name"]
+  }
   interface GPUUncapturedErrorEvent extends Event {
     readonly error: GPUError
   }

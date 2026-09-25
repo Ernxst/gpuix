@@ -96,7 +96,7 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc --noEmit && bun run typecheck:test && bun run typecheck:webgpu",
     "typecheck:test": "tsc --project tsconfig.test.json",
-    "typecheck:webgpu": "tsc --project tsconfig.webgpu-globals.json && tsc --project tsconfig.webgpu-types.json",
+    "typecheck:webgpu": "tsc --project tsconfig.webgpu-globals.json && tsc --project tsconfig.webgpu-types.json && tsc --project type-tests/webgpu/tsconfig.json && tsc --project type-tests/webgpu/tsconfig.with-types.json",
     "dev": "tsc --watch",
     "test": "bun run build && bun run typecheck:test && vitest run --exclude src/__tests__/canvas-wpt.test.tsx",
     "canvas:wpt": "vitest run src/__tests__/canvas-wpt.test.tsx",
