@@ -45,6 +45,9 @@ mod packager {
         sync::OnceLock,
         time::Duration,
     };
+
+    #[cfg(test)]
+    pub(super) static TEST_EXECUTABLE_PATH: OnceLock<PathBuf> = OnceLock::new();
     use time::OffsetDateTime;
     use url::Url;
 
@@ -1062,31 +1065,40 @@ mod packager {
     }
 
     fn current_exe() -> std::io::Result<PathBuf> {
+        #[cfg(test)]
+        if let Some(path) = TEST_EXECUTABLE_PATH.get() {
+            return Ok(path.clone());
+        }
+
         let path = std::env::current_exe()?;
         #[cfg(all(target_os = "macos"))]
-        {
-            use std::fs;
-            if path.ancestors().any(|ancestor| {
-                matches!(
-                    ancestor
-                        .symlink_metadata()
-                        .as_ref()
-                        .map(fs::Metadata::file_type)
-                        .as_ref()
-                        .map(fs::FileType::is_symlink),
-                    Ok(true)
-                )
-            }) {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "current_exe() contains a symlink, refusing to use it: {}",
-                        path.display()
-                    ),
-                ));
-            }
-        }
+        reject_symlink_ancestors(&path)?;
         path.canonicalize()
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn reject_symlink_ancestors(path: &Path) -> std::io::Result<()> {
+        use std::fs;
+        if path.ancestors().any(|ancestor| {
+            matches!(
+                ancestor
+                    .symlink_metadata()
+                    .as_ref()
+                    .map(fs::Metadata::file_type)
+                    .as_ref()
+                    .map(fs::FileType::is_symlink),
+                Ok(true)
+            )
+        }) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "current_exe() contains a symlink, refusing to use it: {}",
+                    path.display()
+                ),
+            ));
+        }
+        Ok(())
     }
 
     #[cfg(any(windows, target_os = "macos"))]
@@ -1371,6 +1383,8 @@ mod tests {
     }
 
     fn options(endpoint: String) -> CheckUpdateOptions {
+        let test_executable = std::env::current_exe().unwrap().canonicalize().unwrap();
+        let _ = packager::TEST_EXECUTABLE_PATH.set(test_executable);
         CheckUpdateOptions {
             endpoints: vec![endpoint],
             pubkey: "not-a-real-key".into(),
@@ -1379,6 +1393,20 @@ mod tests {
             installer_args: None,
             install_mode: None,
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn production_exe_check_refuses_symlinked_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("target");
+        let symlink = directory.path().join("symlink");
+        std::fs::write(&target, "test").unwrap();
+        std::os::unix::fs::symlink(&target, &symlink).unwrap();
+
+        let err = packager::reject_symlink_ancestors(&symlink).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("symlink, refusing to use it"));
     }
 
     #[test]
