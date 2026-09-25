@@ -62,7 +62,7 @@ Override with `render(<App />, { strictStyles })` or `createRoot(renderer, { str
 | `flexGrow`, `flexShrink` | number ≥ 0 |
 | `flexBasis` | number (px) |
 | `alignItems`, `alignSelf`, `justifyItems`, `justifySelf` | `start`, `flex-start`, `center`, `end`, `flex-end`, `baseline`, `stretch` |
-| `alignContent` | the above plus `normal`, `space-between` / `between`, `space-around` / `around`, `space-evenly` / `evenly` |
+| `alignContent` | `start`, `flex-start`, `center`, `end`, `flex-end`, `normal`, `space-between` / `between`, `space-around` / `around`, `space-evenly` / `evenly`, `stretch` |
 | `justifyContent` | `start`, `flex-start`, `center`, `end`, `flex-end`, `space-between` / `between`, `space-around` / `around`, `space-evenly` / `evenly` |
 | `gap`, `rowGap`, `columnGap` | number ≥ 0 |
 | `gridTemplateColumns`, `gridTemplateRows` | array of track objects, not a CSS string: `[{ type: "fr", value: 1 }, { type: "px", value: 200 }]`; also `percent`, `auto`, `min-content`, `max-content`, `fit-content`, `minmax`, `repeat` (count or `auto-fill`/`auto-fit`) |
