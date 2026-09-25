@@ -4736,8 +4736,10 @@ A descendant nested inside named groups can select a name with
 `hoverWithinGroup`, matching Tailwind's `group-hover/name`. `hoverWithin` and
 `activeWithin` then match every ancestor whose `hoverGroup` has that name. An
 outer group can activate the style through an unhovered inner group with the
-same name. Groups with other names do not activate it. A `hoverWithinGroup`
-naming no ancestor `hoverGroup` produces a style diagnostic.
+same name. Groups with other names do not activate it. A hand-written
+`hoverWithinGroup` naming no ancestor `hoverGroup` produces a style
+diagnostic. A CSS-module-generated binding with no matching selector ancestor
+silently does not apply, matching how the same selector behaves in CSS.
 
 ```tsx
 <div style={{ hoverGroup: 'outer' }}>

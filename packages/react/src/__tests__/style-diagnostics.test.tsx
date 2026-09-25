@@ -1771,4 +1771,67 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(diagnostics[0].message).toContain('no ancestor hoverGroup named "sidebar" was found')
     expect(warn).toHaveBeenCalled()
   })
+
+  it("keeps an unmatched CSS-module group silent but diagnoses a handwritten group", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+    const generatedGroup =
+      "gpuix-css-module:hover-group:/fixture/dock.module.css:tileBase"
+    const compiled = (style: StyleDesc) => {
+      Object.defineProperty(style, COMPILED_STYLE, { value: true })
+      return style as unknown as string
+    }
+
+    testRoot.render(
+      <div>
+        <span className={compiled({ hoverGroup: generatedGroup } as StyleDesc)}>
+          <span>
+            <img
+              alt=""
+              className={compiled({
+                hoverWithinGroup: generatedGroup,
+                hoverWithin: { width: 22 },
+              } as StyleDesc)}
+            />
+          </span>
+        </span>
+        <span>
+          <span>
+            <img
+              alt=""
+              data-testid="unmatched-css-module-group"
+              className={compiled({
+                hoverWithinGroup: generatedGroup,
+                hoverWithin: { width: 22 },
+              } as StyleDesc)}
+            />
+          </span>
+        </span>
+        <span>
+          <span>
+            <img
+              alt=""
+              data-testid="unmatched-handwritten-group"
+              style={{ hoverWithinGroup: "handwritten", hoverWithin: { width: 22 } }}
+            />
+          </span>
+        </span>
+      </div>,
+    )
+
+    const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementType: "img",
+      dataTestId: "unmatched-handwritten-group",
+      property: "hoverWithinGroup",
+      value: '"handwritten"',
+    })
+    expect(diagnostics[0]?.message).toContain(
+      'no ancestor hoverGroup named "handwritten" was found',
+    )
+    expect(diagnostics.find((diagnostic) => diagnostic.dataTestId === "unmatched-css-module-group"))
+      .toBeUndefined()
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
 })
