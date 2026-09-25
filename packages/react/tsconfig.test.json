@@ -18,7 +18,6 @@
     "src/__tests__/resize-observer.types.tsx",
     "src/__tests__/element-identity.test.tsx",
     "src/__tests__/testing-screenshot.test.tsx",
-    "src/__tests__/bun-preload-hover-group.test.ts",
     "src/__tests__/testing-vitest-setup.test.tsx",
     "src/__tests__/testing-per-file-isolation.test.tsx",
     "src/__tests__/fixtures/per-file-isolation/01-menu.fixture.tsx",

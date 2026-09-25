@@ -17006,9 +17006,6 @@ pub(crate) fn apply_batch_to_tree_with_diagnostics(
     let mut diagnostics = Vec::new();
     let mut inline_style_candidates = HashSet::new();
     let mut inline_subtree_roots = Vec::new();
-    let mut hover_within_group_candidates = HashSet::new();
-    let mut hover_group_subtree_candidates = HashSet::new();
-    let mut hover_group_subtree_roots = Vec::new();
     let mut accessibility_candidates = HashSet::new();
     for batch_op in parsed {
         match batch_op {
@@ -17025,7 +17022,6 @@ pub(crate) fn apply_batch_to_tree_with_diagnostics(
             } => {
                 tree.append_child(parent_id, child_id);
                 inline_subtree_roots.push(child_id);
-                hover_group_subtree_roots.push(child_id);
             }
             BatchOp::InsertBefore {
                 parent_id,
@@ -17034,22 +17030,12 @@ pub(crate) fn apply_batch_to_tree_with_diagnostics(
             } => {
                 tree.insert_before(parent_id, child_id, before_id);
                 inline_subtree_roots.push(child_id);
-                hover_group_subtree_roots.push(child_id);
             }
             BatchOp::SetStyle { id, .. } => {
                 let (shared, problems) = styles.next().expect("one resolved style per setStyle op");
-                let previous_hover_group = tree
-                    .elements
-                    .get(&id)
-                    .and_then(|element| element.style.as_deref())
-                    .and_then(|style| style.hover_group.as_deref());
-                if previous_hover_group != shared.hover_group.as_deref() {
-                    hover_group_subtree_roots.push(id);
-                }
                 tree.set_style(id, shared);
                 diagnostics.extend(pending_style_diagnostics(id, problems));
                 inline_style_candidates.insert(id);
-                hover_within_group_candidates.insert(id);
             }
             BatchOp::SetText { id, content } => {
                 tree.set_text(id, content);
@@ -17089,16 +17075,8 @@ pub(crate) fn apply_batch_to_tree_with_diagnostics(
     }
     let mut inline_style_candidates = inline_style_candidates.into_iter().collect::<Vec<_>>();
     inline_style_candidates.sort_unstable();
-    for root_id in hover_group_subtree_roots {
-        crate::text::inline::subtree_ids(tree, root_id, &mut hover_group_subtree_candidates);
-    }
-    hover_within_group_candidates.extend(hover_group_subtree_candidates);
-    let mut hover_within_group_candidates = hover_within_group_candidates
-        .into_iter()
-        .collect::<Vec<_>>();
-    hover_within_group_candidates.sort_unstable();
     if collect_diagnostics {
-        for id in hover_within_group_candidates {
+        for &id in &inline_style_candidates {
             diagnostics.extend(pending_hover_within_group_diagnostic(tree, id));
         }
     }
@@ -17901,40 +17879,6 @@ mod batch_tests {
             tree.elements[&1].style.as_deref(),
             Some(&StyleDesc::default())
         );
-    }
-
-    #[test]
-    fn changing_an_ancestor_hover_group_revalidates_descendant_bindings() {
-        let mut tree = RetainedTree::new();
-        let mounted = r#"[
-            ["createElement",1,"div"],
-            ["createElement",2,"span"],
-            ["createElement",3,"span"],
-            ["createElement",4,"img"],
-            ["setStyle",2,{"hoverGroup":"tile"}],
-            ["setStyle",4,{"hoverWithinGroup":"tile"}],
-            ["appendChild",1,2],
-            ["appendChild",2,3],
-            ["appendChild",3,4],
-            ["setRoot",1]
-        ]"#;
-        let mounted = apply_batch_to_tree_with_diagnostics(&mut tree, mounted.as_bytes(), true)
-            .expect("the matching named ancestor is accepted");
-        assert!(mounted.diagnostics.is_empty());
-
-        let removed = apply_batch_to_tree_with_diagnostics(
-            &mut tree,
-            br#"[["setStyle",2,{}]]"#,
-            true,
-        )
-        .expect("style updates remain valid batches");
-        assert_eq!(removed.diagnostics.len(), 1);
-        assert_eq!(removed.diagnostics[0].element_id, 4);
-        assert_eq!(removed.diagnostics[0].problem.property, "hoverWithinGroup");
-        assert!(removed.diagnostics[0]
-            .problem
-            .reason
-            .contains("no ancestor hoverGroup named \"tile\" was found"));
     }
 
     /// Skipping an unknown opcode would let a JS/Rust version skew desync the

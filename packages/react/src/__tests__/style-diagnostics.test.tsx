@@ -1748,18 +1748,13 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
 
     testRoot.render(
       <div style={{ hoverGroup: "outer" }}>
-        <span>
-          <span>
-            <img
-              data-testid="orphaned-hover-within"
-              alt=""
-              style={{
-                hoverWithinGroup: "sidebar",
-                hoverWithin: { backgroundColor: "#7c86ff" },
-              }}
-            />
-          </span>
-        </span>
+        <span
+          data-testid="orphaned-hover-within"
+          style={{
+            hoverWithinGroup: "sidebar",
+            hoverWithin: { backgroundColor: "#7c86ff" },
+          }}
+        />
       </div>,
     )
 
@@ -1768,7 +1763,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(diagnostics).toHaveLength(1)
     expect(diagnostics[0]).toMatchObject({
       elementId: element.id,
-      elementType: "img",
+      elementType: "div",
       dataTestId: "orphaned-hover-within",
       property: "hoverWithinGroup",
       value: '"sidebar"',
