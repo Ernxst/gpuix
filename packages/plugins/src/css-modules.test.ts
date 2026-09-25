@@ -606,6 +606,28 @@ test("compiles a hovered ancestor selector into hoverGroup and hoverWithin style
   })
 })
 
+test("compiles a pressed ancestor selector into the shared group and activeWithin styles", async () => {
+  await expect(
+    transformGpuixCssModule(
+      `
+        .card:hover .title { color: #ffffff; }
+        .card:active .title { background-color: #22c55e; }
+      `,
+      "/fixture/card.module.css",
+    ),
+  ).resolves.toEqual({
+    card: {
+      hoverGroup: "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+    },
+    title: {
+      hoverWithinGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
+      hoverWithin: { color: "#ffffff" },
+      activeWithin: { backgroundColor: "#22c55e" },
+    },
+  })
+})
+
 test("composes same-file classes in stylesheet order", async () => {
   await expect(
     transformGpuixCssModule(

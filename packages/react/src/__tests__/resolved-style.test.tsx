@@ -1,8 +1,12 @@
+import fs from "node:fs"
+import path from "node:path"
 import React from "react"
 import type { CSSProperties } from "react"
 import { describe, expect, it } from "vitest"
+import { transformGpuixCssModule } from "../../../plugins/dist/css-modules.js"
 import type { NativeStateStyleKey, StyleDesc } from "../index.js"
 import { createTestRoot } from "../testing.js"
+import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
 
 type SharedStyle = {
   [Property in keyof CSSProperties & keyof StyleDesc]?: Exclude<
@@ -15,6 +19,43 @@ type SharedStyle = {
 type WidenedShared = SharedStyle & Pick<StyleDesc, NativeStateStyleKey>
 
 describe("resolved test-renderer styles", () => {
+  it("renders a CSS module descendant state while its ancestor is pressed", async () => {
+    const styles = await transformGpuixCssModule(
+      `.card { width: 300px; height: 80px; padding: 20px; }
+       .title { width: 100px; height: 40px; background-color: #334155; }
+       .card:active .title { background-color: #22c55e; }`,
+      "/fixture/card.module.css",
+    )
+    for (const style of Object.values(styles)) {
+      Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true })
+    }
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div className={styles.card} data-testid="card">
+          <span className={styles.title} data-testid="title" />
+        </div>,
+      )
+      const card = root.renderer.findByTestId("card")!
+      const title = root.renderer.findByTestId("title")!
+      const { x, y } = root.renderer.getElementBounds(card.id)!
+      fs.mkdirSync(SHOTS_DIR, { recursive: true })
+      const idle = path.join(SHOTS_DIR, "module-active-descendant-idle.png")
+      const pressed = path.join(SHOTS_DIR, "module-active-descendant-pressed.png")
+
+      expect(root.renderer.getResolvedStyle(title.id)?.backgroundColor).toBe("#334155")
+      root.renderer.captureScreenshot(idle)
+      root.renderer.nativeSimulateMouseDown(x + 5, y + 5)
+      expect(root.renderer.getResolvedStyle(title.id)?.backgroundColor).toBe("#22c55e")
+      root.renderer.captureScreenshot(pressed)
+      expectScreenshotsDiffer(idle, pressed)
+      root.renderer.nativeSimulateMouseUp(x + 5, y + 5)
+      expect(root.renderer.getResolvedStyle(title.id)?.backgroundColor).toBe("#334155")
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("reads the hoverWithin style applied by the issue #52 repro", () => {
     const root = createTestRoot()
     try {
