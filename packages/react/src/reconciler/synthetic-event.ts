@@ -472,7 +472,9 @@ export function createGpuixSyntheticEvent(
     nativeEvent.eventType === "load" ||
     nativeEvent.eventType === "error"
   const isNonBubblingEvent =
-    isNonCancelableEvent ||
+    (isNonCancelableEvent &&
+      nativeEvent.eventType !== "focus" &&
+      nativeEvent.eventType !== "blur") ||
     nativeEvent.eventType === "pointerEnter" ||
     nativeEvent.eventType === "pointerLeave"
   const isDragEvent =

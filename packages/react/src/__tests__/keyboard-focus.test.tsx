@@ -339,18 +339,22 @@ describeNative("keyboard focus", () => {
     const first = testRoot.renderer.findByTestId("one")!
     testRoot.renderer.focusElement(first.id)
     expect(events).toEqual([
-      "focus:parent-capture:1:false:false",
-      "focus:one:2:false:false",
+      "focus:parent-capture:1:true:false",
+      "focus:one:2:true:false",
+      "focus:parent-bubble:3:true:false",
     ])
 
     testRoot.renderer.simulateKeystrokes("tab")
     expect(events).toEqual([
-      "focus:parent-capture:1:false:false",
-      "focus:one:2:false:false",
-      "blur:parent-capture:1:false:false",
-      "blur:one:2:false:false",
-      "focus:parent-capture:1:false:false",
-      "focus:two:2:false:false",
+      "focus:parent-capture:1:true:false",
+      "focus:one:2:true:false",
+      "focus:parent-bubble:3:true:false",
+      "blur:parent-capture:1:true:false",
+      "blur:one:2:true:false",
+      "blur:parent-bubble:3:true:false",
+      "focus:parent-capture:1:true:false",
+      "focus:two:2:true:false",
+      "focus:parent-bubble:3:true:false",
     ])
 
     const bounds = testRoot.renderer.getElementBounds(first.id)!
@@ -359,16 +363,115 @@ describeNative("keyboard focus", () => {
       bounds.y! + bounds.height! / 2
     )
     expect(events).toEqual([
-      "focus:parent-capture:1:false:false",
-      "focus:one:2:false:false",
-      "blur:parent-capture:1:false:false",
-      "blur:one:2:false:false",
-      "focus:parent-capture:1:false:false",
-      "focus:two:2:false:false",
-      "blur:parent-capture:1:false:false",
-      "blur:two:2:false:false",
-      "focus:parent-capture:1:false:false",
-      "focus:one:2:false:false",
+      "focus:parent-capture:1:true:false",
+      "focus:one:2:true:false",
+      "focus:parent-bubble:3:true:false",
+      "blur:parent-capture:1:true:false",
+      "blur:one:2:true:false",
+      "blur:parent-bubble:3:true:false",
+      "focus:parent-capture:1:true:false",
+      "focus:two:2:true:false",
+      "focus:parent-bubble:3:true:false",
+      "blur:parent-capture:1:true:false",
+      "blur:two:2:true:false",
+      "blur:parent-bubble:3:true:false",
+      "focus:parent-capture:1:true:false",
+      "focus:one:2:true:false",
+      "focus:parent-bubble:3:true:false",
+    ])
+  })
+
+  it("bubbles focus and blur from a descendant with DOM target and currentTarget", () => {
+    const events: string[] = []
+    const record = (label: string, event: GpuixSyntheticEvent): void => {
+      events.push(
+        `${event.type}:${label}:${event.target.id}:${event.currentTarget.id}:${event.eventPhase}`
+      )
+    }
+    const parentRef = React.createRef<PublicInstance>()
+    const inputRef = React.createRef<PublicInstance>()
+    const buttonRef = React.createRef<PublicInstance>()
+
+    testRoot.render(
+      <div
+        ref={parentRef}
+        onFocusCapture={(event) => record("parent-capture", event)}
+        onFocus={(event) => record("parent-bubble", event)}
+        onBlurCapture={(event) => record("parent-capture", event)}
+        onBlur={(event) => record("parent-bubble", event)}
+      >
+        <input
+          ref={inputRef}
+          onFocus={(event) => record("input", event)}
+          onBlur={(event) => record("input", event)}
+        />
+        <button ref={buttonRef}>Next</button>
+      </div>
+    )
+
+    testRoot.renderer.focusElement(inputRef.current!.id)
+    testRoot.renderer.focusElement(buttonRef.current!.id)
+
+    expect(events).toEqual([
+      `focus:parent-capture:${inputRef.current!.id}:${parentRef.current!.id}:1`,
+      `focus:input:${inputRef.current!.id}:${inputRef.current!.id}:2`,
+      `focus:parent-bubble:${inputRef.current!.id}:${parentRef.current!.id}:3`,
+      `blur:parent-capture:${inputRef.current!.id}:${parentRef.current!.id}:1`,
+      `blur:input:${inputRef.current!.id}:${inputRef.current!.id}:2`,
+      `blur:parent-bubble:${inputRef.current!.id}:${parentRef.current!.id}:3`,
+      `focus:parent-capture:${buttonRef.current!.id}:${parentRef.current!.id}:1`,
+      `focus:parent-bubble:${buttonRef.current!.id}:${parentRef.current!.id}:3`,
+    ])
+  })
+
+  it("stops focus bubbling when the target calls stopPropagation", () => {
+    const events: string[] = []
+    const inputRef = React.createRef<PublicInstance>()
+
+    testRoot.render(
+      <div
+        onFocusCapture={() => events.push("capture")}
+        onFocus={() => events.push("bubble")}
+      >
+        <input
+          ref={inputRef}
+          onFocus={(event) => {
+            events.push("target")
+            event.stopPropagation()
+          }}
+        />
+      </div>
+    )
+
+    testRoot.renderer.focusElement(inputRef.current!.id)
+
+    expect(events).toEqual(["capture", "target"])
+  })
+
+  it("notifies ancestor listeners when the focused element has no focus props", () => {
+    const events: string[] = []
+    const parentRef = React.createRef<PublicInstance>()
+    const inputRef = React.createRef<PublicInstance>()
+
+    testRoot.render(
+      <div
+        ref={parentRef}
+        onFocusCapture={(event) => {
+          events.push(`capture:${event.target.id}:${event.currentTarget.id}`)
+        }}
+        onFocus={(event) => {
+          events.push(`bubble:${event.target.id}:${event.currentTarget.id}`)
+        }}
+      >
+        <input ref={inputRef} />
+      </div>
+    )
+
+    testRoot.renderer.focusElement(inputRef.current!.id)
+
+    expect(events).toEqual([
+      `capture:${inputRef.current!.id}:${parentRef.current!.id}`,
+      `bubble:${inputRef.current!.id}:${parentRef.current!.id}`,
     ])
   })
 

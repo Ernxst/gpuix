@@ -18,7 +18,6 @@ GPU-IX dispatches its own synthetic events over the retained host tree (`package
 
 ## Traps
 
-- **`onFocus` and `onBlur` do not bubble.** In React DOM they do. An ancestor's `onFocus` never runs when a descendant takes focus; `onFocusCapture` runs only when the focused descendant has its own `onFocus` or `onFocusCapture`. To react to focus inside a subtree, use the `focusWithin` style or put handlers on each focusable child.
 - **`FocusEvent.relatedTarget` is always `null`.** "Close on blur unless focus moved inside me" treats every blur as focus leaving.
 - **`ref.current.id` is a number**, the native element id. The authored `id` is `ref.current.getAttribute("id")` or `ref.current.props.id`.
 - **Refs have no `isConnected` (#660), `closest`, `querySelector`, `dataset`, `style`, `classList`, `children`, `parentNode`, `textContent`, `addEventListener`, `setAttribute` or `offsetWidth`.** `el.contains(el)` reports whether a ref is still mounted.
@@ -48,7 +47,7 @@ GPU-IX dispatches its own synthetic events over the retained host tree (`package
 | `onDragEnter`, `onDragOver`, `onDragLeave`, `onDrop` | yes | yes | OS file drags; `onDrop` runs only if an `onDragOver` on the path called `preventDefault()`. |
 | `onFileDrop` (legacy) | no | no | Desktop-namespace alias for `onDrop`; receives the raw `EventPayload` with `paths`, `x` and `y`. Prefer `onDrop` and `event.dataTransfer.files`. |
 | `onKeyDown`, `onKeyUp` | yes | yes | To the focused element, or the root when nothing is focused. |
-| `onFocus`, `onBlur` | yes | **no** | See Traps. |
+| `onFocus`, `onBlur` | yes | yes | Capture travels root to target, then bubble travels to ancestors. `target` is the focused element; `relatedTarget` is always `null`. |
 | `onScroll` | yes | no | Scroll container position changed. |
 | `onWheel` | yes | yes | DOM sign convention; `deltaMode` 0 or 1. |
 | `onChange` | yes | yes | Per edit on inputs and textareas (`value`, `inputType`) and on choice inputs (`checked`); bubbles to ancestors. |

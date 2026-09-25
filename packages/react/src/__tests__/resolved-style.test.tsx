@@ -4,6 +4,7 @@ import React from "react"
 import type { CSSProperties } from "react"
 import { describe, expect, it } from "vitest"
 import type { NativeStateStyleKey, StyleDesc } from "../index.js"
+import type { GpuixFocusEvent } from "../reconciler/synthetic-event.js"
 import { createTestRoot } from "../testing.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
 
@@ -578,7 +579,9 @@ describe("resolved test-renderer styles", () => {
         <div style={{ width: 400, height: 120 }}>
           <div
             data-testid="focus-within-not-a-tab-stop"
-            onFocus={() => focused.push("container")}
+            onFocus={(event: GpuixFocusEvent) => {
+              if (event.target === event.currentTarget) focused.push("container")
+            }}
             style={{
               width: 160,
               height: 40,
