@@ -18,7 +18,7 @@ A declaration that compiles is not always one the renderer accepts. The compiler
 
 ## Traps
 
-- **Import CSS modules from JS by relative path only.** Bun resolves a JS-level `.module.css` import with `path.resolve(importer dir, id)`, so `@/ui/x.module.css` and `pkg/x.module.css` resolve to the wrong file. A `#ui/x.module.css` specifier is not recognised as a CSS module in either Bun or Vite, because the plugin strips everything after `#` (`css.ts` `cleanId`). Inside CSS, `@import` and `composes … from` do resolve package and `#` imports.
+- **Import CSS modules from JS by relative path only.** Bun resolves a JS-level `.module.css` import with `path.resolve(importer dir, id)`, so `@/ui/x.module.css` and `pkg/x.module.css` resolve to the wrong file. A `#ui/x.module.css` specifier fails in both: the plugin strips everything after `#` (`css.ts` `cleanId`), so Bun resolves it to the importer's directory and Vite hands it to its own CSS handling, which yields class-name strings. Inside CSS, `@import` and `composes … from` do resolve package and `#` imports.
 - **Only two descendant forms exist: `.a:hover .b` and `.a:active .b`.** Plain descendants, children (`>`), compound classes (`.a.b`), attribute selectors, and descendants of `:focus`/`:focus-visible`/`:focus-within` fail the build (#670). There are no `data-*` state attributes to target anyway. For `.card:focus-within .title`, give `.card` its own `:focus-within` rule and drive the title from React state (`styles.md`, State styles).
 - **One ancestor per descendant class.** `.card:hover .title` together with `.panel:hover .title` fails: `selector ".panel:hover .title" conflicts with selector ".card:hover .title"`.
 - **A descendant rendered outside its ancestor gets a runtime diagnostic, not a silent miss.** `.a:hover .b` gives `.a` a generated `hoverGroup` and `.b` a `hoverWithinGroup`; if an element with class `b` has no `a` ancestor, strict mode reports `no ancestor hoverGroup named … was found`.
@@ -26,7 +26,8 @@ A declaration that compiles is not always one the renderer accepts. The compiler
 - **`box-shadow` and `text-decoration` cannot be written in a CSS module** although the native style model has both. The translator expands them to `shadowOffset…` and `textDecorationLine`, which are rejected (#672). Put them in the `style` prop.
 - **`line-height` must be unitless or `px`.** `2rem` compiles to the bare number `32`, which the renderer reads as a multiplier of the font size. `em` and `%` values compile and then fail natively. Releases up to 0.25.0-fork.4 also turn `px` into a multiplier (#665, fixed on `main` by #668); on those, use unitless values.
 - **Lengths in `em` compile and then fail natively.** Native lengths accept px, `%`, `ch`, `vw` and `vh`; `rem` works only because the compiler converts it to px at 16px per rem.
-- **Values the renderer rejects compile cleanly**: `display: block` (native accepts `none`, `flex`, `grid`; omit `display` for block flow), `margin: 0 auto` (margins must be numbers), and `grid-template-columns`/`-rows`/`grid-auto-*` (native takes track-object arrays, not CSS strings; set grids in `style`).
+- **Values the renderer rejects compile cleanly**: `display: block` (native accepts `none`, `flex`, `grid`; omit `display` for block flow), `margin: 0 auto` (margins must be numbers), and `grid-template-columns`/`-rows` and `grid-auto-rows`/`-columns` (native takes track-object arrays, not CSS strings; set them in `style`). `grid-auto-flow` works.
+- **`@import` must come before every rule.** An `@import` after a rule is dropped without an error, together with the variables and classes it would have brought in.
 - **`transition` belongs on the base class rule only.** Inside `:hover` or another state it fails the build; the `transition-*` longhands are rejected everywhere.
 - **Plain descendant rules nested inside a class are rejected.** `postcss-nesting` flattens `.card { .label {} }` to `.card .label`. `&:hover` and `&:hover .label` are fine.
 - **`bun build --compile` on the command line compiles no CSS modules.** It takes no plugins, so each import becomes Bun's class-name string and paints nothing; strict mode is off in the binary, so this only warns. Build with `Bun.build({ compile, plugins: [gpuixCssModulesBun()] })` (`packages/plugins/README.md`).
@@ -104,7 +105,7 @@ div
 The built-in PostCSS pipeline is `postcss-import` (resolving through the host bundler), `postcss-nesting`, then `postcss-custom-properties({ preserve: false })`. After substitution every `--*` declaration is removed, and a `:root` rule left empty is dropped.
 
 - A module can declare its own `:root { --x: … }` and use `var(--x)`; so can an imported token file. `var(--x, fallback)` with no definition takes the fallback.
-- `@import` resolves relative paths, package `imports` (`#styles/tokens.css`), exported package subpaths, and packages whose `style` field points at CSS, from the file that contains the `@import`, under both Vite and Bun (test "Vite and Bun resolve package imports and bare CSS packages inside nested modules").
+- `@import` resolves relative paths, package `imports` (`#styles/tokens.css`), exported package subpaths, and packages whose `style` field points at CSS, from the file that contains the `@import`, under both Vite and Bun (test "Vite and Bun resolve package imports and bare CSS packages inside nested modules"). Under the Bun preload, releases up to 0.25.0-fork.4 resolve package and `#` specifiers against the importer's directory instead (#667, fixed on `main` by #669).
 - `@import "./other.module.css"` inlines that file's classes as this module's own.
 
 ## At-rules
@@ -115,7 +116,7 @@ After `@import` is inlined, every remaining at-rule fails with `at-rule "@<name>
 
 - Allowed only in a rule whose selector is one class with no pseudo-class; elsewhere: `declaration "composes: …" must be in a single local class rule`.
 - **Same file** (`composes: base icon`): included classes merge in stylesheet order, not the order listed.
-- **Other file** (`composes: x from "./f.module.css"`): imported classes merge first in `composes` order, then local rules. Relative paths resolve from the stylesheet that declares the `composes`, including one pulled in by `@import`. Under the Bun preload, package subpaths and `#` imports work (fixed on `main` by #669; releases up to 0.25.0-fork.4 resolve `#…` against the importer's directory, #667).
+- **Other file** (`composes: x from "./f.module.css"`): imported classes merge first in `composes` order, then local rules. Relative paths resolve from the stylesheet that declares the `composes`, including one pulled in by `@import`. Under the Bun preload, package subpaths and `#` imports work (fixed on `main` by #669; releases up to 0.25.0-fork.4 resolve package and `#…` specifiers against the importer's directory, #667).
 - State objects deep-merge, and hover ancestor/descendant pairs compose across modules.
 - Errors: `from global` is rejected; missing classes, unreadable files and cycles are reported by name; composing two different `hoverGroup` values fails.
 
@@ -240,12 +241,12 @@ Being on this list means the property name compiles. The Traps section lists val
 | `border: 1px solid red` | `borderWidth`, `borderStyle`, `borderColor`. |
 | `flex: 1` | `flexGrow: 1`, `flexShrink: 1`, `flexBasis: 0`. The `flex` shorthand is not accepted in inline `style`. |
 | `aspect-ratio: 16 / 9` | A number. |
-| `width: 50%`, `50vw`, `calc(100% - 10px)` | Strings, passed through; see `styles.md` for the native length grammar. |
+| `width: 50%`, `50vw`, `calc(100% - 10px)` | Strings, passed through; `rem` inside `calc()`/`clamp()` is converted to px. See `styles.md` for the native length grammar. |
 | Colours (`oklch()`, `hsl()`, named, hex) | Strings. |
 | `transition: opacity 150ms ease-out` | The shorthand string, on the base rule only. |
 | `color: red !important` | `"red !important"`, passed through and rejected natively. |
 
-Rejected at build time: `font`, `font-style`, `transform`, `z-index`, `inset`, the `outline` shorthand, `outline-style`, `place-items`, `background-image`, `background: linear-gradient(…)`, `-webkit-line-clamp`, `transition-*` longhands, `animation`, `line-height: normal`, and anything else not listed above. Errors read `property "<camelName>" is not supported by the native style prop` (or `…by the native "<state>" style` inside a state).
+Rejected at build time: `font`, `font-style`, `transform`, `z-index`, `inset`, the `outline` shorthand, `outline-style`, `place-items`, `background-image`, `background: linear-gradient(…)`, `-webkit-line-clamp`, `transition-*` longhands, `animation`, `line-height: normal`, and anything else not listed above. Errors read `property "<camelName>" is not supported by the native style prop` (or `…by the native "<state>" style` inside a state); `font` is reported as `fontStyle`, and `line-height: normal` and `background: linear-gradient(…)` fail with `Failed to parse declaration …`.
 
 ## The compiled value and `className`
 
@@ -267,6 +268,7 @@ import { cn } from "@gpuix/react/cn"
 - `className` takes one compiled object, `cn(...)` over compiled objects, or `null`/`undefined`/`""`. A plain string or an uncompiled object throws `UnsupportedClassNamePropError` in development (strict styles) and warns once otherwise; no style applies.
 - `style` beats `className` per property, and a property set in `style` also removes that property from the class's state styles: a class `:hover` background never shows over an inline `backgroundColor`.
 - `cn()` merges compiled styles shallowly: a later class's `hover` object replaces an earlier one whole, where CSS would cascade both. Keep each state's declarations in one class, or use `composes`, which deep-merges states.
+- `cn(styles.a, "extra")` carries the string along, and the element then throws `UnsupportedClassNamePropError` in development. Pass only compiled styles.
 - With no compiled input, `cn` delegates to the `cn` package (with Tailwind merge) and returns a string, which is what the web build uses.
 
 ## Open issues

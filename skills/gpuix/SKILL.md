@@ -28,10 +28,11 @@ Before writing code that relies on a browser behaviour, check it in the referenc
 
 **Refs are not elements.** `ref.current.id` is a numeric native id; the authored id is `getAttribute("id")`. Refs have `focus`, `blur`, `click`, `contains`, `getBoundingClientRect`, `scrollTop`, `matches` (four pseudo-classes) and `getAttribute`. They have no `isConnected`, `closest`, `dataset`, `style`, `classList`, `children` or `addEventListener`.
 
-**Text lives in `<text>`.** `span`, `strong`, `a`, `p` and the other HTML tags are block boxes that stack vertically. For styled words inside a sentence, nest `<text>` in `<text>`; a `<text>` accepts only strings and `<text>`. Uncoloured text paints light grey `#e2e2e2`, which is invisible on light surfaces. `color`, `fontSize`, `fontFamily` and `fontWeight` inherit from ancestors.
+**Text lives in `<text>`.** `span`, `strong`, `a`, `p` and the other HTML tags are block boxes that stack vertically. For styled words inside a sentence, nest `<text>` in `<text>`; a `<text>` accepts only strings and `<text>`. Uncoloured text paints light grey `#e2e2e2`, which is invisible on light surfaces. `color`, `fontSize`, `fontFamily`, `fontWeight`, `whiteSpace`, `textTransform`, `fontVariantNumeric` and `userSelect` inherit from ancestors.
 
 **Style values are narrower than CSS.**
-- Spacing, insets, radii, font sizes and `flexBasis` are numbers in px. Only `width`/`height`/`min*`/`max*` take strings (`%`, `vw`, `vh`, `ch`, `calc(a ± b)`, `clamp()`, intrinsic keywords).
+- Spacing, insets, radii, font sizes and `flexBasis` are numbers in px. Among lengths, only `width`/`height`/`min*`/`max*` take strings (`%`, `vw`, `vh`, `ch`, `calc(a ± b)`, `clamp()`, intrinsic keywords).
+- A numeric `lineHeight` is a multiple of the font size, so `lineHeight: 20` is twenty lines tall; write `"20px"` for pixels.
 - `display` is `none`, `flex` or `grid`; omit it for block flow.
 - Grid templates are arrays of track objects. `boxShadow` is an object.
 - There is no `var()`, `rem`/`em`, `zIndex`, `transform`, `flex` shorthand, `margin: auto` or `box-sizing`.
@@ -43,26 +44,26 @@ Before writing code that relies on a browser behaviour, check it in the referenc
 - Write `box-shadow` and `text-decoration` in `style`. Keep `line-height` unitless or `px`.
 - `style` beats `className` per property, including inside state styles.
 
-**Interaction styling is built in.** `style.hover`, `active`, `focus`, `focusVisible`, `focusWithin` and `dragOver` style the element itself. `hoverGroup` on an ancestor with `hoverWithin`/`activeWithin` on a descendant (optionally `hoverWithinGroup: "name"`) replaces `.parent:hover .child`. A `hoverWithin` with no `hoverGroup` ancestor silently never applies. Nothing styles a descendant from its ancestor's focus; drive that from React state. Built-in components expose state through `style={(state) => …}`, not `data-*` attributes.
+**Interaction styling is built in.** `style.hover`, `active`, `focus`, `focusVisible`, `focusWithin` and `dragOver` style the element itself. `hoverGroup` on an ancestor with `hoverWithin`/`activeWithin` on a descendant (optionally `hoverWithinGroup: "name"`) replaces `.parent:hover .child`. A `hoverWithin` with no `hoverGroup` ancestor silently never applies. Nothing styles a descendant from its ancestor's focus; drive that from React state. Built-in components expose state through `style={(state) => …}` on `SelectTrigger`, `SelectIcon`, `SelectItem`, `SelectItemIndicator` and `ComboboxItem`, not through `data-*` attributes (`references/components.md`).
 
 **Motion is native and respects Reduce Motion.** `style.transition` (CSS shorthand or object) animates changes to opacity, colours, sizes, insets and radii. `motion.div` with `AnimatePresence` animates enter and exit of numeric targets. Both snap automatically when the OS Reduce Motion setting is on; do not add a `matchMedia` check. `render(…, { reducedMotion })` overrides the OS. Animation loops written in JS are not covered.
 
 **Events differ from React DOM in ways that break common patterns.**
 - `onFocus`/`onBlur` do not bubble, and `relatedTarget` is always `null`.
 - Keyboard events have `key` but no `code` or `keyCode`.
-- Enter and Space activate any focused element that has `onClick`.
+- Enter and Space activate a focused element that has `onClick` or sits inside an element that has one; checkboxes and radios take Space only.
 - App shortcuts go on the single top-level element's `onKeyDown`; with several top-level children they are lost.
-- An element takes focus only with `tabIndex`, `autoFocus`, a key or focus listener, or `focusWithin`.
+- An element takes focus only with `tabIndex`, a key or focus listener, or `focusWithin`; inputs and textareas already can. `autoFocus` focuses only an element that is already focusable.
 
-**Overlays need `<anchored deferred>`** or the built-in Content parts, with an opaque background. Absolutely positioned cards paint in tree order, and there is no `zIndex`.
+**Overlays need `<anchored>`** (deferred by default, so it paints on top) or the built-in Content parts. `<anchored>` sits beside its direct parent's box, so put it inside the trigger's parent. Give it an opaque background: a translucent one lets the page show through. Absolutely positioned cards paint in tree order, and there is no `zIndex`.
 
-**Tests need a real native window.** They cannot run inside an agent sandbox, so ask for an unsandboxed run first. Build `dist` before running Vitest directly. `render()` reuses one offscreen window per test file. Frames advance only when told to (`advanceAsyncClock`). A golden can differ between a warm window and a fresh one.
+**Tests need a real native window.** They cannot run inside an agent sandbox, so ask for an unsandboxed run first. Build `dist` before running Vitest directly. `render()` reuses one offscreen window per test file. `requestAnimationFrame` callbacks and async tasks advance only on `advanceAsyncClock`; transitions run on wall time unless you `clockPause()`. A golden can differ between a warm window and a fresh one.
 
 **Install from the fork's GitHub releases, not npm.** `@gpuix/react` on npm is upstream's package. Pin the release tarballs with an `overrides` entry for `@gpuix/native`, and set `"jsxImportSource": "@gpuix/react"`. Run the app with `bun --hot --preload @gpuix/plugins/preload app.tsx`. Build binaries with `Bun.build` and the CSS plugin; the `bun build --compile` CLI drops CSS modules.
 
 ## When something does not work
 
-1. Look for a style diagnostic in the console (development), or call `renderer.drainStyleDiagnostics()` in a test.
+1. Look for a style diagnostic in the console (development), or call `renderer.drainStyleDiagnostics()` in a test. Both need strict styles, which are on by default outside production; pass `strictStyles: true` to `render()` or `createTestRoot()` otherwise.
 2. Check the reference file's Traps and its open-issues table; many gaps are tracked on https://github.com/Ernxst/gpuix/issues.
 3. Confirm the prop or value against `StyleDesc`, `Props` and the element prop types in `@gpuix/react`'s `types/host.d.ts`.
 4. Reproduce it in a test with `createTestRoot()` and assert numbers (bounds, text, resolved style) rather than pixels.

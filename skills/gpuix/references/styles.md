@@ -23,9 +23,10 @@ The `style` prop takes a `StyleDesc` object (`packages/react/src/types/host.ts`)
 ## Traps
 
 - **Spacing, insets, radii, font sizes and letter spacing take numbers only, and a number means px.** `padding`, `margin*`, `gap`, `top`/`right`/`bottom`/`left`, `borderRadius*`, `fontSize`, `letterSpacing`, `flexBasis`, `outlineWidth`/`outlineOffset` reject `"8px"`, `"1rem"`, `"50%"`, `"auto"` and multi-value strings such as `"8px 16px"`. `margin: "0 auto"` is dropped; centre with `alignItems`/`justifyContent`.
-- **Only `width`, `height`, `min*` and `max*` accept strings.** See Lengths. There is no `rem`, `em`, `min()`, `max()` or `var()` in any inline value.
+- **Among lengths, only `width`, `height`, `min*` and `max*` accept strings.** See Lengths. There is no `rem`, `em`, `min()`, `max()` or `var()` in any inline value.
+- **A numeric `lineHeight` is a multiple of the font size.** `lineHeight: 20` is twenty lines tall; write `"20px"` for pixels.
 - **`display` accepts `"none"`, `"flex"` or `"grid"` only.** `"block"`, `"inline"`, `"inline-flex"` and `"contents"` are dropped. An element with no `display` lays out as a block: its children stack vertically, each taking the full width. That includes `span`, `strong`, `a` and the other inline-looking tags (see `elements.md`).
-- **Uncoloured text paints light grey `#e2e2e2`, not black.** It disappears on a light surface. `color` on an ancestor `div` is inherited, as are `fontSize`, `fontFamily` and `fontWeight`.
+- **Uncoloured text paints light grey `#e2e2e2`, not black.** It disappears on a light surface. `color` on an ancestor `div` is inherited, as are `fontSize`, `fontFamily`, `fontWeight`, `whiteSpace`, `textTransform`, `fontVariantNumeric`, `userSelect` and `selectionColor`.
 - **Common web properties do not exist**: the `flex` shorthand, `zIndex`, `boxSizing`, `transform`, `fontStyle`, `inset`, `backgroundImage`, `textDecorationColor`, `transitionProperty`, `objectFit` (a prop on `<img>`, not a style). An unknown key is dropped with a diagnostic. Layout is always border-box. Stacking follows tree order; paint an overlay later with `<anchored deferred>` (#481).
 - **`var()` does nothing in inline styles.** `--*` keys are accepted and ignored, and `color: "var(--x)"` is dropped as an unsupported colour. Only CSS modules substitute custom properties, at build time.
 - **A bad field is dropped quietly outside development.** Strict diagnostics are on by default only when `NODE_ENV !== "production"` and not in a `bun build --compile` binary; there a bad field vanishes without a word.
@@ -46,7 +47,7 @@ The `style` prop takes a `StyleDesc` object (`packages/react/src/types/host.ts`)
 
 Override with `render(<App />, { strictStyles })` or `createRoot(renderer, { strictStyles })` (`packages/react/src/reconciler/reconciler.ts`).
 
-- **Field problems** (unknown key, bad keyword, bad colour, malformed length or transition): the field is dropped in both modes and its valid siblings still apply. In strict mode `console.warn` names the element, its `id`/`data-testid`, the property and the value, once per element and message. Tests read them with `renderer.drainStyleDiagnostics()`.
+- **Field problems** (unknown key, bad keyword, bad colour, malformed length or transition): the field is dropped in both modes and its valid siblings still apply. In strict mode `console.warn` names the element, its `id`/`data-testid`, the property and the value, once per element and message. Tests read them with `renderer.drainStyleDiagnostics()`, which also records only in strict mode.
 - **Prop-shape problems** throw in strict mode and warn once otherwise: a non-object `style` (arrays included), an uncompiled `className`, a `transition` on an element that cannot transition it.
 - **Invalid `motion` targets** go to the Rust log only; the element keeps its declared style.
 
@@ -76,7 +77,7 @@ Override with `render(<App />, { strictStyles })` or `createRoot(renderer, { str
 | `opacity` | 0–1 |
 | `overflow`, `overflowX`, `overflowY` | `visible`, `hidden`, `scroll`, `auto` (`auto` behaves as `scroll`); only `scroll`/`auto` make a ref scrollable |
 | `clipPath` | `inset()` with 1–4 non-negative `px`, `%` or `0` values |
-| `cursor` | 30 keywords (the `Cursor` type in `host.ts`); others dropped with a diagnostic |
+| `cursor` | 29 keywords (the `CursorValue` type in `host.ts`); others dropped with a diagnostic |
 | `pointerEvents` | `auto`, `none` |
 | `userSelect` | `auto`, `text`, `none` (inherited) |
 | `touchAction` | accepted and ignored |
@@ -124,12 +125,12 @@ Colour fields accept named colours, `transparent`, 3/4/6/8-digit hex, `rgb[a]()`
 | `lineHeight` | number or numeric string = multiple of the font size; `"<n>px"` = absolute; `> 0` |
 | `textAlign` | `left`, `start`, `center`, `right` (no `end`, `justify`) |
 | `textDecoration` | `underline`, `line-through`, `none` |
-| `textTransform` | `none`, `uppercase`, `lowercase` |
-| `whiteSpace` | `normal`, `nowrap`, `pre` (no `pre-wrap`) |
+| `textTransform` | `none`, `uppercase`, `lowercase` (inherited) |
+| `whiteSpace` | `normal`, `nowrap`, `pre` (no `pre-wrap`) (inherited) |
 | `textWrap` | `wrap`, `nowrap` (no `balance`, `pretty`) |
 | `textOverflow` | `ellipsis`, `ellipsis-start` |
 | `lineClamp` | positive integer |
-| `fontVariantNumeric` | `normal` or numeric-variant keywords (`tabular-nums` etc.) |
+| `fontVariantNumeric` | `normal` or numeric-variant keywords (`tabular-nums` etc.) (inherited) |
 | `listStyle`, `listStyleType` | `none` only |
 
 No user-agent styles apply: `h1` is not bold or large, `pre` needs `whiteSpace: "pre"`, `b`/`i`/`small` need explicit styles.
@@ -142,7 +143,7 @@ A state key holds a partial style applied while the state holds. Later entries i
 - `hover`, `active` and `dragOver` cannot set `display: "none"`; the other states can hide or reveal an element.
 - `focus` and `focusVisible` do not make an element focusable; give it `tabIndex`. `focusVisible` needs keyboard modality. `focusWithin` gives the element a focus handle without making it a Tab stop.
 - `active` also applies while a focused element is activated with Space or Enter.
-- `<virtual-list>` style has no `hover`, `active` or `dragOver`, but applies the `*Within` states.
+- `<virtual-list>` applies only `hoverWithin`, `focusWithin` and `activeWithin`.
 
 **Hover groups** style a descendant from its ancestor's state, like `.card:hover .title`:
 
@@ -173,13 +174,13 @@ style={{ transition: "opacity 150ms ease-out, background-color 200ms" }}   // CS
 style={{ transition: { properties: ["opacity", "backgroundColor"], durationMs: 150, easing: "easeOut" } }}
 ```
 
-- Object `easing`: `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut` (camelCase), a cubic-bezier 4-tuple, or `{ type: "spring", stiffness = 100, damping = 10, mass = 1, velocity = 0 }` (a spring ignores `durationMs`). `delayMs` is optional.
+- Object `easing`: `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut` (camelCase), a cubic-bezier 4-tuple, or `{ type: "spring", stiffness = 100, damping = 10, mass = 1, velocity = 0 }` (a spring ignores `durationMs`). `durationMs` is required unless the easing is a spring; `easing` defaults to `ease`; `delayMs` is optional.
 - String easings: `ease-in` etc. or `cubic-bezier(…)`; no springs. `none` disables. The TS type allows up to three comma-separated items; the runtime accepts more.
-- `all`, unknown properties, unknown keys and duplicates reject the whole declaration.
+- `all`, unknown properties and unknown keys reject the whole declaration. The object form also rejects a property listed twice; in the string form the last entry for a property wins.
 - React-driven style changes and the `focus`, `focusVisible`, `hoverWithin`, `hover` and `active` states animate. An interrupted transition retargets from the painted value; a spring keeps its velocity.
 - Mixed units (px ↔ %, `auto` ↔ px) step instead of interpolating, unless `interpolateSize: "allow-keywords"` lets `width`/`height` travel to or from `auto` and the intrinsic keywords on `<div>`/`<text>`.
 - Colours blend in premultiplied sRGB.
-- `<div>`, its aliases and `<text>` transition everything; `img`, `canvas`, `code`, `diff`, `markdown`, `input`, `textarea` and `anchored` transition everything except `color`; `<virtual-list>` cannot transition (diagnosed; throws in strict mode).
+- `<div>`, its aliases and `<text>` transition everything; `img`, `canvas`, `code`, `diff`, `markdown`, `input`, `textarea` and `anchored` transition everything except `color`; `<svg>` and `<virtual-list>` cannot transition (diagnosed; throws in strict mode).
 
 ## `motion.div` and `AnimatePresence`
 

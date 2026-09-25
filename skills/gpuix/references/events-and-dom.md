@@ -18,16 +18,17 @@ GPU-IX dispatches its own synthetic events over the retained host tree (`package
 
 ## Traps
 
-- **`onFocus` and `onBlur` do not bubble.** In React DOM they do. An ancestor's `onFocus` never runs when a descendant takes focus; `onFocusCapture` runs only when the focused descendant has its own `onFocus`/`onBlur`. To react to focus inside a subtree, use the `focusWithin` style or put handlers on each focusable child.
+- **`onFocus` and `onBlur` do not bubble.** In React DOM they do. An ancestor's `onFocus` never runs when a descendant takes focus; `onFocusCapture` runs only when the focused descendant has its own `onFocus` or `onFocusCapture`. To react to focus inside a subtree, use the `focusWithin` style or put handlers on each focusable child.
 - **`FocusEvent.relatedTarget` is always `null`.** "Close on blur unless focus moved inside me" treats every blur as focus leaving.
 - **`ref.current.id` is a number**, the native element id. The authored `id` is `ref.current.getAttribute("id")` or `ref.current.props.id`.
 - **Refs have no `isConnected` (#660), `closest`, `querySelector`, `dataset`, `style`, `classList`, `children`, `parentNode`, `textContent`, `addEventListener`, `setAttribute` or `offsetWidth`.** `el.contains(el)` reports whether a ref is still mounted.
 - **`window` is `globalThis`.** Under Bun `window.addEventListener("resize" | "keydown" | "blur", …)` registers without error and never fires. Use `useWindowSize()` for resize and a root `onKeyDown` for shortcuts.
-- **`document` answers `getElementById`, `activeElement`, `body`, `defaultView`, and `pointerup`/`pointercancel` listeners only.** Other listener types are ignored with one warning; `createElement`, `documentElement`, `querySelector`, `dispatchEvent` are undefined and throw when called.
+- **`document` answers `getElementById`, `activeElement`, `body`, `defaultView`, and `pointerup`/`pointercancel` listeners only.** Other listener types are ignored with one warning; `documentElement` is `undefined`, and `createElement`, `querySelector` and `dispatchEvent` are undefined and throw when called.
 - **Not installed anywhere**: `getComputedStyle`, `matchMedia`, `MutationObserver`, `IntersectionObserver`, `innerWidth`/`innerHeight`, `devicePixelRatio`, `DOMRect`, `CSS`, `KeyboardEvent`, `MouseEvent`, `FocusEvent`, `requestIdleCallback`.
 - **Keys pressed with nothing focused reach only the root element's own `onKeyDown`/`onKeyUp`.** Render one top-level element and put app shortcuts on it. With several top-level children (`<><App /><Toaster /></>`) GPU-IX inserts an implicit root with no handlers, and no-focus shortcuts are lost (#619).
-- **Only elements with a focus handle can take focus.** A handle comes from `tabIndex`, `autoFocus`, a key/focus/blur listener (capture forms included), `onAccessibilityAction`, or a `focusWithin` style; inputs, textareas and choice/range inputs have one already. `ref.focus()` on a bare `div` does nothing. Adding `onKeyDown` makes an element focusable but not a Tab stop.
-- **Any focused element with `onClick` is activated by Enter and by Space** (an `<a href>` by Enter only). In the DOM only buttons and links are. Code that also calls its own click on Enter fires twice unless it calls `preventDefault()` on that keydown.
+- **Only elements with a focus handle can take focus.** A handle comes from `tabIndex`, a key/focus/blur listener (capture forms included), `onAccessibilityAction`, or a `focusWithin` style; inputs, textareas and choice/range inputs have one already. `ref.focus()` on a bare `div` does nothing, and so does `autoFocus`: it focuses only an element that is already focusable. Adding `onKeyDown` makes an element focusable but not a Tab stop.
+- **Enter and Space fire `onClick` on a focused element that has one or sits inside one**: focus on a `tabIndex` child inside a clickable row, and Enter fires the row's `onClick`. An `<a href>` takes Enter only; checkboxes and radios take Space only. In the DOM only buttons and links activate this way. Code that also calls its own click on Enter fires twice unless it calls `preventDefault()` on that keydown.
+- **`disabled` and `ariaDisabled` block clicks for the whole subtree.** In the DOM, `aria-disabled` blocks nothing.
 - **Keyboard events have no `code`, `keyCode`, `which`, `charCode`, `location` or `isComposing`.** Match on `key` and the modifier flags; hotkey libraries that match `event.code` never fire.
 - **There is no HTML drag and drop between elements.** No `draggable`, `onDragStart`, `onDrag` or `onDragEnd`; `onDragEnter`/`Over`/`Leave`/`onDrop` are for OS file drags, and `dataTransfer.getData()` returns `""`. Build in-app drags with `onPointerDown` + `onPointerMove` (the pointer is captured automatically).
 - **These React DOM props do not exist**: `onInput`, `onBeforeInput`, `onKeyPress`, `onCopy`/`onCut`/`onPaste`, `onFocusIn`/`onFocusOut`, `onPointerOver`/`onPointerOut`, `onMouseOver`/`onMouseOut`, `onTouch*`, `onGotPointerCapture`/`onLostPointerCapture`, `onSelect`, `onComposition*`, `onAnimation*`, `onTransition*`. TypeScript rejects them; forced through, they are dropped silently. `onChange` fires per edit, which covers `onInput`.
@@ -51,7 +52,7 @@ GPU-IX dispatches its own synthetic events over the retained host tree (`package
 | `onWheel` | yes | yes | DOM sign convention; `deltaMode` 0 or 1. |
 | `onChange` | yes | yes | Per edit on inputs and textareas (`value`, `inputType`) and on choice inputs (`checked`); bubbles to ancestors. |
 | `onSubmit`, `onReset` | yes | yes | On `<form>`. |
-| `onLoad`, `onError` | yes | no | Images. |
+| `onLoad`, `onError` | yes | yes | Images. Ancestor handlers run, as in React, although `event.bubbles` is false. |
 | `onVisibleRange`, `onToggleFile`, `onShowMore`, `onLineClick`, `onLinkClick` | no | no | `virtual-list`, `diff`, `markdown`. |
 | `onHighlight`, `onAccessibilityAction`, `onMotionComplete` | no | yes | |
 
@@ -62,7 +63,7 @@ Window text selection is a `render()` option (`onSelectionChange`), not a prop.
 A plain object, not a DOM `Event`. `nativeEvent` is the raw GPU-IX payload.
 
 - **All events**: `type`, `target`, `currentTarget` (refs), `eventPhase`, `bubbles`, `cancelable`, `defaultPrevented`, `preventDefault()`, `stopPropagation()`, `stopImmediatePropagation()`, `isDefaultPrevented()`, `isPropagationStopped()`, `persist()` (no-op). No `timeStamp`, `isTrusted`, `composedPath()` or `view`.
-- **Mouse, pointer, wheel**: modifier flags, `button` (−1 on move), `detail` (click count), `clientX`/`clientY` = `pageX`/`pageY` (window coordinates), `relatedTarget` (enter/leave only), `setPointerCapture()`/`releasePointerCapture()`. No `screenX/Y`, `offsetX/Y`, `movementX/Y`, `pressure`, `tilt`.
+- **Mouse, pointer, wheel**: modifier flags, `button` (−1 on pointer move), `detail` (click count), `clientX`/`clientY` = `pageX`/`pageY` (window coordinates), `relatedTarget` (enter/leave only), `setPointerCapture()`/`releasePointerCapture()`. No `screenX/Y`, `offsetX/Y`, `movementX/Y`, `pressure`, `tilt`.
 - **Pointer**: `pointerId` 1, `pointerType` `"mouse"`, `isPrimary`, `buttons`.
 - **Keyboard**: `key` per UI Events (`" "` for Space, `F1`–`F35`, the produced character), `repeat`, modifier flags, `getModifierState()` for Alt/Control/Meta/Shift. See Traps for what is missing.
 - **Change**: `value`, `inputType` (`insertText`, `insertFromPaste`, …), `checked`. `event.target.value` works at runtime, but `event.target` is typed `PublicInstance`, so read `event.value`.
@@ -82,7 +83,7 @@ A plain object, not a DOM `Event`. `nativeEvent` is the raw GPU-IX payload.
 - **Tab stops**: `<button>` and `<a href>` get an implicit `tabIndex` 0 (none when `disabled`); inputs and textareas are focusable; `tabIndex={-1}` is focusable but skipped; positive values order Tab; a radio group is one stop; `display: none` subtrees are skipped.
 - **Tab** is delivered as a `keyDown` with `key: "Tab"` to the focused element (or root); traversal runs unless prevented.
 - **Keys with focus** go to the focused element as `target` and bubble through listening ancestors, even when the focused element has no listener. A root `onKeyDown` also hears keys typed into inputs; compare `event.target` with the root to tell them apart.
-- **Keyboard activation**: Enter and Space on any focused element with `onClick`; Enter only on `<a href>`; text editors keep Space as text.
+- **Keyboard activation**: Enter and Space on a focused element that has `onClick` or sits inside one; Enter only on `<a href>`; Space only on checkboxes and radios; text editors keep Space as text. Enter in a text input does not submit its `<form>`.
 - **Focus visible**: the `focusVisible` style and `ref.matches(":focus-visible")` are true only after keyboard input.
 - **Imperative focus**: `ref.focus({ preventScroll })` (ignored on disabled controls), `ref.blur()`, `document.activeElement` (the focused ref, or `body`). Renderer equivalents: `focusElement(id, preventScroll)`, `focusNext()`, `focusPrevious()`, `getActiveElement()`.
 - **Missing**: focus trapping (#578), `inert`, `aria-modal` (#536), a `tabIndex` property on refs (read `props.tabIndex`).
@@ -95,13 +96,13 @@ A ref is the host instance itself. Type refs as `PublicInstance`, `InputPublicIn
 |---|---|
 | `id`, `type`, `props` | Numeric native id; authored type; latest props. |
 | `tagName`, `nodeName`, `localName` | Authored name (`"ARTICLE"` / `"article"`), even for tags drawn as `div`. |
-| `parentElement`, `parentId` | Live retained parent; `null` at the root or once unmounted. |
+| `parentElement` | Live retained parent; `null` at the root or once unmounted. (`parentId` can be stale on descendants of a removed subtree.) |
 | `ownerDocument` | The host document if one exists, else the GPU-IX facade (also without `globals`). |
 | `focus()`, `blur()`, `click()` | See Focus. `click()` runs full dispatch and activation. |
 | `dispatchEvent(event)` | Reaches handlers only for `click` and `pointerdown`/`up`/`move`/`cancel`/`enter`/`leave`. |
 | `setPointerCapture()`, `releasePointerCapture()` | Native capture; no `hasPointerCapture`. |
 | `scrollTop`, `scrollLeft` (read/write), `scrollWidth`, `scrollHeight`, `clientWidth`, `clientHeight`, `scrollTo()` | Only `overflow: scroll`/`auto` and `virtual-list` scroll; `overflow: hidden` reports 0 and ignores writes. `scrollTo` is instant. |
-| `scrollIntoView(opts)` | `block: "start"` or `"nearest"`; `center`, `end` and `false` fall back to nearest with a warning, and throw in strict mode. |
+| `scrollIntoView(opts)` | `block: "start"` or `"nearest"`; `center`, `end`, `false` and any `inline` other than `nearest` fall back to nearest with a warning, and throw in strict mode. |
 | `getBoundingClientRect()` | Plain object in window coordinates; all zeros when unpainted. `getBounds()` returns `null` instead. |
 | `matches(selector)` | `:focus`, `:focus-visible`, `:hover`, `:active` only; anything else throws `SyntaxError`. |
 | `contains(other)`, `compareDocumentPosition(other)` | Retained-tree answers; `DOCUMENT_POSITION_*` constants are exported from `@gpuix/react` (not on `Node`). |
@@ -135,7 +136,7 @@ The globals are typed as full DOM types although the objects are partial (#649).
 - `getElementById(id)`: first mounted element whose `id` prop matches.
 - `body`: the root host element (the implicit wrapper when there are several top-level children).
 - `activeElement`, `defaultView` (`window`).
-- `addEventListener`/`removeEventListener` for `"pointerup"` and `"pointercancel"` with function listeners; `capture` is honoured, `once`/`signal`/listener objects and other types are ignored with a warning. A listener belongs to the current root and is dropped when it unmounts.
+- `addEventListener`/`removeEventListener` for `"pointerup"` and `"pointercancel"` with function listeners; `capture` is honoured. Passing `once` or `signal`, a listener object, or another event type registers nothing and warns once. A listener belongs to the current root and is dropped when it unmounts.
 - Only the most recently mounted root is visible; there is one document for all windows.
 
 ## DOM APIs that UI libraries use

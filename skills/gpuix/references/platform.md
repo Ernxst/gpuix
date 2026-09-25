@@ -41,7 +41,7 @@ Pin the three tarballs from a release on https://github.com/Ernxst/gpuix/release
 }
 ```
 
-Tags look like `@gpuix/react@0.25.0-fork.4` (URL-encoded in the path). `@gpuix/plugins` is needed for Bun builds and CSS modules. Peer dependencies: `react ^19.2.0`, `react-reconciler ^0.33.0`, optional `scheduler ^0.27.0`; React 18 is not supported. To use unreleased changes, build tarballs from a checkout (`bun install && bun run build`, then `bun pm pack` in `packages/native`, `packages/react` and `packages/plugins`) and pin them by absolute `file:` path; do not use a `link:` or directory dependency, which can load two copies of React under Bun.
+Tags look like `@gpuix/react@0.25.0-fork.4` (URL-encoded in the path). `@gpuix/plugins` is needed for Bun builds and CSS modules. Peer dependencies: `react ^19.2.0`, `react-reconciler ^0.33.0`, optional `scheduler ^0.27.0`; React 18 is not supported. To use unreleased changes, build tarballs from a checkout cloned with `--recurse-submodules` (it needs a Rust toolchain; `bun install && bun run build`, then `bun pm pack` in `packages/native`, `packages/react` and `packages/plugins`) and pin them by absolute `file:` path; do not use a `link:` or directory dependency, which can load two copies of React under Bun.
 
 ## TypeScript
 
@@ -137,13 +137,13 @@ await Bun.build({
 ```
 
 - Without `NODE_ENV=production` the binary ships React's development build.
-- `gpuix()` from `@gpuix/plugins/bun` sets GPU-IX build defaults for `Bun.build` (Bun target, ESM, JSX from `@gpuix/react`, `@gpuix/native` always external) and takes no PostCSS plugins; `gpuixCssModulesBun({ plugins })` does take them.
+- `gpuix()` from `@gpuix/plugins/bun` sets GPU-IX build defaults for `Bun.build` (Bun target, ESM, JSX from `@gpuix/react`, `@gpuix/native` always external) and takes no PostCSS plugins. Because it keeps `@gpuix/native` external, use `gpuixCssModulesBun({ plugins? })` for a `compile` build, as above (`examples/compile-chat.ts`).
 - Do not register the preload in `bunfig.toml`; it is embedded into compiled binaries and fails there.
 - The README's "Ship a binary" and app-bundle sections cover `cargo-packager` for `.app`/installer packaging.
 
 ## Menus, window controls, background launch, updates
 
-- **Menus**: `render(…, { menus })` with items of kind `action`, `separator`, `submenu` or `system` (`role: "quit"`, `keyEquivalent`, `osAction`); `menus: []` removes the default menu; `onMenuAction({ id })` handles actions; `renderer.setMenus()` and `renderer.quit()` exist. macOS gets no Edit menu by default.
+- **Menus**: `render(…, { menus })` takes `{ name, items, disabled? }` menus. Item kinds: `action` (`id`, `label`, optional `keyEquivalent` and `osAction`; `role: "quit"` needs no `id`), `separator`, `submenu` (`label`, `items`) and `system` (`label`, `systemMenu: "services"`). `menus: []` removes the default menu; `onMenuAction({ id })` handles actions; `renderer.setMenus()` and `renderer.quit()` exist. macOS gets no Edit menu by default.
 - **Window controls** on the renderer from `useGpuixRequired()`: `activateWindow()`, `minimizeWindow()`, `zoomWindow()`, `toggleFullscreen()`.
 - **Background launch**: `focus: false` opens without stealing focus; `show: false` keeps the window hidden until `activateWindow()`. Both are ignored on Linux. Agents launching a live app pass `GPUIX_BACKGROUND=1` and the app maps it to `focus: false`.
 - **Auto-update**: `import { checkUpdate } from "@gpuix/native"`; `checkUpdate(currentVersion, { endpoints, pubkey, … })` returns an update or `null`, and `update.downloadAndInstall()` replaces the packaged files without relaunching.

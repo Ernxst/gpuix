@@ -27,7 +27,7 @@ Tests render into a real native window placed offscreen, through Metal on macOS 
 - **`createTestRoot` comes from `@gpuix/react/testing`**, not from `@gpuix/react`.
 - **`render()` shares one window per test file; `createTestRoot()` opens a new window per call.** `cleanup()` only takes down the `render()` tree. Call `unmount()` on every `createTestRoot()` root, which also closes its window.
 - **A second `render()` in the same test replaces the first tree.** A window holds one React container.
-- **Changing `render()` options between calls reopens the window.** An omitted option and the same option passed at its default value count as different. Keep one options object per file, or put suite defaults in `configureTestWindow`.
+- **Changing `render()` options between calls reopens the window.** An omitted option and the same option passed at its default value count as different. `onSelectionChange` is neither compared nor re-applied, so a reused window keeps the first callback. Keep one options object per file, or put suite defaults in `configureTestWindow`, which also closes the shared window when called.
 - **Under `render()`, a top-level `height: "100%"` or `flexGrow: 1` gets no height.** The node mounts inside an auto-height `container`. Give the tree an explicit height, or use `createTestRoot()`, which mounts the node as the window root.
 - **Nothing advances on its own.** There are three clocks (see Clocks). `requestAnimationFrame` callbacks run only on `renderer.advanceAsyncClock(ms)`. `waitFor` and `findBy*` do not advance the motion clock.
 - **The motion clock runs on wall time unless paused**, so a plain assertion can catch a style transition mid-flight. Pause and step it (`renderer.clockPause()`, `renderer.clockFastForward(ms)`), or use `toMatchScreenshot`, which settles animations by default.
@@ -44,7 +44,7 @@ Tests render into a real native window placed offscreen, through Metal on macOS 
 | Import | Contents |
 |---|---|
 | `@gpuix/react/testing` | Framework-free: `render`, `createTestRoot`, `cleanup`, `act`, `TestRenderer`, `configureTestWindow`, `configuredTestWindow`, `disposeSharedWindow`, `isNativeTestRendererAvailable`, `textContent`, `rendererOf`, `describeElement`, `accessibleNameOf`, `computedRoleOf`, `matchesComputedRole`, `recordCanvasCommands`, `canvasGoldenPath`, `expectCanvasMatchesBrowser`. It never imports Vitest. |
-| `@gpuix/react/testing/vitest` | Everything above, plus `expect.extend(gpuixMatchers)`, `afterEach(cleanup)`, and a per-file teardown that restores `configureTestWindow`/`configureScreenshots` defaults and closes the shared window (`testing-vitest.ts`). |
+| `@gpuix/react/testing/vitest` | Everything above, plus `expect.extend(gpuixMatchers)`, `afterEach(cleanup)`, and a per-file teardown that restores the `configureTestWindow`/`configureScreenshots` values in effect when the file started and closes the shared window (`testing-vitest.ts`). |
 | `@gpuix/react/testing/matchers` | `gpuixMatchers`, `configureScreenshots`, `configuredScreenshots` and the matcher types (`testing-expect.ts`). |
 | `@gpuix/react/automation` | The Playwright-like `App`/`Locator` client (see Automation client). |
 
@@ -73,7 +73,7 @@ Other runners wire it by hand: import from `@gpuix/react/testing`, register `aft
 | `asyncTaskMode` | `"eager"` (default) or `"manual"`; see Clocks. |
 | `allowPrivateNetworkImages` | Allow loopback and private-address image URLs. |
 | `strictStyles` | Strict style diagnostics; defaults to the runtime policy. |
-| `onSelectionChange` | Window text-selection callback. |
+| `onSelectionChange` | Window text-selection callback; set by the call that opens the window. |
 
 ## Window reuse and reset
 
@@ -89,7 +89,7 @@ Families: `ByText`, `ByTestId`, `ByRole`, `ByLabelText`, `ByPlaceholderText`, `B
 
 | Family | Matches |
 |---|---|
-| `ByText` | Retained `<text>` content: own text plus children's; the innermost match wins. `<code>`, `<diff>` and `<markdown>` paint their text natively, so read them with `renderer.getPaintedText()`. |
+| `ByText` | Retained `<text>` content: own text plus direct children's; the innermost match wins. `<code>`, `<diff>` and `<markdown>` paint their text natively, so read them with `renderer.getPaintedText()`. |
 | `ByTestId` | `data-testid`. |
 | `ByRole` | Computed AccessKit role, accessible name and `level`. `hidden: true` throws. |
 | `ByLabelText` | The `ariaLabel` prop only; `<label htmlFor>` and `title` are not consulted. |
@@ -101,7 +101,7 @@ A `TestElement` has `id`, `type`, `style` (declared, not resolved), `text`, `eve
 
 ## `userEvent` and native input
 
-`userEvent` methods return promises: `click`, `dblClick`, `hover`, `unhover` (at the centre of the painted bounds, through GPUI hit-testing), `type(el, text)` (focuses, then types keystroke by keystroke), `clear(el)` (`cmd-a` on macOS, `ctrl-a` elsewhere, then `backspace`), `tab({ shift })`, and `keyboard(el, keys)`. There is no `setup()`, `pointer()`, `selectOptions`, `upload` or `paste`. Each keystroke is committed before the next, so `"tab a"` types `a` into the element that took focus.
+`userEvent` methods return promises: `click`, `dblClick` and `hover` (at the centre of the painted bounds, through GPUI hit-testing), `unhover` (moves the pointer outside the element, or to (-1, -1)), `type(el, text)` (focuses, then types keystroke by keystroke), `clear(el)` (`cmd-a` on macOS, `ctrl-a` elsewhere, then `backspace`), `tab({ shift })`, and `keyboard(el, keys)`. There is no `setup()`, `pointer()`, `selectOptions`, `upload` or `paste`. Each keystroke is committed before the next, so `"tab a"` types `a` into the element that took focus.
 
 Lower-level `TestRenderer` methods: `nativeSimulateClick(x, y, button?, modifiers?, clickCount?)`, `nativeSimulateKeystrokes(elementId, keys)`, `simulateKeystrokes(keys)` (to the focused element), `nativeSimulateMouseDown`/`MouseMove`/`MouseUp`, `nativeSimulateScrollWheel`, the `nativeSimulateFileDrop*` family, `dragSelect`, `simulateResize` and `setClipboardText`. Each dispatches inside its own `act` scope.
 

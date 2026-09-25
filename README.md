@@ -355,6 +355,17 @@ packed in [Quickstart](#quickstart), and run `bun install`.
 
 ![The GPUIX todo example app](./docs/images/todo-app.png)
 
+## Agent skill
+
+Coding agents tend to assume browser behaviour GPU-IX does not have. The
+repository ships an agent skill, [`skills/gpuix`](skills/gpuix/SKILL.md), that
+lists what GPU-IX supports and the traps that differ from React DOM. Install
+it into an app's agent setup with:
+
+```bash
+npx skills add Ernxst/gpuix --skill gpuix
+```
+
 ## Examples
 
 | Example | Run | What it shows |

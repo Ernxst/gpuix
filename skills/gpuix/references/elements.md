@@ -21,7 +21,7 @@ The intrinsic elements are the `ElementType` union in `packages/react/src/types/
 
 ## Traps
 
-- **HTML-looking tags are block boxes, not inline flow.** `span`, `strong`, `em`, `a`, `b`, `i`, `p`, `button`, `label` and the other aliases are created natively as `div`s. With no `display`, a parent stacks its children vertically, each full width. `<p>Hello <strong>world</strong></p>` paints "Hello" and "world" on separate rows (probe: the `span` at y=0 and the `strong` at y=52, both 400px wide in a 400px `p`). For styled runs inside a sentence, nest `<text>` in `<text>`.
+- **HTML-looking tags are block boxes, not inline flow.** `span`, `strong`, `em`, `a`, `b`, `i`, `p`, `button`, `label` and the other aliases are created natively as `div`s. With no `display`, a parent stacks its children vertically, each full width. `<p><span>Hello</span> <strong>world</strong></p>` in a 400px `p` paints the `span` at y=0 and the `strong` at y=52, each 400px wide. For styled runs inside a sentence, nest `<text>` in `<text>`.
 - **A `<text>` accepts only strings and nested `<text>`.** Any other child, including `<span>`, `<a>`, `<strong>` and components that render them, throws `InlineTextChildError`.
 - **Unknown tags render nothing.** `<select>`, `<option>`, `<table>`, `<br>`, `<hr>`, `<dialog>`, `<details>`, `<iframe>`, `<video>`, SVG `<path>`, custom elements: TypeScript rejects them, and a forced one logs a Rust warning and paints an empty box, dropping its children. See the substitutes in the element table.
 - **JSX SVG does not work.** `<svg>` paints only its `source` (markup string) or `src` (path or data URL) as a monochrome icon tinted by `color`; children and `viewBox`/`fill`/`stroke` are ignored. Icon libraries that emit `<svg><path/></svg>` JSX paint nothing. Use `<svg source={markup}>` for tintable icons and `<img>` for full colour.
@@ -86,7 +86,7 @@ On `div`, `text` and the aliases, only known props reach the renderer: the unive
 
 - `<label htmlFor="id">` targets a control by author `id`; without `htmlFor`, its first descendant `input`, `textarea` or `button`. Clicking it focuses and clicks the control.
 - `<button disabled>` cannot be focused or activated.
-- `<form onSubmit>` receives `event.formData` and `event.submitter`; nothing navigates, so `preventDefault()` has no page to stop. `onReset` is cancelable. The ref has `requestSubmit(submitter?)`, `reset()`, `checkValidity()`.
+- `<form onSubmit>` receives `event.formData` and `event.submitter`; nothing navigates, so `preventDefault()` has no page to stop. Enter in a text input does not submit the form, unlike a browser; call `requestSubmit()` from `onKeyDown`. `onReset` is cancelable. The ref has `requestSubmit(submitter?)`, `reset()`, `checkValidity()`.
 - No `select`, `fieldset` or `output` controls.
 
 ## `img` and `svg`
@@ -115,10 +115,10 @@ Their text is selectable and searchable, but test text queries cannot see it; us
 
 ## `anchored` and overlays
 
-`<anchored>` places its children beside the box of its nearest positioned ancestor, so wrap the trigger and the overlay in a `position: "relative"` parent. Props: `position`, `side`, `align`, `gap`, `anchor`, `offset`, `fit` (`"switch"` flips to the other side on overflow, `"snap"` shifts inside the window), `snapMargin`, `deferred` (paint in a later pass, on top), `priority`, `occlude` (block hits to what is behind; on by default).
+`<anchored>` places its children beside the box of its direct parent, so put it inside the trigger's parent (the built-in Content parts follow this shape). Props: `position`, `side`, `align`, `gap`, `anchor`, `offset`, `fit` (`"switch"` flips to the other side on overflow, `"snap"` shifts inside the window), `snapMargin`, `deferred` (paint in a later pass, on top; on by default), `priority`, `occlude` (block hits to what is behind; on by default).
 
-- Menus, tooltips and dialogs need `<anchored deferred>` (or the built-in Content parts). A `position: "absolute"` card paints in tree order, so a later `<virtual-list>` paints over it and takes its clicks. There is no `zIndex` (#481).
-- Give overlays an opaque fill. A translucent overlay background shows the `#1A1A1A` fallback surface, not the page.
+- Menus, tooltips and dialogs need `<anchored>` (or the built-in Content parts), which is deferred unless `deferred={false}`. A `position: "absolute"` card paints in tree order, so a later `<virtual-list>` paints over it and takes its clicks. There is no `zIndex` (#481).
+- Give overlays an opaque fill. A missing or fully transparent background gets a `#1A1A1A` fallback surface; a translucent one lets the page show through.
 - A `div` that paints a fill or is positioned blocks clicks and hovers behind it, but the wheel passes through to **any** scroller behind it, not only an ancestor. Give a modal backdrop `pointerEvents: "auto"` to swallow the wheel. `pointerEvents: "none"` removes an element's hitbox without disabling its own listeners, and does not inherit.
 - Overlays cannot leave the window (#326).
 
@@ -136,7 +136,7 @@ A host element, not a component; each immediate child is one row. It needs a bou
 
 - Implicit roles follow HTML-AAM: `header`/`footer` are landmarks outside sectioning content, `section` and `form` only when named, `li` inside a list, `a` only with `href`, headings carry their level. An explicit `role` wins; React Native's `accessibilityRole` is rejected.
 - ARIA props are accepted in camelCase (`ariaLabel`) and `aria-*` spellings. An unlisted `aria-*` prop (`aria-modal`, `aria-owns`, `aria-activedescendant`, `aria-busy`, `aria-sort`, `aria-posinset`, `aria-setsize`, `aria-autocomplete`, `aria-errormessage`) warns once and is dropped; TypeScript does not check hyphenated props. `ariaControls`, `ariaRelevant` and `ariaMultiSelectable` are kept as attributes but not exposed to assistive technology.
-- `disabled` on any element makes it unavailable and removes it from Tab order; `ariaDisabled` keeps it in Tab order.
+- `disabled` on any element makes it unavailable and removes it from Tab order; `ariaDisabled` keeps it in Tab order. Both block clicks for the whole subtree, which `aria-disabled` does not do in the DOM.
 - `visuallyHidden` (the `sr-only` equivalent) takes `true`, needs an explicit role, and works on `div`, `text`, `input`, `textarea` and `img`.
 - Live regions: `ariaLive` needs a role; `role="status" | "alert" | "log"` imply politeness. `announce()` from `@gpuix/react` speaks a message without an element.
 - `ariaLabelledBy`/`ariaDescribedBy` resolve author `id`s.
