@@ -77,7 +77,7 @@ These compile:
 .a:hover, .b:focus-visible
 ```
 
-These fail the build:
+These selectors fail when paired with native declarations (as the drift test checks):
 
 <!-- skill-check:rejected-selectors -->
 ```text
@@ -99,6 +99,9 @@ div
 :global(.a)
 :root
 ```
+
+`:root` rules containing only custom properties are allowed; the rule above
+shows that native declarations such as `color` are not.
 
 ## `:root` custom properties and `@import`
 

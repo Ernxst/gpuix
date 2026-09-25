@@ -31,7 +31,7 @@ The native renderer cannot start inside an agent sandbox: macOS denies it the wi
 
 - `packages/native/index.js`, `index.d.ts` and `*.node` are generated. Change Rust declarations and rebuild instead of editing generated output by hand.
 - Update the relevant README API section for user-facing fixes or features.
-- Update `skills/gpuix/` in the same PR when a change alters user-facing behaviour: a supported element, prop, style, selector, event, export or DOM API, a known gap closing or opening, or a testing behaviour. `bun run test` in `packages/plugins` fails when the skill's CSS module property and selector lists or its entry-point list drift from the source; the rest of the skill is checked by review.
+- Update `skills/gpuix/` in the same PR when a change alters user-facing behaviour: a supported element, prop, style, selector, event, export or DOM API, a known gap closing or opening, or a testing behaviour. `bun run test` in `packages/plugins` checks the listed CSS module properties and selectors against the source and compiler, and the listed entry points against package exports. It does not find newly supported selectors omitted from the lists, so review the selector surface for those changes.
 - This fork ships package tarballs attached to GitHub releases, stamped and packed by hand. It does not publish the upstream package names to npm. Do not publish locally.
 - Preserve attribution headers and `THIRD_PARTY_NOTICES.md` when changing ported code.
 

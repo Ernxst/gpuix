@@ -46,6 +46,7 @@ GPU-IX dispatches its own synthetic events over the retained host tree (`package
 | `onMouseDownOutside` | no | no | GPU-IX "click outside". |
 | `onPointerDown`, `Up`, `Move`, `Cancel` | yes | yes | Before the matching mouse event; `pointerCancel` when the window deactivates. |
 | `onDragEnter`, `onDragOver`, `onDragLeave`, `onDrop` | yes | yes | OS file drags; `onDrop` runs only if an `onDragOver` on the path called `preventDefault()`. |
+| `onFileDrop` (legacy) | no | no | Desktop-namespace alias for `onDrop`; receives the raw `EventPayload` with `paths`, `x` and `y`. Prefer `onDrop` and `event.dataTransfer.files`. |
 | `onKeyDown`, `onKeyUp` | yes | yes | To the focused element, or the root when nothing is focused. |
 | `onFocus`, `onBlur` | yes | **no** | See Traps. |
 | `onScroll` | yes | no | Scroll container position changed. |
@@ -72,7 +73,7 @@ A plain object, not a DOM `Event`. `nativeEvent` is the raw GPU-IX payload.
 
 ## Propagation, `stopPropagation`, `preventDefault`
 
-- The target is the deepest painted element under the pointer, even without a listener; the event then reaches listening ancestors. A click on a painted child (icon, switch thumb) reaches the parent's `onClick` with the child as `target`; only a descendant with its own `onClick` keeps it.
+- The target is the deepest painted element under the pointer, even without a listener; the event then reaches listening ancestors. A click on a painted child (icon, switch thumb) reaches the parent's `onClick` with the child as `target`. If the child also has `onClick`, both handlers run in bubble order; call `stopPropagation()` in the child to prevent the parent's action.
 - Capture runs root → parent; at the target its capture then bubble listeners run; bubble runs parent → root. `stopPropagation()` still lets the target's other listener run; `stopImmediatePropagation()` does not.
 - Events never reach `document` or `window`, except the window `pointerup`/`pointercancel` delivered to facade listeners, which run **before** the released element's own `onPointerUp`/`onClick`.
 - `preventDefault()` cancels: click activation (and reverts a checkbox or radio flip); the keyboard click on Enter/Space keydown; Tab traversal (in any phase); keyboard scrolling on scroll keys; radio/range arrow defaults. On `dragOver` it accepts the drop.

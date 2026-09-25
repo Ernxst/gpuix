@@ -3465,10 +3465,11 @@ React's own reconciliation - still navigates where it currently sits in JSX.
 A closed Select keeps each item's `display: "none"` placeholder in the tree so
 that position stays current even while nothing paints.
 
-A click anywhere on a styled row bubbles to `SelectItem`'s own `onClick`, the
-clicked element as `target` — the same as any other painted, non-interactive
-child. `ComboboxItem` behaves the same way. Only an interactive descendant
-with its own `onClick`, such as a nested button, keeps the click for itself.
+A click anywhere on a styled row bubbles to `SelectItem`'s own `onClick`, with
+the clicked element as `target` — the same as any other painted child. A nested
+button's `onClick` also runs, then the row action runs as the click bubbles. Call
+`stopPropagation()` in the button when it should not select the row.
+`ComboboxItem` behaves the same way.
 
 ### Style Combobox and Tooltip the same way
 
@@ -3575,7 +3576,9 @@ it does not inherit, so children keep their own hitboxes.
 
 A filled child of a click target (switch thumb, radio dot, check icon) does
 not eat the parent's click: a click on it bubbles to the ancestor's `onClick`
-like any other non-interactive painted child, with the child as `target`.
+with the child as `target`. If the child also has `onClick`, both handlers run
+in bubble order; call `stopPropagation()` in the child to prevent the parent
+action.
 `pointerEvents: "none"` is for keeping a child from blocking a pointer target
 behind it, as above, not for making it clickable through to an ancestor.
 
