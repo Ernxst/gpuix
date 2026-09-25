@@ -89,10 +89,10 @@ selectors, at-rules and animations are rejected until they have a native style
 representation.
 
 `text-decoration` supports the native `underline`, `line-through`, and `none`
-values in CSS modules. An explicit decoration colour is applied through the
-native `color` style, so it colours both the text and its decoration. Only the
-solid decoration style is supported. `box-shadow` still expands into
-React Native-only properties and is rejected; set it through the `style` prop.
+values in CSS modules. Explicit decoration colours and non-solid decoration
+styles are rejected because the native style prop cannot represent them.
+`box-shadow` still expands into React Native-only properties and is rejected;
+set it through the `style` prop.
 
 CSS modules can compose local classes from the same file or another CSS module:
 

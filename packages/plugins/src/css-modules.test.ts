@@ -61,14 +61,32 @@ test("converts simple CSS module classes into GPUIX style objects", async () => 
 test("converts text-decoration shorthand and longhands to style prop keys", async () => {
   await expect(
     transformGpuixCssModule(
-      ".plain { text-decoration: underline; } .coloured { text-decoration: underline red; } .longhands { text-decoration-line: line-through; text-decoration-style: solid; text-decoration-color: blue; }",
+      ".plain { text-decoration: underline; } .line { text-decoration-line: line-through; text-decoration-style: solid; }",
       "/fixture/decoration.module.css",
     ),
   ).resolves.toEqual({
     plain: { textDecoration: "underline" },
-    coloured: { textDecoration: "underline", color: "red" },
-    longhands: { textDecoration: "line-through", color: "blue" },
+    line: { textDecoration: "line-through" },
   })
+
+  await expect(
+    transformGpuixCssModule(
+      ".coloured { text-decoration: underline red; }",
+      "/fixture/decoration.module.css",
+    ),
+  ).rejects.toThrow('property "textDecorationColor" is not supported by the native style prop')
+  await expect(
+    transformGpuixCssModule(
+      ".coloured { text-decoration-color: blue; }",
+      "/fixture/decoration.module.css",
+    ),
+  ).rejects.toThrow('property "textDecorationColor" is not supported by the native style prop')
+  await expect(
+    transformGpuixCssModule(
+      ".multiple { text-decoration: underline line-through; }",
+      "/fixture/decoration.module.css",
+    ),
+  ).rejects.toThrow('property "textDecoration" value "underline line-through" is not supported')
 })
 
 test("renders a text-decoration CSS module on the desktop renderer", async () => {
@@ -88,8 +106,16 @@ test("renders a text-decoration CSS module on the desktop renderer", async () =>
     }
     const root = createTestRoot()
     try {
-      root.render(React.createElement("text", { className: styles.default.link }, "link"))
-      expect(root.renderer.getAllText()).toContain("link")
+      root.render(
+        React.createElement(
+          "text",
+          { className: styles.default.link, "data-testid": "link" },
+          "link",
+        ),
+      )
+      expect(root.renderer.getAllText()).toEqual(["link"])
+      const link = root.renderer.findByTestId("link")!
+      expect(root.renderer.getResolvedStyle(link.id)).toMatchObject({ textDecoration: "underline" })
     } finally {
       root.unmount()
     }

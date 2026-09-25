@@ -387,14 +387,27 @@ async function parseCssModule(
         value.textDecoration = value.textDecorationLine
         delete value.textDecorationLine
       }
-      // GPUIX uses the text colour for its decoration colour and supports solid
-      // decoration only. The translator adds black/solid defaults to shorthand
-      // declarations, so only carry a colour when CSS supplied one explicitly.
+      if (explicitTextDecorationColor) {
+        throw unsupportedCss(
+          sourceId,
+          'property "textDecorationColor" is not supported by the native style prop',
+        )
+      }
+      // The translator adds a black default to shorthand declarations. GPUIX
+      // has no separate decoration colour, so drop that implicit value.
       if ("textDecorationColor" in value) {
-        if (explicitTextDecorationColor) value.color = value.textDecorationColor
         delete value.textDecorationColor
       }
       if (value.textDecorationStyle === "solid") delete value.textDecorationStyle
+      if (
+        typeof value.textDecoration === "string" &&
+        !["underline", "line-through", "none"].includes(value.textDecoration)
+      ) {
+        throw unsupportedCss(
+          sourceId,
+          `property "textDecoration" value ${JSON.stringify(value.textDecoration)} is not supported by the native style prop`,
+        )
+      }
       if (explicitLineHeight !== undefined) value.lineHeight = explicitLineHeight
 
       const allowedProperties = state ? NATIVE_STATE_PROPERTIES : SUPPORTED_PROPERTIES

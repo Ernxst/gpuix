@@ -61,7 +61,7 @@ Class names match `[A-Za-z_][A-Za-z0-9_-]*`. Every rejection reads `[gpuix] cann
 
 A hand-written `hover-group: name` on the ancestor replaces the generated name. `hover-group` and `hover-within-group` are not allowed inside a state rule.
 
-`text-decoration` supports `underline`, `line-through`, and `none`; the native renderer supports solid decoration only. An explicit decoration colour is applied as `color`, so the text and decoration share it.
+`text-decoration` supports `underline`, `line-through`, and `none`; the native renderer supports solid decoration only. Explicit decoration colours and non-solid styles are rejected because the native style prop cannot represent them.
 
 These compile:
 
