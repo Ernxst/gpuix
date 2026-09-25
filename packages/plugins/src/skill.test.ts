@@ -9,14 +9,23 @@ import { SUPPORTED_PROPERTIES, transformGpuixCssModule } from "./css-modules.ts"
 const repoRoot = path.resolve(import.meta.dir, "../../..")
 const skillDir = path.join(repoRoot, "skills/gpuix")
 
+function skillCheckBlock(text: string, name: string): string | undefined {
+  const marker = `<!-- skill-check:${name} -->`
+  const fence = "```"
+  return new RegExp(`${marker}\\s*${fence}[a-z]*\\r?\\n([\\s\\S]*?)${fence}`).exec(text)?.[1]
+}
+
+test("reads skill-check blocks with CRLF line endings", () => {
+  const text = "<!-- skill-check:example -->\r\n```text\r\nfirst\r\nsecond\r\n```"
+  expect(skillCheckBlock(text, "example")).toBe("first\r\nsecond\r\n")
+})
+
 async function listed(file: string, name: string): Promise<string[]> {
   const text = await readFile(path.join(skillDir, file), "utf8")
-  const block = new RegExp(`<!-- skill-check:${name} -->\\s*\`\`\`[a-z]*\\n([\\s\\S]*?)\`\`\``).exec(
-    text,
-  )
-  if (!block) throw new Error(`skills/gpuix/${file} has no skill-check:${name} block`)
-  return block[1]
-    .split("\n")
+  const block = skillCheckBlock(text, name)
+  if (block === undefined) throw new Error(`skills/gpuix/${file} has no skill-check:${name} block`)
+  return block
+    .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
 }
