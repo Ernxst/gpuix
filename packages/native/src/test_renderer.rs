@@ -49,6 +49,13 @@ pub struct TestGpuCanvasState {
     pub released: u32,
 }
 
+#[napi(object)]
+pub struct ScreenshotCaptureTimings {
+    pub capture_ms: f64,
+    pub crop_ms: f64,
+    pub encode_ms: f64,
+}
+
 // ── Thread-local storage for !Send GPUI types ────────────────────────
 
 /// Bundles VisualTestAppContext + window handle + view entity.
@@ -201,6 +208,36 @@ fn point_is_inside(bounds: crate::automation::ElementBounds, point: (f64, f64)) 
         && point.0 < bounds.x + bounds.width
         && point.1 >= bounds.y
         && point.1 < bounds.y + bounds.height
+}
+
+fn crop_screenshot(
+    image: &image::RgbaImage,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> std::result::Result<image::RgbaImage, String> {
+    let left = i64::from(x).max(0);
+    let top = i64::from(y).max(0);
+    let right = (i64::from(x) + i64::from(width)).min(i64::from(image.width()));
+    let bottom = (i64::from(y) + i64::from(height)).min(i64::from(image.height()));
+
+    if width == 0 || height == 0 || right <= left || bottom <= top {
+        return Err(format!(
+            "Crop [x={x}, y={y}, width={width}, height={height}] does not intersect the {}x{} screenshot",
+            image.width(),
+            image.height()
+        ));
+    }
+
+    Ok(image::imageops::crop_imm(
+        image,
+        left as u32,
+        top as u32,
+        (right - left) as u32,
+        (bottom - top) as u32,
+    )
+    .to_image())
 }
 
 /// Ancestor `hoverGroup` sources for `element_id`. `target` mirrors
@@ -2608,40 +2645,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn capture_screenshot(&self, path: String) -> Result<()> {
         with_test_state(self.state_id, |cx, window, view| {
-            if self.auto_drains_async_tasks() {
-                let view = view.clone();
-
-                // Flush: notify view and run until parked so layout/rendering are current.
-                cx.update_window(window, |_, _window, app| {
-                    view.update(app, |_, cx| {
-                        cx.notify();
-                    });
-                })
-                .map_err(|e| Error::from_reason(e.to_string()))?;
-
-                // Force a window refresh before capture so render_to_image reads
-                // the most recent frame scene.
-                cx.update_window(window, |_, window, _app| {
-                    window.refresh();
-                })
-                .map_err(|e| Error::from_reason(e.to_string()))?;
-
-                self.drain_async_tasks_if_eager(cx);
-            }
-
-            // Eager capture draws the latest state. Manual capture reads the
-            // scene retained by the last explicit draw without consuming a
-            // pending repaint.
-            let image = if self.auto_drains_async_tasks() {
-                cx.capture_screenshot(window)
-                    .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))?
-            } else {
-                self.manual_frame.lock().unwrap().clone().ok_or_else(|| {
-                    Error::from_reason(
-                        "No manual-mode frame has been drawn; call flush() before captureScreenshot()",
-                    )
-                })?
-            };
+            let image = self.capture_rendered_image(cx, window, view)?;
 
             // Save as PNG (format inferred from file extension).
             image
@@ -2650,6 +2654,64 @@ impl TestGpuixRenderer {
 
             Ok(())
         })
+    }
+
+    /// Capture and crop to a rectangle in device pixels before PNG encoding.
+    #[napi]
+    pub fn capture_screenshot_clip(
+        &self,
+        path: String,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> Result<ScreenshotCaptureTimings> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let capture_start = std::time::Instant::now();
+            let image = self.capture_rendered_image(cx, window, view)?;
+            let capture_ms = capture_start.elapsed().as_secs_f64() * 1000.0;
+            let crop_start = std::time::Instant::now();
+            let clipped = crop_screenshot(&image, x, y, width, height).map_err(Error::from_reason)?;
+            let crop_ms = crop_start.elapsed().as_secs_f64() * 1000.0;
+            let encode_start = std::time::Instant::now();
+            clipped
+                .save(&path)
+                .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {}", e)))?;
+            Ok(ScreenshotCaptureTimings {
+                capture_ms,
+                crop_ms,
+                encode_ms: encode_start.elapsed().as_secs_f64() * 1000.0,
+            })
+        })
+    }
+
+    fn capture_rendered_image(
+        &self,
+        cx: &mut gpui::VisualTestAppContext,
+        window: gpui::AnyWindowHandle,
+        view: &gpui::Entity<GpuixView>,
+    ) -> Result<image::RgbaImage> {
+        if self.auto_drains_async_tasks() {
+            let view = view.clone();
+            cx.update_window(window, |_, _, app| {
+                view.update(app, |_, cx| cx.notify());
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            cx.update_window(window, |_, window, _app| window.refresh())
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+            self.drain_async_tasks_if_eager(cx);
+        }
+
+        if self.auto_drains_async_tasks() {
+            cx.capture_screenshot(window)
+                .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))
+        } else {
+            self.manual_frame.lock().unwrap().clone().ok_or_else(|| {
+                Error::from_reason(
+                    "No manual-mode frame has been drawn; call flush() before captureScreenshot()",
+                )
+            })
+        }
     }
 
     /// Compare a reference PNG with an actual screenshot using an absolute tolerance for each
@@ -3198,5 +3260,47 @@ impl TestGpuixRenderer {
 impl Drop for TestGpuixRenderer {
     fn drop(&mut self) {
         dispose_test_state(self.state_id);
+    }
+}
+
+#[cfg(test)]
+mod screenshot_crop_tests {
+    use super::crop_screenshot;
+    use image::{ImageBuffer, Rgba};
+
+    fn numbered_image(width: u32, height: u32) -> image::RgbaImage {
+        ImageBuffer::from_fn(width, height, |x, y| {
+            Rgba([x as u8, y as u8, (x + y * width) as u8, 255])
+        })
+    }
+
+    #[test]
+    fn keeps_odd_device_pixel_bounds_and_pixels() {
+        let image = numbered_image(7, 5);
+        let cropped = crop_screenshot(&image, 1, 1, 3, 3).unwrap();
+
+        assert_eq!(cropped.dimensions(), (3, 3));
+        assert_eq!(*cropped.get_pixel(0, 0), Rgba([1, 1, 8, 255]));
+        assert_eq!(*cropped.get_pixel(2, 2), Rgba([3, 3, 24, 255]));
+    }
+
+    #[test]
+    fn clips_bounds_at_each_window_edge() {
+        let image = numbered_image(4, 3);
+
+        let top_left = crop_screenshot(&image, -1, -1, 3, 3).unwrap();
+        assert_eq!(top_left.dimensions(), (2, 2));
+        assert_eq!(*top_left.get_pixel(1, 1), Rgba([1, 1, 5, 255]));
+
+        let bottom_right = crop_screenshot(&image, 2, 1, 4, 4).unwrap();
+        assert_eq!(bottom_right.dimensions(), (2, 2));
+        assert_eq!(*bottom_right.get_pixel(1, 1), Rgba([3, 2, 11, 255]));
+    }
+
+    #[test]
+    fn rejects_bounds_without_visible_pixels() {
+        let image = numbered_image(4, 3);
+        assert!(crop_screenshot(&image, 5, 0, 1, 1).is_err());
+        assert!(crop_screenshot(&image, 0, 0, 0, 1).is_err());
     }
 }

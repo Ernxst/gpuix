@@ -764,6 +764,8 @@ export declare class TestGpuixRenderer {
    * Supported on macOS through Metal and Windows through DirectX.
    */
   captureScreenshot(path: string): void
+  /** Capture and crop to a rectangle in device pixels before PNG encoding. */
+  captureScreenshotClip(path: string, x: number, y: number, width: number, height: number): ScreenshotCaptureTimings
   /**
    * Compare a reference PNG with an actual screenshot using an absolute tolerance for each
    * RGBA channel. The contour and geometry metrics are intentionally asymmetric: they derive
@@ -1257,6 +1259,12 @@ export interface ResizeObservationEntry {
 export interface ResizeObservationSize {
   width: number
   height: number
+}
+
+export interface ScreenshotCaptureTimings {
+  captureMs: number
+  cropMs: number
+  encodeMs: number
 }
 
 export interface ScrollWheelModifiers {

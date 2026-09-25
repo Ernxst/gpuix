@@ -296,6 +296,13 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
   drainStyleDiagnostics(): StyleDiagnostic[]
   takeStyleDiagnosticsForReporting(): StyleDiagnostic[]
   captureScreenshot(path: string): void
+  captureScreenshotClip(
+    path: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ): { captureMs: number; cropMs: number; encodeMs: number }
   compareImages(goldenPath: string, actualPath: string, tolerance: number): ImageComparisonResult
   simulateResize(width: number, height: number): void
 }
@@ -1978,8 +1985,24 @@ export class TestRenderer implements NativeRenderer {
 
   /** Capture the current Metal or DirectX frame and save it as a PNG. */
   captureScreenshot(path: string): void {
-    if (this.asyncTaskMode === "eager") this.native.flush()
+    this.prepareScreenshotCapture()
     this.native.captureScreenshot(path)
+  }
+
+  /** @internal Bring eager-mode geometry up to date before reading a clip rect. */
+  prepareScreenshotCapture(): void {
+    if (this.asyncTaskMode === "eager") this.native.flush()
+  }
+
+  /** @internal Capture a device-pixel rectangle directly from the native frame. */
+  captureScreenshotClip(
+    path: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ): { captureMs: number; cropMs: number; encodeMs: number } {
+    return this.native.captureScreenshotClip(path, x, y, width, height)
   }
 
   /** Decode two PNGs natively and compare their RGBA pixels. */
