@@ -4,7 +4,11 @@ import path from "node:path"
 import type { BunPlugin } from "bun"
 import type { Plugin } from "vite"
 import type { AcceptedPlugin } from "postcss"
-import { imports as resolvePackageImports, type Package } from "resolve.exports"
+import {
+  exports as resolvePackageExports,
+  imports as resolvePackageImports,
+  type Package,
+} from "resolve.exports"
 import { createUnplugin } from "unplugin"
 import { transformGpuixCssModule, type CssImportResolver } from "./css-modules.js"
 
@@ -59,6 +63,43 @@ function resolveBunCssDependency(specifier: string, importer: string): string | 
     } catch {
       // Try the other parent form before reporting an unresolved dependency.
     }
+  }
+  return resolveBunPackageExport(specifier, importer)
+}
+
+function resolveBunPackageExport(specifier: string, importer: string): string | undefined {
+  const segments = specifier.split("/")
+  const packageName = specifier.startsWith("@")
+    ? segments.slice(0, 2).join("/")
+    : segments[0]
+  if (!packageName) return undefined
+  const subpath = specifier.slice(packageName.length)
+  let directory = path.dirname(importer)
+  while (true) {
+    const packageDir = path.join(directory, "node_modules", packageName)
+    const manifest = path.join(packageDir, "package.json")
+    if (existsSync(manifest)) {
+      const pkg = JSON.parse(readFileSync(manifest, "utf8")) as Package
+      if (pkg.exports === undefined) return undefined
+      let targets: ReturnType<typeof resolvePackageExports>
+      try {
+        targets = resolvePackageExports(pkg, `.${subpath}`, { conditions: ["bun"] })
+      } catch {
+        return undefined
+      }
+      for (const target of targets ?? []) {
+        const resolved = path.resolve(packageDir, target)
+        try {
+          if (statSync(resolved).isFile()) return resolved
+        } catch {
+          // Try the next target in a package exports fallback array.
+        }
+      }
+      return undefined
+    }
+    const parent = path.dirname(directory)
+    if (parent === directory) return undefined
+    directory = parent
   }
 }
 

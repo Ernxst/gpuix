@@ -488,6 +488,8 @@ test("Bun preload resolves package imports in CSS compositions", async () => {
   try {
     await mkdir(path.join(fixture, "ui/control"), { recursive: true })
     await mkdir(path.join(fixture, "ui/button"), { recursive: true })
+    const packageDir = path.join(fixture, "node_modules/style-pkg")
+    await mkdir(packageDir, { recursive: true })
     await writeFile(
       path.join(fixture, "package.json"),
       JSON.stringify({ imports: { "#ui/*": "./ui/*" } }),
@@ -497,13 +499,18 @@ test("Bun preload resolves package imports in CSS compositions", async () => {
       ".control { display: flex; }\n",
     )
     await writeFile(
+      path.join(packageDir, "package.json"),
+      JSON.stringify({ name: "style-pkg", exports: { "./tile.module.css": "./tile.module.css" } }),
+    )
+    await writeFile(path.join(packageDir, "tile.module.css"), ".tile { color: red; }\n")
+    await writeFile(
       path.join(fixture, "ui/button/button.module.css"),
-      '.tile { composes: control from "#ui/control/control.module.css"; }\n',
+      '.button { composes: control from "#ui/control/control.module.css"; composes: tile from "style-pkg/tile.module.css"; }\n',
     )
     const entry = path.join(fixture, "entry.ts")
     await writeFile(
       entry,
-      'import styles from "./ui/button/button.module.css"\nconsole.log(JSON.stringify(styles.tile))\n',
+      'import styles from "./ui/button/button.module.css"\nconsole.log(JSON.stringify(styles.button))\n',
     )
 
     const result = Bun.spawnSync([process.execPath, "--preload", preload, entry], {
@@ -513,7 +520,7 @@ test("Bun preload resolves package imports in CSS compositions", async () => {
     })
 
     expect(result.exitCode, result.stderr.toString()).toBe(0)
-    expect(JSON.parse(result.stdout.toString())).toEqual({ display: "flex" })
+    expect(JSON.parse(result.stdout.toString())).toEqual({ display: "flex", color: "red" })
   } finally {
     await rm(fixture, { recursive: true, force: true })
   }

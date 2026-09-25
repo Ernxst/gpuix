@@ -105,7 +105,9 @@ conflicting declarations across files, so those conflicts are not guaranteed to
 match the web build. A relative `from` path resolves from the stylesheet that
 declares the `composes` statement. Package `imports` subpaths such as
 `composes: control from "#ui/control/control.module.css"` use the same Vite or
-Bun resolution as `@import`. `composes: name from global` is rejected
+Bun resolution as `@import`. Exported package subpaths such as
+`composes: tile from "style-pkg/tile.module.css"` also resolve under Bun's
+preload. `composes: name from global` is rejected
 because GPU-IX cannot resolve a global class to a style object. Composition also
 rejects classes whose `hoverGroup` or `hoverWithinGroup` values name different
 groups, because one style object cannot represent both relationships.
