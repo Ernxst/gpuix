@@ -154,12 +154,13 @@ test("watches token files imported by a Vite CSS module", async () => {
 test("keeps unitless line-height as a ratio and pixel line-height as a length", async () => {
   await expect(
     transformGpuixCssModule(
-      ".ratio { font-size: 12px; line-height: 1.5; } .pixels { line-height: 18px; }",
+      ".ratio { font-size: 12px; line-height: 1.5; } .pixels { line-height: 18px; } .composed { composes: pixels; }",
       "/fixture/text.module.css",
     ),
   ).resolves.toEqual({
     ratio: { fontSize: 12, lineHeight: "1.5" },
-    pixels: { lineHeight: 18 },
+    pixels: { lineHeight: "18px" },
+    composed: { lineHeight: "18px" },
   })
 })
 

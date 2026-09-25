@@ -192,8 +192,8 @@ that contains each `@import`. PostCSS retains its CSS-aware lookup when a
 package's JavaScript entry differs from its `style` field.
 
 Unitless `line-height`, such as `line-height: 1.5`, compiles to the font-size
-multiplier `lineHeight: "1.5"`. A pixel value such as `18px` remains an absolute
-line height.
+multiplier `lineHeight: "1.5"`. A pixel value such as `line-height: 18px`
+compiles to `lineHeight: "18px"`, an absolute line height on desktop.
 
 `gpuixCssModulesBun()` is the same transform for Bun, in `Bun.build()` or in a
 `Bun.plugin()` preload. A Bun build without it compiles `.module.css` to class
