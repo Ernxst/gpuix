@@ -25,7 +25,14 @@ const MARKER = 'FIRST_FRAME '
 const describeLive =
   process.platform === 'darwin' && isNativeTestRendererAvailable() ? describe : describe.skip
 
-function presentsDuringFirstPump(env: Record<string, string>): number {
+interface FirstFrame {
+  /** Frames presented while the window was revealed. */
+  presents: number
+  /** Whether the deferred default menus installed once frames ran. */
+  menus: boolean
+}
+
+function runFirstFrame(env: Record<string, string>): FirstFrame {
   const child = spawnSync('bun', ['first-frame.tsx'], {
     cwd: CWD,
     env: { ...process.env, ...env },
@@ -38,7 +45,7 @@ function presentsDuringFirstPump(env: Record<string, string>): number {
       `first-frame.tsx exited with ${child.status} and no result\n${child.stdout}\n${child.stderr}`
     )
   }
-  return (JSON.parse(line.slice(MARKER.length)) as { presents: number }).presents
+  return JSON.parse(line.slice(MARKER.length)) as FirstFrame
 }
 
 describeLive('first presented frame', () => {
@@ -48,6 +55,14 @@ describeLive('first presented frame', () => {
     ['a window animating from an effect', { FIRST_FRAME_RAF: '1' }],
     ['an unfocused window animating from an effect', { FIRST_FRAME_FOCUS: '0', FIRST_FRAME_RAF: '1' }],
   ])('presents the committed tree when revealing %s', (_name, env) => {
-    expect(presentsDuringFirstPump(env)).toBeGreaterThan(0)
+    expect(runFirstFrame(env).presents).toBeGreaterThan(0)
+  }, 60_000)
+
+  it('keeps the first frame and default menus when a mount effect activates the window', () => {
+    expect(runFirstFrame({ FIRST_FRAME_ACTIVATE: '1' })).toEqual({ presents: 1, menus: true })
+  }, 60_000)
+
+  it('installs the default menus after revealing a focused window', () => {
+    expect(runFirstFrame({}).menus).toBe(true)
   }, 60_000)
 })

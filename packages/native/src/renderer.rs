@@ -4444,6 +4444,24 @@ impl GpuixRenderer {
         }
     }
 
+    /// Whether the macOS application menu bar has been installed.
+    #[napi]
+    pub fn test_has_application_menus(&self) -> Result<bool> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            Ok(app.update(|cx| has_application_menus(cx)))
+        });
+
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        Err(Error::from_reason(
+            "Application menu test seam requires macOS test support",
+        ))
+    }
+
     /// Whether the embedded macOS runtime is still retained by thread-local handles.
     #[napi]
     pub fn test_has_embedded_runtime(&self) -> bool {
@@ -4591,7 +4609,15 @@ impl GpuixRenderer {
     pub fn activate_window(&self, _env: Env) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
-            PENDING_WINDOW_REVEAL.with(|pending| pending.set(None));
+            // Before the first tick the window is still hidden: reveal it now,
+            // focused, so it keeps its first frame and deferred default menus.
+            PENDING_WINDOW_REVEAL.with(|pending| {
+                if let Some(mut reveal) = pending.take() {
+                    reveal.activate = true;
+                    pending.set(Some(reveal));
+                }
+            });
+            reveal_pending_window()?;
             GPUI_APP.with(|app| {
                 let app = app.borrow();
                 let app = app

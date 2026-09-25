@@ -883,7 +883,8 @@ have one.
 On macOS and Windows, `init()` opens a shown window hidden, and the first
 `tick()` or `tickIdle()` shows it, so its first frame contains whatever was
 committed before that tick. `render()` commits before it starts the frame
-loop. A custom host should do the same: commit its root, then tick. Linux
+loop. A custom host should do the same: commit its root, then tick. Until
+that tick, `isActive()` reads `false` even for a focused window. Linux
 shows the window while `init()` opens it.
 
 ## Application menus and termination

@@ -147,6 +147,8 @@ export declare class GpuixRenderer {
    * setting, so it is safe to run alongside other test processes.
    */
   testSetPlatformReducedMotion(enabled: boolean): void
+  /** Whether the macOS application menu bar has been installed. */
+  testHasApplicationMenus(): boolean
   /** Whether the embedded macOS runtime is still retained by thread-local handles. */
   testHasEmbeddedRuntime(): boolean
   isInitialized(): boolean

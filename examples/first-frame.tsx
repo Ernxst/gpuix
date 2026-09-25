@@ -10,6 +10,11 @@
  * `FIRST_FRAME_FOCUS=0` opens the window unfocused. `FIRST_FRAME_RAF=1` starts
  * a `requestAnimationFrame` loop from an effect, whose pending next-frame
  * callback subjects an inactive window's frames to GPUI's throttle.
+ * `FIRST_FRAME_ACTIVATE=1` calls `activateWindow()` from a mount effect, which
+ * runs inside the first commit, before the first pump.
+ *
+ * After the pump it runs the frame loop briefly and reports whether the
+ * default menus, deferred until the shown window's second frame, installed.
  */
 
 import React, { useEffect } from 'react'
@@ -18,12 +23,20 @@ import {
   createRenderer,
   render,
   requestAnimationFrame,
+  startFrameLoop,
+  useGpuixRequired,
 } from '@gpuix/react'
 
 const focus = process.env.FIRST_FRAME_FOCUS !== '0'
 const animate = process.env.FIRST_FRAME_RAF === '1'
+const activate = process.env.FIRST_FRAME_ACTIVATE === '1'
 
 function App() {
+  const gpuix = useGpuixRequired()
+  useEffect(() => {
+    if (activate) gpuix.activateWindow?.()
+  }, [gpuix])
+
   useEffect(() => {
     if (!animate) return
     let id = requestAnimationFrame(function loop() {
@@ -50,12 +63,18 @@ function App() {
 
 const renderer = createRenderer()
 renderer.init({ title: 'GPUIX first frame', width: 320, height: 200, focus })
-render(<App />, { renderer })
-
+// The capture needs the window, so it starts after `init`; the window stays
+// hidden until the first pump or an `activateWindow()` during the commit.
 renderer.startPresentTimingCapture()
+render(<App />, { renderer })
 renderer.tickIdle()
 const presents = renderer.takePresentTimestamps().length
 
-console.log(`FIRST_FRAME ${JSON.stringify({ presents })}`)
-renderer.quit()
-process.exit(0)
+const loop = startFrameLoop(renderer)
+setTimeout(() => {
+  const menus = renderer.testHasApplicationMenus()
+  loop.stop()
+  console.log(`FIRST_FRAME ${JSON.stringify({ presents, menus })}`)
+  renderer.quit()
+  process.exit(0)
+}, 500)
