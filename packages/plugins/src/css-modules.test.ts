@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { access, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -7,11 +7,17 @@ import type { BunPlugin } from "bun"
 import postcssCustomProperties from "postcss-custom-properties"
 import postcssImport from "postcss-import"
 import React from "react"
-import { createTestRoot } from "@gpuix/react/testing"
+import { createTestRoot, isNativeTestRendererAvailable } from "@gpuix/react/testing"
 import { createServer } from "vite"
 import { gpuix as gpuixBun, gpuixDev } from "./bun.ts"
 import { cssModuleId, gpuixCssModules, gpuixCssModulesBun, loadCssModule } from "./css.ts"
 import { transformGpuixCssModule } from "./css-modules.ts"
+
+const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+
+async function canonicalFiles(files: string[]): Promise<string[]> {
+  return Promise.all(files.map((file) => realpath(file)))
+}
 
 // The comment matters: a token rule that keeps one after its custom properties
 // are removed is still a `:root` rule, which has no native style representation.
@@ -89,40 +95,42 @@ test("converts text-decoration shorthand and longhands to style prop keys", asyn
   ).rejects.toThrow('property "textDecoration" value "underline line-through" is not supported')
 })
 
-test("renders a text-decoration CSS module on the desktop renderer", async () => {
-  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-decoration-"))
-  const sourceId = path.join(fixture, "decoration.module.css")
-  await writeFile(sourceId, ".link { text-decoration: underline; }")
-  const vite = await createServer({
-    appType: "custom",
-    configFile: false,
-    root: fixture,
-    plugins: [gpuixCssModules()],
-  })
+describeNative("desktop renderer", () => {
+  test("renders a text-decoration CSS module", async () => {
+    const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-decoration-"))
+    const sourceId = path.join(fixture, "decoration.module.css")
+    await writeFile(sourceId, ".link { text-decoration: underline; }")
+    const vite = await createServer({
+      appType: "custom",
+      configFile: false,
+      root: fixture,
+      plugins: [gpuixCssModules()],
+    })
 
-  try {
-    const styles = (await vite.ssrLoadModule("/decoration.module.css")) as {
-      default: { link: string }
-    }
-    const root = createTestRoot()
     try {
-      root.render(
-        React.createElement(
-          "text",
-          { className: styles.default.link, "data-testid": "link" },
-          "link",
-        ),
-      )
-      expect(root.renderer.getAllText()).toEqual(["link"])
-      const link = root.renderer.findByTestId("link")!
-      expect(root.renderer.getResolvedStyle(link.id)).toMatchObject({ textDecoration: "underline" })
+      const styles = (await vite.ssrLoadModule("/decoration.module.css")) as {
+        default: { link: string }
+      }
+      const root = createTestRoot()
+      try {
+        root.render(
+          React.createElement(
+            "text",
+            { className: styles.default.link, "data-testid": "link" },
+            "link",
+          ),
+        )
+        expect(root.renderer.getAllText()).toEqual(["link"])
+        const link = root.renderer.findByTestId("link")!
+        expect(root.renderer.getResolvedStyle(link.id)).toMatchObject({ textDecoration: "underline" })
+      } finally {
+        root.unmount()
+      }
     } finally {
-      root.unmount()
+      await vite.close()
+      await rm(fixture, { recursive: true, force: true })
     }
-  } finally {
-    await vite.close()
-    await rm(fixture, { recursive: true, force: true })
-  }
+  })
 })
 
 test("rejects declarations outside the native style model", async () => {
@@ -214,7 +222,21 @@ test("watches token files imported by a Vite CSS module", async () => {
     await writeFile(tokens, tokenCss)
     const watched: string[] = []
     await loadCssModule({ addWatchFile: (id: string) => watched.push(id) }, cssModuleId(sourceId))
-    expect(watched).toEqual([sourceId, await realpath(tokens)])
+    expect(await canonicalFiles(watched)).toEqual(await canonicalFiles([sourceId, tokens]))
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
+test("matches watched files that use different path aliases", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-watch-alias-"))
+  const tokens = path.join(fixture, "tokens.css")
+  const alias = `${fixture}${path.sep}nested${path.sep}..${path.sep}tokens.css`
+
+  try {
+    await mkdir(path.join(fixture, "nested"))
+    await writeFile(tokens, tokenCss)
+    expect(await canonicalFiles([alias])).toEqual(await canonicalFiles([tokens]))
   } finally {
     await rm(fixture, { recursive: true, force: true })
   }
