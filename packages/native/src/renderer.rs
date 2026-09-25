@@ -205,11 +205,13 @@ pub(crate) fn pending_custom_prop_diagnostic(
     })
 }
 
+// CSS-module group names encode generated identities and should not be treated
+// as a likely authoring mistake when their matching ancestor is absent.
+const CSS_MODULE_HOVER_GROUP_PREFIX: &str = "gpuix-css-module:hover-group:";
+
 /// Whether a `hoverWithinGroup` name on `element_id` matches any ancestor's
 /// `hoverGroup`. `None` when there is no `hoverWithinGroup` to check, or when
 /// a matching ancestor exists.
-const CSS_MODULE_HOVER_GROUP_PREFIX: &str = "gpuix-css-module:hover-group:";
-
 pub(crate) fn pending_hover_within_group_diagnostic(
     tree: &RetainedTree,
     element_id: u64,
@@ -16889,7 +16891,7 @@ mod resolve_styles_tests {
         style: serde_json::Value,
         collect_diagnostics: bool,
     ) -> (StyleDesc, Vec<PendingStyleDiagnostic>) {
-        let batch = serde_json::to_vec(&serde_json::json!([
+        let batch = serde_json::to_vec(&json!([
             ["createElement", 1, "div"],
             ["setStyle", 1, style],
             ["setRoot", 1]
