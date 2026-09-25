@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.25.0-fork.6
+
+1. **CSS modules accept `text-decoration` line values.** Values such as `underline` and `line-through` compile. A decoration colour or combined line values fail at build time with the CSS file name; native does not support decoration colours. [#672](https://github.com/Ernxst/gpuix/issues/672), [PR #677](https://github.com/Ernxst/gpuix/pull/677)
+2. **CSS-module descendant hover rules follow CSS when an ancestor class is absent.** The rule applies no hover and emits no warning; a hand-written `hoverWithinGroup` still warns. [#675](https://github.com/Ernxst/gpuix/issues/675), [PR #679](https://github.com/Ernxst/gpuix/pull/679)
+3. **Native `onFocus` and `onBlur` run during capture, target and bubble.** Call `stopPropagation()` to stop an event from reaching further handlers. Native `relatedTarget` remains `null`. [#676](https://github.com/Ernxst/gpuix/issues/676), [PR #678](https://github.com/Ernxst/gpuix/pull/678), [#550](https://github.com/Ernxst/gpuix/issues/550)
+4. **An installable agent skill documents GPU-IX's supported features and known gaps.** Install it with `npx skills add Ernxst/gpuix --skill gpuix`. [#673](https://github.com/Ernxst/gpuix/issues/673), [PR #674](https://github.com/Ernxst/gpuix/pull/674)
+
 ## 0.25.0-fork.5
 
 1. **CSS module pixel line-height keeps its unit.** A declaration such as
