@@ -26,7 +26,7 @@ Before writing code that relies on a browser behaviour, check it in the referenc
 
 **There is no DOM.** Do not reach for `document.createElement`, `getComputedStyle`, `matchMedia`, `MutationObserver`, `IntersectionObserver`, `window.innerWidth`, or listeners on `window`/`document`. They are absent, or they register and never fire. Headless DOM libraries (Base UI, Radix, Floating UI, React Aria) do not work, or work only in parts; use `@gpuix/react/select`, `/combobox`, `/tooltip`, `/floating` and `<anchored>`. Portals do not exist.
 
-**Refs are not elements.** `ref.current.id` is a numeric native id; the authored id is `getAttribute("id")`. Refs have `focus`, `blur`, `click`, `contains`, `getBoundingClientRect`, `scrollTop`, `matches` (four pseudo-classes) and `getAttribute`. They have no `isConnected`, `closest`, `dataset`, `style`, `classList`, `children` or `addEventListener`.
+**Refs are not elements.** `ref.current.id` is a numeric native id; the authored id is `getAttribute("id")`. Refs have `isConnected`, `focus`, `blur`, `click`, `contains`, `compareDocumentPosition`, `getBoundingClientRect`, `scrollTop`, `matches` (four pseudo-classes) and `getAttribute`. They have no `closest`, `dataset`, `style`, `classList`, `children` or `addEventListener`.
 
 **Text lives in `<text>`.** `span`, `strong`, `a`, `p` and the other HTML tags are block boxes that stack vertically. For styled words inside a sentence, nest `<text>` in `<text>`; a `<text>` accepts only strings and `<text>`. Uncoloured text paints light grey `#e2e2e2`, which is invisible on light surfaces. `color`, `fontSize`, `fontFamily`, `fontWeight`, `whiteSpace`, `textTransform`, `fontVariantNumeric` and `userSelect` inherit from ancestors.
 

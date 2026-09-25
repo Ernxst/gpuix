@@ -96,6 +96,7 @@ A ref is the host instance itself. Type refs as `PublicInstance`, `InputPublicIn
 |---|---|
 | `id`, `type`, `props` | Numeric native id; authored type; latest props. |
 | `tagName`, `nodeName`, `localName` | Authored name (`"ARTICLE"` / `"article"`), even for tags drawn as `div`. |
+| `isConnected` | True while the element is mounted in its root; false after removal. |
 | `parentElement` | Live retained parent; `null` at the root or once unmounted. (`parentId` can be stale on descendants of a removed subtree.) |
 | `ownerDocument` | The host document if one exists, else the GPU-IX facade (also without `globals`). |
 | `focus()`, `blur()`, `click()` | See Focus. `click()` runs full dispatch and activation. |
@@ -105,7 +106,7 @@ A ref is the host instance itself. Type refs as `PublicInstance`, `InputPublicIn
 | `scrollIntoView(opts)` | `block: "start"` or `"nearest"`; `center`, `end`, `false` and any `inline` other than `nearest` fall back to nearest with a warning, and throw in strict mode. |
 | `getBoundingClientRect()` | Plain object in window coordinates; all zeros when unpainted. `getBounds()` returns `null` instead. |
 | `matches(selector)` | `:focus`, `:focus-visible`, `:hover`, `:active` only; anything else throws `SyntaxError`. |
-| `contains(other)`, `compareDocumentPosition(other)` | Retained-tree answers; `DOCUMENT_POSITION_*` constants are exported from `@gpuix/react` (not on `Node`). |
+| `contains(other)`, `compareDocumentPosition(other)` | Retained-tree answers; `DOCUMENT_POSITION_*` constants are exported from `@gpuix/react` and exposed on the `Node` shim. |
 | `getAttribute(name)`, `hasAttribute(name)` | Read props case-insensitively (`aria-*`, `data-*`, `id`, `for`, `hidden`); `class` and `style` return `null`. |
 | Inputs | `value`, `selectionStart`, `selectionEnd`, `selectionDirection`, `setSelectionRange()`, `select()`, `checked`, `defaultChecked`, `indeterminate`, `valueAsNumber` (range only), `form`, `validity`, `validationMessage`, `setCustomValidity()`; see `elements.md`. |
 | Forms | `requestSubmit()`, `reset()`, `checkValidity()`. |
@@ -151,9 +152,9 @@ The globals are typed as full DOM types although the objects are partial (#649).
 | `KeyboardEvent`, `MouseEvent`, `FocusEvent` constructors | absent |
 | `ResizeObserver`, `requestAnimationFrame`, `PointerEvent`, `navigator.clipboard.readText`/`writeText` | present (via `globals`) |
 | `HTMLAnchorElement`, `HTMLSelectElement`, `HTMLLabelElement`, `HTMLFormElement`, `SVGElement`, `ShadowRoot` | absent |
-| ref `addEventListener`, `isConnected`, `closest`, `parentNode`, `children`, `setAttribute`, `dataset`, `classList`, `style`, `offset*`, `hasPointerCapture`, `getRootNode` | absent |
+| ref `addEventListener`, `closest`, `parentNode`, `children`, `setAttribute`, `dataset`, `classList`, `style`, `offset*`, `hasPointerCapture`, `getRootNode` | absent |
 | ref `dispatchEvent`, `matches`, `scrollIntoView` | partial (see Refs) |
-| ref `focus`, `blur`, `click`, `contains`, `compareDocumentPosition`, `parentElement`, `ownerDocument`, `getAttribute`, `getBoundingClientRect`, `scroll*`, `client*` | present |
+| ref `isConnected`, `focus`, `blur`, `click`, `contains`, `compareDocumentPosition`, `parentElement`, `ownerDocument`, `getAttribute`, `getBoundingClientRect`, `scroll*`, `client*` | present |
 
 ## Third-party headless libraries
 

@@ -1616,6 +1616,10 @@ class HostElement implements Instance {
     return parentElement(this)
   }
 
+  get isConnected(): boolean {
+    return stateFor(this).mounted
+  }
+
   get ownerDocument() {
     return ownerDocument()
   }
