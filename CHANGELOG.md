@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.25.0-fork.5
+
+1. **CSS module pixel line-height keeps its unit.** A declaration such as
+   `line-height: 18px` now renders with an 18px line height, while unitless values
+   remain multipliers. [#665](https://github.com/Ernxst/gpuix/issues/665),
+   [PR #668](https://github.com/Ernxst/gpuix/pull/668)
+
+2. **Bun preload resolves CSS module compositions through package imports.**
+   Composed package subpaths and `#` import aliases resolve, including targets
+   without an `exports` map. [#667](https://github.com/Ernxst/gpuix/issues/667),
+   [PR #669](https://github.com/Ernxst/gpuix/pull/669)
+
+3. **CSS modules apply descendant styles while an ancestor is active.** A rule
+   such as `.card:active .title` applies the descendant style while the ancestor
+   is pressed. [#670](https://github.com/Ernxst/gpuix/issues/670),
+   [PR #671](https://github.com/Ernxst/gpuix/pull/671)
+
 ## 0.25.0-fork.2
 
 **`@gpuix/react` supports Vitest 5.** The Vitest entry now augments Vitest 5's
