@@ -6,6 +6,8 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import type { BunPlugin } from "bun"
 import postcssCustomProperties from "postcss-custom-properties"
 import postcssImport from "postcss-import"
+import React from "react"
+import { createTestRoot } from "@gpuix/react/testing"
 import { createServer } from "vite"
 import { gpuix as gpuixBun, gpuixDev } from "./bun.ts"
 import { cssModuleId, gpuixCssModules, gpuixCssModulesBun, loadCssModule } from "./css.ts"
@@ -54,6 +56,73 @@ test("converts simple CSS module classes into GPUIX style objects", async () => 
       fontSize: 14,
     },
   })
+})
+
+test("converts text-decoration shorthand and longhands to style prop keys", async () => {
+  await expect(
+    transformGpuixCssModule(
+      ".plain { text-decoration: underline; } .line { text-decoration-line: line-through; text-decoration-style: solid; }",
+      "/fixture/decoration.module.css",
+    ),
+  ).resolves.toEqual({
+    plain: { textDecoration: "underline" },
+    line: { textDecoration: "line-through" },
+  })
+
+  await expect(
+    transformGpuixCssModule(
+      ".coloured { text-decoration: underline red; }",
+      "/fixture/decoration.module.css",
+    ),
+  ).rejects.toThrow('property "textDecorationColor" is not supported by the native style prop')
+  await expect(
+    transformGpuixCssModule(
+      ".coloured { text-decoration-color: blue; }",
+      "/fixture/decoration.module.css",
+    ),
+  ).rejects.toThrow('property "textDecorationColor" is not supported by the native style prop')
+  await expect(
+    transformGpuixCssModule(
+      ".multiple { text-decoration: underline line-through; }",
+      "/fixture/decoration.module.css",
+    ),
+  ).rejects.toThrow('property "textDecoration" value "underline line-through" is not supported')
+})
+
+test("renders a text-decoration CSS module on the desktop renderer", async () => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-module-decoration-"))
+  const sourceId = path.join(fixture, "decoration.module.css")
+  await writeFile(sourceId, ".link { text-decoration: underline; }")
+  const vite = await createServer({
+    appType: "custom",
+    configFile: false,
+    root: fixture,
+    plugins: [gpuixCssModules()],
+  })
+
+  try {
+    const styles = (await vite.ssrLoadModule("/decoration.module.css")) as {
+      default: { link: string }
+    }
+    const root = createTestRoot()
+    try {
+      root.render(
+        React.createElement(
+          "text",
+          { className: styles.default.link, "data-testid": "link" },
+          "link",
+        ),
+      )
+      expect(root.renderer.getAllText()).toEqual(["link"])
+      const link = root.renderer.findByTestId("link")!
+      expect(root.renderer.getResolvedStyle(link.id)).toMatchObject({ textDecoration: "underline" })
+    } finally {
+      root.unmount()
+    }
+  } finally {
+    await vite.close()
+    await rm(fixture, { recursive: true, force: true })
+  }
 })
 
 test("rejects declarations outside the native style model", async () => {

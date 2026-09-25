@@ -344,6 +344,7 @@ async function parseCssModule(
         declaration.remove()
       })
       let explicitLineHeight: string | undefined
+      let explicitTextDecorationColor = false
       transformRule.walkDecls("line-height", (declaration) => {
         if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(declaration.value)) {
           explicitLineHeight = declaration.value
@@ -354,12 +355,58 @@ async function parseCssModule(
             : undefined
         }
       })
+      transformRule.walkDecls("text-decoration", (declaration) => {
+        explicitTextDecorationColor ||= declaration.value
+          .split(/\s+/)
+          .some(
+            (part) =>
+              ![
+                "underline",
+                "overline",
+                "line-through",
+                "none",
+                "solid",
+                "double",
+                "dotted",
+                "dashed",
+                "wavy",
+              ].includes(part.toLowerCase()),
+          )
+      })
+      transformRule.walkDecls("text-decoration-color", () => {
+        explicitTextDecorationColor = true
+      })
       const hasDeclarations = transformRule.nodes?.some((node) => node.type === "decl") ?? false
       const transformed = hasDeclarations ? transformCss(transformRule.toString()) : {}
       const value = hasDeclarations ? transformed[name] : {}
 
       if (!isPlainObject(value)) {
         throw unsupportedCss(sourceId, `class ".${name}" did not produce a style object`)
+      }
+      if ("textDecorationLine" in value) {
+        value.textDecoration = value.textDecorationLine
+        delete value.textDecorationLine
+      }
+      if (explicitTextDecorationColor) {
+        throw unsupportedCss(
+          sourceId,
+          'property "textDecorationColor" is not supported by the native style prop',
+        )
+      }
+      // The translator adds a black default to shorthand declarations. GPUIX
+      // has no separate decoration colour, so drop that implicit value.
+      if ("textDecorationColor" in value) {
+        delete value.textDecorationColor
+      }
+      if (value.textDecorationStyle === "solid") delete value.textDecorationStyle
+      if (
+        typeof value.textDecoration === "string" &&
+        !["underline", "line-through", "none"].includes(value.textDecoration)
+      ) {
+        throw unsupportedCss(
+          sourceId,
+          `property "textDecoration" value ${JSON.stringify(value.textDecoration)} is not supported by the native style prop`,
+        )
       }
       if (explicitLineHeight !== undefined) value.lineHeight = explicitLineHeight
 

@@ -88,12 +88,11 @@ classes are composed separately. Other
 selectors, at-rules and animations are rejected until they have a native style
 representation.
 
-`box-shadow` and `text-decoration` are part of the native style model, but the
-underlying CSS-to-object transform expands them into React Native's split
-properties (`shadowOffset`, `shadowRadius`, `textDecorationLine`, and so on),
-which GPUIX's model does not accept, so a CSS module declaring either is
-rejected (`text-decoration` is [#672](https://github.com/Ernxst/gpuix/issues/672)).
-Set them through the `style` prop instead.
+`text-decoration` supports the native `underline`, `line-through`, and `none`
+values in CSS modules. Explicit decoration colours and non-solid decoration
+styles are rejected because the native style prop cannot represent them.
+`box-shadow` still expands into React Native-only properties and is rejected;
+set it through the `style` prop.
 
 CSS modules can compose local classes from the same file or another CSS module:
 

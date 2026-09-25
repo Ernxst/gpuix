@@ -61,6 +61,8 @@ Class names match `[A-Za-z_][A-Za-z0-9_-]*`. Every rejection reads `[gpuix] cann
 
 A hand-written `hover-group: name` on the ancestor replaces the generated name. `hover-group` and `hover-within-group` are not allowed inside a state rule.
 
+`text-decoration` supports `underline`, `line-through`, and `none`; the native renderer supports solid decoration only. Explicit decoration colours and non-solid styles are rejected because the native style prop cannot represent them.
+
 These compile:
 
 <!-- skill-check:accepted-selectors -->
@@ -279,5 +281,4 @@ import { cn } from "@gpuix/react/cn"
 | Issue | Gap |
 |---|---|
 | #670 | Descendant styles from ancestor `:focus`, `:focus-visible`, `:focus-within`. |
-| #672 | `text-decoration` rejected after conversion to `textDecorationLine`. |
-| #632 | Whether to keep the React Native translator, the source of the `box-shadow`, `text-decoration`, `font` and `em` failures. |
+| #632 | Whether to keep the React Native translator, the source of the `box-shadow`, `font` and `em` failures. |
