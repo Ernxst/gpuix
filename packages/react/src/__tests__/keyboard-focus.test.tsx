@@ -123,6 +123,40 @@ describeNative("keyboard focus", () => {
     expect(focusedLabel()).toBe("two")
   })
 
+  it.each(["input", "textarea"] as const)(
+    "moves focus backwards out of a %s with Shift+Tab",
+    (type) => {
+      // <input>/<textarea> track the same focus handle on the editor
+      // wrapper and on the text element inside it; that must still be one
+      // tab stop, or Shift+Tab bounces off the field instead of leaving it.
+      testRoot.render(
+        <div style={{ width: 400, height: 200 }}>
+          <div tabIndex={0} ariaLabel="before" style={{ width: 40, height: 20 }} />
+          {type === "input" ? (
+            <input autoFocus ariaLabel="field" style={{ width: 120, height: 20 }} />
+          ) : (
+            <textarea autoFocus ariaLabel="field" style={{ width: 120, height: 40 }} />
+          )}
+          <div tabIndex={0} ariaLabel="after" style={{ width: 40, height: 20 }} />
+        </div>
+      )
+
+      expect(focusedLabel()).toBe("field")
+
+      testRoot.renderer.simulateKeystrokes("shift-tab")
+      expect(focusedLabel()).toBe("before")
+
+      testRoot.renderer.simulateKeystrokes("tab")
+      expect(focusedLabel()).toBe("field")
+
+      testRoot.renderer.simulateKeystrokes("tab")
+      expect(focusedLabel()).toBe("after")
+
+      testRoot.renderer.simulateKeystrokes("shift-tab")
+      expect(focusedLabel()).toBe("field")
+    }
+  )
+
   it.each([
     ["tabIndex", (focused: boolean) => ({ tabIndex: focused ? -1 : 0 })],
     ["disabled", (focused: boolean) => ({ disabled: focused })],
