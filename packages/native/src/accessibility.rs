@@ -710,7 +710,10 @@ fn first_labelable_descendant(tree: &RetainedTree, element: &RetainedElement) ->
 
 /// The `<label>` that wraps this control without an `htmlFor`, when the
 /// control is the first labelable element inside it.
-fn implicit_label<'a>(tree: &'a RetainedTree, element: &RetainedElement) -> Option<&'a RetainedElement> {
+fn implicit_label<'a>(
+    tree: &'a RetainedTree,
+    element: &RetainedElement,
+) -> Option<&'a RetainedElement> {
     let mut current = element.parent;
     while let Some(id) = current {
         let ancestor = tree.elements.get(&id)?;

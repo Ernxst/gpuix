@@ -1,12 +1,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui::{
-    canvas, px, DispatchPhase, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, Styled,
-};
 use crate::element_tree::EventModifiers;
 use crate::renderer::{
     emit_event_full, populate_mouse_up_payload, populate_pointer_metadata, EventCallback,
+};
+use gpui::{
+    canvas, px, DispatchPhase, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, Styled,
 };
 
 #[derive(Clone)]
@@ -81,12 +81,15 @@ impl PointerRouter {
     }
 
     pub(crate) fn cancel(&mut self) -> Option<CancelledPointer> {
-        let cancelled = self.capture_owner.or(self.pressed_target).map(|target| CancelledPointer {
-            target,
-            x: self.last_position.map(|position| position.0),
-            y: self.last_position.map(|position| position.1),
-            modifiers: self.last_modifiers.clone(),
-        });
+        let cancelled = self
+            .capture_owner
+            .or(self.pressed_target)
+            .map(|target| CancelledPointer {
+                target,
+                x: self.last_position.map(|position| position.0),
+                y: self.last_position.map(|position| position.1),
+                modifiers: self.last_modifiers.clone(),
+            });
         self.pressed_button = None;
         self.capture_owner = None;
         self.pressed_target = None;

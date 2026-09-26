@@ -30,11 +30,11 @@ use crate::renderer::{
     dispatch_application_menu_action, drain_style_diagnostics, first_canvas_diagnostic_message,
     forget_canvas_diagnostics, fresh_canvas_diagnostics, has_application_menus,
     init_application_menu_support, install_application_menus, parse_canvas_image_source,
-    parse_debug_frame_overlay_mode, reset_application_menus, set_application_menus, take_style_diagnostics_for_reporting,
-    to_element_id, validate_canvas_target, CanvasImageLoadState, DebugFrameOverlayStats,
-    ElementInteractionState, EventCallback, FocusDirection, FrameTimestampOrigin,
-    GpuixStyleDiagnostic, GpuixView, InteractiveStyleState, MenuSpec, PendingStyleDiagnostics,
-    WindowSize,
+    parse_debug_frame_overlay_mode, reset_application_menus, set_application_menus,
+    take_style_diagnostics_for_reporting, to_element_id, validate_canvas_target,
+    CanvasImageLoadState, DebugFrameOverlayStats, ElementInteractionState, EventCallback,
+    FocusDirection, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView, InteractiveStyleState,
+    MenuSpec, PendingStyleDiagnostics, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -492,6 +492,8 @@ pub struct TestGpuixRenderer {
     /// can observe an asynchronously populated image handle before its repaint;
     /// keeping the drawn pixels is what makes current-frame capture exact.
     manual_frame: Mutex<Option<image::RgbaImage>>,
+    /// Whether GPUI state has advanced beyond the last explicit manual frame.
+    manual_frame_pending: AtomicBool,
     /// The test scheduler's clock advance primitive also runs its task queue.
     /// Manual mode holds `advanceTime` deltas until the explicit drain boundary.
     manual_async_clock_advance: Mutex<Duration>,
@@ -628,6 +630,7 @@ impl TestGpuixRenderer {
             image_network_policy,
             auto_drain_async_tasks: AtomicBool::new(true),
             manual_frame: Mutex::new(None),
+            manual_frame_pending: AtomicBool::new(false),
             manual_async_clock_advance: Mutex::new(Duration::ZERO),
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(PendingStyleDiagnostics::default()),
@@ -685,7 +688,8 @@ impl TestGpuixRenderer {
         self.debug_frame_overlay_frame_origin
             .store(frames, Ordering::Relaxed);
         *self.active_pointer_origin.lock().unwrap() = None;
-        self.frame_request_generation.fetch_add(1, Ordering::Relaxed);
+        self.frame_request_generation
+            .fetch_add(1, Ordering::Relaxed);
         self.frame_timestamps.lock().unwrap().clear();
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         self.test_gpu_canvases.reset();
@@ -693,6 +697,7 @@ impl TestGpuixRenderer {
         self.style_diagnostics.lock().unwrap().clear();
         self.canvas_diagnostic_members.lock().unwrap().clear();
         self.manual_frame.lock().unwrap().take();
+        self.manual_frame_pending.store(false, Ordering::Relaxed);
         *self.manual_async_clock_advance.lock().unwrap() = Duration::ZERO;
         // Draw the reset window, empty as a newly opened one is after its
         // first frame, which its statistics count.
@@ -707,6 +712,7 @@ impl TestGpuixRenderer {
             .store(enabled, Ordering::Relaxed);
         if enabled {
             self.manual_frame.lock().unwrap().take();
+            self.manual_frame_pending.store(false, Ordering::Relaxed);
             *self.manual_async_clock_advance.lock().unwrap() = Duration::ZERO;
         }
     }
@@ -734,6 +740,7 @@ impl TestGpuixRenderer {
             .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))?
             .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))?;
         *self.manual_frame.lock().unwrap() = Some(image);
+        self.manual_frame_pending.store(false, Ordering::Relaxed);
         Ok(())
     }
 
@@ -744,7 +751,18 @@ impl TestGpuixRenderer {
         event: E,
     ) -> Result<()> {
         if self.auto_drains_async_tasks() {
-            cx.simulate_event(window, event);
+            cx.update_window(window, |_, window, app| {
+                if window.is_dirty() {
+                    window.draw(app).clear(app);
+                }
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.update_window(window, |_, window, app| {
+                window.dispatch_event(event.to_platform_input(), app);
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Self::draw_if_dirty(cx, window)?;
             return Ok(());
         }
         cx.update_window(window, |_, window, app| {
@@ -785,19 +803,20 @@ impl TestGpuixRenderer {
     /// Microseconds spent rebuilding the element tree since the last call,
     /// cleared on read. Whatever a draw costs beyond this is layout, prepaint
     /// and paint, which is the split #480 turns on.
-    /// Whether the window still needs drawing.
+    /// Whether the current visible frame is stale.
     ///
-    /// A tree at rest reports `false` after a draw, so `drawPendingFrame` is a
-    /// no-op. Anything that re-dirties the window every frame makes a page pay
-    /// a second full draw per update, which is invisible to a timing harness
-    /// that only calls `flush`. Reading this needs no debug overlay, which
-    /// would itself dirty the window.
+    /// Eager mode reports GPUI's window dirtiness. Manual mode also reports
+    /// state changes that have not reached its last explicitly captured frame.
+    /// Reading this needs no debug overlay, which would itself dirty the window.
     #[napi]
     pub fn is_window_dirty(&self) -> Result<bool> {
-        with_test_state(self.state_id, |cx, window, _view| {
+        let window_dirty = with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, _app| window.is_dirty())
                 .map_err(|error| Error::from_reason(error.to_string()))
-        })
+        })?;
+        Ok(window_dirty
+            || (!self.auto_drains_async_tasks()
+                && self.manual_frame_pending.load(Ordering::Relaxed)))
     }
 
     /// Microseconds spent re-deriving gpui styles from `StyleDesc` since the
@@ -901,10 +920,59 @@ impl TestGpuixRenderer {
     }
 
     #[napi]
-    pub fn apply_canvas_command_delta(&self,id:f64,ops:Uint32Array,operands:Float64Array,strings:Vec<String>)->Result<()>{self.surface_canvas_preparation_diagnostics()?;let id=to_element_id(id)?;let tree=self.tree.lock().unwrap();validate_canvas_target(&tree,id).map_err(Error::from_reason)?;let decoded=crate::canvas::decode_delta(&self.canvas_display_lists,id,ops.as_ref(),operands.as_ref(),&strings,canvas_size(&tree,id)).map_err(|e|Error::from_reason(format!("<canvas> element {id}: {e}")))?;let strict=self.strict_styles.load(Ordering::Relaxed);if strict&&!decoded.diagnostics.is_empty(){return Err(Error::from_reason(first_canvas_diagnostic_message(&tree,id,&decoded.diagnostics).unwrap()));}let outcome=crate::canvas::install_decoded_delta(&self.canvas_display_lists,id,decoded);drop(tree);if !strict{self.style_diagnostics.lock().unwrap().extend(fresh_canvas_diagnostics(id,outcome.diagnostics,&self.canvas_diagnostic_members));}if outcome.invalidates{self.request_invalidate()?;}Ok(())}
+    pub fn apply_canvas_command_delta(
+        &self,
+        id: f64,
+        ops: Uint32Array,
+        operands: Float64Array,
+        strings: Vec<String>,
+    ) -> Result<()> {
+        self.surface_canvas_preparation_diagnostics()?;
+        let id = to_element_id(id)?;
+        let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
+        let decoded = crate::canvas::decode_delta(
+            &self.canvas_display_lists,
+            id,
+            ops.as_ref(),
+            operands.as_ref(),
+            &strings,
+            canvas_size(&tree, id),
+        )
+        .map_err(|e| Error::from_reason(format!("<canvas> element {id}: {e}")))?;
+        let strict = self.strict_styles.load(Ordering::Relaxed);
+        if strict && !decoded.diagnostics.is_empty() {
+            return Err(Error::from_reason(
+                first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics).unwrap(),
+            ));
+        }
+        let outcome = crate::canvas::install_decoded_delta(&self.canvas_display_lists, id, decoded);
+        drop(tree);
+        if !strict {
+            self.style_diagnostics
+                .lock()
+                .unwrap()
+                .extend(fresh_canvas_diagnostics(
+                    id,
+                    outcome.diagnostics,
+                    &self.canvas_diagnostic_members,
+                ));
+        }
+        if outcome.invalidates {
+            self.request_invalidate()?;
+        }
+        Ok(())
+    }
 
     #[napi]
-    pub fn reset_canvas(&self,id:f64)->Result<()>{let id=to_element_id(id)?;let tree=self.tree.lock().unwrap();validate_canvas_target(&tree,id).map_err(Error::from_reason)?;drop(tree);crate::canvas::reset_canvas(&self.canvas_display_lists,id);self.request_invalidate()}
+    pub fn reset_canvas(&self, id: f64) -> Result<()> {
+        let id = to_element_id(id)?;
+        let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
+        drop(tree);
+        crate::canvas::reset_canvas(&self.canvas_display_lists, id);
+        self.request_invalidate()
+    }
 
     /// Install a GPU-only test texture into one live `<canvas>` presentation.
     /// This exercises the same retained Metal surface path as production.
@@ -1354,6 +1422,9 @@ impl TestGpuixRenderer {
                 window.refresh();
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
+            if !self.auto_drains_async_tasks() {
+                self.manual_frame_pending.store(true, Ordering::Relaxed);
+            }
             Ok(())
         })
     }
@@ -1409,10 +1480,9 @@ impl TestGpuixRenderer {
     pub fn flush(&self) -> Result<()> {
         self.request_invalidate()?;
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.update_window(window, |_, window, app| window.draw(app).clear(app))
-                .map_err(|e| Error::from_reason(e.to_string()))?;
-            self.remember_manual_frame(cx, window)?;
             self.drain_async_tasks_if_eager(cx);
+            Self::draw_if_dirty(cx, window)?;
+            self.remember_manual_frame(cx, window)?;
             Ok(())
         })?;
         self.surface_canvas_preparation_diagnostics()
@@ -1499,22 +1569,28 @@ impl TestGpuixRenderer {
                 );
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
 
     /// Draw one platform-style pending frame without notifying the view first.
-    /// Unlike `flush`, this does not request invalidation; it only draws when
-    /// the window is already dirty.
-    /// A clean window remains clean, so this only repaints work already
-    /// scheduled by production code such as an async image load completion.
+    /// Unlike `flush`, this does not notify the view. It draws GPUI dirtiness
+    /// or materializes state waiting behind the manual-mode frame boundary.
     #[napi]
     pub fn draw_pending_frame(&self) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
             let drew = cx
                 .update_window(window, |_, window, app| {
-                    if window.is_dirty() {
+                    // GPUI's phased scroll hover suppression is released from
+                    // its next-frame callback. A manual draw must advance that
+                    // callback before painting the pending frame.
+                    window.simulate_next_frame(app);
+                    let manual_frame_pending = !self.auto_drains_async_tasks()
+                        && self.manual_frame_pending.load(Ordering::Relaxed);
+                    if window.is_dirty() || manual_frame_pending {
+                        if !window.is_dirty() {
+                            window.refresh();
+                        }
                         window.draw(app).clear(app);
                         true
                     } else {
@@ -1585,10 +1661,13 @@ impl TestGpuixRenderer {
                 delta = delta.saturating_add(*pending);
                 *pending = Duration::ZERO;
             }
+            let auto_drain = self.auto_drains_async_tasks();
             cx.advance_clock(delta);
             let view = view.clone();
             cx.update_window(window, |_, window, app| {
-                window.simulate_next_frame(app);
+                if auto_drain {
+                    window.simulate_next_frame(app);
+                }
                 view.update(app, |view, cx| {
                     if view.clock.fast_forward_if_frozen_ms(delta_ms).is_some() {
                         cx.notify();
@@ -1596,17 +1675,16 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            if self.auto_drains_async_tasks() {
-                cx.update_window(window, |_, window, app| window.draw(app).clear(app))
-                    .map_err(|error| Error::from_reason(error.to_string()))?;
-            }
             cx.run_until_parked();
-            if !self.auto_drains_async_tasks() {
+            if auto_drain {
+                Self::draw_if_dirty(cx, window)?;
+            } else {
                 // Manual mode separates task progress from paint: async
                 // completions and frame callbacks become visible only after an
                 // explicit `drawPendingFrame`.
                 cx.update_window(window, |_, window, _app| window.refresh())
                     .map_err(|error| Error::from_reason(error.to_string()))?;
+                self.manual_frame_pending.store(true, Ordering::Relaxed);
             }
             Ok(())
         })
@@ -1660,7 +1738,9 @@ impl TestGpuixRenderer {
                 let motions = view
                     .motion_states
                     .values()
-                    .filter(|state| state.is_valid() && state.sampled_frame(now, reduce_motion).active)
+                    .filter(|state| {
+                        state.is_valid() && state.sampled_frame(now, reduce_motion).active
+                    })
                     .count();
                 u32::try_from(transitions.saturating_add(motions)).unwrap_or(u32::MAX)
             })
@@ -1805,18 +1885,6 @@ impl TestGpuixRenderer {
             // Offscreen windows receive no platform activation. Tab traversal
             // nevertheless models input to the active production window, and
             // GPUI intentionally suppresses focus paths for inactive windows.
-            if keystrokes
-                .iter()
-                .any(|keystroke| keystroke.key.eq_ignore_ascii_case("tab"))
-            {
-                cx.update_window(window, |_, window, app| {
-                    if !window.is_window_active() {
-                        window.simulate_active_status_change(true, app);
-                    }
-                })
-                .map_err(|error| Error::from_reason(error.to_string()))?;
-            }
-
             // Dispatch directly rather than through `VisualTestAppContext`,
             // whose keystroke and event helpers redraw after every key even
             // when nothing changed. A clean window's last frame is already
@@ -1825,12 +1893,15 @@ impl TestGpuixRenderer {
             for keystroke in keystrokes {
                 // Match GPUI's simulated key-down/text-input path before releasing the key.
                 cx.update_window(window, |_, window, app| {
+                    // Activate the offscreen window in the same update as the
+                    // first Tab. Separate updates let GPUI paint an activation
+                    // frame before it processes the focus move.
+                    if keystroke.key.eq_ignore_ascii_case("tab") && !window.is_window_active() {
+                        window.simulate_active_status_change(true, app);
+                    }
                     window.dispatch_keystroke(keystroke.clone(), app);
                 })
                 .map_err(|error| Error::from_reason(error.to_string()))?;
-                if auto_drain {
-                    Self::draw_if_dirty(cx, window)?;
-                }
                 cx.update_window(window, |_, window, app| {
                     window.dispatch_event(
                         gpui::InputEvent::to_platform_input(gpui::KeyUpEvent { keystroke }),
@@ -1902,7 +1973,10 @@ impl TestGpuixRenderer {
     ) -> Result<()> {
         let modifiers =
             crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
-        with_test_state(self.state_id, |cx, window, _view| {
+        with_test_state(self.state_id, |cx, window, view| {
+            view.update(cx, |view, _cx| {
+                view.last_pointer_position = Some((x, y));
+            });
             let button: Option<gpui::MouseButton> = pressed_button.map(u32_to_mouse_button);
 
             self.simulate_event(
@@ -2644,7 +2718,9 @@ impl TestGpuixRenderer {
     /// Same numbers as the on-screen overlay: current, p90, p99, max, frames.
     #[napi]
     pub fn get_debug_frame_overlay_stats(&self) -> Result<DebugFrameOverlayStats> {
-        let origin = self.debug_frame_overlay_frame_origin.load(Ordering::Relaxed);
+        let origin = self
+            .debug_frame_overlay_frame_origin
+            .load(Ordering::Relaxed);
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, _app| {
                 let mut stats = window.debug_frame_overlay_stats();
@@ -2766,7 +2842,8 @@ impl TestGpuixRenderer {
             let image = self.capture_rendered_image(cx, window, view)?;
             let capture_ms = capture_start.elapsed().as_secs_f64() * 1000.0;
             let crop_start = std::time::Instant::now();
-            let clipped = crop_screenshot(&image, x, y, width, height).map_err(Error::from_reason)?;
+            let clipped =
+                crop_screenshot(&image, x, y, width, height).map_err(Error::from_reason)?;
             let crop_ms = crop_start.elapsed().as_secs_f64() * 1000.0;
             let encode_start = std::time::Instant::now();
             clipped
@@ -3217,8 +3294,7 @@ impl TestGpuixRenderer {
     pub fn get_element_bounds(&self, id: f64) -> Result<Option<crate::renderer::ElementBounds>> {
         let id = to_element_id(id)?;
         self.settle_for_read()?;
-        Ok(crate::automation::get_bounds(id)
-            .map(crate::renderer::ElementBounds::from_painted))
+        Ok(crate::automation::get_bounds(id).map(crate::renderer::ElementBounds::from_painted))
     }
 
     #[napi]

@@ -373,28 +373,30 @@ fn wire_hover_and_style_transition_events<E: gpui::StatefulInteractiveElement>(
     // React's ancestry-diff target therefore share this listener rather than
     // competing for the same slot or emitting a second bubbling event source.
     if transition_hover || tracks_hover || tracks_hover_group || tracks_mouse_hover {
-        el = el.on_hover(cx.listener(move |view, is_hovered: &bool, window, cx| {
-            let transition_changed = transition_hover
-                && view
-                    .transition_states
-                    .get_mut(&id)
-                    .is_some_and(|state| state.set_hovered(*is_hovered));
-            let interactive_changed = (tracks_hover || tracks_hover_group)
-                && view
-                    .interactive_style_states
-                    .entry(id)
-                    .or_default()
-                    .set_hovered(*is_hovered);
-            if interactive_changed {
-                view.interaction_revision = view.interaction_revision.saturating_add(1);
-            }
-            if transition_changed || interactive_changed {
-                cx.notify();
-            }
-            if tracks_mouse_hover {
-                view.update_hover_target(id, *is_hovered, window, cx);
-            }
-        }));
+        el = el
+            .hover_listener_mode(gpui::HoverListenerMode::InputModalityIndependent)
+            .on_hover(cx.listener(move |view, is_hovered: &bool, window, cx| {
+                let transition_changed = transition_hover
+                    && view
+                        .transition_states
+                        .get_mut(&id)
+                        .is_some_and(|state| state.set_hovered(*is_hovered));
+                let interactive_changed = (tracks_hover || tracks_hover_group)
+                    && view
+                        .interactive_style_states
+                        .entry(id)
+                        .or_default()
+                        .set_hovered(*is_hovered);
+                if interactive_changed {
+                    view.interaction_revision = view.interaction_revision.saturating_add(1);
+                }
+                if transition_changed || interactive_changed {
+                    cx.notify();
+                }
+                if tracks_mouse_hover {
+                    view.update_hover_target(id, *is_hovered, window, cx);
+                }
+            }));
     }
 
     if transition_active || tracks_active {
@@ -891,8 +893,12 @@ mod tests {
             }));
         }
 
-        assert!(registry.get_or_create(42, "first", &HashMap::new()).is_some());
-        assert!(registry.get_or_create(42, "second", &HashMap::new()).is_some());
+        assert!(registry
+            .get_or_create(42, "first", &HashMap::new())
+            .is_some());
+        assert!(registry
+            .get_or_create(42, "second", &HashMap::new())
+            .is_some());
         assert_eq!(destroyed.get(), 1);
     }
 }

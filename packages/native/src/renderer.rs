@@ -22,13 +22,13 @@ use cocoa::{
 use futures::{channel::mpsc, StreamExt as _};
 use gpui::AppContext as _;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-use napi::bindgen_prelude::*;
-#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use napi::bindgen_prelude::PromiseRaw;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-use napi::{JsDeferred, JsValue};
+use napi::bindgen_prelude::*;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+use napi::{JsDeferred, JsValue};
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use napi_derive::napi;
 #[cfg(target_os = "macos")]
@@ -218,7 +218,10 @@ pub(crate) fn pending_hover_within_group_diagnostic(
 ) -> Option<PendingStyleDiagnostic> {
     let style = tree.elements.get(&element_id)?.style.as_deref()?;
     let target = style.hover_within_group.as_deref()?;
-    let mut current = tree.elements.get(&element_id).and_then(|element| element.parent);
+    let mut current = tree
+        .elements
+        .get(&element_id)
+        .and_then(|element| element.parent);
     while let Some(id) = current {
         let Some(element) = tree.elements.get(&id) else {
             break;
@@ -1589,7 +1592,9 @@ enum UiCommand {
     ActivateWindow,
     /// Show the window `init` opened hidden; see `PendingWindowReveal`.
     #[cfg(target_os = "windows")]
-    RevealWindow { activate: bool },
+    RevealWindow {
+        activate: bool,
+    },
     MinimizeWindow,
     ZoomWindow,
     ToggleFullscreen,
@@ -1823,8 +1828,7 @@ async fn run_ui_commands(
                 timestamp_origin,
                 requested_timestamp_origin,
             } => window.update(cx, move |_view, window, _cx| {
-                let origin =
-                    animation_frame_origin(&timestamp_origin, requested_timestamp_origin);
+                let origin = animation_frame_origin(&timestamp_origin, requested_timestamp_origin);
                 window.on_next_frame(move |_window, _cx| {
                     dispatch_animation_frame_callback(
                         callback,
@@ -2093,7 +2097,9 @@ async fn run_ui_commands(
             }
             UiCommand::GetElementInteractionState { id, response } => {
                 window.update(cx, move |view, window, _cx| {
-                    response.send(view.element_interaction_state(id, window)).ok();
+                    response
+                        .send(view.element_interaction_state(id, window))
+                        .ok();
                 })
             }
             UiCommand::PromptForPaths { options, deferred } => {
@@ -2610,8 +2616,11 @@ pub fn test_on_screen_window_owner_pids() -> Result<Vec<u32>> {
     // writes into `pids` through the `LPARAM` it receives, for the duration
     // of this synchronous call.
     unsafe {
-        EnumWindows(Some(collect_window), LPARAM(&mut pids as *mut Vec<u32> as isize))
-            .map_err(|error| Error::new(Status::GenericFailure, format!("{error}")))?;
+        EnumWindows(
+            Some(collect_window),
+            LPARAM(&mut pids as *mut Vec<u32> as isize),
+        )
+        .map_err(|error| Error::new(Status::GenericFailure, format!("{error}")))?;
     }
     Ok(pids)
 }
@@ -3329,23 +3338,20 @@ impl GpuixRenderer {
             // see `PendingWindowReveal`.
             let mut gpui_window_options = to_gpui_window_options(&window_options, bounds);
             gpui_window_options.show = false;
-            match cx.open_window(
-                gpui_window_options,
-                |_window, cx| {
-                    cx.new(|view_cx| {
-                        GpuixView::new(
-                            tree.clone(),
-                            canvas_display_lists.clone(),
-                            callback.clone(),
-                            window_event_callback.clone(),
-                            title,
-                            selection.clone(),
-                            image_network_policy.clone(),
-                            view_cx,
-                        )
-                    })
-                },
-            ) {
+            match cx.open_window(gpui_window_options, |_window, cx| {
+                cx.new(|view_cx| {
+                    GpuixView::new(
+                        tree.clone(),
+                        canvas_display_lists.clone(),
+                        callback.clone(),
+                        window_event_callback.clone(),
+                        title,
+                        selection.clone(),
+                        image_network_policy.clone(),
+                        view_cx,
+                    )
+                })
+            }) {
                 Ok(window_handle) => {
                     *opened_window_for_app.borrow_mut() = Some(window_handle);
                     let default_menus_app_name = defer_default_menus.then(|| app_name.clone());
@@ -3538,23 +3544,20 @@ impl GpuixRenderer {
                         {
                             gpui_window_options.show = false;
                         }
-                        let window = match cx.open_window(
-                            gpui_window_options,
-                            |_window, cx| {
-                                cx.new(|view_cx| {
-                                    GpuixView::new(
-                                        tree,
-                                        canvas_display_lists,
-                                        callback,
-                                        window_event_callback,
-                                        title,
-                                        selection,
-                                        image_network_policy,
-                                        view_cx,
-                                    )
-                                })
-                            },
-                        ) {
+                        let window = match cx.open_window(gpui_window_options, |_window, cx| {
+                            cx.new(|view_cx| {
+                                GpuixView::new(
+                                    tree,
+                                    canvas_display_lists,
+                                    callback,
+                                    window_event_callback,
+                                    title,
+                                    selection,
+                                    image_network_policy,
+                                    view_cx,
+                                )
+                            })
+                        }) {
                             Ok(window) => window,
                             Err(error) => {
                                 startup_sender
@@ -3714,22 +3717,57 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn apply_canvas_command_delta(&self, id: f64, ops: Uint32Array, operands: Float64Array, strings: Vec<String>) -> Result<()> {
+    pub fn apply_canvas_command_delta(
+        &self,
+        id: f64,
+        ops: Uint32Array,
+        operands: Float64Array,
+        strings: Vec<String>,
+    ) -> Result<()> {
         self.surface_canvas_preparation_diagnostics()?;
-        let id = to_element_id(id)?; let tree = self.tree.lock().unwrap();
+        let id = to_element_id(id)?;
+        let tree = self.tree.lock().unwrap();
         validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
-        let decoded = crate::canvas::decode_delta(&self.canvas_display_lists, id, ops.as_ref(), operands.as_ref(), &strings, canvas_size(&tree, id)).map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
+        let decoded = crate::canvas::decode_delta(
+            &self.canvas_display_lists,
+            id,
+            ops.as_ref(),
+            operands.as_ref(),
+            &strings,
+            canvas_size(&tree, id),
+        )
+        .map_err(|error| Error::from_reason(format!("<canvas> element {id}: {error}")))?;
         let strict = self.strict_styles.load(Ordering::Relaxed);
-        if strict && !decoded.diagnostics.is_empty() { let message = first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics).unwrap(); return Err(Error::from_reason(message)); }
-        let outcome = crate::canvas::install_decoded_delta(&self.canvas_display_lists, id, decoded); drop(tree);
-        if !strict { self.style_diagnostics.lock().unwrap().extend(fresh_canvas_diagnostics(id, outcome.diagnostics, &self.canvas_diagnostic_members)); }
-        if outcome.invalidates { self.request_invalidate()?; } Ok(())
+        if strict && !decoded.diagnostics.is_empty() {
+            let message = first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics).unwrap();
+            return Err(Error::from_reason(message));
+        }
+        let outcome = crate::canvas::install_decoded_delta(&self.canvas_display_lists, id, decoded);
+        drop(tree);
+        if !strict {
+            self.style_diagnostics
+                .lock()
+                .unwrap()
+                .extend(fresh_canvas_diagnostics(
+                    id,
+                    outcome.diagnostics,
+                    &self.canvas_diagnostic_members,
+                ));
+        }
+        if outcome.invalidates {
+            self.request_invalidate()?;
+        }
+        Ok(())
     }
 
     #[napi]
     pub fn reset_canvas(&self, id: f64) -> Result<()> {
-        let id = to_element_id(id)?; let tree = self.tree.lock().unwrap(); validate_canvas_target(&tree, id).map_err(Error::from_reason)?; drop(tree);
-        crate::canvas::reset_canvas(&self.canvas_display_lists, id); self.request_invalidate()
+        let id = to_element_id(id)?;
+        let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
+        drop(tree);
+        crate::canvas::reset_canvas(&self.canvas_display_lists, id);
+        self.request_invalidate()
     }
 }
 
@@ -4551,8 +4589,7 @@ impl GpuixRenderer {
         {
             let timestamp_origin = self.animation_frame_timestamp_origin.clone();
             return update_window_without_view(move |window, _cx| {
-                let origin =
-                    animation_frame_origin(&timestamp_origin, requested_timestamp_origin);
+                let origin = animation_frame_origin(&timestamp_origin, requested_timestamp_origin);
                 window.on_next_frame(move |_window, _cx| {
                     dispatch_animation_frame_callback(
                         callback,
@@ -5728,9 +5765,7 @@ impl GpuixRenderer {
         let id = to_element_id(id)?;
         #[cfg(target_os = "macos")]
         draw_window_for_automation_read()?;
-        Ok(self
-            .element_bounds(id)?
-            .map(ElementBounds::from_painted))
+        Ok(self.element_bounds(id)?.map(ElementBounds::from_painted))
     }
 
     /// Start reporting post-paint size changes for one retained element.
@@ -6082,6 +6117,11 @@ impl GpuixRenderer {
     ) -> Result<()> {
         let modifiers =
             crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
+
+        #[cfg(target_os = "macos")]
+        update_window(|view, _window, _cx| {
+            view.last_pointer_position = Some((x, y));
+        })?;
 
         #[cfg(target_os = "macos")]
         return update_window_without_view(move |window, cx| {
@@ -6881,17 +6921,74 @@ impl WebGpuixRenderer {
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = applyCanvasCommandDelta)]
-    pub fn apply_canvas_command_delta_web(&self, id: f64, ops: js_sys::Uint32Array, operands: js_sys::Float64Array, strings: js_sys::Array) -> Result<(), wasm_bindgen::JsValue> {
-        self.surface_canvas_preparation_diagnostics()?; let id = web_element_id(id)?; let tree = self.tree.lock().unwrap(); validate_canvas_target(&tree, id).map_err(|e| wasm_bindgen::JsValue::from_str(&e))?;
-        let mut op_values=vec![0;ops.length() as usize]; ops.copy_to(&mut op_values); let mut operand_values=vec![0.0;operands.length() as usize]; operands.copy_to(&mut operand_values);
-        let strings=strings.iter().enumerate().map(|(i,v)|v.as_string().ok_or_else(||wasm_bindgen::JsValue::from_str(&format!("<canvas> element {id}: side-table entry {i} is not a string")))).collect::<Result<Vec<_>,_>>()?;
-        let decoded=crate::canvas::decode_delta(&self.canvas_display_lists,id,&op_values,&operand_values,&strings,canvas_size(&tree,id)).map_err(|e|wasm_bindgen::JsValue::from_str(&format!("<canvas> element {id}: {e}")))?;
-        let strict=self.strict_styles.load(Ordering::Relaxed); if strict&&!decoded.diagnostics.is_empty(){return Err(wasm_bindgen::JsValue::from_str(&first_canvas_diagnostic_message(&tree,id,&decoded.diagnostics).unwrap()));}
-        let outcome=crate::canvas::install_decoded_delta(&self.canvas_display_lists,id,decoded); if !strict { for diagnostic in fresh_canvas_diagnostics(id,outcome.diagnostics,&self.canvas_diagnostic_members){web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&style_diagnostic_context(&diagnostic,&tree).0));} } drop(tree); if outcome.invalidates{notify_web();} Ok(())
+    pub fn apply_canvas_command_delta_web(
+        &self,
+        id: f64,
+        ops: js_sys::Uint32Array,
+        operands: js_sys::Float64Array,
+        strings: js_sys::Array,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        self.surface_canvas_preparation_diagnostics()?;
+        let id = web_element_id(id)?;
+        let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id).map_err(|e| wasm_bindgen::JsValue::from_str(&e))?;
+        let mut op_values = vec![0; ops.length() as usize];
+        ops.copy_to(&mut op_values);
+        let mut operand_values = vec![0.0; operands.length() as usize];
+        operands.copy_to(&mut operand_values);
+        let strings = strings
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                v.as_string().ok_or_else(|| {
+                    wasm_bindgen::JsValue::from_str(&format!(
+                        "<canvas> element {id}: side-table entry {i} is not a string"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let decoded = crate::canvas::decode_delta(
+            &self.canvas_display_lists,
+            id,
+            &op_values,
+            &operand_values,
+            &strings,
+            canvas_size(&tree, id),
+        )
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&format!("<canvas> element {id}: {e}")))?;
+        let strict = self.strict_styles.load(Ordering::Relaxed);
+        if strict && !decoded.diagnostics.is_empty() {
+            return Err(wasm_bindgen::JsValue::from_str(
+                &first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics).unwrap(),
+            ));
+        }
+        let outcome = crate::canvas::install_decoded_delta(&self.canvas_display_lists, id, decoded);
+        if !strict {
+            for diagnostic in
+                fresh_canvas_diagnostics(id, outcome.diagnostics, &self.canvas_diagnostic_members)
+            {
+                web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(
+                    &style_diagnostic_context(&diagnostic, &tree).0,
+                ));
+            }
+        }
+        drop(tree);
+        if outcome.invalidates {
+            notify_web();
+        }
+        Ok(())
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = resetCanvas)]
-    pub fn reset_canvas_web(&self,id:f64)->Result<(),wasm_bindgen::JsValue>{let id=web_element_id(id)?;let tree=self.tree.lock().unwrap();validate_canvas_target(&tree,id).map_err(|e|wasm_bindgen::JsValue::from_str(&e))?;drop(tree);crate::canvas::reset_canvas(&self.canvas_display_lists,id);notify_web();Ok(())}
+    pub fn reset_canvas_web(&self, id: f64) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(id)?;
+        let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id).map_err(|e| wasm_bindgen::JsValue::from_str(&e))?;
+        drop(tree);
+        crate::canvas::reset_canvas(&self.canvas_display_lists, id);
+        notify_web();
+        Ok(())
+    }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = isInitialized)]
     pub fn is_initialized(&self) -> bool {
@@ -7005,9 +7102,8 @@ impl WebGpuixRenderer {
         element_id: f64,
     ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
-        let state = update_web_view(move |view, window, _cx| {
-            view.element_interaction_state(id, window)
-        })?;
+        let state =
+            update_web_view(move |view, window, _cx| view.element_interaction_state(id, window))?;
         element_interaction_state_js(state)
     }
 
@@ -7095,9 +7191,11 @@ impl WebGpuixRenderer {
         let generation = update_web_view(move |view, _window, _cx| {
             view.custom_registry.image_request_generation(id)
         })?;
-        Ok(generation.map_or(wasm_bindgen::JsValue::NULL, |generation| {
-            wasm_bindgen::JsValue::from_f64(generation as f64)
-        }))
+        Ok(
+            generation.map_or(wasm_bindgen::JsValue::NULL, |generation| {
+                wasm_bindgen::JsValue::from_f64(generation as f64)
+            }),
+        )
     }
 
     /// `[selectionStart, selectionEnd, backward]` in UTF-16 code units, or null.
@@ -7648,6 +7746,9 @@ pub(crate) struct GpuixView {
     /// it once per mouse event; the React bridge expands its ancestry into DOM
     /// mouseenter/mouseleave transitions.
     hover_target: Option<u64>,
+    /// Last event position delivered through the rendered tree. Window::mouse_position
+    /// can be platform-global and outside window-local bounds after scheduler changes.
+    pub(crate) last_pointer_position: Option<(f64, f64)>,
     /// Retained elements whose GPUI hitboxes are currently hovered. GPUI only
     /// reports hover edges, so this preserves hovered ancestors when a more
     /// specific descendant reports that it is no longer hovered.
@@ -7969,6 +8070,7 @@ impl GpuixView {
             external_drag_target: None,
             external_drag_paths: None,
             hover_target: None,
+            last_pointer_position: None,
             hovered_targets: HashSet::new(),
             reported_hover_target: None,
             hover_target_dispatch_pending: false,
@@ -8162,6 +8264,25 @@ impl GpuixView {
         });
     }
 
+    fn pointer_is_over_visible_hover_group(
+        &self,
+        id: u64,
+        window: &gpui::Window,
+    ) -> bool {
+        let Some(bounds) = crate::automation::get_bounds(id) else {
+            return false;
+        };
+        let (x, y) = self
+            .last_pointer_position
+            .unwrap_or_else(|| point_to_xy(window.mouse_position()));
+        bounds.width > 0.0
+            && bounds.height > 0.0
+            && x >= bounds.x
+            && x <= bounds.x + bounds.width
+            && y >= bounds.y
+            && y <= bounds.y + bounds.height
+    }
+
     /// Publish the target implied by a GPUI mouse-move callback before the
     /// move itself. GPUI defers `on_hover` until paint, while the DOM delivers
     /// the entered ancestry before the first `mousemove`. `on_mouse_move`
@@ -8237,12 +8358,7 @@ impl GpuixView {
         if self.external_drag_target != Some(id) {
             if let Some(previous) = self.external_drag_target {
                 let previous_paths = self.external_drag_paths.as_deref().unwrap_or_default();
-                self.dispatch_external_drag_event(
-                    previous,
-                    "dragLeave",
-                    previous_paths,
-                    position,
-                );
+                self.dispatch_external_drag_event(previous, "dragLeave", previous_paths, position);
             }
             self.clear_external_drag_path();
             self.set_external_drag_path(id, true);
@@ -8414,12 +8530,17 @@ impl GpuixView {
     pub(crate) fn cancel_pointer_sequence(&mut self, window: &mut gpui::Window) -> bool {
         let was_pressed = self.pointer_router.borrow().is_pressed();
         if let Some(cancelled) = self.pointer_router.borrow_mut().cancel() {
-            emit_event_full(&self.event_callback, cancelled.target, "pointerCancel", |payload| {
-                payload.x = cancelled.x;
-                payload.y = cancelled.y;
-                payload.modifiers = cancelled.modifiers;
-                populate_pointer_metadata(payload, 0);
-            });
+            emit_event_full(
+                &self.event_callback,
+                cancelled.target,
+                "pointerCancel",
+                |payload| {
+                    payload.x = cancelled.x;
+                    payload.y = cancelled.y;
+                    payload.modifiers = cancelled.modifiers;
+                    populate_pointer_metadata(payload, 0);
+                },
+            );
             window.release_pointer();
         }
         // After the element's `pointerCancel`, as a DOM `pointercancel` reaches
@@ -8762,6 +8883,12 @@ impl GpuixView {
         self.focus_handles
             .iter()
             .find_map(|(id, handle)| handle.is_focused(window).then_some(*id))
+    }
+
+    fn has_focused_host_element(&self, window: &gpui::Window) -> bool {
+        self.focus_handles
+            .values()
+            .any(|handle| handle.is_focused(window))
     }
 
     pub(crate) fn element_interaction_state(
@@ -10238,7 +10365,8 @@ impl GpuixView {
                         if target == before {
                             return false;
                         }
-                        state.set_offset_from_scrollbar(gpui::point(gpui::px(0.), gpui::px(target)));
+                        state
+                            .set_offset_from_scrollbar(gpui::point(gpui::px(0.), gpui::px(target)));
                     }
                 }
                 let after = f32::from(state.scroll_px_offset_for_scrollbar().y);
@@ -10399,8 +10527,7 @@ impl GpuixView {
         while let Some(id) = stack.pop() {
             let visible = !self.display_none_in_ancestry(&tree, id, window);
             let is_focusable = self.focus_handles.get(&id).is_some_and(|handle| {
-                (handle.tab_stop && handle.tab_index >= 0)
-                    || (id == current_id && !handle.tab_stop)
+                (handle.tab_stop && handle.tab_index >= 0) || (id == current_id && !handle.tab_stop)
             });
             if visible && is_focusable {
                 focusable.push((id, order));
@@ -10619,11 +10746,12 @@ impl GpuixView {
         };
         // A radio group is one tab stop; its other members are reached with
         // the arrow keys.
-        let radio_tab_skips = crate::custom_elements::choice_input::RadioGroups::collect(tree, |id| {
-            self.display_none_in_ancestry(tree, id, window)
-                || accessibility_hidden_in_ancestry(tree, id)
-        })
-        .tab_skips();
+        let radio_tab_skips =
+            crate::custom_elements::choice_input::RadioGroups::collect(tree, |id| {
+                self.display_none_in_ancestry(tree, id, window)
+                    || accessibility_hidden_in_ancestry(tree, id)
+            })
+            .tab_skips();
         let is_focus_anchor = |element: &crate::retained_tree::RetainedElement| {
             focused_id == Some(element.id)
                 && !sequential_tab_index(element).is_some_and(|index| index >= 0)
@@ -11071,7 +11199,7 @@ impl gpui::Render for GpuixView {
 
         if self.focus_lost_subscription.is_none() {
             self.focus_lost_subscription = Some(cx.on_focus_lost(window, |view, window, cx| {
-                if window.focused(cx).is_none() {
+                if window.focused(cx).is_none() && !view.has_focused_host_element(window) {
                     view.root_focus_handle.focus(window, cx);
                 }
             }));
@@ -11079,7 +11207,7 @@ impl gpui::Render for GpuixView {
         // autoFocus is resolved above, before the fallback root can claim an
         // otherwise empty focus path. Once a retained element has focus this
         // check remains inert, including across ordinary React re-renders.
-        if window.focused(cx).is_none() {
+        if window.focused(cx).is_none() && !self.has_focused_host_element(window) {
             self.root_focus_handle.focus(window, cx);
         }
 
@@ -11203,31 +11331,33 @@ impl gpui::Render for GpuixView {
                 .size_full()
                 .text_color(gpui::rgba(0xe2e2e2ff))
                 .track_focus(&self.root_focus_handle)
+                .on_mouse_move(cx.listener(|view, event: &gpui::MouseMoveEvent, _window, _cx| {
+                    view.last_pointer_position = Some(point_to_xy(event.position));
+                }))
                 .on_action(cx.listener(Self::focus_next_action))
                 .on_action(cx.listener(Self::focus_previous_action))
-                .on_key_down(
-                    cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
-                        let activates = (event.keystroke.key == "enter" || event.keystroke.key == "space")
-                            && !event.keystroke.modifiers.modified();
-                        if !activates && view.clear_keyboard_active() {
-                            cx.notify();
-                        }
-                        view.dispatch_unfocused_key_event(
+                .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
+                    let activates = (event.keystroke.key == "enter"
+                        || event.keystroke.key == "space")
+                        && !event.keystroke.modifiers.modified();
+                    if !activates && view.clear_keyboard_active() {
+                        cx.notify();
+                    }
+                    view.dispatch_unfocused_key_event(
+                        "keyDown",
+                        &event.keystroke,
+                        Some(event.is_held),
+                        window,
+                    );
+                    if !view.handle_scroll_key_down(event, window, cx) {
+                        view.dispatch_focused_key_event(
                             "keyDown",
                             &event.keystroke,
                             Some(event.is_held),
                             window,
                         );
-                        if !view.handle_scroll_key_down(event, window, cx) {
-                            view.dispatch_focused_key_event(
-                                "keyDown",
-                                &event.keystroke,
-                                Some(event.is_held),
-                                window,
-                            );
-                        }
-                    }),
-                )
+                    }
+                }))
                 .on_key_up(cx.listener(|view, event: &gpui::KeyUpEvent, window, cx| {
                     if view.clear_keyboard_active() {
                         cx.notify();
@@ -11537,8 +11667,7 @@ fn build_element_with_parent_layout(
         hover_within_group_target,
         ctx.interactive_style_states,
     );
-    let (hover_within, active_within) =
-        (hover_groups.hover_within, hover_groups.active_within);
+    let (hover_within, active_within) = (hover_groups.hover_within, hover_groups.active_within);
     let focus_within = is_focus_within(ctx.tree, ctx.focus_handles, id, window);
     let effective_display = element.style.as_deref().and_then(|style| {
         effective_display(
@@ -11945,16 +12074,16 @@ fn build_element_with_parent_layout(
                 let listener = focus_paint_bounds_listener(id, ctx);
                 match box_insets {
                     Some(insets) => Some(std::rc::Rc::new(
-                        move |
-                            bounds: gpui::Bounds<gpui::Pixels>,
-                            window: &mut gpui::Window,
-                            cx: &mut gpui::App| {
-                        crate::automation::record_box_insets(id, insets);
-                        if let Some(listener) = &listener {
-                            listener(bounds, window, cx);
-                        }
+                        move |bounds: gpui::Bounds<gpui::Pixels>,
+                              window: &mut gpui::Window,
+                              cx: &mut gpui::App| {
+                            crate::automation::record_box_insets(id, insets);
+                            if let Some(listener) = &listener {
+                                listener(bounds, window, cx);
+                            }
                         },
-                    ) as crate::automation::PaintBoundsListener),
+                    )
+                        as crate::automation::PaintBoundsListener),
                     None => listener,
                 }
             };
@@ -12795,10 +12924,10 @@ fn effective_intrinsic_state_style(style: &StyleDesc, state: InteractionProbeSta
 }
 
 fn box_insets_for_style(style: &StyleDesc) -> crate::automation::BoxInsets {
-    let side =
-        |longhand: fn(&StyleDesc) -> Option<f64>, shorthand: fn(&StyleDesc) -> Option<f64>| {
-            longhand(style).or_else(|| shorthand(style)).unwrap_or(0.0)
-        };
+    let side = |longhand: fn(&StyleDesc) -> Option<f64>,
+                shorthand: fn(&StyleDesc) -> Option<f64>| {
+        longhand(style).or_else(|| shorthand(style)).unwrap_or(0.0)
+    };
     let borders_suppressed = style
         .border_style
         .as_deref()
@@ -13461,13 +13590,8 @@ fn build_virtual_list(
         ctx.inherited.accessibility_hidden,
         crate::accessibility::AccessibleText::default(),
     );
-    let list = crate::automation::track_own_bounds_with_insets(
-        list,
-        element.id,
-        None,
-        None,
-        box_insets,
-    );
+    let list =
+        crate::automation::track_own_bounds_with_insets(list, element.id, None, None, box_insets);
     if let Some(group) = style.and_then(|style| style.resolved_hover_group.as_ref()) {
         // `gpui::List` is Styled but has no interactive identity. A transparent
         // stateful surface gives the retained virtual-list node the same group
@@ -13488,6 +13612,7 @@ fn build_virtual_list(
             .relative()
             .group(group.clone())
             .child(list)
+            .hover_listener_mode(gpui::HoverListenerMode::InputModalityIndependent)
             .on_hover(cx.listener(move |view, is_hovered: &bool, _window, cx| {
                 if view
                     .interactive_style_states
@@ -14176,18 +14301,10 @@ mod external_drag_tracking_tests {
         assert!(tracks_external_drag_events(&tree.elements[&2], &tree));
         assert_eq!(external_drag_legacy_target(2, &tree), Some(1));
 
-        tree.elements
-            .get_mut(&2)
-            .unwrap()
-            .events
-            .remove("drop");
+        tree.elements.get_mut(&2).unwrap().events.remove("drop");
         assert_eq!(external_drag_legacy_target(2, &tree), Some(1));
 
-        tree.elements
-            .get_mut(&1)
-            .unwrap()
-            .events
-            .remove("fileDrop");
+        tree.elements.get_mut(&1).unwrap().events.remove("fileDrop");
         tree.elements
             .get_mut(&2)
             .unwrap()
@@ -14321,11 +14438,11 @@ where
     // separate, optional payload selected from its nearest direct marker.
     if tracks_external_drag {
         let legacy_target = external_drag_legacy_target(element.id, tree);
-        el = el.on_drop(cx.listener(
-            move |view, dropped: &gpui::ExternalPaths, window, _cx| {
+        el = el.on_drop(
+            cx.listener(move |view, dropped: &gpui::ExternalPaths, window, _cx| {
                 view.submit_external_drag(legacy_target, dropped, window.mouse_position());
-            },
-        ));
+            }),
+        );
     }
 
     el
@@ -14396,7 +14513,10 @@ fn interaction_state_for_element(
         .get(&element_id)
         .and_then(|element| element.style.as_deref())
         .and_then(|style| style.hover_within_group.as_deref());
-    let mut current = tree.elements.get(&element_id).and_then(|element| element.parent);
+    let mut current = tree
+        .elements
+        .get(&element_id)
+        .and_then(|element| element.parent);
     let mut hover_within = false;
     let mut active_within = false;
     while let Some(id) = current {
@@ -14430,7 +14550,13 @@ fn interaction_state_for_element(
         current = element.parent;
     }
     let focus_within = is_focus_within(tree, focus_handles, element_id, window);
-    (focused, focus_visible, hover_within, focus_within, active_within)
+    (
+        focused,
+        focus_visible,
+        hover_within,
+        focus_within,
+        active_within,
+    )
 }
 
 fn effective_display<'a>(
@@ -14671,23 +14797,27 @@ where
     let tracks_mouse_up = tracks_pointer_event(element, ctx.tree, "mouseUp");
     let tracks_pointer_up = tracks_pointer_event(element, ctx.tree, "pointerUp");
     let tracks_active = tracks_active(element.style.as_deref());
-    let transition_active = element.style.as_deref().is_some_and(|style| {
-        style.transition.is_some() && style.active.is_some()
-    });
+    let transition_active = element
+        .style
+        .as_deref()
+        .is_some_and(|style| style.transition.is_some() && style.active.is_some());
     if tracks_active || transition_active {
         let focus_handle = ctx.focus_handles.get(&element.id).cloned();
         let id = element.id;
-        el = el.on_key_down(cx.listener(move |view, key_event: &gpui::KeyDownEvent, window, cx| {
-            let activates = (key_event.keystroke.key == "enter" || key_event.keystroke.key == "space")
-                && !key_event.keystroke.modifiers.modified();
-            if activates
-                && (activates_on_space || key_event.keystroke.key != "space")
-                && is_focused(focus_handle.as_ref(), window)
-                && view.begin_keyboard_active(id, window, cx)
-            {
-                cx.notify();
-            }
-        }));
+        el = el.on_key_down(cx.listener(
+            move |view, key_event: &gpui::KeyDownEvent, window, cx| {
+                let activates = (key_event.keystroke.key == "enter"
+                    || key_event.keystroke.key == "space")
+                    && !key_event.keystroke.modifiers.modified();
+                if activates
+                    && (activates_on_space || key_event.keystroke.key != "space")
+                    && is_focused(focus_handle.as_ref(), window)
+                    && view.begin_keyboard_active(id, window, cx)
+                {
+                    cx.notify();
+                }
+            },
+        ));
     }
     let callback = ctx.event_callback.clone();
     let id = element.id;
@@ -14840,6 +14970,7 @@ pub(crate) fn build_host_container(
     // allocating a formatted name for every `<div>` and `<text>` on every frame.
     let mut el = gpui::div().id(gpui::ElementId::Integer(element.id));
     let tracks_hover = tracks_hover(style);
+    let tracks_hover_group = style.is_some_and(|style| style.hover_group.is_some());
     let tracks_active = tracks_active(style);
     let tracks_mouse_hover = tracks_mouse_hover_events(element, ctx.tree);
 
@@ -15159,9 +15290,9 @@ pub(crate) fn build_host_container(
     let tracks_pointer_cancel = tracks_pointer_event(element, ctx.tree, "pointerCancel");
     let tracks_context_menu = tracks_pointer_event(element, ctx.tree, "contextMenu");
     if tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel || tracks_context_menu {
-        for &button in mouse_down_button_set(
-            tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel,
-        ) {
+        for &button in
+            mouse_down_button_set(tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel)
+        {
             let callback = ctx.event_callback.clone();
             let id = element.id;
             el = el.on_mouse_down(
@@ -15217,30 +15348,36 @@ pub(crate) fn build_host_container(
         el = el.capture_pointer();
     }
 
-    if transition_hover || tracks_hover || tracks_mouse_hover {
+    if transition_hover || tracks_hover || tracks_hover_group || tracks_mouse_hover {
         let id = element.id;
-        el = el.on_hover(cx.listener(move |view, is_hovered: &bool, window, cx| {
-            let transition_changed = transition_hover
-                && view
-                    .transition_states
-                    .get_mut(&id)
-                    .is_some_and(|state| state.set_hovered(*is_hovered));
-            let interactive_changed = tracks_hover
-                && view
-                    .interactive_style_states
-                    .entry(id)
-                    .or_default()
-                    .set_hovered(*is_hovered);
-            if interactive_changed {
-                view.interaction_revision = view.interaction_revision.saturating_add(1);
-            }
-            if transition_changed || interactive_changed {
-                cx.notify();
-            }
+        el = el
+            .hover_listener_mode(gpui::HoverListenerMode::InputModalityIndependent)
+            .on_hover(cx.listener(move |view, is_hovered: &bool, window, cx| {
+                let is_hovered = *is_hovered
+                    || (!*is_hovered
+                        && tracks_hover_group
+                        && view.pointer_is_over_visible_hover_group(id, window));
+                let transition_changed = transition_hover
+                    && view
+                        .transition_states
+                        .get_mut(&id)
+                        .is_some_and(|state| state.set_hovered(is_hovered));
+                let interactive_changed = (tracks_hover || tracks_hover_group)
+                    && view
+                        .interactive_style_states
+                        .entry(id)
+                        .or_default()
+                        .set_hovered(is_hovered);
+                if interactive_changed {
+                    view.interaction_revision = view.interaction_revision.saturating_add(1);
+                }
+                if transition_changed || interactive_changed {
+                    cx.notify();
+                }
             if tracks_mouse_hover {
-                view.update_hover_target(id, *is_hovered, window, cx);
+                view.update_hover_target(id, is_hovered, window, cx);
             }
-        }));
+            }));
     }
 
     if transition_active || tracks_active {
@@ -16496,7 +16633,10 @@ pub(crate) fn emit_pointer_move(
         payload.pressed_button = event.pressed_button.map(mouse_button_to_u32);
         populate_pointer_metadata(
             payload,
-            event.pressed_button.map(mouse_button_bit).unwrap_or_default(),
+            event
+                .pressed_button
+                .map(mouse_button_bit)
+                .unwrap_or_default(),
         );
     });
 }
@@ -17831,9 +17971,9 @@ fn to_layer_shell_options(options: &LayerShellOptions) -> gpui::layer_shell::Lay
         _ => Layer::Top,
     };
     let anchor = match options.anchor.as_deref() {
-        Some(names) if !names.is_empty() => names
-            .iter()
-            .fold(Anchor::empty(), |acc, name| acc | layer_shell_anchor_bit(name)),
+        Some(names) if !names.is_empty() => names.iter().fold(Anchor::empty(), |acc, name| {
+            acc | layer_shell_anchor_bit(name)
+        }),
         _ => Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
     };
     let keyboard_interactivity = match options.keyboard_interactivity.as_deref() {
@@ -18542,10 +18682,7 @@ mod window_options_tests {
                     opts.margin,
                     Some((gpui::px(0.0), gpui::px(0.0), gpui::px(0.0), gpui::px(0.0)))
                 );
-                assert_eq!(
-                    opts.keyboard_interactivity,
-                    KeyboardInteractivity::None
-                );
+                assert_eq!(opts.keyboard_interactivity, KeyboardInteractivity::None);
             }
             other => panic!("expected a layer-shell window kind, got {other:?}"),
         }

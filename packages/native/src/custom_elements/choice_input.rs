@@ -190,7 +190,12 @@ impl RadioGroups {
                 .find(|(_, checked)| *checked)
                 .or_else(|| group.first())
                 .map(|(id, _)| *id);
-            skips.extend(group.iter().map(|(id, _)| *id).filter(|id| Some(*id) != stop));
+            skips.extend(
+                group
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .filter(|id| Some(*id) != stop),
+            );
         }
         skips
     }
@@ -255,7 +260,8 @@ impl ChoiceInputElement {
                             bounds.origin.y + px(height * y),
                         )
                     };
-                    let mut path = gpui::PathBuilder::stroke(px((width.min(height) * 0.14).max(1.0)));
+                    let mut path =
+                        gpui::PathBuilder::stroke(px((width.min(height) * 0.14).max(1.0)));
                     path.move_to(at(0.22, 0.52));
                     path.line_to(at(0.42, 0.72));
                     path.line_to(at(0.78, 0.30));
@@ -301,7 +307,11 @@ impl CustomElement for ChoiceInputElement {
             .border_1()
             .border_color(border)
             .rounded(corner)
-            .bg(if filled { self.theme.accent } else { self.theme.bg })
+            .bg(if filled {
+                self.theme.accent
+            } else {
+                self.theme.bg
+            })
             .overflow_hidden();
         if native_disabled {
             el = el.opacity(0.5);
@@ -365,15 +375,20 @@ impl CustomElement for ChoiceInputElement {
         if !native_disabled && ctx.style.is_some_and(|style| style.active.is_some()) {
             let focus_handle = ctx.focus_handle.cloned();
             let id = ctx.id;
-            el = el.on_key_down(cx.listener(move |view, event: &gpui::KeyDownEvent, window, cx| {
-                let activates = event.keystroke.key == "space" && !event.keystroke.modifiers.modified();
-                if activates
-                    && focus_handle.as_ref().is_some_and(|handle| handle.is_focused(window))
-                    && view.begin_keyboard_active(id, window, cx)
-                {
-                    cx.notify();
-                }
-            }));
+            el = el.on_key_down(cx.listener(
+                move |view, event: &gpui::KeyDownEvent, window, cx| {
+                    let activates =
+                        event.keystroke.key == "space" && !event.keystroke.modifiers.modified();
+                    if activates
+                        && focus_handle
+                            .as_ref()
+                            .is_some_and(|handle| handle.is_focused(window))
+                        && view.begin_keyboard_active(id, window, cx)
+                    {
+                        cx.notify();
+                    }
+                },
+            ));
         }
         if ctx.events.contains("keyDown") {
             let callback = ctx.event_callback.clone();
@@ -516,8 +531,14 @@ mod tests {
     #[test]
     fn indeterminate_is_mixed_only_on_a_checkbox() {
         let tree = tree_with(&[
-            (2, &[("type", "checkbox".into()), ("indeterminate", true.into())]),
-            (3, &[("type", "radio".into()), ("indeterminate", true.into())]),
+            (
+                2,
+                &[("type", "checkbox".into()), ("indeterminate", true.into())],
+            ),
+            (
+                3,
+                &[("type", "radio".into()), ("indeterminate", true.into())],
+            ),
             (4, &[("type", "radio".into()), ("checked", true.into())]),
         ]);
         assert_eq!(choice_state(&tree.elements[&2]), Some(gpui::Toggled::Mixed));
@@ -534,7 +555,11 @@ mod tests {
                 ("checked", checked.into()),
             ]
         };
-        let (a, b, c) = (radio("size", false), radio("size", true), radio("size", false));
+        let (a, b, c) = (
+            radio("size", false),
+            radio("size", true),
+            radio("size", false),
+        );
         let (d, e) = (radio("tone", false), radio("tone", false));
         let tree = tree_with(&[(2, &a), (3, &b), (4, &c), (5, &d), (6, &e)]);
         let groups = RadioGroups::collect(&tree, |_| false);

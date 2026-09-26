@@ -1555,7 +1555,15 @@ fn grid_track_sizing_has_fixed_component(track: &GridTrackValue) -> bool {
 fn grid_template_has_valid_auto_repetition(tracks: &[GridTrackValue]) -> bool {
     let auto_repetition_count = tracks
         .iter()
-        .filter(|track| matches!(track, GridTrackValue::Repeat { count: GridRepeatCount::Auto(_), .. }))
+        .filter(|track| {
+            matches!(
+                track,
+                GridTrackValue::Repeat {
+                    count: GridRepeatCount::Auto(_),
+                    ..
+                }
+            )
+        })
         .count();
 
     match auto_repetition_count {
@@ -2034,9 +2042,10 @@ fn parse_transition_shorthand(
         for token in tokens.iter().skip(1) {
             if token.ends_with("ms")
                 || token.ends_with('s')
-                || token.chars().next().is_some_and(|ch| {
-                    ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+'
-                })
+                || token
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+')
             {
                 match parse_transition_time(token) {
                     Ok(value) if time_count == 0 => {
@@ -2495,11 +2504,8 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         }
         if key == "hoverWithinGroup" {
             if prefix.is_empty() {
-                parsed.style.hover_within_group = decode::<String>(
-                    &property!("hoverWithinGroup"),
-                    value,
-                    &mut parsed.problems,
-                );
+                parsed.style.hover_within_group =
+                    decode::<String>(&property!("hoverWithinGroup"), value, &mut parsed.problems);
             } else {
                 reject(
                     &mut parsed.problems,
@@ -3750,7 +3756,14 @@ mod tests {
         }));
 
         assert_eq!(parsed.style.width, Some(DimensionValue::Pixels(120.0)));
-        assert_eq!(parsed.style.hover.as_deref().and_then(|style| style.opacity), Some(0.5));
+        assert_eq!(
+            parsed
+                .style
+                .hover
+                .as_deref()
+                .and_then(|style| style.opacity),
+            Some(0.5)
+        );
         assert_eq!(parsed.problems.len(), 1);
         assert_eq!(parsed.problems[0].property, "notAStyleProperty");
         assert_eq!(parsed.problems[0].reason, "unsupported style property");
@@ -3814,14 +3827,26 @@ mod tests {
         assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
         let transitions = parsed.style.transition.expect("transition list");
         assert_eq!(transitions.len(), 2);
-        assert_eq!(transitions[0].properties, vec![TransitionProperty::BackgroundColor]);
+        assert_eq!(
+            transitions[0].properties,
+            vec![TransitionProperty::BackgroundColor]
+        );
         assert_eq!(transitions[0].duration_ms, 120.0);
         assert_eq!(transitions[0].delay_ms, 0.0);
-        assert_eq!(transitions[0].easing, TransitionEasing::Name("easeOut".into()));
-        assert_eq!(transitions[1].properties, vec![TransitionProperty::BorderRadius]);
+        assert_eq!(
+            transitions[0].easing,
+            TransitionEasing::Name("easeOut".into())
+        );
+        assert_eq!(
+            transitions[1].properties,
+            vec![TransitionProperty::BorderRadius]
+        );
         assert_eq!(transitions[1].duration_ms, 200.0);
         assert_eq!(transitions[1].delay_ms, 40.0);
-        assert_eq!(transitions[1].easing, TransitionEasing::Name("linear".into()));
+        assert_eq!(
+            transitions[1].easing,
+            TransitionEasing::Name("linear".into())
+        );
     }
 
     #[test]
@@ -3851,7 +3876,11 @@ mod tests {
             assert!(parsed.style.transition.is_none(), "{value:?}");
             assert_eq!(parsed.problems.len(), 1, "{value:?}: {:?}", parsed.problems);
             assert!(parsed.problems[0].property == "transition");
-            assert!(parsed.problems[0].reason.contains(reason), "{:?}", parsed.problems);
+            assert!(
+                parsed.problems[0].reason.contains(reason),
+                "{:?}",
+                parsed.problems
+            );
         }
     }
 
@@ -3907,7 +3936,10 @@ mod tests {
 
         let parsed = parse_style_value(&json!({ "lineHeight": "16px" }));
         assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
-        assert_eq!(parsed.style.line_height, Some(LineHeightValue::Pixels(16.0)));
+        assert_eq!(
+            parsed.style.line_height,
+            Some(LineHeightValue::Pixels(16.0))
+        );
     }
 
     #[test]
@@ -4227,7 +4259,16 @@ mod tests {
             "hover": { "display": "grid", "opacity": 0.5 }
         }));
         assert!(hover_grid.problems.is_empty(), "{:?}", hover_grid.problems);
-        assert_eq!(hover_grid.style.hover.as_deref().unwrap().display.as_deref(), Some("grid"));
+        assert_eq!(
+            hover_grid
+                .style
+                .hover
+                .as_deref()
+                .unwrap()
+                .display
+                .as_deref(),
+            Some("grid")
+        );
 
         let hover_within_none = parse_style_value(&json!({
             "hoverWithin": { "display": "none" }
@@ -4500,7 +4541,11 @@ mod tests {
                 }]
             }));
 
-            assert!(parsed.problems.is_empty(), "{keyword}: {:?}", parsed.problems);
+            assert!(
+                parsed.problems.is_empty(),
+                "{keyword}: {:?}",
+                parsed.problems
+            );
             let expected = match keyword {
                 "auto-fill" => GridAutoRepeatKind::AutoFill,
                 _ => GridAutoRepeatKind::AutoFit,
@@ -4621,7 +4666,14 @@ mod tests {
 
     #[test]
     fn rejects_every_invalid_grid_repeat_count() {
-        for count in [json!(0), json!(2.5), json!(-1), json!(65), json!("auto"), json!("Auto-Fill")] {
+        for count in [
+            json!(0),
+            json!(2.5),
+            json!(-1),
+            json!(65),
+            json!("auto"),
+            json!("Auto-Fill"),
+        ] {
             let parsed = parse_style_value(&json!({
                 "gridTemplateColumns": [{
                     "type": "repeat",
@@ -4654,10 +4706,7 @@ mod tests {
         }));
         assert_eq!(fit_content_only.style.grid_template_columns, None);
         assert_eq!(fit_content_only.problems.len(), 1);
-        assert_eq!(
-            fit_content_only.problems[0].property,
-            "gridTemplateColumns"
-        );
+        assert_eq!(fit_content_only.problems[0].property, "gridTemplateColumns");
 
         // A `minmax()` with a fixed percentage lower bound does count, even
         // though its upper bound (`1fr`) does not.
@@ -5778,7 +5827,10 @@ mod tests {
             },
         }));
         assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
-        assert!(matches!(parsed.style.box_shadow, Some(BoxShadowValue::One(_))));
+        assert!(matches!(
+            parsed.style.box_shadow,
+            Some(BoxShadowValue::One(_))
+        ));
 
         let round_tripped = serde_json::to_value(&parsed.style).unwrap();
         assert!(round_tripped["boxShadow"].is_object());
@@ -5802,7 +5854,10 @@ mod tests {
         }));
         assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
         let Some(BoxShadowValue::Many(layers)) = &parsed.style.box_shadow else {
-            panic!("expected an array of layers, got {:?}", parsed.style.box_shadow);
+            panic!(
+                "expected an array of layers, got {:?}",
+                parsed.style.box_shadow
+            );
         };
         assert_eq!(layers.len(), 2);
         assert!(!layers[0].inset);
@@ -5833,7 +5888,10 @@ mod tests {
                 { "offsetX": 0.0, "offsetY": 2.0, "blurRadius": 0.0, "spreadRadius": 0.0, "color": "not-a-color" },
             ],
         }));
-        assert_eq!(parsed.style.box_shadow, None, "an invalid layer rejects the whole list");
+        assert_eq!(
+            parsed.style.box_shadow, None,
+            "an invalid layer rejects the whole list"
+        );
         assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
         assert_eq!(parsed.problems[0].property, "boxShadow[1].color");
     }

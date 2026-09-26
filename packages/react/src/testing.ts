@@ -17,6 +17,10 @@ import { fileURLToPath } from "node:url"
 import React, { act as reactAct, createElement, createRef, type ReactNode } from "react"
 import type { EventPayload, MenuSpec, PromptForPathsOptions } from "@gpuix/native"
 import {
+  beginResizeObserverDeliveryTurn,
+  flushPendingResizeObservations,
+} from "./resize-observer.js"
+import {
   getDefaultNormalizer,
   matches as matchesMatcher,
   resolveTestId,
@@ -1186,13 +1190,41 @@ export class TestRenderer implements NativeRenderer {
    *  surface a further frame's worth of events — in a loop until nothing is
    *  left. */
   dispatchNativeEvents(): boolean {
+    const endResizeObserverDeliveryTurn = beginResizeObserverDeliveryTurn()
+    try {
     const report = (error: unknown): void => reportUncaughtErrorToRenderer(this, error)
     let delivered = false
+    let hadPendingResizeObservations = false
+    actSync(report, () => {
+      hadPendingResizeObservations = flushPendingResizeObservations(this)
+    })
+    if (hadPendingResizeObservations) {
+      delivered = true
+    }
     for (;;) {
       const events = this.native.drainEvents()
       if (events.length === 0) break
       delivered = true
+      const resizeEvents = events.filter(
+        (event): event is EventPayload & { entries: NonNullable<EventPayload["entries"]> } =>
+          event.eventType === "resizeObservation" && Array.isArray(event.entries)
+      )
+      const resizeEntries = new Map<number, NonNullable<EventPayload["entries"]>[number]>()
+      for (const event of resizeEvents) {
+        for (const entry of event.entries) resizeEntries.set(entry.elementId, entry)
+      }
+      let resizeBatchDelivered = false
       for (const event of events) {
+        if (event.eventType === "resizeObservation") {
+          if (!resizeBatchDelivered && resizeEvents[0]) {
+            resizeBatchDelivered = true
+            const batch = { ...resizeEvents[0], entries: [...resizeEntries.values()] }
+            actSync(report, () => {
+              handleGpuixEvent(batch, this)
+            })
+          }
+          continue
+        }
         if (event.eventType === "windowResize" || event.eventType === "windowActivation") {
           actSync(report, () => {
             this.windowEventHandler?.(event)
@@ -1209,6 +1241,9 @@ export class TestRenderer implements NativeRenderer {
       }
     }
     return delivered
+    } finally {
+      endResizeObserverDeliveryTurn()
+    }
   }
 
   /** End-to-end: focus element → simulate keystrokes through GPUI →

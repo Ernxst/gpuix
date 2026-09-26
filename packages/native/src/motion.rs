@@ -509,7 +509,6 @@ impl TransitionValues {
                 .collect(),
         )
     }
-
 }
 
 impl TransitionValues {
@@ -594,7 +593,11 @@ impl StyleTransitionTrack {
 
         let duration = milliseconds(self.duration_ms);
         let raw = if duration.is_zero() {
-            if elapsed < delay { 0.0 } else { 1.0 }
+            if elapsed < delay {
+                0.0
+            } else {
+                1.0
+            }
         } else {
             elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
         };
@@ -1080,8 +1083,9 @@ pub(crate) fn intrinsic_probe(
     {
         return None;
     }
-    let (settled_width, settled_height) = retained
-        .map_or((false, false), |state| state.settles_intrinsic(&state.target_style));
+    let (settled_width, settled_height) = retained.map_or((false, false), |state| {
+        state.settles_intrinsic(&state.target_style)
+    });
     let latched = retained.map_or(IntrinsicSize::default(), |state| state.intrinsic);
     let previous_width = retained.and_then(|state| intrinsic_keyword(&state.target_style.width));
     let previous_height = retained.and_then(|state| intrinsic_keyword(&state.target_style.height));
@@ -1602,7 +1606,10 @@ where
             if value.is_finite()
                 && value >= 0.0
                 && value.fract() == 0.0
-                && value <= u32::MAX as f64 => Ok(MotionRepeat::Finite(value as u32)),
+                && value <= u32::MAX as f64 =>
+        {
+            Ok(MotionRepeat::Finite(value as u32))
+        }
         MotionRepeatInput::String(value) if value == "Infinity" => Ok(MotionRepeat::Infinite),
         MotionRepeatInput::Number(_) | MotionRepeatInput::String(_) => Err(
             serde::de::Error::custom("motion repeat must be a non-negative integer or Infinity"),
@@ -1744,7 +1751,8 @@ impl MotionState {
                 self.source = source.clone();
                 self.valid = false;
                 self.generation = source_generation(source);
-                self.needs_settle = source_is_exit(source) || self.generation != previous_generation;
+                self.needs_settle =
+                    source_is_exit(source) || self.generation != previous_generation;
                 return Err(error);
             }
         };

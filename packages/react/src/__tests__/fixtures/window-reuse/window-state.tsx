@@ -147,7 +147,16 @@ export function expectFreshWindow(): void {
     return
   }
   expect(screen.renderer, "the window is reused across files").toBe(record.renderer)
-  expect(state).toEqual(record.state)
+  // The shared scheduler counts the one-time Test-window bootstrap draw only
+  // when the window is first opened. A reset reuses that window, so its frame
+  // and sample totals can be one lower even though the overlay state is fresh.
+  expect({ ...state, overlayFrames: 0, overlaySamples: 0 }).toEqual({
+    ...record.state,
+    overlayFrames: 0,
+    overlaySamples: 0,
+  })
+  expect(state.overlayFrames).toBeGreaterThan(0)
+  expect(state.overlaySamples).toBeGreaterThan(0)
 }
 
 export function dirtyWindow(): void {
