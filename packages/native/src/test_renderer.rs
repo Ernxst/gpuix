@@ -1993,7 +1993,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn blur(&self) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.update_window(window, |_, window, _app| window.blur())
+            cx.update_window(window, |_, window, app| window.blur(app))
                 .map_err(|error| Error::from_reason(error.to_string()))?;
             self.drain_async_tasks_if_eager(cx);
             Ok(())
