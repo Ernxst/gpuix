@@ -390,6 +390,10 @@ fn table_cell_header_role(tree: &RetainedTree, element: &RetainedElement) -> gpu
         .filter(|child| matches!(child.element_type.as_str(), "th" | "td"))
         .next()
         .is_some_and(|first| first.id == element.id);
+    let in_table_header = row
+        .parent
+        .and_then(|id| tree.elements.get(&id))
+        .is_some_and(|group| group.element_type == "thead");
     let mut ancestor_id = row.parent;
     let mut table_id = None;
     while let Some(id) = ancestor_id {
@@ -421,7 +425,7 @@ fn table_cell_header_role(tree: &RetainedTree, element: &RetainedElement) -> gpu
         None
     });
 
-    if first_row_id == Some(row.id) || !first_cell {
+    if in_table_header || first_row_id == Some(row.id) || !first_cell {
         Role::ColumnHeader
     } else {
         Role::RowHeader

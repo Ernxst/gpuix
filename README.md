@@ -2975,10 +2975,11 @@ const columns = [
 ```
 
 `scope` on `<th>` supports `row`, `col`, `rowgroup` and `colgroup`. Without it,
-the first row's headers become column headers and first cells in later rows
-become row headers. Positive `colSpan` and `rowSpan` values are exposed to
-native accessibility. `headers` is retained on native elements but does not
-create an accessibility relation.
+headers in `<thead>` and headers in the table's first row become column
+headers; first cells in later rows outside `<thead>` become row headers.
+Positive `colSpan` and `rowSpan` values are exposed to native accessibility.
+`headers` is retained on native elements but does not create an accessibility
+relation.
 
 Native `<colgroup>` and `<col>` elements are deferred, and native rendering
 does not use them for column sizing. Under `react-dom`, table tags and

@@ -132,6 +132,42 @@ describeNative("accessibility", () => {
     ])
   })
 
+  it("treats unscoped headers in every thead row as column headers", () => {
+    testRoot.render(
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Production</th>
+          </tr>
+          <tr>
+            <th>Machine input</th>
+            <th>Per minute</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Iron ore</th>
+            <td>60 / min</td>
+          </tr>
+        </tbody>
+      </table>,
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "ColumnHeader")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "ColumnHeader", label: "Item" }),
+        expect.objectContaining({ role: "ColumnHeader", label: "Production" }),
+        expect.objectContaining({ role: "ColumnHeader", label: "Machine input" }),
+        expect.objectContaining({ role: "ColumnHeader", label: "Per minute" }),
+      ]),
+    )
+    expect(withRole(tree, "RowHeader")).toEqual([
+      expect.objectContaining({ role: "RowHeader", label: "Iron ore" }),
+    ])
+  })
+
   it("lets authored roles and labels override table defaults", () => {
     testRoot.render(
       <table role="grid" aria-label="Custom ledger">
