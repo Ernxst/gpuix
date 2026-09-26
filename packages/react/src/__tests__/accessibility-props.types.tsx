@@ -47,6 +47,11 @@ const aliases = [
   <div role="row" aria-rowindex={2} />,
   <div role="consumer-web-only-role" />,
   <text visuallyHidden role="heading" aria-level={1}>Production ledger</text>,
+  <table aria-label="Power ledger">
+    <caption>Power ledger</caption>
+    <thead><tr><th scope="col">Item</th><th scope="col">Rate</th></tr></thead>
+    <tbody><tr><th scope="row">Iron</th><td colSpan={2} rowSpan={1} headers="item" /></tr></tbody>
+  </table>,
 ]
 
 const aliasProps: Props = {

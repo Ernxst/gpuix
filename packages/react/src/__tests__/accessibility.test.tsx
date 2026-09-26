@@ -69,6 +69,92 @@ describeNative("accessibility", () => {
     expect(withRole(tree, "GenericContainer")).toEqual([])
   })
 
+  it("maps native table elements and uses the caption as the table name", () => {
+    testRoot.render(
+      <table>
+        <caption>Power ledger</caption>
+        <thead>
+          <tr>
+            <th scope="col">Item</th>
+            <th>Rate</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Iron</th>
+            <td rowSpan={2}>60 / min</td>
+          </tr>
+          <tr>
+            <th scope="row">Copper</th>
+            <td colSpan={2}>30 / min</td>
+          </tr>
+        </tbody>
+      </table>,
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "Table")).toEqual([
+      expect.objectContaining({ role: "Table", label: "Power ledger" }),
+    ])
+    expect(withRole(tree, "Caption")).toEqual([
+      expect.objectContaining({ role: "Caption", label: "Power ledger" }),
+    ])
+    expect(withRole(tree, "RowGroup")).toHaveLength(2)
+    expect(withRole(tree, "Row")).toHaveLength(3)
+    expect(withRole(tree, "ColumnHeader")).toHaveLength(2)
+    expect(withRole(tree, "RowHeader")).toHaveLength(2)
+    expect(withRole(tree, "Cell")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "Cell", label: "60 / min", row_span: 2 }),
+        expect.objectContaining({ role: "Cell", label: "30 / min", column_span: 2 }),
+      ]),
+    )
+  })
+
+  it("resolves header positions when rows are direct table children", () => {
+    testRoot.render(
+      <table>
+        <tr>
+          <th>Item</th>
+          <th>Rate</th>
+        </tr>
+        <tr>
+          <th>Iron</th>
+          <td>60 / min</td>
+        </tr>
+      </table>,
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "ColumnHeader")).toHaveLength(2)
+    expect(withRole(tree, "RowHeader")).toEqual([
+      expect.objectContaining({ role: "RowHeader", label: "Iron" }),
+    ])
+  })
+
+  it("lets authored roles and labels override table defaults", () => {
+    testRoot.render(
+      <table role="grid" aria-label="Custom ledger">
+        <caption>Ignored caption name</caption>
+        <tbody>
+          <tr>
+            <td role="button" aria-label="Run calculation">Run</td>
+          </tr>
+        </tbody>
+      </table>,
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "Grid")).toEqual([
+      expect.objectContaining({ role: "Grid", label: "Custom ledger" }),
+    ])
+    expect(withRole(tree, "Table")).toHaveLength(0)
+    expect(withRole(tree, "Button")).toEqual([
+      expect.objectContaining({ role: "Button", label: "Run calculation" }),
+    ])
+    expect(withRole(tree, "Cell")).toHaveLength(0)
+  })
+
   it("projects a named role-less div as a generic container", () => {
     testRoot.render(
       <div

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GPUIX table elements under react-dom</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 28px; color: #edf0f6; background: #171a21; font: 15px/1.5 system-ui, sans-serif; }
+      main { width: min(620px, 100%); display: grid; gap: 18px; }
+      h1 { margin: 0; font-size: 23px; }
+      p { margin: 0; color: #a9b2c1; }
+      table { width: 100%; border-collapse: separate; border-spacing: 0 1px; text-align: left; }
+      caption { padding: 10px; text-align: left; font-weight: 700; }
+      th, td { padding: 9px; }
+      thead tr { background: #303746; }
+      tbody tr { background: #222733; }
+      tbody th { font-weight: 400; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./table.dom.tsx"></script>
+  </body>
+</html>
