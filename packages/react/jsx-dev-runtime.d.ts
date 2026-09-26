@@ -82,6 +82,14 @@ export namespace JSX {
     var: Props
     label: LabelProps
     form: FormProps
+    table: Props
+    caption: Props
+    thead: Props
+    tbody: Props
+    tfoot: Props
+    tr: Props
+    th: Props
+    td: Props
     img: ImgProps
     svg: SvgProps
     canvas: CanvasProps

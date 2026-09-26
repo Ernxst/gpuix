@@ -821,6 +821,14 @@ export type ElementType =
   | "var"
   | "label"
   | "form"
+  | "table"
+  | "caption"
+  | "thead"
+  | "tbody"
+  | "tfoot"
+  | "tr"
+  | "th"
+  | "td"
   | "img"
   | "svg"
   | "canvas"
@@ -1224,6 +1232,14 @@ export interface Props extends AccessibilityProps {
   className?: string | undefined
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
+
+  /** HTML table header scope. GPUIX uses this to resolve the implicit `th` role. */
+  scope?: "row" | "col" | "rowgroup" | "colgroup"
+  /** HTML table cell span. Native accessibility exposes these as AX spans. */
+  colSpan?: number
+  rowSpan?: number
+  /** HTML table header ids associated with a cell; retained for parity, not projected natively. */
+  headers?: string
 
   /** Author-defined identity preserved for shared DOM/native JSX and native diagnostics. */
   id?: string

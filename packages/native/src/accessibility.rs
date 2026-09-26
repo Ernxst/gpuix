@@ -363,11 +363,96 @@ impl AccessibilityRole {
     }
 }
 
-fn resolved_role(element: &RetainedElement) -> Option<AccessibilityRole> {
+fn table_cell_header_role(tree: &RetainedTree, element: &RetainedElement) -> gpui::Role {
+    use gpui::Role;
+
+    match element
+        .custom_props
+        .get("scope")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("row" | "rowgroup") => return Role::RowHeader,
+        Some("col" | "colgroup") => return Role::ColumnHeader,
+        _ => {}
+    }
+
+    let Some(row) = element
+        .parent
+        .and_then(|id| tree.elements.get(&id))
+        .filter(|parent| parent.element_type == "tr")
+    else {
+        return Role::ColumnHeader;
+    };
+    let first_cell = row
+        .children
+        .iter()
+        .filter_map(|id| tree.elements.get(id))
+        .filter(|child| matches!(child.element_type.as_str(), "th" | "td"))
+        .next()
+        .is_some_and(|first| first.id == element.id);
+    let in_table_header = row
+        .parent
+        .and_then(|id| tree.elements.get(&id))
+        .is_some_and(|group| group.element_type == "thead");
+    let mut ancestor_id = row.parent;
+    let mut table_id = None;
+    while let Some(id) = ancestor_id {
+        let Some(ancestor) = tree.elements.get(&id) else {
+            break;
+        };
+        if ancestor.element_type == "table" {
+            table_id = Some(ancestor.id);
+            break;
+        }
+        ancestor_id = ancestor.parent;
+    }
+    let first_row_id = table_id.and_then(|table_id| {
+        let mut pending: Vec<u64> = tree
+            .elements
+            .get(&table_id)?
+            .children
+            .iter()
+            .rev()
+            .copied()
+            .collect();
+        while let Some(id) = pending.pop() {
+            let child = tree.elements.get(&id)?;
+            if child.element_type == "tr" {
+                return Some(child.id);
+            }
+            pending.extend(child.children.iter().rev().copied());
+        }
+        None
+    });
+
+    if in_table_header || first_row_id == Some(row.id) || !first_cell {
+        Role::ColumnHeader
+    } else {
+        Role::RowHeader
+    }
+}
+
+fn resolved_role(tree: &RetainedTree, element: &RetainedElement) -> Option<AccessibilityRole> {
     if let Some(value) = element.custom_props.get("role") {
         return AccessibilityRole::parse(value).filter(|role| {
             !(role.role == gpui::Role::GenericContainer
                 && matches!(value.as_str(), Some("none" | "presentation")))
+        });
+    }
+
+    let table_role = match element.element_type.as_str() {
+        "table" => Some((gpui::Role::Table, false)),
+        "caption" => Some((gpui::Role::Caption, true)),
+        "thead" | "tbody" | "tfoot" => Some((gpui::Role::RowGroup, false)),
+        "tr" => Some((gpui::Role::Row, false)),
+        "td" => Some((gpui::Role::Cell, true)),
+        "th" => Some((table_cell_header_role(tree, element), true)),
+        _ => None,
+    };
+    if let Some((role, name_from_contents)) = table_role {
+        return Some(AccessibilityRole {
+            role,
+            name_from_contents,
         });
     }
 
@@ -534,8 +619,8 @@ fn flattened_text(tree: &RetainedTree, element: &RetainedElement, subject: NameS
 /// Accname recurses into a role-less descendant at step 2, so a label it carries
 /// names the subtree it sits on. Chromium and dom-accessibility-api both include
 /// it.
-fn carries_authored_name(node: &RetainedElement) -> bool {
-    resolved_role(node).is_some_and(|role| role.supports("ariaLabel"))
+fn carries_authored_name(tree: &RetainedTree, node: &RetainedElement) -> bool {
+    resolved_role(tree, node).is_some_and(|role| role.supports("ariaLabel"))
 }
 
 /// Whether `node` runs into its siblings instead of separating from them.
@@ -603,7 +688,7 @@ fn contribute_flattened_text(
     let carries_name = if is_root {
         !matches!(subject, NameSubject::Contents)
     } else {
-        carries_authored_name(node)
+        carries_authored_name(tree, node)
     };
     // A reference is never followed from inside a reference: one level is what
     // the spec resolves, and it is what makes a descendant pointing back at an
@@ -744,6 +829,18 @@ fn explicit_label_text(tree: &RetainedTree, element: &RetainedElement) -> Option
     (!parts.is_empty()).then(|| parts.join(" "))
 }
 
+fn table_caption_text(tree: &RetainedTree, element: &RetainedElement) -> Option<String> {
+    if element.element_type != "table" {
+        return None;
+    }
+    let caption = element
+        .children
+        .iter()
+        .filter_map(|id| tree.elements.get(id))
+        .find(|child| child.element_type == "caption")?;
+    flattened_contents_text(tree, caption)
+}
+
 /// The subtree flattened to the string a role that names itself from its
 /// contents reads, or `None` when the subtree holds no text.
 ///
@@ -857,7 +954,7 @@ impl<'a> AccessibilityProps<'a> {
         // does in Chromium.
         let range = crate::custom_elements::range_input::range_values(element);
         Self {
-            role: resolved_role(element),
+            role: resolved_role(tree, element),
             label: element
                 .custom_props
                 .get("ariaLabel")
@@ -953,8 +1050,18 @@ impl<'a> AccessibilityProps<'a> {
             column_index: positive_integer(element.custom_props.get("ariaColIndex")),
             row_count: positive_integer(element.custom_props.get("ariaRowCount")),
             column_count: positive_integer(element.custom_props.get("ariaColCount")),
-            row_span: positive_integer(element.custom_props.get("ariaRowSpan")),
-            column_span: positive_integer(element.custom_props.get("ariaColSpan")),
+            row_span: positive_integer(
+                element
+                    .custom_props
+                    .get("rowSpan")
+                    .or_else(|| element.custom_props.get("ariaRowSpan")),
+            ),
+            column_span: positive_integer(
+                element
+                    .custom_props
+                    .get("colSpan")
+                    .or_else(|| element.custom_props.get("ariaColSpan")),
+            ),
             disabled: is_action_disabled(element),
         }
     }
@@ -1050,8 +1157,11 @@ pub(crate) fn has_semantics(element: &RetainedElement) -> bool {
         .any(|key| is_accessibility_prop(key))
 }
 
-pub(crate) fn role_supports_name_from_contents(element: &RetainedElement) -> bool {
-    resolved_role(element).is_some_and(|role| role.name_from_contents)
+pub(crate) fn role_supports_name_from_contents(
+    tree: &RetainedTree,
+    element: &RetainedElement,
+) -> bool {
+    resolved_role(tree, element).is_some_and(|role| role.name_from_contents)
 }
 
 pub(crate) fn is_native_disabled(element: &RetainedElement) -> bool {
@@ -1163,7 +1273,22 @@ fn roleless_reason(property: &str) -> &'static str {
 }
 
 fn supports_accessibility_host(element_type: &str) -> bool {
-    matches!(element_type, "div" | "text" | "input" | "textarea" | "img")
+    matches!(
+        element_type,
+        "div"
+            | "text"
+            | "input"
+            | "textarea"
+            | "img"
+            | "table"
+            | "caption"
+            | "thead"
+            | "tbody"
+            | "tfoot"
+            | "tr"
+            | "th"
+            | "td"
+    )
 }
 
 /// Element types whose accessibility declaration reaches an AccessKit node.
@@ -1303,7 +1428,7 @@ pub(crate) fn element_problems(
 ) -> Vec<AccessibilityProblem> {
     let mut problems = Vec::new();
     let role_value = element.custom_props.get("role");
-    let role = resolved_role(element);
+    let role = resolved_role(tree, element);
     let explicit = role_value.and_then(AccessibilityRole::parse);
 
     if has_semantics(element)
@@ -1649,6 +1774,7 @@ where
                 .filter(|_| props.supports("ariaLabel"))
                 .map(str::to_owned)
                 .or(explicit_label)
+                .or_else(|| table_caption_text(tree, element))
                 .or_else(|| text.name_from_contents.map(str::to_owned))
                 .or_else(|| text.placeholder.map(str::to_owned))
                 .or_else(|| live_projection_name.map(str::to_owned))
@@ -2017,19 +2143,19 @@ mod tests {
     fn resolves_the_role_a_host_type_or_a_name_implies() {
         let mut input = RetainedElement::new(1, "input".to_string(), 1);
         assert_eq!(
-            resolved_role(&input).map(|role| role.role),
+            resolved_role(&detached_tree(), &input).map(|role| role.role),
             Some(gpui::Role::TextInput)
         );
 
         let textarea = RetainedElement::new(2, "textarea".to_string(), 1);
         assert_eq!(
-            resolved_role(&textarea).map(|role| role.role),
+            resolved_role(&detached_tree(), &textarea).map(|role| role.role),
             Some(gpui::Role::MultilineTextInput)
         );
 
         input.custom_props.insert("role".into(), "searchbox".into());
         assert_eq!(
-            resolved_role(&input).map(|role| role.role),
+            resolved_role(&detached_tree(), &input).map(|role| role.role),
             Some(gpui::Role::SearchInput)
         );
 
@@ -2038,7 +2164,7 @@ mod tests {
             .custom_props
             .insert("ariaLabel".into(), "Ledger".into());
         assert_eq!(
-            resolved_role(&labelled).map(|role| role.role),
+            resolved_role(&detached_tree(), &labelled).map(|role| role.role),
             Some(gpui::Role::GenericContainer)
         );
 
@@ -2047,7 +2173,7 @@ mod tests {
             .custom_props
             .insert("ariaDescribedBy".into(), "hint".into());
         assert_eq!(
-            resolved_role(&described).map(|role| role.role),
+            resolved_role(&detached_tree(), &described).map(|role| role.role),
             Some(gpui::Role::GenericContainer)
         );
 
@@ -2058,16 +2184,16 @@ mod tests {
         presentational
             .custom_props
             .insert("ariaLabel".into(), "x".into());
-        assert_eq!(resolved_role(&presentational).map(|role| role.role), None);
+        assert_eq!(resolved_role(&detached_tree(), &presentational).map(|role| role.role), None);
 
         let mut empty_label = RetainedElement::new(6, "div".to_string(), 1);
         empty_label
             .custom_props
             .insert("ariaLabel".into(), "".into());
-        assert_eq!(resolved_role(&empty_label).map(|role| role.role), None);
+        assert_eq!(resolved_role(&detached_tree(), &empty_label).map(|role| role.role), None);
 
         let bare = RetainedElement::new(7, "div".to_string(), 1);
-        assert_eq!(resolved_role(&bare).map(|role| role.role), None);
+        assert_eq!(resolved_role(&detached_tree(), &bare).map(|role| role.role), None);
     }
 
     #[test]
