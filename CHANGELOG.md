@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.25.0-fork.8
+
+1. **The first frame a window shows now contains the rendered tree, on macOS and Windows.** GPUI used to show the window before React had committed, so the first frame it presented was an empty scene; the tree now reaches the screen about 60 ms sooner (`266.3 ms` → `205.0 ms` from launch to first present containing the tree, median of 10 runs). Until the first tick, `isActive()` reads `false` even for a focused window; call `activateWindow()` before that tick, such as from a mount effect, to show the window immediately. [#600](https://github.com/Ernxst/gpuix/issues/600), [PR #691](https://github.com/Ernxst/gpuix/pull/691), [Ernxst/zed#4](https://github.com/Ernxst/zed/pull/4)
+2. **macOS windows start their display link when they're shown and skip tab-group queries while they're the only window open.** Launch to second frame dropped by 20–40 ms across four interleaved timing runs on the same Mac. [#599](https://github.com/Ernxst/gpuix/issues/599), [PR #690](https://github.com/Ernxst/gpuix/pull/690), [Ernxst/zed#3](https://github.com/Ernxst/zed/pull/3)
+3. **The test renderer redraws a window only when a key press changed it.** On a 1000-row tree, the first Tab dropped from 625 ms to 156 ms and a later Tab from 516 ms to 73 ms; a key that changes nothing now costs under 0.1 ms instead of 364 ms. [#663](https://github.com/Ernxst/gpuix/issues/663), [PR #689](https://github.com/Ernxst/gpuix/pull/689)
+
 ## 0.25.0-fork.7
 
 1. **Element refs expose their mounted state and the `Node` shim has standard position constants.** `ref.current.isConnected` is `true` while mounted and `false` after removal. `DOCUMENT_POSITION_*` lets composite lists order mounted refs; automatic reordering after an item moves remains unsupported because `MutationObserver` is unavailable. [#660](https://github.com/Ernxst/gpuix/issues/660), [PR #681](https://github.com/Ernxst/gpuix/pull/681)

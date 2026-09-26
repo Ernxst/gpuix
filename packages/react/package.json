@@ -1,6 +1,6 @@
 {
   "name": "@gpuix/react",
-  "version": "0.25.0-fork.7",
+  "version": "0.25.0-fork.8",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -104,7 +104,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@gpuix/native": "0.25.0-fork.7",
+    "@gpuix/native": "0.25.0-fork.8",
     "cn": "^0.4.0",
     "eventsource-parser": "^4.1.0",
     "zod": "^4.4.3"
