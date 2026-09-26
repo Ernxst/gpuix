@@ -2935,6 +2935,58 @@ add semantics and focus behavior, but no visual defaults.
 | `<ins>` | `insertion` |
 | `<p>`, `<span>`, `<strong>`, `<em>`, `<kbd>`, `<b>`, `<i>`, `<u>`, `<small>`, `<sub>`, `<sup>`, `<cite>`, `<samp>`, `<var>`, `<pre>` | none |
 
+## HTML tables
+
+`<table>`, `<caption>`, `<thead>`, `<tbody>`, `<tfoot>`, `<tr>`, `<th>` and
+`<td>` keep their element names in the native tree and expose the HTML-AAM
+table, caption, rowgroup, row, header and cell roles. A caption names its table.
+An explicit `role`, `aria-label` or `aria-labelledby` takes precedence over the
+implicit role or caption name.
+
+Native table elements use the same ordinary GPUI box layout as `<div>`; they do
+not run the browser's automatic table layout algorithm. Use grid with a shared
+column template on each row, or set matching widths on cells, to align columns.
+This example uses one grid template for every row:
+
+```tsx
+const columns = [
+  { type: "px", value: 138 },
+  { type: "px", value: 230 },
+  { type: "px", value: 122 },
+]
+
+<table style={{ display: "flex", flexDirection: "column" }}>
+  <caption>Iron production</caption>
+  <thead>
+    <tr style={{ display: "grid", gridTemplateColumns: columns }}>
+      <th scope="col">Item</th>
+      <th scope="col">Machine</th>
+      <th scope="col">Rate</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style={{ display: "grid", gridTemplateColumns: columns }}>
+      <th scope="row">Iron ore</th>
+      <td>Miner</td>
+      <td>60 / min</td>
+    </tr>
+  </tbody>
+</table>
+```
+
+`scope` on `<th>` supports `row`, `col`, `rowgroup` and `colgroup`. Without it,
+headers in `<thead>` and headers in the table's first row become column
+headers; first cells in later rows outside `<thead>` become row headers.
+Positive `colSpan` and `rowSpan` values are exposed to native accessibility.
+`headers` is retained on native elements but does not create an accessibility
+relation.
+
+Native `<colgroup>` and `<col>` elements are deferred, and native rendering
+does not use them for column sizing. Under `react-dom`, table tags and
+attributes remain real HTML elements and use the browser's table behaviour.
+See the [native table example](./examples/table.tsx) and its [react-dom
+page](./examples/table.dom.html).
+
 Four of those roles depend on where the element sits, how it is named, or what
 it declares, and GPUIX resolves them the way HTML-AAM does:
 

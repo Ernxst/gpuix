@@ -669,8 +669,21 @@ const DIV_ALIASES = new Set([
   "form",
 ])
 
+// Table elements keep their names in the retained tree for accessibility and
+// web parity. Native GPUI layout still treats each one as an ordinary host box.
+const TABLE_ELEMENTS = new Set([
+  "table",
+  "caption",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "th",
+  "td",
+])
+
 // Built-in element types that don't use custom props.
-const BUILT_IN_TYPES = new Set(["div", "text", ...DIV_ALIASES])
+const BUILT_IN_TYPES = new Set(["div", "text", ...DIV_ALIASES, ...TABLE_ELEMENTS])
 const CUSTOM_STYLE_TRANSITION_TYPES = new Set<ElementType>([
   "img",
   "canvas",
@@ -1503,7 +1516,12 @@ function syncCustomProps(
   const builtIn = BUILT_IN_TYPES.has(type)
   for (const [key, value] of customPropEntries(instance, props)) {
     if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isAuthorVisibleProp(key)) continue
+    if (
+      builtIn &&
+      !UNIVERSAL_PROPS.has(key) &&
+      !isAuthorVisibleProp(key) &&
+      !isTableSpecificProp(type, key)
+    ) continue
     renderer.setCustomProp(id, key, serializeCustomProp(type, key, value))
   }
 }
@@ -1523,7 +1541,12 @@ function diffCustomProps(
   // Updated or added props
   for (const [key, value] of newEntries) {
     if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isAuthorVisibleProp(key)) continue
+    if (
+      builtIn &&
+      !UNIVERSAL_PROPS.has(key) &&
+      !isAuthorVisibleProp(key) &&
+      !isTableSpecificProp(type, key)
+    ) continue
     const oldValue = oldEntries.find(([oldKey]) => oldKey === key)?.[1]
     if (oldValue !== value) {
       renderer.setCustomProp(id, key, serializeCustomProp(type, key, value))
@@ -1532,11 +1555,20 @@ function diffCustomProps(
   // Removed props
   for (const [key] of oldEntries) {
     if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isAuthorVisibleProp(key)) continue
+    if (
+      builtIn &&
+      !UNIVERSAL_PROPS.has(key) &&
+      !isAuthorVisibleProp(key) &&
+      !isTableSpecificProp(type, key)
+    ) continue
     if (!newKeys.includes(key)) {
       renderer.setCustomProp(id, key, null)
     }
   }
+}
+
+function isTableSpecificProp(type: string, key: string): boolean {
+  return TABLE_ELEMENTS.has(type) && ["scope", "colSpan", "rowSpan", "headers"].includes(key)
 }
 
 /**

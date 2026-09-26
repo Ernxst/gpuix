@@ -69,6 +69,13 @@ use crate::theme::Theme;
 /// next-frame callback requests future work but is not consumed by a draw.
 pub(crate) const MAX_SETTLE_PASSES: usize = 3;
 
+fn is_host_container_type(element_type: &str) -> bool {
+    matches!(
+        element_type,
+        "div" | "text" | "table" | "caption" | "thead" | "tbody" | "tfoot" | "tr" | "th" | "td"
+    )
+}
+
 /// Settle layout dirtied by a previous draw before a synchronous read, without
 /// consuming pending animation-frame callbacks: a read should see the last
 /// drawn frame, not force one that only a running animation is waiting on.
@@ -11498,7 +11505,8 @@ fn retained_gpui_element_id(
 ) -> Option<gpui::ElementId> {
     let id = element.id;
     match element.element_type.as_str() {
-        "div" | "text" | "virtual-list" => Some(gpui::ElementId::Integer(id)),
+        "div" | "text" | "virtual-list" | "table" | "caption" | "thead" | "tbody"
+        | "tfoot" | "tr" | "th" | "td" => Some(gpui::ElementId::Integer(id)),
         "img" => Some(gpui::ElementId::Name(format!("__gpuix_img_{id}").into())),
         "svg" => Some(gpui::ElementId::Name(format!("__gpuix_svg_{id}").into())),
         "input" | "textarea" => Some(gpui::ElementId::Name(format!("__gpuix_editor_{id}").into())),
@@ -11721,11 +11729,10 @@ fn build_element_with_parent_layout(
         _ => None,
     };
     let declared_style = probe_style.as_ref().or(element.style.as_deref());
-    let supports_style_transitions = matches!(
-        element.element_type.as_str(),
-        "div"
-            | "text"
-            | "img"
+    let supports_style_transitions = is_host_container_type(&element.element_type)
+        || matches!(
+            element.element_type.as_str(),
+            "img"
             | "canvas"
             | "code"
             | "diff"
@@ -11770,7 +11777,7 @@ fn build_element_with_parent_layout(
         // Measuring a custom surface means re-entering its own `render` inside
         // the frame that is already rendering it, and a custom renderer is not
         // required to be idempotent under that.
-        let measurable = matches!(element.element_type.as_str(), "div" | "text")
+        let measurable = is_host_container_type(&element.element_type)
             && interpolate_size_keywords(
                 declared_style,
                 parent_inherited.interpolate_size_keywords,
@@ -12011,7 +12018,7 @@ fn build_element_with_parent_layout(
         .descend(style, hover_group, id, current_color, font);
     ctx.inherited.accessibility_hidden |= crate::accessibility::is_hidden(element);
     ctx.inherited.text_accessibility_owned_by_role |=
-        crate::accessibility::role_supports_name_from_contents(element);
+        crate::accessibility::role_supports_name_from_contents(ctx.tree, element);
 
     // A `highlight` here replaces any ancestor's: the nearest declaration wins,
     // and `GroupList::collect` skips nested declarations so an ancestor never
@@ -12041,7 +12048,8 @@ fn build_element_with_parent_layout(
         // own builder meant every interaction prop on the shared `Props` type
         // (onClick, hover, focus, tabIndex) type-checked, registered a JS
         // listener, and then silently did nothing.
-        "div" | "text" => {
+        "div" | "text" | "table" | "caption" | "thead" | "tbody" | "tfoot" | "tr"
+        | "th" | "td" => {
             ctx.custom_registry.destroy(id);
             build_host_container(element, style, box_insets, ctx, window, cx)
         }
@@ -12338,7 +12346,7 @@ fn content_sized_intrinsic_axes(
     };
     // Only a host container's own style describes how its children are laid
     // out. A custom element renders its children through its own element.
-    if !matches!(parent.element_type.as_str(), "div" | "text") {
+    if !is_host_container_type(&parent.element_type) {
         return STRETCHED;
     }
     let parent_style = parent.style.as_deref();
@@ -13166,7 +13174,7 @@ fn resolve_intrinsic_keywords(
         ctx.intrinsic_probe_cache.remove(&id);
         return;
     }
-    if !matches!(element_type, "div" | "text") {
+    if !is_host_container_type(element_type) {
         ctx.intrinsic_probe_cache.remove(&id);
         return;
     }
@@ -15460,7 +15468,7 @@ fn accessible_name_from_contents(
     element: &crate::retained_tree::RetainedElement,
     ctx: &BuildCtx,
 ) -> Option<String> {
-    let owns_name = crate::accessibility::role_supports_name_from_contents(element)
+    let owns_name = crate::accessibility::role_supports_name_from_contents(ctx.tree, element)
         && element
             .custom_props
             .get("ariaLabel")
@@ -15497,7 +15505,7 @@ fn build_visually_hidden_element(
     // whose authored spacing is irregular therefore reads slightly differently
     // projected than painted.
     let content_value = (!ctx.inherited.text_accessibility_owned_by_role
-        && !crate::accessibility::role_supports_name_from_contents(element))
+        && !crate::accessibility::role_supports_name_from_contents(ctx.tree, element))
     .then(|| crate::accessibility::flattened_contents_text(ctx.tree, element))
     .flatten();
     let element_id = retained_gpui_element_id(element)
