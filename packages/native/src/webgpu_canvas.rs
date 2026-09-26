@@ -808,10 +808,8 @@ impl WebGpuProducer {
                     let pipeline = if let Some(pipeline) = pipelines.get(&pipeline_id) {
                         *pipeline
                     } else {
-                        let pipeline = self
-                            .render_pipelines
-                            .get(&pipeline_id)
-                            .with_context(|| {
+                        let pipeline =
+                            self.render_pipelines.get(&pipeline_id).with_context(|| {
                                 format!("Unknown WebGPU render pipeline {pipeline_id}")
                             })?;
                         if pipeline.device_id != device_id {

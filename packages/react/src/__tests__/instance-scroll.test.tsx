@@ -324,13 +324,12 @@ describeNative("host instance scroll properties", () => {
 
     expect(testRoot.renderer.getActiveElement()).toBe(targetRef.current!.id)
 
-    // Sampled either side of the scrollTop read, which is the synchronous
-    // read that settles the deferred autofocus reveal, so the delta is the
-    // reveal's own frame cost: exactly one settle pass.
+    // GPUI now reveals the focused target in the initial layout pass, before
+    // the scrollTop read, so reading the settled position needs no extra frame.
     const framesBeforeReveal = testRoot.renderer.getDebugFrameOverlayStats().frames
     expect(scrollerRef.current!.scrollTop).toBeGreaterThan(0)
     const framesAfterReveal = testRoot.renderer.getDebugFrameOverlayStats().frames
-    expect(framesAfterReveal - framesBeforeReveal).toBe(1)
+    expect(framesAfterReveal - framesBeforeReveal).toBe(0)
 
     const scrollerBounds = testRoot.renderer.getElementBounds(scrollerRef.current!.id)!
     const targetBounds = testRoot.renderer.getElementBounds(targetRef.current!.id)!

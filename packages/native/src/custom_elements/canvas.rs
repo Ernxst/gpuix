@@ -1244,10 +1244,9 @@ impl CanvasElement {
         let tracks_pointer_move = tracks("pointerMove");
         // A canvas that declares only `onContextMenu` takes the right button
         // alone, unless an ancestor tracks `onMouseDown` too.
-        let mouse_down_buttons =
-            crate::renderer::mouse_down_button_set(
-                tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel,
-            );
+        let mouse_down_buttons = crate::renderer::mouse_down_button_set(
+            tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel,
+        );
         let mut event_types = ctx.events.iter().map(String::as_str).collect::<Vec<_>>();
         if tracks_click && !ctx.events.contains("click") && !ctx.events.contains("doubleClick") {
             event_types.push("click");
@@ -1255,7 +1254,10 @@ impl CanvasElement {
         if tracks_aux_click && !ctx.events.contains("auxClick") {
             event_types.push("auxClick");
         }
-        if (tracks_mouse_down || tracks_pointer_down || tracks_pointer_cancel || tracks_context_menu)
+        if (tracks_mouse_down
+            || tracks_pointer_down
+            || tracks_pointer_cancel
+            || tracks_context_menu)
             && !ctx.events.contains("mouseDown")
             && !ctx.events.contains("contextMenu")
         {
@@ -1356,44 +1358,55 @@ impl CanvasElement {
                     for &button in mouse_down_buttons {
                         let callback = callback.clone();
                         let geometry = geometry.clone();
-                        element = element.on_mouse_down(button, cx.listener(move |view, event: &gpui::MouseDownEvent, _window, cx| {
-                            let (x, y) = local_point(&geometry, event.position);
-                            view.record_pointer_down(id, event);
-                            view.record_pointer_sample(x, y, event.modifiers.into());
-                            if tracks_pointer_down {
-                                crate::renderer::emit_event_full(&callback, id, "pointerDown", |payload| {
-                                    payload.x = Some(x);
-                                    payload.y = Some(y);
-                                    payload.button =
-                                        Some(crate::renderer::mouse_button_to_u32(event.button));
-                                    payload.click_count = Some(event.click_count as u32);
-                                    payload.modifiers = Some(event.modifiers.into());
-                                    crate::renderer::populate_pointer_metadata(
-                                        payload,
-                                        crate::renderer::mouse_button_bit(event.button),
+                        element = element.on_mouse_down(
+                            button,
+                            cx.listener(move |view, event: &gpui::MouseDownEvent, _window, cx| {
+                                let (x, y) = local_point(&geometry, event.position);
+                                view.record_pointer_down(id, event);
+                                view.record_pointer_sample(x, y, event.modifiers.into());
+                                if tracks_pointer_down {
+                                    crate::renderer::emit_event_full(
+                                        &callback,
+                                        id,
+                                        "pointerDown",
+                                        |payload| {
+                                            payload.x = Some(x);
+                                            payload.y = Some(y);
+                                            payload.button = Some(
+                                                crate::renderer::mouse_button_to_u32(event.button),
+                                            );
+                                            payload.click_count = Some(event.click_count as u32);
+                                            payload.modifiers = Some(event.modifiers.into());
+                                            crate::renderer::populate_pointer_metadata(
+                                                payload,
+                                                crate::renderer::mouse_button_bit(event.button),
+                                            );
+                                        },
                                     );
-                                });
-                            }
-                            if tracks_mouse_down || tracks_context_menu {
-                                crate::renderer::emit_event_full(
-                                    &callback,
-                                    id,
-                                    "mouseDown",
-                                    |payload| {
-                                        payload.x = Some(x);
-                                        payload.y = Some(y);
-                                        payload.button = Some(crate::renderer::mouse_button_to_u32(event.button));
-                                        payload.click_count = Some(event.click_count as u32);
-                                        payload.modifiers = Some(event.modifiers.into());
-                                    },
-                                );
-                            }
-                            // The div path stops here too. Without it an
-                            // ancestor's own GPUI listener also fires and
-                            // React dispatches its `onMouseDown` twice: once
-                            // bubbling from the canvas, once at target.
-                            cx.stop_propagation();
-                        }));
+                                }
+                                if tracks_mouse_down || tracks_context_menu {
+                                    crate::renderer::emit_event_full(
+                                        &callback,
+                                        id,
+                                        "mouseDown",
+                                        |payload| {
+                                            payload.x = Some(x);
+                                            payload.y = Some(y);
+                                            payload.button = Some(
+                                                crate::renderer::mouse_button_to_u32(event.button),
+                                            );
+                                            payload.click_count = Some(event.click_count as u32);
+                                            payload.modifiers = Some(event.modifiers.into());
+                                        },
+                                    );
+                                }
+                                // The div path stops here too. Without it an
+                                // ancestor's own GPUI listener also fires and
+                                // React dispatches its `onMouseDown` twice: once
+                                // bubbling from the canvas, once at target.
+                                cx.stop_propagation();
+                            }),
+                        );
                     }
                 }
                 "mouseUp" | "pointerUp" => {
@@ -1411,23 +1424,37 @@ impl CanvasElement {
                         element = element.on_mouse_up(button, move |event, _window, cx| {
                             let (x, y) = local_point(&geometry, event.position);
                             if tracks_pointer_up {
-                                crate::renderer::emit_event_full(&callback, id, "pointerUp", |payload| {
-                                    payload.x = Some(x);
-                                    payload.y = Some(y);
-                                    payload.button = Some(crate::renderer::mouse_button_to_u32(event.button));
-                                    payload.click_count = Some(event.click_count as u32);
-                                    payload.modifiers = Some(event.modifiers.into());
-                                    crate::renderer::populate_pointer_metadata(payload, 0);
-                                });
+                                crate::renderer::emit_event_full(
+                                    &callback,
+                                    id,
+                                    "pointerUp",
+                                    |payload| {
+                                        payload.x = Some(x);
+                                        payload.y = Some(y);
+                                        payload.button = Some(
+                                            crate::renderer::mouse_button_to_u32(event.button),
+                                        );
+                                        payload.click_count = Some(event.click_count as u32);
+                                        payload.modifiers = Some(event.modifiers.into());
+                                        crate::renderer::populate_pointer_metadata(payload, 0);
+                                    },
+                                );
                             }
                             if tracks_mouse_up {
-                                crate::renderer::emit_event_full(&callback, id, "mouseUp", |payload| {
-                                    payload.x = Some(x);
-                                    payload.y = Some(y);
-                                    payload.button = Some(crate::renderer::mouse_button_to_u32(event.button));
-                                    payload.click_count = Some(event.click_count as u32);
-                                    payload.modifiers = Some(event.modifiers.into());
-                                });
+                                crate::renderer::emit_event_full(
+                                    &callback,
+                                    id,
+                                    "mouseUp",
+                                    |payload| {
+                                        payload.x = Some(x);
+                                        payload.y = Some(y);
+                                        payload.button = Some(
+                                            crate::renderer::mouse_button_to_u32(event.button),
+                                        );
+                                        payload.click_count = Some(event.click_count as u32);
+                                        payload.modifiers = Some(event.modifiers.into());
+                                    },
+                                );
                             }
                             cx.stop_propagation();
                         });
@@ -1444,21 +1471,26 @@ impl CanvasElement {
                             let (x, y) = local_point(&geometry, event.position);
                             view.record_pointer_sample(x, y, event.modifiers.into());
                             if tracks_pointer_move {
-                                crate::renderer::emit_event_full(&callback, id, "pointerMove", |payload| {
-                                    payload.x = Some(x);
-                                    payload.y = Some(y);
-                                    payload.modifiers = Some(event.modifiers.into());
-                                    payload.pressed_button = event
-                                        .pressed_button
-                                        .map(crate::renderer::mouse_button_to_u32);
-                                    crate::renderer::populate_pointer_metadata(
-                                        payload,
-                                        event
+                                crate::renderer::emit_event_full(
+                                    &callback,
+                                    id,
+                                    "pointerMove",
+                                    |payload| {
+                                        payload.x = Some(x);
+                                        payload.y = Some(y);
+                                        payload.modifiers = Some(event.modifiers.into());
+                                        payload.pressed_button = event
                                             .pressed_button
-                                            .map(crate::renderer::mouse_button_bit)
-                                            .unwrap_or_default(),
-                                    );
-                                });
+                                            .map(crate::renderer::mouse_button_to_u32);
+                                        crate::renderer::populate_pointer_metadata(
+                                            payload,
+                                            event
+                                                .pressed_button
+                                                .map(crate::renderer::mouse_button_bit)
+                                                .unwrap_or_default(),
+                                        );
+                                    },
+                                );
                             }
                             if tracks_mouse_move {
                                 crate::renderer::emit_event_full(
@@ -1511,8 +1543,7 @@ impl CanvasElement {
             }
         }
 
-        if (tracks_mouse_down && tracks_mouse_move)
-            || (tracks_pointer_down && tracks_pointer_move)
+        if (tracks_mouse_down && tracks_mouse_move) || (tracks_pointer_down && tracks_pointer_move)
         {
             element = element.capture_pointer();
         }
@@ -1523,28 +1554,30 @@ impl CanvasElement {
         let tracks_hover_group = ctx.style.is_some_and(|style| style.hover_group.is_some());
         let tracks_mouse_hover = ctx.tracks_mouse_hover;
         if tracks_mouse_hover || transition_hover || tracks_hover || tracks_hover_group {
-            element = element.on_hover(cx.listener(move |view, hovered: &bool, window, cx| {
-                let transition_changed = transition_hover
-                    && view
-                        .transition_states
-                        .get_mut(&id)
-                        .is_some_and(|state| state.set_hovered(*hovered));
-                let interactive_changed = (tracks_hover || tracks_hover_group)
-                    && view
-                        .interactive_style_states
-                        .entry(id)
-                        .or_default()
-                        .set_hovered(*hovered);
-                if interactive_changed {
-                    view.interaction_revision = view.interaction_revision.saturating_add(1);
-                }
-                if transition_changed || interactive_changed {
-                    cx.notify();
-                }
-                if tracks_mouse_hover {
-                    view.update_hover_target(id, *hovered, window, cx);
-                }
-            }));
+            element = element
+                .hover_listener_mode(gpui::HoverListenerMode::InputModalityIndependent)
+                .on_hover(cx.listener(move |view, hovered: &bool, window, cx| {
+                    let transition_changed = transition_hover
+                        && view
+                            .transition_states
+                            .get_mut(&id)
+                            .is_some_and(|state| state.set_hovered(*hovered));
+                    let interactive_changed = (tracks_hover || tracks_hover_group)
+                        && view
+                            .interactive_style_states
+                            .entry(id)
+                            .or_default()
+                            .set_hovered(*hovered);
+                    if interactive_changed {
+                        view.interaction_revision = view.interaction_revision.saturating_add(1);
+                    }
+                    if transition_changed || interactive_changed {
+                        cx.notify();
+                    }
+                    if tracks_mouse_hover {
+                        view.update_hover_target(id, *hovered, window, cx);
+                    }
+                }));
         }
 
         let transition_active = ctx
@@ -1759,7 +1792,13 @@ impl CustomElement for CanvasElement {
         root = root.child(drawing);
         #[cfg(target_os = "macos")]
         if let Some(source) = presentation {
-            root = root.child(gpui::surface(source).absolute().top_0().left_0().size_full());
+            root = root.child(
+                gpui::surface(source)
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+            );
         }
         let root = self.attach_mouse_events(root, &ctx, cx);
         super::apply_accessibility(root, &ctx).into_any_element()

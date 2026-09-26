@@ -360,7 +360,10 @@ impl CustomElementFactory for InputFactory {
         Box::new(TextEditorElement::new(false))
     }
 
-    fn variant(&self, props: &std::collections::HashMap<String, serde_json::Value>) -> &'static str {
+    fn variant(
+        &self,
+        props: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> &'static str {
         match InputKind::from_type(props.get("type")) {
             InputKind::Text => "",
             InputKind::Checkbox => "checkbox",

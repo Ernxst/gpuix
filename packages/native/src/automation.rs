@@ -226,7 +226,9 @@ enum ClockMode {
         wall_origin: Instant,
         logical_origin: Instant,
     },
-    Frozen { now: Instant },
+    Frozen {
+        now: Instant,
+    },
 }
 
 struct ClockInner {

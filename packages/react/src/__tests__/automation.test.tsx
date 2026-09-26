@@ -1504,7 +1504,9 @@ describeNative("automation", () => {
 
     renderer.nativeSimulateAccessibilityAction(node.accesskit_id, "activate")
     expect(clicks).toEqual(["click"])
-    expect(readFrameNumber()).toBe(frameNumber)
+    // AccessKit activation follows GPUI's click path, which focuses the button;
+    // that focus state belongs in the next accessibility frame.
+    expect(readFrameNumber()).toBe(frameNumber + 1)
   })
 
   it("publishes explicit roles, states, descriptions, and values", () => {

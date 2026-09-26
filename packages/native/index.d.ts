@@ -423,13 +423,11 @@ export declare class TestGpuixRenderer {
    * Microseconds spent rebuilding the element tree since the last call,
    * cleared on read. Whatever a draw costs beyond this is layout, prepaint
    * and paint, which is the split #480 turns on.
-   * Whether the window still needs drawing.
+   * Whether the current visible frame is stale.
    *
-   * A tree at rest reports `false` after a draw, so `drawPendingFrame` is a
-   * no-op. Anything that re-dirties the window every frame makes a page pay
-   * a second full draw per update, which is invisible to a timing harness
-   * that only calls `flush`. Reading this needs no debug overlay, which
-   * would itself dirty the window.
+   * Eager mode reports GPUI's window dirtiness. Manual mode also reports
+   * state changes that have not reached its last explicitly captured frame.
+   * Reading this needs no debug overlay, which would itself dirty the window.
    */
   isWindowDirty(): boolean
   /**
@@ -515,10 +513,8 @@ export declare class TestGpuixRenderer {
   simulateAccessibilityAction(accesskitId: string, action: "activate" | "increment" | "decrement" | "focus"): void
   /**
    * Draw one platform-style pending frame without notifying the view first.
-   * Unlike `flush`, this does not request invalidation; it only draws when
-   * the window is already dirty.
-   * A clean window remains clean, so this only repaints work already
-   * scheduled by production code such as an async image load completion.
+   * Unlike `flush`, this does not notify the view. It draws GPUI dirtiness
+   * or materializes state waiting behind the manual-mode frame boundary.
    */
   drawPendingFrame(): void
   /**
