@@ -146,21 +146,41 @@ def run_frame_attempt(destination: Path, attempt: int) -> bool:
 
 
 def main() -> int:
-    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != "--frame-only"):
-        print("usage: run-app-bench.py <output-directory> [--frame-only]", file=sys.stderr)
+    options = sys.argv[2:]
+    if len(sys.argv) < 2 or len(options) != len(set(options)) or set(options) - {"--frame-only", "--resume"}:
+        print("usage: run-app-bench.py <output-directory> [--frame-only] [--resume]", file=sys.stderr)
         return 2
     destination = Path(sys.argv[1]).resolve()
     destination.mkdir(parents=True, exist_ok=True)
-    frame_only = len(sys.argv) == 3
-    valid = 0
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    frame_only = "--frame-only" in options
+    resume = "--resume" in options
+    previous = [int(path.stem.split("-")[1]) for path in destination.glob("attempt-*.log")]
+    if previous and not resume:
+        log(f"existing attempts in {destination}; pass --resume to preserve them")
+        return 2
+    start_attempt = max(previous, default=0) + 1 if resume else 1
+    completed = (
+        destination.glob("attempt-*-frame.json")
+        if frame_only
+        else (
+            path
+            for path in destination.glob("attempt-*-valid.json")
+            if (destination / path.name.replace("-valid.json", "-frame.json")).exists()
+        )
+    )
+    valid = sum(1 for _ in completed) if resume else 0
+    if valid >= VALID_RUNS:
+        log(f"already completed {valid} valid invocations in {destination}")
+        return 0
+    log(f"starting at attempt {start_attempt} with {valid} valid invocations")
+    for attempt in range(start_attempt, start_attempt + MAX_ATTEMPTS):
         wait_for_quiet()
         if run_attempt(destination, attempt, frame_only):
             valid += 1
             if valid == VALID_RUNS:
                 log(f"completed {valid} valid invocations in {destination}")
                 return 0
-    log(f"only {valid} valid invocations after {MAX_ATTEMPTS} attempts")
+    log(f"only {valid} valid invocations after {MAX_ATTEMPTS} more attempts")
     return 1
 
 
