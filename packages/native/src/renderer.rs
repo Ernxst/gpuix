@@ -11428,6 +11428,8 @@ impl gpui::Render for GpuixView {
             .retain(|id, _| tree.elements.contains_key(id));
         self.virtual_lists
             .retain(|id, _| tree.elements.contains_key(id));
+        VIRTUAL_LIST_SCROLL_GENERATIONS
+            .with(|cell| cell.borrow_mut().retain(|id, _| tree.elements.contains_key(id)));
         self.motion_states
             .retain(|id, _| tree.elements.contains_key(id));
         self.intrinsic_probe_cache
