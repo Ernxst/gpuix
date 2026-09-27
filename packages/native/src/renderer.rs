@@ -34,7 +34,7 @@ use napi_derive::napi;
 #[cfg(target_os = "macos")]
 use objc::{class, msg_send, sel, sel_impl};
 use std::borrow::Cow;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash as _, Hasher as _};
 use std::path::PathBuf;
@@ -1030,6 +1030,11 @@ thread_local! {
     #[cfg(target_os = "macos")]
     static PENDING_WINDOW_REVEAL: std::cell::Cell<Option<PendingWindowReveal>> =
         const { std::cell::Cell::new(None) };
+    /// Deadline for `install_default_menus_if_overdue`'s fallback, set
+    /// alongside the on-next-frame install and cleared once either runs.
+    #[cfg(target_os = "macos")]
+    static DEFAULT_MENUS_FALLBACK: Cell<Option<(std::time::Instant, String)>> =
+        const { Cell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     static WEB_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -1444,11 +1449,58 @@ fn show_window_with_current_frame(ns_view: id, ns_window: id, activate: bool) {
 
 /// Default menus (`menus: None`) load WritingToolsUI and, with it, SwiftUI,
 /// WebKit and about a hundred other frameworks. Install them after the
-/// window's second frame so they do not delay its first present.
+/// window's second frame so they do not delay its first present. A window
+/// that presents no frames — hidden, or occluded behind another window —
+/// would otherwise never run that callback, so `install_default_menus_if_overdue`
+/// installs them as a fallback, from the tick every `render()` keeps pumping
+/// regardless of frames, about 100ms after the window is shown or created if
+/// the second frame has not arrived by then: well past a visible window's
+/// second frame, and free for one with no first present left to protect.
+/// Whichever path runs first wins; `has_application_menus` stops the other
+/// from installing twice.
 #[cfg(target_os = "macos")]
 fn install_default_menus_after_second_frame(window: &mut gpui::Window, app_name: String) {
+    DEFAULT_MENUS_FALLBACK.with(|slot| {
+        slot.set(Some((
+            std::time::Instant::now() + Duration::from_millis(100),
+            app_name.clone(),
+        )))
+    });
     window.on_next_frame(move |window, _cx| {
         window.on_next_frame(move |_window, cx| {
+            if has_application_menus(cx) {
+                return;
+            }
+            // The default-menu path cannot fail.
+            let _ = install_application_menus(cx, &app_name, None);
+        });
+    });
+}
+
+/// Fallback for `install_default_menus_after_second_frame` on a window that
+/// presents no frames. Checked from every tick, which `render()` keeps
+/// pumping on a timer even for a window with a stopped display link.
+#[cfg(target_os = "macos")]
+fn install_default_menus_if_overdue() {
+    let due = DEFAULT_MENUS_FALLBACK.with(|slot| match slot.take() {
+        Some((deadline, app_name)) if std::time::Instant::now() >= deadline => Some(app_name),
+        pending => {
+            slot.set(pending);
+            None
+        }
+    });
+    let Some(app_name) = due else {
+        return;
+    };
+    GPUI_APP.with(|app| {
+        let app = app.borrow();
+        let Some(app) = app.as_ref() else {
+            return;
+        };
+        app.update(|cx| {
+            if has_application_menus(cx) {
+                return;
+            }
             // The default-menu path cannot fail.
             let _ = install_application_menus(cx, &app_name, None);
         });
@@ -4346,6 +4398,7 @@ impl GpuixRenderer {
         #[cfg(target_os = "macos")]
         {
             reveal_pending_window()?;
+            install_default_menus_if_overdue();
             // Avoid an extra idle pump when a native callback is already queued.
             // This is only a latency optimization: a request can race this load,
             // so MacPlatform::pump_events itself must always return before waiting.
