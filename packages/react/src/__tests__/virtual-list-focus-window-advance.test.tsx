@@ -846,4 +846,131 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
       screen.unmount()
     }
   })
+
+  function ListWithEmptyLastRowThenOutside() {
+    // itemCount 21: rows 0-19 (all with buttons) are the initial window: row
+    // 20, the logical end, is not built at all yet and has nothing focusable
+    // once it is. A fully mounted list would leave Tab on Outside in one
+    // press; the queued crossing must reach the same place in one press too,
+    // not stop on Row 20's empty content and need a second Tab.
+    const [start, setStart] = useState(0)
+    const end = Math.min(21, start + 20)
+    return (
+      <div>
+        <virtual-list
+          role="rowgroup"
+          ariaLabel="Rows"
+          itemCount={21}
+          windowStart={start}
+          estimatedItemHeight={24}
+          style={{ width: 320, height: 240, display: "flex", flexDirection: "column" }}
+          onVisibleRange={(event) => {
+            const next = Math.max(0, Math.floor(event.startIndex ?? 0))
+            setStart((current) => (current === next ? current : next))
+          }}
+        >
+          {Array.from({ length: end - start }, (_, offset) => {
+            const index = start + offset
+            if (index === 20) {
+              return (
+                <div key={index} role="row" ariaLabel="Row 20" style={{ height: 24, display: "flex" }} />
+              )
+            }
+            return (
+              <div key={index} role="row" ariaLabel={`Row ${index}`} style={{ height: 24, display: "flex" }}>
+                <div role="button" tabIndex={0} ariaLabel={`Button ${index}`} style={{ width: 40, height: 24 }} />
+              </div>
+            )
+          })}
+        </virtual-list>
+        <div role="button" tabIndex={0} ariaLabel="Outside" style={{ width: 40, height: 24 }} />
+      </div>
+    )
+  }
+
+  it("reaches the next ordinary tab stop in one Tab when the logical end has nothing focusable", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(<ListWithEmptyLastRowThenOutside />)
+
+      const start = screen.getByRole("button", { name: "Button 0" })
+      screen.renderer.focusElement(start.id)
+      screen.renderer.flush()
+      for (let index = 0; index < 19; index += 1) {
+        screen.renderer.focusNext()
+        screen.renderer.flush()
+        screen.renderer.drawPendingFrame()
+      }
+      expect(screen.getByRole("button", { name: "Button 19" })).toHaveFocus()
+      expect(screen.queryByRole("row", { name: "Row 20" })).toBeNull()
+
+      screen.renderer.focusNext()
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      expect(screen.getByRole("button", { name: "Outside" })).toHaveFocus()
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  function ListWithEmptyFirstRowAfterBefore() {
+    // The reverse: a "Before" button precedes the list, row 0 (the logical
+    // start) is empty once built, and rows 1-20 (all with buttons) are the
+    // initial window.
+    const [start, setStart] = useState(1)
+    const end = Math.min(21, start + 20)
+    return (
+      <div>
+        <div role="button" tabIndex={0} ariaLabel="Before" style={{ width: 40, height: 24 }} />
+        <virtual-list
+          role="rowgroup"
+          ariaLabel="Rows"
+          itemCount={21}
+          windowStart={start}
+          estimatedItemHeight={24}
+          style={{ width: 320, height: 240, display: "flex", flexDirection: "column" }}
+          onVisibleRange={(event) => {
+            const next = Math.max(0, Math.floor(event.startIndex ?? 0))
+            setStart((current) => (current === next ? current : next))
+          }}
+        >
+          {Array.from({ length: end - start }, (_, offset) => {
+            const index = start + offset
+            if (index === 0) {
+              return <div key={index} role="row" ariaLabel="Row 0" style={{ height: 24, display: "flex" }} />
+            }
+            return (
+              <div key={index} role="row" ariaLabel={`Row ${index}`} style={{ height: 24, display: "flex" }}>
+                <div role="button" tabIndex={0} ariaLabel={`Button ${index}`} style={{ width: 40, height: 24 }} />
+              </div>
+            )
+          })}
+        </virtual-list>
+      </div>
+    )
+  }
+
+  it("reaches the previous ordinary tab stop in one Shift+Tab when the logical start has nothing focusable", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(<ListWithEmptyFirstRowAfterBefore />)
+
+      const button1 = screen.getByRole("button", { name: "Button 1" })
+      screen.renderer.focusElement(button1.id)
+      screen.renderer.flush()
+      expect(button1).toHaveFocus()
+      expect(screen.queryByRole("row", { name: "Row 0" })).toBeNull()
+
+      screen.renderer.focusPrevious()
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      expect(screen.getByRole("button", { name: "Before" })).toHaveFocus()
+    } finally {
+      screen.unmount()
+    }
+  })
 })

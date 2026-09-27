@@ -13816,7 +13816,19 @@ fn build_virtual_list(
                         FocusDirection::Previous => pending.target_index.checked_sub(1),
                     };
                     let Some(next_index) = next_index else {
+                        // The list has nothing left to offer in this
+                        // direction: every remaining logical row has been
+                        // built and scanned, and none had anything
+                        // focusable. A fully mounted list would have Tab
+                        // fall through to whatever ordinary tab stop follows
+                        // (or precedes) it in one press; this queued scan
+                        // continues that same press now that it knows there
+                        // is nothing left to wait on.
                         entry.pending_focus = None;
+                        match pending.direction {
+                            FocusDirection::Next => window.focus_next(cx),
+                            FocusDirection::Previous => window.focus_prev(cx),
+                        }
                         break;
                     };
                     entry.pending_focus = Some(PendingVirtualFocus {
