@@ -17199,11 +17199,15 @@ pub(crate) fn emit_event_full(
 /// position directly and never runs the closure `set_scroll_handler`
 /// installs, which only fires from an actual wheel/drag scroll — so a
 /// programmatic reveal past the built range needs its own `visibleRange`
-/// event, shaped the same way a real scroll's would be: a full viewport
-/// ending (or starting, for `Previous`) at `target_index`, sized from the
-/// list's own measured viewport height and estimated row height, not a
-/// single-row range. An app that reads `endIndex` to size its window, not
-/// just `startIndex`, gets a plausible one either way.
+/// event: an *estimated* viewport range ending (or starting, for `Previous`)
+/// at `target_index`, sized from the list's own measured viewport height and
+/// its estimated row height, not a single-row range. A real scroll's own
+/// event uses each row's actual measured height instead, so a list with
+/// variable-height rows can get different indices here than a real scroll at
+/// the same position would report; this one is still bounded and always
+/// includes `target_index`, which is what widening the window needs. An app
+/// that reads `endIndex` to size its window, not just `startIndex`, gets a
+/// plausible one either way.
 fn emit_virtual_window_advance(
     callback: &Option<EventCallback>,
     entry: &VirtualListEntry,

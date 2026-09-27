@@ -131,7 +131,7 @@ A host element, not a component; each immediate child is one row. It needs a bou
 - A single child without `itemCount={1}` throws `VirtualListRowContractError` in strict mode and warns otherwise.
 - Scroll to a row with `renderer.scrollToItem?.(ref.current.id, index, offsetPx?)` (from `useGpuixRequired()`), not a ref method. `ref.current.scrollTop` works.
 - Windowing (which rows to mount) is app state; unmounted rows paint as estimate-sized placeholders. A focused row stays mounted offscreen.
-- Tab and Shift+Tab through row content cross the mounted window's edge: reaching the last (or first) mounted row's focusable control requests the next logical row the same way scrolling would, then focuses it once `onVisibleRange` mounts it. This needs `onVisibleRange` to actually widen the window past that edge; a fixed-size window stalls navigation there, same as it would under real scrolling.
+- Tab and Shift+Tab through row content cross the mounted window's edge: reaching the last (or first) mounted row's focusable control reports an estimated `onVisibleRange` that includes the next logical row (sized from the viewport and estimated row height, not each row's measured height, so it can differ from a real scroll's own indices with variable-height rows, though it always includes that row), then focuses it once the app mounts it. This needs `onVisibleRange` to actually widen the window past that edge; a fixed-size window stalls navigation there, same as it would under real scrolling.
 
 ## Accessibility props
 
