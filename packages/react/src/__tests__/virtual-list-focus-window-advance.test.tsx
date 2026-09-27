@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import { describe, expect, it } from "vitest"
-import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
+import { act, createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import { gpuixMatchers } from "../testing-expect.js"
 
 expect.extend(gpuixMatchers)
@@ -232,7 +232,15 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
     }
   })
 
-  function WindowedRowsDeferredVisibleRange() {
+  /** A slot the test releases explicitly, instead of a real timer: `onVisibleRange`
+   *  defers its `setStart` until the test calls `release.current()`, so the
+   *  gap between "request queued" and "request resolved" is exact and has no
+   *  real-clock delay to be flaky about on a loaded machine. */
+  function WindowedRowsDeferredVisibleRange({
+    release,
+  }: {
+    release: { current: (() => void) | null }
+  }) {
     const [start, setStart] = useState(0)
     const end = Math.min(ROW_COUNT, start + WINDOW_ROWS)
     return (
@@ -251,13 +259,9 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
               flexDirection: "column",
               overflowY: "scroll",
             }}
-            // Widens the window, but only after a real delay: an app whose
-            // `onVisibleRange` fetches data (or otherwise defers) before
-            // committing, rather than one that resolves in the same tick a
-            // synthetic `visibleRange` event is delivered in.
             onVisibleRange={(event) => {
               const next = Math.max(0, Math.floor(event.startIndex ?? 0) - 2)
-              setTimeout(() => setStart((current) => (current === next ? current : next)), 20)
+              release.current = () => setStart((current) => (current === next ? current : next))
             }}
           >
             {Array.from({ length: end - start }, (_, offset) => {
@@ -275,11 +279,12 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
     )
   }
 
-  it("does not steal focus back if it moves elsewhere before a deferred crossing resolves", async () => {
+  it("does not steal focus back if it moves elsewhere before a deferred crossing resolves", () => {
     const screen = createTestRoot()
+    const release: { current: (() => void) | null } = { current: null }
 
     try {
-      screen.render(<WindowedRowsDeferredVisibleRange />)
+      screen.render(<WindowedRowsDeferredVisibleRange release={release} />)
 
       const start = screen.getByRole("button", { name: "Button 0" })
       screen.renderer.focusElement(start.id)
@@ -292,23 +297,27 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
       const lastBuilt = screen.getByRole("button", { name: `Button ${WINDOW_ROWS - 1}` })
       expect(lastBuilt).toHaveFocus()
 
-      // Crosses the boundary and queues a request for Button 20. The app's
-      // timer has not fired yet, so it is still outstanding.
+      // Crosses the boundary and queues a request for Button 20. The
+      // deferred `onVisibleRange` has captured a release but not called it,
+      // so the request is still outstanding.
       screen.renderer.focusNext()
       screen.renderer.flush()
       screen.renderer.drawPendingFrame()
       expect(screen.queryByRole("button", { name: `Button ${WINDOW_ROWS}` })).toBeNull()
       expect(lastBuilt).toHaveFocus()
+      expect(release.current).not.toBeNull()
 
-      // The user focuses something else before the timer fires.
+      // The user focuses something else before the deferred update lands.
       const elsewhere = screen.getByRole("button", { name: "Elsewhere" })
       screen.renderer.focusElement(elsewhere.id)
       expect(elsewhere).toHaveFocus()
 
-      // Let the deferred `setStart` land and React commit the wider window,
-      // then draw: Button 20 exists now, but resolving the stale request
-      // must not pull focus away from `elsewhere`.
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      // Release it now, at a moment the test chose exactly: Button 20 exists
+      // once this draws, but resolving the stale request must not pull focus
+      // away from `elsewhere`. `act` flushes the commit synchronously, the
+      // same guarantee `dispatchNativeEvents` gives a handler called from the
+      // native event pipeline, since this call is not one.
+      act(() => release.current!())
       screen.renderer.flush()
       screen.renderer.drawPendingFrame()
 
@@ -319,7 +328,7 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
     }
   })
 
-  function WindowedRowsWithOrderedTarget() {
+  function WindowedRowsWithMultiControlTarget() {
     const [start, setStart] = useState(0)
     const end = Math.min(ROW_COUNT, start + WINDOW_ROWS)
     return (
@@ -345,13 +354,14 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
           {Array.from({ length: end - start }, (_, offset) => {
             const index = start + offset
             if (index === WINDOW_ROWS) {
-              // The crossing target: DOM order and tab order disagree, so
-              // resolving the request has to pick by tab order, not by
-              // walking the DOM front to back.
+              // The crossing target has two ordinary (tabIndex 0) controls:
+              // resolving the request has to pick the first one in document
+              // order, not whichever one a plain unordered tree walk visits
+              // first.
               return (
                 <div key={index} role="row" ariaLabel={`Row ${index}`} style={{ height: 24, display: "flex" }}>
-                  <div role="button" tabIndex={5} ariaLabel="Dom-first" style={{ width: 40, height: 24 }} />
-                  <div role="button" tabIndex={1} ariaLabel="Tab-order-first" style={{ width: 40, height: 24 }} />
+                  <div role="button" tabIndex={0} ariaLabel="First" style={{ width: 40, height: 24 }} />
+                  <div role="button" tabIndex={0} ariaLabel="Second" style={{ width: 40, height: 24 }} />
                 </div>
               )
             }
@@ -366,11 +376,11 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
     )
   }
 
-  it("resolves a crossing target by tab order, not DOM order", () => {
+  it("resolves a crossing target's first focusable control in document order", () => {
     const screen = createTestRoot()
 
     try {
-      screen.render(<WindowedRowsWithOrderedTarget />)
+      screen.render(<WindowedRowsWithMultiControlTarget />)
 
       const start = screen.getByRole("button", { name: "Button 0" })
       screen.renderer.focusElement(start.id)
@@ -386,7 +396,222 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
       screen.renderer.flush()
       screen.renderer.drawPendingFrame()
 
-      expect(screen.getByRole("button", { name: "Tab-order-first" })).toHaveFocus()
+      expect(screen.getByRole("button", { name: "First" })).toHaveFocus()
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  function WindowedRowsWithHiddenControlInTarget() {
+    const [start, setStart] = useState(0)
+    const end = Math.min(ROW_COUNT, start + WINDOW_ROWS)
+    return (
+      <div role="table" ariaLabel="Demo" ariaRowCount={ROW_COUNT}>
+        <virtual-list
+          role="rowgroup"
+          ariaLabel="Rows"
+          itemCount={ROW_COUNT}
+          windowStart={start}
+          estimatedItemHeight={24}
+          style={{
+            width: 320,
+            height: 240,
+            display: "flex",
+            flexDirection: "column",
+            overflowY: "scroll",
+          }}
+          onVisibleRange={(event) => {
+            const next = Math.max(0, Math.floor(event.startIndex ?? 0) - 2)
+            setStart((current) => (current === next ? current : next))
+          }}
+        >
+          {Array.from({ length: end - start }, (_, offset) => {
+            const index = start + offset
+            if (index === WINDOW_ROWS) {
+              return (
+                <div key={index} role="row" ariaLabel={`Row ${index}`} style={{ height: 24, display: "flex" }}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    ariaLabel="Hidden"
+                    style={{ width: 40, height: 24, display: "none" }}
+                  />
+                  <div role="button" tabIndex={0} ariaLabel="Visible" style={{ width: 40, height: 24 }} />
+                </div>
+              )
+            }
+            return (
+              <div key={index} role="row" ariaLabel={`Row ${index}`} style={{ height: 24, display: "flex" }}>
+                <div role="button" tabIndex={0} ariaLabel={`Button ${index}`} style={{ width: 40, height: 24 }} />
+              </div>
+            )
+          })}
+        </virtual-list>
+      </div>
+    )
+  }
+
+  it("skips a display:none control when resolving a crossing target", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(<WindowedRowsWithHiddenControlInTarget />)
+
+      const start = screen.getByRole("button", { name: "Button 0" })
+      screen.renderer.focusElement(start.id)
+      screen.renderer.flush()
+      for (let index = 0; index < WINDOW_ROWS - 1; index += 1) {
+        screen.renderer.focusNext()
+        screen.renderer.flush()
+        screen.renderer.drawPendingFrame()
+      }
+      expect(screen.getByRole("button", { name: `Button ${WINDOW_ROWS - 1}` })).toHaveFocus()
+
+      screen.renderer.focusNext()
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      expect(screen.getByRole("button", { name: "Visible" })).toHaveFocus()
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  function ListWithUnbuiltRowPastANonFocusableOne() {
+    // itemCount 4, but only rows 0-1 are ever handed to the list: rows 2-3
+    // are genuinely unbuilt, past a built row (1) with nothing focusable of
+    // its own. Tab from row 0 must still cross to row 2, not treat row 1 as
+    // the built window's edge and give up on it.
+    const [start, setStart] = useState(0)
+    const rows = start === 0 ? [0, 1] : [2, 3]
+    return (
+      <div>
+        <virtual-list
+          role="rowgroup"
+          ariaLabel="Rows"
+          itemCount={4}
+          windowStart={start}
+          estimatedItemHeight={24}
+          style={{ width: 320, height: 240, display: "flex", flexDirection: "column" }}
+          onVisibleRange={(event) => {
+            // A small list reports a `startIndex` of 0 well before its
+            // logical count actually reaches 0, so this reads `endIndex`
+            // instead: whether the reported range's far edge has moved past
+            // what is currently mounted. This app only has two window
+            // states, 0 and 2 (matching `rows` below), so it jumps straight
+            // to the far edge's row rather than trying to keep a buffer.
+            const next = Math.max(0, (event.endIndex ?? 1) - 1)
+            setStart((current) => (current === next ? current : next))
+          }}
+        >
+          {rows.map((index) => (
+            <div key={index} role="row" ariaLabel={`Row ${index}`} style={{ height: 24, display: "flex" }}>
+              {index !== 1 && (
+                <div role="button" tabIndex={0} ariaLabel={`Button ${index}`} style={{ width: 40, height: 24 }} />
+              )}
+            </div>
+          ))}
+        </virtual-list>
+        <div role="button" tabIndex={0} ariaLabel="Outside" style={{ width: 40, height: 24 }} />
+      </div>
+    )
+  }
+
+  it("crosses past a built row with nothing focusable to reach a genuinely unbuilt one", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(<ListWithUnbuiltRowPastANonFocusableOne />)
+
+      const button0 = screen.getByRole("button", { name: "Button 0" })
+      screen.renderer.focusElement(button0.id)
+      screen.renderer.flush()
+      expect(button0).toHaveFocus()
+      expect(screen.queryByRole("row", { name: "Row 2" })).toBeNull()
+
+      // Row 1 is built but has nothing focusable; Row 2 is not built at all.
+      // Tab must widen the window to reach Row 2, not give up on Row 1 and
+      // fall through to Outside.
+      screen.renderer.focusNext()
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      expect(screen.getByRole("button", { name: "Button 2" })).toBeVisible()
+      expect(screen.getByRole("button", { name: "Button 2" })).toHaveFocus()
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  function WindowedRowsWithNonOverlappingSlide() {
+    // onVisibleRange anchors the new window at the *end* of the reported
+    // range rather than its start, so the requested row lands at the very
+    // front of the new window instead of a few rows into it — the old
+    // window and the new one share no rows, and the origin's own row is
+    // unmounted by the very commit that builds the target.
+    const [start, setStart] = useState(0)
+    const end = Math.min(ROW_COUNT, start + WINDOW_ROWS)
+    return (
+      <div role="table" ariaLabel="Demo" ariaRowCount={ROW_COUNT}>
+        <virtual-list
+          role="rowgroup"
+          ariaLabel="Rows"
+          itemCount={ROW_COUNT}
+          windowStart={start}
+          estimatedItemHeight={24}
+          style={{
+            width: 320,
+            height: 240,
+            display: "flex",
+            flexDirection: "column",
+            overflowY: "scroll",
+          }}
+          onVisibleRange={(event) => {
+            const next = Math.max(0, (event.endIndex ?? 1) - 1)
+            setStart((current) => (current === next ? current : next))
+          }}
+        >
+          {Array.from({ length: end - start }, (_, offset) => {
+            const index = start + offset
+            return (
+              <div key={index} role="row" ariaLabel={`Row ${index}`} style={{ height: 24, display: "flex" }}>
+                <div role="button" tabIndex={0} ariaLabel={`Button ${index}`} style={{ width: 40, height: 24 }} />
+              </div>
+            )
+          })}
+        </virtual-list>
+      </div>
+    )
+  }
+
+  it("resolves the crossing even when widening the window unmounts the origin's own row", () => {
+    const screen = createTestRoot()
+
+    try {
+      screen.render(<WindowedRowsWithNonOverlappingSlide />)
+
+      const start = screen.getByRole("button", { name: "Button 0" })
+      screen.renderer.focusElement(start.id)
+      screen.renderer.flush()
+      for (let index = 0; index < WINDOW_ROWS - 1; index += 1) {
+        screen.renderer.focusNext()
+        screen.renderer.flush()
+        screen.renderer.drawPendingFrame()
+      }
+      const lastBuilt = screen.getByRole("button", { name: `Button ${WINDOW_ROWS - 1}` })
+      expect(lastBuilt).toHaveFocus()
+
+      // This app's `onVisibleRange` replaces the window outright: Button 19
+      // (the request's origin) is unmounted in the same commit that mounts
+      // Button 20. That is the request succeeding, not focus moving away.
+      screen.renderer.focusNext()
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      expect(screen.queryByRole("button", { name: `Button ${WINDOW_ROWS - 1}` })).toBeNull()
+      const nextButton = screen.getByRole("button", { name: `Button ${WINDOW_ROWS}` })
+      expect(nextButton).toBeVisible()
+      expect(nextButton).toHaveFocus()
     } finally {
       screen.unmount()
     }
