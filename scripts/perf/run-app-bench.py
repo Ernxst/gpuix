@@ -45,7 +45,13 @@ def latest_result(after: float) -> Path | None:
     return max((p for p in candidates if p.stat().st_mtime >= after), key=lambda p: p.stat().st_mtime, default=None)
 
 
-def run_attempt(destination: Path, attempt: int) -> bool:
+def run_attempt(destination: Path, attempt: int, frame_only: bool) -> bool:
+    if not frame_only and not run_app_attempt(destination, attempt):
+        return False
+    return run_frame_attempt(destination, attempt)
+
+
+def run_app_attempt(destination: Path, attempt: int) -> bool:
     log_path = destination / f"attempt-{attempt}.log"
     load_path = destination / f"attempt-{attempt}-load.csv"
     started_at = time.time()
@@ -95,9 +101,10 @@ def run_attempt(destination: Path, attempt: int) -> bool:
     suffix = "valid" if valid else "discarded"
     shutil.copy2(result, destination / f"attempt-{attempt}-{suffix}.json")
     log(f"attempt {attempt}: {suffix}; raw JSON {result}")
-    if not valid:
-        return False
+    return valid
 
+
+def run_frame_attempt(destination: Path, attempt: int) -> bool:
     frame_log = destination / f"attempt-{attempt}-frame.log"
     frame_load = destination / f"attempt-{attempt}-frame-load.csv"
     with frame_log.open("w") as output, frame_load.open("w", newline="") as load_output:
@@ -139,15 +146,16 @@ def run_attempt(destination: Path, attempt: int) -> bool:
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: run-app-bench.py <output-directory>", file=sys.stderr)
+    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != "--frame-only"):
+        print("usage: run-app-bench.py <output-directory> [--frame-only]", file=sys.stderr)
         return 2
     destination = Path(sys.argv[1]).resolve()
     destination.mkdir(parents=True, exist_ok=True)
+    frame_only = len(sys.argv) == 3
     valid = 0
     for attempt in range(1, MAX_ATTEMPTS + 1):
         wait_for_quiet()
-        if run_attempt(destination, attempt):
+        if run_attempt(destination, attempt, frame_only):
             valid += 1
             if valid == VALID_RUNS:
                 log(f"completed {valid} valid invocations in {destination}")

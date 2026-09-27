@@ -130,3 +130,8 @@ the offscreen window, but not a Metal present. The fixture also reports the
 whole update cycle, including React work in the animation phase, native calls
 and Metal command submission. Neither metric includes GPU execution, so
 interpret it alongside an Instruments trace when investigating that cost.
+
+When a live display is unavailable, `python3 scripts/perf/run-app-bench.py
+<output-directory> --frame-only` keeps the same quiet-host gate and five valid
+invocations for the offscreen frame fixture. Startup and memory need a live,
+unlocked desktop and are not measured by this mode.
