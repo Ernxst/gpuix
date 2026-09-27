@@ -1,7 +1,7 @@
 /** Live-window GPUI draw time for a large scroll surface and a steady animation. */
 
 import React, { useState } from "react"
-import { createRenderer, render, requestAnimationFrame } from "@gpuix/react"
+import { createRenderer, render, requestAnimationFrame, startFrameLoop } from "@gpuix/react"
 
 const renderer = createRenderer()
 renderer.init({ title: "GPUIX frame benchmark", width: 640, height: 560 })
@@ -33,6 +33,8 @@ render(
   </div>,
   { renderer },
 )
+startFrameLoop(renderer)
+renderer.activateWindow()
 
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()))
