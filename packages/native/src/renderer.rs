@@ -9028,9 +9028,6 @@ impl GpuixView {
         self.pending_focus_element = Some((id, reveal));
     }
 
-    /// Whether `element_id` or any ancestor (including itself) currently
-    /// resolves `display` to `none` from its interaction state.
-    ///
     /// Focus handle lifetime is unaffected by this: it is a focusability
     /// predicate, checked only at the points where focus would actually move
     /// (see issue #426).
@@ -9040,35 +9037,50 @@ impl GpuixView {
         element_id: u64,
         window: &gpui::Window,
     ) -> bool {
-        let mut current = Some(element_id);
-        while let Some(id) = current {
-            let Some(element) = tree.elements.get(&id) else {
-                return false;
-            };
-            let (focused, focus_visible, hover_within, focus_within, active_within) =
-                interaction_state_for_element(
-                    tree,
-                    &self.focus_handles,
-                    &self.interactive_style_states,
-                    id,
-                    window,
-                );
-            if element.style.as_deref().is_some_and(|style| {
-                effective_display(
-                    style,
-                    focused,
-                    focus_visible,
-                    hover_within,
-                    focus_within,
-                    active_within,
-                ) == Some("none")
-            }) {
-                return true;
-            }
-            current = element.parent;
-        }
-        false
+        element_display_none_in_ancestry(
+            tree,
+            &self.focus_handles,
+            &self.interactive_style_states,
+            element_id,
+            window,
+        )
     }
+}
+
+/// Whether `element_id` or any ancestor (including itself) currently resolves
+/// `display` to `none` from its interaction state. Free-standing so both
+/// [`GpuixView::display_none_in_ancestry`] and a `<virtual-list>` row-focus
+/// resolution running from a [`BuildCtx`] (no `&GpuixView`) share one
+/// eligibility check.
+fn element_display_none_in_ancestry(
+    tree: &RetainedTree,
+    focus_handles: &HashMap<u64, gpui::FocusHandle>,
+    interactive_style_states: &HashMap<u64, InteractiveStyleState>,
+    element_id: u64,
+    window: &gpui::Window,
+) -> bool {
+    let mut current = Some(element_id);
+    while let Some(id) = current {
+        let Some(element) = tree.elements.get(&id) else {
+            return false;
+        };
+        let (focused, focus_visible, hover_within, focus_within, active_within) =
+            interaction_state_for_element(tree, focus_handles, interactive_style_states, id, window);
+        if element.style.as_deref().is_some_and(|style| {
+            effective_display(
+                style,
+                focused,
+                focus_visible,
+                hover_within,
+                focus_within,
+                active_within,
+            ) == Some("none")
+        }) {
+            return true;
+        }
+        current = element.parent;
+    }
+    false
 }
 
 /// Everything `build_element` threads through the tree.
@@ -9786,11 +9798,26 @@ impl VirtualListConfig {
 /// logical rows beyond it. `build_virtual_list` resolves it once the target
 /// row is built, walking forward (or backward, for `direction`) over rows
 /// with no focusable descendant of their own.
+///
+/// `origin_id` is who asked: resolving the request steals focus only while
+/// that element still holds it, so focus moving elsewhere first (a click, a
+/// later unrelated Tab) cancels the request instead of yanking focus back
+/// once the row eventually appears. `attempts_remaining` bounds how many
+/// frames it waits for the app's `onVisibleRange` to widen far enough — an
+/// app that ignores the request, or an `itemCount` shrink that strands
+/// `target_index` past the new count, cancels it rather than retrying
+/// forever.
 #[derive(Clone, Copy)]
 struct PendingVirtualFocus {
     target_index: usize,
     direction: FocusDirection,
+    origin_id: u64,
+    attempts_remaining: u32,
 }
+
+/// How many frames a cross-window focus request waits for the app's
+/// `onVisibleRange` to widen the window before giving up.
+const VIRTUAL_FOCUS_MAX_ATTEMPTS: u32 = 45;
 
 struct VirtualListEntry {
     state: gpui::ListState,
@@ -10681,11 +10708,15 @@ impl GpuixView {
 
     /// Tab ran off the built edge of `list_id` with no next/previous
     /// focusable anywhere in the document (or only one outside this list).
-    /// If the list has more logical rows in `direction`, queue a focus
-    /// request for the next one and nudge the list's scroll position to
-    /// reveal it, which drives the `visibleRange` event the app widens its
-    /// window from. `build_virtual_list` resolves the request once that row
-    /// is built.
+    /// That is only the built window's true edge when `current_id`'s row is
+    /// the last (or first) row the list has actually built — a built row
+    /// with nothing focusable of its own, followed by something outside the
+    /// list, reaches here the same way, and normal Tab is correct for that
+    /// (nothing to widen; walk on to whatever is next). Only at the true
+    /// edge, with more logical rows beyond it, queue a focus request for the
+    /// next one and nudge the list's scroll position to reveal it, which
+    /// drives the `visibleRange` event the app widens its window from.
+    /// `build_virtual_list` resolves the request once that row is built.
     fn request_virtual_window_advance(
         &mut self,
         list_id: u64,
@@ -10703,6 +10734,15 @@ impl GpuixView {
         let Some(current_logical) = entry.logical_index_of(row_id) else {
             return false;
         };
+        let at_built_edge = match direction {
+            FocusDirection::Next => {
+                current_logical + 1 == entry.window_start + entry.child_ids.len()
+            }
+            FocusDirection::Previous => current_logical == entry.window_start,
+        };
+        if !at_built_edge {
+            return false;
+        }
         let logical_count = entry.config.logical_count(entry.child_ids.len());
         let target_index = match direction {
             FocusDirection::Next => current_logical
@@ -10716,9 +10756,11 @@ impl GpuixView {
         entry.pending_focus = Some(PendingVirtualFocus {
             target_index,
             direction,
+            origin_id: current_id,
+            attempts_remaining: VIRTUAL_FOCUS_MAX_ATTEMPTS,
         });
         entry.state.scroll_to_reveal_item(target_index);
-        emit_virtual_window_advance(&self.event_callback, list_id, target_index);
+        emit_virtual_window_advance(&self.event_callback, entry, list_id, target_index, direction);
         cx.notify();
         true
     }
@@ -13662,26 +13704,43 @@ fn build_virtual_list(
     }
 
     // A cross-window Tab request from `request_virtual_window_advance`: the
-    // scroll it issued may have widened the app's window enough this frame
+    // event it emitted may have widened the app's window enough this frame
     // to build the target row. Walk forward past any row with nothing
-    // focusable of its own, and stop nudging once the request is resolved or
-    // runs off the logical range.
+    // focusable of its own, and stop once the request is resolved, cancelled,
+    // or runs off the logical range.
     if let Some(entry) = ctx.virtual_lists.get_mut(&element.id) {
         while let Some(pending) = entry.pending_focus {
+            // The requesting element lost focus (a click, a later unrelated
+            // Tab) before the row it asked for showed up: resolving now would
+            // yank focus back to a request nobody is waiting on anymore.
+            let origin_still_focused = ctx
+                .focus_handles
+                .get(&pending.origin_id)
+                .is_some_and(|handle| handle.is_focused(window));
+            if !origin_still_focused || pending.attempts_remaining == 0 {
+                entry.pending_focus = None;
+                break;
+            }
             let Some(child_id) = entry.child_at(pending.target_index) else {
+                // Not built yet. Hold the list's scroll position toward it,
+                // but don't re-emit: the app either hasn't caught up to the
+                // one `visibleRange` already sent, or a real scroll produced
+                // a newer one since, and repeating a stale target would fight
+                // that instead of just waiting on it.
                 entry.state.scroll_to_reveal_item(pending.target_index);
-                emit_virtual_window_advance(
-                    ctx.event_callback,
-                    element.id,
-                    pending.target_index,
-                );
+                entry.pending_focus = Some(PendingVirtualFocus {
+                    attempts_remaining: pending.attempts_remaining - 1,
+                    ..pending
+                });
                 break;
             };
             match first_focusable_descendant_in_row(
                 ctx.tree,
                 ctx.focus_handles,
+                ctx.interactive_style_states,
                 child_id,
                 pending.direction,
+                window,
             ) {
                 Some(target_focus_id) => {
                     entry.pending_focus = None;
@@ -13706,10 +13765,17 @@ fn build_virtual_list(
                     };
                     entry.pending_focus = Some(PendingVirtualFocus {
                         target_index: next_index,
-                        direction: pending.direction,
+                        attempts_remaining: VIRTUAL_FOCUS_MAX_ATTEMPTS,
+                        ..pending
                     });
                     entry.state.scroll_to_reveal_item(next_index);
-                    emit_virtual_window_advance(ctx.event_callback, element.id, next_index);
+                    emit_virtual_window_advance(
+                        ctx.event_callback,
+                        entry,
+                        element.id,
+                        next_index,
+                        pending.direction,
+                    );
                 }
             }
         }
@@ -13866,29 +13932,56 @@ fn virtual_row_ancestor(tree: &RetainedTree, list_id: u64, element_id: u64) -> O
 /// The first (`Next`) or last (`Previous`) focusable descendant of `row_id`,
 /// in document order, under the same tab-stop criteria ordinary Tab
 /// traversal uses. `None` for a row with no focusable content of its own.
+/// The first (`Next`) or last (`Previous`) focusable descendant of `row_id`
+/// in Tab order: the same eligibility (a tab stop, not under `display: none`
+/// in its own ancestry) and ordering (ascending positive `tabIndex` before
+/// document order) as [`GpuixView::focus_unrendered_virtual_target`]'s own
+/// traversal, restricted to one row's subtree. `None` for a row with no
+/// eligible descendant of its own.
 fn first_focusable_descendant_in_row(
     tree: &RetainedTree,
     focus_handles: &HashMap<u64, gpui::FocusHandle>,
+    interactive_style_states: &HashMap<u64, InteractiveStyleState>,
     row_id: u64,
     direction: FocusDirection,
+    window: &gpui::Window,
 ) -> Option<u64> {
     let mut stack = vec![row_id];
-    let mut last_match = None;
+    let mut order = 0usize;
+    let mut focusable = Vec::new();
     while let Some(id) = stack.pop() {
-        if focus_handles
+        let is_focusable = focus_handles
             .get(&id)
-            .is_some_and(|handle| handle.tab_stop && handle.tab_index >= 0)
+            .is_some_and(|handle| handle.tab_stop && handle.tab_index >= 0);
+        if is_focusable
+            && !element_display_none_in_ancestry(
+                tree,
+                focus_handles,
+                interactive_style_states,
+                id,
+                window,
+            )
         {
-            match direction {
-                FocusDirection::Next => return Some(id),
-                FocusDirection::Previous => last_match = Some(id),
-            }
+            focusable.push((id, order));
+            order += 1;
         }
         if let Some(element) = tree.elements.get(&id) {
             stack.extend(element.children.iter().rev().copied());
         }
     }
-    last_match
+    focusable.sort_by_key(|(id, document_order)| {
+        let tab_index = focus_handles[id].tab_index;
+        if tab_index > 0 {
+            (0, tab_index, *document_order)
+        } else {
+            (1, 0, *document_order)
+        }
+    });
+    match direction {
+        FocusDirection::Next => focusable.first(),
+        FocusDirection::Previous => focusable.last(),
+    }
+    .map(|(id, _)| *id)
 }
 
 #[derive(Clone, Copy)]
@@ -17051,14 +17144,37 @@ pub(crate) fn emit_event_full(
 /// position directly and never runs the closure `set_scroll_handler`
 /// installs, which only fires from an actual wheel/drag scroll — so a
 /// programmatic reveal past the built range needs its own `visibleRange`
-/// event, shaped the same way a real scroll's would be. `target_index` is
-/// reported as the start of the visible range: every `onVisibleRange`
-/// implementation in the docs already treats its reported start as the near
-/// edge of a buffer to keep mounted, the same assumption a real scroll makes.
-fn emit_virtual_window_advance(callback: &Option<EventCallback>, list_id: u64, target_index: usize) {
+/// event, shaped the same way a real scroll's would be: a full viewport
+/// ending (or starting, for `Previous`) at `target_index`, sized from the
+/// list's own measured viewport height and estimated row height, not a
+/// single-row range. An app that reads `endIndex` to size its window, not
+/// just `startIndex`, gets a plausible one either way.
+fn emit_virtual_window_advance(
+    callback: &Option<EventCallback>,
+    entry: &VirtualListEntry,
+    list_id: u64,
+    target_index: usize,
+    direction: FocusDirection,
+) {
+    let viewport_rows = entry
+        .config
+        .estimated_item_height
+        .filter(|height| *height > 0.0)
+        .map(|height| {
+            (f32::from(entry.state.viewport_bounds().size.height) / height).ceil() as usize
+        })
+        .unwrap_or(1)
+        .max(1);
+    let (start_index, end_index) = match direction {
+        FocusDirection::Next => (
+            target_index.saturating_sub(viewport_rows - 1),
+            target_index + 1,
+        ),
+        FocusDirection::Previous => (target_index, target_index + viewport_rows),
+    };
     emit_event_full(callback, list_id, "visibleRange", |payload| {
-        payload.start_index = Some(target_index as f64);
-        payload.end_index = Some((target_index + 1) as f64);
+        payload.start_index = Some(start_index as f64);
+        payload.end_index = Some(end_index as f64);
     });
 }
 
