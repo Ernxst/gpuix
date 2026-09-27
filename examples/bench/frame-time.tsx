@@ -42,9 +42,11 @@ function pause(): Promise<void> {
 
 async function measuredDraw(update: () => void): Promise<number> {
   const before = renderer.getDebugFrameOverlayStats().frames
+  const offsetBefore = scrollId === undefined ? null : renderer.getScrollOffset(scrollId)
   update()
+  let running = true
   for (let attempt = 0; attempt < 30; attempt++) {
-    renderer.tick()
+    running = renderer.tick()
     const stats = renderer.getDebugFrameOverlayStats()
     if (stats.frames > before && stats.currentMs !== null && stats.currentMs !== undefined) {
       await pause()
@@ -52,7 +54,8 @@ async function measuredDraw(update: () => void): Promise<number> {
     }
     await pause()
   }
-  throw new Error("GPUI did not draw within 30 event-loop pumps")
+  const offsetAfter = scrollId === undefined ? null : renderer.getScrollOffset(scrollId)
+  throw new Error(`GPUI did not draw within 30 event-loop pumps: ${JSON.stringify({ before, after: renderer.getDebugFrameOverlayStats(), running, offsetBefore, offsetAfter, capabilities: renderer.capabilities() })}`)
 }
 
 function summary(samples: number[]) {
