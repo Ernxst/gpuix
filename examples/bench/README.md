@@ -123,7 +123,7 @@ four. Each invocation includes five warm launches per app and one first launch
 after building the app.
 
 The wrapper also runs `frame-time.tsx` in the GPU-backed test window. Its scroll phase
-moves a non-virtual list of 1,128 rows, and its animation phase changes a
+sends wheel events over a non-virtual list of 1,128 rows, and its animation phase changes a
 box's width. It reports the median and p95 of GPUI's `Window::draw` duration
 for each phase. That duration includes GPUI build, layout and paint work in
 the offscreen window, but not a Metal present. The fixture also reports the

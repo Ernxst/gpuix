@@ -49,15 +49,17 @@ try {
   if (scrollId === undefined) throw new Error('scroll fixture did not mount')
   const id = scrollId
 
-  for (let index = 0; index < 12; index++) draw(() => renderer.scrollTo(id, 0, -(index + 1) * 20))
+  for (let index = 0; index < 12; index++) draw(() => renderer.dispatchScrollWheel(300, 300, 0, -24))
   renderer.resetDebugFrameOverlayStats()
   const scroll: number[] = []
   const scrollCycle: number[] = []
   for (let index = 0; index < 120; index++) {
-    const sample = draw(() => renderer.scrollTo(id, 0, -(index + 20) * 24))
+    const sample = draw(() => renderer.dispatchScrollWheel(300, 300, 0, -24))
     scroll.push(sample.gpuiMs)
     scrollCycle.push(sample.cycleMs)
   }
+  const offset = renderer.getScrollOffset(id)
+  if (offset === null || offset[1] >= 0) throw new Error(`scroll fixture did not move: ${offset}`)
 
   for (let index = 0; index < 12; index++) draw(() => render(scene(40 + (index % 60) * 3)))
   renderer.resetDebugFrameOverlayStats()
