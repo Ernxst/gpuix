@@ -90,7 +90,7 @@ Families: `ByText`, `ByTestId`, `ByRole`, `ByLabelText`, `ByPlaceholderText`, `B
 |---|---|
 | `ByText` | Retained `<text>` content: own text plus direct children's; the innermost match wins. `<code>`, `<diff>` and `<markdown>` paint their text natively, so read them with `renderer.getPaintedText()`. |
 | `ByTestId` | `data-testid`. |
-| `ByRole` | Computed AccessKit role, accessible name and `level`. `hidden: true` throws. |
+| `ByRole` | Computed AccessKit role, accessible name and `level`. `hidden: true` throws. Reaches rendered `<virtual-list>` descendants too, but only rows the current window has built. |
 | `ByLabelText` | The `ariaLabel` prop only; `<label htmlFor>` and `title` are not consulted. |
 | `ByPlaceholderText`, `ByDisplayValue` | The declared `placeholder`/`value` prop, not the live editor buffer. |
 
