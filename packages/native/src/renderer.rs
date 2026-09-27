@@ -1066,6 +1066,23 @@ thread_local! {
     /// second time by `splice_focusable` and land on the wrong row.
     static PENDING_VIRTUAL_LIST_SCROLLS: RefCell<HashMap<u64, gpui::ListOffset>> =
         RefCell::new(HashMap::new());
+    /// Bumped each time a `<virtual-list>`'s `visibleRange` scroll handler
+    /// runs — which only happens from an actual wheel/drag scroll (see
+    /// `emit_virtual_window_advance`), never from a cross-window focus
+    /// request's own programmatic reveal. A pending request snapshots this
+    /// at queue time and cancels if it has moved on by the time the request
+    /// would otherwise resolve: a real scroll since then means whatever the
+    /// user was looking for, it is no longer the Tab press that queued this.
+    static VIRTUAL_LIST_SCROLL_GENERATIONS: RefCell<HashMap<u64, u64>> =
+        RefCell::new(HashMap::new());
+}
+
+fn virtual_list_scroll_generation(list_id: u64) -> u64 {
+    VIRTUAL_LIST_SCROLL_GENERATIONS.with(|cell| cell.borrow().get(&list_id).copied().unwrap_or(0))
+}
+
+fn bump_virtual_list_scroll_generation(list_id: u64) {
+    VIRTUAL_LIST_SCROLL_GENERATIONS.with(|cell| *cell.borrow_mut().entry(list_id).or_insert(0) += 1);
 }
 
 const SELECTION_SCROLL_TICK_MS: u64 = 24;
@@ -9800,27 +9817,38 @@ impl VirtualListConfig {
 /// with no focusable descendant of their own.
 ///
 /// `origin_id` is who asked: resolving the request steals focus only while
-/// that element is *known* to hold it, i.e. still has a focus handle and it
-/// is focused. A handle that has disappeared entirely is not the same as
-/// one that lost focus to something else — widening the window can unmount
-/// the origin's own row as part of building the row this request asked for
-/// (a fixed-size window that no longer overlaps its old range), and that is
-/// this request succeeding, not the user moving away from it; only a handle
-/// that still exists but points elsewhere means focus definitely moved on
-/// its own, and cancels the request. `attempts_remaining` bounds how many
-/// *builds* (not how much wall-clock time) a request survives unresolved —
-/// nothing here forces an extra frame to spend that budget on, so an app
-/// that stops rendering entirely simply leaves an inert, harmless pending
-/// request rather than one force-cancelled on a schedule. It still reaches
-/// zero across whatever frames do happen, cancelling an `itemCount` shrink
-/// that stranded `target_index` past the new count immediately rather than
-/// waiting for it to run out.
+/// nothing definite says otherwise. Widening the window can unmount the
+/// origin's own row as part of building the row this request asked for (a
+/// fixed-size window that no longer overlaps its old range), and that alone
+/// is this request succeeding, not the user moving away from it — so a
+/// missing origin handle only cancels when some *other* host element has
+/// plainly taken focus in the meantime (the origin's row removed for an
+/// unrelated reason, and the user focused something else before the target
+/// ever built). A handle that still exists but points elsewhere always
+/// cancels: focus there definitely moved on its own. `attempts_remaining`
+/// bounds how many *builds* (not how much wall-clock time) a request
+/// survives unresolved — nothing here forces an extra frame to spend that
+/// budget on, so an app that stops rendering entirely simply leaves an
+/// inert, harmless pending request rather than one force-cancelled on a
+/// schedule. It still reaches zero across whatever frames do happen,
+/// cancelling an `itemCount` shrink that stranded `target_index` past the
+/// new count immediately rather than waiting for it to run out.
+/// `scroll_generation` cancels the request outright the moment a real
+/// wheel/drag scroll happens, regardless of focus: whatever the user is
+/// doing after that, it is not the Tab press that queued this, so an
+/// unrelated later scroll bringing the target into range must not resolve
+/// it.
 #[derive(Clone, Copy)]
 struct PendingVirtualFocus {
     target_index: usize,
     direction: FocusDirection,
     origin_id: u64,
     attempts_remaining: u32,
+    /// [`virtual_list_scroll_generation`] at the moment this was queued (or
+    /// last re-targeted). A later real scroll bumps it, cancelling this
+    /// request rather than resolving an obsolete Tab press once the target
+    /// a since-moved-on scroll happens to build anyway.
+    scroll_generation: u64,
 }
 
 /// How many frames a cross-window focus request waits for the app's
@@ -10754,6 +10782,7 @@ impl GpuixView {
             direction,
             origin_id: current_id,
             attempts_remaining: VIRTUAL_FOCUS_MAX_ATTEMPTS,
+            scroll_generation: virtual_list_scroll_generation(list_id),
         });
         entry.state.scroll_to_reveal_item(target_index);
         emit_virtual_window_advance(&self.event_callback, entry, list_id, target_index, direction);
@@ -13709,20 +13738,34 @@ fn build_virtual_list(
             // The requesting element definitely lost focus to something else
             // (a click, a later unrelated Tab) before the row it asked for
             // showed up: resolving now would yank focus back to a request
-            // nobody is waiting on anymore. A *missing* handle is not that —
-            // widening the window can unmount the origin's own row as part of
-            // building the very row this request asked for (a fixed-size
-            // window that does not overlap its old range), and that is this
-            // request succeeding, not the user moving away from it.
-            let origin_definitely_elsewhere = ctx
-                .focus_handles
-                .get(&pending.origin_id)
-                .is_some_and(|handle| !handle.is_focused(window));
+            // nobody is waiting on anymore. A *missing* origin handle is not
+            // itself that — widening the window can unmount the origin's own
+            // row as part of building the very row this request asked for (a
+            // fixed-size window that does not overlap its old range), and
+            // that is this request succeeding, not the user moving away from
+            // it — unless something else has plainly taken focus in the
+            // meantime regardless (the origin's row removed for an unrelated
+            // reason, and the user focused something outside the list before
+            // the target ever built).
+            let origin_definitely_elsewhere = match ctx.focus_handles.get(&pending.origin_id) {
+                Some(handle) => !handle.is_focused(window),
+                None => ctx
+                    .focus_handles
+                    .iter()
+                    .any(|(id, handle)| *id != pending.origin_id && handle.is_focused(window)),
+            };
             // itemCount shrinking can strand a target past the new count;
             // that can never resolve, so cancel outright rather than
             // spending the retry budget rediscovering it every frame.
             let logical_count = entry.config.logical_count(entry.child_ids.len());
+            // A real scroll since this was queued (or last re-targeted) means
+            // whatever the user is doing now, it is not the Tab press that
+            // asked for this row — resolving it regardless would focus a row
+            // an unrelated, later scroll happened to bring into range.
+            let superseded_by_real_scroll =
+                virtual_list_scroll_generation(element.id) != pending.scroll_generation;
             if origin_definitely_elsewhere
+                || superseded_by_real_scroll
                 || pending.target_index >= logical_count
                 || pending.attempts_remaining == 0
             {
@@ -13796,6 +13839,7 @@ fn build_virtual_list(
         let callback = ctx.event_callback.clone();
         let list_id = element.id;
         list_state.set_scroll_handler(move |event, _window, _cx| {
+            bump_virtual_list_scroll_generation(list_id);
             emit_event_full(&callback, list_id, "visibleRange", |payload| {
                 payload.start_index = Some(event.visible_range.start as f64);
                 payload.end_index = Some(event.visible_range.end as f64);

@@ -660,4 +660,190 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
       screen.unmount()
     }
   })
+
+  function WindowedRowsWithRemovableOriginAndDeferredTarget({
+    release,
+    removeOrigin,
+  }: {
+    release: { current: (() => void) | null }
+    removeOrigin: { current: (() => void) | null }
+  }) {
+    const [start, setStart] = useState(0)
+    const [originRemoved, setOriginRemoved] = useState(false)
+    removeOrigin.current = () => setOriginRemoved(true)
+    const end = Math.min(ROW_COUNT, start + WINDOW_ROWS)
+    return (
+      <div>
+        <div role="table" ariaLabel="Demo" ariaRowCount={ROW_COUNT}>
+          <virtual-list
+            role="rowgroup"
+            ariaLabel="Rows"
+            itemCount={ROW_COUNT}
+            windowStart={start}
+            estimatedItemHeight={24}
+            style={{
+              width: 320,
+              height: 240,
+              display: "flex",
+              flexDirection: "column",
+              overflowY: "scroll",
+            }}
+            onVisibleRange={(event) => {
+              const next = Math.max(0, Math.floor(event.startIndex ?? 0) - 2)
+              release.current = () => setStart((current) => (current === next ? current : next))
+            }}
+          >
+            {Array.from({ length: end - start }, (_, offset) => {
+              const index = start + offset
+              // Removed for a reason unrelated to this crossing: an app
+              // update, not the window widening to build the target.
+              if (originRemoved && index === WINDOW_ROWS - 1) return null
+              return (
+                <div key={index} role="row" ariaLabel={`Row ${index}`} style={{ height: 24, display: "flex" }}>
+                  <div role="button" tabIndex={0} ariaLabel={`Button ${index}`} style={{ width: 40, height: 24 }} />
+                </div>
+              )
+            })}
+          </virtual-list>
+        </div>
+        <div role="button" tabIndex={0} ariaLabel="Outside" style={{ width: 40, height: 24 }} />
+      </div>
+    )
+  }
+
+  it("does not steal focus from an explicitly focused control when the origin's row was removed for an unrelated reason", () => {
+    const screen = createTestRoot()
+    const release: { current: (() => void) | null } = { current: null }
+    const removeOrigin: { current: (() => void) | null } = { current: null }
+
+    try {
+      screen.render(
+        <WindowedRowsWithRemovableOriginAndDeferredTarget release={release} removeOrigin={removeOrigin} />
+      )
+
+      const start = screen.getByRole("button", { name: "Button 0" })
+      screen.renderer.focusElement(start.id)
+      screen.renderer.flush()
+      for (let index = 0; index < WINDOW_ROWS - 1; index += 1) {
+        screen.renderer.focusNext()
+        screen.renderer.flush()
+        screen.renderer.drawPendingFrame()
+      }
+      expect(screen.getByRole("button", { name: `Button ${WINDOW_ROWS - 1}` })).toHaveFocus()
+
+      // Crosses the boundary, queues a request for Button 20, deferred.
+      screen.renderer.focusNext()
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+      expect(screen.queryByRole("button", { name: `Button ${WINDOW_ROWS}` })).toBeNull()
+      expect(release.current).not.toBeNull()
+
+      // The app removes the origin's row for a reason that has nothing to do
+      // with this request — its own focus handle is now gone.
+      act(() => removeOrigin.current!())
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+      expect(screen.queryByRole("row", { name: `Row ${WINDOW_ROWS - 1}` })).toBeNull()
+
+      // The user explicitly focuses something else before the target ever
+      // builds.
+      const outside = screen.getByRole("button", { name: "Outside" })
+      screen.renderer.focusElement(outside.id)
+      expect(outside).toHaveFocus()
+
+      // The deferred crossing finally builds Button 20 — but the request it
+      // came from is stale twice over now, and must not steal focus back.
+      act(() => release.current!())
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      expect(screen.getByRole("button", { name: `Button ${WINDOW_ROWS}` })).toBeVisible()
+      expect(outside).toHaveFocus()
+    } finally {
+      screen.unmount()
+    }
+  })
+
+  function WindowedRowsDeferredVisibleRangeQueue({ releases }: { releases: Array<() => void> }) {
+    const [start, setStart] = useState(0)
+    const end = Math.min(ROW_COUNT, start + WINDOW_ROWS)
+    return (
+      <div role="table" ariaLabel="Demo" ariaRowCount={ROW_COUNT}>
+        <virtual-list
+          role="rowgroup"
+          ariaLabel="Rows"
+          itemCount={ROW_COUNT}
+          windowStart={start}
+          estimatedItemHeight={24}
+          style={{
+            width: 320,
+            height: 240,
+            display: "flex",
+            flexDirection: "column",
+            overflowY: "scroll",
+          }}
+          onVisibleRange={(event) => {
+            const next = Math.max(0, Math.floor(event.startIndex ?? 0) - 2)
+            releases.push(() => setStart((current) => (current === next ? current : next)))
+          }}
+        >
+          {Array.from({ length: end - start }, (_, offset) => {
+            const index = start + offset
+            return (
+              <div key={index} role="row" ariaLabel={`Row ${index}`} style={{ height: 24, display: "flex" }}>
+                <div role="button" tabIndex={0} ariaLabel={`Button ${index}`} style={{ width: 40, height: 24 }} />
+              </div>
+            )
+          })}
+        </virtual-list>
+      </div>
+    )
+  }
+
+  it("cancels a pending crossing once a real scroll happens, even if its own target builds later anyway", () => {
+    const screen = createTestRoot()
+    const releases: Array<() => void> = []
+
+    try {
+      screen.render(<WindowedRowsDeferredVisibleRangeQueue releases={releases} />)
+
+      const start = screen.getByRole("button", { name: "Button 0" })
+      screen.renderer.focusElement(start.id)
+      screen.renderer.flush()
+      for (let index = 0; index < WINDOW_ROWS - 1; index += 1) {
+        screen.renderer.focusNext()
+        screen.renderer.flush()
+        screen.renderer.drawPendingFrame()
+      }
+      expect(screen.getByRole("button", { name: `Button ${WINDOW_ROWS - 1}` })).toHaveFocus()
+
+      // Crosses the boundary, queues a request for Button 20, deferred.
+      screen.renderer.focusNext()
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+      expect(releases).toHaveLength(1)
+
+      // A real, unrelated wheel scroll happens before the app ever builds
+      // Button 20 — this is what supersedes the pending request, regardless
+      // of what focus does.
+      screen.renderer.nativeSimulateScrollWheel(160, 120, 0, -400)
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      // The original request's own target eventually builds anyway (the app
+      // catches up to it later, and Button 19 stays mounted throughout — the
+      // real scroll's own paint position is what moved, not React's window)
+      // — but a real scroll happened in between, so this Tab press is
+      // obsolete and must not claim focus. A cancelled request never repaints
+      // toward Button 20, so this checks that focus never left, not that
+      // Button 20 is now visible.
+      act(() => releases[0]!())
+      screen.renderer.flush()
+      screen.renderer.drawPendingFrame()
+
+      expect(screen.getByRole("button", { name: `Button ${WINDOW_ROWS - 1}` })).toHaveFocus()
+    } finally {
+      screen.unmount()
+    }
+  })
 })
