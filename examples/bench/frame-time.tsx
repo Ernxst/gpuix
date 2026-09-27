@@ -1,7 +1,7 @@
 /** Live-window GPUI draw time for a large scroll surface and a steady animation. */
 
 import React, { useState } from "react"
-import { createRenderer, render, requestAnimationFrame, startFrameLoop } from "@gpuix/react"
+import { createRenderer, render } from "@gpuix/react"
 
 const renderer = createRenderer()
 renderer.init({ title: "GPUIX frame benchmark", width: 640, height: 560 })
@@ -33,24 +33,26 @@ render(
   </div>,
   { renderer },
 )
-startFrameLoop(renderer)
 renderer.activateWindow()
+renderer.tick()
 
-function nextFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()))
+function pause(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 16))
 }
 
 async function measuredDraw(update: () => void): Promise<number> {
   const before = renderer.getDebugFrameOverlayStats().frames
   update()
-  for (let attempt = 0; attempt < 8; attempt++) {
-    await nextFrame()
+  for (let attempt = 0; attempt < 30; attempt++) {
+    renderer.tick()
     const stats = renderer.getDebugFrameOverlayStats()
     if (stats.frames > before && stats.currentMs !== null && stats.currentMs !== undefined) {
+      await pause()
       return stats.currentMs
     }
+    await pause()
   }
-  throw new Error("GPUI did not draw within eight display frames")
+  throw new Error("GPUI did not draw within 30 event-loop pumps")
 }
 
 function summary(samples: number[]) {
@@ -60,15 +62,21 @@ function summary(samples: number[]) {
 }
 
 async function main() {
-  await nextFrame()
-  await nextFrame()
+  const watchdog = setTimeout(() => {
+    console.error("Frame fixture timed out", renderer.getDebugFrameOverlayStats())
+    process.exit(1)
+  }, 30_000)
+  for (let index = 0; index < 4; index++) {
+    renderer.tick()
+    await pause()
+  }
   if (scrollId === undefined || !setAnimationWidth) throw new Error("fixture did not mount")
 
   for (let index = 0; index < 12; index++) {
     await measuredDraw(() => renderer.scrollTo(scrollId!, 0, -(index + 1) * 20))
   }
   renderer.resetDebugFrameOverlayStats()
-  await nextFrame()
+  renderer.tick()
   const scroll: number[] = []
   for (let index = 0; index < 120; index++) {
     scroll.push(await measuredDraw(() => renderer.scrollTo(scrollId!, 0, -(index + 20) * 24)))
@@ -78,12 +86,13 @@ async function main() {
     await measuredDraw(() => setAnimationWidth!(40 + (index % 60) * 3))
   }
   renderer.resetDebugFrameOverlayStats()
-  await nextFrame()
+  renderer.tick()
   const animation: number[] = []
   for (let index = 0; index < 120; index++) {
     animation.push(await measuredDraw(() => setAnimationWidth!(40 + (index % 60) * 3)))
   }
 
+  clearTimeout(watchdog)
   console.log(`GPUIX_FRAME_BENCH ${JSON.stringify({ scroll: summary(scroll), animation: summary(animation) })}`)
   setTimeout(() => process.exit(0), 100)
 }
