@@ -12,6 +12,7 @@ let tabCount = arguments.first(where: { $0.hasPrefix("--tabs=") })
 let summaryOnly = arguments.contains("--summary")
 let tabDelay = arguments.first(where: { $0.hasPrefix("--tab-delay=") })
     .flatMap { Double($0.dropFirst("--tab-delay=".count)) } ?? 0.06
+let shiftTab = arguments.contains("--shift")
 let pid: pid_t
 if let suppliedPID = arguments.first(where: { !$0.hasPrefix("--") }).flatMap(pid_t.init) {
     pid = suppliedPID
@@ -32,8 +33,14 @@ _ = AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBool
 NSRunningApplication(processIdentifier: pid)?.activate(options: [])
 Thread.sleep(forTimeInterval: 0.35)
 for _ in 0..<max(0, tabCount) {
-    CGEvent(keyboardEventSource: nil, virtualKey: 48, keyDown: true)?.postToPid(pid)
-    CGEvent(keyboardEventSource: nil, virtualKey: 48, keyDown: false)?.postToPid(pid)
+    let down = CGEvent(keyboardEventSource: nil, virtualKey: 48, keyDown: true)
+    let up = CGEvent(keyboardEventSource: nil, virtualKey: 48, keyDown: false)
+    if shiftTab {
+        down?.flags = .maskShift
+        up?.flags = .maskShift
+    }
+    down?.postToPid(pid)
+    up?.postToPid(pid)
     Thread.sleep(forTimeInterval: tabDelay)
 }
 Thread.sleep(forTimeInterval: 0.25)
