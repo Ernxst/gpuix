@@ -23,6 +23,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -55,6 +56,11 @@ function fail(message: string): never {
 
 function log(message: string): void {
   console.log(`[app-bench] ${message}`)
+}
+
+function hostLoad() {
+  const [load1, load5, load15] = os.loadavg()
+  return { at: new Date().toISOString(), load1, load5, load15, cpus: os.cpus().length }
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +217,14 @@ async function stop(app: RunningApp): Promise<void> {
 interface MemorySample {
   physFootprintMB?: number
   rssMB?: number
+  processes?: Array<{
+    pid: number
+    name: string
+    physFootprintMB?: number
+    rssMB?: number
+    footprintSharePercent?: number
+    rssSharePercent?: number
+  }>
 }
 
 function unitToMB(value: number, unit: string): number {
@@ -247,10 +261,53 @@ function readRssMB(pid: number): number | undefined {
   return Number.isFinite(kb) ? kb / 1024 : undefined
 }
 
+function processTreePids(rootPid: number): number[] {
+  const result = spawnSync("ps", ["-axo", "pid=,ppid="], { encoding: "utf8" })
+  if (result.status !== 0) return [rootPid]
+  const children = new Map<number, number[]>()
+  for (const line of result.stdout.split("\n")) {
+    const [pidText, ppidText] = line.trim().split(/\s+/)
+    const pid = Number(pidText)
+    const ppid = Number(ppidText)
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue
+    const siblings = children.get(ppid) ?? []
+    siblings.push(pid)
+    children.set(ppid, siblings)
+  }
+
+  const pending = [rootPid]
+  const pids: number[] = []
+  while (pending.length > 0) {
+    const pid = pending.pop()!
+    pids.push(pid)
+    pending.push(...(children.get(pid) ?? []))
+  }
+  return pids
+}
+
 function sampleMemory(pid: number): MemorySample {
+  const processes = processTreePids(pid).map((processPid) => ({
+    pid: processPid,
+    name: processName(processPid),
+    physFootprintMB: readFootprintMB(processPid) ?? readVmmapPhysFootprintMB(processPid),
+    rssMB: readRssMB(processPid),
+  }))
+  const physFootprintMB = processes.reduce((sum, process) => sum + (process.physFootprintMB ?? 0), 0)
+  const rssMB = processes.reduce((sum, process) => sum + (process.rssMB ?? 0), 0)
   return {
-    physFootprintMB: readFootprintMB(pid) ?? readVmmapPhysFootprintMB(pid),
-    rssMB: readRssMB(pid),
+    physFootprintMB: processes.some((process) => process.physFootprintMB !== undefined)
+      ? physFootprintMB
+      : undefined,
+    rssMB: processes.some((process) => process.rssMB !== undefined) ? rssMB : undefined,
+    processes: processes.map((process) => ({
+      ...process,
+      footprintSharePercent: process.physFootprintMB === undefined || physFootprintMB === 0
+        ? undefined
+        : (process.physFootprintMB / physFootprintMB) * 100,
+      rssSharePercent: process.rssMB === undefined || rssMB === 0
+        ? undefined
+        : (process.rssMB / rssMB) * 100,
+    })),
   }
 }
 
@@ -419,6 +476,7 @@ interface BuildResult {
   bundleMB?: number
   coldBuildS?: number
   rebuildS?: number
+  buildRunDetails?: Array<{ phase: string; seconds: number; loadStart: ReturnType<typeof hostLoad>; loadEnd: ReturnType<typeof hostLoad> }>
 }
 
 async function measureBuild(fixture: Fixture): Promise<BuildResult> {
@@ -426,12 +484,24 @@ async function measureBuild(fixture: Fixture): Promise<BuildResult> {
   // runs below, even one whose bundle/build numbers this harness doesn't
   // report (gpuix-chat — see examples/bench/README.md).
   log(`${fixture.id}: ${fixture.measuresBuild ? "cold build" : "build"}`)
+  const coldLoadStart = hostLoad()
   const cold = fixture.build("cold")
+  const coldLoadEnd = hostLoad()
   if (!fixture.measuresBuild) return {}
   const bundleMB = fs.statSync(cold.binary).size / (1024 * 1024)
   log(`${fixture.id}: rebuild`)
+  const rebuildLoadStart = hostLoad()
   const rebuild = fixture.build("rebuild")
-  return { bundleMB, coldBuildS: cold.buildMs / 1000, rebuildS: rebuild.buildMs / 1000 }
+  const rebuildLoadEnd = hostLoad()
+  return {
+    bundleMB,
+    coldBuildS: cold.buildMs / 1000,
+    rebuildS: rebuild.buildMs / 1000,
+    buildRunDetails: [
+      { phase: "cold", seconds: cold.buildMs / 1000, loadStart: coldLoadStart, loadEnd: coldLoadEnd },
+      { phase: "rebuild", seconds: rebuild.buildMs / 1000, loadStart: rebuildLoadStart, loadEnd: rebuildLoadEnd },
+    ],
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -442,27 +512,64 @@ interface StartupMemorySamples {
   startupMs: number[]
   physFootprintMB: number[]
   rssMB: number[]
+  runDetails: Array<{
+    runStartEpochMs?: number
+    runEndEpochMs?: number
+    startupMs?: number
+    physFootprintMB?: number
+    rssMB?: number
+    processes?: MemorySample["processes"]
+    jsHeapUsedMB?: number
+    jsHeapTotalMB?: number
+    phases?: unknown
+    hostLoadStart: ReturnType<typeof hostLoad>
+    hostLoadEnd: ReturnType<typeof hostLoad>
+  }>
 }
 
 async function measureStartupAndMemoryRun(fixture: Fixture): Promise<{
+  runStartEpochMs: number
+  runEndEpochMs: number
   startupMs?: number
   physFootprintMB?: number
   rssMB?: number
+  processes?: MemorySample["processes"]
+  jsHeapUsedMB?: number
+  jsHeapTotalMB?: number
+  phases?: unknown
+  hostLoadStart: ReturnType<typeof hostLoad>
+  hostLoadEnd: ReturnType<typeof hostLoad>
 }> {
+  const loadStart = hostLoad()
   const spawnEpochMs = Date.now()
   const app = fixture.spawnForRun()
   try {
     const marker = await waitForMarker(app, fixture.readyPredicate, READY_TIMEOUT_MS)
     if (!marker) {
       log(`${fixture.id}: no ready marker within ${READY_TIMEOUT_MS}ms, skipping this run`)
-      return {}
+      return {
+        runStartEpochMs: spawnEpochMs,
+        runEndEpochMs: Date.now(),
+        hostLoadStart: loadStart,
+        hostLoadEnd: hostLoad(),
+      }
     }
     const readyAtEpochMs = marker.readyAtEpochMs as number
     const startupMs = readyAtEpochMs - spawnEpochMs
     await sleep(IDLE_BEFORE_MEMORY_MS)
     const pid = appPid(app)
     const memory = pid ? sampleMemory(pid) : {}
-    return { startupMs, ...memory }
+    return {
+      runStartEpochMs: spawnEpochMs,
+      runEndEpochMs: Date.now(),
+      startupMs,
+      ...memory,
+      jsHeapUsedMB: typeof marker.jsHeapUsedMB === "number" ? marker.jsHeapUsedMB : undefined,
+      jsHeapTotalMB: typeof marker.jsHeapTotalMB === "number" ? marker.jsHeapTotalMB : undefined,
+      phases: marker.phases,
+      hostLoadStart: loadStart,
+      hostLoadEnd: hostLoad(),
+    }
   } finally {
     await stop(app)
   }
@@ -482,6 +589,8 @@ interface FixtureReport {
   firstLaunchMs?: number
   startup?: Stats
   startupSamples: number[]
+  startupRunDetails: StartupMemorySamples["runDetails"]
+  buildRunDetails?: BuildResult["buildRunDetails"]
   physFootprint?: Stats
   rss?: Stats
   notes: string[]
@@ -529,23 +638,24 @@ async function main(): Promise<void> {
   // The first launch of a newly written executable waits for a macOS
   // malware scan that scales with file size, so it is reported on its own
   // rather than mixed into the warm startup samples.
-  const firstLaunch = new Map<string, number | undefined>()
+  const firstLaunch = new Map<string, Awaited<ReturnType<typeof measureStartupAndMemoryRun>>>()
   for (const fixture of FIXTURES) {
     log(`first launch: ${fixture.id}`)
-    firstLaunch.set(fixture.id, (await measureStartupAndMemoryRun(fixture)).startupMs)
+    firstLaunch.set(fixture.id, await measureStartupAndMemoryRun(fixture))
   }
 
   // Startup/memory: interleave fixtures run by run — single-run timings on
   // this machine vary by up to 45%, and batching would let a machine-wide
   // slowdown land entirely on whichever fixture ran last.
   const startupMemory = new Map<string, StartupMemorySamples>(
-    FIXTURES.map((f) => [f.id, { startupMs: [], physFootprintMB: [], rssMB: [] }]),
+    FIXTURES.map((f) => [f.id, { startupMs: [], physFootprintMB: [], rssMB: [], runDetails: [] }]),
   )
   for (let run = 0; run < runs; run++) {
     for (const fixture of FIXTURES) {
       log(`run ${run + 1}/${runs}: ${fixture.id} startup + memory`)
       const sample = await measureStartupAndMemoryRun(fixture)
       const bucket = startupMemory.get(fixture.id)!
+      bucket.runDetails.push(sample)
       if (sample.startupMs !== undefined) bucket.startupMs.push(sample.startupMs)
       if (sample.physFootprintMB !== undefined) bucket.physFootprintMB.push(sample.physFootprintMB)
       if (sample.rssMB !== undefined) bucket.rssMB.push(sample.rssMB)
@@ -563,9 +673,11 @@ async function main(): Promise<void> {
       bundleMB: build.bundleMB,
       coldBuildS: build.coldBuildS,
       rebuildS: build.rebuildS,
-      firstLaunchMs: firstLaunch.get(fixture.id),
+      firstLaunchMs: firstLaunch.get(fixture.id)?.startupMs,
       startup: stats(sm.startupMs),
       startupSamples: sm.startupMs,
+      startupRunDetails: [firstLaunch.get(fixture.id)!, ...sm.runDetails],
+      buildRunDetails: build.buildRunDetails,
       physFootprint: stats(sm.physFootprintMB),
       rss: stats(sm.rssMB),
       notes,

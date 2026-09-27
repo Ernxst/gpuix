@@ -62,6 +62,8 @@ async function main(): Promise<void> {
         event: 'ready',
         readyAtEpochMs: performance.timeOrigin + tFrame,
         sinceStartMs: tFrame,
+        jsHeapUsedMB: process.memoryUsage().heapUsed / (1024 * 1024),
+        jsHeapTotalMB: process.memoryUsage().heapTotal / (1024 * 1024),
         phases: {
           import: tImportEnd - tImportStart,
           render: tAfterRender - tBeforeRender,

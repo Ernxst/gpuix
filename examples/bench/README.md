@@ -57,7 +57,8 @@ cd packages/native && cargo build --release --example hello_bench
   (`footprint <pid>`, falling back to `vmmap --summary <pid>`'s "Physical
   footprint" line if `footprint` doesn't parse), and **RSS**
   (`ps -o rss= -p <pid>`). They diverge because footprint discounts shared,
-  reclaimable, and compressed pages that RSS counts in full.
+  reclaimable, and compressed pages that RSS counts in full. The harness sums
+  the launched process and its descendants, and records each process's share.
 - **Build** — cold `bun build --compile` / `cargo build --release --example
   hello_bench`, and a rebuild after touching one source file (a trailing
   comment appended then removed, so the fixture's behaviour never changes).
@@ -111,3 +112,26 @@ reference" column carrying the figures Jamon Holmgren published for the same
 app shape across 21 Mac app frameworks — not remeasured here, just kept
 alongside for comparison. The full run, including every raw sample, is
 written to `tmp/app-bench/<timestamp>.json`.
+
+## Quiet-host frame comparison
+
+After the builds above, run `python3 scripts/perf/run-app-bench.py <output-directory>`
+from the repository root. It waits for a five-minute interval with one-minute
+host load below four, then retains five complete invocations of `app-bench`.
+It records load throughout each invocation and discards one if load reaches
+four. Each invocation includes five warm launches per app and one first launch
+after building the app.
+
+The wrapper also runs `frame-time.tsx` in the GPU-backed test window. Its scroll phase
+sends wheel events over a non-virtual list of 1,128 rows, and its animation phase changes a
+box's width. It reports the median and p95 of GPUI's `Window::draw` duration
+for each phase. That duration includes GPUI build, layout and paint work in
+the offscreen window, but not a Metal present. The fixture also reports the
+whole update cycle, including React work in the animation phase, native calls
+and Metal command submission. Neither metric includes GPU execution, so
+interpret it alongside an Instruments trace when investigating that cost.
+
+When a live display is unavailable, `python3 scripts/perf/run-app-bench.py
+<output-directory> --frame-only` keeps the same quiet-host gate and five valid
+invocations for the offscreen frame fixture. Startup and memory need a live,
+unlocked desktop and are not measured by this mode.
