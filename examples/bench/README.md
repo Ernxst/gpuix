@@ -126,6 +126,7 @@ The wrapper also runs `frame-time.tsx` in the GPU-backed test window. Its scroll
 moves a non-virtual list of 1,128 rows, and its animation phase changes a
 box's width. It reports the median and p95 of GPUI's `Window::draw` duration
 for each phase. That duration includes GPUI build, layout and paint work in
-the offscreen window, but not a Metal present. It does not include JavaScript
-reconciliation or GPU execution, so interpret it alongside an Instruments
-trace when investigating either cost.
+the offscreen window, but not a Metal present. The fixture also reports the
+whole update cycle, including React work in the animation phase, native calls
+and Metal command submission. Neither metric includes GPU execution, so
+interpret it alongside an Instruments trace when investigating that cost.

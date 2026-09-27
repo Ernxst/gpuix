@@ -130,7 +130,7 @@ def run_attempt(destination: Path, attempt: int) -> bool:
         log(f"attempt {attempt}: frame fixture produced no marker; see {frame_log}")
         return False
     frame = json.loads(marker)
-    if any(frame[mode]["n"] != 120 for mode in ("scroll", "animation")):
+    if any(frame[mode]["n"] != 120 for mode in ("scroll", "scrollCycle", "animation", "animationCycle")):
         log(f"attempt {attempt}: frame fixture had incomplete samples; see {frame_log}")
         return False
     (destination / f"attempt-{attempt}-frame.json").write_text(json.dumps(frame, indent=2))

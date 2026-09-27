@@ -32,14 +32,16 @@ function summary(samples: number[]) {
   return { n: samples.length, medianMs: percentile(0.5), p95Ms: percentile(0.95), minMs: sorted[0], maxMs: sorted.at(-1), samples }
 }
 
-function draw(update: () => void): number {
+function draw(update: () => void): { gpuiMs: number; cycleMs: number } {
   const before = renderer.getDebugFrameOverlayStats().frames
+  const start = performance.now()
   update()
+  const cycleMs = performance.now() - start
   const after = renderer.getDebugFrameOverlayStats()
   if (after.frames <= before || after.currentMs === null || after.currentMs === undefined) {
     throw new Error(`GPUI did not draw: ${JSON.stringify({ before, after })}`)
   }
-  return after.currentMs
+  return { gpuiMs: after.currentMs, cycleMs }
 }
 
 try {
@@ -50,18 +52,24 @@ try {
   for (let index = 0; index < 12; index++) draw(() => renderer.scrollTo(id, 0, -(index + 1) * 20))
   renderer.resetDebugFrameOverlayStats()
   const scroll: number[] = []
+  const scrollCycle: number[] = []
   for (let index = 0; index < 120; index++) {
-    scroll.push(draw(() => renderer.scrollTo(id, 0, -(index + 20) * 24)))
+    const sample = draw(() => renderer.scrollTo(id, 0, -(index + 20) * 24))
+    scroll.push(sample.gpuiMs)
+    scrollCycle.push(sample.cycleMs)
   }
 
   for (let index = 0; index < 12; index++) draw(() => render(scene(40 + (index % 60) * 3)))
   renderer.resetDebugFrameOverlayStats()
   const animation: number[] = []
+  const animationCycle: number[] = []
   for (let index = 0; index < 120; index++) {
-    animation.push(draw(() => render(scene(40 + (index % 60) * 3))))
+    const sample = draw(() => render(scene(40 + (index % 60) * 3)))
+    animation.push(sample.gpuiMs)
+    animationCycle.push(sample.cycleMs)
   }
 
-  console.log(`GPUIX_FRAME_BENCH ${JSON.stringify({ scroll: summary(scroll), animation: summary(animation) })}`)
+  console.log(`GPUIX_FRAME_BENCH ${JSON.stringify({ scroll: summary(scroll), scrollCycle: summary(scrollCycle), animation: summary(animation), animationCycle: summary(animationCycle) })}`)
 } finally {
   unmount()
 }
