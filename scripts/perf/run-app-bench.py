@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -103,10 +104,12 @@ def run_attempt(destination: Path, attempt: int) -> bool:
         writer = csv.writer(load_output)
         writer.writerow(("epoch_seconds", "load_1m"))
         process = subprocess.Popen(
-            ["/bin/sh", "-c", 'tail -f /dev/null | script -q /dev/null "$@"', "sh", str(destination / "frame-time")],
+            ["script", "-q", "/dev/null", str(destination / "frame-time")],
             cwd=ROOT / "examples" / "bench",
+            stdin=subprocess.PIPE,
             stdout=output,
             stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
         noisy = False
         deadline = time.monotonic() + 60
@@ -117,7 +120,7 @@ def run_attempt(destination: Path, attempt: int) -> bool:
             noisy |= load >= LIMIT
             time.sleep(1)
         if process.poll() is None:
-            process.kill()
+            os.killpg(process.pid, signal.SIGKILL)
             process.wait()
         noisy |= os.getloadavg()[0] >= LIMIT
     if process.returncode != 0 or noisy:
