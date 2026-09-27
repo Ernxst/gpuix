@@ -35,6 +35,9 @@ render(
 )
 renderer.activateWindow()
 renderer.tick()
+for (const delay of [100, 250, 500, 750, 1_000]) {
+  setTimeout(() => renderer.activateWindow(), delay)
+}
 
 function pause(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 16))
@@ -69,11 +72,12 @@ async function main() {
     console.error("Frame fixture timed out", renderer.getDebugFrameOverlayStats())
     process.exit(1)
   }, 30_000)
-  for (let index = 0; index < 4; index++) {
+  for (let index = 0; index < 75; index++) {
     renderer.tick()
     await pause()
   }
   if (scrollId === undefined || !setAnimationWidth) throw new Error("fixture did not mount")
+  await measuredDraw(() => setAnimationWidth!(41))
 
   for (let index = 0; index < 12; index++) {
     await measuredDraw(() => renderer.scrollTo(scrollId!, 0, -(index + 1) * 20))
