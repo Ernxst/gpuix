@@ -8722,19 +8722,24 @@ impl GpuixView {
                 .map(|(context, _)| context);
         }
 
+        let ancestor_path = self
+            .virtual_lists
+            .get(&list_id)
+            .and_then(|entry| entry.accessibility_ancestor_path.clone());
         let accessibility_host_ids = self.accessibility_host_ids.as_mut();
-        let gpui_element_path = accessibility_host_ids.as_ref().map(|_| {
-            let mut path = vec![gpui::ElementId::View(window.current_view())];
-            if let Some(group_id) = virtual_list_group_id {
-                path.push(group_id);
-            }
-            path.extend([
-                gpui::ElementId::Integer(list_id),
-                gpui::ElementId::Name(
-                    format!("__gpuix_virtual_row_{}_{}", list_id, expected_child_id).into(),
-                ),
-            ]);
-            path
+        let gpui_element_path = accessibility_host_ids.as_ref().and_then(|_| {
+            ancestor_path.map(|mut path| {
+                if let Some(group_id) = virtual_list_group_id {
+                    path.push(group_id);
+                }
+                path.extend([
+                    gpui::ElementId::Integer(list_id),
+                    gpui::ElementId::Name(
+                        format!("__gpuix_virtual_row_{}_{}", list_id, expected_child_id).into(),
+                    ),
+                ]);
+                path
+            })
         });
         let mut build_ctx = BuildCtx {
             tree: &tree,
@@ -9731,6 +9736,12 @@ struct VirtualListEntry {
     child_revisions: Vec<u64>,
     row_focus_handles: Vec<Option<gpui::FocusHandle>>,
     seen_rows: HashSet<u64>,
+    /// This list's real GPUI ancestor chain (everything before its own
+    /// `Integer(list_id)`), refreshed each time `build_virtual_list` runs.
+    /// `render_item` builds rows later, after the `BuildCtx` that had this
+    /// path is gone, so a row's identity has to start from a copy of it
+    /// rather than assuming the list has no id-bearing ancestors.
+    accessibility_ancestor_path: Option<Vec<gpui::ElementId>>,
 }
 
 impl VirtualListEntry {
@@ -9764,6 +9775,7 @@ impl VirtualListEntry {
             child_revisions,
             row_focus_handles,
             seen_rows: HashSet::new(),
+            accessibility_ancestor_path: None,
         }
     }
 
@@ -13521,6 +13533,13 @@ fn build_virtual_list(
             entry.state.clone()
         }
     };
+
+    if let Some(entry) = ctx.virtual_lists.get_mut(&element.id) {
+        entry.accessibility_ancestor_path = ctx
+            .gpui_element_path
+            .as_ref()
+            .map(|path| path[..path.len().saturating_sub(1)].to_vec());
+    }
 
     // Queued scrolls apply here, after `sync` spliced this frame's child
     // changes, so the indices JS computed against its committed child list are
