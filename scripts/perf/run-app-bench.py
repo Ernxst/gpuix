@@ -104,9 +104,8 @@ def run_attempt(destination: Path, attempt: int) -> bool:
         writer = csv.writer(load_output)
         writer.writerow(("epoch_seconds", "load_1m"))
         process = subprocess.Popen(
-            ["script", "-q", "/dev/null", str(destination / "frame-time")],
-            cwd=ROOT / "examples" / "bench",
-            stdin=subprocess.PIPE,
+            ["bun", "examples/bench/frame-time.tsx"],
+            cwd=ROOT,
             stdout=output,
             stderr=subprocess.STDOUT,
             start_new_session=True,
@@ -145,16 +144,6 @@ def main() -> int:
         return 2
     destination = Path(sys.argv[1]).resolve()
     destination.mkdir(parents=True, exist_ok=True)
-    binary = destination / "frame-time"
-    build = subprocess.run(
-        ["bun", "build", "--compile", "--production", "examples/bench/frame-time.tsx", "--outfile", str(binary)],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if build.returncode != 0:
-        log(f"frame fixture build failed: {build.stderr}")
-        return build.returncode
     valid = 0
     for attempt in range(1, MAX_ATTEMPTS + 1):
         wait_for_quiet()

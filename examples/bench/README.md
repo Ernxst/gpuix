@@ -122,9 +122,10 @@ It records load throughout each invocation and discards one if load reaches
 four. Each invocation includes five warm launches per app and one first launch
 after building the app.
 
-The wrapper also runs `frame-time.tsx` in a visible window. Its scroll phase
+The wrapper also runs `frame-time.tsx` in the GPU-backed test window. Its scroll phase
 moves a non-virtual list of 1,128 rows, and its animation phase changes a
 box's width. It reports the median and p95 of GPUI's `Window::draw` duration
-for each phase. That duration includes GPUI build, layout and paint work. It
-does not include JavaScript reconciliation or GPU execution, so interpret it
-alongside an Instruments trace when investigating either cost.
+for each phase. That duration includes GPUI build, layout and paint work in
+the offscreen window, but not a Metal present. It does not include JavaScript
+reconciliation or GPU execution, so interpret it alongside an Instruments
+trace when investigating either cost.
