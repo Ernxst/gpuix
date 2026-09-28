@@ -739,6 +739,8 @@ previous tree.
 In the test renderer, one `advanceAsyncClock()` delivers every frame callback
 queued before it synchronously, before it returns. `advanceTime()` and
 `clockFastForward()` advance clocks only and deliver no frame callbacks.
+`drawPendingFrame()` can advance GPUI's own frame work, but leaves requested
+animation frame callbacks pending until `advanceAsyncClock()`.
 
 ### Canvas bitmap and layout dimensions
 

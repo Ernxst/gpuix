@@ -116,6 +116,10 @@ Lower-level `TestRenderer` methods: `nativeSimulateClick(x, y, button?, modifier
 | GPUI timers | `renderer.advanceTime(ms)` | Caret blink, drag autoscroll, list edge scroll. Does not draw a frame or move JS `setTimeout`. |
 | Motion | `clockPause()`, `clockSet(ms)`, `clockFastForward(ms)`, `clockResume()` | Style transitions and `motion` animations. Wall time unless paused. |
 
+`drawPendingFrame()` can run GPUI's own frame work without delivering requested
+`requestAnimationFrame` callbacks. Those callbacks stay pending until the next
+`advanceAsyncClock(ms)` and receive that advance's timestamp.
+
 `waitFor(callback, { timeout = 1000, interval = 50 })` sleeps `interval` ms of wall time, then advances the async and timer clocks by `interval`, flushes, and retries. The clocks therefore advance about as fast as wall time: a 2000 ms GPUI timer is never reached inside the default timeout. Advance the clock directly instead.
 
 `asyncTaskMode: "eager"` drains native async tasks after every renderer call. `"manual"` drains them only on `advanceAsyncClock`, and the repaint waits for `drawPendingFrame()`; use it to observe intermediate frames such as an image's `loading` state.

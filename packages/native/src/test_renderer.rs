@@ -480,7 +480,10 @@ pub struct TestGpuixRenderer {
     #[cfg(all(target_os = "macos", feature = "test-support"))]
     test_gpu_canvases: WebGpuCanvasStore,
     events: Arc<Mutex<Vec<EventPayload>>>,
-    frame_timestamps: Arc<Mutex<Vec<f64>>>,
+    frame_timestamps: Mutex<Vec<f64>>,
+    /// Test frame requests wait for advance_async_clock, even if another
+    /// renderer operation asks GPUI to simulate a frame first.
+    pending_frame_requests: Mutex<usize>,
     /// Same handle GpuixView paints against, so tests can assert on the live
     /// selection after simulating a drag.
     selection: crate::text::SharedSelection,
@@ -511,9 +514,6 @@ pub struct TestGpuixRenderer {
     /// that count for the window's lifetime, so the stats report frames drawn
     /// since this point, which is what a newly opened window would report.
     debug_frame_overlay_frame_origin: AtomicU64,
-    /// Bumped by `reset_window_state`, so a next-frame callback requested
-    /// before the reset records no timestamp when its frame arrives.
-    frame_request_generation: Arc<AtomicU64>,
 }
 
 #[napi]
@@ -535,7 +535,6 @@ impl TestGpuixRenderer {
         let tree = Arc::new(Mutex::new(RetainedTree::new()));
         let canvas_display_lists = crate::canvas::SharedDisplayLists::default();
         let events: Arc<Mutex<Vec<EventPayload>>> = Arc::new(Mutex::new(Vec::new()));
-        let frame_timestamps: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
 
         // Event callback: push to Vec instead of ThreadsafeFunction.
         let events_clone = events.clone();
@@ -625,7 +624,8 @@ impl TestGpuixRenderer {
             #[cfg(all(target_os = "macos", feature = "test-support"))]
             test_gpu_canvases: WebGpuCanvasStore::default(),
             events,
-            frame_timestamps,
+            frame_timestamps: Mutex::new(Vec::new()),
+            pending_frame_requests: Mutex::new(0),
             selection,
             image_network_policy,
             auto_drain_async_tasks: AtomicBool::new(true),
@@ -639,7 +639,6 @@ impl TestGpuixRenderer {
             active_pointer_origin: Mutex::new(None),
             file_drag_active: AtomicBool::new(false),
             debug_frame_overlay_frame_origin: AtomicU64::new(0),
-            frame_request_generation: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -688,9 +687,8 @@ impl TestGpuixRenderer {
         self.debug_frame_overlay_frame_origin
             .store(frames, Ordering::Relaxed);
         *self.active_pointer_origin.lock().unwrap() = None;
-        self.frame_request_generation
-            .fetch_add(1, Ordering::Relaxed);
         self.frame_timestamps.lock().unwrap().clear();
+        *self.pending_frame_requests.lock().unwrap() = 0;
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         self.test_gpu_canvases.reset();
         *self.animation_frame_timestamp_origin.lock().unwrap() = None;
@@ -1607,37 +1605,22 @@ impl TestGpuixRenderer {
         self.surface_canvas_preparation_diagnostics()
     }
 
-    /// Queue one callback for the next manually advanced GPUI frame without
-    /// dirtying or synchronously drawing the offscreen window.
+    /// Queue one callback for the next `advanceAsyncClock()` without dirtying or
+    /// synchronously drawing the offscreen window.
     #[napi]
     pub fn request_frame(&self, performance_timestamp_ms: f64) -> Result<()> {
-        let timestamp_origin = self.animation_frame_timestamp_origin.clone();
-        let frame_timestamps = self.frame_timestamps.clone();
-        let generation = self.frame_request_generation.clone();
-        let requested_generation = generation.load(Ordering::Relaxed);
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.update_window(window, move |_, window, app| {
-                let origin = animation_frame_origin(
-                    &timestamp_origin,
+            cx.update_window(window, |_, _window, app| {
+                animation_frame_origin(
+                    &self.animation_frame_timestamp_origin,
                     crate::renderer::FrameTimestampOriginPair::new(
                         app.background_executor().now(),
                         performance_timestamp_ms,
                     ),
                 );
-                window.on_next_frame(move |_window, app| {
-                    if generation.load(Ordering::Relaxed) != requested_generation {
-                        return;
-                    }
-                    frame_timestamps
-                        .lock()
-                        .unwrap()
-                        .push(animation_frame_timestamp_ms(
-                            origin,
-                            app.background_executor().now(),
-                        ));
-                });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
+            *self.pending_frame_requests.lock().unwrap() += 1;
             Ok(())
         })
     }
@@ -1667,6 +1650,20 @@ impl TestGpuixRenderer {
             cx.update_window(window, |_, window, app| {
                 if auto_drain {
                     window.simulate_next_frame(app);
+                }
+                let pending = std::mem::take(&mut *self.pending_frame_requests.lock().unwrap());
+                if pending > 0 {
+                    let origin = self
+                        .animation_frame_timestamp_origin
+                        .lock()
+                        .unwrap()
+                        .expect("frame requests establish a timestamp origin");
+                    let timestamp =
+                        animation_frame_timestamp_ms(origin, app.background_executor().now());
+                    self.frame_timestamps
+                        .lock()
+                        .unwrap()
+                        .extend(std::iter::repeat(timestamp).take(pending));
                 }
                 view.update(app, |view, cx| {
                     if view.clock.fast_forward_if_frozen_ms(delta_ms).is_some() {
