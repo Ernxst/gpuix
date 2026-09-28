@@ -19,7 +19,7 @@ Use Bun and the checked-in lockfile. In a new checkout, install with `bun instal
 - React tests: `bun run test` in `packages/react`; target the affected tests when appropriate.
 - Native build: `bun run build:native` from the repository root. This produces the release binary with `test-support`. Restart the app after rebuilding; hot reload cannot replace a loaded native binary.
 - Browser build: `bun run web:wasm` from the repository root.
-- Target directory: don't set `CARGO_TARGET_DIR` or pass `--target-dir`, including for one-off review builds. Cargo runs through mbx, which already gives each checkout its own target directory and deletes it when unused; a custom target directory bypasses mbx and is never cleaned up.
+- Target directory: don't set `CARGO_TARGET_DIR` or pass `--target-dir`, including for one-off review builds. Cargo runs through mbx, which already gives each checkout its own target directory and deletes it when unused; a custom target directory bypasses mbx and is never cleaned up. Before the first native build in a new checkout, run `mkdir -p packages/native/target && mbx adopt packages/native`. Otherwise `napi build` creates `target/` as a plain directory before Cargo runs, and mbx stops the build in a terminal to ask whether to move it, which an unattended run cannot answer.
 
 CI is disabled by default to control costs. No checks run on pull requests or pushes, so the absence of checks is not a signal; verify changes locally. Enable CI manually for a one-off run only when another platform is genuinely needed, such as Windows or Linux. Do not re-enable the workflow or change `.github/workflows/ci.yml` to get checks.
 
