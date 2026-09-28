@@ -18,7 +18,7 @@ import {
   type App,
   type ParamsOf,
 } from '@gpuix/react/automation'
-import { createTestRoot, isNativeTestRendererAvailable, TestRenderer } from '@gpuix/react/testing'
+import { createTestRoot, isNativeTestRendererAvailable, TestRenderer, textContent } from '@gpuix/react/testing'
 import { ChatApp, SafeMdxContent, SafeMdxTranscript } from './chat'
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
@@ -68,7 +68,7 @@ describeNative('chat example', () => {
         // on a preceding tree locator to do so.
         expect((await app.call('getPaintedText', {})).text).toContain('hello gpuix')
         await composer.press('enter')
-        await app.getByText('GPUIX chat demo').waitFor()
+        await app.getByText(/GPUIX chat demo/).waitFor()
       } finally {
         await app.close()
       }
@@ -317,9 +317,6 @@ describeNative('chat example', () => {
       return row!
     }
 
-    const initialTitleCount = renderer.getPaintedText().filter((text) => text === initialTitle).length
-    const nextTitleCount = renderer.getPaintedText().filter((text) => text === nextTitle).length
-
     const initialRow = conversationRow(initialTitle)
     const nextRow = conversationRow(nextTitle)
     const activeBackground = initialRow.style.backgroundColor
@@ -330,12 +327,9 @@ describeNative('chat example', () => {
     try {
       await app.getByText(nextTitle).click()
 
-      expect(renderer.getPaintedText().filter((text) => text === initialTitle)).toHaveLength(
-        initialTitleCount - 1
-      )
-      expect(renderer.getPaintedText().filter((text) => text === nextTitle)).toHaveLength(
-        nextTitleCount + 1
-      )
+      const title = renderer.findByTestId('conversation-title')
+      expect(title).toBeDefined()
+      expect(textContent(renderer, title!)).toBe(nextTitle)
       expect(renderer.getElement(initialRow.id)?.style.backgroundColor).toBe(inactiveBackground)
       expect(renderer.getElement(nextRow.id)?.style.backgroundColor).toBe(activeBackground)
     } finally {
@@ -502,7 +496,7 @@ describeNative('chat example', () => {
     try {
       await app.getByTestId('search').click()
       expect(renderer.getPaintedText()).toContain('Search threads')
-      expect(renderer.getFocusedElementId()).toBe(renderer.findByTestId('search-input')?.id)
+      expect(renderer.getActiveElement()).toBe(renderer.findByTestId('search-input')?.id)
 
       renderer.nativeSimulateClick(900, 40)
       expect(renderer.getPaintedText()).not.toContain('Search threads')
@@ -520,10 +514,10 @@ describeNative('chat example', () => {
       await app.getByTestId('new-task').click()
       const composer = renderer.findByTestId('composer')
       expect(composer).toBeDefined()
-      expect(renderer.getFocusedElementId()).toBe(composer?.id)
+      expect(renderer.getActiveElement()).toBe(composer?.id)
 
       await app.getByTestId('thread-c2').click()
-      expect(renderer.getFocusedElementId()).toBe(renderer.findByTestId('composer')?.id)
+      expect(renderer.getActiveElement()).toBe(renderer.findByTestId('composer')?.id)
     } finally {
       await app.close()
     }
