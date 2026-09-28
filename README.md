@@ -4697,6 +4697,10 @@ pressed, matching CSS `.group:active .descendant`. `dragOver` applies while OS
 files are dragged over the element; it is desktop-only, since there is no web
 equivalent.
 
+`hover` stays active while the pointer is over a descendant, including a link
+or a child that paints its own background, as CSS `:hover` does in a browser.
+An unrelated element covering the ancestor still blocks its hover state.
+
 `focusWithin`, `activeWithin`, and `dragOver` do not yet participate in
 `transition`, content-sized intrinsic measurement (`width: "max-content"` and
 the like), or custom-element `currentColor` resolution, unlike `hover`,
