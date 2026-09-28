@@ -145,6 +145,10 @@ A state key holds a partial style applied while the state holds. Later entries i
 - `active` also applies while a focused element is activated with Space or Enter.
 - `<virtual-list>` applies only `hoverWithin`, `focusWithin` and `activeWithin`.
 
+`hover` remains active over descendants, including links, children with their
+own background or hover fill, and positioned children outside the ancestor's
+box. An unrelated element covering the ancestor blocks that state.
+
 **Hover groups** style a descendant from its ancestor's state, like `.card:hover .title`:
 
 ```tsx
