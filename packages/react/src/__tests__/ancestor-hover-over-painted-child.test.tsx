@@ -114,4 +114,57 @@ describe.skipIf(!isNativeTestRendererAvailable())("ancestor :hover over painted 
       testRoot.unmount()
     }
   })
+
+  it("keeps a parent hovered over an absolute child outside its bounds", () => {
+    const testRoot = createTestRoot()
+    const events: string[] = []
+    try {
+      testRoot.render(
+        <div style={{ width: 300, height: 100, backgroundColor: "#101010" }}>
+          <div
+            data-testid="row"
+            onMouseEnter={() => events.push("enter")}
+            onMouseLeave={() => events.push("leave")}
+            style={{
+              position: "relative",
+              width: 100,
+              height: 50,
+              backgroundColor: "#253047",
+              hover: { backgroundColor: "#d97706" },
+            }}
+          >
+            <div
+              data-testid="child"
+              style={{
+                position: "absolute",
+                left: 120,
+                top: 0,
+                width: 50,
+                height: 40,
+                backgroundColor: "#284f37",
+              }}
+            />
+          </div>
+        </div>
+      )
+
+      const row = testRoot.renderer.findByTestId("row")!
+      const child = testRoot.renderer.findByTestId("child")!
+      const { x, y, width, height } = testRoot.renderer.getElementBounds(child.id)!
+      testRoot.renderer.nativeSimulateMouseMove(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(x + width / 2, y + height / 2)
+      const screenshot = `${SHOTS_DIR}/gpuix-hover-over-outside-child.png`
+      testRoot.renderer.captureScreenshot(screenshot)
+      const image = decodePng(readFileSync(screenshot), screenshot)
+      const offset = (20 * image.width + 20) * 4
+
+      expect([...image.data.subarray(offset, offset + 4)]).toEqual([217, 119, 6, 255])
+      expect(testRoot.renderer.getResolvedStyle(row.id)).toMatchObject({
+        backgroundColor: "#d97706",
+      })
+      expect(events).toEqual(["enter"])
+    } finally {
+      testRoot.unmount()
+    }
+  })
 })
