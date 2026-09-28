@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.25.0-fork.11
+
+1. **Tab and Shift+Tab cross the built edge of a windowed `<virtual-list>`.** When a focused row control reaches the end of the rows the app has mounted, GPU-IX asks `onVisibleRange` for the next range and focuses the newly built row. The app must update its virtual window in response. VoiceOver row navigation beyond the built range remains unverified. [#695](https://github.com/Ernxst/gpuix/issues/695), [PR #702](https://github.com/Ernxst/gpuix/pull/702)
+2. **`advanceAsyncClock()` gives pending test frame callbacks one timestamp.** A `drawPendingFrame()` between a frame request and the next clock advance no longer leaves an earlier timestamp in the advance's batch or causes the timestamp consistency error. [#706](https://github.com/Ernxst/gpuix/issues/706), [PR #707](https://github.com/Ernxst/gpuix/pull/707)
+
 ## 0.25.0-fork.10
 
 GPU-IX keeps an ancestor's hover styles active while the pointer is over a descendant, including positioned children outside the ancestor's bounds. The release also includes updated GPUI behaviour from Zed. [#704](https://github.com/Ernxst/gpuix/issues/704), [PR #705](https://github.com/Ernxst/gpuix/pull/705), [Ernxst/zed#10](https://github.com/Ernxst/zed/pull/10)
