@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   useGpuix,
   useWindowInsets,
+  type InputPublicInstance,
   type Props,
   type PublicInstance,
   type StyleDesc,
@@ -434,7 +435,7 @@ function SidebarAction({
 }) {
   return (
     <div
-      testId={testId}
+      data-testid={testId}
       onClick={onClick}
       style={{
         display: 'flex',
@@ -478,7 +479,7 @@ function ConversationRow({
 }) {
   return (
     <div
-      testId={`thread-${conversation.id}`}
+      data-testid={`thread-${conversation.id}`}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -658,7 +659,7 @@ function Sidebar({
               </text>
               {groupIndex === 0 && (
                 <div
-                  testId="thread-filter"
+                  data-testid="thread-filter"
                   onClick={onFilter}
                   style={{
                     width: 22,
@@ -1011,7 +1012,7 @@ function OverlayCard({
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
           <text style={{ fontSize: 14, fontWeight: 600, color: C.text, flexGrow: 1 }}>{title}</text>
           <div
-            testId="overlay-close"
+            data-testid="overlay-close"
             onClick={onClose}
             style={{
               height: 24,
@@ -1126,6 +1127,7 @@ function Header({
         </>
       )}
       <text
+        data-testid="conversation-title"
         style={{
           fontSize: 13,
           fontWeight: 500,
@@ -1343,10 +1345,9 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (next: stri
           </SelectLabel>
           {group.items.map((model) => (
             <SelectItem
-              asChild
               key={model.id}
               value={model.id}
-              testId={`model-${model.id}`}
+              data-testid={`model-${model.id}`}
               style={(state) => menuItemStyle(state)}
             >
               {(state) => (
@@ -1383,10 +1384,9 @@ function ReasoningPicker({ value, onChange }: { value: string; onChange: (next: 
       </SelectLabel>
       {REASONING.map((option) => (
         <SelectItem
-          asChild
           key={option.id}
           value={option.id}
-          testId={`reasoning-${option.id}`}
+          data-testid={`reasoning-${option.id}`}
           style={(state) => menuItemStyle(state)}
         >
           {(state) => (
@@ -1412,10 +1412,9 @@ function AccessPicker({ value, onChange }: { value: string; onChange: (next: str
     >
       {ACCESS.map((option) => (
         <SelectItem
-          asChild
           key={option.id}
           value={option.id}
-          testId={`access-${option.id}`}
+          data-testid={`access-${option.id}`}
           style={(state) => menuItemStyle(state)}
         >
           {(state) => (
@@ -1445,10 +1444,9 @@ function ProjectPicker({ value, onChange }: { value: string; onChange: (next: st
     >
       {PROJECTS.map((option) => (
         <SelectItem
-          asChild
           key={option.id}
           value={option.id}
-          testId={`project-${option.id}`}
+          data-testid={`project-${option.id}`}
           style={(state) => menuItemStyle(state)}
         >
           {(state) => <MenuRow label={option.label} icon="folder" selected={state.selected} />}
@@ -1481,10 +1479,9 @@ function WorkspacePicker({ value, onChange }: { value: string; onChange: (next: 
       </SelectLabel>
       {WORKSPACES.map((option) => (
         <SelectItem
-          asChild
           key={option.id}
           value={option.id}
-          testId={`workspace-${option.id}`}
+          data-testid={`workspace-${option.id}`}
           style={(state) => menuItemStyle(state)}
         >
           {(state) => (
@@ -1508,10 +1505,9 @@ function BranchPicker({ value, onChange }: { value: string; onChange: (next: str
     >
       {BRANCHES.map((option) => (
         <SelectItem
-          asChild
           key={option.id}
           value={option.id}
-          testId={`branch-${option.id}`}
+          data-testid={`branch-${option.id}`}
           style={(state) => menuItemStyle(state)}
         >
           {(state) => <MenuRow label={option.label} icon="gitBranch" selected={state.selected} />}
@@ -1580,7 +1576,7 @@ function Composer({
   onModeChange: (next: 'build' | 'plan') => void
   focusTick: number
 }) {
-  const composerRef = useRef<PublicInstance | null>(null)
+  const composerRef = useRef<InputPublicInstance | null>(null)
   const { renderer } = useGpuix()
   useEffect(() => {
     const id = composerRef.current?.id
@@ -1764,7 +1760,7 @@ function GhostButton({
   const color = active ? C.text : C.ghost
   return (
     <div
-      testId={testId}
+      data-testid={testId}
       style={{
         display: 'flex',
         flexDirection: 'row',
@@ -2409,7 +2405,7 @@ export function ChatApp({
       {overlay === 'search' && (
         <OverlayCard title="Search threads" height={420} onClose={() => setOverlay(null)}>
           <input
-            testId="search-input"
+            data-testid="search-input"
             value={query}
             placeholder="Filter by title"
             autoFocus
@@ -2431,7 +2427,7 @@ export function ChatApp({
             {searchHits.map((conversation) => (
               <div
                 key={conversation.id}
-                testId={`search-${conversation.id}`}
+                data-testid={`search-${conversation.id}`}
                 onClick={() => goTo(conversation.id)}
                 style={{
                   paddingTop: 8,
@@ -2455,7 +2451,7 @@ export function ChatApp({
             This is the GPUIX chat demo. Threads, drafts, and replies stay in this window.
           </text>
           <div
-            testId="cycle-overlay"
+            data-testid="cycle-overlay"
             onClick={() => renderer?.cycleDebugFrameOverlay?.()}
             style={{
               height: 32,
