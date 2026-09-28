@@ -25,7 +25,7 @@ CI is disabled by default to control costs. No checks run on pull requests or pu
 
 Verify the target changed: TypeScript checks do not compile Rust, and native checks do not validate the browser renderer. Consult the relevant package scripts or CI job for additional checks required by the change.
 
-The native renderer cannot start inside an agent sandbox: macOS denies it the window and system services it needs. React tests, native tests, the examples and anything else that loads it need an unsandboxed run, so request one on the first attempt instead of trying sandboxed first. In a bb thread that cannot request one, such as Codex, run the command in a bb terminal (`bb terminal create --thread $BB_THREAD_ID --command "…"`), which runs outside the sandbox.
+The native renderer cannot start inside an agent sandbox: macOS denies it the window and system services it needs. React tests, native tests, the examples and anything else that loads it need an unsandboxed run, so request one on the first attempt instead of trying sandboxed first. In a bb thread that cannot request one, such as Codex, run the command in a bb terminal, which runs outside the sandbox. Start it, wait for it, read it and close it in one shell command, with a tool timeout that covers the wait, because each separate call re-sends the whole conversation: `id=$(bb terminal create --thread $BB_THREAD_ID --command "…" --json | jq -r .terminalId); bb terminal wait $id --exit --timeout 10m; bb terminal output $id | tail -n 40; bb terminal close $id`. The first line of the output gives the exit code.
 
 ## Repository constraints
 
