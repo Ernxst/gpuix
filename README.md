@@ -2065,6 +2065,20 @@ function MessageList({ messages }: { messages: Message[] }) {
 as they do on a `<div>`. Use `role="list"` on the list and `role="listitem"` on
 its rows to match the react-dom equivalent of `<ul>` and `<li>`.
 
+A row outside the mounted window has no accessibility node at all until it is
+built — there is nothing yet for a screen reader to land on. Tab and Shift+Tab
+through row content cross that boundary anyway: reaching the last (or first)
+mounted row's focusable control widens the window by reporting an estimated
+`onVisibleRange` that includes the next logical row, then focuses it once the
+app has rendered it. This range is sized from the list's viewport and
+estimated row height, not each row's actual measured height, so it can report
+different indices than a real scroll at the same position would with
+variable-height rows; it stays bounded and always includes the requested row
+either way. A row with no focusable content of its own is skipped over in the
+same pass. This needs `onVisibleRange` to actually grow the window far enough
+to include the requested row; a fixed-size window that never grows leaves
+navigation stuck at its edge, the same as it would with real scrolling.
+
 The list needs a **bounded height** or bounded flex space. Each rendered row
 must have one stable host root, which can contain any GPUIX host or custom
 element. There is no `VirtualList` wrapper: windowing is application state.
