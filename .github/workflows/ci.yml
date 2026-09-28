@@ -25,9 +25,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Fork cost control (macOS runners bill at 10x, Windows at 2x): push/PR
-  # builds only Linux x64 — the one platform not buildable locally — and
-  # workflow_dispatch builds and tests the OSes named by its `targets` input
+  # push/PR builds Linux x64 and Windows x64; macOS is built and tested
+  # locally. workflow_dispatch builds and tests the OSes named by its `targets` input
   # (all three by default). Computed in a plan job because job-level `if`
   # cannot reference the matrix context.
   # One target per OS, on the architecture that OS is mostly used on
@@ -50,9 +49,7 @@ jobs:
             {"os":"linux","host":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","bunTarget":"bun-linux-x64","build":"bun run build:release --target x86_64-unknown-linux-gnu"},
             {"os":"windows","host":"windows-latest","target":"x86_64-pc-windows-msvc","bunTarget":"bun-windows-x64","build":"bun run build --target x86_64-pc-windows-msvc"}
           ]'
-          LINUX_ONLY='[
-            {"os":"linux","host":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","bunTarget":"bun-linux-x64","build":"bun run build:release --target x86_64-unknown-linux-gnu"}
-          ]'
+          LINUX_WINDOWS=$(echo "$FULL" | jq -c 'map(select(.os != "macos"))')
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             CHOSEN=$(echo "$FULL" | jq -c --arg targets "$TARGETS" '
               ($targets | gsub(" "; "") | ascii_downcase | split(",")) as $want
@@ -62,7 +59,7 @@ jobs:
               exit 1
             fi
           else
-            CHOSEN="$LINUX_ONLY"
+            CHOSEN="$LINUX_WINDOWS"
           fi
           echo "settings=$(echo "$CHOSEN" | jq -c .)" >> "$GITHUB_OUTPUT"
 
